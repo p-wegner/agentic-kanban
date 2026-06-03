@@ -1657,6 +1657,10 @@ export function BoardPage() {
         </div>
       )}
       <div className="flex flex-col gap-2 p-4 h-full overflow-hidden">
+        {/* One responsive control row: the board pulse, filters, and toolbar pack
+            together (a single line on desktop, wrapping on small screens) instead of
+            stacking as three separate full-width rows. */}
+        <div className="flex flex-wrap items-center gap-2">
         {/* The board summary (ticket/done/commit badges + progress bar) is irrelevant in
             the Butler chat view — hide it there to give the conversation more vertical room. */}
         {viewMode !== "butler" && (
@@ -1709,6 +1713,7 @@ export function BoardPage() {
           runQueueOpenSlots={runQueueForecast.openSlots}
           onViewAllHealthEvents={() => handleViewModeChange("health-events")}
         />
+        </div>
         {viewMode === "kanban" && selectedBoardIssues.length > 0 && (
           <div
             className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs shadow-sm dark:border-brand-800 dark:bg-brand-950/40"
