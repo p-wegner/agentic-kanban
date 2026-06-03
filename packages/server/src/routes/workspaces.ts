@@ -70,8 +70,8 @@ export function createWorkspacesRoute(
   router.post("/", async (c) => {
     const body = await parseJsonBody(c);
     const isDirect = body.isDirect === true;
-    if (!body.issueId || (!body.branch && !isDirect)) {
-      return c.json({ error: "issueId is required; branch is required unless isDirect is true" }, 400);
+    if (!body.issueId) {
+      return c.json({ error: "issueId is required" }, 400);
     }
 
     const result = await workspaceService.createWorkspace({
