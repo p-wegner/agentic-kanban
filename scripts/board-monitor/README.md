@@ -4,11 +4,15 @@ The autonomous control plane that keeps **this** dev board moving: server alive,
 merged, stale sessions unstuck, backlog flowing and refilled. Architecture decision and the
 A/B/C comparison that led here: [`docs/decisions/006-board-monitor-orchestrator-architecture.md`](../../docs/decisions/006-board-monitor-orchestrator-architecture.md).
 
-**TL;DR of the approach:** a fresh, short-lived `codex exec` session every ~5 minutes (not one
+**TL;DR of the approach:** a fresh, short-lived headless agent session every ~30 minutes (not one
 long-running agent, not the in-process monitor). Each run makes the bounded set of high-value
 control-plane actions its priorities call for (e.g. merge finished work, fill agent slots up to the
 target) and exits. Durable memory lives outside the model — in the board, git, and a small rolling
 `state.md` — so every session is disposable and crash-resilient.
+
+**Which harness runs each cycle** is set by `MONITOR_AGENT` (default `claude` = Claude Code headless;
+set `MONITOR_AGENT=codex` for `codex exec`). Both harnesses read the same `objective.md` and fire the
+repo's hooks (PreToolUse safety + Stop commit-discipline); only the launch command differs.
 
 **`objective.md` is the single source of truth for monitor policy.** Both this codex loop and the
 in-process **Monitor Butler** (`packages/server/src/services/monitor-butler.ts`, off by default)
@@ -19,7 +23,7 @@ Steer everything (priorities + the TUNABLE TARGETS block) by editing `objective.
 
 | File | Role | Committed? |
 |---|---|---|
-| `loop.sh` | The driver: fires `timeout 1800 codex exec "<objective>"` every `MONITOR_SLEEP`s (**re-reading `objective.md` each iteration**), trims `state.md`, has a launch-failure guard | yes |
+| `loop.sh` | The driver: fires the chosen harness (`claude --print` or `codex exec`) with the objective every `MONITOR_SLEEP`s (**re-reading `objective.md` each iteration**), trims `state.md`, has a launch-failure guard | yes |
 | `frontend-smoke.ps1` | PowerShell Playwright smoke check used by the monitor skill; polls for hydrated board text and prints bounded snippets safely for multiline output | yes |
 | `objective.md` | The prompt each fresh run receives (read it to know what the orchestrator is told to do) | yes |
 | `state.md` | **Rolling cross-iteration memory** — one line per cycle, newest last, trimmed to the last `MONITOR_STATE_KEEP` (40) lines. Runtime state, not source | **no** (gitignored) |
@@ -54,9 +58,9 @@ kill "$(cat scripts/board-monitor/loop.pid)"
 > with no restart**. This is the single place to steer the loop's pace. Only `loop.sh`'s own env
 > knobs (`MONITOR_SLEEP` etc.) are read once at start and still require a restart.
 
-**Env knobs:** `MONITOR_SLEEP` (gap between runs, default 1800s) · `MONITOR_MAX_ITERS` (default 500)
-· `MONITOR_ITER_TIMEOUT` (per-iteration cap, default 1800s) · `MONITOR_STATE_KEEP` (memory lines
-kept, default 40).
+**Env knobs:** `MONITOR_AGENT` (harness: `claude` default, or `codex`) · `MONITOR_SLEEP` (gap between
+runs, default 1800s = 30min) · `MONITOR_MAX_ITERS` (default 500) · `MONITOR_ITER_TIMEOUT`
+(per-iteration cap, default 1800s) · `MONITOR_STATE_KEEP` (memory lines kept, default 40).
 
 ## Observe (current)
 
@@ -83,9 +87,9 @@ What the signals mean:
   and how many consecutive cycles an item has been touched (so you can spot something it keeps
   re-acting on).
 - **`exit=0`** = clean bounded run. **`exit=124`** = hit the iteration timeout. Two distinct causes:
-  (a) genuinely babysitting a long merge/rebase, or (b) **a post-completion idle hang** — codex
+  (a) genuinely babysitting a long merge/rebase, or (b) **a post-completion idle hang** — the agent
   finishes its work, writes its `state.md` line and commits, then *sits idle* until the timeout kills
-  it (confirmed 2026-06-01: hangs on iters 1/6/7 of ~11, each *after* the cycle's work was done). Case
+  it (confirmed 2026-06-01 with the codex harness: hangs on iters 1/6/7 of ~11, each *after* the cycle's work was done). Case
   (b) is harmless to output but burns the full `MONITOR_ITER_TIMEOUT` and stalls board advance for that
   gap. Fine in ones and twos; if it's a recurring fraction of cycles, **lower `MONITOR_ITER_TIMEOUT`**
   (e.g. 1800 → 1200) to cap the wasted wall-clock — the work is already committed before the hang, so a
