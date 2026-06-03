@@ -24,8 +24,13 @@ describe("computeDropSortOrder", () => {
     expect(computeDropSortOrder(orders, 4)).toBe(500); // 400 + 100
   });
 
-  it("rounds fractional midpoints", () => {
-    expect(computeDropSortOrder([100, 101], 1)).toBe(101); // Math.round(201/2) = 101 (rounds half up)
+  it("returns prev+1 when no integer gap exists between neighbors", () => {
+    // prev=100, next=101, mid=101 >= next → falls back to prev+1=101
+    expect(computeDropSortOrder([100, 101], 1)).toBe(101);
+  });
+
+  it("uses midpoint when an integer gap exists", () => {
+    expect(computeDropSortOrder([100, 102], 1)).toBe(101); // (100+102)/2 = 101 < 102 ✓
   });
 
   it("handles a single card — before", () => {
