@@ -218,26 +218,17 @@ export function BoardStats({
                 );
               })}
             </div>
-            {/* Commits + active profiles */}
-            {(commitCount !== null && commitCount > 0) || profileCounts.size > 0 ? (
+            {/* Commits (active-profile badges live on the always-visible pulse line) */}
+            {commitCount !== null && commitCount > 0 && (
               <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-gray-100 dark:border-gray-800">
-                {commitCount !== null && commitCount > 0 && (
-                  <span className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400" title={commitBranch ? `Commits on ${commitBranch}` : "Commits on default branch"}>
-                    <svg className="w-3 h-3 text-gray-400 dark:text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                      <circle cx="12" cy="12" r="3" /><line x1="12" y1="3" x2="12" y2="9" /><line x1="12" y1="15" x2="12" y2="21" />
-                    </svg>
-                    {commitCount.toLocaleString('en-US')} commits
-                  </span>
-                )}
-                {[...profileCounts.entries()].map(([profile, count]) => (
-                  <span key={profile} className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-brand-50 dark:bg-brand-900/40 border border-brand-200 dark:border-brand-700 text-xs text-brand-700 dark:text-brand-300" title="Active profile">
-                    <span className="w-1.5 h-1.5 rounded-full bg-brand-500" />
-                    {profile}
-                    <span className="font-semibold">{count}</span>
-                  </span>
-                ))}
+                <span className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400" title={commitBranch ? `Commits on ${commitBranch}` : "Commits on default branch"}>
+                  <svg className="w-3 h-3 text-gray-400 dark:text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                    <circle cx="12" cy="12" r="3" /><line x1="12" y1="3" x2="12" y2="9" /><line x1="12" y1="15" x2="12" y2="21" />
+                  </svg>
+                  {commitCount.toLocaleString('en-US')} commits
+                </span>
               </div>
-            ) : null}
+            )}
           </div>
         )}
       </div>
@@ -253,6 +244,15 @@ export function BoardStats({
           <span className="text-xs text-indigo-600 dark:text-indigo-400">active</span>
         </div>
       )}
+
+      {/* Active agent profiles — live signal, always visible at every screen size */}
+      {[...profileCounts.entries()].map(([profile, count]) => (
+        <div key={profile} className="flex items-center gap-1 px-2 py-1 rounded-full bg-brand-50 dark:bg-brand-900/40 border border-brand-200 dark:border-brand-700" title={`${count} active ${profile} agent${count === 1 ? "" : "s"}`}>
+          <span className="w-1.5 h-1.5 rounded-full bg-brand-500 shrink-0" />
+          <span className="text-xs text-brand-700 dark:text-brand-300 max-w-[120px] truncate">{profile}</span>
+          <span className="text-xs font-semibold text-brand-700 dark:text-brand-300">{count}</span>
+        </div>
+      ))}
 
       {/* Blocked filter */}
       {onToggleBlocked && (
