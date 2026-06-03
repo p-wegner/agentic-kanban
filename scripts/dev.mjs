@@ -18,7 +18,9 @@ import { pathToFileURL } from "node:url";
 import {
   classifyProcessExit,
   createDependencyRecoveryState,
+  createSharedDistRecoveryState,
   dependencyManifestsChanged,
+  isStaleSharedDistError,
   snapshotDependencyManifests,
 } from "./dev-supervisor.mjs";
 import { resolveDevPorts } from "./dev-port-plan.mjs";
@@ -144,6 +146,7 @@ async function freePort(port, label) {
 const MAX_RESTARTS = 5;
 const RESTART_DELAY_MS = 1000;
 const dependencyRecovery = createDependencyRecoveryState(snapshotDependencyManifests(process.cwd()));
+const sharedDistRecovery = createSharedDistRecoveryState();
 
 function installUpdatedDependencies(label) {
   console.warn(
@@ -165,6 +168,28 @@ function installUpdatedDependencies(label) {
   console.error(
     `[dev] Dependency install failed for ${label} (exit ${result.status ?? result.signal ?? "unknown"}). ` +
     "Run `pnpm install --frozen-lockfile`, then restart `pnpm dev`.",
+  );
+  return false;
+}
+
+function rebuildSharedDist(label) {
+  console.warn(
+    `[dev] ${label} crashed with ERR_MODULE_NOT_FOUND referencing packages/shared/dist. ` +
+    "Running `pnpm --filter @agentic-kanban/shared build` before restarting...",
+  );
+  const result = spawnSync(
+    "pnpm",
+    ["--filter", "@agentic-kanban/shared", "build"],
+    { cwd: process.cwd(), stdio: "inherit", shell: false, windowsHide: true },
+  );
+  if (result.status === 0) {
+    sharedDistRecovery.markRebuilt();
+    console.warn(`[dev] Shared dist rebuild completed. Restarting ${label}...`);
+    return true;
+  }
+  console.error(
+    `[dev] Shared dist rebuild failed for ${label} (exit ${result.status ?? result.signal ?? "unknown"}). ` +
+    "Run `pnpm --filter @agentic-kanban/shared build` manually, then restart `pnpm dev`.",
   );
   return false;
 }
@@ -202,14 +227,32 @@ function spawnProcess(label, cmd, args, opts) {
   let currentProc = null;
 
   function start() {
-    const proc = spawn(cmd, args, { ...opts, stdio: "inherit", env: process.env });
+    // Pipe stderr so we can inspect it for stale-shared-dist errors, while still
+    // forwarding every line to the terminal so output is not lost.
+    const proc = spawn(cmd, args, { ...opts, stdio: ["inherit", "inherit", "pipe"], env: process.env });
     currentProc = proc;
     observedDependencyRecoveryGeneration = dependencyRecovery.generation;
+
+    let stderrBuffer = "";
+    proc.stderr.on("data", (chunk) => {
+      const text = chunk.toString();
+      stderrBuffer += text;
+      process.stderr.write(chunk);
+    });
 
     proc.on("exit", (code, signal) => {
       const exitType = classifyProcessExit(code, signal);
       if (exitType === "clean") return;
       if (exitType === "fatal") {
+        // Stale shared dist takes priority: rebuild once (up to MAX_SHARED_DIST_REBUILDS)
+        // before falling back to the generic dependency-manifest recovery path.
+        if (isStaleSharedDistError(stderrBuffer) && sharedDistRecovery.canRebuild()) {
+          if (rebuildSharedDist(label)) {
+            restarts = 0;
+            setTimeout(start, RESTART_DELAY_MS);
+          }
+          return;
+        }
         const currentDependencySnapshot = snapshotDependencyManifests(process.cwd());
         if (dependencyManifestsChanged(dependencyRecovery.snapshot, currentDependencySnapshot)) {
           if (installUpdatedDependencies(label)) {
