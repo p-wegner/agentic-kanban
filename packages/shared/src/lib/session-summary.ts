@@ -593,3 +593,54 @@ export function parseSessionSummary(
     repeatedCommands,
   };
 }
+
+/**
+ * Compact, fleet-aggregatable friction metrics derived from a parsed session
+ * summary. Persisted alongside the cost/token stats in `sessions.stats` so the
+ * insights endpoint can roll them up without re-parsing transcripts.
+ *
+ * Bounded in size: `tools` is bounded by the number of distinct tool names a
+ * session used (~15-20), and `repeatedCommands` is capped + truncated.
+ */
+export interface SessionFrictionStats {
+  /** Total tool invocations across all tools. */
+  totalToolCalls: number;
+  /** Tool invocations that returned an error result. */
+  failedToolCalls: number;
+  /** Number of distinct error excerpts captured. */
+  errorCount: number;
+  /** Per-tool call/failure counts (the denominator for fail-rate analysis). */
+  tools: ToolUsePattern[];
+  /** Commands the agent ran 2+ times within the session (a wasted-turn signal). */
+  repeatedCommands: RepeatedCommand[];
+}
+
+export function computeFrictionStats(
+  summary: Pick<SessionSummary, "toolUsePatterns" | "repeatedCommands" | "errors">,
+  opts?: { maxRepeatedCommands?: number; maxCommandLength?: number },
+): SessionFrictionStats {
+  const maxCmds = opts?.maxRepeatedCommands ?? 8;
+  const maxLen = opts?.maxCommandLength ?? 100;
+
+  let totalToolCalls = 0;
+  let failedToolCalls = 0;
+  for (const t of summary.toolUsePatterns) {
+    totalToolCalls += t.count;
+    failedToolCalls += t.failedCount;
+  }
+
+  const repeatedCommands = summary.repeatedCommands
+    .slice(0, maxCmds)
+    .map((rc) => ({
+      command: rc.command.length > maxLen ? rc.command.slice(0, maxLen) : rc.command,
+      count: rc.count,
+    }));
+
+  return {
+    totalToolCalls,
+    failedToolCalls,
+    errorCount: summary.errors.length,
+    tools: summary.toolUsePatterns,
+    repeatedCommands,
+  };
+}

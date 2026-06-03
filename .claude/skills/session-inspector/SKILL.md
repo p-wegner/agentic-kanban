@@ -14,6 +14,25 @@ Inspect session transcripts across all three supported agents. Each stores data 
 | Codex CLI | `~/.codex/sessions/YYYY/MM/DD/` | Full JSONL transcripts per session |
 | Copilot CLI | `~/.copilot/session-state/<uuid>/events.jsonl` + board DB | Full JSONL transcripts locally; also available via API |
 
+## Per-session vs fleet (which skill?)
+
+This skill debugs **one** session (why it stopped, what it did, did it produce output). For **aggregate, time-scoped questions across MANY sessions** — "which tools fail most in the last 48h", "what are agents wasting tokens on", "where can we compound" — do **not** loop the per-session recipes below. Use the **`fleet-analysis`** skill, which pulls a server-side friction roll-up in one call:
+
+```powershell
+# All sessions in a window, friction aggregated server-side (no N+1, no transcript parsing):
+GET /api/insights?projectId=<id>&hours=48   # → .friction { byTool, topRepeatedCommands, worstSkills, failPct, coverage }
+```
+
+Backfill historical friction once so coverage is high: `pnpm cli -- session backfill-friction --hours 48` (main checkout). MCP/butler shortcut: `mcp__agentic-kanban__get_fleet_friction { hours }`.
+
+For a structured **single-session** summary across providers there are matching analyzers (each reports tool-failure counts + repeated commands):
+
+```powershell
+node scripts/analyze-claude-session.mjs  --latest   # or <path> | --list [--worktrees] | --json
+node scripts/analyze-codex-session.mjs   --latest
+node scripts/analyze-copilot-session.mjs --latest
+```
+
 ## Directory naming convention
 
 Each working directory maps to a session dir by replacing path separators with `--`:
