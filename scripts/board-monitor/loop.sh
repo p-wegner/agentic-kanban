@@ -1,18 +1,27 @@
 #!/usr/bin/env bash
 # Detached board-monitor loop for agentic-kanban.
 #
-# Each iteration starts a FRESH `codex exec` session with the board-monitor
-# objective (no resume — the board + git are the durable state, so a fresh
-# session avoids context bloat and can't hijack a board workspace agent's
-# session via `resume --last`). Hooks run (--dangerously-bypass-hook-trust) so
-# the PreToolUse safety guards AND the Stop commit-discipline guard fire.
+# Each iteration starts a FRESH agent session with the board-monitor objective
+# (no resume — the board + git are the durable state, so a fresh session avoids
+# context bloat and can't hijack a board workspace agent's session via
+# `resume --last`). The repo's hooks fire either way, so the PreToolUse safety
+# guards AND the Stop commit-discipline guard run every cycle.
+#
+# Which harness runs each cycle is chosen by MONITOR_AGENT (default "claude"):
+#   - claude → Claude Code headless (`claude --print`, runs in $REPO, hooks native)
+#   - codex  → `codex exec` (needs -C "$REPO" + --dangerously-bypass-hook-trust
+#              so the Claude-style hooks fire through codex's bridge)
+# Both read the SAME objective.md; only the launch command differs.
 #
 # Launch detached (no window, survives shell exit):
 #   nohup bash scripts/board-monitor/loop.sh > /dev/null 2>&1 & disown
+#   # to run the codex harness instead of Claude Code:
+#   MONITOR_AGENT=codex nohup bash scripts/board-monitor/loop.sh > /dev/null 2>&1 & disown
 # Stop gracefully: `touch scripts/board-monitor/STOP` (exits after the current
 # iteration) or kill the logged PID.
 #
-# Env knobs: MONITOR_SLEEP (default 1800s between runs), MONITOR_MAX_ITERS
+# Env knobs: MONITOR_AGENT (default "claude"; "codex" for the codex harness),
+# MONITOR_SLEEP (default 1800s = 30min between runs), MONITOR_MAX_ITERS
 # (default 500), MONITOR_ITER_TIMEOUT (default 1800s per iteration).
 
 set -u
@@ -21,6 +30,7 @@ DIR="$REPO/scripts/board-monitor"
 LOG="$DIR/loop.log"
 STOP="$DIR/STOP"
 STATE="$DIR/state.md"
+AGENT="${MONITOR_AGENT:-claude}"
 SLEEP="${MONITOR_SLEEP:-1800}"
 MAX="${MONITOR_MAX_ITERS:-500}"
 ITER_TIMEOUT="${MONITOR_ITER_TIMEOUT:-1800}"
@@ -42,7 +52,10 @@ fi
 # target the live driver. loop.sh never wrote this before, so it drifted stale
 # on every restart.
 echo "$$" > "$DIR/loop.pid"
-log "board-monitor loop START (pid $$, sleep ${SLEEP}s, max ${MAX}, iter-timeout ${ITER_TIMEOUT}s, state-keep ${STATE_KEEP})"
+# Run from the repo so the Claude Code harness (no -C flag) uses $REPO as cwd.
+# All file refs above are absolute, so this cd is safe; codex passes -C explicitly.
+cd "$REPO" || { log "FATAL: cannot cd to $REPO"; exit 1; }
+log "board-monitor loop START (pid $$, agent ${AGENT}, sleep ${SLEEP}s, max ${MAX}, iter-timeout ${ITER_TIMEOUT}s, state-keep ${STATE_KEEP})"
 
 short_streak=0
 for (( i=1; i<=MAX; i++ )); do
@@ -53,11 +66,27 @@ for (( i=1; i<=MAX; i++ )); do
   # objective.md and the next cycle picks it up — no loop restart needed).
   OBJ="$(cat "$DIR/objective.md")"
   start=$(date +%s)
-  timeout "$ITER_TIMEOUT" codex exec \
-    --dangerously-bypass-approvals-and-sandbox \
-    --dangerously-bypass-hook-trust \
-    -C "$REPO" \
-    "$OBJ" >> "$LOG" 2>&1
+  case "$AGENT" in
+    codex)
+      # codex needs explicit cwd (-C) and the hook-trust bypass so the repo's
+      # Claude-style hooks fire through codex's bridge.
+      timeout "$ITER_TIMEOUT" codex exec \
+        --dangerously-bypass-approvals-and-sandbox \
+        --dangerously-bypass-hook-trust \
+        -C "$REPO" \
+        "$OBJ" >> "$LOG" 2>&1
+      ;;
+    *)
+      # Claude Code headless (default). cwd is $REPO (set at startup), so the repo
+      # is already an allowed dir — no --add-dir needed. Hooks fire natively.
+      # bypassPermissions = no permission prompt blocks the headless run. The
+      # objective goes in via STDIN (not a positional arg) so it can't be mistaken
+      # for a flag value.
+      printf '%s' "$OBJ" | timeout "$ITER_TIMEOUT" claude \
+        --print \
+        --permission-mode bypassPermissions >> "$LOG" 2>&1
+      ;;
+  esac
   code=$?
   dur=$(( $(date +%s) - start ))
   log "--- iteration $i END exit=$code dur=${dur}s ---"
