@@ -76,7 +76,7 @@ export function ConstellationView({ columns, onIssueClick, searchQuery }: Conste
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const starsRef = useRef<Array<{ x: number; y: number; r: number; a: number }>>([]);
 
-  const activeColumns = columns.filter((c) => showDone || !HIDDEN_STATUSES.has(c.status.name));
+  const activeColumns = columns.filter((c) => showDone || !HIDDEN_STATUSES.has(c.name));
 
   const buildLayout = useCallback(
     (width: number, height: number) => {
@@ -90,18 +90,18 @@ export function ConstellationView({ columns, onIssueClick, searchQuery }: Conste
       const newClusters: Cluster[] = activeColumns.map((col, i) => {
         const angle = (i / clusterCount) * Math.PI * 2 - Math.PI / 2;
         return {
-          id: col.status.id,
-          label: col.status.name,
+          id: col.id,
+          label: col.name,
           x: cx + Math.cos(angle) * clusterRadius,
           y: cy + Math.sin(angle) * clusterRadius,
-          color: STATUS_COLORS[col.status.name] ?? "#8a8175",
+          color: STATUS_COLORS[col.name] ?? "#8a8175",
           issueCount: col.issues.length,
         };
       });
 
       const newNodes: Node[] = [];
       for (const col of activeColumns) {
-        const cluster = newClusters.find((c) => c.id === col.status.id)!;
+        const cluster = newClusters.find((c) => c.id === col.id)!;
         const orbitRadius = 60 + col.issues.length * 8;
         col.issues.forEach((issue, j) => {
           const existing = nodesRef.current.find((n) => n.id === issue.id);
@@ -110,7 +110,7 @@ export function ConstellationView({ columns, onIssueClick, searchQuery }: Conste
           const tx = cluster.x + Math.cos(angle) * dist;
           const ty = cluster.y + Math.sin(angle) * dist;
           const typeColor = TYPE_COLORS[issue.issueType ?? "task"] ?? "#5b7a8c";
-          const statusColor = STATUS_COLORS[col.status.name] ?? "#8a8175";
+          const statusColor = STATUS_COLORS[col.name] ?? "#8a8175";
           const priority = issue.priority ?? "low";
           newNodes.push({
             id: issue.id,
