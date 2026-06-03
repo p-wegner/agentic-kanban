@@ -7,13 +7,28 @@ when it is enabled. Edit here to steer either. Do not create a second strategy f
 
 This is a FRESH session every run — you have NO memory of previous runs. The kanban board and git are your single source of truth; re-read them each run via the board's MCP tools / CLI / API. Read CLAUDE.md if unsure of conventions.
 
-## TUNABLE TARGETS — edit these live to steer the loop
-> The loop re-reads this file at the START of every iteration, so changes here take effect on the next cycle with **NO restart**. This block is the SINGLE place to adjust the board's pace — these numbers are not hardcoded anywhere else (the $backlog-refill skill defers to them).
-- **ACTIVE_AGENTS_TARGET = 5** — keep this many workspaces actively In Progress at all times.
-- **BACKLOG_FLOOR = 10** — never let the backlog drop below this; refill before it does.
-- **MAX_NEW_STARTS_PER_CYCLE = 2** — cap on how many NEW workspaces to launch in a single cycle (safe ramp; raise for a faster fill).
-- **REFILL_FOCUS = balanced** — when refilling, create a balanced mix of bug-fix and feature/enhancement tickets. (Set to `bugfix-only` to create ONLY real, reproducible bug-fix tickets.)
+## TUNABLE TARGETS - generated from Strategy Bullseye
+<!-- STRATEGY_BULLSEYE_GENERATED_START -->
+> The loop re-reads this file at the START of every iteration, so changes here take effect on the next cycle with **NO restart**. This block is generated from the Strategy Bullseye preference; edit the bullseye in the board UI instead of hand-editing these values.
+- **ACTIVE_AGENTS_TARGET = 3** - keep this many workspaces actively In Progress at all times.
+- **BACKLOG_FLOOR = 10** - never let the backlog drop below this; refill before it does.
+- **MAX_NEW_STARTS_PER_CYCLE = 2** - cap on how many NEW workspaces to launch in a single cycle.
+- **REFILL_FOCUS = balanced** - derived from work-type marker weights; `bugfix-only` emphasizes reproducible bugs, `balanced` allows feature/quality mix.
 
+## STRATEGY WEIGHTS (generated - do not hand-edit)
+- REST API Performance: weight 5/5, area, provider claude
+- Backend Efficiency: weight 4/5, area, provider claude
+- Quality: weight 3/5, work-type, provider claude
+- Feature: weight 2/5, work-type
+- Bugfix: weight 2/5, work-type
+
+## PROVIDER POLICY (generated - do not hand-edit)
+When selecting a provider for a new workspace, apply these rules in priority order:
+1. **FILL** profiles should always have capacity — start work on them first.
+2. **THROTTLE** profiles are preferred for main work. Respect their headroom percentage.
+3. **FALLBACK-ONLY** profiles are last resort — only use if all others are exhausted or the user explicitly selects them.
+- **Claude (Anthropic)** [claude:]: FILL — use aggressively, keep busy at all times (Primary harness - all new workspaces launch on Claude. Keep 3 agents busy.)
+<!-- STRATEGY_BULLSEYE_GENERATED_END -->
 FIRST, READ YOUR RECENT MEMORY: `scripts/board-monitor/state.md` is a short rolling log of what the last several cycles did. Read it before choosing an action and use it to ESCALATE rather than repeat — if a prior cycle (or two) already nudged an item with no change, take the stronger action this time (stop the stale session and inspect the branch, rebuild, or flag for a human) instead of nudging it again. If the file is missing or empty, just proceed.
 
 Each run, make as much bounded progress toward a healthy, moving board as the priorities below allow, then stop. This is **NOT** a strict one-action-per-cycle rule — do every safe, high-value action the priorities call for this run (e.g. you may launch up to MAX_NEW_STARTS_PER_CYCLE workspaces in a single cycle to fill agent slots). Use the $board-monitor skill for the health/conflict checks. In priority order:
