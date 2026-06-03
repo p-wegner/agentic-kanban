@@ -1,15 +1,10 @@
 import { VIEW_REGISTRY, type ViewMode } from "../lib/viewRegistry.js";
+import { SHORTCUT_REGISTRY, type ShortcutCategory } from "../lib/shortcutRegistry.js";
 
 interface ShortcutHelpProps {
   onClose: () => void;
   currentView?: ViewMode;
 }
-
-// View-switch shortcuts are derived from the canonical view registry (#116) so
-// the overlay never drifts out of sync with the toolbar and command palette.
-const VIEW_SHORTCUTS: Array<{ keys: string[]; description: string }> = VIEW_REGISTRY.filter(
-  (v) => v.shortcut,
-).map((v) => ({ keys: [v.shortcut as string], description: `Switch to ${v.label}` }));
 
 interface Shortcut {
   keys: string[];
@@ -17,46 +12,30 @@ interface Shortcut {
   sequential?: boolean;
 }
 
-const GLOBAL_SHORTCUTS: Shortcut[] = [
-  { keys: ["/"], description: "Focus search" },
-  { keys: ["Ctrl", "K"], description: "Command palette" },
-  { keys: ["Escape"], description: "Close panel / clear search / go back" },
-  { keys: ["?"], description: "Show keyboard shortcuts" },
-  { keys: ["c"], description: "Create new issue" },
-  { keys: ["w"], description: "New issue + start workspace" },
-  { keys: ["q"], description: "Open Quick Tasks panel" },
-  { keys: ["Shift", "V"], description: "Start voice inbox (record idea → Backlog issue)" },
-  ...VIEW_SHORTCUTS,
-  { keys: ["a"], description: "Toggle All Workspaces panel" },
-  { keys: ["h"], description: "Toggle File Contention Heatmap" },
-  { keys: ["t"], description: "Search agent transcripts" },
-  { keys: ["x"], description: "Open Codemod Factory" },
-  { keys: ["g", "s"], description: "Open settings", sequential: true },
-];
-
-const VIEW_SPECIFIC_SHORTCUTS: Partial<Record<ViewMode, Shortcut[]>> = {
-  butler: [
-    { keys: ["Enter"], description: "Send message" },
-    { keys: ["Ctrl", "Enter"], description: "Send message" },
-    { keys: ["Shift", "Enter"], description: "Insert newline" },
-    { keys: ["Ctrl", "Space"], description: "Hold to dictate" },
-    { keys: ["Ctrl", "L"], description: "Clear Butler context" },
-    { keys: ["Ctrl", "Shift", "X"], description: "Clear Butler context" },
-    { keys: ["Ctrl", "P"], description: "Cycle Butler profile" },
-    { keys: ["Ctrl", "M"], description: "Cycle Butler model" },
-    { keys: ["Ctrl", "Shift", "N"], description: "New Butler session" },
-    { keys: ["Escape"], description: "Close Butler panels / exit to Board when input is empty" },
-  ],
-};
-
 export function ShortcutHelp({ onClose, currentView }: ShortcutHelpProps) {
   const view = VIEW_REGISTRY.find((v) => v.id === currentView);
   const viewShortcuts = currentView ? VIEW_SPECIFIC_SHORTCUTS[currentView] ?? [] : [];
 
+  // Group non-view shortcuts by category from the registry
+  const categories: ShortcutCategory[] = ["Navigation", "Board", "Panels"];
+  const byCategory = Object.fromEntries(
+    categories.map((cat) => [
+      cat,
+      SHORTCUT_REGISTRY.filter((s) => s.category === cat),
+    ]),
+  ) as Record<ShortcutCategory, Shortcut[]>;
+
+  // View shortcuts derived from VIEW_REGISTRY — single source of truth (#116)
+  const viewSwitchShortcuts: Shortcut[] = VIEW_REGISTRY.filter((v) => v.shortcut).map((v) => ({
+    keys: v.chord ? ["g", v.shortcut as string] : [v.shortcut as string],
+    description: `Switch to ${v.label}`,
+    sequential: v.chord,
+  }));
+
   return (
     <>
       <div className="fixed inset-0 bg-black/30 z-50" onClick={onClose} />
-      <div className="fixed top-[12%] left-1/2 -translate-x-1/2 w-full max-w-md bg-white dark:bg-gray-900 rounded-lg shadow-2xl z-50 border border-gray-200 dark:border-gray-700 overflow-hidden">
+      <div className="fixed top-[12%] left-1/2 -translate-x-1/2 w-full max-w-lg bg-white dark:bg-gray-900 rounded-lg shadow-2xl z-50 border border-gray-200 dark:border-gray-700 overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
             Keyboard Shortcuts{view ? ` — ${view.label}` : ""}
@@ -72,12 +51,32 @@ export function ShortcutHelp({ onClose, currentView }: ShortcutHelpProps) {
           {viewShortcuts.length > 0 && (
             <ShortcutSection title={`${view?.toolbarLabel ?? "View"} shortcuts`} shortcuts={viewShortcuts} />
           )}
-          <ShortcutSection title="Global shortcuts" shortcuts={GLOBAL_SHORTCUTS} />
+          {categories.map((cat) =>
+            byCategory[cat].length > 0 ? (
+              <ShortcutSection key={cat} title={cat} shortcuts={byCategory[cat]} />
+            ) : null,
+          )}
+          <ShortcutSection title="Views" shortcuts={viewSwitchShortcuts} />
         </div>
       </div>
     </>
   );
 }
+
+const VIEW_SPECIFIC_SHORTCUTS: Partial<Record<ViewMode, Shortcut[]>> = {
+  butler: [
+    { keys: ["Enter"], description: "Send message" },
+    { keys: ["Ctrl", "Enter"], description: "Send message" },
+    { keys: ["Shift", "Enter"], description: "Insert newline" },
+    { keys: ["Ctrl", "Space"], description: "Hold to dictate" },
+    { keys: ["Ctrl", "L"], description: "Clear Butler context" },
+    { keys: ["Ctrl", "Shift", "X"], description: "Clear Butler context" },
+    { keys: ["Ctrl", "P"], description: "Cycle Butler profile" },
+    { keys: ["Ctrl", "M"], description: "Cycle Butler model" },
+    { keys: ["Ctrl", "Shift", "N"], description: "New Butler session" },
+    { keys: ["Escape"], description: "Close Butler panels / exit to Board when input is empty" },
+  ],
+};
 
 function ShortcutSection({ title, shortcuts }: { title: string; shortcuts: Shortcut[] }) {
   return (
@@ -99,7 +98,7 @@ function ShortcutSection({ title, shortcuts }: { title: string; shortcuts: Short
                 </kbd>
                 {i < shortcut.keys.length - 1 && (
                   <span className="text-xs text-gray-400 dark:text-gray-500 mx-0.5">
-                    {shortcut.sequential ? "→" : "+"}
+                    {shortcut.sequential ? "then" : "+"}
                   </span>
                 )}
               </span>
