@@ -33,7 +33,8 @@ export type ViewMode =
   | "strategy"
   | "focus"
   | "runbooks"
-  | "capacity";
+  | "capacity"
+  | "constellation";
 
 export interface ViewDescriptor {
   /** Stable view id — matches BoardPage's `viewMode` state. */
@@ -192,6 +193,16 @@ const ICON = {
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h4v7H3zM10 8h4v11h-4zM17 4h4v15h-4z" />
       <path strokeLinecap="round" strokeLinejoin="round" d="M3 19h18" />
+    </svg>
+  ),
+  constellation: (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <circle cx="5" cy="5" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="19" cy="8" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="19" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="8" cy="14" r="1" fill="currentColor" stroke="none" />
+      <circle cx="17" cy="16" r="1" fill="currentColor" stroke="none" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M5 5l7 14M5 5l14 3M19 8l-7 11M8 14l9 2" />
     </svg>
   ),
 } as const;
@@ -430,6 +441,18 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteIcon: "⬡",
     paletteDescription: "Show agent capacity, open slots, and next issues to launch",
     shortcut: "c",
+    group: "secondary",
+  },
+  {
+    id: "constellation",
+    toolbarLabel: "Stars",
+    label: "Constellation",
+    tooltip: "Constellation — animated starfield view of your board",
+    icon: ICON.constellation,
+    paletteIcon: "✦",
+    paletteDescription: "Immersive radial starfield: issues as glowing nodes orbiting status clusters",
+    shortcut: "e",
+    activeClass: "bg-indigo-700 text-white",
     group: "secondary",
   },
 ];
