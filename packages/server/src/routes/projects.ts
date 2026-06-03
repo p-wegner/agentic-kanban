@@ -16,6 +16,7 @@ import { getWorkspaceRisk } from "../services/workspace-risk.service.js";
 import { getProjectHealth } from "../services/project-health.service.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
+import { createHash } from "node:crypto";
 
 function parseBoardHealthEventsLimit(raw: string | undefined): number {
   const parsed = Number.parseInt(raw ?? "", 10);
@@ -250,7 +251,16 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
   router.get("/:id/board", async (c) => {
     const projectId = c.req.param("id");
     const result = await projectService.getBoard(projectId);
-    return c.json(result);
+    const body = JSON.stringify(result);
+    const etag = `"${createHash("sha1").update(body).digest("hex").slice(0, 16)}"`;
+    const ifNoneMatch = c.req.header("if-none-match");
+    if (ifNoneMatch === etag) {
+      return new Response(null, { status: 304, headers: { ETag: etag } });
+    }
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "application/json", ETag: etag },
+    });
   });
 
   // GET /api/projects/:id/workspace-launch-failures
