@@ -26,6 +26,8 @@ export interface LaunchPreviewData {
   model: string | null;
   warnings: string[];
   budgetEstimate?: BudgetEstimate;
+  ports: { serverPort: number; clientPort: number } | null;
+  blockedBy: { issueNumber: number; title: string }[];
 }
 
 interface LaunchPreviewPanelProps {
@@ -277,8 +279,28 @@ export function LaunchPreviewPanel({
             )}
           </div>
 
+          {preview.ports && (
+            <PreviewRow
+              label="Ports"
+              value={`server :${preview.ports.serverPort} · client :${preview.ports.clientPort}`}
+            />
+          )}
+
           {preview.budgetEstimate && (
             <BudgetRiskBadge estimate={preview.budgetEstimate} />
+          )}
+
+          {preview.blockedBy && preview.blockedBy.length > 0 && (
+            <div className="space-y-1 pt-1">
+              {preview.blockedBy.map((dep) => (
+                <div key={dep.issueNumber} className="flex gap-1.5 items-start text-xs text-red-600 dark:text-red-400">
+                  <svg className="h-3.5 w-3.5 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 0 0 5.636 5.636m12.728 12.728A9 9 0 0 1 5.636 5.636m12.728 12.728L5.636 5.636" />
+                  </svg>
+                  <span>Blocked by #{dep.issueNumber}: {dep.title} — resolve this issue before launching.</span>
+                </div>
+              ))}
+            </div>
           )}
 
           {preview.warnings.length > 0 && (
