@@ -33,3 +33,6 @@ CLAUDE.local.md
 
 # Runtime scheduler lock — pid/session churn, must not be tracked
 .claude/scheduled_tasks.lock
+
+# code-metrics analysis output (regenerable; config in .codemetricsrc is tracked)
+code-metrics-out/
