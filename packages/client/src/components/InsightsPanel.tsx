@@ -640,6 +640,9 @@ function QuotaProviderCard({ provider }: { provider: QuotaProviderEntry }) {
               {provider.plan}
             </span>
           )}
+          <span className="text-[10px] font-mono text-gray-400 dark:text-gray-600 truncate" title={`Quota provider ID: ${provider.id}`}>
+            id: {provider.id}
+          </span>
         </div>
         {provider.status === "auth" && (
           <a
