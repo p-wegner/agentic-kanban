@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { createTestApp as _createTestApp } from "./helpers/test-app.js";
 import { createMockSessionManager } from "./helpers/mocks.js";
 import type { TestDb } from "./helpers/test-db.js";
+import { BASE_SERVER_PORT, BASE_CLIENT_PORT } from "../services/worktree-ports.js";
 
 function createTestApp() {
   return _createTestApp((app, db) => {
@@ -327,5 +328,94 @@ describe("POST /api/workspaces/preview", () => {
     const after = await database.select().from(schema.workspaces)
       .where(eq(schema.workspaces.issueId, freshIssueId));
     expect(after.length).toBe(before.length);
+  });
+
+  it("returns derived server and client ports for a feature branch", async () => {
+    const res = await app.request("/api/workspaces/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ issueId, branch: "feature/ak-99-launch-preview" }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.ports).not.toBeNull();
+    expect(body.ports.serverPort).toBe(BASE_SERVER_PORT + 99);
+    expect(body.ports.clientPort).toBe(BASE_CLIENT_PORT + 99);
+  });
+
+  it("returns null ports for a direct workspace", async () => {
+    const res = await app.request("/api/workspaces/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ issueId, isDirect: true }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.ports).toBeNull();
+  });
+
+  it("returns blockedBy list when the issue has unresolved blocking dependencies", async () => {
+    const blockerProjectId = await createProject(database);
+    const todoStatusId = await createStatus(database, blockerProjectId, "Todo", 0);
+    const doneStatusId = await createStatus(database, blockerProjectId, "Done", 1);
+
+    const targetIssueId = await createIssue(database, blockerProjectId, todoStatusId, { issueNumber: 500, title: "Target issue" });
+    const openBlockerId = await createIssue(database, blockerProjectId, todoStatusId, { issueNumber: 501, title: "Open blocker" });
+    const resolvedBlockerId = await createIssue(database, blockerProjectId, doneStatusId, { issueNumber: 502, title: "Resolved blocker" });
+
+    await database.insert(schema.issueDependencies).values([
+      { id: randomUUID(), issueId: targetIssueId, dependsOnId: openBlockerId, type: "depends_on", createdAt: now },
+      { id: randomUUID(), issueId: targetIssueId, dependsOnId: resolvedBlockerId, type: "depends_on", createdAt: now },
+    ]);
+
+    const res = await app.request("/api/workspaces/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ issueId: targetIssueId, branch: "feature/ak-500-target" }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+
+    // Only the open (unresolved) blocker should appear
+    expect(body.blockedBy).toHaveLength(1);
+    expect(body.blockedBy[0].issueNumber).toBe(501);
+    expect(body.blockedBy[0].title).toBe("Open blocker");
+  });
+
+  it("returns empty blockedBy when all dependencies are resolved", async () => {
+    const resolvedProjectId = await createProject(database);
+    const todoStatusId = await createStatus(database, resolvedProjectId, "Todo", 0);
+    const doneStatusId = await createStatus(database, resolvedProjectId, "Done", 1);
+
+    const targetIssueId = await createIssue(database, resolvedProjectId, todoStatusId, { issueNumber: 600, title: "All clear" });
+    const resolvedBlockerId = await createIssue(database, resolvedProjectId, doneStatusId, { issueNumber: 601, title: "Already done" });
+
+    await database.insert(schema.issueDependencies).values([
+      { id: randomUUID(), issueId: targetIssueId, dependsOnId: resolvedBlockerId, type: "depends_on", createdAt: now },
+    ]);
+
+    const res = await app.request("/api/workspaces/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ issueId: targetIssueId, branch: "feature/ak-600-all-clear" }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.blockedBy).toHaveLength(0);
+  });
+
+  it("shows missing profile warning when a named profile has no config file", async () => {
+    const res = await app.request("/api/workspaces/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        issueId,
+        branch: "feature/test",
+        profile: { provider: "claude", name: "nonexistent-profile-abc123" },
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.warnings.some((w: string) => w.includes("Profile unavailable"))).toBe(true);
   });
 });
