@@ -7,6 +7,7 @@ import {
   type AgentProfilePreflightResult,
 } from "../services/agent-profile-health.service.js";
 import { getMcpHealthSummary, probeMcpHealth } from "../services/mcp-health.service.js";
+import { fetchLiveQuotaUsage } from "../services/quota-usage.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { preferences } from "@agentic-kanban/shared/schema";
@@ -85,6 +86,19 @@ export function createPreferencesRoute(database: Database = db) {
 
   router.post("/mcp/probe", async (c) => {
     return c.json(await probeMcpHealth());
+  });
+
+  // GET /api/preferences/quota-usage — live quota from tampermonkey-direct
+  router.get("/quota-usage", async (c) => {
+    try {
+      const data = await fetchLiveQuotaUsage();
+      return c.json(data);
+    } catch (err) {
+      return c.json(
+        { error: err instanceof Error ? err.message : String(err), providers: [], scrapedAt: new Date().toISOString() },
+        503,
+      );
+    }
   });
 
   return router;
