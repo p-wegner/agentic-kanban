@@ -15,6 +15,7 @@ import { WorkspaceArtifactsBrowser } from "./WorkspaceArtifactsBrowser.js";
 import { EpicDecomposerModal } from "./EpicDecomposerModal.js";
 import { ShowdownDialog } from "./ShowdownDialog.js";
 import { ShowdownPanel } from "./ShowdownPanel.js";
+import { CompareAttemptsPanel } from "./CompareAttemptsPanel.js";
 import { usePanelLayout } from "../hooks/usePanelLayout.js";
 import type { TrailEntry } from "../hooks/useTicketTrail.js";
 import { TicketTrailStrip } from "./TicketTrailStrip.js";
@@ -363,6 +364,7 @@ export function IssueDetailPanel({
   const [showDecomposeModal, setShowDecomposeModal] = useState(false);
   const [showShowdownDialog, setShowShowdownDialog] = useState(false);
   const [activeShowdownId, setActiveShowdownId] = useState<string | null>(null);
+  const [showCompareAttempts, setShowCompareAttempts] = useState(false);
   const [availableSkills, setAvailableSkills] = useState<{ id: string; name: string; description: string }[]>([]);
   const [comments, setComments] = useState<IssueComment[]>([]);
   const [newNoteBody, setNewNoteBody] = useState("");
@@ -1485,7 +1487,14 @@ export function IssueDetailPanel({
                         </span>
                       )}
                       {issue.workspaceSummary!.total > 1 && (
-                        <span className="text-xs text-gray-400 dark:text-gray-500 ml-auto">+{issue.workspaceSummary!.total - 1}</span>
+                        <button
+                          type="button"
+                          onClick={e => { e.stopPropagation(); setShowCompareAttempts(true); }}
+                          className="ml-auto text-xs text-blue-600 dark:text-blue-400 hover:underline shrink-0"
+                          title={`Compare all ${issue.workspaceSummary!.total} attempts`}
+                        >
+                          +{issue.workspaceSummary!.total - 1} more
+                        </button>
                       )}
                     </div>
                     {(issue.workspaceSummary.main.status === "active" || issue.workspaceSummary.main.status === "fixing") && (issue.workspaceSummary.main.contextTokens || issue.workspaceSummary.main.lastTool) && (
@@ -2232,6 +2241,13 @@ export function IssueDetailPanel({
           showdownId={activeShowdownId}
           onClose={() => setActiveShowdownId(null)}
           onWinnerPicked={() => setActiveShowdownId(null)}
+        />
+      )}
+      {showCompareAttempts && (
+        <CompareAttemptsPanel
+          issueId={issue.id}
+          onClose={() => setShowCompareAttempts(false)}
+          onOpenWorkspace={(workspaceId) => onManageWorkspaces(issue, workspaceId)}
         />
       )}
     </>
