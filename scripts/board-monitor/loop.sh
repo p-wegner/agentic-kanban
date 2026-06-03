@@ -21,7 +21,7 @@
 # iteration) or kill the logged PID.
 #
 # Env knobs: MONITOR_AGENT (default "claude"; "codex" for the codex harness),
-# MONITOR_SLEEP (default 1800s = 30min between runs), MONITOR_MAX_ITERS
+# MONITOR_SLEEP (default 900s = 15min between runs), MONITOR_MAX_ITERS
 # (default 500), MONITOR_ITER_TIMEOUT (default 1800s per iteration).
 
 set -u
@@ -31,7 +31,7 @@ LOG="$DIR/loop.log"
 STOP="$DIR/STOP"
 STATE="$DIR/state.md"
 AGENT="${MONITOR_AGENT:-claude}"
-SLEEP="${MONITOR_SLEEP:-1800}"
+SLEEP="${MONITOR_SLEEP:-900}"
 MAX="${MONITOR_MAX_ITERS:-500}"
 ITER_TIMEOUT="${MONITOR_ITER_TIMEOUT:-1800}"
 # Rolling cross-iteration memory: each fresh session reads state.md for what
