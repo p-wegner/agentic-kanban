@@ -1,6 +1,8 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useTheme, type Theme } from "../hooks/useTheme.js";
 import { ProjectTabs } from "./ProjectTabs.js";
+import { NotificationBell } from "./NotificationBell.js";
+import type { NotificationEvent } from "../hooks/useActivityNotifications.js";
 
 interface Project {
   id: string;
@@ -33,6 +35,13 @@ interface LayoutProps {
   onSettingsClick?: () => void;
   isDark?: boolean;
   onThemeToggle?: () => void;
+  notificationEvents?: NotificationEvent[];
+  notificationUnreadCount?: number;
+  notificationOpen?: boolean;
+  onNotificationOpen?: () => void;
+  onNotificationClose?: () => void;
+  onNotificationMarkRead?: () => void;
+  onNotificationEventClick?: (event: NotificationEvent) => void;
 }
 
 export function Layout({
@@ -54,6 +63,13 @@ export function Layout({
   onSettingsClick,
   isDark,
   onThemeToggle,
+  notificationEvents = [],
+  notificationUnreadCount = 0,
+  notificationOpen = false,
+  onNotificationOpen,
+  onNotificationClose,
+  onNotificationMarkRead,
+  onNotificationEventClick,
 }: LayoutProps) {
   const [showRegister, setShowRegister] = useState(false);
   const [confirmUnregister, setConfirmUnregister] = useState<Project | null>(null);
@@ -301,6 +317,15 @@ export function Layout({
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </button>
+            <NotificationBell
+              events={notificationEvents}
+              unreadCount={notificationUnreadCount}
+              isOpen={notificationOpen}
+              onOpen={onNotificationOpen ?? (() => {})}
+              onClose={onNotificationClose ?? (() => {})}
+              onMarkRead={onNotificationMarkRead ?? (() => {})}
+              onEventClick={onNotificationEventClick ?? (() => {})}
+            />
             <button
               onClick={onThemeToggle}
               className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
@@ -348,6 +373,7 @@ export function Layout({
                     { label: "Launch Failures", onClick: onLaunchFailuresClick },
                     { label: "Worktrees", onClick: onWorktreeOverviewClick },
                     { label: "Project Health", onClick: onProjectHealthClick },
+                    { label: `Notifications${notificationUnreadCount > 0 ? ` (${notificationUnreadCount})` : ""}`, onClick: onNotificationOpen },
                     { label: isDark ? "Light mode" : "Dark mode", onClick: onThemeToggle },
                     { label: "Settings", onClick: onSettingsClick },
                   ].map((item) => (
