@@ -1,4 +1,4 @@
-import { eq, asc } from "drizzle-orm";
+import { eq, asc, inArray } from "drizzle-orm";
 import { issues, workspaces, workflowTransitions, workflowNodes, projectStatuses } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 
@@ -58,20 +58,16 @@ export async function getIssueCycleTime(issueId: string, database: Database, now
 
   const workspaceIds = wsRows.map((w) => w.id);
 
-  // Fetch transitions for all workspaces, ordered by time
-  const allTransitions: Array<{ workspaceId: string; toNodeId: string; createdAt: string }> = [];
-  for (const wsId of workspaceIds) {
-    const rows = await database
-      .select({
-        workspaceId: workflowTransitions.workspaceId,
-        toNodeId: workflowTransitions.toNodeId,
-        createdAt: workflowTransitions.createdAt,
-      })
-      .from(workflowTransitions)
-      .where(eq(workflowTransitions.workspaceId, wsId))
-      .orderBy(asc(workflowTransitions.createdAt));
-    allTransitions.push(...rows);
-  }
+  // Fetch transitions for all workspaces in a single query
+  const allTransitions = await database
+    .select({
+      workspaceId: workflowTransitions.workspaceId,
+      toNodeId: workflowTransitions.toNodeId,
+      createdAt: workflowTransitions.createdAt,
+    })
+    .from(workflowTransitions)
+    .where(inArray(workflowTransitions.workspaceId, workspaceIds))
+    .orderBy(asc(workflowTransitions.createdAt));
 
   if (allTransitions.length === 0) {
     return {
@@ -83,17 +79,16 @@ export async function getIssueCycleTime(issueId: string, database: Database, now
     };
   }
 
-  // Resolve node IDs to status names
+  // Resolve node IDs to status names in a single query
   const nodeIds = [...new Set(allTransitions.map((t) => t.toNodeId))];
   const nodeStatusMap = new Map<string, string>();
-  for (const nodeId of nodeIds) {
+  if (nodeIds.length > 0) {
     const nodeRows = await database
-      .select({ statusName: workflowNodes.statusName })
+      .select({ id: workflowNodes.id, statusName: workflowNodes.statusName })
       .from(workflowNodes)
-      .where(eq(workflowNodes.id, nodeId))
-      .limit(1);
-    if (nodeRows.length > 0 && nodeRows[0].statusName) {
-      nodeStatusMap.set(nodeId, nodeRows[0].statusName);
+      .where(inArray(workflowNodes.id, nodeIds));
+    for (const row of nodeRows) {
+      if (row.statusName) nodeStatusMap.set(row.id, row.statusName);
     }
   }
 
