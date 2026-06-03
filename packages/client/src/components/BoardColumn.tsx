@@ -54,6 +54,9 @@ interface BoardColumnProps {
   children?: React.ReactNode;
   style?: React.CSSProperties;
   width?: number;
+  /** Mobile vertical-stack mode: full-width, auto-height (no internal scroll) so
+   *  the board scrolls through all columns instead of one full-height column. */
+  stacked?: boolean;
   onResizeStart?: (e: React.MouseEvent) => void;
   onResizeReset?: () => void;
 }
@@ -83,6 +86,7 @@ export function BoardColumn({
   children,
   style,
   width,
+  stacked = false,
   onResizeStart,
   onResizeReset,
 }: BoardColumnProps) {
@@ -180,7 +184,7 @@ export function BoardColumn({
     <div style={{ display: "contents" }}>
     <div
       id={`column-${column.id}`}
-      className={`${width != null ? "" : "w-[calc(100vw-2rem)] sm:w-72 shrink-0"} bg-surface-sunken dark:bg-surface-sunken-dark rounded-xl p-2 flex flex-col transition-all relative ${
+      className={`${stacked ? "w-full shrink-0" : width != null ? "" : "w-[calc(100vw-2rem)] sm:w-72 shrink-0"} bg-surface-sunken dark:bg-surface-sunken-dark rounded-xl p-2 flex flex-col transition-all relative ${
         dragOver ? "ring-2 ring-brand-400 ring-offset-1 ring-offset-surface dark:ring-offset-surface-dark" : ""
       }`}
       style={columnStyle}
@@ -225,14 +229,14 @@ export function BoardColumn({
         </div>
       </div>
 
-      <div className="relative flex-1 min-h-0 overflow-hidden rounded-lg">
-        {(scrollState === "top" || scrollState === "middle") && (
+      <div className={`relative rounded-lg ${stacked ? "" : "flex-1 min-h-0 overflow-hidden"}`}>
+        {!stacked && (scrollState === "top" || scrollState === "middle") && (
           <div className="absolute top-0 left-0 right-0 h-6 bg-gradient-to-b from-surface-sunken dark:from-surface-sunken-dark to-transparent z-10 pointer-events-none rounded-t-lg" />
         )}
         <div
           ref={scrollRef}
-          onScroll={updateScrollState}
-          className="space-y-1.5 h-full overflow-y-auto column-scroll-container pb-6"
+          onScroll={stacked ? undefined : updateScrollState}
+          className={`space-y-1.5 column-scroll-container ${stacked ? "" : "h-full overflow-y-auto pb-6"}`}
         >
           {displayedIssues.map((issue: IssueWithStatus, idx: number) => (
             <div key={issue.id}>
@@ -272,7 +276,7 @@ export function BoardColumn({
             <p className="text-xs text-gray-400 dark:text-gray-500 text-center py-4">No issues</p>
           )}
         </div>
-        {(scrollState === "bottom" || scrollState === "middle") && (
+        {!stacked && (scrollState === "bottom" || scrollState === "middle") && (
           <div className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-surface-sunken dark:from-surface-sunken-dark to-transparent z-10 pointer-events-none rounded-b-lg" />
         )}
       </div>
