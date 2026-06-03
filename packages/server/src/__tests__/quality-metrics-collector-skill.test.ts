@@ -18,6 +18,15 @@ describe("quality-metrics-collector skill", () => {
     expect(skill!.prompt).toContain("Invoke-RestMethod");
   });
 
+  it("instructs agents to reuse the code-metrics skill bundled scc binary", () => {
+    const skill = BUILTIN_SKILLS.find((item) => item.name === "quality-metrics-collector");
+
+    expect(skill).toBeDefined();
+    expect(skill!.prompt).toContain("code-metrics");
+    expect(skill!.prompt).toContain("tools\\\\scc.exe");
+    expect(skill!.prompt).toMatch(/bundled/i);
+  });
+
   it("keeps the local installable skill safe for worktree-launched collectors", () => {
     const skillPath = new URL("../../../../.claude/skills/quality-metrics-collector/SKILL.md", import.meta.url);
     const prompt = readFileSync(skillPath, "utf8");
@@ -28,5 +37,14 @@ describe("quality-metrics-collector skill", () => {
       '$serverPort = if ($env:KANBAN_BOARD_SERVER_PORT) { $env:KANBAN_BOARD_SERVER_PORT } elseif ($env:KANBAN_SERVER_PORT)',
     );
     expect(prompt).toContain("/api/projects/$projectId/quality-metrics");
+  });
+
+  it("local skill reuses code-metrics bundled scc and mentions setup fallback", () => {
+    const skillPath = new URL("../../../../.claude/skills/quality-metrics-collector/SKILL.md", import.meta.url);
+    const prompt = readFileSync(skillPath, "utf8");
+
+    expect(prompt).toContain("code-metrics");
+    expect(prompt).toContain("tools\\scc.exe");
+    expect(prompt).toContain("setup.ps1");
   });
 });
