@@ -40,7 +40,8 @@ export type ViewMode =
   | "stale-work"
   | "throughput"
   | "provider-mix"
-  | "lead-time";
+  | "lead-time"
+  | "scorecard-distribution";
 
 export interface ViewDescriptor {
   /** Stable view id — matches BoardPage's `viewMode` state. */
@@ -249,6 +250,11 @@ const ICON = {
       <circle cx="11" cy="12" r="1.5" fill="currentColor" stroke="none" />
       <circle cx="15" cy="7" r="1.5" fill="currentColor" stroke="none" />
       <circle cx="19" cy="10" r="1.5" fill="currentColor" stroke="none" />
+    </svg>
+  ),
+  "scorecard-distribution": (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 19h18M5 19v-5h3v5M10 19V9h3v10M16 19V4h3v15" />
     </svg>
   ),
 } as const;
@@ -565,6 +571,17 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     icon: ICON["lead-time"],
     paletteIcon: "LT",
     paletteDescription: "Trend chart of issue lead time (creation → Done) with median and p90 lines",
+    activeClass: "bg-emerald-600 text-white",
+    group: "secondary",
+  },
+  {
+    id: "scorecard-distribution",
+    toolbarLabel: "Scores",
+    label: "Score Distribution",
+    tooltip: "Score Distribution — histogram of workspace scorecard scores",
+    icon: ICON["scorecard-distribution"],
+    paletteIcon: "SD",
+    paletteDescription: "Histogram of workspace scorecard scores across recent workspaces",
     activeClass: "bg-emerald-600 text-white",
     group: "secondary",
   },
