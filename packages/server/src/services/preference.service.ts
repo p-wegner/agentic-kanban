@@ -15,7 +15,7 @@ export const SETTINGS_KEYS = [
   "permission_prompt_tool", "auto_review", "auto_merge", "auto_merge_in_review", "resume_with_new_model",
   "review_auto_fix", "disabled_mcp_tools", "auto_start_followup", "require_manual_approval",
   "dependency_auto_chain",
-  "dynamic_column_scaling", "persistent_agent", "learning_step_after_agent",
+  "dynamic_column_scaling", "card_density", "persistent_agent", "learning_step_after_agent",
   "learning_step_after_review", "learning_step_before_merge", "auto_monitor",
   "auto_monitor_interval", "nudge_auto_start", "projects_base_path", "plan_auto_continue",
   "visual_verification_mode", "after_merge_verify_agent",

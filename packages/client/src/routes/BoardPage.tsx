@@ -1683,6 +1683,8 @@ export function BoardPage() {
           onShowRunQueueForecast={() => panels.setShowRunQueueForecast(true)}
           runQueueOpenSlots={runQueueForecast.openSlots}
           onViewAllHealthEvents={() => handleViewModeChange("health-events")}
+          cardDensity={prefs.cardDensity}
+          onCardDensityChange={prefs.handleCardDensityChange}
         />
         </div>
         {viewMode === "kanban" && (
@@ -1926,6 +1928,7 @@ export function BoardPage() {
             projectId={activeProjectId}
             columnWidths={columnWidths}
             dynamicColumnScaling={prefs.dynamicColumnScaling}
+            cardDensity={prefs.cardDensity}
             creatingInColumnId={creatingInColumnId}
             searchQuery={searchQuery}
             sessionActivity={sessionActivity}
