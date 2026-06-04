@@ -1,4 +1,4 @@
-﻿// GENERATED from .claude/skills/merge-reconciler/SKILL.md (canonical source).
+// GENERATED from .claude/skills/merge-reconciler/SKILL.md (canonical source).
 // Keep in sync: re-run the generator if the SKILL.md changes.
 // This is the default playbook the auto-merge orchestrator injects when it launches
 // the batch merge-reconciler; a project-scoped agent_skills row overrides it.
