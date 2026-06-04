@@ -87,6 +87,8 @@ export interface BacklogEmptyDeps {
   serverPort: number;
   boardEvents: ReturnType<typeof createBoardEvents>;
   logMonitorAction: (action: MonitorActionName, workspaceId: string, issueId: string) => void;
+  /** Which projects this cycle may refill (global monitor on, or per-project hands-off mode). Defaults to all. */
+  allowProject?: (projectId: string) => boolean;
   /** Injectable persistence for the cooldown timestamp (defaults to the real preferences repo). */
   setCooldownStamp?: (iso: string) => Promise<void>;
   /** Injectable host-issue creator (defaults to a real DB insert). Returns the new issue id or null. */
@@ -120,6 +122,7 @@ export async function runBacklogEmptyStrategy(
     setCooldownStamp = (iso) => setPreference("backlog_empty_last_run", iso),
     createHostIssue = defaultCreateHostIssue,
     deleteHostIssue = defaultDeleteHostIssue,
+    allowProject = () => true,
   }: BacklogEmptyDeps,
   now: string = new Date().toISOString(),
 ): Promise<void> {
@@ -139,8 +142,9 @@ export async function runBacklogEmptyStrategy(
   const baseUrl = `http://127.0.0.1:${serverPort}`;
   const skillName = prefMap.get("backlog_empty_skill") || DEFAULT_BACKLOG_SKILL;
 
-  const inProgressStatuses = await db.select({ id: projectStatuses.id, projectId: projectStatuses.projectId }).from(projectStatuses)
-    .where(sql`${projectStatuses.name} = 'In Progress'`);
+  const inProgressStatuses = (await db.select({ id: projectStatuses.id, projectId: projectStatuses.projectId }).from(projectStatuses)
+    .where(sql`${projectStatuses.name} = 'In Progress'`))
+    .filter((s) => allowProject(s.projectId));
 
   let triggeredAny = false;
   for (const inProgressSt of inProgressStatuses) {

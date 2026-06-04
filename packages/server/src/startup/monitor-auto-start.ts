@@ -1,22 +1,42 @@
 import { isTerminalStatusIdView } from "@agentic-kanban/shared";
-import { issueDependencies, issues, projectStatuses, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
-import { eq, sql, inArray } from "drizzle-orm";
+import { issueDependencies, issues, issueTags, projectStatuses, tags, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
+import { and, eq, sql, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { createBoardEvents } from "../services/board-events.js";
 import type { MonitorActionName } from "../services/monitor-nudge.js";
 import { resolveMonitorTunables } from "../services/strategy-objective.service.js";
 
+/** Issues carrying this tag are an explicit opt-out of monitor auto-start. */
+const SKIP_AUTO_START_TAG = "no-auto-start";
+
+async function hasSkipAutoStartTag(issueId: string): Promise<boolean> {
+  const rows = await db.select({ id: tags.id }).from(issueTags)
+    .innerJoin(tags, eq(issueTags.tagId, tags.id))
+    .where(and(eq(issueTags.issueId, issueId), eq(tags.name, SKIP_AUTO_START_TAG)))
+    .limit(1);
+  return rows.length > 0;
+}
+
 export interface AutoStartDeps {
   serverPort: number;
   boardEvents: ReturnType<typeof createBoardEvents>;
   logMonitorAction: (action: MonitorActionName, workspaceId: string, issueId: string) => void;
+  /**
+   * Which projects this cycle may auto-start work for. The monitor passes a predicate
+   * that is true when the global monitor is on (legacy behaviour, gated on
+   * nudge_auto_start) OR the project has per-project hands-off mode enabled. This
+   * replaces the old single global `nudge_auto_start` gate so a freshly-registered
+   * project can drain its backlog without flipping a global switch.
+   */
+  allowProject: (projectId: string) => boolean;
 }
 
-export async function runAutoStart(prefMap: Map<string, string>, { serverPort, boardEvents, logMonitorAction }: AutoStartDeps) {
-  if (prefMap.get("nudge_auto_start") !== "true") return;
+export async function runAutoStart(prefMap: Map<string, string>, { serverPort, boardEvents, logMonitorAction, allowProject }: AutoStartDeps) {
   const baseUrl = `http://127.0.0.1:${serverPort}`;
-  const inProgressStatuses = await db.select({ id: projectStatuses.id, projectId: projectStatuses.projectId }).from(projectStatuses)
-    .where(sql`${projectStatuses.name} = 'In Progress'`);
+  const inProgressStatuses = (await db.select({ id: projectStatuses.id, projectId: projectStatuses.projectId }).from(projectStatuses)
+    .where(sql`${projectStatuses.name} = 'In Progress'`))
+    .filter((s) => allowProject(s.projectId));
+  if (inProgressStatuses.length === 0) return;
 
   // Per-project effective tunables (Strategy Bullseye when configured, else legacy
   // nudge prefs). `activeAgentsTarget` is the WIP target; `maxNewStartsPerCycle`
@@ -48,6 +68,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       const openWs = await db.select({ id: workspaces.id }).from(workspaces)
         .where(sql`${workspaces.issueId} = ${issue.id} AND ${workspaces.status} != 'closed'`).limit(1);
       if (openWs.length > 0) continue;
+      if (await hasSkipAutoStartTag(issue.id)) continue;
       const branchSlug = issue.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").substring(0, 40);
       const branch = `feature/ak-${issue.issueNumber}-${branchSlug}`;
       const prompt = issue.description ? `${issue.title}\n\n${issue.description}` : issue.title;
@@ -86,9 +107,10 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       const existingWs = await db.select({ id: workspaces.id }).from(workspaces)
         .where(sql`${workspaces.issueId} = ${issue.id} AND ${workspaces.status} != 'closed'`).limit(1);
       if (existingWs.length > 0) continue;
+      if (await hasSkipAutoStartTag(issue.id)) continue;
 
       const deps = await db.select({ dependsOnId: issueDependencies.dependsOnId }).from(issueDependencies)
-        .where(sql`${issueDependencies.issueId} = ${issue.id} AND ${issueDependencies.type} = 'depends_on'`);
+        .where(sql`${issueDependencies.issueId} = ${issue.id} AND (${issueDependencies.type} = 'depends_on' OR ${issueDependencies.type} = 'blocked_by')`);
       if (deps.length > 0) {
         const blockerIds = deps.map((d) => d.dependsOnId);
         const blockerIssues = await db
