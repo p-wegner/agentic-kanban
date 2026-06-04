@@ -264,6 +264,19 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
     return c.json(result);
   });
 
+  // GET /api/projects/:id/board/summary — column counts only, no issue bodies
+  router.get("/:id/board/summary", async (c) => {
+    const projectId = c.req.param("id");
+    try {
+      const result = await projectService.getBoardSummary(projectId);
+      return c.json(result);
+    } catch (err: any) {
+      const msg = err?.message ?? "";
+      if (msg.includes("not found")) return c.json({ error: msg }, 404);
+      throw err;
+    }
+  });
+
   // GET /api/projects/:id/board
   router.get("/:id/board", async (c) => {
     const projectId = c.req.param("id");
