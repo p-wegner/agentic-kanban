@@ -1135,6 +1135,20 @@ export function BoardPage() {
 
   const { openIssueById, navigateTrail, trailControls, ticketTrail } = useBoardNavigation(columns, setSelectedIssue);
 
+  async function handleDuplicateIssue(issue: IssueWithStatus) {
+    try {
+      const result = await apiFetch<{ id: string; issueNumber: number; title: string }>(
+        `/api/issues/${issue.id}/duplicate`,
+        { method: "POST" },
+      );
+      await refetchBoard();
+      showToast(`Duplicated as #${result.issueNumber}`, "success");
+      openIssueById(result.id);
+    } catch {
+      showToast("Failed to duplicate issue", "error");
+    }
+  }
+
   const handleMentionClick = useCallback(
     (issueId: string) => {
       openIssueById(issueId);
@@ -1959,6 +1973,7 @@ export function BoardPage() {
             onDryRun={panels.setDryRunIssue}
             onDragStart={handleBoardDragStart}
             onDrop={handleDrop}
+            onDuplicate={handleDuplicateIssue}
             onMoveToNext={handleMoveToNext}
             onColumnResizeStart={handleColumnResizeStart}
             onColumnResizeReset={(colId) => setColumnWidths((prev) => {

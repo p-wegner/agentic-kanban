@@ -209,6 +209,7 @@ interface IssueCardProps {
   onStartWorkspace?: (issue: IssueWithStatus) => void;
   onDryRun?: (issue: IssueWithStatus) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
+  onDuplicate?: (issue: IssueWithStatus) => void;
   onMoveToNext?: (issue: IssueWithStatus) => void;
   nextStatusName?: string;
   tags?: TagBadge[];
@@ -245,7 +246,7 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   );
 }
 
-export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, onDryRun, onDragStart, onMoveToNext, nextStatusName, tags, allProjectTags, quickUpdate, searchQuery, liveActivity, liveStats, todos, isPendingIssue, isPendingWorkspace, isSelected, isKeyboardFocused, cardDensity = "comfortable" }: IssueCardProps) {
+export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, onDryRun, onDragStart, onDuplicate, onMoveToNext, nextStatusName, tags, allProjectTags, quickUpdate, searchQuery, liveActivity, liveStats, todos, isPendingIssue, isPendingWorkspace, isSelected, isKeyboardFocused, cardDensity = "comfortable" }: IssueCardProps) {
   const compact = cardDensity === "compact";
   const typeBadgeColor = issue.issueType ? (issueTypeColors[issue.issueType] ?? null) : null;
   const priorityBadgeColor = issue.priority && issue.priority !== "medium" ? (priorityColors[issue.priority] ?? null) : null;
@@ -491,6 +492,22 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
               </svg>
               <span className="truncate">Move to {nextStatusName}</span>
             </button>
+          )}
+          {onDuplicate && (
+            <>
+              <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => runContextAction(() => onDuplicate(issue))}
+                className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
+              >
+                <svg className="h-3.5 w-3.5 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                <span className="truncate">Duplicate issue</span>
+              </button>
+            </>
           )}
         </div>,
         document.body,

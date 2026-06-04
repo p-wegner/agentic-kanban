@@ -300,6 +300,18 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     }
   });
 
+  // POST /api/issues/:id/duplicate
+  router.post("/:id/duplicate", async (c) => {
+    const id = c.req.param("id");
+    try {
+      const result = await issueService.duplicateIssue(id);
+      return c.json(result, 201);
+    } catch (err: any) {
+      if (err.code === "NOT_FOUND") return c.json({ error: err.message }, 404);
+      throw err;
+    }
+  });
+
   // DELETE /api/issues/:id
   router.delete("/:id", async (c) => {
     const id = c.req.param("id");

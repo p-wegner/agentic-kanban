@@ -345,6 +345,7 @@ export function IssueDetailPanel({
   const [estimating, setEstimating] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [togglingVisualVerify, setTogglingVisualVerify] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
   const [moveToDonePending, setMoveToDonePending] = useState<{ confirm: () => Promise<void> } | null>(null);
   const [dependencyImpactPending, setDependencyImpactPending] = useState<{
     toStatusId: string;
@@ -560,6 +561,23 @@ export function IssueDetailPanel({
 
   async function handleTogglePinned() {
     await onUpdate(issue.id, { pinned: !issue.pinned });
+  }
+
+  async function handleDuplicate() {
+    if (duplicating) return;
+    setDuplicating(true);
+    try {
+      const result = await apiFetch<{ id: string; issueNumber: number; title: string }>(
+        `/api/issues/${issue.id}/duplicate`,
+        { method: "POST" },
+      );
+      showToast(`Duplicated as #${result.issueNumber}`, "success");
+      onNavigateToIssue?.(result.id);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Duplicate failed", "error");
+    } finally {
+      setDuplicating(false);
+    }
   }
 
   async function handleAiEstimate() {
@@ -1161,6 +1179,17 @@ export function IssueDetailPanel({
                     </svg>
                   </button>
                 )}
+                <button
+                  onClick={handleDuplicate}
+                  disabled={duplicating}
+                  title="Duplicate issue"
+                  aria-label="Duplicate issue"
+                  className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 p-0.5 rounded transition-colors disabled:opacity-50"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                </button>
                 <button
                   data-delete-issue-action
                   onClick={() => handleDelete()}
