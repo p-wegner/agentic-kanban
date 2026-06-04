@@ -86,6 +86,12 @@ interface BoardColumnProps {
   wipLimit?: number | null;
   onSetWipLimit?: (statusId: string, limit: number | null) => void;
   cardDensity?: CardDensity;
+  onColumnDragStart?: (e: React.DragEvent) => void;
+  onColumnDragOver?: (e: React.DragEvent) => void;
+  onColumnDragLeave?: () => void;
+  onColumnDrop?: (e: React.DragEvent) => void;
+  onColumnDragEnd?: () => void;
+  isColumnDragOver?: boolean;
 }
 
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
@@ -125,6 +131,12 @@ export function BoardColumn({
   wipLimit,
   onSetWipLimit,
   cardDensity = "comfortable",
+  onColumnDragStart,
+  onColumnDragOver,
+  onColumnDragLeave,
+  onColumnDrop,
+  onColumnDragEnd,
+  isColumnDragOver = false,
 }: BoardColumnProps) {
   const [dragOver, setDragOver] = useState(false);
   const dragCounterRef = useRef(0);
@@ -246,14 +258,30 @@ export function BoardColumn({
       id={`column-${column.id}`}
       className={`${stacked ? "w-full shrink-0" : width != null ? "" : "w-[calc(100vw-2rem)] sm:w-72 shrink-0"} bg-surface-sunken dark:bg-surface-sunken-dark rounded-xl p-2 flex flex-col transition-all relative ${
         dragOver ? "ring-2 ring-brand-400 ring-offset-1 ring-offset-surface dark:ring-offset-surface-dark" : ""
-      }`}
+      } ${isColumnDragOver ? "ring-2 ring-brand-300 ring-offset-1 ring-offset-surface dark:ring-offset-surface-dark opacity-75" : ""}`}
       style={columnStyle}
       onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
-      onDragOver={handleDragOver}
-      onDrop={handleDrop}
+      onDragLeave={(e) => { handleDragLeave(); onColumnDragLeave?.(); }}
+      onDragOver={(e) => { handleDragOver(e); onColumnDragOver?.(e); }}
+      onDrop={(e) => { handleDrop(e); onColumnDrop?.(e); }}
+      onDragEnd={onColumnDragEnd}
     >
       <div className={`flex items-center justify-between mb-2 px-1 shrink-0 rounded-lg transition-colors ${wipStatus === "over" ? "bg-red-50/60 dark:bg-red-900/20" : ""}`}>
+        <div className="flex items-start gap-1">
+          {onColumnDragStart && (
+            <div
+              draggable
+              onDragStart={onColumnDragStart}
+              className="mt-0.5 cursor-grab active:cursor-grabbing text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400 transition-colors shrink-0"
+              title="Drag to reorder column"
+            >
+              <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 16 16">
+                <circle cx="5" cy="4" r="1.2"/><circle cx="11" cy="4" r="1.2"/>
+                <circle cx="5" cy="8" r="1.2"/><circle cx="11" cy="8" r="1.2"/>
+                <circle cx="5" cy="12" r="1.2"/><circle cx="11" cy="12" r="1.2"/>
+              </svg>
+            </div>
+          )}
         <div className="flex flex-col gap-0.5">
           <h2 className="font-semibold text-sm text-ink-soft dark:text-gray-300 flex items-center gap-2 tracking-tight">
             {column.name}
@@ -291,6 +319,7 @@ export function BoardColumn({
               {estimateRollup.unestimated > 0 ? `${estimateRollup.unestimated} unestimated` : ""}
             </span>
           )}
+        </div>
         </div>
         <div className="flex items-center gap-1">
           <button

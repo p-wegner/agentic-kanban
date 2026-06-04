@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues, CreateIssueRequest, ProfileSelection } from "@agentic-kanban/shared";
 import { BoardErrorBoundary } from "./BoardErrorBoundary.js";
 import { BoardColumn } from "./BoardColumn.js";
@@ -120,6 +120,7 @@ export interface BoardKanbanViewProps {
   wipLimits?: Record<string, number | null>;
   onSetWipLimit?: (statusId: string, limit: number | null) => void;
   cardDensity?: CardDensity;
+  onColumnReorder?: (draggedColumnId: string, targetSortOrder: number) => void;
 }
 
 export function BoardKanbanView({
@@ -162,11 +163,63 @@ export function BoardKanbanView({
   wipLimits,
   onSetWipLimit,
   cardDensity = "comfortable",
+  onColumnReorder,
 }: BoardKanbanViewProps) {
   // Below sm, columns stack vertically and the board scrolls down through them
   // (instead of a horizontal one-column-at-a-time swipe, where an empty column
   // wastes the whole screen). Stacked columns are full-width and auto-height.
   const isNarrow = useIsNarrow();
+
+  const draggedColumnId = useRef<string | null>(null);
+  const [columnDragOverId, setColumnDragOverId] = useState<string | null>(null);
+
+  function handleColumnDragStart(e: React.DragEvent, columnId: string) {
+    draggedColumnId.current = columnId;
+    e.dataTransfer.effectAllowed = "move";
+  }
+
+  function handleColumnDragOver(e: React.DragEvent, columnId: string) {
+    if (!draggedColumnId.current || draggedColumnId.current === columnId) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setColumnDragOverId(columnId);
+  }
+
+  function handleColumnDragLeave(columnId: string) {
+    setColumnDragOverId((prev) => (prev === columnId ? null : prev));
+  }
+
+  function handleColumnDrop(e: React.DragEvent, targetColumnId: string) {
+    e.preventDefault();
+    e.stopPropagation();
+    setColumnDragOverId(null);
+    const sourceId = draggedColumnId.current;
+    draggedColumnId.current = null;
+    if (!sourceId || sourceId === targetColumnId || !onColumnReorder) return;
+
+    const sorted = [...activeColumns].sort((a, b) => a.sortOrder - b.sortOrder);
+    const targetIdx = sorted.findIndex((c) => c.id === targetColumnId);
+    if (targetIdx < 0) return;
+
+    const sortOrders = sorted.map((c) => c.sortOrder);
+    const sourceIdx = sorted.findIndex((c) => c.id === sourceId);
+
+    let newSortOrder: number;
+    if (sourceIdx > targetIdx) {
+      // moving left: place before targetIdx
+      newSortOrder = targetIdx === 0 ? sortOrders[0] - 100 : Math.round((sortOrders[targetIdx - 1] + sortOrders[targetIdx]) / 2);
+    } else {
+      // moving right: place after targetIdx
+      newSortOrder = targetIdx === sortOrders.length - 1 ? sortOrders[sortOrders.length - 1] + 100 : Math.round((sortOrders[targetIdx] + sortOrders[targetIdx + 1]) / 2);
+    }
+
+    onColumnReorder(sourceId, newSortOrder);
+  }
+
+  function handleColumnDragEnd() {
+    draggedColumnId.current = null;
+    setColumnDragOverId(null);
+  }
 
   const pinnedIssues = allColumns.flatMap((c) => c.issues).filter((i) => i.pinned);
 
@@ -252,6 +305,12 @@ export function BoardKanbanView({
               wipLimit={wipLimits?.[col.id]}
               onSetWipLimit={onSetWipLimit}
               cardDensity={cardDensity}
+              onColumnDragStart={onColumnReorder && !isNarrow ? (e) => handleColumnDragStart(e, col.id) : undefined}
+              onColumnDragOver={onColumnReorder && !isNarrow ? (e) => handleColumnDragOver(e, col.id) : undefined}
+              onColumnDragLeave={onColumnReorder && !isNarrow ? () => handleColumnDragLeave(col.id) : undefined}
+              onColumnDrop={onColumnReorder && !isNarrow ? (e) => handleColumnDrop(e, col.id) : undefined}
+              onColumnDragEnd={onColumnReorder && !isNarrow ? handleColumnDragEnd : undefined}
+              isColumnDragOver={columnDragOverId === col.id}
             >
               <CreateIssueForm
                 projectId={projectId}
