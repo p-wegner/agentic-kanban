@@ -6,7 +6,51 @@ import { evaluateWipLimit } from "../lib/wipLimits.js";
 import { computeDropSortOrder } from "../lib/reorderIssues.js";
 import type { CardDensity } from "../hooks/useBoardPreferences.js";
 
+export type SwimlaneDimension = "none" | "priority" | "tag";
+
 const ESTIMATE_POINTS: Record<string, number> = { XS: 1, S: 2, M: 3, L: 5, XL: 8 };
+
+const PRIORITY_LANE_ORDER = ["critical", "high", "medium", "low", "ungrouped"];
+const PRIORITY_LANE_STYLES: Record<string, { label: string; headerBg: string; headerBorder: string; headerText: string; dot: string }> = {
+  critical: { label: "Critical", headerBg: "bg-red-50 dark:bg-red-950/40", headerBorder: "border-red-200 dark:border-red-800", headerText: "text-red-700 dark:text-red-400", dot: "bg-red-500" },
+  high: { label: "High", headerBg: "bg-orange-50 dark:bg-orange-950/40", headerBorder: "border-orange-200 dark:border-orange-800", headerText: "text-orange-700 dark:text-orange-400", dot: "bg-orange-500" },
+  medium: { label: "Medium", headerBg: "bg-yellow-50 dark:bg-yellow-950/40", headerBorder: "border-yellow-200 dark:border-yellow-800", headerText: "text-yellow-700 dark:text-yellow-400", dot: "bg-yellow-400" },
+  low: { label: "Low", headerBg: "bg-slate-50 dark:bg-slate-800/40", headerBorder: "border-slate-200 dark:border-slate-700", headerText: "text-slate-600 dark:text-slate-400", dot: "bg-slate-400" },
+  ungrouped: { label: "Ungrouped", headerBg: "bg-gray-50 dark:bg-gray-800/40", headerBorder: "border-gray-200 dark:border-gray-700", headerText: "text-gray-500 dark:text-gray-400", dot: "bg-gray-400" },
+};
+
+function groupByPriority(issues: IssueWithStatus[]): { key: string; issues: IssueWithStatus[] }[] {
+  const groups: Record<string, IssueWithStatus[]> = {};
+  for (const key of PRIORITY_LANE_ORDER) groups[key] = [];
+  for (const issue of issues) {
+    const p = issue.priority && PRIORITY_LANE_ORDER.includes(issue.priority) ? issue.priority : "ungrouped";
+    groups[p].push(issue);
+  }
+  return PRIORITY_LANE_ORDER.map((key) => ({ key, issues: groups[key] })).filter((g) => g.issues.length > 0);
+}
+
+function groupByTag(issues: IssueWithStatus[]): { key: string; label: string; color: string | null; issues: IssueWithStatus[] }[] {
+  const tagGroups: Map<string, { label: string; color: string | null; issues: IssueWithStatus[] }> = new Map();
+  const ungrouped: IssueWithStatus[] = [];
+  for (const issue of issues) {
+    const tags = issue.tags ?? [];
+    if (tags.length === 0) {
+      ungrouped.push(issue);
+    } else {
+      for (const tag of tags) {
+        if (!tagGroups.has(tag.id)) {
+          tagGroups.set(tag.id, { label: tag.name, color: tag.color, issues: [] });
+        }
+        tagGroups.get(tag.id)!.issues.push(issue);
+      }
+    }
+  }
+  const result: { key: string; label: string; color: string | null; issues: IssueWithStatus[] }[] = [];
+  for (const [key, g] of tagGroups) result.push({ key, ...g });
+  result.sort((a, b) => a.label.localeCompare(b.label));
+  if (ungrouped.length > 0) result.push({ key: "ungrouped", label: "Ungrouped", color: null, issues: ungrouped });
+  return result;
+}
 
 function computeColumnEstimate(issues: IssueWithStatus[]): { total: number; unestimated: number } {
   let total = 0;
@@ -92,6 +136,8 @@ interface BoardColumnProps {
   onColumnDrop?: (e: React.DragEvent) => void;
   onColumnDragEnd?: () => void;
   isColumnDragOver?: boolean;
+  swimlaneDimension?: SwimlaneDimension;
+  onDropWithLane?: (statusId: string, laneKey: string, sortOrder?: number) => void;
 }
 
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
@@ -137,6 +183,8 @@ export function BoardColumn({
   onColumnDrop,
   onColumnDragEnd,
   isColumnDragOver = false,
+  swimlaneDimension = "none",
+  onDropWithLane,
 }: BoardColumnProps) {
   const [dragOver, setDragOver] = useState(false);
   const dragCounterRef = useRef(0);
@@ -363,47 +411,152 @@ export function BoardColumn({
           onScroll={stacked ? undefined : updateScrollState}
           className={`${cardDensity === "compact" ? "space-y-1" : "space-y-1.5"} column-scroll-container ${stacked ? "" : "h-full overflow-y-auto pb-6"}`}
         >
-          {displayedIssues.map((issue: IssueWithStatus, idx: number) => (
-            <div key={issue.id}>
-              <DropGap
-                visible={dragOver}
-                onDrop={(e) => handleDropGap(e, computeGapSortOrder(idx))}
-              />
-              <IssueCard
-                issue={issue}
-                onClick={onIssueClick}
-                onWorkspaceClick={onWorkspaceClick}
-                onStartWorkspace={onStartWorkspace}
-                onDryRun={onDryRun}
-                onDragStart={onDragStart}
-                onDuplicate={onDuplicate}
-                onMoveToNext={nextStatus && onMoveToNext ? (iss) => onMoveToNext(iss, nextStatus.id) : undefined}
-                nextStatusName={nextStatus?.name}
-                tags={issue.tags}
-                allProjectTags={allProjectTags}
-                quickUpdate={quickUpdate}
-                allStatuses={allColumns?.map((c) => ({ id: c.id, name: c.name }))}
-                onDeleteIssue={onDeleteIssue}
-                searchQuery={searchQuery}
-                liveActivity={sessionActivity?.[issue.id]}
-                liveStats={liveStats?.[issue.id]}
-                todos={sessionTodos?.[issue.id]}
-                isPendingIssue={pendingIssueIds?.has(issue.id)}
-                isPendingWorkspace={pendingWorkspaceIssueIds?.has(issue.id)}
-                isSelected={selectedIssueIds?.has(issue.id)}
-                isKeyboardFocused={keyboardCursorIssueId === issue.id}
-                cardDensity={cardDensity}
-              />
-            </div>
-          ))}
-          {dragOver && displayedIssues.length > 0 && (
-            <DropGap
-              visible={true}
-              onDrop={(e) =>
-                handleDropGap(e, computeGapSortOrder(displayedIssues.length))
-              }
-            />
+          {swimlaneDimension === "none" && (
+            <>
+              {displayedIssues.map((issue: IssueWithStatus, idx: number) => (
+                <div key={issue.id}>
+                  <DropGap
+                    visible={dragOver}
+                    onDrop={(e) => handleDropGap(e, computeGapSortOrder(idx))}
+                  />
+                  <IssueCard
+                    issue={issue}
+                    onClick={onIssueClick}
+                    onWorkspaceClick={onWorkspaceClick}
+                    onStartWorkspace={onStartWorkspace}
+                    onDryRun={onDryRun}
+                    onDragStart={onDragStart}
+                    onDuplicate={onDuplicate}
+                    onMoveToNext={nextStatus && onMoveToNext ? (iss) => onMoveToNext(iss, nextStatus.id) : undefined}
+                    nextStatusName={nextStatus?.name}
+                    tags={issue.tags}
+                    allProjectTags={allProjectTags}
+                    quickUpdate={quickUpdate}
+                    allStatuses={allColumns?.map((c) => ({ id: c.id, name: c.name }))}
+                    onDeleteIssue={onDeleteIssue}
+                    searchQuery={searchQuery}
+                    liveActivity={sessionActivity?.[issue.id]}
+                    liveStats={liveStats?.[issue.id]}
+                    todos={sessionTodos?.[issue.id]}
+                    isPendingIssue={pendingIssueIds?.has(issue.id)}
+                    isPendingWorkspace={pendingWorkspaceIssueIds?.has(issue.id)}
+                    isSelected={selectedIssueIds?.has(issue.id)}
+                    isKeyboardFocused={keyboardCursorIssueId === issue.id}
+                    cardDensity={cardDensity}
+                  />
+                </div>
+              ))}
+              {dragOver && displayedIssues.length > 0 && (
+                <DropGap
+                  visible={true}
+                  onDrop={(e) => handleDropGap(e, computeGapSortOrder(displayedIssues.length))}
+                />
+              )}
+            </>
           )}
+          {swimlaneDimension === "priority" && (() => {
+            const groups = groupByPriority(displayedIssues);
+            if (groups.length === 0) return null;
+            return groups.map((group) => {
+              const style = PRIORITY_LANE_STYLES[group.key] ?? PRIORITY_LANE_STYLES.ungrouped;
+              return (
+                <SwimLaneGroup
+                  key={group.key}
+                  laneKey={group.key}
+                  label={style.label}
+                  dot={style.dot}
+                  headerBg={style.headerBg}
+                  headerBorder={style.headerBorder}
+                  headerText={style.headerText}
+                  count={group.issues.length}
+                  columnId={column.id}
+                  onDropWithLane={onDropWithLane}
+                >
+                  {group.issues.map((issue, idx) => (
+                    <div key={issue.id}>
+                      <IssueCard
+                        issue={issue}
+                        onClick={onIssueClick}
+                        onWorkspaceClick={onWorkspaceClick}
+                        onStartWorkspace={onStartWorkspace}
+                        onDryRun={onDryRun}
+                        onDragStart={onDragStart}
+                        onDuplicate={onDuplicate}
+                        onMoveToNext={nextStatus && onMoveToNext ? (iss) => onMoveToNext(iss, nextStatus.id) : undefined}
+                        nextStatusName={nextStatus?.name}
+                        tags={issue.tags}
+                        allProjectTags={allProjectTags}
+                        quickUpdate={quickUpdate}
+                        allStatuses={allColumns?.map((c) => ({ id: c.id, name: c.name }))}
+                        onDeleteIssue={onDeleteIssue}
+                        searchQuery={searchQuery}
+                        liveActivity={sessionActivity?.[issue.id]}
+                        liveStats={liveStats?.[issue.id]}
+                        todos={sessionTodos?.[issue.id]}
+                        isPendingIssue={pendingIssueIds?.has(issue.id)}
+                        isPendingWorkspace={pendingWorkspaceIssueIds?.has(issue.id)}
+                        isSelected={selectedIssueIds?.has(issue.id)}
+                        isKeyboardFocused={keyboardCursorIssueId === issue.id}
+                        cardDensity={cardDensity}
+                      />
+                      {idx < group.issues.length - 1 && <div className={`${cardDensity === "compact" ? "mt-1" : "mt-1.5"}`} />}
+                    </div>
+                  ))}
+                </SwimLaneGroup>
+              );
+            });
+          })()}
+          {swimlaneDimension === "tag" && (() => {
+            const groups = groupByTag(displayedIssues);
+            if (groups.length === 0) return null;
+            return groups.map((group) => (
+              <SwimLaneGroup
+                key={group.key}
+                laneKey={group.key}
+                label={group.label}
+                dot={undefined}
+                dotColor={group.color ?? undefined}
+                headerBg="bg-gray-50 dark:bg-gray-800/40"
+                headerBorder="border-gray-200 dark:border-gray-700"
+                headerText="text-gray-700 dark:text-gray-300"
+                count={group.issues.length}
+                columnId={column.id}
+                onDropWithLane={onDropWithLane}
+                dragOver={dragOver}
+              >
+                {group.issues.map((issue, idx) => (
+                  <div key={issue.id}>
+                    <IssueCard
+                      issue={issue}
+                      onClick={onIssueClick}
+                      onWorkspaceClick={onWorkspaceClick}
+                      onStartWorkspace={onStartWorkspace}
+                      onDryRun={onDryRun}
+                      onDragStart={onDragStart}
+                      onDuplicate={onDuplicate}
+                      onMoveToNext={nextStatus && onMoveToNext ? (iss) => onMoveToNext(iss, nextStatus.id) : undefined}
+                      nextStatusName={nextStatus?.name}
+                      tags={issue.tags}
+                      allProjectTags={allProjectTags}
+                      quickUpdate={quickUpdate}
+                      allStatuses={allColumns?.map((c) => ({ id: c.id, name: c.name }))}
+                      onDeleteIssue={onDeleteIssue}
+                      searchQuery={searchQuery}
+                      liveActivity={sessionActivity?.[issue.id]}
+                      liveStats={liveStats?.[issue.id]}
+                      todos={sessionTodos?.[issue.id]}
+                      isPendingIssue={pendingIssueIds?.has(issue.id)}
+                      isPendingWorkspace={pendingWorkspaceIssueIds?.has(issue.id)}
+                      isSelected={selectedIssueIds?.has(issue.id)}
+                      isKeyboardFocused={keyboardCursorIssueId === issue.id}
+                      cardDensity={cardDensity}
+                    />
+                    {idx < group.issues.length - 1 && <div className={`${cardDensity === "compact" ? "mt-1" : "mt-1.5"}`} />}
+                  </div>
+                ))}
+              </SwimLaneGroup>
+            ));
+          })()}
           {isCreating && children}
           {column.issues.length === 0 && !isCreating && !dragOver && (
             <p className="text-xs text-gray-400 dark:text-gray-500 text-center py-4">No issues</p>
@@ -424,6 +577,100 @@ export function BoardColumn({
         <div className="w-0.5 h-8 rounded-full bg-gray-300 dark:bg-gray-600 group-hover:bg-brand-400 transition-colors" />
       </div>
     )}
+    </div>
+  );
+}
+
+interface SwimLaneGroupProps {
+  laneKey: string;
+  label: string;
+  dot?: string;
+  dotColor?: string;
+  headerBg: string;
+  headerBorder: string;
+  headerText: string;
+  count: number;
+  columnId: string;
+  onDropWithLane?: (statusId: string, laneKey: string, sortOrder?: number) => void;
+  children: React.ReactNode;
+}
+
+function SwimLaneGroup({
+  laneKey,
+  label,
+  dot,
+  dotColor,
+  headerBg,
+  headerBorder,
+  headerText,
+  count,
+  columnId,
+  onDropWithLane,
+  children,
+}: SwimLaneGroupProps) {
+  const [laneExpanded, setLaneExpanded] = useState(true);
+  const [laneDragOver, setLaneDragOver] = useState(false);
+  const laneCounterRef = useRef(0);
+
+  function handleLaneDragEnter(e: React.DragEvent) {
+    e.preventDefault();
+    laneCounterRef.current++;
+    setLaneDragOver(true);
+  }
+
+  function handleLaneDragLeave() {
+    laneCounterRef.current--;
+    if (laneCounterRef.current === 0) setLaneDragOver(false);
+  }
+
+  function handleLaneDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  function handleLaneDrop(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    laneCounterRef.current = 0;
+    setLaneDragOver(false);
+    onDropWithLane?.(columnId, laneKey);
+  }
+
+  return (
+    <div
+      className={`rounded-lg border ${headerBorder} mb-1.5 overflow-hidden transition-all ${laneDragOver ? "ring-2 ring-brand-400 ring-offset-1" : ""}`}
+      onDragEnter={onDropWithLane ? handleLaneDragEnter : undefined}
+      onDragLeave={onDropWithLane ? handleLaneDragLeave : undefined}
+      onDragOver={onDropWithLane ? handleLaneDragOver : undefined}
+      onDrop={onDropWithLane ? handleLaneDrop : undefined}
+    >
+      <button
+        type="button"
+        onClick={() => setLaneExpanded((v) => !v)}
+        className={`flex w-full items-center gap-1.5 px-2 py-1 ${headerBg} transition-colors hover:brightness-95`}
+        aria-expanded={laneExpanded}
+      >
+        {dot ? (
+          <span className={`w-2 h-2 rounded-full shrink-0 ${dot}`} />
+        ) : dotColor ? (
+          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: dotColor }} />
+        ) : (
+          <span className="w-2 h-2 rounded-full shrink-0 bg-gray-400" />
+        )}
+        <span className={`text-[10px] font-bold uppercase tracking-wider ${headerText}`}>{label}</span>
+        <span className={`ml-auto text-[10px] font-mono ${headerText} opacity-70`}>{count}</span>
+        <svg
+          className={`w-3 h-3 ${headerText} transition-transform shrink-0 ${laneExpanded ? "rotate-180" : ""}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {laneExpanded && (
+        <div className="p-1.5 space-y-1.5">
+          {children}
+        </div>
+      )}
     </div>
   );
 }

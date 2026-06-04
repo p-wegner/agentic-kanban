@@ -59,6 +59,8 @@ interface BoardToolbarProps {
   onIssueTypeFilterChange?: (type: string | null) => void;
   showPriorityLegend?: boolean;
   onShowPriorityLegendChange?: (v: boolean) => void;
+  swimlaneDimension?: "none" | "priority" | "tag";
+  onSwimlaneChange?: (v: "none" | "priority" | "tag") => void;
 }
 
 export function BoardToolbar({
@@ -101,6 +103,8 @@ export function BoardToolbar({
   onIssueTypeFilterChange,
   showPriorityLegend = false,
   onShowPriorityLegendChange,
+  swimlaneDimension = "none",
+  onSwimlaneChange,
 }: BoardToolbarProps) {
   const [showMonitorPopover, setShowMonitorPopover] = useState(false);
   const [showColumnVisibility, setShowColumnVisibility] = useState(false);
@@ -340,6 +344,29 @@ export function BoardToolbar({
                     : "text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-700"
                 }`}
                 title={`Show ${label} issues only`}
+                aria-pressed={isActive}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {onSwimlaneChange && (
+        <div className="flex items-center gap-0 border border-black/[0.07] dark:border-white/10 rounded-md p-0.5 bg-surface-raised dark:bg-surface-raised-dark shrink-0">
+          {(["none", "priority", "tag"] as const).map((dim) => {
+            const label = dim === "none" ? "None" : dim === "priority" ? "Priority" : "Tag";
+            const isActive = swimlaneDimension === dim;
+            return (
+              <button
+                key={dim}
+                onClick={() => onSwimlaneChange(dim)}
+                className={`px-2 py-0.5 text-xs rounded transition-colors ${
+                  isActive
+                    ? "bg-brand-600 text-white"
+                    : "text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-700"
+                }`}
+                title={`Group by ${label}`}
                 aria-pressed={isActive}
               >
                 {label}
