@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { eq } from "drizzle-orm";
+import { and, eq, gte } from "drizzle-orm";
 import { issues, projectStatuses } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -564,15 +564,20 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     cutoffDate.setDate(cutoffDate.getDate() - days + 1);
     const cutoffDay = cutoffDate.toISOString().slice(0, 10);
 
-    // Fetch issues currently in "Done" whose statusChangedAt falls in the window.
+    // Fetch only "Done" issues whose statusChangedAt falls within the window.
     const rows = await database
       .select({
         statusChangedAt: issues.statusChangedAt,
-        statusName: projectStatuses.name,
       })
       .from(issues)
       .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-      .where(eq(issues.projectId, projectId));
+      .where(
+        and(
+          eq(issues.projectId, projectId),
+          eq(projectStatuses.name, "Done"),
+          gte(issues.statusChangedAt, cutoffDay)
+        )
+      );
 
     // Build the date axis: one entry per day in the trailing window.
     const today = new Date();
@@ -581,13 +586,12 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
       dates.push(d.toISOString().slice(0, 10));
     }
 
-    // Count issues per day that moved into a "Done" status on that exact day.
+    // Count issues per day that moved into "Done" on that exact day.
     const countByDate = new Map<string, number>(dates.map((d) => [d, 0]));
     for (const r of rows) {
-      if (r.statusName !== "Done") continue;
       if (!r.statusChangedAt) continue;
       const movedDay = r.statusChangedAt.slice(0, 10);
-      if (movedDay >= cutoffDay && countByDate.has(movedDay)) {
+      if (countByDate.has(movedDay)) {
         countByDate.set(movedDay, (countByDate.get(movedDay) ?? 0) + 1);
       }
     }
