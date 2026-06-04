@@ -40,3 +40,4 @@ export { testRuns, flakyTestPins } from "./test-runs.js";
 export { boardHealthEvents, boardHealthEventsRelations } from "./board-health-events.js";
 export { qualityMetrics } from "./quality-metrics.js";
 export { milestones, milestonesRelations } from "./milestones.js";
+export { issueTimeEntries, issueTimeEntriesRelations } from "./issue-time-entries.js";
