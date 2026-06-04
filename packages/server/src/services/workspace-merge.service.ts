@@ -323,6 +323,11 @@ export function createWorkspaceMergeService(deps: {
         if (projectId) boardEvents?.broadcast(projectId, "workspace_merged");
         return {
           id,
+          merged: false,
+          reconciled: true,
+          baseBranch,
+          baseHeadShaBefore: baseSha,
+          baseHeadShaAfter: baseSha,
           mergeOutput: `Branch '${workspace.branch}' was already fully merged into ${baseBranch} (tip ${branchSha} is an ancestor). Reconciled as successful no-op.`,
         };
       }
@@ -464,7 +469,15 @@ export function createWorkspaceMergeService(deps: {
       mergeResult: result,
     });
 
-    return { id, mergeOutput: result };
+    return {
+      id,
+      merged: true,
+      baseBranch: targetBranch,
+      mergeCommitSha: mergeCommitSha || undefined,
+      baseHeadShaBefore: preMergeHead || undefined,
+      baseHeadShaAfter: mergeCommitSha || undefined,
+      mergeOutput: result,
+    };
   }
 
   async function runPostMergeTasks(args: {

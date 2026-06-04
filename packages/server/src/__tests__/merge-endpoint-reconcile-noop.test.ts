@@ -150,6 +150,28 @@ describe("merge endpoint — already-merged-ancestor reconcile no-op path", () =
     expect(result.mergeOutput).toContain("Reconciled as successful no-op");
   });
 
+  it("(b2) reconcile no-op response shape: merged=false, reconciled=true, baseBranch, baseHeadSha*", async () => {
+    const { workspaceId } = await seedScenario(db);
+    const git = makeGitService({
+      revParse: async (_repo, ref) => ref === "feature/ak-492-test" ? "ancestor-sha" : "master-sha-abc",
+      isAncestor: async () => true,
+    });
+
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+    const result = await svc.mergeWorkspace(workspaceId);
+
+    expect(result.merged).toBe(false);
+    expect(result.reconciled).toBe(true);
+    expect(result.baseBranch).toBe("master");
+    expect(result.baseHeadShaBefore).toBe("master-sha-abc");
+    expect(result.baseHeadShaAfter).toBe("master-sha-abc");
+  });
+
   it("(c) issue transitions to Done after ancestor reconcile", async () => {
     const { workspaceId, issueId } = await seedScenario(db);
     const git = makeGitService({
@@ -212,5 +234,34 @@ describe("merge endpoint — already-merged-ancestor reconcile no-op path", () =
     await svc.mergeWorkspace(workspaceId);
 
     expect(mergeBranch).toHaveBeenCalled();
+  });
+
+  it("real merge response shape: merged=true, baseBranch, mergeCommitSha, baseHeadShaBefore, baseHeadShaAfter", async () => {
+    const { workspaceId } = await seedScenario(db);
+    let callCount = 0;
+    const git = makeGitService({
+      revParse: async (_repo, ref) => {
+        if (ref === "feature/ak-492-test") return "feature-sha";
+        if (ref === "master") return "master-sha-before";
+        // HEAD is called twice: once pre-merge (returns before-sha), once post-merge (returns merge-commit-sha)
+        callCount++;
+        return callCount === 1 ? "master-sha-before" : "merge-commit-sha";
+      },
+      isAncestor: async () => false,
+    });
+
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+    const result = await svc.mergeWorkspace(workspaceId);
+
+    expect(result.merged).toBe(true);
+    expect(result.baseBranch).toBe("master");
+    expect(result.mergeCommitSha).toBeDefined();
+    expect(result.baseHeadShaBefore).toBeDefined();
+    expect(result.baseHeadShaAfter).toBeDefined();
   });
 });
