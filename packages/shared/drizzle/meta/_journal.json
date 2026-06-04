@@ -533,6 +533,13 @@
                         "when":  1748764528072,
                         "tag":  "0075_project_default_skill",
                         "breakpoints":  true
+                    },
+                    {
+                        "idx":  76,
+                        "version":  "6",
+                        "when":  1748764529000,
+                        "tag":  "0076_issue_checklist",
+                        "breakpoints":  true
                     }
                 ]
 }

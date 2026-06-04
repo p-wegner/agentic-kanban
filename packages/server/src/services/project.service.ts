@@ -436,6 +436,7 @@ export function createProjectService(deps: { database: Database }) {
         estimate: issues.estimate,
         externalKey: issues.externalKey,
         externalUrl: issues.externalUrl,
+        checklistJson: issues.checklistJson,
       })
       .from(issues)
       .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
@@ -504,10 +505,18 @@ export function createProjectService(deps: { database: Database }) {
       name: s.name,
       projectId: s.projectId,
       sortOrder: s.sortOrder,
-      issues: issuesWithBlocked.filter((i) => i.statusId === s.id).map((i) => ({
-        ...i,
-        tags: issueTagMap.get(i.id) ?? [],
-      })),
+      issues: issuesWithBlocked.filter((i) => i.statusId === s.id).map((i) => {
+        const { checklistJson, ...rest } = i;
+        let checklist: { id: string; text: string; completed: boolean }[] | undefined;
+        if (checklistJson) {
+          try { checklist = JSON.parse(checklistJson); } catch { checklist = undefined; }
+        }
+        return {
+          ...rest,
+          tags: issueTagMap.get(i.id) ?? [],
+          ...(checklist && checklist.length > 0 ? { checklist } : {}),
+        };
+      }),
     }));
   }
 

@@ -248,6 +248,8 @@ export interface UpdateIssueRequest {
   externalKey?: string | null;
   /** Optional external-tracker deep link; must be http/https. */
   externalUrl?: string | null;
+  /** Acceptance-criteria checklist items. Replaces the full list when provided. */
+  checklist?: { id: string; text: string; completed: boolean }[] | null;
 }
 
 export interface MainWorkspaceInfo {
@@ -406,6 +408,7 @@ export interface IssueWithStatus {
   externalKey?: string | null;
   externalUrl?: string | null;
   tags?: { id: string; name: string; color: string | null }[];
+  checklist?: { id: string; text: string; completed: boolean }[];
 }
 
 export interface StatusWithIssues {
