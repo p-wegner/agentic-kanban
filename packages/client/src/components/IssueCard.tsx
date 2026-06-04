@@ -7,6 +7,7 @@ import { IssueWorkLogBadge } from "./IssueWorkLogBadge.js";
 import { showToast } from "./Toast.js";
 import { formatRelativeTime, formatAbsoluteTime } from "../lib/formatRelativeTime.js";
 import type { CardDensity } from "../hooks/useBoardPreferences.js";
+import { PRIORITY_META } from "../lib/chartColors.js";
 
 export interface ProjectTag {
   id: string;
@@ -258,6 +259,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
   const compact = cardDensity === "compact";
   const typeBadgeColor = issue.issueType ? (issueTypeColors[issue.issueType] ?? null) : null;
   const priorityBadgeColor = issue.priority && issue.priority !== "medium" ? (priorityColors[issue.priority] ?? null) : null;
+  const priorityAccentColor = issue.priority ? (PRIORITY_META.find((p) => p.key === issue.priority)?.color ?? null) : null;
   const ws = issue.workspaceSummary;
   const hasActiveWorkspace = ws?.main && ws.main.status !== "closed";
   const [depDragOver, setDepDragOver] = useState(false);
@@ -433,7 +435,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
       aria-selected={isSelected ? "true" : undefined}
       aria-current={isKeyboardFocused ? "true" : undefined}
       aria-label={`Open issue ${issue.title}`}
-      className={`group bg-surface-raised dark:bg-surface-raised-dark rounded-lg shadow-sm border cursor-pointer hover:shadow-md hover:-translate-y-px transition-all duration-150 relative isolate ${compact ? "p-1.5" : "p-2.5"} ${
+      className={`group bg-surface-raised dark:bg-surface-raised-dark rounded-lg shadow-sm border cursor-pointer hover:shadow-md hover:-translate-y-px transition-all duration-150 relative isolate overflow-hidden ${compact ? "p-1.5" : "p-2.5"} ${
         isPendingIssue
           ? "border-brand-300 bg-brand-50/70 shadow-brand-100 shadow-md dark:border-brand-700 dark:bg-brand-950/40"
           : isKeyboardFocused
@@ -443,6 +445,13 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
           : depDragOver ? "border-brand-400 bg-brand-50 shadow-brand-200" : isPendingWorkspace ? "border-brand-300 shadow-brand-100 shadow-md" : "border-black/[0.07] dark:border-white/10 hover:border-brand-200 dark:hover:border-gray-600"
       }`}
     >
+      {priorityAccentColor && (
+        <span
+          aria-hidden="true"
+          className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-lg"
+          style={{ backgroundColor: priorityAccentColor }}
+        />
+      )}
       {isSelected && (
         <span className="absolute right-2 top-2 z-10 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-600 px-1.5 text-[10px] font-semibold text-white shadow-sm">
           ✓

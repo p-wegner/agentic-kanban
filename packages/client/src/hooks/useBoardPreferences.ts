@@ -20,8 +20,10 @@ export interface BoardPreferences {
   dynamicColumnScaling: boolean;
   cardDensity: CardDensity;
   hiddenColumns: Set<string>;
+  showPriorityLegend: boolean;
   handleCardDensityChange: (v: CardDensity) => Promise<void>;
   handleHiddenColumnsChange: (statusName: string, hidden: boolean) => Promise<void>;
+  handleShowPriorityLegendChange: (v: boolean) => Promise<void>;
   toggleAutoMonitor: () => Promise<void>;
   handleMonitorRunNow: () => Promise<void>;
   handleIntervalChange: (v: string) => Promise<void>;
@@ -43,6 +45,7 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
   const [dynamicColumnScaling, setDynamicColumnScaling] = useState(false);
   const [cardDensity, setCardDensity] = useState<CardDensity>("comfortable");
   const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set());
+  const [showPriorityLegend, setShowPriorityLegend] = useState(false);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
 
   const loadPreferences = useCallback(async () => {
@@ -53,6 +56,7 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
       if (projectId) {
         const raw = s[`board_hidden_columns_${projectId}`];
         setHiddenColumns(raw ? new Set(raw.split(",").filter(Boolean)) : new Set());
+        setShowPriorityLegend(s[`board_show_priority_legend_${projectId}`] === "true");
       }
       setAutoReview(s.auto_review !== "false");
       setAutoMerge(s.auto_merge !== "false");
@@ -137,6 +141,15 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
     await apiFetch("/api/preferences/settings", { method: "PUT", body: JSON.stringify({ card_density: v }) }).catch(() => {});
   }, []);
 
+  const handleShowPriorityLegendChange = useCallback(async (v: boolean) => {
+    if (!projectId) return;
+    setShowPriorityLegend(v);
+    await apiFetch("/api/preferences/settings", {
+      method: "PUT",
+      body: JSON.stringify({ [`board_show_priority_legend_${projectId}`]: String(v) }),
+    }).catch(() => {});
+  }, [projectId]);
+
   const handleHiddenColumnsChange = useCallback(async (statusName: string, hidden: boolean) => {
     if (!projectId) return;
     const next = new Set(hiddenColumns);
@@ -183,8 +196,10 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
     dynamicColumnScaling,
     cardDensity,
     hiddenColumns,
+    showPriorityLegend,
     handleCardDensityChange,
     handleHiddenColumnsChange,
+    handleShowPriorityLegendChange,
     prefsLoaded,
     toggleAutoMonitor,
     handleMonitorRunNow,
