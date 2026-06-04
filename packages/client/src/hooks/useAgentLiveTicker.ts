@@ -64,6 +64,10 @@ export function useAgentLiveTicker(
   const sessionIdCacheRef = useRef<Record<string, string>>({});
   const enabledRef = useRef(enabled);
   enabledRef.current = enabled;
+  const columnsRef = useRef(columns);
+  columnsRef.current = columns;
+  const liveActivityRef = useRef(liveActivity);
+  liveActivityRef.current = liveActivity;
 
   const fetchSessionId = useCallback(async (workspaceId: string): Promise<string | null> => {
     if (sessionIdCacheRef.current[workspaceId]) return sessionIdCacheRef.current[workspaceId];
@@ -157,23 +161,28 @@ export function useAgentLiveTicker(
     refresh(columns, liveActivity);
   }, [liveActivity, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Periodic poll so ticker stays fresh even without board events
+  // Periodic poll so ticker stays fresh even without board events.
+  // columnsRef/liveActivityRef keep interval stable across board updates.
   useEffect(() => {
     if (!enabled) {
       setEntries([]);
       return;
     }
-    const id = setInterval(() => refresh(columns, liveActivity), POLL_INTERVAL_MS);
+    const id = setInterval(
+      () => refresh(columnsRef.current, liveActivityRef.current),
+      POLL_INTERVAL_MS,
+    );
     return () => clearInterval(id);
-  }, [enabled, columns, liveActivity, refresh]);
+  }, [enabled, refresh]);
 
   // Clear session ID cache for no-longer-active workspaces
   useEffect(() => {
     const activeIds = new Set(getActiveWorkspaces(columns).map((a) => a.workspaceId));
     for (const key of Object.keys(sessionIdCacheRef.current)) {
       if (!activeIds.has(key)) {
+        const cachedSessionId = sessionIdCacheRef.current[key];
         delete sessionIdCacheRef.current[key];
-        // also clear etag for any session that was cached
+        if (cachedSessionId) delete etagsRef.current[cachedSessionId];
       }
     }
   }, [columns]);
