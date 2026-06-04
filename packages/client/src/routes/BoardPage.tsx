@@ -137,6 +137,7 @@ export function BoardPage() {
   const pendingGRef = useRef(false);
   const pendingGTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
+  const [showStartWorkspacePicker, setShowStartWorkspacePicker] = useState(false);
   const [keyboardCursorIssueId, setKeyboardCursorIssueId] = useState<string | null>(null);
   const keyboardCursorIssueIdRef = useRef<string | null>(null);
   keyboardCursorIssueIdRef.current = keyboardCursorIssueId;
@@ -1585,8 +1586,8 @@ export function BoardPage() {
       shortcut: "c",
       category: "issue",
       handler: () => {
-        const col = activeColumns[0] ?? filteredColumns[0];
-        if (col) setCreatingInColumnId(col.id);
+        const col = activeColumns[0] ?? filteredColumns[0] ?? columns[0];
+        if (col) setExpandedCreatePanel({ statusId: col.id, statusName: col.name, state: {} });
       },
     }));
 
@@ -1598,6 +1599,17 @@ export function BoardPage() {
       handler: () => {
         const col = activeColumns[0] ?? filteredColumns[0] ?? columns[0];
         if (col) setExpandedCreatePanel({ statusId: col.id, statusName: col.name, state: { startWorkspace: true } });
+      },
+    }));
+
+    unregisters.push(registerAction({
+      id: "start-workspace-for-issue",
+      label: "Start Workspace for Issue…",
+      description: "Fuzzy-pick an issue and start a workspace for it",
+      icon: "▷",
+      category: "issue",
+      handler: () => {
+        setShowStartWorkspacePicker(true);
       },
     }));
 
@@ -2289,6 +2301,7 @@ export function BoardPage() {
         showWorktreeOverview={panels.showWorktreeOverview}
         showProjectHealth={panels.showProjectHealth}
         showCommandPalette={panels.showCommandPalette}
+        showStartWorkspacePicker={showStartWorkspacePicker}
         showShortcutHelp={panels.showShortcutHelp}
         onCloseSettings={() => panels.setShowSettings(false)}
         onCloseQuickTasks={() => panels.setShowQuickTasks(false)}
@@ -2303,6 +2316,14 @@ export function BoardPage() {
         onCloseWorktreeOverview={() => panels.setShowWorktreeOverview(false)}
         onCloseProjectHealth={() => panels.setShowProjectHealth(false)}
         onCloseCommandPalette={() => panels.setShowCommandPalette(false)}
+        onCloseStartWorkspacePicker={() => setShowStartWorkspacePicker(false)}
+        onWorkspaceStarted={(workspaceId, issue) => {
+          setShowStartWorkspacePicker(false);
+          setWorkspaceIssue(issue);
+          setWorkspaceInitial({ workspaceId, sessionId: "" });
+          setWorkspaceOpenCreate(false);
+          refetchBoard();
+        }}
         onCloseShortcutHelp={() => panels.setShowShortcutHelp(false)}
         activeProjectId={activeProjectId}
         columns={columns}
