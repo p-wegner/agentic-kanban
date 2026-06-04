@@ -526,6 +526,21 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
             Stale
           </span>
         )}
+        {issue.columnAgeDays != null && issue.columnAgeDays > 0 && (
+          <span
+            className={`inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded ${
+              issue.isColumnStale
+                ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+                : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+            }`}
+            title={`In this column for ${issue.columnAgeDays} day${issue.columnAgeDays === 1 ? "" : "s"}${issue.isColumnStale ? " — past threshold" : ""}`}
+          >
+            <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            {issue.columnAgeDays}d
+          </span>
+        )}
         {!issue.isBlocked && (issue as IssueWithStatus & { dependencyCount?: number }).dependencyCount ? (
           <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-brand-50 text-brand-600 dark:bg-brand-900/40 dark:text-brand-400" title={`${(issue as IssueWithStatus & { dependencyCount?: number }).dependencyCount} dependencies`}>
             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M5 12h14M12 5l7 7-7 7"/></svg>
