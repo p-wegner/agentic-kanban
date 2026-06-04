@@ -15,6 +15,7 @@ export interface BoardPanelState {
   showFileContention: boolean;
   showTranscriptSearch: boolean;
   showProjectHealth: boolean;
+  showTimeReport: boolean;
   showCommandPalette: boolean;
   showShortcutHelp: boolean;
   showLiveActivityTicker: boolean;
@@ -31,6 +32,7 @@ export interface BoardPanelState {
   setShowFileContention: Dispatch<SetStateAction<boolean>>;
   setShowTranscriptSearch: (v: boolean) => void;
   setShowProjectHealth: Dispatch<SetStateAction<boolean>>;
+  setShowTimeReport: Dispatch<SetStateAction<boolean>>;
   setShowCommandPalette: (v: boolean) => void;
   setShowShortcutHelp: Dispatch<SetStateAction<boolean>>;
   setShowLiveActivityTicker: Dispatch<SetStateAction<boolean>>;
@@ -50,6 +52,7 @@ export function useBoardPanels(): BoardPanelState {
   const [showFileContention, setShowFileContention] = useState(false);
   const [showTranscriptSearch, setShowTranscriptSearch] = useState(false);
   const [showProjectHealth, setShowProjectHealth] = useState(false);
+  const [showTimeReport, setShowTimeReport] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [showLiveActivityTicker, setShowLiveActivityTicker] = useState(false);
@@ -68,6 +71,7 @@ export function useBoardPanels(): BoardPanelState {
     showFileContention,
     showTranscriptSearch,
     showProjectHealth,
+    showTimeReport,
     showCommandPalette,
     showShortcutHelp,
     showLiveActivityTicker,
@@ -84,6 +88,7 @@ export function useBoardPanels(): BoardPanelState {
     setShowFileContention,
     setShowTranscriptSearch,
     setShowProjectHealth,
+    setShowTimeReport,
     setShowCommandPalette,
     setShowShortcutHelp,
     setShowLiveActivityTicker,
