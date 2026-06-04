@@ -490,7 +490,8 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
   router.get("/cfd", async (c) => {
     const projectId = c.req.query("projectId");
     if (!projectId) return c.json({ error: "projectId required" }, 400);
-    const days = Math.min(Math.max(Number(c.req.query("days") ?? "30"), 1), 365);
+    const daysRaw = parseInt(c.req.query("days") ?? "30", 10);
+    const days = Math.min(Math.max(Number.isNaN(daysRaw) ? 30 : daysRaw, 1), 365);
 
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - days);
