@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { execSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { resolve, sep, join } from "node:path";
-import { projects, projectStatuses, issues, workspaces, preferences } from "@agentic-kanban/shared/schema";
+import { projects, projectStatuses, issues, workspaces, preferences, agentSkills } from "@agentic-kanban/shared/schema";
 import { eq, and, notInArray, sql } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { branchExists, detectRepoInfo, getProjectGitStats } from "./git-info.service.js";
@@ -122,6 +122,12 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       throw new ProjectError(`Project "${existing.name}" is already registered at this path`, "CONFLICT");
     }
 
+    // Default skill so a freshly-registered project's worktrees aren't skill-less (#531).
+    // Mirrors the CLI registration path (project-registration.ts); the REST path (used by
+    // the UI) previously skipped this, so UI-registered projects got no onboarding skill.
+    const [navSkill] = await database.select({ id: agentSkills.id }).from(agentSkills)
+      .where(eq(agentSkills.name, "board-navigator")).limit(1);
+
     const id = randomUUID();
     const result = await insertProject(id, {
       name,
@@ -131,6 +137,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       repoName: repoInfo.repoName,
       defaultBranch: repoInfo.defaultBranch,
       remoteUrl: repoInfo.remoteUrl,
+      defaultSkillId: navSkill?.id ?? null,
     }, database);
 
     if (body.gitignoreTemplate && GITIGNORE_TEMPLATES[body.gitignoreTemplate]) {

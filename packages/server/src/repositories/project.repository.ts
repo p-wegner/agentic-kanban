@@ -51,6 +51,7 @@ export async function insertProject(
     repoName: string;
     defaultBranch: string | null;
     remoteUrl: string | null;
+    defaultSkillId?: string | null;
   },
   database: Database = db,
 ) {
@@ -64,6 +65,7 @@ export async function insertProject(
     repoName: values.repoName,
     defaultBranch: values.defaultBranch,
     remoteUrl: values.remoteUrl,
+    defaultSkillId: values.defaultSkillId ?? null,
     createdAt: now,
     updatedAt: now,
   });
