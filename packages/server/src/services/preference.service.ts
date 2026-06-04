@@ -39,6 +39,7 @@ function isAllowedDynamicKey(key: string): boolean {
     /^tdd_mode_[0-9a-f-]+$/.test(key) ||
     /^backlog_filter_presets_[0-9a-f-]+$/.test(key) ||
     /^board_saved_views_[0-9a-f-]+$/.test(key) ||
+    /^board_hidden_columns_[0-9a-f-]+$/.test(key) ||
     /^launch_templates_[0-9a-f-]+$/.test(key) ||
     /^monitor_policy_presets_[0-9a-f-]+$/.test(key) ||
     /^wip_limit_[0-9a-f-]+$/.test(key) ||

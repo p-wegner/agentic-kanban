@@ -174,7 +174,7 @@ export function BoardPage() {
   }, []);
 
   // Extracted hooks
-  const prefs = useBoardPreferences();
+  const prefs = useBoardPreferences(activeProjectId);
   const panels = useBoardPanels();
   const agentQuestionsCount = useAgentQuestionsCount(activeProjectId);
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
@@ -1098,13 +1098,18 @@ export function BoardPage() {
         (col) =>
           !ARCHIVE_STATUS_NAMES.has(col.name) &&
           col.name !== BACKLOG_STATUS_NAME &&
-          (col.name !== "AI Reviewed" || showAiReviewedColumn),
+          (col.name !== "AI Reviewed" || showAiReviewedColumn) &&
+          !prefs.hiddenColumns.has(col.name),
       ),
-    [filteredColumns, showAiReviewedColumn],
+    [filteredColumns, showAiReviewedColumn, prefs.hiddenColumns],
   );
   const archiveColumns = useMemo(
     () => filteredColumns.filter((col) => ARCHIVE_STATUS_NAMES.has(col.name)),
     [filteredColumns],
+  );
+  const visibilityColumns = useMemo(
+    () => columns.filter((col) => !ARCHIVE_STATUS_NAMES.has(col.name) && col.name !== BACKLOG_STATUS_NAME),
+    [columns],
   );
   const archiveExpanded = !collapsedGroups.has("archive");
   const visibleKanbanIssues = useMemo(
@@ -1713,6 +1718,9 @@ export function BoardPage() {
           onViewAllHealthEvents={() => handleViewModeChange("health-events")}
           cardDensity={prefs.cardDensity}
           onCardDensityChange={prefs.handleCardDensityChange}
+          visibilityColumns={visibilityColumns}
+          hiddenColumns={prefs.hiddenColumns}
+          onHiddenColumnsChange={prefs.handleHiddenColumnsChange}
           milestones={milestones}
           activeMilestoneId={milestoneFilterId}
           onMilestoneFilterChange={setMilestoneFilterId}
