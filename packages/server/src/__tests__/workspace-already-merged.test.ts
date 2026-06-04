@@ -33,6 +33,7 @@ async function seedScenario(db: ReturnType<typeof createTestDb>["db"], opts: {
   workingDir?: string | null;
   isDirect?: boolean;
   branch?: string;
+  readyForMerge?: boolean;
 }) {
   const now = new Date().toISOString();
   const projectId = randomUUID();
@@ -76,7 +77,7 @@ async function seedScenario(db: ReturnType<typeof createTestDb>["db"], opts: {
     baseBranch: "master",
     isDirect: opts.isDirect ?? false,
     status: opts.workspaceStatus ?? "idle",
-    readyForMerge: false,
+    readyForMerge: opts.readyForMerge ?? false,
     provider: "claude",
     createdAt: now,
     updatedAt: now,
@@ -168,7 +169,7 @@ describe("doMerge ancestry check", () => {
   });
 
   it("(a) already-merged branch tip => merge reports success, no 409", async () => {
-    const { workspaceId } = await seedScenario(db, { workspaceStatus: "idle" });
+    const { workspaceId } = await seedScenario(db, { workspaceStatus: "idle", readyForMerge: true });
     const detectConflicts = vi.fn(async () => ({ hasConflicts: true, conflictingFiles: ["Layout.tsx"] }));
     const git = {
       ...makeGitService({
@@ -191,7 +192,7 @@ describe("doMerge ancestry check", () => {
   });
 
   it("(b) truly conflicting unmerged branch => still 409", async () => {
-    const { workspaceId } = await seedScenario(db, { workspaceStatus: "idle" });
+    const { workspaceId } = await seedScenario(db, { workspaceStatus: "idle", readyForMerge: true });
     const detectConflicts = vi.fn(async () => ({ hasConflicts: true, conflictingFiles: ["Layout.tsx", "BoardStats.tsx"] }));
     const git = {
       ...makeGitService({
@@ -209,7 +210,7 @@ describe("doMerge ancestry check", () => {
     });
     await expect(svc.mergeWorkspace(workspaceId)).rejects.toMatchObject({
       message: "Merge conflicts detected",
-      code: "BAD_REQUEST",
+      code: "CONFLICT",
     });
     expect(detectConflicts).toHaveBeenCalled();
   });
