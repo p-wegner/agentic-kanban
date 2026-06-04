@@ -1,33 +1,38 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Layout } from "../components/Layout.js";
 import { useTheme } from "../hooks/useTheme.js";
-import { GraphView } from "../components/GraphView.js";
-import { TableView } from "../components/TableView.js";
-import { AgentGrid } from "../components/AgentGrid.js";
-import { TimelineView } from "../components/TimelineView.js";
-import { MetricsView } from "../components/MetricsView.js";
-import { QualityMetricsView } from "../components/QualityMetricsView.js";
-import { ButlerView } from "../components/ButlerView.js";
-import { WorkflowsView } from "../components/WorkflowsView.js";
-import { WorkflowAnalyticsDashboard } from "../components/WorkflowAnalyticsDashboard.js";
-import { InsightsPanel } from "../components/InsightsPanel.js";
-import { DigestView } from "../components/DigestView.js";
-import { ActivityFeedView } from "../components/ActivityFeedView.js";
-import { FocusView } from "../components/FocusView.js";
-import { StrategyTargetsView } from "../components/StrategyTargetsView.js";
-import { SwimlaneView } from "../components/SwimlaneView.js";
-import { FlakyTestsPanel } from "../components/FlakyTestsPanel.js";
-import { MonitorCycleHistoryPanel } from "../components/MonitorCycleHistoryPanel.js";
-import { BoardHealthNotificationCenter } from "../components/BoardHealthNotificationCenter.js";
-import { RunbooksView } from "../components/RunbooksView.js";
-import { SprintCapacityPlanner } from "../components/SprintCapacityPlanner.js";
-import { ConstellationView } from "../components/ConstellationView.js";
-import { MomentumView } from "../components/MomentumView.js";
-import { StaleWorkDashboard } from "../components/StaleWorkDashboard.js";
-import { ThroughputChart } from "../components/ThroughputChart.js";
-import { ProviderMixChart } from "../components/ProviderMixChart.js";
-import { LeadTimeTrendChart } from "../components/LeadTimeTrendChart.js";
-import { ScorecardDistributionChart } from "../components/ScorecardDistributionChart.js";
+// Code-split: every non-kanban view below is rendered only behind a `viewMode` guard,
+// so it is loaded on demand. This keeps the heaviest chunks off the initial kanban
+// paint — most notably WorkflowsView (which pulls in @xyflow/react + @dagrejs/dagre)
+// and the markdown/chart-heavy analytics views. The explicit `.then(m => ({ default:
+// m.X }))` form preserves each component's prop types through React.lazy.
+const GraphView = lazy(() => import("../components/GraphView.js").then((m) => ({ default: m.GraphView })));
+const TableView = lazy(() => import("../components/TableView.js").then((m) => ({ default: m.TableView })));
+const AgentGrid = lazy(() => import("../components/AgentGrid.js").then((m) => ({ default: m.AgentGrid })));
+const TimelineView = lazy(() => import("../components/TimelineView.js").then((m) => ({ default: m.TimelineView })));
+const MetricsView = lazy(() => import("../components/MetricsView.js").then((m) => ({ default: m.MetricsView })));
+const QualityMetricsView = lazy(() => import("../components/QualityMetricsView.js").then((m) => ({ default: m.QualityMetricsView })));
+const ButlerView = lazy(() => import("../components/ButlerView.js").then((m) => ({ default: m.ButlerView })));
+const WorkflowsView = lazy(() => import("../components/WorkflowsView.js").then((m) => ({ default: m.WorkflowsView })));
+const WorkflowAnalyticsDashboard = lazy(() => import("../components/WorkflowAnalyticsDashboard.js").then((m) => ({ default: m.WorkflowAnalyticsDashboard })));
+const InsightsPanel = lazy(() => import("../components/InsightsPanel.js").then((m) => ({ default: m.InsightsPanel })));
+const DigestView = lazy(() => import("../components/DigestView.js").then((m) => ({ default: m.DigestView })));
+const ActivityFeedView = lazy(() => import("../components/ActivityFeedView.js").then((m) => ({ default: m.ActivityFeedView })));
+const FocusView = lazy(() => import("../components/FocusView.js").then((m) => ({ default: m.FocusView })));
+const StrategyTargetsView = lazy(() => import("../components/StrategyTargetsView.js").then((m) => ({ default: m.StrategyTargetsView })));
+const SwimlaneView = lazy(() => import("../components/SwimlaneView.js").then((m) => ({ default: m.SwimlaneView })));
+const FlakyTestsPanel = lazy(() => import("../components/FlakyTestsPanel.js").then((m) => ({ default: m.FlakyTestsPanel })));
+const MonitorCycleHistoryPanel = lazy(() => import("../components/MonitorCycleHistoryPanel.js").then((m) => ({ default: m.MonitorCycleHistoryPanel })));
+const BoardHealthNotificationCenter = lazy(() => import("../components/BoardHealthNotificationCenter.js").then((m) => ({ default: m.BoardHealthNotificationCenter })));
+const RunbooksView = lazy(() => import("../components/RunbooksView.js").then((m) => ({ default: m.RunbooksView })));
+const SprintCapacityPlanner = lazy(() => import("../components/SprintCapacityPlanner.js").then((m) => ({ default: m.SprintCapacityPlanner })));
+const ConstellationView = lazy(() => import("../components/ConstellationView.js").then((m) => ({ default: m.ConstellationView })));
+const MomentumView = lazy(() => import("../components/MomentumView.js").then((m) => ({ default: m.MomentumView })));
+const StaleWorkDashboard = lazy(() => import("../components/StaleWorkDashboard.js").then((m) => ({ default: m.StaleWorkDashboard })));
+const ThroughputChart = lazy(() => import("../components/ThroughputChart.js").then((m) => ({ default: m.ThroughputChart })));
+const ProviderMixChart = lazy(() => import("../components/ProviderMixChart.js").then((m) => ({ default: m.ProviderMixChart })));
+const LeadTimeTrendChart = lazy(() => import("../components/LeadTimeTrendChart.js").then((m) => ({ default: m.LeadTimeTrendChart })));
+const ScorecardDistributionChart = lazy(() => import("../components/ScorecardDistributionChart.js").then((m) => ({ default: m.ScorecardDistributionChart })));
 import { useAgentQuestionsCount } from "../components/AgentQuestionsPanel.js";
 import { BoardErrorBoundary } from "../components/BoardErrorBoundary.js";
 import { BacklogView } from "../components/BacklogView.js";
@@ -38,8 +43,10 @@ import { BoardToolbar } from "../components/BoardToolbar.js";
 import { SavedBoardViews } from "../components/SavedBoardViews.js";
 import { VIEW_REGISTRY, VIEW_IDS, SHORTCUT_TO_VIEW, type ViewMode } from "../lib/viewRegistry.js";
 import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
-import { IssueDetailPanel } from "../components/IssueDetailPanel.js";
-import { WorkspacePanel } from "../components/WorkspacePanel.js";
+// Lazy: opened on user action (issue click / workspace open), and they pull in
+// react-markdown — no need to ship them on the initial board paint.
+const IssueDetailPanel = lazy(() => import("../components/IssueDetailPanel.js").then((m) => ({ default: m.IssueDetailPanel })));
+const WorkspacePanel = lazy(() => import("../components/WorkspacePanel.js").then((m) => ({ default: m.WorkspacePanel })));
 import { SkeletonBoard } from "../components/SkeletonBoard.js";
 import { ToastContainer, showToast } from "../components/Toast.js";
 import { suggestBranchName } from "../lib/branch.js";
@@ -56,7 +63,11 @@ import { useBoardPanels } from "../hooks/useBoardPanels.js";
 import { useBoardNavigation } from "../hooks/useBoardNavigation.js";
 import { useBoardBulkSelection } from "../hooks/useBoardBulkSelection.js";
 import { BoardBulkActionBar } from "../components/BoardBulkActionBar.js";
-import { BoardOverlayPanels } from "../components/BoardOverlayPanels.js";
+// Lazy: aggregates ~20 user-action panels (Settings, Codemod, MergeQueue,
+// TranscriptSearch, CommandPalette, …). Rendered unconditionally though, and it hosts
+// the event-driven ApprovalDialog, so the chunk is prefetched on idle after first
+// paint (see effect below) to avoid a cold-fetch delay when an agent approval arrives.
+const BoardOverlayPanels = lazy(() => import("../components/BoardOverlayPanels.js").then((m) => ({ default: m.BoardOverlayPanels })));
 import { AgentLiveTickerPanel } from "../components/AgentLiveTickerPanel.js";
 import { useAgentLiveTicker } from "../hooks/useAgentLiveTicker.js";
 import type {
@@ -70,6 +81,15 @@ import type {
 } from "@agentic-kanban/shared";
 import { isIssueInFlight } from "@agentic-kanban/shared";
 import type { BoardViewState, SavedViewReference } from "../lib/boardSavedViews.js";
+
+/** Lightweight fallback shown for the ~1 frame it takes to fetch a lazy view chunk. */
+function ViewLoadingFallback() {
+  return (
+    <div className="flex-1 min-h-0 flex items-center justify-center text-gray-400 dark:text-gray-500">
+      <div className="h-6 w-6 animate-spin rounded-full border-2 border-current border-t-transparent" aria-label="Loading view" />
+    </div>
+  );
+}
 
 interface Project {
   id: string;
@@ -96,6 +116,16 @@ const BACKLOG_STATUS_NAME = "Backlog";
 
 export function BoardPage() {
   const { theme: _theme, setTheme, isDark } = useTheme();
+  // Warm the overlay-panels chunk shortly after the board paints. It is lazy (keeps it
+  // off the initial bundle) but hosts the event-driven ApprovalDialog, so prefetching
+  // on idle means an incoming agent-approval request never waits on a cold chunk fetch.
+  useEffect(() => {
+    const warm = () => { void import("../components/BoardOverlayPanels.js"); };
+    const ric = (window as unknown as { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback;
+    if (ric) { const id = ric(warm); return () => (window as unknown as { cancelIdleCallback?: (h: number) => void }).cancelIdleCallback?.(id); }
+    const t = setTimeout(warm, 1500);
+    return () => clearTimeout(t);
+  }, []);
   const [columns, setColumns] = useState<StatusWithIssues[]>([]);
   const columnsRef = useRef<StatusWithIssues[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1998,6 +2028,10 @@ export function BoardPage() {
             onClearSelection={bulk.clearSelection}
           />
         )}
+        {/* All non-kanban views are lazy-loaded; one Suspense boundary covers the whole
+            switch since exactly one view renders at a time. The kanban board itself is
+            eager and lives outside this boundary, so it never shows the fallback. */}
+        <Suspense fallback={<ViewLoadingFallback />}>
         {viewMode === "graph" && activeProjectId ? (
           <div className="flex-1 min-h-0">
             <BoardErrorBoundary columnName="Graph View">
@@ -2259,6 +2293,7 @@ export function BoardPage() {
             />
           </BoardErrorBoundary>
         )}
+        </Suspense>
         {viewMode === "kanban" && milestoneFilterId && (() => {
           const activeMilestone = milestones.find(m => m.id === milestoneFilterId);
           if (!activeMilestone) return null;
@@ -2369,6 +2404,7 @@ export function BoardPage() {
         )}
       </div>
       {selectedIssue && (
+        <Suspense fallback={null}>
         <IssueDetailPanel
           issue={selectedIssue}
           statuses={columns.map((col) => ({ id: col.id, name: col.name }))}
@@ -2386,8 +2422,10 @@ export function BoardPage() {
           }}
           trail={trailControls}
         />
+        </Suspense>
       )}
       {workspaceIssue && (
+        <Suspense fallback={null}>
         <WorkspacePanel
           key={`${workspaceIssue.id}:${workspaceInitial?.workspaceId ?? "new"}:${workspaceOpenCreate ? "create" : "view"}`}
           issue={workspaceIssue}
@@ -2405,6 +2443,7 @@ export function BoardPage() {
           initialShowCreate={workspaceOpenCreate}
           initialShowDiff={workspaceInitialDiff}
         />
+        </Suspense>
       )}
       <ToastContainer />
       {panels.showLiveActivityTicker && (
@@ -2420,6 +2459,7 @@ export function BoardPage() {
           }}
         />
       )}
+      <Suspense fallback={null}>
       <BoardOverlayPanels
         showSettings={panels.showSettings}
         showQuickTasks={panels.showQuickTasks}
@@ -2494,6 +2534,7 @@ export function BoardPage() {
         setWorkspaceOpenCreate={setWorkspaceOpenCreate}
         setSelectedIssue={setSelectedIssue}
       />
+      </Suspense>
     </Layout>
     </MentionProvider>
   );
