@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues, CreateIssueRequest, ProfileSelection } from "@agentic-kanban/shared";
 import { BoardErrorBoundary } from "./BoardErrorBoundary.js";
 import { BoardColumn } from "./BoardColumn.js";
+import type { SwimlaneDimension } from "./BoardColumn.js";
 import type { ProjectTag, QuickUpdateCallbacks } from "./IssueCard.js";
 import { CompletedGrid } from "./CompletedGrid.js";
 import { CreateIssueForm } from "./CreateIssueForm.js";
@@ -9,6 +10,8 @@ import type { CreateIssueFormState } from "./CreateIssueForm.js";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { useIsNarrow } from "../hooks/useMediaQuery.js";
 import type { CardDensity } from "../hooks/useBoardPreferences.js";
+
+export type { SwimlaneDimension };
 
 interface PinnedStripProps {
   issues: IssueWithStatus[];
@@ -121,6 +124,8 @@ export interface BoardKanbanViewProps {
   onSetWipLimit?: (statusId: string, limit: number | null) => void;
   cardDensity?: CardDensity;
   onColumnReorder?: (draggedColumnId: string, targetSortOrder: number) => void;
+  swimlaneDimension?: SwimlaneDimension;
+  onDropWithLane?: (statusId: string, laneKey: string, sortOrder?: number) => void;
 }
 
 export function BoardKanbanView({
@@ -164,6 +169,8 @@ export function BoardKanbanView({
   onSetWipLimit,
   cardDensity = "comfortable",
   onColumnReorder,
+  swimlaneDimension = "none",
+  onDropWithLane,
 }: BoardKanbanViewProps) {
   // Below sm, columns stack vertically and the board scrolls down through them
   // (instead of a horizontal one-column-at-a-time swipe, where an empty column
@@ -311,6 +318,8 @@ export function BoardKanbanView({
               onColumnDrop={onColumnReorder && !isNarrow ? (e) => handleColumnDrop(e, col.id) : undefined}
               onColumnDragEnd={onColumnReorder && !isNarrow ? handleColumnDragEnd : undefined}
               isColumnDragOver={columnDragOverId === col.id}
+              swimlaneDimension={swimlaneDimension}
+              onDropWithLane={onDropWithLane}
             >
               <CreateIssueForm
                 projectId={projectId}
