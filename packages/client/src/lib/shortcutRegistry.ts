@@ -27,6 +27,9 @@ export const SHORTCUT_REGISTRY: ShortcutEntry[] = [
   { keys: ["Escape"], description: "Close panel / clear search / go back", category: "Navigation" },
   { keys: ["?"], description: "Show keyboard shortcuts", category: "Navigation" },
   // Board
+  { keys: ["↑", "↓"], description: "Move selection up / down within column", category: "Board" },
+  { keys: ["←", "→"], description: "Move selection left / right across columns", category: "Board" },
+  { keys: ["Enter"], description: "Open selected card's detail panel", category: "Board" },
   { keys: ["w"], description: "New issue + start workspace", category: "Board" },
   { keys: ["Shift", "V"], description: "Start voice inbox (record idea → Backlog issue)", category: "Board" },
   { keys: ["g", "s"], description: "Open settings", category: "Board", sequential: true },

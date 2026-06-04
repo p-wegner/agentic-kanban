@@ -69,6 +69,7 @@ interface BoardColumnProps {
   pendingIssueIds?: Set<string>;
   pendingWorkspaceIssueIds?: Set<string>;
   selectedIssueIds?: Set<string>;
+  keyboardCursorIssueId?: string | null;
   allProjectTags?: ProjectTag[];
   quickUpdate?: QuickUpdateCallbacks;
   children?: React.ReactNode;
@@ -106,6 +107,7 @@ export function BoardColumn({
   pendingIssueIds,
   pendingWorkspaceIssueIds,
   selectedIssueIds,
+  keyboardCursorIssueId,
   allProjectTags,
   quickUpdate,
   children,
@@ -350,6 +352,7 @@ export function BoardColumn({
                 isPendingIssue={pendingIssueIds?.has(issue.id)}
                 isPendingWorkspace={pendingWorkspaceIssueIds?.has(issue.id)}
                 isSelected={selectedIssueIds?.has(issue.id)}
+                isKeyboardFocused={keyboardCursorIssueId === issue.id}
               />
             </div>
           ))}
