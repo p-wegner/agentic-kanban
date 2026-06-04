@@ -16,6 +16,7 @@ import { getProjectById, getProjectByRepoPath, getAllProjects, insertProject, de
 import { generateSetupScript as generateSetupScriptAI, generateTeardownScript as generateTeardownScriptAI, generateVerifyScript as generateVerifyScriptAI } from "./project-setup.service.js";
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
 import type { WorkspaceSummaryCache } from "./workspace-summary-cache.service.js";
+import type { WorkspaceSummary } from "./workspace-summary.service.js";
 
 export class ProjectError extends Error {
   constructor(
@@ -514,13 +515,28 @@ export function createProjectService(deps: { database: Database; workspaceSummar
         .map((i) => i.id),
     );
 
-    const cachedSummaryMap = workspaceSummaryCache?.get(projectId) ?? null;
-    const summaryMapPromise = cachedSummaryMap
-      ? Promise.resolve(cachedSummaryMap)
-      : buildWorkspaceSummaryMap(issueIds, defaultBranch, database, archivedIssueIds).then((m) => {
-          workspaceSummaryCache?.set(projectId, m);
-          return m;
-        });
+    const cacheResult = workspaceSummaryCache?.get(projectId) ?? null;
+    let summaryMapPromise: Promise<Map<string, WorkspaceSummary>>;
+    if (cacheResult && !cacheResult.stale) {
+      // Fresh cache hit — return immediately, no rebuild needed
+      summaryMapPromise = Promise.resolve(cacheResult.value);
+    } else if (cacheResult && cacheResult.stale) {
+      // Stale-while-revalidate: return stale data immediately, rebuild in background
+      summaryMapPromise = Promise.resolve(cacheResult.value);
+      if (workspaceSummaryCache && !workspaceSummaryCache.isRebuilding(projectId)) {
+        workspaceSummaryCache.markRebuilding(projectId);
+        buildWorkspaceSummaryMap(issueIds, defaultBranch, database, archivedIssueIds)
+          .then((m) => { workspaceSummaryCache.set(projectId, m); })
+          .catch(() => {})
+          .finally(() => { workspaceSummaryCache.clearRebuilding(projectId); });
+      }
+    } else {
+      // Cold miss — must block on rebuild (no stale data available)
+      summaryMapPromise = buildWorkspaceSummaryMap(issueIds, defaultBranch, database, archivedIssueIds).then((m) => {
+        workspaceSummaryCache?.set(projectId, m);
+        return m;
+      });
+    }
 
     const [workspaceSummaryMap, blockedMap, issueTagMap, staleDaysRow, inProgressStaleDaysRow] = await Promise.all([
       summaryMapPromise,
