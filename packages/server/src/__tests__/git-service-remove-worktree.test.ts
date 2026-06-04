@@ -1,8 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile, symlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 const execFileMock = vi.hoisted(() => vi.fn());
 
@@ -67,6 +71,41 @@ describe("git service removeWorktree cleanup fallback", () => {
 
     expect(existsSync(join(unsafePath, "important", "data.txt"))).toBe(true);
     expect(execFileMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not delete junction target when recursively removing a worktree with a junction", async () => {
+    // Create a separate source dir (simulates mainCheckout/node_modules) with a sentinel file
+    const sourceDir = join(tempRoot, "source-main");
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(join(sourceDir, "sentinel.txt"), "must-survive\n");
+
+    // Create the junction/symlink inside the worktree dir
+    const junctionPath = join(worktreePath, "node_modules");
+    if (process.platform === "win32") {
+      await execFileAsync("cmd", ["/c", "mklink", "/J", junctionPath, sourceDir]);
+    } else {
+      await symlink(sourceDir, junctionPath, "dir");
+    }
+
+    execFileMock.mockImplementation((_cmd, args, _opts, callback) => {
+      if (args[0] === "worktree" && args[1] === "remove") {
+        callback(new Error("git worktree remove failed"), "", "fatal: Directory not empty");
+        return;
+      }
+      if (args[0] === "worktree" && args[1] === "prune") {
+        callback(null, "", "");
+        return;
+      }
+      callback(new Error(`unexpected git args: ${args.join(" ")}`), "", "");
+    });
+
+    await expect(removeWorktree(repoPath, worktreePath)).resolves.toBeUndefined();
+
+    // Worktree directory itself must be gone
+    expect(existsSync(worktreePath)).toBe(false);
+    // Junction target (source dir) and its sentinel file must be untouched
+    expect(existsSync(sourceDir)).toBe(true);
+    expect(existsSync(join(sourceDir, "sentinel.txt"))).toBe(true);
   });
 
   it("cleans up an already-merged worktree missing .git before retrying branch deletion", async () => {
