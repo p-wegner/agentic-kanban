@@ -17,10 +17,10 @@ This is a FRESH session every run — you have NO memory of previous runs. The k
 
 ## STRATEGY WEIGHTS (generated - do not hand-edit)
 - REST API Performance: weight 5/5, area, provider claude
-- Backend Efficiency: weight 4/5, area, provider claude
-- Quality: weight 3/5, work-type, provider claude
-- Feature: weight 2/5, work-type
-- Bugfix: weight 2/5, work-type
+- Backend Efficiency: weight 5/5, area, provider claude
+- Quality: weight 5/5, work-type, provider claude
+- Bugfix: weight 5/5, work-type
+- Feature: weight 1/5, work-type
 
 ## PROVIDER POLICY (generated - do not hand-edit)
 When selecting a provider for a new workspace, apply these rules in priority order:
