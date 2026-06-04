@@ -1,4 +1,5 @@
 import { issueTags, issues, preferences, projects, sessions, tags, workspaces } from "@agentic-kanban/shared/schema";
+import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { eq } from "drizzle-orm";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -225,7 +226,14 @@ Server: http://localhost:${serverPort}`;
       }
 
       await db.update(workspaces).set({ status: "closed", workingDir: null, readyForMerge: false, updatedAt: now }).where(eq(workspaces.id, workspace.id));
-      if (doneStatusId) await db.update(issues).set({ statusId: doneStatusId, updatedAt: now }).where(eq(issues.id, issueId));
+      if (doneStatusId) {
+        await db.update(issues).set({ statusId: doneStatusId, updatedAt: now }).where(eq(issues.id, issueId));
+        // Advance the workflow node to the `end` node matching Done status, so
+        // blocked_by/depends_on dependents can resolve via the node type check (#537).
+        await syncCurrentNodeToStatus(db, issueId).catch((err) =>
+          console.warn("[workflow] syncCurrentNodeToStatus after merge failed (non-fatal):", err),
+        );
+      }
       boardEvents.broadcast(projectId, "workspace_merged");
       console.log(`[workflow] auto-merged workspace ${workspace.id}`);
     } catch (err) {
