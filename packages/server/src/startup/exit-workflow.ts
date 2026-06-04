@@ -272,7 +272,16 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge }:
         const reviewSessionId = await sessionManager.startSession({ workspaceId, prompt, agentCommand, agentArgs: reviewArgsWithModel, claudeProfile: effectiveReviewProfile, provider: toExecutorProvider(reviewProvider), triggerType: "review", profile: profileSelection, extraEnv: { KANBAN_SESSION_TYPE: "review", KANBAN_AFTER_MERGE_VERIFY: verifyAgent } });
         reviewSessionIds.add(reviewSessionId);
         console.log(`[workflow] launched ${reviewSkillName} session ${reviewSessionId} for workspace ${workspaceId} (verifyAgent=${verifyAgent})`);
-      } catch (err) { console.error("[workflow] Failed to launch review session:", err); }
+      } catch (err) {
+        console.error("[workflow] Failed to launch review session:", err);
+        // Do NOT swallow this and leave the workspace stuck at "reviewing" with no
+        // running session (the #529 stranding). Reset to idle and surface the failure;
+        // the stranded-review reconciler then re-launches it instead of it sitting
+        // forever as never-reviewed / not-mergeable.
+        await db.update(workspaces).set({ status: "idle", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, workspaceId)).catch(() => {});
+        boardEvents.broadcast(projectId, "workflow_error");
+        emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Auto-review failed to launch for workspace ${workspaceId}; reset to idle for recovery.` });
+      }
     } catch (err) {
       console.error("[workflow] onSessionExit error:", err);
     }
