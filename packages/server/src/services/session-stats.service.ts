@@ -1,11 +1,11 @@
-import { sessions, sessionMessages } from "@agentic-kanban/shared/schema";
-import { inArray, desc } from "drizzle-orm";
+import { sessions } from "@agentic-kanban/shared/schema";
+import { inArray } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 
 /**
  * For a list of workspace IDs, query their latest sessions and return:
  * - contextTokens per workspace (contextTokens from session stats, falling back to input + cache-read)
- * - lastTool per workspace (name of last tool_use block in session messages)
+ * - lastTool per workspace (from sessions.stats.lastTool — written by broadcast on session exit)
  */
 export async function enrichWorkspacesWithSessionData(
   wsIds: string[],
@@ -26,54 +26,14 @@ export async function enrichWorkspacesWithSessionData(
   for (const s of sessRows) latestByWs.set(s.workspaceId, { id: s.id, stats: s.stats });
 
   for (const [wsId, sess] of latestByWs) {
-    if (sess.stats) {
-      try {
-        const p = JSON.parse(sess.stats) as Record<string, unknown>;
-        const explicitContextTokens = (p.contextTokens as number) ?? 0;
-        const tokens = explicitContextTokens || ((p.inputTokens as number) ?? 0) + ((p.cacheReadTokens as number) ?? 0);
-        if (tokens) contextTokensMap.set(wsId, tokens);
-      } catch { /* ignore */ }
-    }
-  }
-
-  const sessIds = [...latestByWs.values()].map(s => s.id);
-  if (sessIds.length > 0) {
-    const msgRows = await database
-      .select({ sessionId: sessionMessages.sessionId, data: sessionMessages.data })
-      .from(sessionMessages)
-      .where(inArray(sessionMessages.sessionId, sessIds))
-      .orderBy(desc(sessionMessages.id));
-
-    const sessionToWs = new Map<string, string>();
-    for (const [wsId, sess] of latestByWs) sessionToWs.set(sess.id, wsId);
-
-    for (const msg of msgRows) {
-      const wsId = sessionToWs.get(msg.sessionId);
-      if (!wsId || lastToolMap.has(wsId) || !msg.data) continue;
-      try {
-        const obj = JSON.parse(msg.data) as Record<string, unknown>;
-        if (obj.type === "assistant") {
-          const content = (obj.message as { content?: unknown[] })?.content ?? [];
-          for (const block of content as { type: string; name?: string }[]) {
-            if (block.type === "tool_use" && block.name) {
-              lastToolMap.set(wsId, block.name);
-              break;
-            }
-          }
-        }
-        // Copilot stream: tool names are in assistant.message data.toolRequests
-        if (obj.type === "assistant.message" && !lastToolMap.has(wsId)) {
-          const data = obj.data as Record<string, unknown> | undefined;
-          const toolRequests = Array.isArray(data?.toolRequests) ? data!.toolRequests : [];
-          for (const tr of toolRequests as { name?: string }[]) {
-            if (tr.name) {
-              lastToolMap.set(wsId, tr.name);
-              break;
-            }
-          }
-        }
-      } catch { /* ignore */ }
-    }
+    if (!sess.stats) continue;
+    try {
+      const p = JSON.parse(sess.stats) as Record<string, unknown>;
+      const explicitContextTokens = (p.contextTokens as number) ?? 0;
+      const tokens = explicitContextTokens || ((p.inputTokens as number) ?? 0) + ((p.cacheReadTokens as number) ?? 0);
+      if (tokens) contextTokensMap.set(wsId, tokens);
+      if (typeof p.lastTool === "string" && p.lastTool) lastToolMap.set(wsId, p.lastTool);
+    } catch { /* ignore */ }
   }
 
   return { contextTokensMap, lastToolMap };
