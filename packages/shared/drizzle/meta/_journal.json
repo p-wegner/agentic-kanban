@@ -540,6 +540,13 @@
                         "when":  1748764529000,
                         "tag":  "0076_issue_checklist",
                         "breakpoints":  true
+                    },
+                    {
+                        "idx":  77,
+                        "version":  "6",
+                        "when":  1748764530000,
+                        "tag":  "0077_hot_status_composite_indexes",
+                        "breakpoints":  true
                     }
                 ]
 }

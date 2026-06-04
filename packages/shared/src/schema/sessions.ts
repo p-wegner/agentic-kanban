@@ -24,6 +24,7 @@ export const sessions = sqliteTable("sessions", {
 }, (table) => ({
   workspaceIdIdx: index("idx_sessions_workspace_id").on(table.workspaceId),
   statusIdx: index("idx_sessions_status").on(table.status),
+  workspaceIdStatusIdx: index("idx_sessions_workspace_id_status").on(table.workspaceId, table.status),
   startedAtIdx: index("idx_sessions_started_at").on(table.startedAt),
 }));
 
