@@ -25,14 +25,15 @@ describe("VIEW_REGISTRY", () => {
     expect(collidingViews).toEqual([]);
   });
 
-  it("enumerates all 17 board views", () => {
-    expect(VIEW_REGISTRY).toHaveLength(17);
+  it("enumerates all board views", () => {
+    expect(VIEW_REGISTRY).toHaveLength(26);
   });
 
   it("preserves the existing view ids", () => {
     const expected: ViewMode[] = [
       "kanban", "backlog", "graph", "table", "agents", "timeline", "metrics",
       "quality-metrics", "digest", "strategy", "focus", "butler", "workflows", "workflow-analytics", "insights", "swimlane", "flaky-tests",
+      "monitor-history", "health-events", "runbooks", "capacity", "constellation", "momentum", "activity", "stale-work", "throughput",
     ];
     expect(VIEW_IDS.slice().sort()).toEqual(expected.slice().sort());
   });
@@ -83,7 +84,10 @@ describe("VIEW_REGISTRY", () => {
     );
     // Analytics/secondary views live behind the "More" overflow dropdown.
     expect([...secondaryIds].sort()).toEqual(
-      ["digest", "flaky-tests", "focus", "insights", "metrics", "quality-metrics", "strategy", "swimlane", "workflows", "workflow-analytics"].sort(),
+      [
+        "digest", "flaky-tests", "focus", "insights", "metrics", "quality-metrics", "strategy", "swimlane", "workflows", "workflow-analytics",
+        "monitor-history", "health-events", "runbooks", "capacity", "constellation", "momentum", "activity", "stale-work", "throughput",
+      ].sort(),
     );
   });
 

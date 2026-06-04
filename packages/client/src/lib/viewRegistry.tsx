@@ -37,7 +37,8 @@ export type ViewMode =
   | "constellation"
   | "momentum"
   | "activity"
-  | "stale-work";
+  | "stale-work"
+  | "throughput";
 
 export interface ViewDescriptor {
   /** Stable view id — matches BoardPage's `viewMode` state. */
@@ -225,6 +226,11 @@ const ICON = {
   "stale-work": (
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  ),
+  throughput: (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h4v7H3zM10 8h4v11h-4zM17 4h4v15h-4zM3 19h18" />
     </svg>
   ),
 } as const;
@@ -509,6 +515,17 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteIcon: "⏰",
     paletteDescription: "List issues stuck in their current column with one-click nudge",
     activeClass: "bg-amber-500 text-white",
+    group: "secondary",
+  },
+  {
+    id: "throughput",
+    toolbarLabel: "Throughput",
+    label: "Throughput",
+    tooltip: "Throughput — daily count of issues completed over the last 14 days",
+    icon: ICON.throughput,
+    paletteIcon: "▦",
+    paletteDescription: "Bar chart of issues moved to Done per day over the trailing window",
+    activeClass: "bg-emerald-600 text-white",
     group: "secondary",
   },
 ];
