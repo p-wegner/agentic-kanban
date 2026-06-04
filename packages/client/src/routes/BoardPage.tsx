@@ -109,7 +109,7 @@ export function BoardPage() {
     try { return sessionStorage.getItem("board-focus-mode") === "1"; } catch { return false; }
   });
   const [statusFilterId, setStatusFilterId] = useState<string | null>(null);
-  const [tagFilterId, setTagFilterId] = useState<string | null>(null);
+  const [activeTagIds, setActiveTagIds] = useState<Set<string>>(new Set());
   const [milestoneFilterId, setMilestoneFilterId] = useState<string | null>(null);
   const [milestones, setMilestones] = useState<MilestoneResponse[]>([]);
   const [issueTypeFilter, setIssueTypeFilter] = useState<string | null>(null);
@@ -475,6 +475,50 @@ export function BoardPage() {
         } else {
           localStorage.removeItem(`board-type-filter-${activeProjectId}`);
         }
+      } catch {
+        // ignore
+      }
+    }
+  }, [activeProjectId]);
+
+  useEffect(() => {
+    if (!activeProjectId) return;
+    try {
+      const stored = localStorage.getItem(`board-tag-filter-${activeProjectId}`);
+      setActiveTagIds(stored ? new Set(stored.split(",").filter(Boolean)) : new Set());
+    } catch {
+      // ignore
+    }
+  }, [activeProjectId]);
+
+  const handleTagFilterToggle = useCallback((tagId: string) => {
+    setActiveTagIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(tagId)) {
+        next.delete(tagId);
+      } else {
+        next.add(tagId);
+      }
+      if (activeProjectId) {
+        try {
+          if (next.size > 0) {
+            localStorage.setItem(`board-tag-filter-${activeProjectId}`, [...next].join(","));
+          } else {
+            localStorage.removeItem(`board-tag-filter-${activeProjectId}`);
+          }
+        } catch {
+          // ignore
+        }
+      }
+      return next;
+    });
+  }, [activeProjectId]);
+
+  const handleClearTagFilter = useCallback(() => {
+    setActiveTagIds(new Set());
+    if (activeProjectId) {
+      try {
+        localStorage.removeItem(`board-tag-filter-${activeProjectId}`);
       } catch {
         // ignore
       }
@@ -1132,21 +1176,21 @@ export function BoardPage() {
     () => columns.find((col) => col.id === statusFilterId) ?? null,
     [columns, statusFilterId],
   );
-  const tagFilter = useMemo(
-    () => allTags.find((tag) => tag.id === tagFilterId) ?? null,
-    [allTags, tagFilterId],
-  );
-  const boardViewState: BoardViewState = useMemo(() => ({
-    searchQuery,
-    showBlocked,
-    showStaleOnly,
-    statusId: statusFilter?.id ?? null,
-    statusName: statusFilter?.name ?? null,
-    tagId: tagFilter?.id ?? null,
-    tagName: tagFilter?.name ?? null,
-    sortMode: "rank",
-    viewMode,
-  }), [searchQuery, showBlocked, showStaleOnly, statusFilter, tagFilter, viewMode]);
+  const boardViewState: BoardViewState = useMemo(() => {
+    const firstTagId = activeTagIds.size === 1 ? [...activeTagIds][0] : null;
+    const firstTag = firstTagId ? allTags.find((t) => t.id === firstTagId) ?? null : null;
+    return {
+      searchQuery,
+      showBlocked,
+      showStaleOnly,
+      statusId: statusFilter?.id ?? null,
+      statusName: statusFilter?.name ?? null,
+      tagId: firstTag?.id ?? null,
+      tagName: firstTag?.name ?? null,
+      sortMode: "rank",
+      viewMode,
+    };
+  }, [activeTagIds, allTags, searchQuery, showBlocked, showStaleOnly, statusFilter, viewMode]);
   const boardStatusOptions = useMemo(
     () => columns.map((col) => ({ id: col.id, name: col.name })),
     [columns],
@@ -1163,10 +1207,13 @@ export function BoardPage() {
   }, [columns, statusFilterId]);
 
   useEffect(() => {
-    if (tagFilterId && tagsLoaded && !allTags.some((tag) => tag.id === tagFilterId)) {
-      setTagFilterId(null);
+    if (activeTagIds.size > 0 && tagsLoaded) {
+      const validIds = new Set([...activeTagIds].filter((id) => allTags.some((t) => t.id === id)));
+      if (validIds.size !== activeTagIds.size) {
+        setActiveTagIds(validIds);
+      }
     }
-  }, [allTags, tagFilterId, tagsLoaded]);
+  }, [allTags, activeTagIds, tagsLoaded]);
 
   useEffect(() => {
     if (!activeProjectId || tagsLoaded) return;
@@ -1187,7 +1234,7 @@ export function BoardPage() {
     setShowBlocked(state.showBlocked);
     setShowStaleOnly(state.showStaleOnly);
     setStatusFilterId(state.statusId);
-    setTagFilterId(state.tagId);
+    setActiveTagIds(state.tagId ? new Set([state.tagId]) : new Set());
     if (VIEW_IDS.includes(state.viewMode)) {
       handleViewModeChange(state.viewMode);
     }
@@ -1204,7 +1251,7 @@ export function BoardPage() {
           if (statusFilterId && issue.statusId !== statusFilterId) {
             return false;
           }
-          if (tagFilterId && !issue.tags?.some((tag) => tag.id === tagFilterId)) {
+          if (activeTagIds.size > 0 && !issue.tags?.some((tag) => activeTagIds.has(tag.id))) {
             return false;
           }
           if (milestoneFilterId && issue.milestoneId !== milestoneFilterId) {
@@ -1230,7 +1277,7 @@ export function BoardPage() {
           return true;
         }),
       })),
-    [columns, focusMode, issueTypeFilter, milestoneFilterId, searchQuery, showBlocked, showStaleOnly, statusFilterId, tagFilterId],
+    [activeTagIds, columns, focusMode, issueTypeFilter, milestoneFilterId, searchQuery, showBlocked, showStaleOnly, statusFilterId],
   );
 
   const showAiReviewedColumn = useMemo(
@@ -1894,6 +1941,10 @@ export function BoardPage() {
           onMilestoneFilterChange={setMilestoneFilterId}
           issueTypeFilter={issueTypeFilter}
           onIssueTypeFilterChange={handleIssueTypeFilterChange}
+          tags={allTags}
+          activeTagIds={activeTagIds}
+          onTagFilterToggle={handleTagFilterToggle}
+          onClearTagFilter={handleClearTagFilter}
           showPriorityLegend={prefs.showPriorityLegend}
           onShowPriorityLegendChange={prefs.handleShowPriorityLegendChange}
           showCardAgingHeatmap={prefs.showCardAgingHeatmap}
