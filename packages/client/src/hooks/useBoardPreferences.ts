@@ -19,7 +19,9 @@ export interface BoardPreferences {
   wipLimits: Record<string, number | null>;
   dynamicColumnScaling: boolean;
   cardDensity: CardDensity;
+  hiddenColumns: Set<string>;
   handleCardDensityChange: (v: CardDensity) => Promise<void>;
+  handleHiddenColumnsChange: (statusName: string, hidden: boolean) => Promise<void>;
   toggleAutoMonitor: () => Promise<void>;
   handleMonitorRunNow: () => Promise<void>;
   handleIntervalChange: (v: string) => Promise<void>;
@@ -28,7 +30,7 @@ export interface BoardPreferences {
   handleSetWipLimit: (statusId: string, limit: number | null) => Promise<void>;
 }
 
-export function useBoardPreferences(): BoardPreferences & { prefsLoaded: boolean } {
+export function useBoardPreferences(projectId: string | null): BoardPreferences & { prefsLoaded: boolean } {
   const [autoReview, setAutoReview] = useState(true);
   const [autoMerge, setAutoMerge] = useState(true);
   const [autoMonitor, setAutoMonitor] = useState(false);
@@ -40,6 +42,7 @@ export function useBoardPreferences(): BoardPreferences & { prefsLoaded: boolean
   const [wipLimits, setWipLimits] = useState<Record<string, number | null>>({});
   const [dynamicColumnScaling, setDynamicColumnScaling] = useState(false);
   const [cardDensity, setCardDensity] = useState<CardDensity>("comfortable");
+  const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set());
   const [prefsLoaded, setPrefsLoaded] = useState(false);
 
   const loadPreferences = useCallback(async () => {
@@ -47,6 +50,10 @@ export function useBoardPreferences(): BoardPreferences & { prefsLoaded: boolean
       const s = await apiFetch<Record<string, string>>("/api/preferences/settings");
       setDynamicColumnScaling(s.dynamic_column_scaling === "true");
       setCardDensity(s.card_density === "compact" ? "compact" : "comfortable");
+      if (projectId) {
+        const raw = s[`board_hidden_columns_${projectId}`];
+        setHiddenColumns(raw ? new Set(raw.split(",").filter(Boolean)) : new Set());
+      }
       setAutoReview(s.auto_review !== "false");
       setAutoMerge(s.auto_merge !== "false");
       setAutoMonitor(s.auto_monitor === "true");
@@ -69,7 +76,7 @@ export function useBoardPreferences(): BoardPreferences & { prefsLoaded: boolean
       // ignore
     }
     setPrefsLoaded(true);
-  }, []);
+  }, [projectId]);
 
   useEffect(() => {
     loadPreferences();
@@ -130,6 +137,24 @@ export function useBoardPreferences(): BoardPreferences & { prefsLoaded: boolean
     await apiFetch("/api/preferences/settings", { method: "PUT", body: JSON.stringify({ card_density: v }) }).catch(() => {});
   }, []);
 
+  const handleHiddenColumnsChange = useCallback(async (statusName: string, hidden: boolean) => {
+    if (!projectId) return;
+    setHiddenColumns((prev) => {
+      const next = new Set(prev);
+      if (hidden) {
+        next.add(statusName);
+      } else {
+        next.delete(statusName);
+      }
+      const value = [...next].join(",");
+      apiFetch("/api/preferences/settings", {
+        method: "PUT",
+        body: JSON.stringify({ [`board_hidden_columns_${projectId}`]: value }),
+      }).catch(() => {});
+      return next;
+    });
+  }, [projectId]);
+
   const handleSetWipLimit = useCallback(async (statusId: string, limit: number | null) => {
     setWipLimits((prev) => {
       const next = { ...prev };
@@ -160,7 +185,9 @@ export function useBoardPreferences(): BoardPreferences & { prefsLoaded: boolean
     wipLimits,
     dynamicColumnScaling,
     cardDensity,
+    hiddenColumns,
     handleCardDensityChange,
+    handleHiddenColumnsChange,
     prefsLoaded,
     toggleAutoMonitor,
     handleMonitorRunNow,
