@@ -39,7 +39,8 @@ export type ViewMode =
   | "activity"
   | "stale-work"
   | "throughput"
-  | "provider-mix";
+  | "provider-mix"
+  | "lead-time";
 
 export interface ViewDescriptor {
   /** Stable view id — matches BoardPage's `viewMode` state. */
@@ -238,6 +239,16 @@ const ICON = {
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M3 6h4v13H3zM10 10h4v9h-4zM17 3h4v16h-4zM3 19h18" />
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 6v13M12 10v9M19 3v16" opacity="0.3" />
+    </svg>
+  ),
+  "lead-time": (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 13l4-3 4 2 4-5 4 3" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 19h18" />
+      <circle cx="7" cy="10" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="11" cy="12" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="7" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="19" cy="10" r="1.5" fill="currentColor" stroke="none" />
     </svg>
   ),
 } as const;
@@ -543,6 +554,17 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     icon: ICON["provider-mix"],
     paletteIcon: "PM",
     paletteDescription: "Stacked bar chart of workspaces grouped by agent provider (claude/codex/copilot)",
+    activeClass: "bg-emerald-600 text-white",
+    group: "secondary",
+  },
+  {
+    id: "lead-time",
+    toolbarLabel: "Lead Time",
+    label: "Lead Time Trend",
+    tooltip: "Lead Time Trend — median + p90 time from creation to Done over a selectable window",
+    icon: ICON["lead-time"],
+    paletteIcon: "LT",
+    paletteDescription: "Trend chart of issue lead time (creation → Done) with median and p90 lines",
     activeClass: "bg-emerald-600 text-white",
     group: "secondary",
   },

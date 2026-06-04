@@ -634,6 +634,72 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     return c.json({ points });
   });
 
+  // GET /api/issues/lead-time?projectId=&days= — lead time trend: median + p90 per day for issues that reached Done.
+  // Lead time = Done statusChangedAt - createdAt (wall-clock age of the issue).
+  // Returns one bucket per day in the trailing window; buckets with no completions have medianMs/p90Ms = null.
+  router.get("/lead-time", async (c) => {
+    const projectId = c.req.query("projectId");
+    if (!projectId) return c.json({ error: "projectId required" }, 400);
+    const daysRaw = parseInt(c.req.query("days") ?? "30", 10);
+    const days = Math.min(Math.max(Number.isNaN(daysRaw) ? 30 : daysRaw, 1), 365);
+
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - days + 1);
+    const cutoffDay = cutoffDate.toISOString().slice(0, 10);
+
+    const rows = await database
+      .select({
+        createdAt: issues.createdAt,
+        statusChangedAt: issues.statusChangedAt,
+      })
+      .from(issues)
+      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+      .where(
+        and(
+          eq(issues.projectId, projectId),
+          eq(projectStatuses.name, "Done"),
+          gte(issues.statusChangedAt, cutoffDay)
+        )
+      );
+
+    // Build date axis.
+    const today = new Date();
+    const dates: string[] = [];
+    for (let d = new Date(cutoffDate); d <= today; d.setDate(d.getDate() + 1)) {
+      dates.push(d.toISOString().slice(0, 10));
+    }
+
+    // Group lead times (ms) per day.
+    const byDate = new Map<string, number[]>(dates.map((d) => [d, []]));
+    for (const r of rows) {
+      if (!r.statusChangedAt || !r.createdAt) continue;
+      const day = r.statusChangedAt.slice(0, 10);
+      if (!byDate.has(day)) continue;
+      const leadMs = new Date(r.statusChangedAt).getTime() - new Date(r.createdAt).getTime();
+      if (leadMs >= 0) byDate.get(day)!.push(leadMs);
+    }
+
+    function percentile(sorted: number[], p: number): number {
+      if (sorted.length === 0) return 0;
+      const idx = (p / 100) * (sorted.length - 1);
+      const lo = Math.floor(idx);
+      const hi = Math.ceil(idx);
+      return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
+    }
+
+    const buckets = dates.map((date) => {
+      const vals = [...(byDate.get(date) ?? [])].sort((a, b) => a - b);
+      return {
+        date,
+        count: vals.length,
+        medianMs: vals.length > 0 ? percentile(vals, 50) : null,
+        p90Ms: vals.length > 0 ? percentile(vals, 90) : null,
+      };
+    });
+
+    return c.json({ buckets });
+  });
+
   // GET /api/issues/:id/showdown — get active showdown for this issue
   router.get("/:id/showdown", async (c) => {
     const issueId = c.req.param("id");
