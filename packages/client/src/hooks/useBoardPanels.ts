@@ -17,6 +17,7 @@ export interface BoardPanelState {
   showProjectHealth: boolean;
   showCommandPalette: boolean;
   showShortcutHelp: boolean;
+  showLiveActivityTicker: boolean;
   dryRunIssue: IssueWithStatus | null;
   setShowSettings: (v: boolean) => void;
   setShowQuickTasks: (v: boolean) => void;
@@ -32,6 +33,7 @@ export interface BoardPanelState {
   setShowProjectHealth: Dispatch<SetStateAction<boolean>>;
   setShowCommandPalette: (v: boolean) => void;
   setShowShortcutHelp: Dispatch<SetStateAction<boolean>>;
+  setShowLiveActivityTicker: Dispatch<SetStateAction<boolean>>;
   setDryRunIssue: (issue: IssueWithStatus | null) => void;
 }
 
@@ -50,6 +52,7 @@ export function useBoardPanels(): BoardPanelState {
   const [showProjectHealth, setShowProjectHealth] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
+  const [showLiveActivityTicker, setShowLiveActivityTicker] = useState(false);
   const [dryRunIssue, setDryRunIssue] = useState<IssueWithStatus | null>(null);
 
   return {
@@ -67,6 +70,7 @@ export function useBoardPanels(): BoardPanelState {
     showProjectHealth,
     showCommandPalette,
     showShortcutHelp,
+    showLiveActivityTicker,
     dryRunIssue,
     setShowSettings,
     setShowQuickTasks,
@@ -82,6 +86,7 @@ export function useBoardPanels(): BoardPanelState {
     setShowProjectHealth,
     setShowCommandPalette,
     setShowShortcutHelp,
+    setShowLiveActivityTicker,
     setDryRunIssue,
   };
 }

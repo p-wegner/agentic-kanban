@@ -57,6 +57,8 @@ import { useBoardNavigation } from "../hooks/useBoardNavigation.js";
 import { useBoardBulkSelection } from "../hooks/useBoardBulkSelection.js";
 import { BoardBulkActionBar } from "../components/BoardBulkActionBar.js";
 import { BoardOverlayPanels } from "../components/BoardOverlayPanels.js";
+import { AgentLiveTickerPanel } from "../components/AgentLiveTickerPanel.js";
+import { useAgentLiveTicker } from "../hooks/useAgentLiveTicker.js";
 import type {
   CreateIssueRequest,
   DependencyInfo,
@@ -190,6 +192,7 @@ export function BoardPage() {
   // Extracted hooks
   const prefs = useBoardPreferences(activeProjectId);
   const panels = useBoardPanels();
+  const tickerEntries = useAgentLiveTicker(columns, sessionActivity, panels.showLiveActivityTicker);
   const agentQuestionsCount = useAgentQuestionsCount(activeProjectId);
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
     try { return JSON.parse(localStorage.getItem("kanban-column-widths") ?? "{}"); } catch { return {}; }
@@ -1455,6 +1458,7 @@ export function BoardPage() {
       if (e.key === "Escape") {
         if (panels.showCommandPalette) { panels.setShowCommandPalette(false); return; }
         if (panels.showAllWorkspaces) { panels.setShowAllWorkspaces(false); return; }
+        if (panels.showLiveActivityTicker) { panels.setShowLiveActivityTicker(false); return; }
         if (panels.showLaunchFailures) { panels.setShowLaunchFailures(false); return; }
         if (panels.showCleanupQueue) { panels.setShowCleanupQueue(false); return; }
         if (panels.showFileContention) { panels.setShowFileContention(false); return; }
@@ -1592,6 +1596,12 @@ export function BoardPage() {
         panels.setShowQuickTasks(true);
         return;
       }
+      if (e.key === "l" && !e.ctrlKey && !e.metaKey && !e.altKey && keyboardCursorIssueIdRef.current === null) {
+        if (isTextEntryTarget(e.target)) return;
+        e.preventDefault();
+        panels.setShowLiveActivityTicker((prev) => !prev);
+        return;
+      }
       if (e.key === "x" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (isTextEntryTarget(e.target)) return;
         e.preventDefault();
@@ -1705,6 +1715,7 @@ export function BoardPage() {
     unregisters.push(registerAction({ id: "open-quick-tasks", label: "Open Quick Tasks", description: "View installed skills and run custom agent tasks", icon: "⚡", shortcut: "q", category: "board", handler: () => panels.setShowQuickTasks(true) }));
     unregisters.push(registerAction({ id: "run-queue-forecast", label: "Run Queue Forecast", description: "View active-agent capacity and the next likely starts", icon: "▥", category: "board", handler: () => panels.setShowRunQueueForecast(true) }));
     unregisters.push(registerAction({ id: "open-codemod-factory", label: "Codemod Factory", description: "Describe a refactor in plain English — AI generates a ts-morph codemod", icon: "⚙", shortcut: "x", category: "board", handler: () => panels.setShowCodemod(true) }));
+    unregisters.push(registerAction({ id: "toggle-live-activity", label: "Live Activity Ticker", description: "Toggle compact stream of running agent output (l)", icon: "▶", shortcut: "l", category: "board", handler: () => panels.setShowLiveActivityTicker((prev) => !prev) }));
 
     for (const view of VIEW_REGISTRY) {
       unregisters.push(registerAction({
@@ -1944,6 +1955,8 @@ export function BoardPage() {
           }).length}
           onShowRunQueueForecast={() => panels.setShowRunQueueForecast(true)}
           runQueueOpenSlots={runQueueForecast.openSlots}
+          onShowLiveActivityTicker={() => panels.setShowLiveActivityTicker((prev) => !prev)}
+          liveActivityCount={tickerEntries.length}
           onViewAllHealthEvents={() => handleViewModeChange("health-events")}
           cardDensity={prefs.cardDensity}
           onCardDensityChange={prefs.handleCardDensityChange}
@@ -2392,6 +2405,19 @@ export function BoardPage() {
         />
       )}
       <ToastContainer />
+      {panels.showLiveActivityTicker && (
+        <AgentLiveTickerPanel
+          entries={tickerEntries}
+          columns={columns}
+          onClose={() => panels.setShowLiveActivityTicker(false)}
+          onWorkspaceClick={(issue, workspaceId) => {
+            setWorkspaceIssue(issue);
+            setWorkspaceInitial({ workspaceId, sessionId: "" });
+            setWorkspaceOpenCreate(false);
+            panels.setShowLiveActivityTicker(false);
+          }}
+        />
+      )}
       <BoardOverlayPanels
         showSettings={panels.showSettings}
         showQuickTasks={panels.showQuickTasks}
