@@ -251,6 +251,7 @@ export interface UpdateIssueRequest {
   /** Acceptance-criteria checklist items. Replaces the full list when provided. */
   checklist?: { id: string; text: string; completed: boolean }[] | null;
   pinned?: boolean;
+  milestoneId?: string | null;
 }
 
 export interface MainWorkspaceInfo {
@@ -411,6 +412,15 @@ export interface IssueWithStatus {
   tags?: { id: string; name: string; color: string | null }[];
   checklist?: { id: string; text: string; completed: boolean }[];
   pinned?: boolean;
+  milestoneId?: string | null;
+}
+
+export interface MilestoneResponse {
+  id: string;
+  projectId: string;
+  name: string;
+  dueDate: string | null;
+  createdAt: string;
 }
 
 export interface StatusWithIssues {

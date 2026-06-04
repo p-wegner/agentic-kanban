@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import type { IssueArtifact, IssueWithStatus, UpdateIssueRequest, DependencyInfo } from "@agentic-kanban/shared";
+import type { IssueArtifact, IssueWithStatus, UpdateIssueRequest, DependencyInfo, MilestoneResponse } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { isHttpUrl } from "../lib/url.js";
 import { formatRelativeTime, formatAbsoluteTime } from "../lib/formatRelativeTime.js";
@@ -380,6 +380,8 @@ export function IssueDetailPanel({
   const [checklist, setChecklist] = useState<{ id: string; text: string; completed: boolean }[]>(issue.checklist ?? []);
   const [newChecklistItem, setNewChecklistItem] = useState("");
   const [savingChecklist, setSavingChecklist] = useState(false);
+  const [milestoneId, setMilestoneId] = useState<string | null>(issue.milestoneId ?? null);
+  const [milestones, setMilestones] = useState<MilestoneResponse[]>([]);
 
   // Inline edit state (independent of the full edit form)
   const [inlineEditingTitle, setInlineEditingTitle] = useState(false);
@@ -400,7 +402,8 @@ export function IssueDetailPanel({
     dueDate !== (issue.dueDate ?? "") ||
     externalKey !== (issue.externalKey ?? "") ||
     externalUrl !== (issue.externalUrl ?? "") ||
-    skipAutoReview !== (issue.skipAutoReview ?? false)
+    skipAutoReview !== (issue.skipAutoReview ?? false) ||
+    milestoneId !== (issue.milestoneId ?? null)
   );
 
   useEffect(() => {
@@ -410,7 +413,7 @@ export function IssueDetailPanel({
       setArtifacts([]);
       setExpandedArtifactId(null);
       try {
-        const [ws, tags, available, deps, issues, skills, commentsResp, artifactsResp, activityResp] = await Promise.all([
+        const [ws, tags, available, deps, issues, skills, commentsResp, artifactsResp, activityResp, milestonesResp] = await Promise.all([
           apiFetch<{ id: string }[]>(`/api/issues/${issue.id}/workspaces`),
           apiFetch<{ id: string; name: string; color: string | null }[]>(`/api/issues/${issue.id}/tags`),
           apiFetch<{ id: string; name: string; color: string | null }[]>(`/api/tags`),
@@ -420,6 +423,7 @@ export function IssueDetailPanel({
           apiFetch<{ comments: IssueComment[] }>(`/api/issues/${issue.id}/comments`).catch(() => ({ comments: [] as IssueComment[] })),
           apiFetch<IssueArtifact[]>(`/api/issues/${issue.id}/artifacts`).catch(() => [] as IssueArtifact[]),
           apiFetch<{ events: ActivityEvent[] }>(`/api/issues/${issue.id}/activity`).catch(() => ({ events: [] })),
+          apiFetch<MilestoneResponse[]>(`/api/projects/${issue.projectId}/milestones`).catch(() => [] as MilestoneResponse[]),
         ]);
         setWorkspaceCount(ws.length);
         setIssueTags(tags);
@@ -430,6 +434,7 @@ export function IssueDetailPanel({
         setComments(commentsResp.comments);
         setArtifacts(artifactsResp);
         setActivityEvents(activityResp.events);
+        setMilestones(milestonesResp);
         setArtifactsLoading(false);
         setActivityLoading(false);
         // Check for active showdown
@@ -464,6 +469,7 @@ export function IssueDetailPanel({
       setExternalUrl(issue.externalUrl ?? "");
       setSkipAutoReview(issue.skipAutoReview ?? false);
       setChecklist(issue.checklist ?? []);
+      setMilestoneId(issue.milestoneId ?? null);
     }
     if (!inlineEditingTitle) setInlineTitleValue(issue.title);
     if (!inlineEditingDescription) setInlineDescriptionValue(issue.description ?? "");
@@ -525,6 +531,7 @@ export function IssueDetailPanel({
     setExternalKey(issue.externalKey ?? "");
     setExternalUrl(issue.externalUrl ?? "");
     setSkipAutoReview(issue.skipAutoReview ?? false);
+    setMilestoneId(issue.milestoneId ?? null);
   }
 
   async function handleEnhance() {
@@ -828,6 +835,7 @@ export function IssueDetailPanel({
         dueDate: dueDate || null,
         externalKey: externalKey.trim() || null,
         externalUrl: trimmedUrl || null,
+        milestoneId: milestoneId || null,
       });
       setPastedImages([]);
       setEditing(false);
@@ -1486,14 +1494,29 @@ export function IssueDetailPanel({
                   </select>
                 </div>
               </div>
-              <div>
-                <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Due Date</label>
-                <input
-                  type="date"
-                  value={dueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
-                  className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Due Date</label>
+                  <input
+                    type="date"
+                    value={dueDate}
+                    onChange={(e) => setDueDate(e.target.value)}
+                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Milestone</label>
+                  <select
+                    value={milestoneId ?? ""}
+                    onChange={(e) => setMilestoneId(e.target.value || null)}
+                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
+                  >
+                    <option value="">None</option>
+                    {milestones.map((m) => (
+                      <option key={m.id} value={m.id}>{m.name}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
               <div className="grid grid-cols-[minmax(0,1fr)_2fr] gap-3">
                 <div>
@@ -1604,6 +1627,14 @@ export function IssueDetailPanel({
                     </div>
                   );
                 })()}
+                {issue.milestoneId && milestones.find(m => m.id === issue.milestoneId) && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-gray-500 dark:text-gray-400">Milestone:</span>
+                    <span className="inline-block text-xs font-medium px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">
+                      {milestones.find(m => m.id === issue.milestoneId)!.name}
+                    </span>
+                  </div>
+                )}
                 {issue.skipAutoReview && (
                   <span className="inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">
                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
