@@ -7,6 +7,7 @@ import {
   ensureAgentGitignore,
   ensureStarterClaudeMd,
   ensureHookScaffold,
+  ensureVerifyGateRunner,
   GENERIC_AGENT_GITIGNORE,
   STARTER_CLAUDE_MD,
 } from "../services/project-scaffold.js";
@@ -209,6 +210,48 @@ describe("project-scaffold", () => {
         const vitalFiles = JSON.parse(await readFile(join(dir, ".claude", "hooks", "vital-files.json"), "utf8"));
         expect(vitalFiles).toContain("custom.db");
         expect(vitalFiles).not.toContain("should-not-appear.db");
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("ensureVerifyGateRunner", () => {
+    it("creates .claude/hooks/ dir with runner and config when absent", async () => {
+      const dir = await tmp();
+      try {
+        ensureVerifyGateRunner(dir);
+        const hooksDir = join(dir, ".claude", "hooks");
+        const { existsSync } = await import("node:fs");
+        expect(existsSync(hooksDir)).toBe(true);
+        expect(existsSync(join(hooksDir, "verify-gate-runner.js"))).toBe(true);
+        expect(existsSync(join(hooksDir, "verify-gate.config.json"))).toBe(true);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("ships a valid JSON config stub with an empty command", async () => {
+      const dir = await tmp();
+      try {
+        ensureVerifyGateRunner(dir);
+        const cfg = JSON.parse(await readFile(join(dir, ".claude", "hooks", "verify-gate.config.json"), "utf8"));
+        expect(typeof cfg.command).toBe("string");
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("does not overwrite an existing runner (idempotent, clobber-safe)", async () => {
+      const dir = await tmp();
+      try {
+        const hooksDir = join(dir, ".claude", "hooks");
+        await mkdir(hooksDir, { recursive: true });
+        await writeFile(join(hooksDir, "verify-gate-runner.js"), "// custom runner");
+        await writeFile(join(hooksDir, "verify-gate.config.json"), JSON.stringify({ command: "npm test" }));
+        ensureVerifyGateRunner(dir);
+        expect(await readFile(join(hooksDir, "verify-gate-runner.js"), "utf8")).toBe("// custom runner");
+        expect(JSON.parse(await readFile(join(hooksDir, "verify-gate.config.json"), "utf8")).command).toBe("npm test");
       } finally {
         await rm(dir, { recursive: true, force: true });
       }
