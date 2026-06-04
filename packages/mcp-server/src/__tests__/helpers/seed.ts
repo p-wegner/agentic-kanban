@@ -17,7 +17,7 @@ export async function seedProject(db: TestDb, name = "Test Project"): Promise<Se
     defaultBranch: "main", createdAt: now, updatedAt: now,
   });
 
-  const names = ["Todo", "In Progress", "Done", "AI Reviewed"];
+  const names = ["Todo", "In Progress", "In Review", "Done", "Cancelled", "AI Reviewed"];
   const statusIds: Record<string, string> = {};
   for (let i = 0; i < names.length; i++) {
     const id = randomUUID();
