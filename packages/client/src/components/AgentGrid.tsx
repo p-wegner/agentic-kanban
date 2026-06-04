@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 
+const STARTABLE_STATUS_NAMES = new Set(["Backlog", "Todo"]);
+
 const MAX_HISTORY = 8;
 
 const WS_STATUS_CONFIG: Record<string, { label: string; dot: string; ring: string; header: string; tier: "live" | "background" }> = {
@@ -306,6 +308,78 @@ function CompactCard({ issue, currentActivity, liveStats, todos, onIssueClick, o
   );
 }
 
+// --- Empty agent slot (drop target) ------------------------------------------
+
+interface EmptySlotProps {
+  onDropIssue: (issue: IssueWithStatus) => void;
+  columns: StatusWithIssues[];
+}
+
+function EmptySlot({ onDropIssue, columns }: EmptySlotProps) {
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  function getDraggedIssue(): IssueWithStatus | null {
+    const raw = (window as unknown as Record<string, unknown>).__dragData;
+    if (!raw || typeof raw !== "object") return null;
+    const data = raw as { issueId: string };
+    const allIssues = columns.flatMap((col) => col.issues);
+    return allIssues.find((i) => i.id === data.issueId) ?? null;
+  }
+
+  function isStartable(issue: IssueWithStatus | null): boolean {
+    if (!issue) return false;
+    const col = columns.find((c) => c.id === issue.statusId);
+    return col ? STARTABLE_STATUS_NAMES.has(col.name) : false;
+  }
+
+  function handleDragOver(e: React.DragEvent) {
+    const issue = getDraggedIssue();
+    if (!isStartable(issue)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setIsDragOver(true);
+  }
+
+  function handleDragLeave() {
+    setIsDragOver(false);
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragOver(false);
+    const issue = getDraggedIssue();
+    if (!isStartable(issue)) return;
+    onDropIssue(issue!);
+  }
+
+  return (
+    <div
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      className={`flex flex-col items-center justify-center rounded-xl border-2 border-dashed transition-colors min-h-[10rem] ${
+        isDragOver
+          ? "border-brand-400 bg-brand-50 dark:border-brand-500 dark:bg-brand-950/30"
+          : "border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/20"
+      }`}
+    >
+      <svg
+        className={`w-6 h-6 mb-1.5 transition-colors ${isDragOver ? "text-brand-500" : "text-gray-300 dark:text-gray-600"}`}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.5}
+      >
+        <circle cx="12" cy="12" r="10" />
+        <path d="M12 8v8M8 12h8" />
+      </svg>
+      <p className={`text-xs font-medium transition-colors ${isDragOver ? "text-brand-600 dark:text-brand-400" : "text-gray-400 dark:text-gray-500"}`}>
+        {isDragOver ? "Drop to start workspace" : "Drop issue here"}
+      </p>
+    </div>
+  );
+}
+
 // --- Public interface ---------------------------------------------------------
 
 export interface AgentGridProps {
@@ -316,9 +390,11 @@ export interface AgentGridProps {
   onIssueClick: (issue: IssueWithStatus) => void;
   onWorkspaceClick: (issue: IssueWithStatus, workspaceId?: string) => void;
   onGoToBoard?: () => void;
+  activeAgentsTarget?: number;
+  onDropIssue?: (issue: IssueWithStatus) => void;
 }
 
-export function AgentGrid({ columns, liveActivity, liveStats, sessionTodos, onIssueClick, onWorkspaceClick, onGoToBoard }: AgentGridProps) {
+export function AgentGrid({ columns, liveActivity, liveStats, sessionTodos, onIssueClick, onWorkspaceClick, onGoToBoard, activeAgentsTarget, onDropIssue }: AgentGridProps) {
   const historyRef = useRef<Map<string, string[]>>(new Map());
   const [, setHistoryTick] = useState(0);
 
@@ -357,7 +433,16 @@ export function AgentGrid({ columns, liveActivity, liveStats, sessionTodos, onIs
       return bLive - aLive;
     });
 
-  if (agents.length === 0) {
+  // Compute how many empty slots to show (capacity - current active agents, capped at 3 visible)
+  const activeAgentCount = agents.filter((i) => {
+    const s = i.workspaceSummary?.main?.status;
+    return s === "active" || s === "fixing";
+  }).length;
+  const emptySlotCount = onDropIssue && activeAgentsTarget && activeAgentsTarget > activeAgentCount
+    ? Math.min(activeAgentsTarget - activeAgentCount, 3)
+    : 0;
+
+  if (agents.length === 0 && emptySlotCount === 0) {
     return (
       <div className="flex flex-1 items-center justify-center h-full text-gray-400 dark:text-gray-500">
         <div className="text-center">
@@ -394,9 +479,11 @@ export function AgentGrid({ columns, liveActivity, liveStats, sessionTodos, onIs
   const reviewingCount = backgroundAgents.filter((i) => i.workspaceSummary?.main?.status === "reviewing").length;
   const idleCount = backgroundAgents.filter((i) => i.workspaceSummary?.main?.status === "idle").length;
 
-  const featuredCount = Math.max(attentionAgents.length, liveAgents.length);
+  const featuredCount = Math.max(attentionAgents.length, liveAgents.length + emptySlotCount);
   const featuredMinPx = featuredCount <= 2 ? 320 : featuredCount <= 4 ? 280 : 240;
   const compactMinPx = backgroundAgents.length <= 6 ? 220 : backgroundAgents.length <= 12 ? 190 : 165;
+
+  const showLiveSection = liveAgents.length > 0 || emptySlotCount > 0;
 
   return (
     <div className="flex flex-col gap-0 h-full overflow-y-auto">
@@ -424,6 +511,12 @@ export function AgentGrid({ columns, liveActivity, liveStats, sessionTodos, onIs
           <span className="flex items-center gap-1 text-gray-500 dark:text-gray-400">
             <span className="w-1.5 h-1.5 rounded-full bg-gray-400" />
             {idleCount} idle
+          </span>
+        )}
+        {emptySlotCount > 0 && (
+          <span className="flex items-center gap-1 text-gray-400 dark:text-gray-500 ml-auto">
+            <span className="w-1.5 h-1.5 rounded-full bg-gray-300 dark:bg-gray-600 border border-dashed border-gray-400" />
+            {emptySlotCount} slot{emptySlotCount !== 1 ? "s" : ""} available
           </span>
         )}
       </div>
@@ -455,7 +548,7 @@ export function AgentGrid({ columns, liveActivity, liveStats, sessionTodos, onIs
           </section>
         )}
 
-        {liveAgents.length > 0 && (
+        {showLiveSection && (
           <section>
             <h3 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
@@ -475,6 +568,9 @@ export function AgentGrid({ columns, liveActivity, liveStats, sessionTodos, onIs
                   onIssueClick={onIssueClick}
                   onWorkspaceClick={onWorkspaceClick}
                 />
+              ))}
+              {onDropIssue && Array.from({ length: emptySlotCount }, (_, i) => (
+                <EmptySlot key={`slot-${i}`} onDropIssue={onDropIssue} columns={columns} />
               ))}
             </div>
           </section>
