@@ -780,6 +780,33 @@ export async function getWorkingTreeDiff(workdirPath: string): Promise<string> {
 }
 
 /**
+ * Commit any uncommitted changes in a worktree so a rebase/merge can run on a clean tree.
+ * Agents routinely leave small artifacts behind (a modified .gitignore, a generated
+ * CLAUDE.local.md/HANDOFF.md) without committing them; a rebase refuses to run on a dirty
+ * tree, so the auto-merge skips the workspace forever (an infinite "rebase conflict" loop
+ * with an empty file list). Committing the leftovers preserves the work rather than
+ * discarding or stalling it. Returns the number of files committed (0 if the tree was clean).
+ */
+export async function commitLeftoverChanges(worktreePath: string): Promise<number> {
+  try {
+    const statusOutput = await execGit(["status", "--porcelain"], worktreePath);
+    const changedFiles = statusOutput.trim().split("\n").filter(Boolean);
+    if (changedFiles.length === 0) return 0;
+    await execGit(["add", "-A"], worktreePath);
+    await execGit([
+      "-c", "user.name=agentic-kanban",
+      "-c", "user.email=board@agentic-kanban.local",
+      "commit", "-m", "chore: commit leftover workspace changes before merge",
+    ], worktreePath);
+    console.log(`[git] committed ${changedFiles.length} leftover change(s) in ${worktreePath} before rebase`);
+    return changedFiles.length;
+  } catch (err) {
+    console.log(`[git] failed to commit leftover changes in ${worktreePath}: ${err instanceof Error ? err.message : String(err)}`);
+    return 0;
+  }
+}
+
+/**
  * Fetch the latest base branch and rebase the current workspace branch onto it.
  * Returns the diff ref to use for review (e.g., "origin/main" or "main").
  * On conflict, aborts the rebase and returns success=false with conflicting file names.
@@ -796,18 +823,10 @@ export async function prepareForReview(
     // No rebase in progress — expected
   }
 
-  // Check for uncommitted changes (staged or unstaged) — rebase requires a clean tree
-  let uncommittedChanges: string[] | undefined;
-  try {
-    const statusOutput = await execGit(["status", "--porcelain"], worktreePath);
-    const changedFiles = statusOutput.trim().split("\n").filter(Boolean);
-    if (changedFiles.length > 0) {
-      uncommittedChanges = changedFiles;
-      console.log(`[git] worktree has ${changedFiles.length} uncommitted change(s) — skipping rebase`);
-      // Return early: rebase would fail on a dirty tree. Let the reviewer handle it.
-      return { diffRef: baseBranch, success: false, uncommittedChanges, error: "Worktree has uncommitted changes" };
-    }
-  } catch { /* best effort */ }
+  // Commit any uncommitted changes so the rebase runs on a clean tree. Bailing here (the old
+  // behavior) made the auto-merge skip a workspace forever whenever an agent left a stray
+  // .gitignore edit / CLAUDE.local.md behind — an infinite "rebase conflict" loop.
+  await commitLeftoverChanges(worktreePath);
 
   // Try to fetch from origin (best effort — no remote is fine)
   try {
@@ -1011,6 +1030,10 @@ export async function rebaseOntoBase(
   branch?: string,
   options: { preferLocalBase?: boolean } = {},
 ): Promise<{ success: boolean; conflictingFiles?: string[]; error?: string }> {
+  // A dirty worktree makes `git rebase` fail with an empty conflict list ("rebase conflict: "),
+  // which the merge queue then skips forever. Commit any leftover changes first. (#nnn)
+  await commitLeftoverChanges(worktreePath);
+
   try {
     await execGit(["fetch", "origin", baseBranch], worktreePath);
   } catch { /* no remote */ }

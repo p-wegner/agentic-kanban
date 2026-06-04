@@ -563,4 +563,26 @@ describe("autoRenumberMigrations", () => {
       await rm(repo, { recursive: true, force: true });
     }
   }, 40000);
+
+  it("rebaseOntoBase commits leftover worktree changes instead of failing on a dirty tree", async () => {
+    // Agents routinely leave a stray .gitignore/CLAUDE.local.md edit uncommitted; the rebase
+    // must not fail on the dirty tree (which made the auto-merge skip the workspace forever).
+    const repo = await createTempRepo();
+    try {
+      const wt = await gitService.createWorktree(repo, "feature/dirty-rebase");
+      const { writeFileSync } = await import("node:fs");
+      writeFileSync(join(wt, "feature.txt"), "work\n");
+      await exec("git", ["add", "."], wt);
+      await exec("git", ["commit", "-m", "feat: work"], wt);
+      // Leave an uncommitted tracked edit + an untracked artifact.
+      writeFileSync(join(wt, "README.md"), "# Test\nedited by agent\n");
+      writeFileSync(join(wt, "CLAUDE.local.md"), "local memory\n");
+      const res = await gitService.rebaseOntoBase(wt, "main", "feature/dirty-rebase", { preferLocalBase: true });
+      expect(res.success).toBe(true);
+      const status = (await exec("git", ["status", "--porcelain"], wt)).trim();
+      expect(status).toBe(""); // leftovers were committed -> clean tree
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  }, 30000);
 });
