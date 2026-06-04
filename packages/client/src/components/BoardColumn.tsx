@@ -4,6 +4,7 @@ import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { IssueCard, type ProjectTag, type QuickUpdateCallbacks } from "./IssueCard.js";
 import { evaluateWipLimit } from "../lib/wipLimits.js";
 import { computeDropSortOrder } from "../lib/reorderIssues.js";
+import type { CardDensity } from "../hooks/useBoardPreferences.js";
 
 const ESTIMATE_POINTS: Record<string, number> = { XS: 1, S: 2, M: 3, L: 5, XL: 8 };
 
@@ -82,6 +83,7 @@ interface BoardColumnProps {
   onResizeReset?: () => void;
   wipLimit?: number | null;
   onSetWipLimit?: (statusId: string, limit: number | null) => void;
+  cardDensity?: CardDensity;
 }
 
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
@@ -118,6 +120,7 @@ export function BoardColumn({
   onResizeReset,
   wipLimit,
   onSetWipLimit,
+  cardDensity = "comfortable",
 }: BoardColumnProps) {
   const [dragOver, setDragOver] = useState(false);
   const dragCounterRef = useRef(0);
@@ -325,7 +328,7 @@ export function BoardColumn({
         <div
           ref={scrollRef}
           onScroll={stacked ? undefined : updateScrollState}
-          className={`space-y-1.5 column-scroll-container ${stacked ? "" : "h-full overflow-y-auto pb-6"}`}
+          className={`${cardDensity === "compact" ? "space-y-1" : "space-y-1.5"} column-scroll-container ${stacked ? "" : "h-full overflow-y-auto pb-6"}`}
         >
           {displayedIssues.map((issue: IssueWithStatus, idx: number) => (
             <div key={issue.id}>
@@ -353,6 +356,7 @@ export function BoardColumn({
                 isPendingWorkspace={pendingWorkspaceIssueIds?.has(issue.id)}
                 isSelected={selectedIssueIds?.has(issue.id)}
                 isKeyboardFocused={keyboardCursorIssueId === issue.id}
+                cardDensity={cardDensity}
               />
             </div>
           ))}

@@ -5,6 +5,7 @@ import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { apiFetch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 import { formatRelativeTime, formatAbsoluteTime } from "../lib/formatRelativeTime.js";
+import type { CardDensity } from "../hooks/useBoardPreferences.js";
 
 export interface ProjectTag {
   id: string;
@@ -221,6 +222,7 @@ interface IssueCardProps {
   isPendingWorkspace?: boolean;
   isSelected?: boolean;
   isKeyboardFocused?: boolean;
+  cardDensity?: CardDensity;
 }
 
 function HighlightedText({ text, query }: { text: string; query: string }) {
@@ -243,7 +245,8 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   );
 }
 
-export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, onDryRun, onDragStart, onMoveToNext, nextStatusName, tags, allProjectTags, quickUpdate, searchQuery, liveActivity, liveStats, todos, isPendingIssue, isPendingWorkspace, isSelected, isKeyboardFocused }: IssueCardProps) {
+export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, onDryRun, onDragStart, onMoveToNext, nextStatusName, tags, allProjectTags, quickUpdate, searchQuery, liveActivity, liveStats, todos, isPendingIssue, isPendingWorkspace, isSelected, isKeyboardFocused, cardDensity = "comfortable" }: IssueCardProps) {
+  const compact = cardDensity === "compact";
   const typeBadgeColor = issue.issueType ? (issueTypeColors[issue.issueType] ?? null) : null;
   const priorityBadgeColor = issue.priority && issue.priority !== "medium" ? (priorityColors[issue.priority] ?? null) : null;
   const ws = issue.workspaceSummary;
@@ -385,7 +388,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
       aria-selected={isSelected ? "true" : undefined}
       aria-current={isKeyboardFocused ? "true" : undefined}
       aria-label={`Open issue ${issue.title}`}
-      className={`group bg-surface-raised dark:bg-surface-raised-dark rounded-lg shadow-sm p-2.5 border cursor-pointer hover:shadow-md hover:-translate-y-px transition-all duration-150 relative isolate ${
+      className={`group bg-surface-raised dark:bg-surface-raised-dark rounded-lg shadow-sm border cursor-pointer hover:shadow-md hover:-translate-y-px transition-all duration-150 relative isolate ${compact ? "p-1.5" : "p-2.5"} ${
         isPendingIssue
           ? "border-brand-300 bg-brand-50/70 shadow-brand-100 shadow-md dark:border-brand-700 dark:bg-brand-950/40"
           : isKeyboardFocused
@@ -506,12 +509,12 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
           </svg>
         )}
       </div>
-      {issue.description && (
+      {!compact && issue.description && (
         <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">
           <HighlightedText text={issue.description} query={searchQuery ?? ""} />
         </p>
       )}
-      <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+      <div className={`flex items-center gap-1.5 flex-wrap ${compact ? "mt-0.5" : "mt-1"}`}>
         {isPendingIssue && (
           <span className="inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded bg-brand-100 text-brand-700 dark:bg-brand-900/50 dark:text-brand-300">
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-brand-500 animate-pulse" />
@@ -684,7 +687,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
           </span>
         )}
       </div>
-      {ws && ws.main && (
+      {!compact && ws && ws.main && (
         <div
           className={`group/ws flex min-w-0 flex-wrap items-center gap-1.5 mt-1.5 text-xs cursor-pointer rounded px-1 py-1 -mx-1 border-t transition-colors overflow-hidden ${
             ws.main.status === "reviewing" ? "border-accent-200 bg-accent-50 hover:bg-accent-100 dark:border-accent-700 dark:bg-accent-900/40" :
@@ -805,13 +808,13 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
           </svg>
         </div>
       )}
-      {(ws?.main?.status === "active" || ws?.main?.status === "fixing") && liveActivity && liveActivity !== "Delegating to agent" && (
+      {!compact && (ws?.main?.status === "active" || ws?.main?.status === "fixing") && liveActivity && liveActivity !== "Delegating to agent" && (
         <div className="flex items-center gap-1.5 mt-1 text-xs text-gray-400 dark:text-gray-500 px-1">
           <span className={`inline-block w-1.5 h-1.5 rounded-full animate-pulse shrink-0 ${ws.main.status === "fixing" ? "bg-orange-400" : "bg-green-400"}`} />
           <span className="truncate">{liveActivity}</span>
         </div>
       )}
-      {(ws?.main?.status === "active" || ws?.main?.status === "fixing") && liveActivity && liveStats && (
+      {!compact && (ws?.main?.status === "active" || ws?.main?.status === "fixing") && liveActivity && liveStats && (
         <div className="flex items-center gap-2 mt-0.5 text-[10px] text-gray-400 dark:text-gray-500 px-1">
           {liveStats.model && <span className="font-mono">{liveStats.model}</span>}
           {liveStats.contextTokens > 0 && (
@@ -830,7 +833,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
           )}
         </div>
       )}
-      {!(ws?.main?.status === "active" || ws?.main?.status === "fixing") && ws?.main && (ws.main.contextTokens || ws.main.lastTool) && (
+      {!compact && !(ws?.main?.status === "active" || ws?.main?.status === "fixing") && ws?.main && (ws.main.contextTokens || ws.main.lastTool) && (
         <div className="flex items-center gap-2 mt-0.5 text-[10px] text-gray-400 dark:text-gray-500 px-1">
           {ws.main.contextTokens != null && ws.main.contextTokens > 0 && (
             <span>{Math.round(ws.main.contextTokens / 1000)}k ctx</span>
@@ -840,7 +843,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
           )}
         </div>
       )}
-      {todos && todos.length > 0 && <TodoProgress todos={todos} />}
+      {!compact && todos && todos.length > 0 && <TodoProgress todos={todos} />}
 
       {/* Issue timestamps */}
       <div className="mt-1 flex items-center gap-2 text-[10px] text-gray-400 dark:text-gray-500 px-0.5">
@@ -849,7 +852,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
 
       {/* Action row: appears on hover, contains all card-level actions in one place */}
       {hasAnyAction && !isDragging && (
-        <div className="mt-1.5 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className={`${compact ? "mt-1" : "mt-1.5"} flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity`}>
           {showResume && (
             <button
               onClick={(e) => { e.stopPropagation(); onWorkspaceClick!(issue, ws?.main?.id); }}
