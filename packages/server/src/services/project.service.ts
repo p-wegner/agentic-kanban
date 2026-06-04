@@ -445,17 +445,21 @@ export function createProjectService(deps: { database: Database }) {
     const issueIds = projectIssues.map((i) => i.id);
     const defaultBranch = project.defaultBranch;
 
-    const [workspaceSummaryMap, blockedMap, issueTagMap, staleDaysRow] = await Promise.all([
+    const [workspaceSummaryMap, blockedMap, issueTagMap, staleDaysRow, inProgressStaleDaysRow] = await Promise.all([
       buildWorkspaceSummaryMap(issueIds, defaultBranch, database),
       buildBlockedMap(issueIds, database),
       buildTagMap(issueIds, database),
       database.select({ value: preferences.value }).from(preferences).where(eq(preferences.key, "backlog_stale_days")).limit(1),
+      database.select({ value: preferences.value }).from(preferences).where(eq(preferences.key, "inprogress_stale_days")).limit(1),
     ]);
 
     const staleDays = parseInt(staleDaysRow[0]?.value ?? "14", 10) || 14;
+    const inProgressStaleDays = parseInt(inProgressStaleDaysRow[0]?.value ?? "3", 10) || 3;
     const now = new Date(nowOverride ?? new Date().toISOString()).getTime();
     const staleMs = staleDays * 24 * 60 * 60 * 1000;
+    const inProgressStaleMs = inProgressStaleDays * 24 * 60 * 60 * 1000;
     const backlogStatusNames = new Set(statuses.filter((s) => s.name.toLowerCase() === "backlog").map((s) => s.id));
+    const inProgressStatusNames = new Set(statuses.filter((s) => s.name.toLowerCase() === "in progress").map((s) => s.id));
 
     const statusByName = new Map(statuses.map((status) => [status.name.toLowerCase(), status]));
     const issuesWithBlocked = projectIssues.map((issue) => {
@@ -469,6 +473,7 @@ export function createProjectService(deps: { database: Database }) {
         : null;
       const effectiveStatusId = workflowStatus ? workflowStatus.id : issue.statusId;
       const isInBacklog = backlogStatusNames.has(effectiveStatusId);
+      const isInProgress = inProgressStatusNames.has(effectiveStatusId);
       let isStale: boolean | undefined;
       let staleDaysActual: number | undefined;
       if (isInBacklog) {
@@ -479,12 +484,18 @@ export function createProjectService(deps: { database: Database }) {
           staleDaysActual = Math.floor(elapsed / (24 * 60 * 60 * 1000));
         }
       }
+      const columnEnteredAt = new Date(issue.statusChangedAt ?? issue.createdAt).getTime();
+      const columnElapsed = now - columnEnteredAt;
+      const columnAgeDays = Math.floor(columnElapsed / (24 * 60 * 60 * 1000));
+      const isColumnStale = isInProgress && columnElapsed >= inProgressStaleMs;
       return {
         ...issue,
         ...(workflowStatus ? { statusId: workflowStatus.id, statusName: workflowStatus.name } : {}),
         ...(wsSummary ? { workspaceSummary: wsSummary } : {}),
         ...(blocked ? { isBlocked: blocked.isBlocked, dependencyCount: blocked.dependencyCount } : {}),
         ...(isStale ? { isStale: true, staleDays: staleDaysActual } : {}),
+        columnAgeDays,
+        ...(isColumnStale ? { isColumnStale: true } : {}),
       };
     });
 
