@@ -15,6 +15,7 @@ import { AgentStartDryRunModal } from "./AgentStartDryRunModal.js";
 import { WorktreeOverview } from "./WorktreeOverview.js";
 import { ProjectHealthOverview } from "./ProjectHealthOverview.js";
 import { CommandPalette } from "./CommandPalette.js";
+import { StartWorkspacePicker } from "./StartWorkspacePicker.js";
 import { ShortcutHelp } from "./ShortcutHelp.js";
 import { CreateIssuePanel } from "./CreateIssuePanel.js";
 import { ApprovalDialog } from "./ApprovalDialog.js";
@@ -62,6 +63,7 @@ interface Props {
   showWorktreeOverview: boolean;
   showProjectHealth: boolean;
   showCommandPalette: boolean;
+  showStartWorkspacePicker: boolean;
   showShortcutHelp: boolean;
 
   // Panel close handlers
@@ -78,6 +80,8 @@ interface Props {
   onCloseWorktreeOverview: () => void;
   onCloseProjectHealth: () => void;
   onCloseCommandPalette: () => void;
+  onCloseStartWorkspacePicker: () => void;
+  onWorkspaceStarted: (workspaceId: string, issue: IssueWithStatus) => void;
   onCloseShortcutHelp: () => void;
 
   // Shared data
@@ -146,6 +150,7 @@ export function BoardOverlayPanels({
   showWorktreeOverview,
   showProjectHealth,
   showCommandPalette,
+  showStartWorkspacePicker,
   showShortcutHelp,
   onCloseSettings,
   onCloseQuickTasks,
@@ -160,6 +165,8 @@ export function BoardOverlayPanels({
   onCloseWorktreeOverview,
   onCloseProjectHealth,
   onCloseCommandPalette,
+  onCloseStartWorkspacePicker,
+  onWorkspaceStarted,
   onCloseShortcutHelp,
   activeProjectId,
   columns,
@@ -360,6 +367,13 @@ export function BoardOverlayPanels({
       )}
       {showCommandPalette && (
         <CommandPalette onClose={onCloseCommandPalette} />
+      )}
+      {showStartWorkspacePicker && (
+        <StartWorkspacePicker
+          issues={columns.flatMap((col) => col.issues)}
+          onClose={onCloseStartWorkspacePicker}
+          onStarted={onWorkspaceStarted}
+        />
       )}
       {showShortcutHelp && (
         <ShortcutHelp onClose={onCloseShortcutHelp} currentView={viewMode} />
