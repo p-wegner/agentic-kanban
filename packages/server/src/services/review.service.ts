@@ -1,5 +1,5 @@
-import { agentSkills, issues, preferences, projects, workspaces } from "@agentic-kanban/shared/schema";
-import { desc, eq, sql } from "drizzle-orm";
+import { agentSkills, issues, preferences, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { and, desc, eq, sql } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { PREF_CODEX_PROFILE, PREF_COPILOT_PROFILE } from "../constants/preference-keys.js";
 import type { ProviderName } from "./agent-provider.js";
@@ -198,6 +198,10 @@ export class ReviewError extends Error {
   }
 }
 
+/** In-flight review launches keyed by workspaceId — prevents duplicate sessions when
+ *  concurrent requests both pass the idle-status check before either updates the DB. */
+const pendingReviewLaunches = new Set<string>();
+
 export async function startManualReview(
   database: Database,
   getSessionManager: () => SessionManager,
@@ -209,60 +213,91 @@ export async function startManualReview(
   const wsRows = await database.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
   if (wsRows.length === 0) throw new ReviewError("Workspace not found", "NOT_FOUND");
   const workspace = wsRows[0];
-  if (workspace.status !== "idle") throw new ReviewError("Workspace is not idle", "CONFLICT");
-
-  const issueRows = await database.select({ projectId: issues.projectId, id: issues.id }).from(issues).where(eq(issues.id, workspace.issueId)).limit(1);
-  if (issueRows.length === 0) throw new ReviewError("Issue not found", "NOT_FOUND");
-  const { projectId, id: issueId } = issueRows[0];
-
-  const prefRows = await database.select().from(preferences);
-  const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
-  const manualProfile = prefMap.get("claude_profile") || undefined;
-  const agentCommand = isMockProfile(manualProfile) ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
-  const claudeProfile = isMockProfile(manualProfile) ? undefined : manualProfile;
-  const provider = parseProviderPref(prefMap);
-  const effectiveProfileName = getEffectiveProfile(prefMap, provider, claudeProfile);
-  const manualProfileSelection = effectiveProfileName ? { provider, name: effectiveProfileName } : undefined;
-  const reviewArgs = buildReviewArgs(prefMap, provider);
-  const autoFix = prefMap.get("review_auto_fix") !== "false";
-
-  const projectRows = await database.select({ defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.id, projectId)).limit(1);
-  const defaultBranch = projectRows.length > 0 ? projectRows[0].defaultBranch : null;
-  let diffRef = workspace.baseBranch || defaultBranch;
-  let manualConflictingFiles: string[] | undefined;
-  let manualUncommittedChanges: string[] | undefined;
-
-  if (!workspace.isDirect && workspace.workingDir) {
-    const baseBranch = workspace.baseBranch || defaultBranch;
-    if (!baseBranch) throw new ReviewError("No default branch configured for this project. Set a default branch in project settings before reviewing.", "BAD_REQUEST");
-    const prep = await gitService.prepareForReview(workspace.workingDir, baseBranch);
-    if (!prep.success) {
-      manualConflictingFiles = prep.conflictingFiles;
-      manualUncommittedChanges = prep.uncommittedChanges;
-      console.warn(`[review-service] rebase failed for manual review ${workspaceId}: ${prep.error}`);
+  if (workspace.status !== "idle") {
+    // Check if there's an active review session so we can give a more specific message
+    const runningReview = await database
+      .select({ id: sessions.id })
+      .from(sessions)
+      .where(and(eq(sessions.workspaceId, workspaceId), eq(sessions.status, "running"), eq(sessions.triggerType, "review")))
+      .limit(1);
+    if (runningReview.length > 0) {
+      throw new ReviewError(`Review session ${runningReview[0].id} is already running for this workspace`, "CONFLICT");
     }
-    diffRef = prep.diffRef;
+    throw new ReviewError("Workspace is not idle", "CONFLICT");
   }
 
-  const manualSkillName = thoroughReview ? "code-review-thorough" : "code-review";
-  const verifyAgent = prefMap.get("after_merge_verify_agent") || "none";
-  const { prompt: reviewPromptText, model: reviewModel } = await buildReviewPrompt(
-    database, workspace.branch, diffRef, issueId, autoFix, projectId,
-    manualConflictingFiles, manualUncommittedChanges, workspaceId, manualSkillName, verifyAgent,
-  );
-  const reviewArgsWithModel = reviewModel && provider === "claude" ? `${reviewArgs ?? ""} --model ${reviewModel}`.trim() : reviewArgs;
+  // Guard against concurrent requests that both passed the idle check before either
+  // updates the DB status to "reviewing".
+  if (pendingReviewLaunches.has(workspaceId)) {
+    throw new ReviewError("Review launch already in progress for this workspace", "CONFLICT");
+  }
+  pendingReviewLaunches.add(workspaceId);
 
-  const now = new Date().toISOString();
-  await database.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
-  boardEvents.broadcast(projectId, "issue_updated");
+  try {
+    const issueRows = await database.select({ projectId: issues.projectId, id: issues.id }).from(issues).where(eq(issues.id, workspace.issueId)).limit(1);
+    if (issueRows.length === 0) throw new ReviewError("Issue not found", "NOT_FOUND");
+    const { projectId, id: issueId } = issueRows[0];
 
-  const reviewExtraEnv: Record<string, string> = { KANBAN_SESSION_TYPE: "review", KANBAN_AFTER_MERGE_VERIFY: verifyAgent };
-  const sessionId = await getSessionManager().startSession({
-    workspaceId, prompt: reviewPromptText, agentCommand, agentArgs: reviewArgsWithModel,
-    claudeProfile, profile: manualProfileSelection, provider: toExecutorProvider(provider),
-    triggerType: "review", extraEnv: reviewExtraEnv,
-  });
-  reviewSessionIds.add(sessionId);
-  console.log(`[review-service] manual review session ${sessionId} for workspace ${workspaceId}`);
-  return { sessionId };
+    const prefRows = await database.select().from(preferences);
+    const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
+    const manualProfile = prefMap.get("claude_profile") || undefined;
+    const agentCommand = isMockProfile(manualProfile) ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
+    const claudeProfile = isMockProfile(manualProfile) ? undefined : manualProfile;
+    const provider = parseProviderPref(prefMap);
+    const effectiveProfileName = getEffectiveProfile(prefMap, provider, claudeProfile);
+    const manualProfileSelection = effectiveProfileName ? { provider, name: effectiveProfileName } : undefined;
+    const reviewArgs = buildReviewArgs(prefMap, provider);
+    const autoFix = prefMap.get("review_auto_fix") !== "false";
+
+    const projectRows = await database.select({ defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.id, projectId)).limit(1);
+    const defaultBranch = projectRows.length > 0 ? projectRows[0].defaultBranch : null;
+    let diffRef = workspace.baseBranch || defaultBranch;
+    let manualConflictingFiles: string[] | undefined;
+    let manualUncommittedChanges: string[] | undefined;
+
+    if (!workspace.isDirect && workspace.workingDir) {
+      const baseBranch = workspace.baseBranch || defaultBranch;
+      if (!baseBranch) throw new ReviewError("No default branch configured for this project. Set a default branch in project settings before reviewing.", "BAD_REQUEST");
+      const prep = await gitService.prepareForReview(workspace.workingDir, baseBranch);
+      if (!prep.success) {
+        manualConflictingFiles = prep.conflictingFiles;
+        manualUncommittedChanges = prep.uncommittedChanges;
+        console.warn(`[review-service] rebase failed for manual review ${workspaceId}: ${prep.error}`);
+      }
+      diffRef = prep.diffRef;
+    }
+
+    const manualSkillName = thoroughReview ? "code-review-thorough" : "code-review";
+    const verifyAgent = prefMap.get("after_merge_verify_agent") || "none";
+    const { prompt: reviewPromptText, model: reviewModel } = await buildReviewPrompt(
+      database, workspace.branch, diffRef, issueId, autoFix, projectId,
+      manualConflictingFiles, manualUncommittedChanges, workspaceId, manualSkillName, verifyAgent,
+    );
+    const reviewArgsWithModel = reviewModel && provider === "claude" ? `${reviewArgs ?? ""} --model ${reviewModel}`.trim() : reviewArgs;
+
+    const now = new Date().toISOString();
+    await database.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
+    boardEvents.broadcast(projectId, "issue_updated");
+
+    let sessionId: string;
+    try {
+      const reviewExtraEnv: Record<string, string> = { KANBAN_SESSION_TYPE: "review", KANBAN_AFTER_MERGE_VERIFY: verifyAgent };
+      sessionId = await getSessionManager().startSession({
+        workspaceId, prompt: reviewPromptText, agentCommand, agentArgs: reviewArgsWithModel,
+        claudeProfile, profile: manualProfileSelection, provider: toExecutorProvider(provider),
+        triggerType: "review", extraEnv: reviewExtraEnv,
+      });
+    } catch (sessionErr) {
+      // Revert the workspace status so retries are possible — don't leave it stuck at "reviewing"
+      const revertedAt = new Date().toISOString();
+      await database.update(workspaces).set({ status: "idle", updatedAt: revertedAt }).where(eq(workspaces.id, workspaceId));
+      boardEvents.broadcast(projectId, "issue_updated");
+      throw sessionErr;
+    }
+    reviewSessionIds.add(sessionId);
+    console.log(`[review-service] manual review session ${sessionId} for workspace ${workspaceId}`);
+    return { sessionId };
+  } finally {
+    pendingReviewLaunches.delete(workspaceId);
+  }
 }

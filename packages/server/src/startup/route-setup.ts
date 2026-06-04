@@ -33,12 +33,12 @@ export function setupRoutes(app: Hono, { sessionManager, boardEvents, reviewSess
       return c.json({ sessionId });
     } catch (err) {
       if (err instanceof ReviewError) {
-        if (err.code === "NOT_FOUND") return c.json({ error: err.message }, 404);
-        if (err.code === "CONFLICT") return c.json({ error: err.message }, 409);
-        if (err.code === "BAD_REQUEST") return c.json({ error: err.message }, 400);
+        if (err.code === "NOT_FOUND") return c.json({ error: err.message, code: err.code }, 404);
+        if (err.code === "CONFLICT") return c.json({ error: err.message, code: err.code }, 409);
+        if (err.code === "BAD_REQUEST") return c.json({ error: err.message, code: err.code }, 400);
       }
       console.error("[workflow] manual review trigger failed:", err);
-      return c.json({ error: String(err) }, 500);
+      return c.json({ error: String(err), code: "INTERNAL" }, 500);
     }
   });
 
