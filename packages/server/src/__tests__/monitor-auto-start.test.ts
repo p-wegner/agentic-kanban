@@ -98,6 +98,95 @@ describe("runAutoStart URL construction", () => {
   });
 });
 
+describe("runAutoStart Backlog promotion for auto-driven projects", () => {
+  it("starts a Backlog issue for an auto-driven project (no manual Backlog→Todo move needed)", async () => {
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]) as ReturnType<typeof db.select>) // inProgressStatuses
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop1 activeWip
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // loop1 inProgressIssues (none)
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop2 inProgressCount
+      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]) as ReturnType<typeof db.select>) // todoStatus
+      .mockReturnValueOnce(makeSelectChain([{ id: "backlog-1" }]) as ReturnType<typeof db.select>) // backlogStatus (auto-driven)
+      .mockReturnValueOnce(makeSelectChain([{ id: "issue-1", title: "New Feature", projectId: "proj-1", issueNumber: 5 }]) as ReturnType<typeof db.select>) // todoIssues (includes backlog)
+      .mockReturnValueOnce(makeSelectChain([{ id: "done-1" }]) as ReturnType<typeof db.select>) // doneStatuses
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // existingWs (none)
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // no-auto-start tag (none)
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>); // deps (none)
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ id: "ws-new" }) } as Response);
+
+    await runAutoStart(
+      new Map([["nudge_wip_limit", "5"]]),
+      makeDeps({ isAutoDrivenProject: () => true }),
+    );
+
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces", expect.any(Object));
+  });
+
+  it("does NOT start a Backlog issue for a non-auto-driven project (Backlog stays triage)", async () => {
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]) as ReturnType<typeof db.select>) // inProgressStatuses
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop1 activeWip
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // loop1 inProgressIssues (none)
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop2 inProgressCount
+      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]) as ReturnType<typeof db.select>) // todoStatus
+      // no backlogStatus lookup (isAutoDrivenProject = false)
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // todoIssues (empty — only Todo queried, nothing there)
+      .mockReturnValueOnce(makeSelectChain([{ id: "done-1" }]) as ReturnType<typeof db.select>); // doneStatuses
+
+    await runAutoStart(
+      new Map([["nudge_wip_limit", "5"]]),
+      makeDeps({ isAutoDrivenProject: () => false }),
+    );
+
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  it("honors no-auto-start tag on a Backlog issue for an auto-driven project", async () => {
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]) as ReturnType<typeof db.select>) // inProgressStatuses
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop1 activeWip
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // loop1 inProgressIssues (none)
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop2 inProgressCount
+      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]) as ReturnType<typeof db.select>) // todoStatus
+      .mockReturnValueOnce(makeSelectChain([{ id: "backlog-1" }]) as ReturnType<typeof db.select>) // backlogStatus
+      .mockReturnValueOnce(makeSelectChain([{ id: "issue-1", title: "Tagged Backlog Issue", projectId: "proj-1", issueNumber: 6 }]) as ReturnType<typeof db.select>) // todoIssues
+      .mockReturnValueOnce(makeSelectChain([{ id: "done-1" }]) as ReturnType<typeof db.select>) // doneStatuses
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // existingWs (none)
+      .mockReturnValueOnce(makeSelectChain([{ id: "tag-1" }]) as ReturnType<typeof db.select>); // no-auto-start tag PRESENT
+
+    await runAutoStart(
+      new Map([["nudge_wip_limit", "5"]]),
+      makeDeps({ isAutoDrivenProject: () => true }),
+    );
+
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  it("does NOT start a dep-blocked Backlog issue for an auto-driven project", async () => {
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]) as ReturnType<typeof db.select>) // inProgressStatuses
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop1 activeWip
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // loop1 inProgressIssues (none)
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop2 inProgressCount
+      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]) as ReturnType<typeof db.select>) // todoStatus
+      .mockReturnValueOnce(makeSelectChain([{ id: "backlog-1" }]) as ReturnType<typeof db.select>) // backlogStatus
+      .mockReturnValueOnce(makeSelectChain([{ id: "issue-1", title: "Blocked Backlog", projectId: "proj-1", issueNumber: 7 }]) as ReturnType<typeof db.select>) // todoIssues
+      .mockReturnValueOnce(makeSelectChain([{ id: "done-1" }]) as ReturnType<typeof db.select>) // doneStatuses
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // existingWs (none)
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // no-auto-start tag (none)
+      .mockReturnValueOnce(makeSelectChain([{ dependsOnId: "blocker-1" }]) as ReturnType<typeof db.select>) // deps
+      .mockReturnValueOnce(makeSelectChain([{ id: "blocker-1", statusId: "inprog-1", currentNodeId: null, currentNodeType: null }]) as ReturnType<typeof db.select>) // blockerIssues (not terminal)
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>); // open-workspace check
+
+    await runAutoStart(
+      new Map([["nudge_wip_limit", "5"]]),
+      makeDeps({ isAutoDrivenProject: () => true }),
+    );
+
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+});
+
 describe("runAutoStart opt-out + scoping", () => {
   it("skips an In-Progress issue tagged no-auto-start", async () => {
     vi.mocked(db.select)
