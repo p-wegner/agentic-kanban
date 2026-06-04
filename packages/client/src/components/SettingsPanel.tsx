@@ -680,12 +680,13 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   const [tab, setTab] = useState<Tab>("agent");
 
   // Project-specific settings
-  const [projectSettings, setProjectSettings] = useState<{ defaultBranch: string; setupScript: string; setupBlocking: boolean; setupEnabled: boolean; teardownScript: string; color: string | null; symlinkEnabled: boolean; symlinkDirs: string; defaultSkillId: string | null }>({
+  const [projectSettings, setProjectSettings] = useState<{ defaultBranch: string; setupScript: string; setupBlocking: boolean; setupEnabled: boolean; teardownScript: string; verifyScript: string; color: string | null; symlinkEnabled: boolean; symlinkDirs: string; defaultSkillId: string | null }>({
     defaultBranch: "",
     setupScript: "",
     setupBlocking: true,
     setupEnabled: true,
     teardownScript: "",
+    verifyScript: "",
     color: null,
     symlinkEnabled: false,
     symlinkDirs: "",
@@ -694,6 +695,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   const [projectBranches, setProjectBranches] = useState<{ local: string[]; remote: string[] } | null>(null);
   const [generatingScript, setGeneratingScript] = useState(false);
   const [generatingTeardown, setGeneratingTeardown] = useState(false);
+  const [generatingVerify, setGeneratingVerify] = useState(false);
 
   // Skills state
   const [skills, setSkills] = useState<{ id: string; name: string; description: string; prompt: string; model: string | null; projectId: string | null; isBuiltin: boolean }[]>([]);
@@ -887,6 +889,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                 setupBlocking: project.setupBlocking !== false,
                 setupEnabled: (project as any).setupEnabled !== false,
                 teardownScript: (project as any).teardownScript || "",
+                verifyScript: (data as Record<string, string>)[`verify_script_${activeProjectId}`] || "",
                 color: project.color || null,
                 symlinkEnabled: (project as any).symlinkEnabled === true,
                 symlinkDirs: (project as any).symlinkDirs || "",
@@ -979,10 +982,14 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
     }
     setSaving(true);
     try {
+      const settingsToSave = { ...settings };
+      if (activeProjectId) {
+        settingsToSave[`verify_script_${activeProjectId}`] = projectSettings.verifyScript;
+      }
       const promises: Promise<unknown>[] = [
         apiFetch("/api/preferences/settings", {
           method: "PUT",
-          body: JSON.stringify(settings),
+          body: JSON.stringify(settingsToSave),
         }),
       ];
       if (activeProjectId) {
@@ -2063,6 +2070,61 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M5 3l1.5 3.5L10 8l-3.5 1.5L5 13l-1.5-3.5L0 8l3.5-1.5L5 3zM19 11l1 2.5L22.5 14l-2.5 1L19 17.5l-1-2.5L15.5 14l2.5-1L19 11z" />
                               </svg>
                               Generate with AI
+                            </>
+                          )}
+                        </button>
+                      </CollapsibleSection>
+                      <CollapsibleSection
+                        title="Verify Script"
+                        configured={!!projectSettings.verifyScript}
+                        defaultOpen={!!projectSettings.verifyScript}
+                      >
+                        <p className="text-xs text-gray-500">Shell command(s) to run after review to confirm the code is correct. Non-zero exit withholds ready-for-merge.</p>
+                        <textarea
+                          value={projectSettings.verifyScript}
+                          onChange={(e) => setProjectSettings(s => ({ ...s, verifyScript: e.target.value }))}
+                          placeholder="pnpm test"
+                          rows={3}
+                          className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 font-mono"
+                        />
+                        <button
+                          onClick={async () => {
+                            if (!activeProjectId || generatingVerify) return;
+                            setGeneratingVerify(true);
+                            try {
+                              const result = await apiFetch<{ verifyScript: string }>(
+                                "/api/projects/generate-verify-script",
+                                {
+                                  method: "POST",
+                                  body: JSON.stringify({ projectId: activeProjectId }),
+                                },
+                              );
+                              if (result.verifyScript !== undefined) {
+                                setProjectSettings(s => ({ ...s, verifyScript: result.verifyScript }));
+                              }
+                            } catch {
+                              showToast("Failed to generate verify script", "error");
+                            } finally {
+                              setGeneratingVerify(false);
+                            }
+                          }}
+                          disabled={generatingVerify || !activeProjectId}
+                          className="text-xs text-brand-600 px-2 py-1.5 hover:text-brand-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                        >
+                          {generatingVerify ? (
+                            <>
+                              <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                              </svg>
+                              Generating...
+                            </>
+                          ) : (
+                            <>
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 3l1.5 3.5L10 8l-3.5 1.5L5 13l-1.5-3.5L0 8l3.5-1.5L5 3zM19 11l1 2.5L22.5 14l-2.5 1L19 17.5l-1-2.5L15.5 14l2.5-1L19 11z" />
+                              </svg>
+                              Suggest with AI
                             </>
                           )}
                         </button>
