@@ -1,5 +1,5 @@
 import { sessionMessages, sessions, workspaces } from "@agentic-kanban/shared/schema";
-import { eq, inArray, sql } from "drizzle-orm";
+import { desc, eq, inArray, sql } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 
 const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000; // every 6 hours
@@ -70,12 +70,14 @@ export async function capSessionMessages(database: Database): Promise<number> {
 
   let totalDeleted = 0;
   for (const row of overflowSessions) {
-    // Find the id threshold: keep the top MAX_MESSAGES_PER_ACTIVE_SESSION rows (highest ids)
+    // Find the oldest row that should be deleted: order descending (newest first),
+    // skip the MAX rows we want to keep, then take 1 — this is the newest row to delete.
+    // Delete everything with id <= that row's id to remove exactly the excess oldest rows.
     const thresholdRows = await database
       .select({ id: sessionMessages.id })
       .from(sessionMessages)
       .where(eq(sessionMessages.sessionId, row.sessionId))
-      .orderBy(sessionMessages.id)
+      .orderBy(desc(sessionMessages.id))
       .limit(1)
       .offset(MAX_MESSAGES_PER_ACTIVE_SESSION);
     if (thresholdRows.length === 0) continue;
