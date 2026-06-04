@@ -6,6 +6,7 @@ import { MCP_TOOL_DEFINITIONS, MCP_TOOL_CATEGORIES } from "@agentic-kanban/share
 import { CLAUDE_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
 import type { IssueTemplate } from "../hooks/useIssueTemplates.js";
+import { SlowRequestsPanel } from "./SlowRequestsPanel.js";
 
 interface SettingsPanelProps {
   onClose: () => void;
@@ -2665,6 +2666,9 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                     label="Permission Prompt Tool"
                     hint="Pass --permission-prompt-tool to Claude Code. Routes tool approval requests through the UI instead of the terminal."
                   />
+                  <div className="pt-4 border-t border-gray-100">
+                    <SlowRequestsPanel />
+                  </div>
                 </>
               )}
             </div>
