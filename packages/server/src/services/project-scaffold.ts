@@ -1,5 +1,6 @@
-import { existsSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { eq } from "drizzle-orm";
 import { agentSkills } from "@agentic-kanban/shared/schema";
 import { db, type Database } from "../db/index.js";
@@ -99,6 +100,41 @@ export function ensureStarterClaudeMd(repoPath: string): void {
     if (!existsSync(claudeMdPath)) writeFileSync(claudeMdPath, STARTER_CLAUDE_MD, "utf8");
   } catch {
     /* non-fatal */
+  }
+}
+
+/** Verify-gate runner source — the .js file that gets copied into .claude/hooks/. */
+const RUNNER_SRC = join(dirname(fileURLToPath(import.meta.url)), "../scaffold/verify-gate-runner.js");
+
+/**
+ * The stub config that lands in .claude/hooks/verify-gate.config.json.
+ * The agent (or human) fills in the command; the file's presence enables the gate.
+ * Ships with an empty command so the gate is opt-in — a missing/empty command is a no-op.
+ */
+const VERIFY_GATE_CONFIG_STUB = JSON.stringify({ command: "" }, null, 2) + "\n";
+
+/**
+ * Copy the generic verify-gate runner and its config stub into .claude/hooks/.
+ * - Never overwrites an existing runner (idempotent, clobber-safe).
+ * - Creates the hooks dir if absent.
+ * Non-fatal on any error.
+ */
+export function ensureVerifyGateRunner(repoPath: string): void {
+  try {
+    const hooksDir = join(repoPath, ".claude", "hooks");
+    if (!existsSync(hooksDir)) mkdirSync(hooksDir, { recursive: true });
+
+    const destRunner = join(hooksDir, "verify-gate-runner.js");
+    if (!existsSync(destRunner) && existsSync(RUNNER_SRC)) {
+      writeFileSync(destRunner, readFileSync(RUNNER_SRC, "utf8"), "utf8");
+    }
+
+    const destConfig = join(hooksDir, "verify-gate.config.json");
+    if (!existsSync(destConfig)) {
+      writeFileSync(destConfig, VERIFY_GATE_CONFIG_STUB, "utf8");
+    }
+  } catch {
+    /* non-fatal: scaffolding must never block registration */
   }
 }
 
