@@ -24,6 +24,8 @@ export interface BoardPreferences {
   showCardAgingHeatmap: boolean;
   agingWarmDays: number;
   agingHotDays: number;
+  recentMergesCollapsed: boolean;
+  handleRecentMergesCollapsedChange: (v: boolean) => Promise<void>;
   handleCardDensityChange: (v: CardDensity) => Promise<void>;
   handleHiddenColumnsChange: (statusName: string, hidden: boolean) => Promise<void>;
   handleShowPriorityLegendChange: (v: boolean) => Promise<void>;
@@ -54,6 +56,7 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
   const [showCardAgingHeatmap, setShowCardAgingHeatmap] = useState(false);
   const [agingWarmDays, setAgingWarmDays] = useState(3);
   const [agingHotDays, setAgingHotDays] = useState(7);
+  const [recentMergesCollapsed, setRecentMergesCollapsed] = useState(false);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
 
   const loadPreferences = useCallback(async () => {
@@ -70,6 +73,7 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
         const hot = parseInt(s[`board_aging_hot_days_${projectId}`] ?? "7", 10);
         setAgingWarmDays(isNaN(warm) ? 3 : warm);
         setAgingHotDays(isNaN(hot) ? 7 : hot);
+        setRecentMergesCollapsed(s[`board_recent_merges_collapsed_${projectId}`] === "true");
       }
       setAutoReview(s.auto_review !== "false");
       setAutoMerge(s.auto_merge !== "false");
@@ -185,6 +189,15 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
     }).catch(() => {});
   }, [projectId]);
 
+  const handleRecentMergesCollapsedChange = useCallback(async (v: boolean) => {
+    if (!projectId) return;
+    setRecentMergesCollapsed(v);
+    await apiFetch("/api/preferences/settings", {
+      method: "PUT",
+      body: JSON.stringify({ [`board_recent_merges_collapsed_${projectId}`]: String(v) }),
+    }).catch(() => {});
+  }, [projectId]);
+
   const handleHiddenColumnsChange = useCallback(async (statusName: string, hidden: boolean) => {
     if (!projectId) return;
     const next = new Set(hiddenColumns);
@@ -235,6 +248,8 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
     showCardAgingHeatmap,
     agingWarmDays,
     agingHotDays,
+    recentMergesCollapsed,
+    handleRecentMergesCollapsedChange,
     handleCardDensityChange,
     handleHiddenColumnsChange,
     handleShowPriorityLegendChange,
