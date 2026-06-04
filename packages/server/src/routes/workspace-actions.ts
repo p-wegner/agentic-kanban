@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
@@ -110,7 +111,17 @@ export function createWorkspaceActionsRoute(
   // GET /api/workspaces/:id/diff
   router.get("/:id/diff", async (c) => {
     const id = c.req.param("id");
-    return c.json(await workspaceService.getWorkspaceDiff(id));
+    const result = await workspaceService.getWorkspaceDiff(id);
+    const body = JSON.stringify(result);
+    const etag = `"${createHash("sha1").update(body).digest("hex").slice(0, 16)}"`;
+    const ifNoneMatch = c.req.header("if-none-match");
+    if (ifNoneMatch === etag) {
+      return new Response(null, { status: 304, headers: { ETag: etag } });
+    }
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "application/json", ETag: etag },
+    });
   });
 
   // POST /api/workspaces/:id/merge
