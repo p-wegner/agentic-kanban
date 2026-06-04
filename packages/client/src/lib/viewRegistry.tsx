@@ -36,7 +36,8 @@ export type ViewMode =
   | "capacity"
   | "constellation"
   | "momentum"
-  | "activity";
+  | "activity"
+  | "stale-work";
 
 export interface ViewDescriptor {
   /** Stable view id — matches BoardPage's `viewMode` state. */
@@ -219,6 +220,11 @@ const ICON = {
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
       <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h2M19 12h2M12 3v2M12 19v2" />
+    </svg>
+  ),
+  "stale-work": (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
     </svg>
   ),
 } as const;
@@ -492,6 +498,17 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteIcon: "⏱",
     paletteDescription: "Project-wide activity: status transitions, merges, sessions in reverse-chronological order",
     shortcut: "x",
+    group: "secondary",
+  },
+  {
+    id: "stale-work",
+    toolbarLabel: "Stale",
+    label: "Stale Work",
+    tooltip: "Stale Work — issues stuck in a column beyond a configurable threshold",
+    icon: ICON["stale-work"],
+    paletteIcon: "⏰",
+    paletteDescription: "List issues stuck in their current column with one-click nudge",
+    activeClass: "bg-amber-500 text-white",
     group: "secondary",
   },
 ];
