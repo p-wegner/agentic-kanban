@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
-import { issues } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
@@ -481,6 +481,74 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
       }
       throw err;
     }
+  });
+
+  // GET /api/issues/cfd?projectId=&days= — cumulative flow diagram data.
+  // Returns one entry per (date, status) pair: the count of issues that were
+  // in that status as of the end of that day (based on statusChangedAt or
+  // createdAt when no explicit status change is recorded).
+  router.get("/cfd", async (c) => {
+    const projectId = c.req.query("projectId");
+    if (!projectId) return c.json({ error: "projectId required" }, 400);
+    const daysRaw = parseInt(c.req.query("days") ?? "30", 10);
+    const days = Math.min(Math.max(Number.isNaN(daysRaw) ? 30 : daysRaw, 1), 365);
+
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - days);
+
+    // Single query: all issues for the project with status metadata.
+    const rows = await database
+      .select({
+        issueId: issues.id,
+        createdAt: issues.createdAt,
+        statusChangedAt: issues.statusChangedAt,
+        statusName: projectStatuses.name,
+        statusSortOrder: projectStatuses.sortOrder,
+      })
+      .from(issues)
+      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+      .where(eq(issues.projectId, projectId));
+
+    // Collect all statuses (sorted by board order).
+    const statusMeta = new Map<string, { sortOrder: number }>();
+    for (const r of rows) {
+      if (!statusMeta.has(r.statusName)) {
+        statusMeta.set(r.statusName, { sortOrder: r.statusSortOrder });
+      }
+    }
+    const statuses = [...statusMeta.entries()]
+      .sort((a, b) => a[1].sortOrder - b[1].sortOrder)
+      .map(([name]) => name);
+
+    // Build the date axis: one entry per day in [cutoffDate, today].
+    const today = new Date();
+    const dates: string[] = [];
+    for (let d = new Date(cutoffDate); d <= today; d.setDate(d.getDate() + 1)) {
+      dates.push(d.toISOString().slice(0, 10));
+    }
+
+    // For each day, count issues per status.
+    // An issue is counted in status X on day D if:
+    //   - its current status is X, AND
+    //   - it entered that status on or before D (statusChangedAt <= D, or
+    //     statusChangedAt is null and createdAt <= D).
+    const counts: { date: string; status: string; count: number }[] = [];
+    for (const date of dates) {
+      const byStatus = new Map<string, number>();
+      for (const s of statuses) byStatus.set(s, 0);
+      for (const r of rows) {
+        const enteredAt = r.statusChangedAt ?? r.createdAt;
+        const enteredDay = enteredAt.slice(0, 10);
+        if (enteredDay <= date) {
+          byStatus.set(r.statusName, (byStatus.get(r.statusName) ?? 0) + 1);
+        }
+      }
+      for (const [status, count] of byStatus) {
+        counts.push({ date, status, count });
+      }
+    }
+
+    return c.json({ statuses, counts });
   });
 
   // GET /api/issues/:id/showdown — get active showdown for this issue
