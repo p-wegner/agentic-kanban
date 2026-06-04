@@ -6,6 +6,7 @@ import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../middleware/ai-operation.js";
 import { checkIssueOverlap } from "../services/issue-ai.service.js";
 import { getFileContention } from "../services/file-contention.service.js";
+import { getProjectActivity } from "../services/project-activity.service.js";
 import { listBoardHealthEvents, getBoardHealthEvent, type BoardHealthEventType, type BoardHealthEventCategory } from "../repositories/board-health-events.repository.js";
 import { listMonitorCycles } from "../services/monitor-cycle-health.service.js";
 import { buildDependencyWavePlan, startNextDependencyWave } from "../services/dependency-wave.service.js";
@@ -349,6 +350,22 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
     const projectId = c.req.param("id");
     const result = await startNextDependencyWave(database, projectId, options);
     return c.json(result);
+  });
+
+  // GET /api/projects/:id/activity — project-wide activity feed (latest N events across all issues)
+  router.get("/:id/activity", async (c) => {
+    const projectId = c.req.param("id");
+    const rawLimit = c.req.query("limit");
+    const parsed = Number.parseInt(rawLimit ?? "", 10);
+    const limit = Number.isFinite(parsed) ? Math.min(200, Math.max(1, parsed)) : 100;
+    try {
+      const result = await getProjectActivity(projectId, database, limit);
+      return c.json(result);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("not found")) return c.json({ error: msg }, 404);
+      return c.json({ error: msg }, 500);
+    }
   });
 
   // GET /api/projects/:id/sprint-capacity
