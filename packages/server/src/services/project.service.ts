@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { execSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { resolve, sep, join } from "node:path";
-import { projects, projectStatuses, issues, workspaces, preferences, agentSkills } from "@agentic-kanban/shared/schema";
+import { projects, projectStatuses, issues, workspaces, preferences } from "@agentic-kanban/shared/schema";
+import { ensureAgentGitignore, ensureStarterClaudeMd, getDefaultSkillId } from "./project-scaffold.js";
 import { eq, and, notInArray, sql } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { branchExists, detectRepoInfo, getProjectGitStats } from "./git-info.service.js";
@@ -122,12 +123,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       throw new ProjectError(`Project "${existing.name}" is already registered at this path`, "CONFLICT");
     }
 
-    // Default skill so a freshly-registered project's worktrees aren't skill-less (#531).
-    // Mirrors the CLI registration path (project-registration.ts); the REST path (used by
-    // the UI) previously skipped this, so UI-registered projects got no onboarding skill.
-    const [navSkill] = await database.select({ id: agentSkills.id }).from(agentSkills)
-      .where(eq(agentSkills.name, "board-navigator")).limit(1);
-
+    // Default onboarding skill so a freshly-registered project's worktrees aren't skill-less (#531).
     const id = randomUUID();
     const result = await insertProject(id, {
       name,
@@ -137,15 +133,15 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       repoName: repoInfo.repoName,
       defaultBranch: repoInfo.defaultBranch,
       remoteUrl: repoInfo.remoteUrl,
-      defaultSkillId: navSkill?.id ?? null,
+      defaultSkillId: await getDefaultSkillId(database),
     }, database);
 
-    if (body.gitignoreTemplate && GITIGNORE_TEMPLATES[body.gitignoreTemplate]) {
-      const gitignorePath = join(repoInfo.repoPath, ".gitignore");
-      if (!existsSync(gitignorePath)) {
-        try { writeFileSync(gitignorePath, GITIGNORE_TEMPLATES[body.gitignoreTemplate], "utf8"); } catch { /* non-fatal */ }
-      }
-    }
+    // Scaffold (clobber-safe for imports): ensure the generic agent-artifact ignores are present
+    // (append-if-missing; seeds the chosen language template only when no .gitignore exists), and
+    // drop a starter CLAUDE.md when the repo has none — keeps agent scratch out of the project's
+    // history and gives agents a baseline working agreement.
+    ensureAgentGitignore(repoInfo.repoPath, body.gitignoreTemplate ? GITIGNORE_TEMPLATES[body.gitignoreTemplate] : undefined);
+    ensureStarterClaudeMd(repoInfo.repoPath);
 
     if (body.generateReadme) {
       const readmePath = join(repoInfo.repoPath, "README.md");
@@ -224,7 +220,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
 
     const projectName = body.name?.trim() || repoInfo.repoName;
     const id = randomUUID();
-    return insertProject(id, {
+    const result = await insertProject(id, {
       name: projectName,
       description: body.description,
       color: body.color,
@@ -232,7 +228,12 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       repoName: repoInfo.repoName,
       defaultBranch: repoInfo.defaultBranch,
       remoteUrl: repoInfo.remoteUrl,
+      defaultSkillId: await getDefaultSkillId(database),
     }, database);
+    // Scaffold the fresh repo with the generic agent-artifact ignores + a starter CLAUDE.md.
+    ensureAgentGitignore(repoInfo.repoPath);
+    ensureStarterClaudeMd(repoInfo.repoPath);
+    return result;
   }
 
   async function updateProject(
