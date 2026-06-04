@@ -397,6 +397,9 @@ export function IssueDetailPanel({
   const [availableIssues, setAvailableIssues] = useState<IssueWithStatus[]>([]);
   const [touchedFiles, setTouchedFiles] = useState<{ path: string; reason: string; confidence: "high" | "medium" | "low" }[] | null>(null);
   const [analyzingTouchedFiles, setAnalyzingTouchedFiles] = useState(false);
+  const [relatedIssues, setRelatedIssues] = useState<{ id: string; issueNumber: number | null; title: string; sharedFileCount: number }[] | null>(null);
+  const [relatedIssuesLoading, setRelatedIssuesLoading] = useState(false);
+  const [showRelatedIssues, setShowRelatedIssues] = useState(false);
   const [showFollowUp, setShowFollowUp] = useState(false);
   const [followUpTitle, setFollowUpTitle] = useState("");
   const [followUpCreating, setFollowUpCreating] = useState(false);
@@ -490,6 +493,16 @@ export function IssueDetailPanel({
         if (tf.files.length > 0) setTouchedFiles(tf.files);
       } catch {
         // No cached prediction yet — that's fine
+      }
+      // Load related issues (non-blocking, best-effort)
+      setRelatedIssuesLoading(true);
+      try {
+        const ri = await apiFetch<{ related: { id: string; issueNumber: number | null; title: string; sharedFileCount: number }[] }>(`/api/issues/${issue.id}/related-issues`);
+        setRelatedIssues(ri.related);
+      } catch {
+        setRelatedIssues([]);
+      } finally {
+        setRelatedIssuesLoading(false);
       }
     }
     loadData();
@@ -2327,6 +2340,54 @@ export function IssueDetailPanel({
             )}
             {touchedFiles && touchedFiles.length === 0 && (
               <p className="text-xs text-gray-400 dark:text-gray-500">No files predicted.</p>
+            )}
+          </div>
+
+          {/* Related Issues section */}
+          <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
+            <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                  Related Issues
+                </label>
+                {!relatedIssuesLoading && relatedIssues && relatedIssues.length > 0 && (
+                  <span className="inline-flex items-center text-xs font-medium px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">
+                    {relatedIssues.length}
+                  </span>
+                )}
+              </div>
+              {(relatedIssues && relatedIssues.length > 0) && (
+                <button
+                  onClick={() => setShowRelatedIssues((v) => !v)}
+                  className="text-xs text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
+                >
+                  {showRelatedIssues ? "Hide" : "Show"}
+                </button>
+              )}
+            </div>
+            {relatedIssuesLoading && (
+              <p className="text-xs text-gray-400 dark:text-gray-500">Loading…</p>
+            )}
+            {!relatedIssuesLoading && relatedIssues && relatedIssues.length === 0 && (
+              <p className="text-xs text-gray-400 dark:text-gray-500">No related issues found.</p>
+            )}
+            {!relatedIssuesLoading && relatedIssues && relatedIssues.length > 0 && showRelatedIssues && (
+              <ul className="space-y-1">
+                {relatedIssues.map((ri) => (
+                  <li key={ri.id} className="flex items-center justify-between gap-2 text-xs">
+                    <button
+                      onClick={() => onNavigateToIssue?.(ri.id)}
+                      className="text-left text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300 hover:underline truncate"
+                      title={ri.title}
+                    >
+                      {ri.issueNumber != null ? `#${ri.issueNumber} ` : ""}{ri.title}
+                    </button>
+                    <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 whitespace-nowrap">
+                      {ri.sharedFileCount} shared {ri.sharedFileCount === 1 ? "file" : "files"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
 

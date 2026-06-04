@@ -215,6 +215,40 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     return c.json(await wrapAiOperation("analyze-touched-files", () => analyzeTouchedFiles(issueId, database, body?.refresh === true)));
   });
 
+  // GET /api/issues/:id/related-issues — find other issues that share touched files with this one
+  router.get("/:id/related-issues", async (c) => {
+    const issueId = c.req.param("id");
+    const rows = await database.select({ touchedFilesJson: issues.touchedFilesJson, projectId: issues.projectId }).from(issues).where(eq(issues.id, issueId)).limit(1);
+    if (rows.length === 0) return c.json({ error: "Issue not found" }, 404);
+    const json = rows[0].touchedFilesJson;
+    if (!json) return c.json({ related: [] });
+    let myFiles: { path: string }[] = [];
+    try { myFiles = JSON.parse(json); } catch { return c.json({ related: [] }); }
+    const myPaths = new Set(myFiles.map((f) => f.path));
+    if (myPaths.size === 0) return c.json({ related: [] });
+
+    const candidates = await database.select({
+      id: issues.id,
+      issueNumber: issues.issueNumber,
+      title: issues.title,
+      touchedFilesJson: issues.touchedFilesJson,
+    }).from(issues).where(and(eq(issues.projectId, rows[0].projectId)));
+
+    const related: { id: string; issueNumber: number | null; title: string; sharedFileCount: number }[] = [];
+    for (const candidate of candidates) {
+      if (candidate.id === issueId) continue;
+      if (!candidate.touchedFilesJson) continue;
+      let candidateFiles: { path: string }[] = [];
+      try { candidateFiles = JSON.parse(candidate.touchedFilesJson); } catch { continue; }
+      const sharedCount = candidateFiles.filter((f) => myPaths.has(f.path)).length;
+      if (sharedCount > 0) {
+        related.push({ id: candidate.id, issueNumber: candidate.issueNumber, title: candidate.title, sharedFileCount: sharedCount });
+      }
+    }
+    related.sort((a, b) => b.sharedFileCount - a.sharedFileCount);
+    return c.json({ related });
+  });
+
 
   // POST /api/issues/:id/preflight — AI ticket sanity check.
   // Optional `clarifications` (answered preflight questions): when present, they are
