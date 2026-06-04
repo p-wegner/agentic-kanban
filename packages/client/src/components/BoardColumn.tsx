@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { IssueCard, type ProjectTag, type QuickUpdateCallbacks } from "./IssueCard.js";
@@ -207,6 +207,15 @@ export function BoardColumn({
         return idx >= 0 && idx < sorted.length - 1 ? sorted[idx + 1] : null;
       })()
     : null;
+
+  // Hoisted once per column (instead of rebuilt inline for every card) so the prop
+  // identity is stable across renders — required for the IssueCard memo to skip
+  // re-rendering on live-session ticks. Only consumed by the card's on-demand
+  // "move to status" submenu.
+  const statusOptions = useMemo(
+    () => allColumns?.map((c) => ({ id: c.id, name: c.name })),
+    [allColumns],
+  );
 
   const updateScrollState = useCallback(() => {
     const el = scrollRef.current;
@@ -441,7 +450,7 @@ export function BoardColumn({
                     tags={issue.tags}
                     allProjectTags={allProjectTags}
                     quickUpdate={quickUpdate}
-                    allStatuses={allColumns?.map((c) => ({ id: c.id, name: c.name }))}
+                    allStatuses={statusOptions}
                     onDeleteIssue={onDeleteIssue}
                     searchQuery={searchQuery}
                     liveActivity={sessionActivity?.[issue.id]}
@@ -500,7 +509,7 @@ export function BoardColumn({
                         tags={issue.tags}
                         allProjectTags={allProjectTags}
                         quickUpdate={quickUpdate}
-                        allStatuses={allColumns?.map((c) => ({ id: c.id, name: c.name }))}
+                        allStatuses={statusOptions}
                         onDeleteIssue={onDeleteIssue}
                         searchQuery={searchQuery}
                         liveActivity={sessionActivity?.[issue.id]}
@@ -553,7 +562,7 @@ export function BoardColumn({
                       tags={issue.tags}
                       allProjectTags={allProjectTags}
                       quickUpdate={quickUpdate}
-                      allStatuses={allColumns?.map((c) => ({ id: c.id, name: c.name }))}
+                      allStatuses={statusOptions}
                       onDeleteIssue={onDeleteIssue}
                       searchQuery={searchQuery}
                       liveActivity={sessionActivity?.[issue.id]}
