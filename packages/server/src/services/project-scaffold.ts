@@ -355,8 +355,6 @@ export function ensureHookScaffold(repoPath: string, options: HookScaffoldOption
 // Verify-gate runner scaffold
 // ---------------------------------------------------------------------------
 
-const RUNNER_SRC = join(dirname(fileURLToPath(import.meta.url)), "../scaffold/verify-gate-runner.js");
-
 const VERIFY_GATE_CONFIG_STUB = JSON.stringify({ command: "" }, null, 2) + "\n";
 
 /**
@@ -364,6 +362,11 @@ const VERIFY_GATE_CONFIG_STUB = JSON.stringify({ command: "" }, null, 2) + "\n";
  * - Never overwrites an existing runner (idempotent, clobber-safe).
  * - Creates the hooks dir if absent.
  * Non-fatal on any error.
+ *
+ * The runner source is resolved via resolveHookSource (same walk-up pattern
+ * used by ensureHookScaffold) so this works in both dev (src/) and production
+ * (dist/ bundles) without relying on import.meta.url-relative paths that
+ * tsc does not copy to dist/.
  */
 export function ensureVerifyGateRunner(repoPath: string): void {
   try {
@@ -371,8 +374,9 @@ export function ensureVerifyGateRunner(repoPath: string): void {
     if (!existsSync(hooksDir)) mkdirSync(hooksDir, { recursive: true });
 
     const destRunner = join(hooksDir, "verify-gate-runner.js");
-    if (!existsSync(destRunner) && existsSync(RUNNER_SRC)) {
-      writeFileSync(destRunner, readFileSync(RUNNER_SRC, "utf8"), "utf8");
+    if (!existsSync(destRunner)) {
+      const src = resolveHookSource("verify-gate-runner.js");
+      if (src) writeFileSync(destRunner, src, "utf8");
     }
 
     const destConfig = join(hooksDir, "verify-gate.config.json");
