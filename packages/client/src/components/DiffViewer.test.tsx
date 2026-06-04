@@ -109,6 +109,40 @@ describe("DiffViewer", () => {
     expect(html).not.toContain("unchanged line");
   });
 
+  it("syntax-highlights TypeScript keywords in diff lines", () => {
+    const tsDiff = `diff --git a/src/foo.ts b/src/foo.ts
+--- a/src/foo.ts
++++ b/src/foo.ts
+@@ -1,2 +1,2 @@
+-const x = 1;
++const x = 99;
+`;
+    const html = renderToStaticMarkup(
+      <DiffViewer diff={tsDiff} stats={{ filesChanged: 1, insertions: 1, deletions: 1 }} />
+    );
+    // keyword "const" should be wrapped in a colored span
+    expect(html).toContain("<span");
+    // The background tints must still be present (highlighting layers on top)
+    expect(html).toContain("bg-green-50");
+    expect(html).toContain("bg-red-50");
+  });
+
+  it("falls back to plain text for unknown extensions", () => {
+    const binaryDiff = `diff --git a/src/foo.bin b/src/foo.bin
+--- a/src/foo.bin
++++ b/src/foo.bin
+@@ -1 +1 @@
+-old binary data
++new binary data
+`;
+    const html = renderToStaticMarkup(
+      <DiffViewer diff={binaryDiff} stats={{ filesChanged: 1, insertions: 1, deletions: 1 }} />
+    );
+    // Should render without error and still show background tints
+    expect(html).toContain("bg-green-50");
+    expect(html).toContain("bg-red-50");
+  });
+
   it("renders expand/collapse toggle when multiple files present", () => {
     const multiFileDiff = `diff --git a/src/a.ts b/src/a.ts
 --- a/src/a.ts
