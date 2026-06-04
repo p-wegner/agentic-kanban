@@ -895,6 +895,104 @@ describe("Board API", () => {
     expect(issue.workspaceSummary.main).toBeDefined();
   });
 
+  it("GET /api/projects/:id/board omits lastAssistantMessage/lastTool for closed workspaces (payload slim)", async () => {
+    const p = await createProjectDirectly(database, { name: "Closed Summary Slim Project" });
+    const inReviewStatusId = await createStatusDirectly(database, p, "In Review", 1);
+    const inProgressStatusId = await createStatusDirectly(database, p, "In Progress", 0);
+    const now = new Date().toISOString();
+
+    // Closed (merged) workspace whose session has an assistant message + tool use.
+    // Lives on a non-archived issue so this assertion stays valid regardless of any
+    // archive lazy-loading: the behavior under test keys off workspace.status === "closed".
+    const closedIssueId = randomUUID();
+    const closedWsId = randomUUID();
+    const closedSessionId = randomUUID();
+    await database.insert(schema.issues).values({
+      id: closedIssueId, projectId: p, statusId: inReviewStatusId, issueNumber: 901,
+      title: "Closed work", priority: "medium", issueType: "bug", sortOrder: 0, createdAt: now, updatedAt: now,
+    });
+    await database.insert(schema.workspaces).values({
+      id: closedWsId, issueId: closedIssueId, branch: "feature/closed-slim", status: "closed", createdAt: now, updatedAt: now,
+    });
+    await database.insert(schema.sessions).values({
+      id: closedSessionId, workspaceId: closedWsId, executor: "claude", status: "stopped", startedAt: now, endedAt: now, triggerType: "initial",
+    });
+    await database.insert(schema.sessionMessages).values({
+      sessionId: closedSessionId, type: "stdout",
+      data: JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash" }, { type: "text", text: "This should not ship on the board." }] } }),
+      createdAt: now,
+    });
+
+    // Archived (Done) issue with an IDLE (non-closed) main workspace — P1: archived
+    // issues are slimmed regardless of workspace status (their card is a CompletedCard).
+    const doneStatusId = await createStatusDirectly(database, p, "Done", 2);
+    const doneIssueId = randomUUID();
+    const doneWsId = randomUUID();
+    const doneSessionId = randomUUID();
+    await database.insert(schema.issues).values({
+      id: doneIssueId, projectId: p, statusId: doneStatusId, issueNumber: 903,
+      title: "Archived idle work", priority: "medium", issueType: "bug", sortOrder: 0, createdAt: now, updatedAt: now,
+    });
+    await database.insert(schema.workspaces).values({
+      id: doneWsId, issueId: doneIssueId, branch: "feature/done-idle-slim", status: "idle", createdAt: now, updatedAt: now,
+    });
+    await database.insert(schema.sessions).values({
+      id: doneSessionId, workspaceId: doneWsId, executor: "claude", status: "stopped", startedAt: now, endedAt: now, triggerType: "initial",
+    });
+    await database.insert(schema.sessionMessages).values({
+      sessionId: doneSessionId, type: "stdout",
+      data: JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "Archived idle message that must not ship." }] } }),
+      createdAt: now,
+    });
+
+    // Active workspace (control) — its live assistant message MUST still be surfaced.
+    const activeIssueId = randomUUID();
+    const activeWsId = randomUUID();
+    const activeSessionId = randomUUID();
+    await database.insert(schema.issues).values({
+      id: activeIssueId, projectId: p, statusId: inProgressStatusId, issueNumber: 902,
+      title: "Active work", priority: "medium", issueType: "bug", sortOrder: 0, createdAt: now, updatedAt: now,
+    });
+    await database.insert(schema.workspaces).values({
+      id: activeWsId, issueId: activeIssueId, branch: "feature/active-slim", status: "active", createdAt: now, updatedAt: now,
+    });
+    await database.insert(schema.sessions).values({
+      id: activeSessionId, workspaceId: activeWsId, executor: "claude", status: "running", startedAt: now, triggerType: "initial",
+    });
+    await database.insert(schema.sessionMessages).values({
+      sessionId: activeSessionId, type: "stdout",
+      data: JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "Live agent message." }] } }),
+      createdAt: now,
+    });
+
+    const res = await app.request(`/api/projects/${p}/board`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    const allIssues = body.flatMap((c: any) => c.issues);
+    const closed = allIssues.find((i: any) => i.id === closedIssueId);
+    const doneIdle = allIssues.find((i: any) => i.id === doneIssueId);
+    const active = allIssues.find((i: any) => i.id === activeIssueId);
+
+    // Closed workspace summary is still present (counts/branch/status intact)...
+    expect(closed.workspaceSummary.main).toBeDefined();
+    expect(closed.workspaceSummary.main.status).toBe("closed");
+    // ...but the heavy assistant-message text + lastTool are omitted to slim the payload.
+    expect(closed.workspaceSummary.main.lastAssistantMessage ?? null).toBeNull();
+    expect(closed.workspaceSummary.main.lastTool ?? null).toBeNull();
+    // ...while the merged/closed-badge fields are preserved (must NOT be swept into the gate).
+    expect(closed.workspaceSummary.main.sessionStatus).toBe("stopped");
+    expect(closed.workspaceSummary.main.lastSessionTriggerType).toBe("initial");
+    expect(closed.workspaceSummary.main.lastSessionAt).toBeTruthy();
+
+    // Archived (Done) idle workspace is also slimmed even though it is not "closed".
+    expect(doneIdle.workspaceSummary.main).toBeDefined();
+    expect(doneIdle.workspaceSummary.main.status).toBe("idle");
+    expect(doneIdle.workspaceSummary.main.lastAssistantMessage ?? null).toBeNull();
+
+    // The active workspace still surfaces its live assistant message.
+    expect(active.workspaceSummary.main.lastAssistantMessage).toBe("Live agent message.");
+  });
+
   it("GET /api/issues tolerates Done issue with null/stale workspace summary data (AK-324)", async () => {
     const p = await createProjectDirectly(database, { name: "AK-324 Issues Null Summary Project" });
     const doneStatusId = await createStatusDirectly(database, p, "Done", 1);
