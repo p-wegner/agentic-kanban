@@ -139,21 +139,18 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
 
   const handleHiddenColumnsChange = useCallback(async (statusName: string, hidden: boolean) => {
     if (!projectId) return;
-    setHiddenColumns((prev) => {
-      const next = new Set(prev);
-      if (hidden) {
-        next.add(statusName);
-      } else {
-        next.delete(statusName);
-      }
-      const value = [...next].join(",");
-      apiFetch("/api/preferences/settings", {
-        method: "PUT",
-        body: JSON.stringify({ [`board_hidden_columns_${projectId}`]: value }),
-      }).catch(() => {});
-      return next;
-    });
-  }, [projectId]);
+    const next = new Set(hiddenColumns);
+    if (hidden) {
+      next.add(statusName);
+    } else {
+      next.delete(statusName);
+    }
+    setHiddenColumns(next);
+    await apiFetch("/api/preferences/settings", {
+      method: "PUT",
+      body: JSON.stringify({ [`board_hidden_columns_${projectId}`]: [...next].join(",") }),
+    }).catch(() => {});
+  }, [projectId, hiddenColumns]);
 
   const handleSetWipLimit = useCallback(async (statusId: string, limit: number | null) => {
     setWipLimits((prev) => {
