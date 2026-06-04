@@ -4,6 +4,9 @@ import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { resolve, sep, join } from "node:path";
 import { projects, projectStatuses, issues, workspaces, preferences } from "@agentic-kanban/shared/schema";
 import { ensureAgentGitignore, ensureStarterClaudeMd, ensureVerifyGateRunner, getDefaultSkillId } from "./project-scaffold.js";
+import { isSkillsDirAbsentOrEmpty, writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
+import { listAgentSkills } from "../repositories/agent-skill.repository.js";
+import { getPreference } from "../repositories/preferences.repository.js";
 import { eq, and, notInArray, sql } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { branchExists, detectRepoInfo, getProjectGitStats } from "./git-info.service.js";
@@ -104,6 +107,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     color?: string;
     gitignoreTemplate?: string;
     generateReadme?: boolean;
+    exportSkillsOnRegistration?: boolean;
   }) {
     if (!body.repoPath) {
       throw new ProjectError("repoPath is required", "BAD_REQUEST");
@@ -148,6 +152,24 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       const readmePath = join(repoInfo.repoPath, "README.md");
       if (!existsSync(readmePath)) {
         try { writeFileSync(readmePath, `# ${name}\n`, "utf8"); } catch { /* non-fatal */ }
+      }
+    }
+
+    const shouldExport = body.exportSkillsOnRegistration ??
+      ((await getPreference("export_skills_on_registration", database)) === "true");
+    if (shouldExport) {
+      const isEmpty = await isSkillsDirAbsentOrEmpty(repoInfo.repoPath);
+      if (isEmpty) {
+        try {
+          const builtinSkills = await listAgentSkills(undefined, false, database);
+          for (const skill of builtinSkills) {
+            if (skill.isBuiltin && !/[/\\]|\.\./.test(skill.name)) {
+              await writeAgentSkillFile(repoInfo.repoPath, skill);
+            }
+          }
+        } catch {
+          // non-fatal — export failure should not block registration
+        }
       }
     }
 

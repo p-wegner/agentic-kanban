@@ -164,6 +164,27 @@ export async function copySkillToWorktree(repoPath: string, skillName: string, w
   }
 }
 
+/**
+ * Returns true when the .claude/skills directory does not exist OR is empty
+ * (no subdirectories with a SKILL.md). Safe to export builtin skills only in
+ * this case — any existing custom skill means we leave the directory alone.
+ */
+export async function isSkillsDirAbsentOrEmpty(repoPath: string): Promise<boolean> {
+  const skillsDir = join(repoPath, ".claude", "skills");
+  const entries = await readdir(skillsDir, { withFileTypes: true }).catch(() => null);
+  if (!entries) return true;
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    try {
+      await access(join(skillsDir, entry.name, "SKILL.md"));
+      return false;
+    } catch {
+      // no SKILL.md in this subdir — keep looking
+    }
+  }
+  return true;
+}
+
 function buildSkillMarkdown(skill: AgentSkillFile) {
   return [
     "---",
