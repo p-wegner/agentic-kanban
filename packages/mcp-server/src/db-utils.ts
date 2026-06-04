@@ -1,4 +1,7 @@
 import { eq, sql } from "drizzle-orm";
+import { readFileSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ToolDb } from "./tools/deps.js";
 import type * as schemaModule from "@agentic-kanban/shared/schema";
 
@@ -7,6 +10,21 @@ export type McpResponse = { content: Array<{ type: "text"; text: string }> };
 /** Standardized MCP error response factory. */
 export function mcpError(message: string): McpResponse {
   return { content: [{ type: "text" as const, text: message }] };
+}
+
+/**
+ * Read stdout content from the per-session .out file, or null when absent.
+ * Mirrors the server-side readSessionStdoutFile — kept in sync manually.
+ */
+export function readSessionStdoutFile(sessionId: string): string | null {
+  const outPath = join(tmpdir(), `kanban-session-${sessionId}.out`);
+  if (!existsSync(outPath)) return null;
+  try {
+    const content = readFileSync(outPath, "utf-8");
+    return content || null;
+  } catch {
+    return null;
+  }
 }
 
 /**

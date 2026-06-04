@@ -3,6 +3,7 @@ import { eq, inArray, and, desc } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { isAnalyticsNoise } from "./session-filter.js";
 import { getChangedFileNames } from "./git.service.js";
+import { readSessionStdoutFile } from "../repositories/session.repository.js";
 
 export type RiskLevel = "high" | "medium" | "low" | "none";
 
@@ -315,14 +316,29 @@ export async function getWorkspaceRisk(
       .filter((id): id is string => !!id);
 
     if (runningSessionIds.length > 0) {
-      const msgRows = await database
-        .select({ sessionId: sessionMessages.sessionId, data: sessionMessages.data })
-        .from(sessionMessages)
-        .where(inArray(sessionMessages.sessionId, runningSessionIds));
+      // Build per-session data map: prefer .out file, fall back to DB rows
+      const sessionDataMap = new Map<string, string>();
+      for (const sid of runningSessionIds) {
+        const fileContent = readSessionStdoutFile(sid);
+        if (fileContent) {
+          sessionDataMap.set(sid, fileContent);
+        }
+      }
+      // For sessions without a .out file, fall back to DB
+      const missingFromFile = runningSessionIds.filter((sid) => !sessionDataMap.has(sid));
+      if (missingFromFile.length > 0) {
+        const dbRows = await database
+          .select({ sessionId: sessionMessages.sessionId, data: sessionMessages.data })
+          .from(sessionMessages)
+          .where(inArray(sessionMessages.sessionId, missingFromFile));
+        for (const row of dbRows) {
+          if (!row.data) continue;
+          sessionDataMap.set(row.sessionId, (sessionDataMap.get(row.sessionId) ?? "") + row.data);
+        }
+      }
 
-      for (const msg of msgRows) {
-        if (!msg.data) continue;
-        for (const line of msg.data.split("\n")) {
+      for (const [sid, data] of sessionDataMap) {
+        for (const line of data.split("\n")) {
           const trimmed = line.trim();
           if (!trimmed) continue;
           try {
@@ -331,7 +347,7 @@ export async function getWorkspaceRisk(
               const content = ((obj.message as { content?: unknown[] })?.content ?? []) as { type: string; name?: string }[];
               for (const block of content) {
                 if (block.type === "tool_use" && block.name === "ask_followup_question") {
-                  const wsId = runningWsIds.find((id) => latestSessionByWs.get(id)?.id === msg.sessionId);
+                  const wsId = runningWsIds.find((id) => latestSessionByWs.get(id)?.id === sid);
                   if (wsId) pendingQuestionsByWs.set(wsId, (pendingQuestionsByWs.get(wsId) ?? 0) + 1);
                 }
               }

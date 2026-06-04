@@ -2,6 +2,7 @@ import { sessionMessages } from "@agentic-kanban/shared/schema";
 import { desc, eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { MonitorActionName } from "../services/monitor-nudge.js";
+import { readSessionStdoutFile } from "../repositories/session.repository.js";
 
 export type MonitorAction = {
   at: string;
@@ -30,9 +31,33 @@ export function logMonitorAction(
 }
 
 export async function getRecentAgentExcerpts(sessionId: string, count = 3): Promise<string[]> {
+  const excerpts: string[] = [];
+
+  // Try .out file first (reversed for newest-first traversal)
+  const fileContent = readSessionStdoutFile(sessionId);
+  if (fileContent !== null) {
+    const lines = fileContent.split("\n").reverse();
+    for (const line of lines) {
+      if (excerpts.length >= count) break;
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      let obj: Record<string, unknown>;
+      try { obj = JSON.parse(trimmed); } catch { continue; }
+      if (obj.type !== "assistant") continue;
+      const content = ((obj.message as Record<string, unknown>)?.content as Array<Record<string, unknown>>) || [];
+      for (const block of content) {
+        if (block.type === "text" && block.text) {
+          excerpts.push((block.text as string).slice(0, 500));
+          if (excerpts.length >= count) break;
+        }
+      }
+    }
+    return excerpts;
+  }
+
+  // Fall back to DB for historical sessions
   const rows = await db.select({ data: sessionMessages.data }).from(sessionMessages)
     .where(eq(sessionMessages.sessionId, sessionId)).orderBy(desc(sessionMessages.id)).limit(50);
-  const excerpts: string[] = [];
   for (const row of rows) {
     if (!row.data || excerpts.length >= count) break;
     const lines = row.data.split("\n").reverse();

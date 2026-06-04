@@ -12,6 +12,7 @@ import {
   sessions,
   sessionMessages,
 } from "@agentic-kanban/shared/schema";
+import { readSessionStdoutFile } from "../repositories/session.repository.js";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
@@ -480,6 +481,11 @@ export function createWorkflowForkService(deps: {
     const sess = await database.select({ id: sessions.id }).from(sessions).where(eq(sessions.workspaceId, workspaceId)).orderBy(sessions.startedAt);
     if (sess.length === 0) return null;
     const lastSession = sess[sess.length - 1];
+    // Prefer .out file; fall back to DB for historical sessions
+    const fileContent = readSessionStdoutFile(lastSession.id);
+    if (fileContent !== null) {
+      return fileContent.length > 1500 ? fileContent.slice(-1500) : fileContent;
+    }
     const msgs = await database
       .select({ data: sessionMessages.data })
       .from(sessionMessages)

@@ -1,8 +1,9 @@
 import { eq } from "drizzle-orm";
-import { issues, sessionMessages, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import { detectConflicts, getDiff, getWorkingTreeDiff } from "./git.service.js";
 import { getWorkspaceById, resolveProjectRepo } from "../repositories/workspace.repository.js";
+import { getSessionMessageRows } from "../repositories/session.repository.js";
 
 export interface ScorecardDimension {
   name: string;
@@ -152,11 +153,8 @@ export async function computeScorecard(workspaceId: string, database: Database):
     const reviewSession = [...reviewSessions].reverse().find((session) => session.exitCode !== null && session.triggerType === "review")
       ?? [...reviewSessions].reverse().find((session) => session.exitCode !== null);
     if (reviewSession) {
-      const msgRows = await database
-        .select({ data: sessionMessages.data })
-        .from(sessionMessages)
-        .where(eq(sessionMessages.sessionId, reviewSession.id));
-      const reviewText = msgRows.map((msg) => msg.data ?? "").join(" ").toLowerCase();
+      const msgRows = await getSessionMessageRows(reviewSession.id, database);
+      const reviewText = msgRows.map((row) => row.data ?? "").join(" ").toLowerCase();
       const criticalIssues = (reviewText.match(/\bcritical\b|\bmajor issue\b|\bsecurity\b|\bbreaking\b/g) ?? []).length;
       if (criticalIssues === 0) {
         skillScore = 10;

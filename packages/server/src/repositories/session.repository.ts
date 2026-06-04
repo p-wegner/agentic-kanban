@@ -1,9 +1,66 @@
 import { sessions, sessionMessages, diffComments, agentSkills } from "@agentic-kanban/shared/schema";
 import { eq, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
+import { readFileSync, existsSync } from "node:fs";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import type { AgentOutputMessage, SessionSummary } from "@agentic-kanban/shared";
+import { sessionOutputPath } from "../services/agent.service.js";
+
+/**
+ * Read stdout content from the per-session .out file, or null when absent.
+ */
+export function readSessionStdoutFile(sessionId: string): string | null {
+  const outPath = sessionOutputPath(sessionId);
+  if (!existsSync(outPath)) return null;
+  try {
+    const content = readFileSync(outPath, "utf-8");
+    return content || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read stdout messages from the per-session .out file. Returns an array of
+ * AgentOutputMessage rows (type="stdout") reconstructed from the raw chunks,
+ * or an empty array when the file is absent (e.g. old sessions before this change).
+ */
+function readStdoutFromFile(sessionId: string): AgentOutputMessage[] {
+  const content = readSessionStdoutFile(sessionId);
+  if (!content) return [];
+  return [{ type: "stdout", sessionId, data: content }];
+}
+
+/**
+ * Get session message rows for a single session, with .out file fallback for stdout.
+ * When the .out file exists, stdout is served from it; non-stdout rows come from DB.
+ * Falls back to DB-only for historical sessions without a .out file.
+ * Returns rows in { type, data } shape for use with parseSessionSummary.
+ */
+export async function getSessionMessageRows(
+  sessionId: string,
+  database: Database = db,
+): Promise<Array<{ type: string; data: string | null }>> {
+  const fileContent = readSessionStdoutFile(sessionId);
+  if (fileContent !== null) {
+    // File present: stdout from file, non-stdout from DB
+    const dbRows = await database
+      .select({ type: sessionMessages.type, data: sessionMessages.data })
+      .from(sessionMessages)
+      .where(eq(sessionMessages.sessionId, sessionId))
+      .orderBy(sessionMessages.id);
+    const nonStdout = dbRows.filter((r) => r.type !== "stdout");
+    return [{ type: "stdout", data: fileContent }, ...nonStdout];
+  }
+  // No file: historical session, read all from DB
+  const dbRows = await database
+    .select({ type: sessionMessages.type, data: sessionMessages.data })
+    .from(sessionMessages)
+    .where(eq(sessionMessages.sessionId, sessionId))
+    .orderBy(sessionMessages.id);
+  return dbRows;
+}
 
 export async function getSessionWorkspaceId(
   sessionId: string,
@@ -162,19 +219,44 @@ export async function getSessionOutput(
     .limit(1);
   if (sessionRows.length === 0) return null;
 
-  const rows = await database
-    .select()
-    .from(sessionMessages)
-    .where(eq(sessionMessages.sessionId, sessionId))
-    .orderBy(sessionMessages.id);
+  // Stdout is served from the per-session .out file. Non-stdout messages
+  // (exit, stderr) remain in the DB. For historical sessions whose .out
+  // file is gone, fall back to DB rows.
+  const stdoutMessages = readStdoutFromFile(sessionId);
 
-  const messages: AgentOutputMessage[] = rows.map((row) => ({
-    type: row.type as AgentOutputMessage["type"],
-    sessionId: row.sessionId,
-    data: row.data ?? undefined,
-    exitCode: row.exitCode != null ? Number(row.exitCode) : undefined,
-  }));
+  let nonStdoutRows: AgentOutputMessage[] = [];
+  if (stdoutMessages.length > 0) {
+    // File present: only fetch non-stdout rows from DB
+    const rows = await database
+      .select()
+      .from(sessionMessages)
+      .where(eq(sessionMessages.sessionId, sessionId))
+      .orderBy(sessionMessages.id);
+    nonStdoutRows = rows
+      .filter((r) => r.type !== "stdout")
+      .map((row) => ({
+        type: row.type as AgentOutputMessage["type"],
+        sessionId: row.sessionId,
+        data: row.data ?? undefined,
+        exitCode: row.exitCode != null ? Number(row.exitCode) : undefined,
+      }));
+  } else {
+    // No file (old session or cleaned up): read all rows from DB
+    const rows = await database
+      .select()
+      .from(sessionMessages)
+      .where(eq(sessionMessages.sessionId, sessionId))
+      .orderBy(sessionMessages.id);
+    nonStdoutRows = rows.map((row) => ({
+      type: row.type as AgentOutputMessage["type"],
+      sessionId: row.sessionId,
+      data: row.data ?? undefined,
+      exitCode: row.exitCode != null ? Number(row.exitCode) : undefined,
+    }));
+  }
 
+  // Interleave: stdout first (the stream), then exit/stderr at the end
+  const messages: AgentOutputMessage[] = [...stdoutMessages, ...nonStdoutRows];
   return { messages };
 }
 
@@ -226,11 +308,19 @@ export async function getSessionSummaryData(
 
   const session = sessionRows[0];
 
-  const rows = await database
-    .select()
-    .from(sessionMessages)
-    .where(eq(sessionMessages.sessionId, sessionId))
-    .orderBy(sessionMessages.id);
+  // Use stdout from .out file if available; fall back to DB for historical sessions
+  const stdoutMessages = readStdoutFromFile(sessionId);
+  let rows: Array<{ type: string; data: string | null }>;
+  if (stdoutMessages.length > 0) {
+    rows = stdoutMessages.map((m) => ({ type: m.type, data: m.data ?? null }));
+  } else {
+    const dbRows = await database
+      .select()
+      .from(sessionMessages)
+      .where(eq(sessionMessages.sessionId, sessionId))
+      .orderBy(sessionMessages.id);
+    rows = dbRows.map((r) => ({ type: r.type, data: r.data }));
+  }
 
   let stats: Record<string, unknown> | null = null;
   if (session.stats) {
