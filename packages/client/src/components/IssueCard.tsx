@@ -4,6 +4,7 @@ import type { IssueWithStatus } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { apiFetch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
+import { formatRelativeTime, formatAbsoluteTime } from "../lib/formatRelativeTime.js";
 
 export interface ProjectTag {
   id: string;
@@ -18,16 +19,6 @@ export interface QuickUpdateCallbacks {
   onTogglePinned?: (issueId: string, pinned: boolean) => Promise<void>;
 }
 
-function relativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
-}
 
 function getLastSessionBadge(triggerType: string | null | undefined): { label: string; className: string } | null {
   if (!triggerType) return null;
@@ -775,7 +766,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
               </>
             )}
             {ws.main.lastSessionAt && ws.main.status !== "active" && ws.main.status !== "reviewing" && ws.main.status !== "fixing" && (
-              <span className="text-gray-400 dark:text-gray-500">{ws.main.diffStats ? "· " : ""}{relativeTime(ws.main.lastSessionAt)}</span>
+              <span className="text-gray-400 dark:text-gray-500" title={formatAbsoluteTime(ws.main.lastSessionAt)}>{ws.main.diffStats ? "· " : ""}{formatRelativeTime(ws.main.lastSessionAt)}</span>
             )}
           </span>
           {ws.main.conflicts?.hasConflicts && ws.main.status !== "fixing" && (
@@ -850,6 +841,11 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
         </div>
       )}
       {todos && todos.length > 0 && <TodoProgress todos={todos} />}
+
+      {/* Issue timestamps */}
+      <div className="mt-1 flex items-center gap-2 text-[10px] text-gray-400 dark:text-gray-500 px-0.5">
+        <span title={formatAbsoluteTime(issue.createdAt)}>{formatRelativeTime(issue.createdAt)}</span>
+      </div>
 
       {/* Action row: appears on hover, contains all card-level actions in one place */}
       {hasAnyAction && !isDragging && (
