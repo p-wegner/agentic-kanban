@@ -5,6 +5,7 @@ import { apiFetch } from "../lib/api.js";
 import { isHttpUrl } from "../lib/url.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { IssueActivitySection, type ActivityEvent } from "./IssueActivitySection.js";
+import { StatusTransitionTimeline } from "./StatusTransitionTimeline.js";
 import { showToast } from "./Toast.js";
 import { MoveToDoneDialog } from "./MoveToDoneDialog.js";
 import { DependencyImpactDialog } from "./DependencyImpactDialog.js";
@@ -2109,6 +2110,15 @@ export function IssueDetailPanel({
               onOpen={handleOpenArtifact}
               onCopy={handleCopyArtifact}
               onDelete={handleDeleteArtifact}
+            />
+          )}
+
+          {/* Status transition timeline */}
+          {!editing && (
+            <StatusTransitionTimeline
+              events={activityEvents}
+              loading={activityLoading}
+              currentStatusName={issue.statusName}
             />
           )}
 
