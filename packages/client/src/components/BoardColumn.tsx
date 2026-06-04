@@ -62,6 +62,7 @@ interface BoardColumnProps {
   onDryRun?: (issue: IssueWithStatus) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
   onDrop: (statusId: string, sortOrder?: number) => void;
+  onDuplicate?: (issue: IssueWithStatus) => void;
   onMoveToNext?: (issue: IssueWithStatus, nextStatusId: string) => void;
   searchQuery?: string;
   sessionActivity?: Record<string, string>;
@@ -101,6 +102,7 @@ export function BoardColumn({
   onDryRun,
   onDragStart,
   onDrop,
+  onDuplicate,
   onMoveToNext,
   searchQuery,
   sessionActivity,
@@ -343,6 +345,7 @@ export function BoardColumn({
                 onStartWorkspace={onStartWorkspace}
                 onDryRun={onDryRun}
                 onDragStart={onDragStart}
+                onDuplicate={onDuplicate}
                 onMoveToNext={nextStatus && onMoveToNext ? (iss) => onMoveToNext(iss, nextStatus.id) : undefined}
                 nextStatusName={nextStatus?.name}
                 tags={issue.tags}
