@@ -1,0 +1,1 @@
+CREATE INDEX `idx_session_messages_session_id_created_at` ON `session_messages` (`session_id`,`created_at`);
