@@ -111,6 +111,9 @@ export function BoardPage() {
   const [milestoneFilterId, setMilestoneFilterId] = useState<string | null>(null);
   const [milestones, setMilestones] = useState<MilestoneResponse[]>([]);
   const [issueTypeFilter, setIssueTypeFilter] = useState<string | null>(null);
+  const [swimlaneDimension, setSwimlaneDimension] = useState<"none" | "priority" | "tag">(() => {
+    try { return (localStorage.getItem("kanban-swimlane") as "none" | "priority" | "tag") ?? "none"; } catch { return "none"; }
+  });
   const [createdDateFilter, setCreatedDateFilter] = useState<string | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
     new Set(["archive"]),
@@ -783,6 +786,30 @@ export function BoardPage() {
     };
     handleDragStart(e, issue);
   }, []);
+
+  function handleSwimlaneChange(dim: "none" | "priority" | "tag") {
+    setSwimlaneDimension(dim);
+    try { localStorage.setItem("kanban-swimlane", dim); } catch {}
+  }
+
+  async function handleDropWithLane(targetStatusId: string, laneKey: string, sortOrder?: number) {
+    const raw = (window as unknown as Record<string, unknown>).__dragData;
+    if (!raw || typeof raw !== "object") return;
+    const { issueId } = raw as { issueId: string; sourceStatusId: string };
+    if (!issueId) return;
+
+    const updateBody: Record<string, unknown> = { statusId: targetStatusId };
+    if (sortOrder !== undefined) updateBody.sortOrder = sortOrder;
+    if (swimlaneDimension === "priority" && laneKey !== "ungrouped") {
+      updateBody.priority = laneKey;
+    }
+    try {
+      await apiFetch(`/api/issues/${issueId}`, { method: "PATCH", body: JSON.stringify(updateBody) });
+      await refetchBoard();
+    } catch {
+      showToast("Failed to move issue", "error");
+    }
+  }
 
   async function handleDrop(targetStatusId: string, sortOrder?: number) {
     const raw = (window as unknown as Record<string, unknown>).__dragData;
@@ -1855,6 +1882,8 @@ export function BoardPage() {
           onIssueTypeFilterChange={handleIssueTypeFilterChange}
           showPriorityLegend={prefs.showPriorityLegend}
           onShowPriorityLegendChange={prefs.handleShowPriorityLegendChange}
+          swimlaneDimension={swimlaneDimension}
+          onSwimlaneChange={handleSwimlaneChange}
         />
         </div>
         {viewMode === "kanban" && (
@@ -2170,6 +2199,8 @@ export function BoardPage() {
             onDryRun={panels.setDryRunIssue}
             onDragStart={handleBoardDragStart}
             onDrop={handleDrop}
+            swimlaneDimension={swimlaneDimension}
+            onDropWithLane={handleDropWithLane}
             onDuplicate={handleDuplicateIssue}
             onMoveToNext={handleMoveToNext}
             onDeleteIssue={handleDeleteIssue}
