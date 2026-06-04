@@ -29,6 +29,8 @@ export const issues = sqliteTable("issues", {
   currentNodeId: text("current_node_id"),
   // Cached result of AI-predicted files this issue will touch (JSON array of {path,reason,confidence}).
   touchedFilesJson: text("touched_files_json"),
+  // Acceptance-criteria checklist items (JSON array of {id,text,completed}).
+  checklistJson: text("checklist_json"),
 }, (table) => ({
   projectIdIdx: index("idx_issues_project_id").on(table.projectId),
   statusIdIdx: index("idx_issues_status_id").on(table.statusId),
