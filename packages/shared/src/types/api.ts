@@ -398,6 +398,8 @@ export interface IssueWithStatus {
   isBlocked?: boolean;
   isStale?: boolean;
   staleDays?: number;
+  columnAgeDays?: number;
+  isColumnStale?: boolean;
   skipAutoReview?: boolean;
   estimate?: string | null;
   dueDate?: string | null;

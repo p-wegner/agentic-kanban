@@ -48,6 +48,7 @@ interface Settings {
   monitor_maintenance_window_end?: string;
   auto_commit_strategy_objective?: string;
   backlog_stale_days?: string;
+  inprogress_stale_days?: string;
   backlog_empty_strategy?: string;
   backlog_empty_skill?: string;
   backlog_empty_cooldown_min?: string;
@@ -99,6 +100,7 @@ const DEFAULT_SETTINGS: Settings = {
   monitor_maintenance_window_end: "",
   auto_commit_strategy_objective: "true",
   backlog_stale_days: "14",
+  inprogress_stale_days: "3",
   backlog_empty_strategy: "skip",
   backlog_empty_skill: "architecture-improvement",
   backlog_empty_cooldown_min: "120",
@@ -1339,6 +1341,22 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                       </div>
                       <p className="mt-1 text-[11px] text-gray-400 dark:text-gray-500 leading-snug">
                         Backlog issues with no activity for this many days are flagged as Stale on the board.
+                      </p>
+                    </div>
+                    <div className="mt-3 pl-5">
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs text-gray-600 dark:text-gray-400">In Progress staleness threshold</label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={settings.inprogress_stale_days || "3"}
+                          onChange={(e) => set("inprogress_stale_days")(e.target.value)}
+                          className="w-16 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
+                        />
+                        <span className="text-xs text-gray-500 dark:text-gray-400">days</span>
+                      </div>
+                      <p className="mt-1 text-[11px] text-gray-400 dark:text-gray-500 leading-snug">
+                        In Progress cards older than this threshold get a warning badge. Age badges appear on all cards.
                       </p>
                     </div>
                     {settings.auto_monitor === "true" && (
