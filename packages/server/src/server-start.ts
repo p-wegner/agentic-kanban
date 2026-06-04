@@ -9,6 +9,7 @@ import { createSessionManager } from "./services/session.manager.js";
 import { createWorkflowEngine } from "./startup/exit-workflow.js";
 import { createAutoMerge } from "./startup/merge-workflow.js";
 import { startAutoMergeOrchestrator } from "./startup/auto-merge-orchestrator.js";
+import { startStrandedReviewReconciler } from "./startup/stranded-review-reconciler.js";
 import { createMonitorSetup } from "./startup/monitor-setup.js";
 import { setupProcessHandlers } from "./startup/process-handlers.js";
 import { setupRoutes } from "./startup/route-setup.js";
@@ -66,6 +67,13 @@ export async function startServer(port?: number, hostname?: string) {
     database: db,
     boardEvents,
     getSessionManager: () => sessionManager,
+  });
+  // Crash-safe recovery for work stranded in "In Review" because the auto-review
+  // handshake never fired (#529): re-launches the review so the chain can complete.
+  startStrandedReviewReconciler({
+    getSessionManager: () => sessionManager,
+    boardEvents,
+    reviewSessionIds: workflow.reviewSessionIds,
   });
   // Autonomous Monitor Butler — cron-driven board-health agent (gated by the
   // monitor_butler_enabled preference; off by default). See services/monitor-butler.ts.
