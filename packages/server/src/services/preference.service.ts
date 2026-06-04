@@ -45,6 +45,7 @@ function isAllowedDynamicKey(key: string): boolean {
     /^launch_templates_[0-9a-f-]+$/.test(key) ||
     /^monitor_policy_presets_[0-9a-f-]+$/.test(key) ||
     /^wip_limit_[0-9a-f-]+$/.test(key) ||
+    /^outbound_webhook_url_[0-9a-f-]+$/.test(key) ||
     isBoardStrategyKey(key);
 }
 
