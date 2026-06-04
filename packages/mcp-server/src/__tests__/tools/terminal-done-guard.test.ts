@@ -136,6 +136,31 @@ describe("terminal-Done guard — move_issue", () => {
     expect(parsed.error).toBeUndefined();
     expect(parsed.movedTo).toBe("Done");
   });
+
+  it("allows move to Done when issue has an open DIRECT workspace (no branch to merge)", async () => {
+    const { invoke, db } = setupTool(registerMoveIssue);
+    const { projectId, statusIds } = await seedProject(db);
+    const { id: issueId } = await seedIssue(db, projectId, statusIds["In Progress"]);
+    const now = new Date().toISOString();
+    // Direct workspace: commits directly to master, never needs merge_workspace
+    await db.insert(schema.workspaces).values({
+      id: randomUUID(),
+      issueId,
+      branch: "master",
+      isDirect: true,
+      status: "idle",
+      mergedAt: null,
+      readyForMerge: false,
+      provider: "claude",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const result = await invoke({ issueId, statusName: "Done" });
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.error).toBeUndefined();
+    expect(parsed.movedTo).toBe("Done");
+  });
 });
 
 describe("terminal-Done guard — update_issue", () => {

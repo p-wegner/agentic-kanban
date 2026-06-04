@@ -10,17 +10,11 @@ import { validateWebhookUrl, fireWebhook } from "@agentic-kanban/shared/lib";
 const TERMINAL_STATUSES = new Set(["Done", "Cancelled"]);
 
 /**
- * Guard: reject a terminal-status move when the issue has an open workspace
- * that has not been merged. The agent must call merge_workspace first so the
- * branch actually lands on the default branch before the issue is closed.
+ * Guard: reject a terminal-status move when the issue has an open non-direct
+ * workspace that has not been merged. Direct workspaces (isDirect=true) commit
+ * directly to master — there is no branch to merge, so they are excluded.
  *
- * A workspace is "open and unmerged" when:
- *   status != "closed"  (still active/idle/reviewing/fixing)
- *   AND isDirect = false (direct workspaces have no branch to merge)
- *
- * Direct workspaces (isDirect=true) are also checked: they are open if
- * status != "closed" but they have no branch to merge, so we still block
- * to avoid stranding them.
+ * Blocked when: status != "closed" AND isDirect = false.
  */
 async function checkOpenWorkspace(
   db: ToolDeps["db"],
@@ -28,11 +22,12 @@ async function checkOpenWorkspace(
   issueId: string,
 ): Promise<{ blocked: boolean; workspaceId?: string; branch?: string }> {
   const openWs = await db
-    .select({ id: schema.workspaces.id, branch: schema.workspaces.branch, isDirect: schema.workspaces.isDirect })
+    .select({ id: schema.workspaces.id, branch: schema.workspaces.branch })
     .from(schema.workspaces)
     .where(and(
       eq(schema.workspaces.issueId, issueId),
       ne(schema.workspaces.status, "closed"),
+      eq(schema.workspaces.isDirect, false),
     ))
     .limit(1);
 
