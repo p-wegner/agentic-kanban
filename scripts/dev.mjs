@@ -27,6 +27,7 @@ import { resolveDevPorts } from "./dev-port-plan.mjs";
 import { buildDevPortEnv } from "./dev-env.mjs";
 import { planPortOwnerKill, parseNetstatListeners } from "./dev-port-guard.mjs";
 import { writeProcessAudit } from "./process-audit.mjs";
+import { repairDrizzleIfNeeded } from "./drizzle-preflight.mjs";
 
 function run(cmd) {
   try {
@@ -291,6 +292,8 @@ function spawnProcess(label, cmd, args, opts) {
 }
 
 async function main() {
+  repairDrizzleIfNeeded(process.cwd());
+
   const { serverPort, clientPort } = configurePorts();
 
   await freePort(serverPort, "server");
