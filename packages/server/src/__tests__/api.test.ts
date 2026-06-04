@@ -585,6 +585,38 @@ describe("Board API", () => {
     expect(body[1].issues.length).toBe(1);
   });
 
+  it("GET /api/projects/:id/board/summary returns per-column counts with no issue bodies", async () => {
+    const res = await app.request(`/api/projects/${projectId}/board/summary`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+
+    expect(body.length).toBe(2);
+    const todo = body.find((col: any) => col.name === "Todo");
+    const done = body.find((col: any) => col.name === "Done");
+    expect(todo).toBeDefined();
+    expect(todo.statusId).toBe(todoStatusId);
+    expect(todo.sortOrder).toBe(0);
+    expect(todo.count).toBe(1);
+    expect(done).toBeDefined();
+    expect(done.statusId).toBe(doneStatusId);
+    expect(done.sortOrder).toBe(1);
+    expect(done.count).toBe(1);
+    // No issue bodies — only the four summary fields
+    expect(todo.issues).toBeUndefined();
+    expect(done.issues).toBeUndefined();
+  });
+
+  it("GET /api/projects/:id/board/summary returns zero count for empty statuses", async () => {
+    const emptyProjectId = await createProjectDirectly(database, { name: "Empty Board Project" });
+    const emptyStatusId = await createStatusDirectly(database, emptyProjectId, "Backlog", 0);
+    const res = await app.request(`/api/projects/${emptyProjectId}/board/summary`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.length).toBe(1);
+    expect(body[0].statusId).toBe(emptyStatusId);
+    expect(body[0].count).toBe(0);
+  });
+
   it("GET /api/projects/:id/board exposes external tracker fields on issues", async () => {
     const linkProjectId = await createProjectDirectly(database, { name: "Board External Link Project" });
     const linkStatusId = await createStatusDirectly(database, linkProjectId, "Todo", 0);
