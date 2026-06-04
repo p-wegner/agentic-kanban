@@ -3,7 +3,7 @@ import { execSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { resolve, sep, join } from "node:path";
 import { projects, projectStatuses, issues, workspaces, preferences } from "@agentic-kanban/shared/schema";
-import { ensureAgentGitignore, ensureStarterClaudeMd, getDefaultSkillId } from "./project-scaffold.js";
+import { ensureAgentGitignore, ensureStarterClaudeMd, ensureVerifyGateRunner, getDefaultSkillId } from "./project-scaffold.js";
 import { eq, and, notInArray, sql } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { branchExists, detectRepoInfo, getProjectGitStats } from "./git-info.service.js";
@@ -142,6 +142,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     // history and gives agents a baseline working agreement.
     ensureAgentGitignore(repoInfo.repoPath, body.gitignoreTemplate ? GITIGNORE_TEMPLATES[body.gitignoreTemplate] : undefined);
     ensureStarterClaudeMd(repoInfo.repoPath);
+    ensureVerifyGateRunner(repoInfo.repoPath);
 
     if (body.generateReadme) {
       const readmePath = join(repoInfo.repoPath, "README.md");
@@ -233,6 +234,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     // Scaffold the fresh repo with the generic agent-artifact ignores + a starter CLAUDE.md.
     ensureAgentGitignore(repoInfo.repoPath);
     ensureStarterClaudeMd(repoInfo.repoPath);
+    ensureVerifyGateRunner(repoInfo.repoPath);
     return result;
   }
 
