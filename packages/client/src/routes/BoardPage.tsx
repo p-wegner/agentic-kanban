@@ -12,6 +12,7 @@ import { WorkflowsView } from "../components/WorkflowsView.js";
 import { WorkflowAnalyticsDashboard } from "../components/WorkflowAnalyticsDashboard.js";
 import { InsightsPanel } from "../components/InsightsPanel.js";
 import { DigestView } from "../components/DigestView.js";
+import { ActivityFeedView } from "../components/ActivityFeedView.js";
 import { FocusView } from "../components/FocusView.js";
 import { StrategyTargetsView } from "../components/StrategyTargetsView.js";
 import { SwimlaneView } from "../components/SwimlaneView.js";
@@ -1814,6 +1815,17 @@ export function BoardPage() {
         {viewMode === "focus" && activeProjectId && (
           <BoardErrorBoundary columnName="Focus View">
             <FocusView
+              projectId={activeProjectId}
+              onIssueClick={(issueId) => {
+                const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
+                if (issue) handleIssueClick(issue);
+              }}
+            />
+          </BoardErrorBoundary>
+        )}
+        {viewMode === "activity" && activeProjectId && (
+          <BoardErrorBoundary columnName="Activity Feed">
+            <ActivityFeedView
               projectId={activeProjectId}
               onIssueClick={(issueId) => {
                 const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
