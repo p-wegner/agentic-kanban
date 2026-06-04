@@ -17,7 +17,7 @@ export const SETTINGS_KEYS = [
   "dependency_auto_chain",
   "dynamic_column_scaling", "card_density", "persistent_agent", "learning_step_after_agent",
   "learning_step_after_review", "learning_step_before_merge", "auto_monitor",
-  "auto_monitor_interval", "nudge_auto_start", "projects_base_path", "plan_auto_continue",
+  "auto_monitor_interval", "nudge_auto_start", "nudge_wip_limit", "projects_base_path", "plan_auto_continue",
   "visual_verification_mode", "after_merge_verify_agent",
   "backup_interval_min", "backup_keep_last",
   "butler_event_feed", "butler_event_feed_min_interval_ms",
