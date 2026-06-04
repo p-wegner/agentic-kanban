@@ -6,6 +6,7 @@ import { ProjectScriptsMenu } from "./ProjectScriptsMenu.js";
 import { ExportImportMenu } from "./ExportImportMenu.js";
 import { PRIMARY_VIEWS, SECONDARY_VIEWS, VIEW_REGISTRY } from "../lib/viewRegistry.js";
 import type { StatusWithIssues } from "@agentic-kanban/shared";
+import type { ProjectTag } from "./IssueCard.js";
 import type { CardDensity } from "../hooks/useBoardPreferences.js";
 import type { MilestoneResponse } from "@agentic-kanban/shared";
 import { PRIORITY_META } from "../lib/chartColors.js";
@@ -139,6 +140,10 @@ interface BoardToolbarProps {
   onAgingThresholdsChange?: (warm: number, hot: number) => void;
   swimlaneDimension?: "none" | "priority" | "tag";
   onSwimlaneChange?: (v: "none" | "priority" | "tag") => void;
+  tags?: ProjectTag[];
+  activeTagIds?: Set<string>;
+  onTagFilterToggle?: (tagId: string) => void;
+  onClearTagFilter?: () => void;
 }
 
 export function BoardToolbar({
@@ -188,6 +193,10 @@ export function BoardToolbar({
   onAgingThresholdsChange,
   swimlaneDimension = "none",
   onSwimlaneChange,
+  tags,
+  activeTagIds,
+  onTagFilterToggle,
+  onClearTagFilter,
 }: BoardToolbarProps) {
   const [showMonitorPopover, setShowMonitorPopover] = useState(false);
   const [showColumnVisibility, setShowColumnVisibility] = useState(false);
@@ -755,6 +764,45 @@ export function BoardToolbar({
         hotDays={agingHotDays}
         onChange={onAgingThresholdsChange}
       />
+    )}
+    {onTagFilterToggle && tags && tags.length > 0 && (
+      <div className="flex items-center gap-1.5 px-1 py-1 flex-wrap" aria-label="Filter by tag">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-ink-faint dark:text-gray-500 shrink-0">Tags:</span>
+        {tags.map((tag) => {
+          const isActive = activeTagIds?.has(tag.id) ?? false;
+          return (
+            <button
+              key={tag.id}
+              onClick={() => onTagFilterToggle(tag.id)}
+              aria-pressed={isActive}
+              title={`Filter by tag: ${tag.name}`}
+              className={`shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border transition-colors ${
+                isActive
+                  ? "border-brand-600 bg-brand-600 text-white hover:bg-brand-700"
+                  : "border-black/[0.07] dark:border-white/10 bg-surface-raised dark:bg-surface-raised-dark text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-700"
+              }`}
+            >
+              {tag.color && (
+                <span
+                  aria-hidden="true"
+                  className="w-1.5 h-1.5 rounded-full shrink-0"
+                  style={{ backgroundColor: tag.color }}
+                />
+              )}
+              {tag.name}
+            </button>
+          );
+        })}
+        {(activeTagIds?.size ?? 0) > 0 && (
+          <button
+            onClick={onClearTagFilter}
+            title="Clear tag filter"
+            className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border border-black/[0.07] dark:border-white/10 bg-surface-raised dark:bg-surface-raised-dark text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-700 transition-colors"
+          >
+            Clear
+          </button>
+        )}
+      </div>
     )}
     </>
   );
