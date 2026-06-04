@@ -6,6 +6,7 @@ import { getWorkspaceDiffStats } from "./workspace-diff-stats.js";
 import { extractMeaningfulOutput, isTerminalStatusIdView, ACTIVE_WORKSPACE_STATUSES, workspaceStatusPriority } from "@agentic-kanban/shared";
 import type { BoardStatusResponse, BoardStatusIssue } from "@agentic-kanban/shared";
 import { isAnalyticsNoise } from "./session-filter.js";
+import { readSessionStdoutFile } from "../repositories/session.repository.js";
 
 // In-memory conflict cache: workspaceId → { result, timestamp }
 const conflictCache = new Map<string, { result: { hasConflicts: boolean; conflictingFiles: string[] }; ts: number }>();
@@ -304,40 +305,27 @@ export async function getBoardStatus(
       if (latestSession) {
         asyncWork.push(
           (async () => {
-            const msgs = await database
-              .select({ type: sessionMessages.type, data: sessionMessages.data, createdAt: sessionMessages.createdAt })
-              .from(sessionMessages)
-              .where(eq(sessionMessages.sessionId, latestSession.id))
-              .orderBy(desc(sessionMessages.id))
-              .limit(50);
-
-            if (msgs.length > 0 && msgs[0].createdAt) {
-              entry.lastActivity = msgs[0].createdAt;
-            }
-
-            // Messages are DESC, reverse for chronological order
-            const chronological = msgs.reverse();
-            entry.lastOutput = extractMeaningfulOutput(chronological, tailLines);
-
-            // Extract last agent message (handles both Claude and Codex formats)
-            for (const msg of msgs) { // msgs is still DESC (newest first)
-              if (msg.type !== "stdout" || !msg.data) continue;
-              for (const line of msg.data.split("\n")) {
-                const trimmed = line.trim();
+            // Try .out file first; fall back to DB rows for historical sessions
+            const fileContent = readSessionStdoutFile(latestSession.id);
+            if (fileContent !== null) {
+              const stdoutRows = [{ type: "stdout" as const, data: fileContent, createdAt: null }];
+              entry.lastOutput = extractMeaningfulOutput(stdoutRows, tailLines);
+              // Parse JSONL for last agent message (file is in chronological order; iterate in reverse)
+              const lines = fileContent.split("\n");
+              for (let i = lines.length - 1; i >= 0; i--) {
+                const trimmed = lines[i].trim();
                 if (!trimmed) continue;
                 try {
                   const obj = JSON.parse(trimmed);
-                  // Claude stream: assistant text block
                   if (obj.type === "assistant" && obj.message?.content) {
                     const content = Array.isArray(obj.message.content) ? obj.message.content : [obj.message.content];
-                    for (const block of [...content].reverse()) {
+                    for (const block of [...content].reverse() as { type: string; text?: string }[]) {
                       if (block.type === "text" && typeof block.text === "string" && block.text.trim()) {
                         entry.lastAgentMessage = block.text.trim().slice(0, 300);
                         break;
                       }
                     }
                   }
-                  // Copilot stream: assistant.message
                   if (obj.type === "assistant.message" && obj.data) {
                     const data = obj.data as Record<string, unknown>;
                     const raw = data.content;
@@ -348,18 +336,65 @@ export async function getBoardStatus(
                             .map(b => b.text as string)
                             .join("\n")
                         : "";
-                    if (contentStr.trim()) {
-                      entry.lastAgentMessage = contentStr.trim().slice(0, 300);
-                    }
+                    if (contentStr.trim()) entry.lastAgentMessage = contentStr.trim().slice(0, 300);
                   }
-                  // Codex stream: agent_message item
                   if (obj.type === "item.completed" && obj.item?.type === "agent_message" && typeof obj.item.text === "string" && obj.item.text.trim()) {
                     entry.lastAgentMessage = obj.item.text.trim().slice(0, 300);
                   }
                 } catch { /* not JSON */ }
                 if (entry.lastAgentMessage) break;
               }
-              if (entry.lastAgentMessage) break;
+            } else {
+              const msgs = await database
+                .select({ type: sessionMessages.type, data: sessionMessages.data, createdAt: sessionMessages.createdAt })
+                .from(sessionMessages)
+                .where(eq(sessionMessages.sessionId, latestSession.id))
+                .orderBy(desc(sessionMessages.id))
+                .limit(50);
+
+              if (msgs.length > 0 && msgs[0].createdAt) {
+                entry.lastActivity = msgs[0].createdAt;
+              }
+
+              const chronological = msgs.reverse();
+              entry.lastOutput = extractMeaningfulOutput(chronological, tailLines);
+
+              for (const msg of msgs) {
+                if (msg.type !== "stdout" || !msg.data) continue;
+                for (const line of msg.data.split("\n")) {
+                  const trimmed = line.trim();
+                  if (!trimmed) continue;
+                  try {
+                    const obj = JSON.parse(trimmed);
+                    if (obj.type === "assistant" && obj.message?.content) {
+                      const content = Array.isArray(obj.message.content) ? obj.message.content : [obj.message.content];
+                      for (const block of [...content].reverse()) {
+                        if (block.type === "text" && typeof block.text === "string" && block.text.trim()) {
+                          entry.lastAgentMessage = block.text.trim().slice(0, 300);
+                          break;
+                        }
+                      }
+                    }
+                    if (obj.type === "assistant.message" && obj.data) {
+                      const data = obj.data as Record<string, unknown>;
+                      const raw = data.content;
+                      const contentStr = typeof raw === "string" ? raw
+                        : Array.isArray(raw)
+                          ? (raw as { type?: string; text?: string }[])
+                              .filter(b => b.type === "text" && typeof b.text === "string")
+                              .map(b => b.text as string)
+                              .join("\n")
+                          : "";
+                      if (contentStr.trim()) entry.lastAgentMessage = contentStr.trim().slice(0, 300);
+                    }
+                    if (obj.type === "item.completed" && obj.item?.type === "agent_message" && typeof obj.item.text === "string" && obj.item.text.trim()) {
+                      entry.lastAgentMessage = obj.item.text.trim().slice(0, 300);
+                    }
+                  } catch { /* not JSON */ }
+                  if (entry.lastAgentMessage) break;
+                }
+                if (entry.lastAgentMessage) break;
+              }
             }
           })(),
         );

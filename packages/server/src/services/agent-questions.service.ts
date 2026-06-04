@@ -17,6 +17,7 @@ import { eq, desc } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { getPreference, setPreference } from "../repositories/preferences.repository.js";
 import { ensureButlerSession, sendButlerTurn, subscribeButler, getButlerSession } from "./butler-sdk.service.js";
+import { readSessionStdoutFile } from "../repositories/session.repository.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 
 /** Function signature for sending a follow-up turn to a workspace — injected so this
@@ -368,10 +369,17 @@ export async function listPendingQuestionsForProject(
       // A running session may not have the result yet.
       if (sess.status === "running") continue;
 
-      const msgs = await db
-        .select({ type: sessionMessages.type, data: sessionMessages.data })
-        .from(sessionMessages)
-        .where(eq(sessionMessages.sessionId, sess.id));
+      // Prefer .out file for stdout; fall back to DB rows for historical sessions
+      let msgs: Array<{ type: string; data: string | null }>;
+      const fileContent = readSessionStdoutFile(sess.id);
+      if (fileContent !== null) {
+        msgs = [{ type: "stdout", data: fileContent }];
+      } else {
+        msgs = await db
+          .select({ type: sessionMessages.type, data: sessionMessages.data })
+          .from(sessionMessages)
+          .where(eq(sessionMessages.sessionId, sess.id));
+      }
 
       const extracted = extractQuestionsFromSession(msgs);
       if (extracted.length === 0) continue;
