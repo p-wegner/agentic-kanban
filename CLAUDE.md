@@ -84,6 +84,12 @@ The control plane that keeps **this** board moving is the **out-of-process loop*
 
 > Caveat: this board's `objective.md` targets are currently **hand-authored** (no generated markers) — saving the Bullseye would clobber that region. Edit one or the other deliberately.
 
+### Driving a different project hands-off (per-project autonomy)
+To develop **another** project (not this dev board) hands-off, the supported driver is the **in-process engine** (`runMonitorCycle` + the auto-review/auto-merge chain + the stranded-review reconciler) — NOT the Conductor (`loop.sh`/`objective.md` are hard-coded to agentic-kanban) and NOT the Monitor Butler (off by default, scoped to one active project). Both are dev-board-only by design (decision 006).
+- **Enable it per project** with the `board_autodrive_<projectId>` preference set to `"true"`. This opts that project into auto-start / relaunch even when the GLOBAL `auto_monitor` is off (it is force-disabled on every boot). It is a separate key, so the boot reset never clobbers it. The cycle scopes its actions per project: global `auto_monitor` on ⇒ all projects (legacy); otherwise only auto-driven projects.
+- A project's **Strategy Bullseye** (`board_strategy_<projectId>`) takes effect via the `resolveMonitorTunables` **pref read** with NO `objective.md` needed — `writeStrategyObjective` only writes the disk file for repos that actually run the Conductor (it no-ops otherwise, which is correct for a normal project). Legacy fallback (no Bullseye): WIP target = `nudge_wip_limit`, `backlogFloor=3`, `maxNewStartsPerCycle=3` (capped so an auto-driven backlog launches in staggered batches, not all at once into conflicting worktrees).
+- Tag an issue `no-auto-start` to keep the monitor from launching it.
+
 ## Server resilience
 Agent subprocess callbacks are wrapped in try/catch in `agent.service.ts`; `uncaughtException`/`unhandledRejection` log with a `[fatal]` prefix; stale sessions are cleaned up on startup in `index.ts` after migrations. `auto_monitor` is force-disabled on every boot.
 

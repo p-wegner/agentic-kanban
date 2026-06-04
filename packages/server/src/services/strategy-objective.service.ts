@@ -330,8 +330,13 @@ export function resolveMonitorTunables(
   return {
     tunables: {
       activeAgentsTarget: Number.isFinite(wipLimit) ? wipLimit : 5,
-      backlogFloor: 1,
-      maxNewStartsPerCycle: Number.POSITIVE_INFINITY,
+      // Floor of 3 (was 1) keeps a small backlog buffer for projects with no Strategy
+      // Bullseye. maxNewStartsPerCycle capped at 3 (was Infinity): without a cap, a
+      // per-project hands-off (board_autodrive) project with many Todo tickets would
+      // launch them ALL in one cycle into conflicting worktrees. Staggering across
+      // cycles lets earlier work land before the next batch starts. (#532)
+      backlogFloor: 3,
+      maxNewStartsPerCycle: 3,
       refillFocus: "balanced",
     },
     source: "prefs",
