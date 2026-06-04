@@ -213,6 +213,7 @@ interface IssueCardProps {
   issue: IssueWithStatus;
   onClick: (issue: IssueWithStatus, event: React.MouseEvent) => void;
   onWorkspaceClick?: (issue: IssueWithStatus, workspaceId?: string) => void;
+  onOpenDiff?: (issue: IssueWithStatus, workspaceId: string) => void;
   onStartWorkspace?: (issue: IssueWithStatus) => void;
   onDryRun?: (issue: IssueWithStatus) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
@@ -258,7 +259,7 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   );
 }
 
-export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, onDryRun, onDragStart, onDuplicate, onMoveToNext, nextStatusName, tags, allProjectTags, quickUpdate, allStatuses, onDeleteIssue, searchQuery, liveActivity, liveStats, todos, isPendingIssue, isPendingWorkspace, isSelected, isKeyboardFocused, cardDensity = "comfortable", showAgingHeatmap = false, agingWarmDays = 3, agingHotDays = 7 }: IssueCardProps) {
+export function IssueCard({ issue, onClick, onWorkspaceClick, onOpenDiff, onStartWorkspace, onDryRun, onDragStart, onDuplicate, onMoveToNext, nextStatusName, tags, allProjectTags, quickUpdate, allStatuses, onDeleteIssue, searchQuery, liveActivity, liveStats, todos, isPendingIssue, isPendingWorkspace, isSelected, isKeyboardFocused, cardDensity = "comfortable", showAgingHeatmap = false, agingWarmDays = 3, agingHotDays = 7 }: IssueCardProps) {
   const compact = cardDensity === "compact";
   const agingDays = issue.columnAgeDays ?? 0;
   const agingBucket = !showAgingHeatmap || agingDays < agingWarmDays
@@ -282,10 +283,11 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
   // Determine which action buttons to show in the action row
   const showActionRow = !isPendingIssue && issue.statusName !== "Done" && issue.statusName !== "Cancelled";
   const showResume = showActionRow && hasActiveWorkspace && !!onWorkspaceClick;
+  const showDiff = !isPendingIssue && hasActiveWorkspace && !!onOpenDiff && !!ws?.main?.id;
   const showStartWorkspace = showActionRow && !hasActiveWorkspace && !!onStartWorkspace;
   const showDryRun = showActionRow && !hasActiveWorkspace && !!onDryRun;
   const showMoveToNext = showActionRow && !!onMoveToNext && !!nextStatusName;
-  const hasAnyAction = showResume || showStartWorkspace || showDryRun || showMoveToNext;
+  const hasAnyAction = showResume || showDiff || showStartWorkspace || showDryRun || showMoveToNext;
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -523,6 +525,19 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
                 <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />
               </svg>
               <span className="truncate">Resume</span>
+            </button>
+          )}
+          {showDiff && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => runContextAction(() => onOpenDiff!(issue, ws!.main!.id!))}
+              className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
+            >
+              <svg className="h-3.5 w-3.5 shrink-0 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25ZM6.75 12h.008v.008H6.75V12Zm0 3h.008v.008H6.75V15Zm0 3h.008v.008H6.75V18Z" />
+              </svg>
+              <span className="truncate">View Diff</span>
             </button>
           )}
           {showStartWorkspace && (
@@ -1042,6 +1057,19 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
                 <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />
               </svg>
               Resume
+            </button>
+          )}
+          {showDiff && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onOpenDiff!(issue, ws!.main!.id!); }}
+              className="flex items-center justify-center gap-1 text-xs text-brand-600 dark:text-brand-400 hover:text-white hover:bg-brand-600 border border-brand-200 dark:border-brand-800 hover:border-brand-600 rounded px-2 py-1 transition-colors"
+              title="Open live diff for this workspace"
+              aria-label="Open live diff"
+            >
+              <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25ZM6.75 12h.008v.008H6.75V12Zm0 3h.008v.008H6.75V15Zm0 3h.008v.008H6.75V18Z" />
+              </svg>
+              Diff
             </button>
           )}
           {showStartWorkspace && (
