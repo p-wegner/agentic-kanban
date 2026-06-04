@@ -1,580 +1,587 @@
 {
-    "version":  "7",
-    "dialect":  "sqlite",
-    "entries":  [
-                    {
-                        "idx":  0,
-                        "version":  "6",
-                        "when":  1777630415809,
-                        "tag":  "0000_flawless_trauma",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  1,
-                        "version":  "6",
-                        "when":  1777657851695,
-                        "tag":  "0001_magical_johnny_storm",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  2,
-                        "version":  "6",
-                        "when":  1777669420009,
-                        "tag":  "0002_bent_may_parker",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  3,
-                        "version":  "6",
-                        "when":  1777724088318,
-                        "tag":  "0003_tough_lightspeed",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  4,
-                        "version":  "6",
-                        "when":  1777741545105,
-                        "tag":  "0004_boring_wind_dancer",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  5,
-                        "version":  "6",
-                        "when":  1777764294260,
-                        "tag":  "0005_silky_frog_thor",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  6,
-                        "version":  "6",
-                        "when":  1777796822440,
-                        "tag":  "0006_wide_ogun",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  7,
-                        "version":  "6",
-                        "when":  1777880000000,
-                        "tag":  "0007_diff_comments",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  8,
-                        "version":  "6",
-                        "when":  1777966400000,
-                        "tag":  "0008_direct_workspace",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  9,
-                        "version":  "6",
-                        "when":  1778052800000,
-                        "tag":  "0009_requires_review",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  10,
-                        "version":  "6",
-                        "when":  1778139200000,
-                        "tag":  "0010_session_messages_cascade",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  11,
-                        "version":  "6",
-                        "when":  1778225600000,
-                        "tag":  "0011_timestamps",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  12,
-                        "version":  "6",
-                        "when":  1778312000000,
-                        "tag":  "0012_session_stats",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  13,
-                        "version":  "6",
-                        "when":  1778398400000,
-                        "tag":  "0013_plan_mode",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  14,
-                        "version":  "6",
-                        "when":  1778484800000,
-                        "tag":  "0014_issue_dependencies",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  15,
-                        "version":  "6",
-                        "when":  1778571200000,
-                        "tag":  "0015_ai_reviewed_status",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  16,
-                        "version":  "6",
-                        "when":  1778657600000,
-                        "tag":  "0016_skip_auto_review",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  17,
-                        "version":  "6",
-                        "when":  1778744000000,
-                        "tag":  "0017_agent_config",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  18,
-                        "version":  "6",
-                        "when":  1778830400000,
-                        "tag":  "0018_agent_skills",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  19,
-                        "version":  "6",
-                        "when":  1778916800000,
-                        "tag":  "0019_workspace_skill",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  20,
-                        "version":  "6",
-                        "when":  1778920000000,
-                        "tag":  "0023_dependency_types",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  21,
-                        "version":  "6",
-                        "when":  1779006400000,
-                        "tag":  "0020_setup_script",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  22,
-                        "version":  "6",
-                        "when":  1779092800000,
-                        "tag":  "0021_project_skills",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  23,
-                        "version":  "6",
-                        "when":  1779265600000,
-                        "tag":  "0022_teardown_script",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  24,
-                        "version":  "6",
-                        "when":  1779352000000,
-                        "tag":  "0024_setup_enabled",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  25,
-                        "version":  "6",
-                        "when":  1779438400000,
-                        "tag":  "0025_provider_session_id",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  26,
-                        "version":  "6",
-                        "when":  1779524800000,
-                        "tag":  "0026_ready_for_merge",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  27,
-                        "version":  "6",
-                        "when":  1779611200000,
-                        "tag":  "0027_estimate_field",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  28,
-                        "version":  "6",
-                        "when":  1779697600000,
-                        "tag":  "0028_perf_indexes_conflict_cache",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  29,
-                        "version":  "6",
-                        "when":  1779784000000,
-                        "tag":  "0029_issue_artifacts",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  30,
-                        "version":  "6",
-                        "when":  1779870000000,
-                        "tag":  "0030_thorough_review",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  31,
-                        "version":  "6",
-                        "when":  1779956400000,
-                        "tag":  "0031_scheduled_runs",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  32,
-                        "version":  "6",
-                        "when":  1780042800000,
-                        "tag":  "0032_diff_stat_cache",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  33,
-                        "version":  "6",
-                        "when":  1780129200000,
-                        "tag":  "0033_backlog_status",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  34,
-                        "version":  "6",
-                        "when":  1780215600000,
-                        "tag":  "0034_session_pid",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  35,
-                        "version":  "6",
-                        "when":  1780302000000,
-                        "tag":  "0035_session_trigger",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  36,
-                        "version":  "6",
-                        "when":  1780388400000,
-                        "tag":  "0036_scheduled_runs_cron",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  37,
-                        "version":  "6",
-                        "when":  1780474800000,
-                        "tag":  "0037_workspace_provider",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  38,
-                        "version":  "6",
-                        "when":  1780561200000,
-                        "tag":  "0038_pending_plan_path",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  39,
-                        "version":  "6",
-                        "when":  1780647600000,
-                        "tag":  "0039_nullable_default_branch",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  40,
-                        "version":  "6",
-                        "when":  1780734000000,
-                        "tag":  "0040_direct_workspace_base_commit",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  41,
-                        "version":  "6",
-                        "when":  1780820400000,
-                        "tag":  "0041_builtin_tags",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  42,
-                        "version":  "6",
-                        "when":  1780906800000,
-                        "tag":  "0042_issue_type",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  43,
-                        "version":  "6",
-                        "when":  1748246124000,
-                        "tag":  "0043_missing_indexes",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  44,
-                        "version":  "6",
-                        "when":  1748332524000,
-                        "tag":  "0044_diff_comments_workspace_idx",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  45,
-                        "version":  "6",
-                        "when":  1748418924000,
-                        "tag":  "0045_workspace_model",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  46,
-                        "version":  "6",
-                        "when":  1748505324000,
-                        "tag":  "0046_issue_due_date",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  47,
-                        "version":  "6",
-                        "when":  1748591724000,
-                        "tag":  "0047_workflow_graphs",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  48,
-                        "version":  "6",
-                        "when":  1748678124000,
-                        "tag":  "0048_workflow_fork",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  49,
-                        "version":  "7",
-                        "when":  1748764524000,
-                        "tag":  "0049_workspace_scorecard",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  50,
-                        "version":  "6",
-                        "when":  1748764525000,
-                        "tag":  "0050_tdd_mode",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  51,
-                        "version":  "6",
-                        "when":  1748764526000,
-                        "tag":  "0051_test_runs",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  52,
-                        "version":  "6",
-                        "when":  1748764527052,
-                        "tag":  "0052_failure_patterns",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  53,
-                        "version":  "6",
-                        "when":  1748764527053,
-                        "tag":  "0053_flaky_test_classifier",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  54,
-                        "version":  "6",
-                        "when":  1748764527054,
-                        "tag":  "0054_touched_files",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  55,
-                        "version":  "6",
-                        "when":  1748800000000,
-                        "tag":  "0055_context_primer",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  56,
-                        "version":  "6",
-                        "when":  1748764524000,
-                        "tag":  "0056_showdowns",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  57,
-                        "version":  "6",
-                        "when":  1748764527055,
-                        "tag":  "0057_codemod_type",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  58,
-                        "version":  "6",
-                        "when":  1748764527056,
-                        "tag":  "0058_board_health_events",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  59,
-                        "version":  "6",
-                        "when":  1748764527057,
-                        "tag":  "0059_issue_comments",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  60,
-                        "version":  "6",
-                        "when":  1748764527058,
-                        "tag":  "0060_session_skill",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  61,
-                        "version":  "6",
-                        "when":  1748764527059,
-                        "tag":  "0061_workspace_merged_at",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  62,
-                        "version":  "6",
-                        "when":  1748764527060,
-                        "tag":  "0062_workspace_code_metrics",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  63,
-                        "version":  "6",
-                        "when":  1748764527061,
-                        "tag":  "0063_workflow_edge_loop_flag",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  64,
-                        "version":  "6",
-                        "when":  1748764527062,
-                        "tag":  "0064_quality_metrics",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  65,
-                        "version":  "6",
-                        "when":  1748764527063,
-                        "tag":  "0065_project_script_shortcuts",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  66,
-                        "version":  "6",
-                        "when":  1748764527064,
-                        "tag":  "0066_workspace_setup_status",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  67,
-                        "version":  "6",
-                        "when":  1748764527065,
-                        "tag":  "0067_project_script_shortcut_details",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  68,
-                        "version":  "6",
-                        "when":  1748764527066,
-                        "tag":  "0068_scheduled_run_history",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  69,
-                        "version":  "6",
-                        "when":  1748764527067,
-                        "tag":  "0069_symlink_bootstrap",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  70,
-                        "version":  "6",
-                        "when":  1748764527068,
-                        "tag":  "0070_workspace_symlink_diagnostics",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  71,
-                        "version":  "6",
-                        "when":  1748764527069,
-                        "tag":  "0071_board_health_event_category",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  72,
-                        "version":  "6",
-                        "when":  1748764527070,
-                        "tag":  "0072_external_tracker_link",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  73,
-                        "version":  "6",
-                        "when":  1748764527071,
-                        "tag":  "0073_diff_comment_resolved",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  74,
-                        "version":  "6",
-                        "when":  1748764527072,
-                        "tag":  "0074_cleanup_warning",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  75,
-                        "version":  "6",
-                        "when":  1748764528072,
-                        "tag":  "0075_project_default_skill",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  76,
-                        "version":  "6",
-                        "when":  1748764529000,
-                        "tag":  "0076_issue_checklist",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  77,
-                        "version":  "6",
-                        "when":  1748764530000,
-                        "tag":  "0077_hot_status_composite_indexes",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  78,
-                        "version":  "6",
-                        "when":  1748764531000,
-                        "tag":  "0078_pinned_issues",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  79,
-                        "version":  "6",
-                        "when":  1748764532000,
-                        "tag":  "0079_issue_comments_issue_id_created_at_idx",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  80,
-                        "version":  "6",
-                        "when":  1748764533000,
-                        "tag":  "0080_archived_status",
-                        "breakpoints":  true
-                    },
-                    {
-                        "idx":  81,
-                        "version":  "6",
-                        "when":  1748764534000,
-                        "tag":  "0081_milestones",
-                        "breakpoints":  true
-                    }
-                ]
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1777630415809,
+      "tag": "0000_flawless_trauma",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1777657851695,
+      "tag": "0001_magical_johnny_storm",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1777669420009,
+      "tag": "0002_bent_may_parker",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1777724088318,
+      "tag": "0003_tough_lightspeed",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1777741545105,
+      "tag": "0004_boring_wind_dancer",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1777764294260,
+      "tag": "0005_silky_frog_thor",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1777796822440,
+      "tag": "0006_wide_ogun",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1777880000000,
+      "tag": "0007_diff_comments",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1777966400000,
+      "tag": "0008_direct_workspace",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1778052800000,
+      "tag": "0009_requires_review",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1778139200000,
+      "tag": "0010_session_messages_cascade",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1778225600000,
+      "tag": "0011_timestamps",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1778312000000,
+      "tag": "0012_session_stats",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1778398400000,
+      "tag": "0013_plan_mode",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1778484800000,
+      "tag": "0014_issue_dependencies",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1778571200000,
+      "tag": "0015_ai_reviewed_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1778657600000,
+      "tag": "0016_skip_auto_review",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1778744000000,
+      "tag": "0017_agent_config",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1778830400000,
+      "tag": "0018_agent_skills",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1778916800000,
+      "tag": "0019_workspace_skill",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1778920000000,
+      "tag": "0023_dependency_types",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1779006400000,
+      "tag": "0020_setup_script",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1779092800000,
+      "tag": "0021_project_skills",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1779265600000,
+      "tag": "0022_teardown_script",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1779352000000,
+      "tag": "0024_setup_enabled",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1779438400000,
+      "tag": "0025_provider_session_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1779524800000,
+      "tag": "0026_ready_for_merge",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "6",
+      "when": 1779611200000,
+      "tag": "0027_estimate_field",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "6",
+      "when": 1779697600000,
+      "tag": "0028_perf_indexes_conflict_cache",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1779784000000,
+      "tag": "0029_issue_artifacts",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1779870000000,
+      "tag": "0030_thorough_review",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1779956400000,
+      "tag": "0031_scheduled_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1780042800000,
+      "tag": "0032_diff_stat_cache",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1780129200000,
+      "tag": "0033_backlog_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1780215600000,
+      "tag": "0034_session_pid",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1780302000000,
+      "tag": "0035_session_trigger",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1780388400000,
+      "tag": "0036_scheduled_runs_cron",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1780474800000,
+      "tag": "0037_workspace_provider",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1780561200000,
+      "tag": "0038_pending_plan_path",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "6",
+      "when": 1780647600000,
+      "tag": "0039_nullable_default_branch",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1780734000000,
+      "tag": "0040_direct_workspace_base_commit",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1780820400000,
+      "tag": "0041_builtin_tags",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "6",
+      "when": 1780906800000,
+      "tag": "0042_issue_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1748246124000,
+      "tag": "0043_missing_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "6",
+      "when": 1748332524000,
+      "tag": "0044_diff_comments_workspace_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "6",
+      "when": 1748418924000,
+      "tag": "0045_workspace_model",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "6",
+      "when": 1748505324000,
+      "tag": "0046_issue_due_date",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "6",
+      "when": 1748591724000,
+      "tag": "0047_workflow_graphs",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "6",
+      "when": 1748678124000,
+      "tag": "0048_workflow_fork",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1748764524000,
+      "tag": "0049_workspace_scorecard",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "6",
+      "when": 1748764525000,
+      "tag": "0050_tdd_mode",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "6",
+      "when": 1748764526000,
+      "tag": "0051_test_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "6",
+      "when": 1748764527052,
+      "tag": "0052_failure_patterns",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "6",
+      "when": 1748764527053,
+      "tag": "0053_flaky_test_classifier",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "6",
+      "when": 1748764527054,
+      "tag": "0054_touched_files",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "6",
+      "when": 1748800000000,
+      "tag": "0055_context_primer",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "6",
+      "when": 1748764524000,
+      "tag": "0056_showdowns",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "6",
+      "when": 1748764527055,
+      "tag": "0057_codemod_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "6",
+      "when": 1748764527056,
+      "tag": "0058_board_health_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "6",
+      "when": 1748764527057,
+      "tag": "0059_issue_comments",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "6",
+      "when": 1748764527058,
+      "tag": "0060_session_skill",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "6",
+      "when": 1748764527059,
+      "tag": "0061_workspace_merged_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "6",
+      "when": 1748764527060,
+      "tag": "0062_workspace_code_metrics",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "6",
+      "when": 1748764527061,
+      "tag": "0063_workflow_edge_loop_flag",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "6",
+      "when": 1748764527062,
+      "tag": "0064_quality_metrics",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "6",
+      "when": 1748764527063,
+      "tag": "0065_project_script_shortcuts",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "6",
+      "when": 1748764527064,
+      "tag": "0066_workspace_setup_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "6",
+      "when": 1748764527065,
+      "tag": "0067_project_script_shortcut_details",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "6",
+      "when": 1748764527066,
+      "tag": "0068_scheduled_run_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "6",
+      "when": 1748764527067,
+      "tag": "0069_symlink_bootstrap",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "6",
+      "when": 1748764527068,
+      "tag": "0070_workspace_symlink_diagnostics",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "6",
+      "when": 1748764527069,
+      "tag": "0071_board_health_event_category",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "6",
+      "when": 1748764527070,
+      "tag": "0072_external_tracker_link",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "6",
+      "when": 1748764527071,
+      "tag": "0073_diff_comment_resolved",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "6",
+      "when": 1748764527072,
+      "tag": "0074_cleanup_warning",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "6",
+      "when": 1748764528072,
+      "tag": "0075_project_default_skill",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "6",
+      "when": 1748764529000,
+      "tag": "0076_issue_checklist",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "6",
+      "when": 1748764530000,
+      "tag": "0077_hot_status_composite_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "6",
+      "when": 1748764531000,
+      "tag": "0078_pinned_issues",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "6",
+      "when": 1748764532000,
+      "tag": "0079_issue_comments_issue_id_created_at_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "6",
+      "when": 1748764533000,
+      "tag": "0080_archived_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "6",
+      "when": 1748764534000,
+      "tag": "0081_milestones",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "6",
+      "when": 1780906800001,
+      "tag": "0082_activity_feed_composite_indexes",
+      "breakpoints": true
+    }
+  ]
 }
