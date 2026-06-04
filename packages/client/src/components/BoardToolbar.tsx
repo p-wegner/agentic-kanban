@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { MonitorPopover, type MonitorStatus } from "./MonitorPopover.js";
 import { useOrchestrator } from "../hooks/useOrchestrator.js";
+import { apiFetch } from "../lib/api.js";
 import { VoiceInboxButton } from "./VoiceInboxButton.js";
 import { ProjectScriptsMenu } from "./ProjectScriptsMenu.js";
 import { ExportImportMenu } from "./ExportImportMenu.js";
@@ -215,6 +216,18 @@ export function BoardToolbar({
   const hasMonitorWarnings = (monitorStatus?.warnings?.length ?? 0) > 0;
   // Dogfooding orchestrator loop status + opt-in notifications (hidden when no loop).
   const { status: orchestrator, notify: orchestratorNotify, setNotify: setOrchestratorNotify } = useOrchestrator(projectId);
+  // Monitor Butler enabled state (loaded from prefs).
+  const [monitorButlerEnabled, setMonitorButlerEnabled] = useState(false);
+  const [monitorButlerInterval, setMonitorButlerInterval] = useState(15);
+  useEffect(() => {
+    apiFetch<Record<string, string>>("/api/preferences/settings")
+      .then((s) => {
+        setMonitorButlerEnabled(s.monitor_butler_enabled === "true");
+        const raw = parseInt(s.monitor_butler_interval_min ?? "15", 10);
+        setMonitorButlerInterval(isNaN(raw) ? 15 : raw);
+      })
+      .catch(() => {});
+  }, []);
 
   // Close the "More" views dropdown on outside click or Escape.
   useEffect(() => {
@@ -538,18 +551,33 @@ export function BoardToolbar({
           className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${
             hasMonitorWarnings
               ? "bg-red-50 dark:bg-red-950 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900"
-              : autoMonitor
+              : (autoMonitor || monitorButlerEnabled || (orchestrator?.available && orchestrator.alive))
                 ? "bg-accent-50 dark:bg-accent-950 border-accent-200 dark:border-accent-800 text-accent-700 hover:bg-accent-100 dark:hover:bg-accent-900"
                 : "bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
           }`}
-          title={hasMonitorWarnings ? "Board monitor warning - dirty main checkout" : autoMonitor ? "Board monitor active - click for details" : "Board monitor - click to configure"}
+          title={
+            hasMonitorWarnings
+              ? "Board monitor warning - dirty main checkout"
+              : buildMonitorTitle(autoMonitor, monitorButlerEnabled, orchestrator?.available && orchestrator.alive)
+          }
         >
           {hasMonitorWarnings ? (
             <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
             </svg>
-          ) : autoMonitor && <span className="w-2 h-2 rounded-full bg-accent-500 animate-pulse" />}
+          ) : (
+            <ActiveMonitorDots
+              autoMonitor={autoMonitor}
+              butlerEnabled={monitorButlerEnabled}
+              orchestratorAlive={orchestrator?.available && orchestrator.alive}
+            />
+          )}
           <span className="hidden sm:inline">Monitor</span>
+          <ActiveMonitorBadge
+            autoMonitor={autoMonitor}
+            butlerEnabled={monitorButlerEnabled}
+            orchestratorAlive={orchestrator?.available && orchestrator.alive}
+          />
         </button>
         <button
           onClick={onMonitorRunNow}
@@ -584,6 +612,8 @@ export function BoardToolbar({
             orchestrator={orchestrator}
             orchestratorNotify={orchestratorNotify}
             onOrchestratorNotifyChange={setOrchestratorNotify}
+            monitorButlerEnabled={monitorButlerEnabled}
+            monitorButlerInterval={monitorButlerInterval}
             onViewAllHealthEvents={onViewAllHealthEvents ? () => {
               setShowMonitorPopover(false);
               onViewAllHealthEvents();
@@ -805,6 +835,44 @@ export function BoardToolbar({
       </div>
     )}
     </>
+  );
+}
+
+function buildMonitorTitle(autoMonitor: boolean, butlerEnabled: boolean, orchestratorAlive: boolean | undefined): string {
+  const active: string[] = [];
+  if (orchestratorAlive) active.push("Orchestrator loop");
+  if (butlerEnabled) active.push("Monitor Butler");
+  if (autoMonitor) active.push("Auto-monitor");
+  if (active.length === 0) return "Board monitor - click to configure";
+  return `Active: ${active.join(", ")} — click for details`;
+}
+
+function ActiveMonitorDots({
+  autoMonitor,
+  butlerEnabled,
+  orchestratorAlive,
+}: { autoMonitor: boolean; butlerEnabled: boolean; orchestratorAlive: boolean | undefined }) {
+  if (!autoMonitor && !butlerEnabled && !orchestratorAlive) return null;
+  return (
+    <span className="flex items-center gap-0.5">
+      {orchestratorAlive && <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" title="Orchestrator loop" />}
+      {butlerEnabled && <span className="w-1.5 h-1.5 rounded-full bg-violet-500 animate-pulse" title="Monitor Butler" />}
+      {autoMonitor && <span className="w-1.5 h-1.5 rounded-full bg-accent-500 animate-pulse" title="Auto-monitor" />}
+    </span>
+  );
+}
+
+function ActiveMonitorBadge({
+  autoMonitor,
+  butlerEnabled,
+  orchestratorAlive,
+}: { autoMonitor: boolean; butlerEnabled: boolean; orchestratorAlive: boolean | undefined }) {
+  const count = [orchestratorAlive, butlerEnabled, autoMonitor].filter(Boolean).length;
+  if (count <= 1) return null;
+  return (
+    <span className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-accent-500 text-white text-[10px] font-semibold leading-none">
+      {count}
+    </span>
   );
 }
 
