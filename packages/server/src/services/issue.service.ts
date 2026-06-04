@@ -739,6 +739,38 @@ export function createIssueService(deps: {
     return deleteArtifactRepo(issueId, artifactId, database);
   }
 
+  async function duplicateIssue(sourceId: string): Promise<CreateIssueResult> {
+    const rows = await database
+      .select({
+        projectId: issues.projectId,
+        title: issues.title,
+        description: issues.description,
+        priority: issues.priority,
+        issueType: issues.issueType,
+      })
+      .from(issues)
+      .where(eq(issues.id, sourceId))
+      .limit(1);
+
+    if (rows.length === 0) throw new IssueError("Issue not found", "NOT_FOUND");
+    const source = rows[0];
+
+    const newIssue = await createIssue({
+      projectId: source.projectId,
+      title: `Copy of ${source.title}`,
+      description: source.description ?? undefined,
+      priority: source.priority ?? undefined,
+      issueType: source.issueType ?? undefined,
+    });
+
+    const sourceTags = await getIssueTags(sourceId, database);
+    for (const tag of sourceTags) {
+      await assignTagRepo(newIssue.id, tag.id, database);
+    }
+
+    return newIssue;
+  }
+
   async function archiveDoneIssues(
     projectId: string,
     olderThanDays: number,
@@ -820,5 +852,6 @@ export function createIssueService(deps: {
     removeTag,
     getDependencies,
     getArtifacts,
+    duplicateIssue,
   };
 }
