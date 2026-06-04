@@ -23,5 +23,6 @@ try {
 export const db = drizzle({ client, schema });
 export const rawClient = client;
 export { schema };
+export { withDbRetry } from "./retry.js";
 
 export type Database = ReturnType<typeof drizzle<typeof schema>>;
