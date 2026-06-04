@@ -164,6 +164,60 @@ test.describe("Issue description markdown rendering", () => {
     expect(value).toContain("`inline code`");
   });
 
+  test("edit/preview toggle renders markdown and returns to textarea with content intact", async ({ page, request }) => {
+    test.setTimeout(60000);
+    const suffix = Date.now().toString(36);
+    const title = `MarkdownToggle ${suffix}`;
+
+    const id = await createIssue(request, { title, description: MARKDOWN_DESCRIPTION, priority: "medium", statusId, projectId });
+    createdIssueIds.push(id);
+
+    await withRetry(() => request.put(`${SERVER_URL}/api/preferences/active-project`, { data: { projectId } }));
+    await page.goto("/");
+    await page.waitForSelector("h2");
+    const issueCard = page.locator("p", { hasText: title }).first();
+    await expect(issueCard).toBeAttached({ timeout: 20000 });
+    await issueCard.scrollIntoViewIfNeeded();
+    await expect(issueCard).toBeVisible({ timeout: 5000 });
+    await issueCard.click();
+    await expect(page.locator("h2", { hasText: "Issue Details" })).toBeVisible();
+
+    // Enter full edit mode via the pencil icon in the panel header
+    await page.getByRole("button", { name: "Edit issue" }).click();
+    await expect(page.locator("text=Edit Issue")).toBeVisible();
+
+    const panel = page.locator(".fixed.right-0");
+
+    // Edit/Preview toggle buttons must be visible
+    const editTab = panel.getByRole("button", { name: "Edit", exact: true });
+    const previewTab = panel.getByRole("button", { name: "Preview", exact: true });
+    await expect(editTab).toBeVisible();
+    await expect(previewTab).toBeVisible();
+
+    // Textarea is visible in Edit mode
+    const textarea = panel.locator("textarea");
+    await expect(textarea).toBeVisible();
+    const originalContent = await textarea.inputValue();
+    expect(originalContent).toContain("# Heading One");
+
+    // Switch to Preview — markdown renders as HTML
+    await previewTab.click();
+    await expect(textarea).not.toBeVisible();
+    const markdownBody = panel.locator(".markdown-body").first();
+    await expect(markdownBody).toBeVisible();
+    await expect(markdownBody.locator("h1")).toHaveText("Heading One");
+    await expect(markdownBody.locator("strong")).toHaveText("bold text");
+    // Raw markdown must not appear as text
+    await expect(markdownBody).not.toContainText("# Heading One");
+    await expect(markdownBody).not.toContainText("**bold text**");
+
+    // Switch back to Edit — textarea reappears with content intact
+    await editTab.click();
+    await expect(textarea).toBeVisible();
+    const restoredContent = await textarea.inputValue();
+    expect(restoredContent).toBe(originalContent);
+  });
+
   test("edit description, save, and re-renders updated markdown", async ({ page, request }) => {
     test.setTimeout(60000);
     const suffix = Date.now().toString(36);
