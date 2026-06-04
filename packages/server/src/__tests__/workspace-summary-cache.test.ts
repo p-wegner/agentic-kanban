@@ -15,24 +15,37 @@ describe("createWorkspaceSummaryCache", () => {
   let cache: ReturnType<typeof createWorkspaceSummaryCache>;
 
   beforeEach(() => {
-    cache = createWorkspaceSummaryCache({ ttlMs: 100 });
+    cache = createWorkspaceSummaryCache({ ttlMs: 100, staleTtlMs: 500 });
   });
 
   it("returns null on a cold cache", () => {
     expect(cache.get("proj-1")).toBeNull();
   });
 
-  it("returns cached value within TTL", () => {
+  it("returns fresh value within TTL (stale=false)", () => {
     const map = makeMap("issue-1");
     cache.set("proj-1", map);
     const hit = cache.get("proj-1");
-    expect(hit).toBe(map);
+    expect(hit).not.toBeNull();
+    expect(hit!.value).toBe(map);
+    expect(hit!.stale).toBe(false);
   });
 
-  it("returns null after TTL expires", async () => {
-    cache = createWorkspaceSummaryCache({ ttlMs: 10 });
-    cache.set("proj-1", makeMap("issue-1"));
+  it("returns stale value after TTL but within staleTtl (stale=true)", async () => {
+    cache = createWorkspaceSummaryCache({ ttlMs: 10, staleTtlMs: 5_000 });
+    const map = makeMap("issue-1");
+    cache.set("proj-1", map);
     await new Promise((r) => setTimeout(r, 20));
+    const hit = cache.get("proj-1");
+    expect(hit).not.toBeNull();
+    expect(hit!.value).toBe(map);
+    expect(hit!.stale).toBe(true);
+  });
+
+  it("returns null after both TTL and staleTtl expire", async () => {
+    cache = createWorkspaceSummaryCache({ ttlMs: 10, staleTtlMs: 10 });
+    cache.set("proj-1", makeMap("issue-1"));
+    await new Promise((r) => setTimeout(r, 30));
     expect(cache.get("proj-1")).toBeNull();
   });
 
@@ -49,8 +62,8 @@ describe("createWorkspaceSummaryCache", () => {
     const map2 = makeMap("issue-b");
     cache.set("proj-1", map1);
     cache.set("proj-2", map2);
-    expect(cache.get("proj-1")).toBe(map1);
-    expect(cache.get("proj-2")).toBe(map2);
+    expect(cache.get("proj-1")!.value).toBe(map1);
+    expect(cache.get("proj-2")!.value).toBe(map2);
   });
 
   it("evicts oldest entry when maxProjects is reached", () => {
@@ -68,6 +81,19 @@ describe("createWorkspaceSummaryCache", () => {
     cache.set("proj-2", makeMap());
     cache.clear();
     expect(cache.size()).toBe(0);
+  });
+
+  it("rebuilding flag prevents duplicate background rebuilds", () => {
+    cache.set("proj-1", makeMap("issue-1"));
+    expect(cache.isRebuilding("proj-1")).toBe(false);
+    cache.markRebuilding("proj-1");
+    expect(cache.isRebuilding("proj-1")).toBe(true);
+    cache.clearRebuilding("proj-1");
+    expect(cache.isRebuilding("proj-1")).toBe(false);
+  });
+
+  it("isRebuilding returns false for unknown project", () => {
+    expect(cache.isRebuilding("unknown")).toBe(false);
   });
 });
 

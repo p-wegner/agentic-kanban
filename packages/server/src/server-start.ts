@@ -18,6 +18,7 @@ import { startMonitorButler } from "./services/monitor-butler.js";
 import { runStartupTasks } from "./startup/startup-tasks.js";
 import { runSessionRestore } from "./startup/session-restore.js";
 import { startBackupScheduler } from "./startup/backup-scheduler.js";
+import { startSessionMessagePruner } from "./services/session-message-pruner.service.js";
 import { getPreference } from "./repositories/preferences.repository.js";
 import { domainErrorHandler } from "./middleware/error-handler.js";
 import { slowRequestLogger } from "./middleware/slow-request-logger.js";
@@ -88,6 +89,9 @@ export async function startServer(port?: number, hostname?: string) {
   } catch (err) {
     console.warn("[backup] failed to start scheduler (non-fatal):", err instanceof Error ? err.message : err);
   }
+
+  // Periodic session_messages pruning — keeps DB size bounded as workspace history grows.
+  startSessionMessagePruner(db);
 
   return { app, sessionManager, boardEvents };
 }
