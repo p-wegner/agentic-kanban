@@ -9,6 +9,7 @@ import type { ShowdownContestant } from "@agentic-kanban/shared";
 import { analyzeDependencies, enhanceIssue, aiEstimateIssue, decomposeEpic, confirmEpicDecomposition, analyzeTouchedFiles } from "../services/issue-ai.service.js";
 import { createIssueService } from "../services/issue.service.js";
 import { createIssueCommentsService } from "../services/issue-comments.service.js";
+import { createIssueTimeEntriesService } from "../services/issue-time-entries.service.js";
 import type { IssueCommentKind, IssueCommentAuthor } from "../repositories/issue-comments.repository.js";
 import { createShowdownService } from "../services/showdown.service.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
@@ -24,6 +25,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
 
   const issueService = createIssueService({ database, boardEvents: options?.boardEvents });
   const issueCommentsService = createIssueCommentsService({ database, boardEvents: options?.boardEvents });
+  const timeEntriesService = createIssueTimeEntriesService({ database });
   const showdownService = createShowdownService({
     database,
     getSessionManager: options?.getSessionManager,
@@ -433,6 +435,33 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     const issueId = c.req.param("id");
     const commentId = c.req.param("commentId");
     await issueCommentsService.removeComment(issueId, commentId);
+    return c.json({ success: true });
+  });
+
+  // GET /api/issues/:id/time-entries
+  router.get("/:id/time-entries", async (c) => {
+    const issueId = c.req.param("id");
+    const entries = await timeEntriesService.listEntries(issueId);
+    const total = await timeEntriesService.totalMinutes(issueId);
+    return c.json({ entries, totalMinutes: total });
+  });
+
+  // POST /api/issues/:id/time-entries
+  router.post("/:id/time-entries", async (c) => {
+    const issueId = c.req.param("id");
+    const body = await parseJsonBody<{ minutes?: number; note?: string }>(c);
+    const minutes = Number(body.minutes);
+    if (!Number.isInteger(minutes) || minutes <= 0) {
+      return c.json({ error: "minutes must be a positive integer" }, 400);
+    }
+    const entry = await timeEntriesService.addEntry({ issueId, minutes, note: body.note ?? null });
+    return c.json(entry, 201);
+  });
+
+  // DELETE /api/issues/:id/time-entries/:entryId
+  router.delete("/:id/time-entries/:entryId", async (c) => {
+    const entryId = c.req.param("entryId");
+    await timeEntriesService.removeEntry(entryId);
     return c.json({ success: true });
   });
 

@@ -582,6 +582,13 @@
       "when": 1780906800001,
       "tag": "0082_activity_feed_composite_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "6",
+      "when": 1780906800002,
+      "tag": "0083_issue_time_entries",
+      "breakpoints": true
     }
   ]
 }
