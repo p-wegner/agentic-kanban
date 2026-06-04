@@ -10,7 +10,7 @@ import { branchExists, detectRepoInfo, getProjectGitStats } from "./git-info.ser
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree } from "./git.service.js";
 import { buildWorkspaceSummaryMap, buildBlockedMap, buildTagMap, buildGraphEdges } from "./board-aggregation.service.js";
 import { getProjectById, getProjectByRepoPath, getAllProjects, insertProject, deleteProjectCascade, getProjectStats, getProjectStatuses, createProjectStatus, deleteProjectStatus, updateProjectStatusSortOrder } from "../repositories/project.repository.js";
-import { generateSetupScript as generateSetupScriptAI, generateTeardownScript as generateTeardownScriptAI } from "./project-setup.service.js";
+import { generateSetupScript as generateSetupScriptAI, generateTeardownScript as generateTeardownScriptAI, generateVerifyScript as generateVerifyScriptAI } from "./project-setup.service.js";
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
 import type { WorkspaceSummaryCache } from "./workspace-summary-cache.service.js";
 
@@ -726,6 +726,15 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     }
   }
 
+  async function generateVerifyScript(projectId: string) {
+    try {
+      return await generateVerifyScriptAI(projectId, database);
+    } catch (err: any) {
+      if (err.statusCode === 404) throw new ProjectError("Project not found", "NOT_FOUND");
+      throw err;
+    }
+  }
+
   async function getBoardSummary(projectId: string) {
     const project = await getProjectById(projectId, database);
     if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
@@ -767,5 +776,6 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     getBranches,
     generateSetupScript,
     generateTeardownScript,
+    generateVerifyScript,
   };
 }
