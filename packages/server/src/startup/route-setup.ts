@@ -38,7 +38,7 @@ export function setupRoutes(app: Hono, { sessionManager, boardEvents, reviewSess
         if (err.code === "BAD_REQUEST") return c.json({ error: err.message }, 400);
       }
       console.error("[workflow] manual review trigger failed:", err);
-      return c.json({ error: String(err) }, 500);
+      return c.json({ error: String(err), code: "INTERNAL" }, 500);
     }
   });
 
