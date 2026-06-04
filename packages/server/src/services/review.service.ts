@@ -279,12 +279,21 @@ export async function startManualReview(
     await database.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
     boardEvents.broadcast(projectId, "issue_updated");
 
-    const reviewExtraEnv: Record<string, string> = { KANBAN_SESSION_TYPE: "review", KANBAN_AFTER_MERGE_VERIFY: verifyAgent };
-    const sessionId = await getSessionManager().startSession({
-      workspaceId, prompt: reviewPromptText, agentCommand, agentArgs: reviewArgsWithModel,
-      claudeProfile, profile: manualProfileSelection, provider: toExecutorProvider(provider),
-      triggerType: "review", extraEnv: reviewExtraEnv,
-    });
+    let sessionId: string;
+    try {
+      const reviewExtraEnv: Record<string, string> = { KANBAN_SESSION_TYPE: "review", KANBAN_AFTER_MERGE_VERIFY: verifyAgent };
+      sessionId = await getSessionManager().startSession({
+        workspaceId, prompt: reviewPromptText, agentCommand, agentArgs: reviewArgsWithModel,
+        claudeProfile, profile: manualProfileSelection, provider: toExecutorProvider(provider),
+        triggerType: "review", extraEnv: reviewExtraEnv,
+      });
+    } catch (sessionErr) {
+      // Revert the workspace status so retries are possible — don't leave it stuck at "reviewing"
+      const revertedAt = new Date().toISOString();
+      await database.update(workspaces).set({ status: "idle", updatedAt: revertedAt }).where(eq(workspaces.id, workspaceId));
+      boardEvents.broadcast(projectId, "issue_updated");
+      throw sessionErr;
+    }
     reviewSessionIds.add(sessionId);
     console.log(`[review-service] manual review session ${sessionId} for workspace ${workspaceId}`);
     return { sessionId };

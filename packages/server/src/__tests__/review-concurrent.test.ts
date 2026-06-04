@@ -120,7 +120,7 @@ describe("startManualReview — concurrent trigger hardening (AK-520)", () => {
     expect(second.sessionId).toBeTruthy();
   });
 
-  it("transient session-manager failure clears in-flight guard and throws (no bare 500)", async () => {
+  it("transient session-manager failure reverts workspace to idle and allows retry", async () => {
     const { workspaceId } = await seedWorkspace(db);
     const reviewSessionIds = new Set<string>();
     const failingManager = makeSessionManager(async () => { throw new Error("EBUSY: sqlite db locked"); });
@@ -129,13 +129,13 @@ describe("startManualReview — concurrent trigger hardening (AK-520)", () => {
       startManualReview(db, () => failingManager as never, mockBoardEvents as never, reviewSessionIds, workspaceId, false),
     ).rejects.toThrow("EBUSY");
 
-    // In-flight guard must be cleared after failure — a retry should be possible
-    expect(() => (reviewSessionIds as Set<string>).size).not.toThrow();
-    // A second attempt on the same workspace is now unblocked by the guard
+    // Workspace must be reverted to idle automatically — no manual reset needed
+    const { eq } = await import("drizzle-orm");
+    const rows = await db.select({ status: workspaces.status }).from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
+    expect(rows[0].status).toBe("idle");
+
+    // In-flight guard must be cleared — a retry is immediately possible without touching the DB
     const retryManager = makeSessionManager(() => "session-retry");
-    await db.update(workspaces).set({ status: "idle" }).where(
-      (await import("drizzle-orm")).eq(workspaces.id, workspaceId),
-    );
     const retryResult = await startManualReview(db, () => retryManager as never, mockBoardEvents as never, reviewSessionIds, workspaceId, false);
     expect(retryResult.sessionId).toBe("session-retry");
   });
