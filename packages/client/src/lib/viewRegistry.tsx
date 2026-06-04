@@ -35,7 +35,8 @@ export type ViewMode =
   | "runbooks"
   | "capacity"
   | "constellation"
-  | "momentum";
+  | "momentum"
+  | "activity";
 
 export interface ViewDescriptor {
   /** Stable view id — matches BoardPage's `viewMode` state. */
@@ -212,6 +213,12 @@ const ICON = {
       <circle cx="9" cy="6" r="1.5" fill="currentColor" stroke="none" />
       <circle cx="13" cy="12" r="1.5" fill="currentColor" stroke="none" />
       <circle cx="19" cy="18" r="1.5" fill="currentColor" stroke="none" />
+    </svg>
+  ),
+  activity: (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h2M19 12h2M12 3v2M12 19v2" />
     </svg>
   ),
 } as const;
@@ -474,6 +481,17 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteDescription: "Immersive radial starfield: issues as glowing nodes orbiting status clusters",
     shortcut: "e",
     activeClass: "bg-indigo-700 text-white",
+    group: "secondary",
+  },
+  {
+    id: "activity",
+    toolbarLabel: "Activity",
+    label: "Activity Feed",
+    tooltip: "Activity Feed — recent status changes and merges across all issues",
+    icon: ICON.activity,
+    paletteIcon: "⏱",
+    paletteDescription: "Project-wide activity: status transitions, merges, sessions in reverse-chronological order",
+    shortcut: "x",
     group: "secondary",
   },
 ];
