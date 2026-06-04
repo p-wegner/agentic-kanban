@@ -77,6 +77,7 @@ export const workspaces = sqliteTable("workspaces", {
 }, (table) => ({
   issueIdIdx: index("idx_workspaces_issue_id").on(table.issueId),
   statusIdx: index("idx_workspaces_status").on(table.status),
+  issueIdStatusIdx: index("idx_workspaces_issue_id_status").on(table.issueId, table.status),
   createdAtIdx: index("idx_workspaces_created_at").on(table.createdAt),
   parentWorkspaceIdIdx: index("idx_workspaces_parent_workspace_id").on(table.parentWorkspaceId),
   showdownIdIdx: index("idx_workspaces_showdown_id").on(table.showdownId),
