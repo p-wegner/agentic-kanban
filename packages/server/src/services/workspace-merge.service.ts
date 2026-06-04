@@ -39,6 +39,7 @@ import {
   describeMergeLock,
   type GitService,
 } from "./workspace-internals.js";
+import { buildReconcilerPrompt } from "./reconciler.service.js";
 
 export function createWorkspaceMergeService(deps: {
   database: Database;
@@ -68,7 +69,7 @@ export function createWorkspaceMergeService(deps: {
 
   async function recordMergeAttempt(
     workspace: typeof workspaces.$inferSelect,
-    eventType: "conflict" | "fix-and-merge-launched" | "merged" | "warning" | "already-merged" | "direct-closed",
+    eventType: "conflict" | "fix-and-merge-launched" | "reconcile-launched" | "merged" | "warning" | "already-merged" | "direct-closed",
     body: string,
     payload: Record<string, unknown> = {},
     createdAt = new Date().toISOString(),
@@ -815,6 +816,81 @@ export function createWorkspaceMergeService(deps: {
   }
 
   /**
+   * Launch ONE batch merge-reconciler agent over a set of stranded/conflicting workspaces.
+   * Sibling of {@link fixAndMerge}: same preflight (kill worktree procs + rebase the integration
+   * worktree onto the current base) and same agent-selection/launch plumbing, but the prompt is
+   * the merge-reconciler playbook with the whole stranded batch injected — the agent decides the
+   * efficient landing strategy (land clean ones first, resolve each overlapping cluster's union
+   * once, sequence migration collisions) and lands them via the board's safe primitives.
+   * `integrationWorkspaceId` is the least-overlap batch member; the agent runs IN its worktree.
+   */
+  async function reconcileBatch(
+    integrationWorkspaceId: string,
+    opts: { strandedBatchJson: string; serverPort: string },
+  ) {
+    const workspace = await getWorkspaceById(integrationWorkspaceId, database);
+    if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
+    if (!workspace.workingDir) throw new WorkspaceError("Integration workspace not set up", "BAD_REQUEST");
+    if (workspace.status === "fixing") throw new WorkspaceError("Reconcile already in progress", "CONFLICT");
+    if (!getSessionManager) throw new WorkspaceError("Session manager not available", "BAD_REQUEST");
+
+    const { repoPath, defaultBranch } = await resolveProjectRepo(integrationWorkspaceId, database);
+    const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
+    const projectId = await resolveProjectId(integrationWorkspaceId, database);
+
+    // Same guard as fixAndMerge/merge: refuse if the main checkout drifted off the base branch.
+    const currentHeadBranch = await gitService.getCurrentBranch(repoPath);
+    if (currentHeadBranch !== baseBranch) {
+      throw new WorkspaceError(
+        `Cannot reconcile: main checkout HEAD is on '${currentHeadBranch}' but base is '${baseBranch}'. ` +
+          `Check out '${baseBranch}' in the main checkout before proceeding.`,
+        "CONFLICT",
+        { currentBranch: currentHeadBranch, targetBranch: baseBranch },
+      );
+    }
+
+    // Prep the integration worktree: kill leftover procs, then rebase onto the current base so the
+    // agent resolves the cluster union against the latest base (best-effort; the agent finishes it).
+    await killWorktreeProcesses(workspace.workingDir, "reconcile");
+    try {
+      await gitService.syncBranchToHead(workspace.workingDir, workspace.branch);
+      await gitService.rebaseOntoBase(workspace.workingDir, baseBranch, workspace.branch, { preferLocalBase: true });
+    } catch (err) {
+      console.warn(`[workspace-merge] reconcile preflight rebase failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    const prompt = await buildReconcilerPrompt(database, {
+      baseBranch,
+      projectId: projectId ?? "",
+      serverPort: opts.serverPort,
+      integrationWorkspaceId,
+      integrationWorkingDir: workspace.workingDir,
+      strandedBatch: opts.strandedBatchJson,
+    });
+
+    const { agentCommand, agentArgs, claudeProfile, profile, provider } =
+      applyWorkspaceAgentSelection(await loadAgentSettings(database), workspace);
+    const executorProvider = toExecutorProvider(provider);
+
+    const sessionId = await getSessionManager().startSession({
+      workspaceId: integrationWorkspaceId, prompt, agentCommand, agentArgs, claudeProfile, profile,
+      provider: executorProvider, multiTurn: executorProvider === "codex" ? false : true, triggerType: "reconcile",
+      skipLaunchPreflight: true, extraEnv: { KANBAN_SESSION_TYPE: "reconcile" },
+    });
+
+    await updateWorkspaceStatus(integrationWorkspaceId, "fixing", {}, database);
+    await recordMergeAttempt(
+      workspace,
+      "reconcile-launched",
+      `Launched a batch merge-reconciler session for integration workspace ${integrationWorkspaceId}.`,
+      { sessionId, targetBranch: baseBranch },
+    );
+    if (projectId) boardEvents?.broadcast(projectId, "session_launched");
+
+    return { sessionId };
+  }
+
+  /**
    * Check whether a workspace's branch is already fully merged into the default branch:
    * no diff against the base branch AND the branch's HEAD commit is reachable from it.
    * Returns a summary the operator can review before confirming reconciliation.
@@ -985,5 +1061,5 @@ export function createWorkspaceMergeService(deps: {
     };
   }
 
-  return { mergeWorkspace, updateBase, abortRebase, resolveConflicts, fixAndMerge, checkAlreadyMerged, reconcileAlreadyMerged };
+  return { mergeWorkspace, updateBase, abortRebase, resolveConflicts, fixAndMerge, reconcileBatch, checkAlreadyMerged, reconcileAlreadyMerged };
 }
