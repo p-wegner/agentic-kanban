@@ -94,20 +94,24 @@ describe("auto-merge orchestrator", () => {
     expect(monitorOrchestrator.state.lastRunAt).toBeNull();
   });
 
-  it("finds idle reviewed workspaces and excludes direct, closed, and in-progress workspaces", async () => {
+  it("finds idle reviewed workspaces (incl. ready work stranded in Done) and excludes direct, closed, in-progress, and user-parked Done", async () => {
     const { db } = createTestDb();
     const { projectId, statusIds } = await seedProject(db);
     const ready = await seedWorkspace(db, { projectId, statusId: statusIds["In Review"], readyForMerge: true });
     const aiReviewed = await seedWorkspace(db, { projectId, statusId: statusIds["AI Reviewed"] });
-    await seedWorkspace(db, { projectId, statusId: statusIds["In Review"], readyForMerge: true, isDirect: true });
-    await seedWorkspace(db, { projectId, statusId: statusIds["In Review"], readyForMerge: true, workspaceStatus: "closed" });
-    await seedWorkspace(db, { projectId, statusId: statusIds["In Review"], readyForMerge: false });
-    await seedWorkspace(db, { projectId, statusId: statusIds["Done"], readyForMerge: true });
+    await seedWorkspace(db, { projectId, statusId: statusIds["In Review"], readyForMerge: true, isDirect: true }); // excluded: direct
+    await seedWorkspace(db, { projectId, statusId: statusIds["In Review"], readyForMerge: true, workspaceStatus: "closed" }); // excluded: closed
+    await seedWorkspace(db, { projectId, statusId: statusIds["In Review"], readyForMerge: false }); // excluded: not ready / not auto-in-review
+    // #534: a readyForMerge workspace whose issue was moved to terminal Done before the
+    // merge tick is stranded-but-recoverable (readyForMerge ⇒ review-approved, not a user park).
+    const doneReady = await seedWorkspace(db, { projectId, statusId: statusIds["Done"], readyForMerge: true });
+    // A user-parked Done workspace (NOT ready) stays excluded — don't auto-merge it.
+    await seedWorkspace(db, { projectId, statusId: statusIds["Done"], readyForMerge: false });
 
     const orchestrator = createAutoMergeOrchestrator({ database: db });
-    await expect(orchestrator.findCompletedWorkspaceIds()).resolves.toEqual(expect.arrayContaining([ready, aiReviewed]));
     const ids = await orchestrator.findCompletedWorkspaceIds();
-    expect(ids).toHaveLength(2);
+    expect(ids).toEqual(expect.arrayContaining([ready, aiReviewed, doneReady]));
+    expect(ids).toHaveLength(3);
   });
 
   it("includes idle In Review workspaces only when auto_merge_in_review is enabled", async () => {

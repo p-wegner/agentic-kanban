@@ -81,7 +81,15 @@ export function createAutoMergeOrchestrator(deps: {
       ));
 
     return rows
-      .filter((row) => !isTerminalStatusView({
+      // Terminal-status (Done/Cancelled) workspaces are normally excluded — a user may
+      // deliberately park an issue in Done without merging. BUT a workspace that is still
+      // OPEN (the query excludes status='closed') with readyForMerge=true is a different
+      // animal: readyForMerge is set by the REVIEW flow, not a user park, so if its issue
+      // was moved to Done after review but before this tick merged it, the branch is
+      // stranded and unmerged. Recover it instead of dropping it (the #534 silent merge
+      // loss: issue looks Done, code never lands). Non-ready terminal workspaces (a real
+      // user park) are still excluded.
+      .filter((row) => row.readyForMerge || !isTerminalStatusView({
         currentNodeId: row.issueCurrentNodeId,
         currentNodeType: row.issueCurrentNodeType,
         statusName: row.issueStatusName,
