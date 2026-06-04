@@ -27,6 +27,7 @@ import { createBoardMonitorRoute } from "./board-monitor.js";
 import { createRunbooksRoute } from "./runbooks.js";
 import { createIssueExportImportRoute } from "./issue-export-import.js";
 import { createMetricsRoute } from "./metrics.js";
+import { createHealthRoute } from "./health.js";
 import { createMilestonesRoute } from "./milestones.js";
 import { createWorkflowForkService } from "../services/workflow-fork.service.js";
 import type { Database } from "../db/index.js";
@@ -81,6 +82,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/merge-queue", createMergeQueueRoute(database, getSessionManager, options));
   routes.route("/showdowns", createShowdownsRoute(database, getSessionManager, options));
   routes.route("/metrics", createMetricsRoute());
+  routes.route("/health", createHealthRoute());
   if (options?.boardEvents) {
     routes.route("/approvals", createApprovalsRoute(options.boardEvents));
   }
