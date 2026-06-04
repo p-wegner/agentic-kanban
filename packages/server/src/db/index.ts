@@ -16,6 +16,20 @@ try {
   await client.execute("PRAGMA journal_mode=WAL");
   // busy_timeout: wait up to 10s for a locked DB before throwing SQLITE_BUSY.
   await client.execute("PRAGMA busy_timeout=10000");
+  // synchronous=NORMAL: with WAL this is crash-safe (only an OS/power loss can drop the
+  // last few committed txns, acceptable for a local single-user board) and removes an
+  // fsync per commit — the dominant cost of the high-frequency session-message write
+  // stream from many concurrent agents, which was serializing the board read on the
+  // single connection (SQLITE_BUSY / multi-second board spikes).
+  await client.execute("PRAGMA synchronous=NORMAL");
+  // temp_store=MEMORY: keep transient B-trees (ORDER BY / GROUP BY in the board
+  // aggregation) in RAM instead of spilling to disk.
+  await client.execute("PRAGMA temp_store=MEMORY");
+  // cache_size=-65536: 64MB page cache (negative = KiB) so the hot board/issue/workspace
+  // pages stay resident.
+  await client.execute("PRAGMA cache_size=-65536");
+  // mmap_size=256MB: memory-map reads to cut syscall overhead on the read-heavy board path.
+  await client.execute("PRAGMA mmap_size=268435456");
 } catch {
   // Non-fatal: pragmas may fail on read-only or in-memory DBs.
 }
