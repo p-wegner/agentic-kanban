@@ -206,6 +206,7 @@ export async function getIssuesByProject(
       externalKey: issues.externalKey,
       externalUrl: issues.externalUrl,
       pinned: issues.pinned,
+      milestoneId: issues.milestoneId,
       statusName: projectStatuses.name,
     })
     .from(issues)

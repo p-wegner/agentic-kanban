@@ -447,6 +447,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
         externalUrl: issues.externalUrl,
         checklistJson: issues.checklistJson,
         pinned: issues.pinned,
+        milestoneId: issues.milestoneId,
       })
       .from(issues)
       .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
@@ -564,6 +565,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
         skipAutoReview: issues.skipAutoReview,
         estimate: issues.estimate,
         pinned: issues.pinned,
+        milestoneId: issues.milestoneId,
       })
       .from(issues)
       .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
