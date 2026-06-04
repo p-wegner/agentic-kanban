@@ -141,6 +141,10 @@ export async function removeWorktree(
   repoPath: string,
   worktreePath: string,
 ): Promise<void> {
+  // Unlink junctions first so neither git nor the fs.rm fallback can traverse
+  // into the main checkout via a Windows junction (data-loss bug #518).
+  await unlinkTopLevelJunctions(worktreePath).catch(() => undefined);
+
   try {
     await execGit(["worktree", "remove", "--force", worktreePath], repoPath);
   } catch (err) {
