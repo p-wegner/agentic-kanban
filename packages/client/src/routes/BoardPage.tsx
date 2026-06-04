@@ -421,6 +421,16 @@ export function BoardPage() {
           );
           setColumns(board);
           columnsRef.current = board;
+
+          const params = new URLSearchParams(window.location.search);
+          const issueParam = params.get("issue");
+          if (issueParam != null) {
+            const issueNumber = parseInt(issueParam, 10);
+            if (!isNaN(issueNumber)) {
+              const found = board.flatMap((c) => c.issues).find((i) => i.issueNumber === issueNumber);
+              if (found) setSelectedIssue(found);
+            }
+          }
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load board");
