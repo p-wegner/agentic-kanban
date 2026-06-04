@@ -38,7 +38,9 @@ export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps
 
       let resolvedStatusId: string | null = null;
       if (statusName) {
-        // Guard: block terminal-status moves when the issue has an open workspace.
+        // Guard: block terminal-status moves when the issue has an open non-direct
+        // workspace. Direct workspaces (isDirect=true) commit directly to master —
+        // no branch to merge — so they are excluded from this check.
         if (TERMINAL_STATUSES.has(statusName)) {
           const openWs = await db
             .select({ id: schema.workspaces.id, branch: schema.workspaces.branch })
@@ -46,6 +48,7 @@ export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps
             .where(and(
               eq(schema.workspaces.issueId, issueId),
               ne(schema.workspaces.status, "closed"),
+              eq(schema.workspaces.isDirect, false),
             ))
             .limit(1);
           if (openWs.length > 0) {
