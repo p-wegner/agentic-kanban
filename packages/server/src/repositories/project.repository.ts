@@ -128,6 +128,29 @@ export async function createProjectStatus(
   return { id, projectId, name };
 }
 
+export async function updateProjectStatusSortOrder(
+  projectId: string,
+  statusId: string,
+  sortOrder: number,
+  database: Database = db,
+): Promise<{ success: true } | { error: string; status: number }> {
+  const rows = await database
+    .select()
+    .from(projectStatuses)
+    .where(and(eq(projectStatuses.id, statusId), eq(projectStatuses.projectId, projectId)));
+
+  if (rows.length === 0) {
+    return { error: "Status not found", status: 404 };
+  }
+
+  await database
+    .update(projectStatuses)
+    .set({ sortOrder })
+    .where(and(eq(projectStatuses.id, statusId), eq(projectStatuses.projectId, projectId)));
+
+  return { success: true };
+}
+
 export async function deleteProjectStatus(
   projectId: string,
   statusId: string,

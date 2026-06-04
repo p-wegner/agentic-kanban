@@ -142,6 +142,16 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
     return c.json(result, 201);
   });
 
+  // PATCH /api/projects/:id/statuses/:statusId
+  router.patch("/:id/statuses/:statusId", async (c) => {
+    const projectId = c.req.param("id");
+    const statusId = c.req.param("statusId");
+    const body = await parseJsonBody(c);
+    if (typeof body.sortOrder !== "number") return c.json({ error: "sortOrder must be a number" }, 400);
+    await projectService.updateStatusSortOrder(projectId, statusId, body.sortOrder);
+    return c.json({ success: true });
+  });
+
   // DELETE /api/projects/:id/statuses/:statusId
   router.delete("/:id/statuses/:statusId", async (c) => {
     const projectId = c.req.param("id");
