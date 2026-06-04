@@ -29,9 +29,16 @@ export interface AutoStartDeps {
    * project can drain its backlog without flipping a global switch.
    */
   allowProject: (projectId: string) => boolean;
+  /**
+   * Which projects have per-project hands-off (autodrive) mode explicitly enabled.
+   * When true for a project, Backlog issues are treated as ready-to-start alongside
+   * Todo issues — so new tickets created via UI/MCP/REST start without a manual
+   * status promotion. Defaults to false (Backlog stays a triage area for non-driven projects).
+   */
+  isAutoDrivenProject?: (projectId: string) => boolean;
 }
 
-export async function runAutoStart(prefMap: Map<string, string>, { serverPort, boardEvents, logMonitorAction, allowProject }: AutoStartDeps) {
+export async function runAutoStart(prefMap: Map<string, string>, { serverPort, boardEvents, logMonitorAction, allowProject, isAutoDrivenProject = () => false }: AutoStartDeps) {
   const baseUrl = `http://127.0.0.1:${serverPort}`;
   const inProgressStatuses = (await db.select({ id: projectStatuses.id, projectId: projectStatuses.projectId }).from(projectStatuses)
     .where(sql`${projectStatuses.name} = 'In Progress'`))
@@ -94,8 +101,19 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
     if (todoStatus.length === 0) continue;
 
     const slotsAvailable = wipLimit - currentWip;
+    const fetchLimit = Math.max(1, Math.min(slotsAvailable, startsRemaining(inProgressSt.projectId))) * 3;
+
+    // For auto-driven projects, also pull Backlog issues so newly-created tickets
+    // start without requiring a manual Backlog→Todo promotion (#536).
+    const candidateStatusIds = [todoStatus[0].id];
+    if (isAutoDrivenProject(inProgressSt.projectId)) {
+      const backlogStatus = await db.select({ id: projectStatuses.id }).from(projectStatuses)
+        .where(sql`${projectStatuses.name} = 'Backlog' AND ${projectStatuses.projectId} = ${inProgressSt.projectId}`).limit(1);
+      if (backlogStatus.length > 0) candidateStatusIds.push(backlogStatus[0].id);
+    }
+
     const todoIssues = await db.select({ id: issues.id, title: issues.title, projectId: issues.projectId, issueNumber: issues.issueNumber }).from(issues)
-      .where(eq(issues.statusId, todoStatus[0].id)).limit(Math.max(1, Math.min(slotsAvailable, startsRemaining(inProgressSt.projectId))) * 3);
+      .where(inArray(issues.statusId, candidateStatusIds)).limit(fetchLimit);
     const doneStatuses = await db.select({ id: projectStatuses.id }).from(projectStatuses)
       .where(sql`${projectStatuses.name} IN ('Done', 'Cancelled')`);
     const doneStatusIds = new Set(doneStatuses.map((s) => s.id));

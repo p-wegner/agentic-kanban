@@ -207,7 +207,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort }: 
         getRecentAgentExcerpts,
         shouldSkipNudge,
       }));
-      await runAutoStart(prefMap, { serverPort, boardEvents, allowProject: shouldAutoStartProject, logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
+      await runAutoStart(prefMap, { serverPort, boardEvents, allowProject: shouldAutoStartProject, isAutoDrivenProject: (projectId) => driveIds.has(projectId), logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
       await runBacklogEmptyStrategy(prefMap, { serverPort, boardEvents, allowProject, logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
     } catch (err) {
       console.warn("[monitor] Cycle error:", err);
