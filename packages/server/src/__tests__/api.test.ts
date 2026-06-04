@@ -851,6 +851,56 @@ describe("Board API", () => {
   });
 });
 
+describe("Board ETag / conditional-GET", () => {
+  const { app, db: database } = createTestApp();
+
+  it("returns ETag on 200, serves 304 on matching If-None-Match, then 200 with new ETag after mutation", async () => {
+    const pid = await createProjectDirectly(database, { name: "ETag Test Project" });
+    const statusId = await createStatusDirectly(database, pid, "Todo", 0);
+
+    // Seed one issue
+    const issueRes = await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "ETag seed issue", statusId, projectId: pid }),
+    });
+    expect(issueRes.status).toBe(201);
+
+    // First GET — expect 200 with ETag
+    const res1 = await app.request(`/api/projects/${pid}/board`);
+    expect(res1.status).toBe(200);
+    const etag1 = res1.headers.get("ETag");
+    expect(etag1).toBeTruthy();
+
+    // Second GET with matching If-None-Match — expect 304 and no body
+    const res2 = await app.request(`/api/projects/${pid}/board`, {
+      headers: { "If-None-Match": etag1! },
+    });
+    expect(res2.status).toBe(304);
+    const body2 = await res2.text();
+    expect(body2).toBe("");
+
+    // Mutate: create a new issue
+    await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "ETag mutation issue", statusId, projectId: pid }),
+    });
+
+    // Third GET with the old ETag — expect 200 with a new ETag
+    const res3 = await app.request(`/api/projects/${pid}/board`, {
+      headers: { "If-None-Match": etag1! },
+    });
+    expect(res3.status).toBe(200);
+    const etag3 = res3.headers.get("ETag");
+    expect(etag3).toBeTruthy();
+    expect(etag3).not.toBe(etag1);
+    const body3 = await res3.json() as any;
+    const allIssues = body3.flatMap((col: any) => col.issues);
+    expect(allIssues.length).toBe(2);
+  });
+});
+
 describe("Workspaces API", () => {
   const { app, db: database } = createTestApp();
   let issueId: string;
