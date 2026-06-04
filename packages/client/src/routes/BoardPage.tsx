@@ -587,9 +587,11 @@ export function BoardPage() {
     showToast(`Registered "${result.name}"`, "success");
   }
 
-  async function handleCreateProject(name: string, path: string) {
-    const body: Record<string, string> = { name };
+  async function handleCreateProject(name: string, path: string, gitignoreTemplate: string, generateReadme: boolean) {
+    const body: Record<string, unknown> = { name };
     if (path) body.path = path;
+    if (gitignoreTemplate) body.gitignoreTemplate = gitignoreTemplate;
+    if (generateReadme) body.generateReadme = generateReadme;
     const result = await apiFetch<{ id: string; name: string; error?: string }>(
       "/api/projects/create",
       { method: "POST", body: JSON.stringify(body) },
