@@ -120,6 +120,8 @@ interface BoardToolbarProps {
   mergeQueueCount?: number;
   onShowRunQueueForecast?: () => void;
   runQueueOpenSlots?: number;
+  onShowLiveActivityTicker?: () => void;
+  liveActivityCount?: number;
   onViewAllHealthEvents?: () => void;
   cardDensity?: CardDensity;
   onCardDensityChange?: (v: CardDensity) => void;
@@ -173,6 +175,8 @@ export function BoardToolbar({
   mergeQueueCount = 0,
   onShowRunQueueForecast,
   runQueueOpenSlots = 0,
+  onShowLiveActivityTicker,
+  liveActivityCount = 0,
   onViewAllHealthEvents,
   cardDensity = "comfortable",
   onCardDensityChange,
@@ -527,6 +531,24 @@ export function BoardToolbar({
           {runQueueOpenSlots > 0 && (
             <span className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-sky-500 text-white text-[10px] font-semibold leading-none">
               {runQueueOpenSlots > 99 ? "99+" : runQueueOpenSlots}
+            </span>
+          )}
+        </button>
+      )}
+      {onShowLiveActivityTicker && (
+        <button
+          onClick={onShowLiveActivityTicker}
+          title="Live Activity — compact stream of running agent output (l)"
+          className="relative shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
+        >
+          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 17l6-6-6-6" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 17l6-6" strokeOpacity={0.4} />
+          </svg>
+          <span className="hidden sm:inline">Pulse</span>
+          {liveActivityCount > 0 && (
+            <span className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-emerald-500 text-white text-[10px] font-semibold leading-none">
+              {liveActivityCount > 99 ? "99+" : liveActivityCount}
             </span>
           )}
         </button>
