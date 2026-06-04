@@ -42,6 +42,12 @@ export interface ProcessWorkspaceDeps {
    */
   autoMergeEnabled: boolean;
   /**
+   * Set of project IDs for which auto-merge is disabled via the per-project
+   * `auto_merge_disabled_<projectId>` preference. Workspaces belonging to these
+   * projects are skipped even when the global `autoMergeEnabled` flag is true.
+   */
+  autoMergeDisabledProjectIds?: Set<string>;
+  /**
    * Whether the monitor may auto-merge In Review workspaces that are NOT marked
    * `readyForMerge`. Gated on the `auto_merge_in_review` preference being exactly
    * "true" (default off). When off, an idle In-Review workspace whose work is
@@ -112,6 +118,10 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
             console.log(`[monitor] Skipping auto-merge for idle+readyForMerge workspace ${ws.wsId}  auto_merge is disabled`);
             continue;
           }
+          if (deps.autoMergeDisabledProjectIds?.has(ws.projectId)) {
+            console.log(`[monitor] Skipping auto-merge for idle+readyForMerge workspace ${ws.wsId}  auto_merge_disabled for project ${ws.projectId}`);
+            continue;
+          }
           if (!canStartMerge(ws)) continue;
           const mergeEndpoint = `/api/workspaces/${ws.wsId}/merge`;
           const mergeRes = await fetch(`http://127.0.0.1:${deps.serverPort}${mergeEndpoint}`, { method: "POST" }).catch(() => null);
@@ -154,7 +164,7 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
           console.log(`[monitor] Workspace ${ws.wsId} has ${sessionCount} sessions with issue in review  closing to break review loop (merge or create new workspace)`);
           deps.boardEvents.broadcast(ws.projectId, "board_changed");
         } else if (ws.issueStatusName === "In Review") {
-          if (deps.autoMergeEnabled && deps.autoMergeInReview) {
+          if (deps.autoMergeEnabled && deps.autoMergeInReview && !deps.autoMergeDisabledProjectIds?.has(ws.projectId)) {
             if (!canStartMerge(ws)) continue;
             const mergeEndpoint = `/api/workspaces/${ws.wsId}/merge`;
             const mergeRes = await fetch(`http://127.0.0.1:${deps.serverPort}${mergeEndpoint}`, { method: "POST" }).catch(() => null);
@@ -219,6 +229,10 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
         } else if (sess?.status === "stopped") {
           if (!deps.autoMergeEnabled) {
             console.log(`[monitor] Skipping auto-merge for reviewing+stopped workspace ${ws.wsId}  auto_merge is disabled`);
+            continue;
+          }
+          if (deps.autoMergeDisabledProjectIds?.has(ws.projectId)) {
+            console.log(`[monitor] Skipping auto-merge for reviewing+stopped workspace ${ws.wsId}  auto_merge_disabled for project ${ws.projectId}`);
             continue;
           }
           if (!canStartMerge(ws)) continue;
