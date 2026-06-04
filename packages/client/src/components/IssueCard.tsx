@@ -22,6 +22,14 @@ export interface QuickUpdateCallbacks {
   onTogglePinned?: (issueId: string, pinned: boolean) => Promise<void>;
 }
 
+function RelativeTime({ timestamp, prefix = "" }: { timestamp: string; prefix?: string }) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick(n => n + 1), 30_000);
+    return () => clearInterval(t);
+  }, []);
+  return <span title={formatAbsoluteTime(timestamp)}>{prefix}{formatRelativeTime(timestamp)}</span>;
+}
 
 function getLastSessionBadge(triggerType: string | null | undefined): { label: string; className: string } | null {
   if (!triggerType) return null;
@@ -972,7 +980,9 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onOpenDiff, onStar
               </>
             )}
             {ws.main.lastSessionAt && ws.main.status !== "active" && ws.main.status !== "reviewing" && ws.main.status !== "fixing" && (
-              <span className="text-gray-400 dark:text-gray-500" title={formatAbsoluteTime(ws.main.lastSessionAt)}>{ws.main.diffStats ? "· " : ""}{formatRelativeTime(ws.main.lastSessionAt)}</span>
+              <span className="text-gray-400 dark:text-gray-500">
+                <RelativeTime timestamp={ws.main.lastSessionAt} prefix={ws.main.diffStats ? "· " : ""} />
+              </span>
             )}
           </span>
           {ws.main.conflicts?.hasConflicts && ws.main.status !== "fixing" && (
