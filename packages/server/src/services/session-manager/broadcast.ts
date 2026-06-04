@@ -1,4 +1,4 @@
-import { db } from "../../db/index.js";
+import { writeDb } from "../../db/index.js";
 import { sessions, sessionMessages } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import * as agentService from "../agent.service.js";
@@ -34,7 +34,7 @@ async function persistFrictionFallback(sessionId: string, messages: AgentOutputM
   try {
     const friction = frictionFromBuffer(messages);
     if (!friction) return;
-    const rows = await db.select({ stats: sessions.stats }).from(sessions).where(eq(sessions.id, sessionId)).limit(1);
+    const rows = await writeDb.select({ stats: sessions.stats }).from(sessions).where(eq(sessions.id, sessionId)).limit(1);
     if (rows.length === 0) return;
     let stats: Record<string, unknown> = {};
     if (rows[0].stats) {
@@ -42,7 +42,7 @@ async function persistFrictionFallback(sessionId: string, messages: AgentOutputM
     }
     if (stats.friction) return; // already persisted on the result-event write
     stats.friction = friction;
-    await db.update(sessions).set({ stats: JSON.stringify(stats) }).where(eq(sessions.id, sessionId));
+    await writeDb.update(sessions).set({ stats: JSON.stringify(stats) }).where(eq(sessions.id, sessionId));
   } catch (err) {
     console.error("Failed to persist session friction (fallback):", err);
   }
@@ -60,7 +60,7 @@ function flushDbBuffer(state: SessionState, sessionId: string) {
   const rows = state.dbWriteBuffer.get(sessionId);
   if (!rows || rows.length === 0) return;
   state.dbWriteBuffer.delete(sessionId);
-  db.insert(sessionMessages).values(rows.map((r) => ({ sessionId, ...r }))).catch((err: unknown) => {
+  writeDb.insert(sessionMessages).values(rows.map((r) => ({ sessionId, ...r }))).catch((err: unknown) => {
     // FK constraint failure means the session was already deleted (race with workspace cleanup) — ignore
     const msg = err instanceof Error ? err.message : String(err);
     if (!msg.includes("SQLITE_CONSTRAINT_FOREIGNKEY") && !msg.includes("FOREIGN KEY")) {
@@ -128,7 +128,7 @@ export function createBroadcaster(
 
         // Provider session ID (e.g. Claude's system/init session_id)
         if (evt.providerSessionId) {
-          db.update(sessions)
+          writeDb.update(sessions)
             .set({ providerSessionId: evt.providerSessionId })
             .where(eq(sessions.id, sessionId))
             .catch((err) => console.error("Failed to update providerSessionId:", err));
@@ -165,7 +165,7 @@ export function createBroadcaster(
             ...(lastTool ? { lastTool } : {}),
             ...(friction ? { friction } : {}),
           };
-          db.update(sessions)
+          writeDb.update(sessions)
             .set({ stats: JSON.stringify(statsToSave) })
             .where(eq(sessions.id, sessionId))
             .catch((err) => console.error("Failed to update session stats:", err));
