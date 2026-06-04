@@ -31,6 +31,7 @@ export const issues = sqliteTable("issues", {
   touchedFilesJson: text("touched_files_json"),
   // Acceptance-criteria checklist items (JSON array of {id,text,completed}).
   checklistJson: text("checklist_json"),
+  pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
 }, (table) => ({
   projectIdIdx: index("idx_issues_project_id").on(table.projectId),
   statusIdIdx: index("idx_issues_status_id").on(table.statusId),
