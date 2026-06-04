@@ -41,10 +41,12 @@ All git operations live in `packages/shared/src/lib/git-service.ts`. `packages/s
 - **Git tests on Windows**: use `.trim()` for content assertions (CRLF vs LF); test git output for keywords, not exact strings.
 
 ### PowerShell tool (top failure modes — measured)
-Fleet analysis found PowerShell is the most-failing tool (~14% of calls). Avoid the recurring footguns:
+Fleet analysis found PowerShell is the most-failing tool (~17% of calls — 423/2493 measured 2026-06-04, the single worst tool). Avoid the recurring footguns:
 - **Never name a variable `$pid`** (nor `$host`/`$home`/`$true`/`$null`/`$pshome`) — these are read-only *automatic* variables. Assigning throws and silently keeps the built-in value (so REST calls hit the WRONG id). Use `$procId` / `$projectId`. (The `validate-command-safety` hook now blocks this.)
 - **Don't pipe native-exe stderr with `2>&1`** (e.g. `taskkill ... 2>&1`, `pnpm ... 2>&1`): in PS 5.1 it wraps stderr lines as ErrorRecords and flips `$?`/exit to failure even on success. stderr is already captured — just drop the `2>&1`.
 - **Prefer `try { ... -ErrorAction Stop } catch {}` over a blanket `$ErrorActionPreference='SilentlyContinue'`** — the latter hides the real error yet the cmdlet still exits 1, so the failure looks mysterious.
+- **For API/preference *writes*, use `curl` (Bash) or an MCP tool — NOT `Invoke-RestMethod -Method Put`.** Measured 2026-06-04: `Invoke-RestMethod -Method Put -Body (… | ConvertTo-Json)` to `/api/preferences/settings` returned `{ok:true}` but **silently no-op'd** (value unchanged); the `curl -X PUT … -d '{…}'` equivalent worked first try. The PS body/JSON encoding round-trip is the suspect. (Reads via `Invoke-RestMethod` are fine.)
+- **Don't reference a variable as `$x:`** — `"…$i:…"` (and any `$var` immediately followed by `:`) parses as a *drive* reference (`InvalidVariableReferenceWithDrive`) and fails the whole script. Use `"${i}:"`.
 - This is **PS 5.1** (Windows PowerShell): no `&&`/`||`, no ternary/`??`, default UTF-16 file encoding (pass `-Encoding utf8`). Unix `head`/`tail`/`which`/`touch`/`grep` don't exist — use the dedicated Read/Grep/Glob tools or PS equivalents.
 
 ### Worktrees (read before testing/typechecking in one)
