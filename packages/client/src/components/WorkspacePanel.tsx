@@ -94,6 +94,7 @@ interface WorkspacePanelProps {
   initialSessionId?: string;
   autoSelectId?: string;
   initialShowCreate?: boolean;
+  initialShowDiff?: boolean;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -293,7 +294,7 @@ function RetryDecisionBadge({ decision }: { decision: RetryDecision }) {
   );
 }
 
-export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onWorkspaceCreating, onWorkspaceCreateSettled, initialWorkspaceId, initialSessionId, autoSelectId, initialShowCreate }: WorkspacePanelProps) {
+export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onWorkspaceCreating, onWorkspaceCreateSettled, initialWorkspaceId, initialSessionId, autoSelectId, initialShowCreate, initialShowDiff }: WorkspacePanelProps) {
   const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(initialShowCreate ?? false);
@@ -586,7 +587,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
   useEffect(() => {
     if (!selectedWorkspace) return;
     const ws = workspaces.find(w => w.id === selectedWorkspace);
-    if (!ws || ws.isDirect || ws.status !== "idle") return;
+    if (!ws || ws.isDirect) return;
+    if (ws.status !== "idle" && !initialShowDiff) return;
     if (diff || conflictState) return;
     apiFetch<DiffResponse>(`/api/workspaces/${selectedWorkspace}/diff`)
       .then((result) => {
