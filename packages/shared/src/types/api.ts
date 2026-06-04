@@ -37,6 +37,7 @@ export interface CreateProjectRequest {
   repoPath: string;
   description?: string;
   color?: string;
+  exportSkillsOnRegistration?: boolean;
 }
 
 export interface UpdateProjectRequest {
