@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import { issueDependencies, issues, preferences, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
+import { eq } from "drizzle-orm";
+import { issueDependencies, issues, preferences, projectStatuses, projects, workflowNodes, workflowTemplates, workspaces } from "@agentic-kanban/shared/schema";
 import { buildDependencyWavePlan, startNextDependencyWave } from "../services/dependency-wave.service.js";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 
@@ -104,6 +105,48 @@ describe("dependency wave planner", () => {
     expect(plan.cyclicInvalid.map((issue) => issue.id).sort()).toEqual([a, b].sort());
     expect(plan.readyNow.map((issue) => issue.id)).not.toContain(a);
     expect(plan.blocked.map((issue) => issue.id)).not.toContain(b);
+  });
+
+  // Regression for #537: a workflow-driven Done blocker (currentNodeId != null,
+  // nodeType !== "end") must still resolve so its dependents land in readyNow.
+  it("treats a workflow-driven Done-STATUS blocker as resolved even when node is non-end (#537)", async () => {
+    const { db } = createTestDb();
+    const { projectId, statusIds } = await seedProject(db);
+    const now = new Date().toISOString();
+
+    // Insert a minimal workflow template + a non-`end` node to simulate the desync.
+    const templateId = randomUUID();
+    await db.insert(workflowTemplates).values({
+      id: templateId,
+      name: "Test Template",
+      isDefault: false,
+      isBuiltin: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const stuckNodeId = randomUUID();
+    await db.insert(workflowNodes).values({
+      id: stuckNodeId,
+      templateId,
+      name: "Review",
+      nodeType: "normal",
+      sortOrder: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    // Blocker is Done-status but stuck on a non-`end` workflow node (the desync).
+    const blockerDoneId = await insertIssue(db, { projectId, statusId: statusIds.Done, title: "Merged foundation", issueNumber: 1 });
+    await db.update(issues).set({ currentNodeId: stuckNodeId }).where(eq(issues.id, blockerDoneId));
+
+    const dependent = await insertIssue(db, { projectId, statusId: statusIds.Todo, title: "Needs foundation", issueNumber: 2 });
+    await insertDependency(db, dependent, blockerDoneId);
+
+    const plan = await buildDependencyWavePlan(db, projectId, { wipLimit: 5 });
+
+    // The Done blocker should be resolved; the dependent should be in readyNow.
+    expect(plan.readyNow.map((i) => i.id)).toContain(dependent);
+    expect(plan.blocked.map((i) => i.id)).not.toContain(dependent);
   });
 
   it("starts only the next ready wave that fits under the WIP limit", async () => {
