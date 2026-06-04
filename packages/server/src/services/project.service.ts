@@ -8,7 +8,7 @@ import type { Database } from "../db/index.js";
 import { branchExists, detectRepoInfo, getProjectGitStats } from "./git-info.service.js";
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree } from "./git.service.js";
 import { buildWorkspaceSummaryMap, buildBlockedMap, buildTagMap, buildGraphEdges } from "./board-aggregation.service.js";
-import { getProjectById, getProjectByRepoPath, getAllProjects, insertProject, deleteProjectCascade, getProjectStats, getProjectStatuses, createProjectStatus, deleteProjectStatus } from "../repositories/project.repository.js";
+import { getProjectById, getProjectByRepoPath, getAllProjects, insertProject, deleteProjectCascade, getProjectStats, getProjectStatuses, createProjectStatus, deleteProjectStatus, updateProjectStatusSortOrder } from "../repositories/project.repository.js";
 import { generateSetupScript as generateSetupScriptAI, generateTeardownScript as generateTeardownScriptAI } from "./project-setup.service.js";
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
 import type { WorkspaceSummaryCache } from "./workspace-summary-cache.service.js";
@@ -665,6 +665,15 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     return createProjectStatus(projectId, name, sortOrder, database);
   }
 
+  async function updateStatusSortOrder(projectId: string, statusId: string, sortOrder: number) {
+    const result = await updateProjectStatusSortOrder(projectId, statusId, sortOrder, database);
+    if ("error" in result) {
+      const code = result.status === 404 ? "NOT_FOUND" : "CONFLICT";
+      throw new ProjectError(result.error, code as "NOT_FOUND" | "CONFLICT");
+    }
+    return result;
+  }
+
   async function removeStatus(projectId: string, statusId: string) {
     const result = await deleteProjectStatus(projectId, statusId, database);
     if ("error" in result) {
@@ -713,6 +722,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     listProjects,
     listStatuses,
     addStatus,
+    updateStatusSortOrder,
     removeStatus,
     getBranches,
     generateSetupScript,

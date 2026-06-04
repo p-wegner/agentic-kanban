@@ -855,6 +855,25 @@ export function BoardPage() {
     }
   }
 
+  async function handleColumnReorder(columnId: string, newSortOrder: number) {
+    const snapshot = columns;
+    setColumns((prev) =>
+      prev
+        .map((col) => (col.id === columnId ? { ...col, sortOrder: newSortOrder } : col))
+        .sort((a, b) => a.sortOrder - b.sortOrder),
+    );
+    try {
+      await apiFetch(`/api/projects/${activeProjectId}/statuses/${columnId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ sortOrder: newSortOrder }),
+      });
+      await refetchBoard();
+    } catch {
+      setColumns(snapshot);
+      showToast("Failed to reorder column", "error");
+    }
+  }
+
   async function handleMoveToNext(issue: IssueWithStatus, nextStatusId: string) {
     const targetColumn = columns.find((col) => col.id === nextStatusId);
 
@@ -2172,6 +2191,7 @@ export function BoardPage() {
             }}
             wipLimits={prefs.wipLimits}
             onSetWipLimit={prefs.handleSetWipLimit}
+            onColumnReorder={handleColumnReorder}
           />
         )}
       </div>
