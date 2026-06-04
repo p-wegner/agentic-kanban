@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { apiFetch } from "../lib/api.js";
+import { IssueWorkLogBadge } from "./IssueWorkLogBadge.js";
 import { showToast } from "./Toast.js";
 import { formatRelativeTime, formatAbsoluteTime } from "../lib/formatRelativeTime.js";
 import type { CardDensity } from "../hooks/useBoardPreferences.js";
@@ -686,6 +687,7 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
             )
           )
         )}
+        {!isPendingIssue && <IssueWorkLogBadge issueId={issue.id} />}
         {ws?.showdown && (
           <span
             className={`inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded ${

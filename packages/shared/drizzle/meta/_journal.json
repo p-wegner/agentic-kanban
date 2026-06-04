@@ -589,6 +589,13 @@
       "when": 1780906800002,
       "tag": "0083_archive_composite_index",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "6",
+      "when": 1780906800003,
+      "tag": "0084_issue_time_entries",
+      "breakpoints": true
     }
   ]
 }
