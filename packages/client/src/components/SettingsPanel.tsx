@@ -2215,8 +2215,17 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                         onChange={(e) => setNewTagName(e.target.value)}
                         placeholder="Tag name"
                         className="flex-1 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && newTagName.trim()) e.currentTarget.form?.requestSubmit();
+                        onKeyDown={async (e) => {
+                          if (e.key === "Enter" && newTagName.trim()) {
+                            const created = await apiFetch<{ id: string; name: string; color: string | null }>("/api/tags", {
+                              method: "POST",
+                              body: JSON.stringify({ name: newTagName.trim(), color: newTagColor }),
+                            });
+                            setTagsList((t) => [...t, { ...created, isBuiltin: false }]);
+                            setNewTagName("");
+                            setNewTagColor("#6B7280");
+                            showToast("Tag created", "success");
+                          }
                         }}
                       />
                       <button
