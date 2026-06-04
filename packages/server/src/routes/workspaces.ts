@@ -5,7 +5,7 @@ import { createWorkspaceService } from "../services/workspace.service.js";
 import type { CreateWorkspaceInput } from "../services/workspace.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
-import { and, eq, gte } from "drizzle-orm";
+import { and, eq, gte, isNotNull } from "drizzle-orm";
 import { workspaces, issues } from "@agentic-kanban/shared/schema";
 
 export function createWorkspacesRoute(
@@ -79,6 +79,47 @@ export function createWorkspacesRoute(
 
     const points = dates.map((date) => ({ date, counts: counts[date] ?? {} }));
     return c.json({ series, points });
+  });
+
+  // GET /api/workspaces/scorecard-distribution?projectId=&days= — scorecard score histogram (5 buckets: 0-20, 20-40, 40-60, 60-80, 80-100)
+  // Must be registered BEFORE /:id to avoid being matched as an ID param
+  router.get("/scorecard-distribution", async (c) => {
+    const projectId = c.req.query("projectId");
+    if (!projectId) return c.json({ error: "projectId required" }, 400);
+    const daysRaw = parseInt(c.req.query("days") ?? "90", 10);
+    const days = Math.min(Math.max(Number.isNaN(daysRaw) ? 90 : daysRaw, 1), 365);
+
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - days + 1);
+    const cutoffDay = cutoffDate.toISOString().slice(0, 10);
+
+    const rows = await database
+      .select({ score: workspaces.scorecardScore })
+      .from(workspaces)
+      .innerJoin(issues, eq(workspaces.issueId, issues.id))
+      .where(
+        and(
+          eq(issues.projectId, projectId),
+          gte(workspaces.createdAt, cutoffDay),
+          isNotNull(workspaces.scorecardScore)
+        )
+      );
+
+    const buckets = [
+      { range: "0-20", min: 0, max: 20, count: 0 },
+      { range: "20-40", min: 20, max: 40, count: 0 },
+      { range: "40-60", min: 40, max: 60, count: 0 },
+      { range: "60-80", min: 60, max: 80, count: 0 },
+      { range: "80-100", min: 80, max: 100, count: 0 },
+    ];
+
+    for (const row of rows) {
+      const score = row.score ?? 0;
+      const idx = score >= 100 ? 4 : Math.min(Math.floor(score / 20), 4);
+      buckets[idx].count++;
+    }
+
+    return c.json({ buckets: buckets.map(({ range, count }) => ({ range, count })), total: rows.length });
   });
 
   // GET /api/workspaces/stale-worktrees — list closed workspaces with directories still on disk

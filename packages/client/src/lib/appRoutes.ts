@@ -28,6 +28,8 @@ const VIEW_ROUTE_PATHS: Record<ViewMode, string> = {
   "stale-work": "/stale-work",
   throughput: "/throughput",
   "provider-mix": "/provider-mix",
+  "lead-time": "/lead-time",
+  "scorecard-distribution": "/scorecard-distribution",
 };
 
 const ROUTE_ALIASES: Record<string, ViewMode> = {
