@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { slowRequestLogger } from "../middleware/slow-request-logger.js";
+import { slowRequestLogger, getSlowRequests, clearSlowRequests } from "../middleware/slow-request-logger.js";
 
 function createTestApp(handlerDelayMs = 0) {
   const app = new Hono();
@@ -18,6 +18,7 @@ describe("slowRequestLogger middleware", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     delete process.env.SLOW_REQUEST_THRESHOLD_MS;
+    clearSlowRequests();
   });
 
   it("logs at debug level for every request", async () => {
@@ -58,10 +59,64 @@ describe("slowRequestLogger middleware", () => {
     vi.spyOn(console, "debug").mockImplementation(() => {});
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    // A fast handler should not trigger the default 200ms threshold
     const app = createTestApp(0);
     await app.request("/api/test");
 
     expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it("records a slow request in the ring buffer", async () => {
+    process.env.SLOW_REQUEST_THRESHOLD_MS = "10";
+    vi.spyOn(console, "debug").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const app = createTestApp(50);
+    await app.request("/api/test");
+
+    const entries = getSlowRequests();
+    expect(entries).toHaveLength(1);
+    expect(entries[0].method).toBe("GET");
+    expect(entries[0].path).toBe("/api/test");
+    expect(entries[0].durationMs).toBeGreaterThanOrEqual(10);
+    expect(entries[0].timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it("does not record a fast request in the ring buffer", async () => {
+    process.env.SLOW_REQUEST_THRESHOLD_MS = "500";
+    vi.spyOn(console, "debug").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const app = createTestApp(0);
+    await app.request("/api/test");
+
+    expect(getSlowRequests()).toHaveLength(0);
+  });
+
+  it("returns entries most-recent first", async () => {
+    process.env.SLOW_REQUEST_THRESHOLD_MS = "10";
+    vi.spyOn(console, "debug").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const app = new Hono();
+    app.use("*", slowRequestLogger);
+    let callCount = 0;
+    app.get("/api/first", async (c) => {
+      await new Promise((r) => setTimeout(r, 50));
+      callCount++;
+      return c.json({ n: callCount });
+    });
+    app.get("/api/second", async (c) => {
+      await new Promise((r) => setTimeout(r, 50));
+      callCount++;
+      return c.json({ n: callCount });
+    });
+
+    await app.request("/api/first");
+    await app.request("/api/second");
+
+    const entries = getSlowRequests();
+    expect(entries).toHaveLength(2);
+    expect(entries[0].path).toBe("/api/second");
+    expect(entries[1].path).toBe("/api/first");
   });
 });

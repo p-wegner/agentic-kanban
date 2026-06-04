@@ -26,6 +26,7 @@ import { createCodemodsRoute } from "./codemods.js";
 import { createBoardMonitorRoute } from "./board-monitor.js";
 import { createRunbooksRoute } from "./runbooks.js";
 import { createIssueExportImportRoute } from "./issue-export-import.js";
+import { createMetricsRoute } from "./metrics.js";
 import { createWorkflowForkService } from "../services/workflow-fork.service.js";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "../services/session.manager.js";
@@ -77,6 +78,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/scheduled-runs", createScheduledRunsRoute(database, getSessionManager, options?.boardEvents));
   routes.route("/merge-queue", createMergeQueueRoute(database, getSessionManager, options));
   routes.route("/showdowns", createShowdownsRoute(database, getSessionManager, options));
+  routes.route("/metrics", createMetricsRoute());
   if (options?.boardEvents) {
     routes.route("/approvals", createApprovalsRoute(options.boardEvents));
   }
