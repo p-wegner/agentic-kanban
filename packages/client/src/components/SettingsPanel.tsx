@@ -113,6 +113,13 @@ const DEFAULT_SETTINGS: Settings = {
   butler_auto_answer: "false",
 };
 
+type MonitorTunables = {
+  activeAgentsTarget: number;
+  backlogFloor: number;
+  maxNewStartsPerCycle: number;
+  refillFocus: "bugfix-only" | "balanced";
+};
+
 type Tab = "agent" | "workflow" | "skills" | "mcp" | "ui" | "project" | "tags" | "templates" | "advanced" | "schedule";
 
 const TABS: { id: Tab; label: string }[] = [
@@ -749,6 +756,9 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
     maintenanceEnd?: string | null;
   } | null>(null);
 
+  const [monitorTunables, setMonitorTunables] = useState<{ tunables: MonitorTunables; source: "strategy" | "prefs" } | null>(null);
+  const [migratingToStrategy, setMigratingToStrategy] = useState(false);
+
   // Config export/import state
   const [configExporting, setConfigExporting] = useState(false);
   const [configImporting, setConfigImporting] = useState(false);
@@ -910,7 +920,10 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
   }, []);
 
   useEffect(() => {
-    if (tab === "workflow") fetchMonitorStatus();
+    if (tab === "workflow") {
+      fetchMonitorStatus();
+      if (activeProjectId) fetchMonitorTunables();
+    }
   }, [tab]);
 
   useEffect(() => {
@@ -926,6 +939,42 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
       const s = await apiFetch<NonNullable<typeof monitorStatus>>("/api/internal/monitor-status");
       setMonitorStatus(s);
     } catch { /* non-fatal */ }
+  }
+
+  async function fetchMonitorTunables() {
+    if (!activeProjectId) return;
+    try {
+      const result = await apiFetch<{ tunables: MonitorTunables; source: "strategy" | "prefs" }>(
+        `/api/projects/${activeProjectId}/monitor-tunables`,
+      );
+      setMonitorTunables(result);
+    } catch { /* non-fatal */ }
+  }
+
+  async function handleMigrateToStrategy() {
+    if (!activeProjectId || migratingToStrategy) return;
+    setMigratingToStrategy(true);
+    try {
+      const wipLimit = parseInt(settings.nudge_wip_limit || "5", 10);
+      const activeAgentsTarget = Number.isFinite(wipLimit) ? wipLimit : 5;
+      const strategyConfig = {
+        version: 1,
+        activeAgentsTarget,
+        backlogFloor: 3,
+        maxNewStartsPerCycle: 3,
+        segments: [],
+      };
+      await apiFetch("/api/preferences/settings", {
+        method: "PUT",
+        body: JSON.stringify({ [`board_strategy_${activeProjectId}`]: JSON.stringify(strategyConfig) }),
+      });
+      showToast("Migrated to Strategy Bullseye", "success");
+      await fetchMonitorTunables();
+    } catch {
+      showToast("Migration failed", "error");
+    } finally {
+      setMigratingToStrategy(false);
+    }
   }
 
   async function handleMonitorRunNow() {
@@ -1436,6 +1485,61 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                       )}
                     </div>
                   </div>
+
+                  {activeProjectId && (
+                    <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+                      <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Monitor Policy</div>
+                      {monitorTunables ? (
+                        <div className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+                          <div className="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-950 border-b border-gray-200 dark:border-gray-700">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-gray-600 dark:text-gray-400">Control surface:</span>
+                              {monitorTunables.source === "strategy" ? (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300 border border-brand-200 dark:border-brand-700 font-medium">Strategy Bullseye</span>
+                              ) : (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-200 dark:border-amber-700 font-medium">Legacy prefs (nudge_*)</span>
+                              )}
+                            </div>
+                            {monitorTunables.source === "prefs" && (
+                              <button
+                                onClick={handleMigrateToStrategy}
+                                disabled={migratingToStrategy}
+                                className="text-xs px-2.5 py-1 rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Create a board_strategy pref from current nudge_* values so this project uses the Strategy Bullseye path"
+                              >
+                                {migratingToStrategy ? "Migrating…" : "Migrate to Strategy"}
+                              </button>
+                            )}
+                          </div>
+                          <div className="px-3 py-2 grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
+                            <div className="flex items-center justify-between">
+                              <span className="text-gray-500 dark:text-gray-400">Active agents target</span>
+                              <span className="font-mono font-medium text-gray-800 dark:text-gray-200">{monitorTunables.tunables.activeAgentsTarget}</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-gray-500 dark:text-gray-400">Backlog floor</span>
+                              <span className="font-mono font-medium text-gray-800 dark:text-gray-200">{monitorTunables.tunables.backlogFloor}</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-gray-500 dark:text-gray-400">Max starts / cycle</span>
+                              <span className="font-mono font-medium text-gray-800 dark:text-gray-200">{monitorTunables.tunables.maxNewStartsPerCycle}</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-gray-500 dark:text-gray-400">Refill focus</span>
+                              <span className="font-mono font-medium text-gray-800 dark:text-gray-200">{monitorTunables.tunables.refillFocus}</span>
+                            </div>
+                          </div>
+                          {monitorTunables.source === "prefs" && (
+                            <div className="px-3 pb-2 text-[11px] text-amber-600 dark:text-amber-400 leading-snug">
+                              Editing nudge_wip_limit controls activeAgentsTarget. Open the Strategy Bullseye or click Migrate to use the full target set.
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="text-xs text-gray-400 dark:text-gray-500 italic">Loading policy…</div>
+                      )}
+                    </div>
+                  )}
 
                   <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
                     <div className="flex items-center justify-between mb-3">
