@@ -106,6 +106,7 @@ export interface BoardKanbanViewProps {
   onDryRun?: (issue: IssueWithStatus) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
   onDrop: (statusId: string, sortOrder?: number) => void;
+  onDuplicate?: (issue: IssueWithStatus) => void;
   onMoveToNext: (issue: IssueWithStatus, nextStatusId: string) => void;
   onColumnResizeStart: (colId: string, e: React.MouseEvent) => void;
   onColumnResizeReset: (colId: string) => void;
@@ -146,6 +147,7 @@ export function BoardKanbanView({
   onDryRun,
   onDragStart,
   onDrop,
+  onDuplicate,
   onMoveToNext,
   onColumnResizeStart,
   onColumnResizeReset,
@@ -231,6 +233,7 @@ export function BoardKanbanView({
               onDryRun={onDryRun}
               onDragStart={onDragStart}
               onDrop={onDrop}
+              onDuplicate={onDuplicate}
               onMoveToNext={onMoveToNext}
               allColumns={allColumns}
               searchQuery={searchQuery}
