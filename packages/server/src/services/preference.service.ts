@@ -31,6 +31,7 @@ export const SETTINGS_KEYS = [
   "stale_column_threshold_days",
   "auto_commit_strategy_objective",
   "issue_templates",
+  "export_skills_on_registration",
   ...allHarnessSettingKeys(),
 ];
 
