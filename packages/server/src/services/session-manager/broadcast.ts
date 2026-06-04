@@ -48,6 +48,27 @@ async function persistFrictionFallback(sessionId: string, messages: AgentOutputM
   }
 }
 
+const DB_FLUSH_INTERVAL_MS = 250;
+const DB_FLUSH_BATCH_SIZE = 50;
+
+function flushDbBuffer(state: SessionState, sessionId: string) {
+  const timer = state.dbWriteTimers.get(sessionId);
+  if (timer !== undefined) {
+    clearTimeout(timer);
+    state.dbWriteTimers.delete(sessionId);
+  }
+  const rows = state.dbWriteBuffer.get(sessionId);
+  if (!rows || rows.length === 0) return;
+  state.dbWriteBuffer.delete(sessionId);
+  db.insert(sessionMessages).values(rows.map((r) => ({ sessionId, ...r }))).catch((err: unknown) => {
+    // FK constraint failure means the session was already deleted (race with workspace cleanup) — ignore
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!msg.includes("SQLITE_CONSTRAINT_FOREIGNKEY") && !msg.includes("FOREIGN KEY")) {
+      console.error("Failed to persist session messages (batch):", err);
+    }
+  });
+}
+
 export function createBroadcaster(
   state: SessionState,
   options: SessionManagerOptions | undefined,
@@ -59,19 +80,27 @@ export function createBroadcaster(
     }
     state.messageBuffer.get(sessionId)!.push(message);
 
-    // Persist to database (fire-and-forget)
-    db.insert(sessionMessages).values({
-      sessionId,
+    // Accumulate into the DB write buffer and schedule a batched flush
+    if (!state.dbWriteBuffer.has(sessionId)) {
+      state.dbWriteBuffer.set(sessionId, []);
+    }
+    state.dbWriteBuffer.get(sessionId)!.push({
       type: message.type,
       data: message.data ?? null,
       exitCode: message.exitCode != null ? String(message.exitCode) : null,
-    }).catch((err: unknown) => {
-      // FK constraint failure means the session was already deleted (race with workspace cleanup) — ignore
-      const msg = err instanceof Error ? err.message : String(err);
-      if (!msg.includes("SQLITE_CONSTRAINT_FOREIGNKEY") && !msg.includes("FOREIGN KEY")) {
-        console.error("Failed to persist session message:", err);
-      }
     });
+
+    const buf = state.dbWriteBuffer.get(sessionId)!;
+    if (buf.length >= DB_FLUSH_BATCH_SIZE) {
+      // Flush immediately when the batch is full
+      flushDbBuffer(state, sessionId);
+    } else if (!state.dbWriteTimers.has(sessionId)) {
+      // Schedule a flush after the cadence window
+      state.dbWriteTimers.set(
+        sessionId,
+        setTimeout(() => flushDbBuffer(state, sessionId), DB_FLUSH_INTERVAL_MS),
+      );
+    }
 
     // Parse stdout data — may contain multiple JSONL lines in a single chunk
     if (message.type === "stdout" && message.data) {
@@ -256,6 +285,9 @@ export function createBroadcaster(
       state.sessionFinalText.set(sessionId, (state.sessionTextParts.get(sessionId) ?? []).join("\n\n"));
       state.sessionTextParts.delete(sessionId);
       state.sessionExitPlanModeDenied.delete(sessionId);
+
+      // Flush any buffered DB writes immediately so no messages are lost on exit
+      flushDbBuffer(state, sessionId);
 
       // Fallback for sessions that never emitted a result/stats event (e.g.
       // codex/copilot). Safe: only sets `friction` when absent, so it can't
