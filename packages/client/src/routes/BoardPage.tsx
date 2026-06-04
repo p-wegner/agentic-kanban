@@ -25,6 +25,7 @@ import { ConstellationView } from "../components/ConstellationView.js";
 import { MomentumView } from "../components/MomentumView.js";
 import { StaleWorkDashboard } from "../components/StaleWorkDashboard.js";
 import { ThroughputChart } from "../components/ThroughputChart.js";
+import { ProviderMixChart } from "../components/ProviderMixChart.js";
 import { useAgentQuestionsCount } from "../components/AgentQuestionsPanel.js";
 import { BoardErrorBoundary } from "../components/BoardErrorBoundary.js";
 import { BacklogView } from "../components/BacklogView.js";
@@ -2125,6 +2126,11 @@ export function BoardPage() {
         {viewMode === "throughput" && activeProjectId && (
           <BoardErrorBoundary columnName="Throughput">
             <ThroughputChart projectId={activeProjectId} />
+          </BoardErrorBoundary>
+        )}
+        {viewMode === "provider-mix" && activeProjectId && (
+          <BoardErrorBoundary columnName="Provider Mix">
+            <ProviderMixChart projectId={activeProjectId} />
           </BoardErrorBoundary>
         )}
         {viewMode === "strategy" && activeProjectId && (
