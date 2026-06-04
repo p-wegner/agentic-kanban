@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { SERVER_URL as BASE } from "../helpers/port.js";
+import { getE2EProjectId } from "../helpers/e2e-project.js";
 
 const BUILTIN_SKILLS = [
   "board-navigator",
@@ -218,9 +219,7 @@ test.describe("Agent Skills API", () => {
   });
 
   test("GET /api/agent-skills?projectId=<id> includes global and project-scoped skills", async ({ request }) => {
-    const projectsRes = await request.get(`${BASE}/api/projects`);
-    const projects = await projectsRes.json();
-    const projectId = projects[0].id;
+    const projectId = await getE2EProjectId(request);
 
     const scopedRes = await request.post(`${BASE}/api/agent-skills`, {
       data: {
