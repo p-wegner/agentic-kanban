@@ -2,8 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db, schema } from "../db.js";
-
-const SERVER_PORT = Number(process.env.SERVER_PORT) || 3001;
+import { getServerPort } from "../server-url.js";
 
 export function registerAnalyzeDependencies(server: McpServer) {
   server.tool(
@@ -27,7 +26,7 @@ export function registerAnalyzeDependencies(server: McpServer) {
         pid = rows[0].projectId;
       }
 
-      const res = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/issues/analyze-dependencies`, {
+      const res = await fetch(`http://127.0.0.1:${getServerPort()}/api/issues/analyze-dependencies`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ issueId, projectId: pid }),
