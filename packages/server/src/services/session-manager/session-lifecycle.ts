@@ -431,6 +431,12 @@ export function createSessionLifecycle(
     // Clean up in-memory state immediately
     state.turnStates.delete(sessionId);
     state.sessionSubstantiveOutput.delete(sessionId);
+    // Cancel any pending DB flush timer; the exit event from the kill will trigger a final flush
+    const stopTimer = state.dbWriteTimers.get(sessionId);
+    if (stopTimer !== undefined) {
+      clearTimeout(stopTimer);
+      state.dbWriteTimers.delete(sessionId);
+    }
     // Try graceful shutdown first (close stdin so agent finishes)
     const closed = agentService.closeStdin(sessionId);
     if (closed) {
@@ -507,6 +513,12 @@ export function createSessionLifecycle(
     state.sessionAgentToolUseIds.delete(sessionId);
     state.sessionProviders.delete(sessionId);
     state.sessionSubstantiveOutput.delete(sessionId);
+    const pendingTimer = state.dbWriteTimers.get(sessionId);
+    if (pendingTimer !== undefined) {
+      clearTimeout(pendingTimer);
+      state.dbWriteTimers.delete(sessionId);
+    }
+    state.dbWriteBuffer.delete(sessionId);
     const now = new Date().toISOString();
     await db.update(sessions)
       .set({ status: "stopped", endedAt: now })
@@ -562,6 +574,12 @@ export function createSessionLifecycle(
     state.sessionFinalText.delete(sessionId);
     state.sessionSubstantiveOutput.delete(sessionId);
     state.sessionExitPlanModeDenied.delete(sessionId);
+    const externalExitTimer = state.dbWriteTimers.get(sessionId);
+    if (externalExitTimer !== undefined) {
+      clearTimeout(externalExitTimer);
+      state.dbWriteTimers.delete(sessionId);
+    }
+    state.dbWriteBuffer.delete(sessionId);
 
     // Clear activity and todos for this session
     if (ctx) {
