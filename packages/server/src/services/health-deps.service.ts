@@ -13,10 +13,11 @@ export interface HealthDepsResult {
 }
 
 export function checkHealthDeps(repoRoot: string): HealthDepsResult {
+  const serverRoot = resolve(repoRoot, "packages/server");
   const checks: DepCheck[] = [
     checkDrizzleJournal(repoRoot),
-    checkNodeModule(repoRoot, "drizzle-orm"),
-    checkNodeModule(repoRoot, "hono"),
+    checkNodeModule(serverRoot, "drizzle-orm"),
+    checkNodeModule(serverRoot, "hono"),
     checkSharedDist(repoRoot),
   ];
   return { ok: checks.every((c) => c.ok), checks };
