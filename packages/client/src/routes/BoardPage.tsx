@@ -174,6 +174,8 @@ export function BoardPage() {
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
+  const [activeAgentsTarget, setActiveAgentsTarget] = useState<number | undefined>(undefined);
+
   // Extracted hooks
   const prefs = useBoardPreferences(activeProjectId);
   const panels = useBoardPanels();
@@ -440,6 +442,13 @@ export function BoardPage() {
     }
     load();
   }, [loadProjects]);
+
+  useEffect(() => {
+    if (!activeProjectId) return;
+    apiFetch<{ policy: { activeAgentsTarget: number } }>(`/api/projects/${activeProjectId}/sprint-capacity`)
+      .then((plan) => setActiveAgentsTarget(plan.policy.activeAgentsTarget))
+      .catch(() => {});
+  }, [activeProjectId]);
 
   useEffect(() => {
     if (!activeProjectId) return;
@@ -984,6 +993,62 @@ export function BoardPage() {
     setWorkspaceIssue(issue);
     setWorkspaceInitial(null);
     setWorkspaceOpenCreate(true);
+  }
+
+  async function handleDropOnAgentSlot(issue: IssueWithStatus) {
+    if (!activeProject) return;
+
+    // Guard: reject if already at or over capacity
+    const activeCount = columns
+      .flatMap((col) => col.issues)
+      .filter((i) => {
+        const s = i.workspaceSummary?.main?.status;
+        return s === "active" || s === "fixing";
+      }).length;
+    if (activeAgentsTarget !== undefined && activeCount >= activeAgentsTarget) {
+      showToast(`Agent capacity reached (${activeAgentsTarget} active). Stop a running workspace first.`, "error");
+      return;
+    }
+
+    setPendingWorkspaceIssueIds((prev) => new Set([...prev, issue.id]));
+    try {
+      const s = await apiFetch<Record<string, string>>("/api/preferences/settings");
+      const provider = (s.provider as "claude" | "codex" | "copilot") || "claude";
+      const profileName = provider === "codex"
+        ? (s.codex_profile || "default")
+        : provider === "copilot"
+        ? (s.copilot_profile || "default")
+        : (s.claude_profile || "default");
+
+      const branch = suggestBranchName(issue);
+      const body: Record<string, unknown> = {
+        issueId: issue.id,
+        branch,
+        requiresReview: s.auto_review !== "false",
+        planMode: issue.priority === "high" || issue.priority === "critical",
+        isDirect: false,
+        profile: { provider, name: profileName },
+      };
+      if (s.default_model) body.model = s.default_model;
+
+      const result = await apiFetch<{ id: string; sessionId?: string }>("/api/workspaces", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      await refetchBoard();
+      // Open the new workspace in the panel
+      setWorkspaceIssue(issue);
+      setWorkspaceInitial({ workspaceId: result.id, sessionId: result.sessionId ?? "" });
+      setWorkspaceOpenCreate(false);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to start workspace", "error");
+    } finally {
+      setPendingWorkspaceIssueIds((prev) => {
+        const next = new Set(prev);
+        next.delete(issue.id);
+        return next;
+      });
+    }
   }
 
   const handleColumnResizeStart = useCallback((colId: string, e: React.MouseEvent) => {
@@ -1819,6 +1884,8 @@ export function BoardPage() {
               onIssueClick={handleIssueClick}
               onWorkspaceClick={handleManageWorkspaces}
               onGoToBoard={() => setViewMode("kanban")}
+              activeAgentsTarget={activeAgentsTarget}
+              onDropIssue={canStartWorkspace ? handleDropOnAgentSlot : undefined}
             />
           </BoardErrorBoundary>
         )}
