@@ -24,8 +24,8 @@ afterEach(() => {
 describe("checkHealthDeps", () => {
   it("returns ok=true when all files exist", () => {
     touch("packages/shared/drizzle/meta/_journal.json");
-    touch("node_modules/drizzle-orm/package.json");
-    touch("node_modules/hono/package.json");
+    touch("packages/server/node_modules/drizzle-orm/package.json");
+    touch("packages/server/node_modules/hono/package.json");
     touch("packages/shared/dist/index.js");
 
     const result = checkHealthDeps(TEST_DIR);
@@ -36,8 +36,8 @@ describe("checkHealthDeps", () => {
   });
 
   it("returns ok=false when drizzle journal is missing, with git-restore hint", () => {
-    touch("node_modules/drizzle-orm/package.json");
-    touch("node_modules/hono/package.json");
+    touch("packages/server/node_modules/drizzle-orm/package.json");
+    touch("packages/server/node_modules/hono/package.json");
     touch("packages/shared/dist/index.js");
 
     const result = checkHealthDeps(TEST_DIR);
@@ -51,7 +51,7 @@ describe("checkHealthDeps", () => {
 
   it("returns ok=false when drizzle-orm is missing, with pnpm install hint", () => {
     touch("packages/shared/drizzle/meta/_journal.json");
-    touch("node_modules/hono/package.json");
+    touch("packages/server/node_modules/hono/package.json");
     touch("packages/shared/dist/index.js");
 
     const result = checkHealthDeps(TEST_DIR);
@@ -64,7 +64,7 @@ describe("checkHealthDeps", () => {
 
   it("returns ok=false when hono is missing, with pnpm install hint", () => {
     touch("packages/shared/drizzle/meta/_journal.json");
-    touch("node_modules/drizzle-orm/package.json");
+    touch("packages/server/node_modules/drizzle-orm/package.json");
     touch("packages/shared/dist/index.js");
 
     const result = checkHealthDeps(TEST_DIR);
@@ -77,8 +77,8 @@ describe("checkHealthDeps", () => {
 
   it("returns ok=false when shared dist is missing, with build hint", () => {
     touch("packages/shared/drizzle/meta/_journal.json");
-    touch("node_modules/drizzle-orm/package.json");
-    touch("node_modules/hono/package.json");
+    touch("packages/server/node_modules/drizzle-orm/package.json");
+    touch("packages/server/node_modules/hono/package.json");
 
     const result = checkHealthDeps(TEST_DIR);
 
@@ -103,8 +103,8 @@ describe("checkHealthDeps", () => {
 
   it("passing checks include the resolved file path in detail", () => {
     touch("packages/shared/drizzle/meta/_journal.json");
-    touch("node_modules/drizzle-orm/package.json");
-    touch("node_modules/hono/package.json");
+    touch("packages/server/node_modules/drizzle-orm/package.json");
+    touch("packages/server/node_modules/hono/package.json");
     touch("packages/shared/dist/index.js");
 
     const result = checkHealthDeps(TEST_DIR);
