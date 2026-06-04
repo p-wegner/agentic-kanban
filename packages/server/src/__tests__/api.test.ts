@@ -493,6 +493,58 @@ describe("Issues API", () => {
     });
     expect(res.status).toBe(400);
   });
+
+  it("PATCH /api/issues/:id persists sortOrder for in-column reorder", async () => {
+    const aRes = await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Card A", statusId, projectId }),
+    });
+    const bRes = await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Card B", statusId, projectId }),
+    });
+    const cRes = await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Card C", statusId, projectId }),
+    });
+    const { id: aId } = await aRes.json() as any;
+    const { id: bId } = await bRes.json() as any;
+    const { id: cId } = await cRes.json() as any;
+
+    // Assign explicit sortOrders so the ordering is deterministic
+    for (const [id, order] of [[aId, 100], [bId, 200], [cId, 300]] as [string, number][]) {
+      const r = await app.request(`/api/issues/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sortOrder: order }),
+      });
+      expect(r.status).toBe(200);
+    }
+
+    // Move C before B: new sortOrder midpoint = 150
+    const reorderRes = await app.request(`/api/issues/${cId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sortOrder: 150 }),
+    });
+    expect(reorderRes.status).toBe(200);
+
+    // Verify persisted sort order survives a fresh fetch
+    const list = await (await app.request(`/api/issues?projectId=${projectId}`)).json() as any[];
+    const c = list.find((i: any) => i.id === cId);
+    expect(c.sortOrder).toBe(150);
+
+    // Verify the board endpoint also reflects the new order (sortOrder ascending)
+    const board = await (await app.request(`/api/projects/${projectId}/board`)).json() as any;
+    const col = board.find((s: any) => s.id === statusId);
+    const ids = col.issues.map((i: any) => i.id);
+    // After reorder: A(100) < C(150) < B(200)
+    expect(ids.indexOf(aId)).toBeLessThan(ids.indexOf(cId));
+    expect(ids.indexOf(cId)).toBeLessThan(ids.indexOf(bId));
+  });
 });
 
 describe("Board API", () => {
