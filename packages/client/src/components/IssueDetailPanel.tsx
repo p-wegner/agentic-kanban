@@ -3,7 +3,7 @@ import ReactMarkdown from "react-markdown";
 import type { IssueArtifact, IssueWithStatus, UpdateIssueRequest, DependencyInfo } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { isHttpUrl } from "../lib/url.js";
-import { formatRelativeTime } from "../lib/formatRelativeTime.js";
+import { formatRelativeTime, formatAbsoluteTime } from "../lib/formatRelativeTime.js";
 import { IssueActivitySection, type ActivityEvent } from "./IssueActivitySection.js";
 import { StatusTransitionTimeline } from "./StatusTransitionTimeline.js";
 import { showToast } from "./Toast.js";
@@ -2276,10 +2276,10 @@ export function IssueDetailPanel({
           {/* Timestamps */}
           <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-400 dark:text-gray-500">
-              <span>Created {formatRelativeTime(issue.createdAt)}</span>
-              <span>Updated {formatRelativeTime(issue.updatedAt)}</span>
+              <span title={formatAbsoluteTime(issue.createdAt)}>Created {formatRelativeTime(issue.createdAt)}</span>
+              <span title={formatAbsoluteTime(issue.updatedAt)}>Updated {formatRelativeTime(issue.updatedAt)}</span>
               {issue.statusChangedAt && (
-                <span>Moved to <span className="text-gray-500 dark:text-gray-400 font-medium">{issue.statusName}</span> {formatRelativeTime(issue.statusChangedAt)}</span>
+                <span title={formatAbsoluteTime(issue.statusChangedAt)}>Moved to <span className="text-gray-500 dark:text-gray-400 font-medium">{issue.statusName}</span> {formatRelativeTime(issue.statusChangedAt)}</span>
               )}
             </div>
           </div>
