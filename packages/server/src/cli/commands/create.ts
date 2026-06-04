@@ -4,6 +4,7 @@ import { projects, projectStatuses, preferences } from "@agentic-kanban/shared/s
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { runMigrations, DEFAULT_STATUSES, logDefaultBranch } from "../shared.js";
+import { getDefaultSkillId, ensureAgentGitignore, ensureStarterClaudeMd } from "../../services/project-scaffold.js";
 
 export function registerCreateCommand(program: Command) {
   program
@@ -121,6 +122,7 @@ Setup:
           repoName: repoInfo.repoName,
           defaultBranch: repoInfo.defaultBranch,
           remoteUrl: repoInfo.remoteUrl,
+          defaultSkillId: await getDefaultSkillId(),
           createdAt: now,
           updatedAt: now,
         });
@@ -140,6 +142,10 @@ Setup:
           .insert(preferences)
           .values({ key: "activeProjectId", value: projectId, updatedAt: now })
           .onConflictDoUpdate({ target: preferences.key, set: { value: projectId, updatedAt: now } });
+
+        // Scaffold the fresh repo: generic agent-artifact ignores + a starter CLAUDE.md.
+        ensureAgentGitignore(repoInfo.repoPath);
+        ensureStarterClaudeMd(repoInfo.repoPath);
 
         dirCreated = false;
         console.log(`Created and registered project "${projectName}"`);

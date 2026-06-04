@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { detectRepoInfo } from "../../services/git-info.service.js";
 import { runMigrations, DEFAULT_STATUSES, logDefaultBranch } from "../shared.js";
+import { getDefaultSkillId, ensureAgentGitignore, ensureStarterClaudeMd } from "../../services/project-scaffold.js";
 
 export function registerRegisterCommand(program: Command) {
   program
@@ -46,6 +47,7 @@ Examples:
           repoName: repoInfo.repoName,
           defaultBranch: repoInfo.defaultBranch,
           remoteUrl: repoInfo.remoteUrl,
+          defaultSkillId: await getDefaultSkillId(),
           createdAt: now,
           updatedAt: now,
         });
@@ -72,6 +74,10 @@ Examples:
             target: preferences.key,
             set: { value: projectId, updatedAt: now },
           });
+
+        // Scaffold (clobber-safe): keep agent scratch out of history + drop a starter CLAUDE.md.
+        ensureAgentGitignore(repoInfo.repoPath);
+        ensureStarterClaudeMd(repoInfo.repoPath);
 
         console.log(`Registered project "${projectName}"`);
         console.log(`  Repo: ${repoInfo.repoPath}`);

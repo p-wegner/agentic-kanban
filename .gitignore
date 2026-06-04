@@ -28,6 +28,7 @@ bash.exe.stackdump
 *.log
 HANDOFF.md
 CLAUDE.local.md
+verify-*.png
 # npm pack build artifacts
 *.tgz
 
