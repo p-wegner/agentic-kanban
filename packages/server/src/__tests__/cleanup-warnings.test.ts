@@ -164,5 +164,48 @@ describe("cleanup warnings API", () => {
       const body = await res.json();
       expect(body.error).toContain("EBUSY");
     });
+
+    it("returns success when worktree path no longer exists", async () => {
+      // The path-already-gone case resolves to success — the DB warning is cleared.
+      mockRetryCleanup.mockResolvedValue({ success: true });
+
+      const app = createTestApp();
+      const res = await app.request("/api/workspaces/ws-1/retry-cleanup", { method: "POST" });
+      expect(res.status).toBe(200);
+
+      const body = await res.json();
+      expect(body.success).toBe(true);
+    });
+  });
+
+  describe("GET /api/workspaces/cleanup-warnings shape", () => {
+    it("surfaces all required fields for the cleanup queue UI", async () => {
+      mockListCleanupWarnings.mockResolvedValue([SAMPLE_ENTRY]);
+
+      const app = createTestApp();
+      const res = await app.request("/api/workspaces/cleanup-warnings?projectId=proj-1");
+      const [entry] = await res.json();
+
+      // All fields required by the queue panel must be present.
+      expect(entry.id).toBeDefined();
+      expect(entry.issueNumber).toBeDefined();
+      expect(entry.workingDir).toBeDefined();
+      expect(entry.cleanupWarning).toBeDefined();
+      expect(entry.branch).toBeDefined();
+      // At least one of these must be present to compute age.
+      expect(entry.updatedAt ?? entry.closedAt ?? entry.mergedAt).not.toBeNull();
+    });
+
+    it("handles null workingDir (path was already cleaned from DB)", async () => {
+      const entryWithoutDir = { ...SAMPLE_ENTRY, workingDir: null };
+      mockListCleanupWarnings.mockResolvedValue([entryWithoutDir]);
+
+      const app = createTestApp();
+      const res = await app.request("/api/workspaces/cleanup-warnings?projectId=proj-1");
+      const [entry] = await res.json();
+
+      expect(entry.workingDir).toBeNull();
+      expect(entry.cleanupWarning).toContain("EBUSY");
+    });
   });
 });
