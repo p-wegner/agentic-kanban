@@ -38,7 +38,8 @@ export type ViewMode =
   | "momentum"
   | "activity"
   | "stale-work"
-  | "throughput";
+  | "throughput"
+  | "provider-mix";
 
 export interface ViewDescriptor {
   /** Stable view id — matches BoardPage's `viewMode` state. */
@@ -231,6 +232,12 @@ const ICON = {
   throughput: (
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h4v7H3zM10 8h4v11h-4zM17 4h4v15h-4zM3 19h18" />
+    </svg>
+  ),
+  "provider-mix": (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 6h4v13H3zM10 10h4v9h-4zM17 3h4v16h-4zM3 19h18" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 6v13M12 10v9M19 3v16" opacity="0.3" />
     </svg>
   ),
 } as const;
@@ -525,6 +532,17 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     icon: ICON.throughput,
     paletteIcon: "▦",
     paletteDescription: "Bar chart of issues moved to Done per day over the trailing window",
+    activeClass: "bg-emerald-600 text-white",
+    group: "secondary",
+  },
+  {
+    id: "provider-mix",
+    toolbarLabel: "Providers",
+    label: "Provider Mix",
+    tooltip: "Provider Mix — workspaces by agent provider over time",
+    icon: ICON["provider-mix"],
+    paletteIcon: "PM",
+    paletteDescription: "Stacked bar chart of workspaces grouped by agent provider (claude/codex/copilot)",
     activeClass: "bg-emerald-600 text-white",
     group: "secondary",
   },

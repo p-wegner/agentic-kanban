@@ -26,6 +26,8 @@ const VIEW_ROUTE_PATHS: Record<ViewMode, string> = {
   momentum: "/momentum",
   activity: "/activity",
   "stale-work": "/stale-work",
+  throughput: "/throughput",
+  "provider-mix": "/provider-mix",
 };
 
 const ROUTE_ALIASES: Record<string, ViewMode> = {
