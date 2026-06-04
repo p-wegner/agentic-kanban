@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createSessionReadService } from "../services/session-read.service.js";
@@ -144,7 +145,17 @@ export function createSessionsRoute(database: Database = db) {
   // GET /api/sessions/:sessionId/output
   router.get("/:sessionId/output", async (c) => {
     const sessionId = c.req.param("sessionId");
-    return c.json(await sessionReadService.getOutput(sessionId));
+    const messages = await sessionReadService.getOutput(sessionId);
+    const body = JSON.stringify(messages);
+    const etag = `"${createHash("sha1").update(body).digest("hex").slice(0, 16)}"`;
+    const ifNoneMatch = c.req.header("if-none-match");
+    if (ifNoneMatch === etag) {
+      return new Response(null, { status: 304, headers: { ETag: etag } });
+    }
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "application/json", ETag: etag },
+    });
   });
 
   // GET /api/sessions/:sessionId/stats
