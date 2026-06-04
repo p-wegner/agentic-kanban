@@ -2094,13 +2094,17 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                             <button
                               onClick={async () => {
                                 if (!editTagName.trim()) return;
-                                await apiFetch(`/api/tags/${tag.id}`, {
-                                  method: "PATCH",
-                                  body: JSON.stringify({ name: editTagName.trim(), color: editTagColor || null }),
-                                });
-                                setTagsList((t) => t.map((tg) => tg.id === tag.id ? { ...tg, name: editTagName.trim(), color: editTagColor || null } : tg));
-                                setEditingTag(null);
-                                showToast("Tag updated", "success");
+                                try {
+                                  await apiFetch(`/api/tags/${tag.id}`, {
+                                    method: "PATCH",
+                                    body: JSON.stringify({ name: editTagName.trim(), color: editTagColor || null }),
+                                  });
+                                  setTagsList((t) => t.map((tg) => tg.id === tag.id ? { ...tg, name: editTagName.trim(), color: editTagColor || null } : tg));
+                                  setEditingTag(null);
+                                  showToast("Tag updated", "success");
+                                } catch {
+                                  showToast("Failed to update tag", "error");
+                                }
                               }}
                               className="text-xs px-2 py-1 bg-brand-600 text-white rounded hover:bg-brand-700"
                             >
@@ -2132,10 +2136,14 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                                 <button
                                   onClick={async () => {
                                     if (!confirm(`Delete tag "${tag.name}"? This will remove it from all issues.`)) return;
-                                    await apiFetch(`/api/tags/${tag.id}`, { method: "DELETE" });
-                                    setTagsList((t) => t.filter((tg) => tg.id !== tag.id));
-                                    setSelectedTagIds((s) => { const n = new Set(s); n.delete(tag.id); return n; });
-                                    showToast("Tag deleted", "success");
+                                    try {
+                                      await apiFetch(`/api/tags/${tag.id}`, { method: "DELETE" });
+                                      setTagsList((t) => t.filter((tg) => tg.id !== tag.id));
+                                      setSelectedTagIds((s) => { const n = new Set(s); n.delete(tag.id); return n; });
+                                      showToast("Tag deleted", "success");
+                                    } catch {
+                                      showToast("Failed to delete tag", "error");
+                                    }
                                   }}
                                   className="text-xs text-gray-400 hover:text-red-600"
                                 >
@@ -2215,22 +2223,39 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                         onChange={(e) => setNewTagName(e.target.value)}
                         placeholder="Tag name"
                         className="flex-1 text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && newTagName.trim()) e.currentTarget.form?.requestSubmit();
+                        onKeyDown={async (e) => {
+                          if (e.key === "Enter" && newTagName.trim()) {
+                            try {
+                              const created = await apiFetch<{ id: string; name: string; color: string | null }>("/api/tags", {
+                                method: "POST",
+                                body: JSON.stringify({ name: newTagName.trim(), color: newTagColor }),
+                              });
+                              setTagsList((t) => [...t, { ...created, isBuiltin: false }]);
+                              setNewTagName("");
+                              setNewTagColor("#6B7280");
+                              showToast("Tag created", "success");
+                            } catch {
+                              showToast("Failed to create tag", "error");
+                            }
+                          }
                         }}
                       />
                       <button
                         disabled={!newTagName.trim()}
                         onClick={async () => {
                           if (!newTagName.trim()) return;
-                          const created = await apiFetch<{ id: string; name: string; color: string | null }>("/api/tags", {
-                            method: "POST",
-                            body: JSON.stringify({ name: newTagName.trim(), color: newTagColor }),
-                          });
-                          setTagsList((t) => [...t, { ...created, isBuiltin: false }]);
-                          setNewTagName("");
-                          setNewTagColor("#6B7280");
-                          showToast("Tag created", "success");
+                          try {
+                            const created = await apiFetch<{ id: string; name: string; color: string | null }>("/api/tags", {
+                              method: "POST",
+                              body: JSON.stringify({ name: newTagName.trim(), color: newTagColor }),
+                            });
+                            setTagsList((t) => [...t, { ...created, isBuiltin: false }]);
+                            setNewTagName("");
+                            setNewTagColor("#6B7280");
+                            showToast("Tag created", "success");
+                          } catch {
+                            showToast("Failed to create tag", "error");
+                          }
                         }}
                         className="text-xs px-3 py-1.5 bg-brand-600 text-white rounded hover:bg-brand-700 disabled:opacity-50"
                       >

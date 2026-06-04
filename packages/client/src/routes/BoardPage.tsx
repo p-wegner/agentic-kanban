@@ -174,7 +174,7 @@ export function BoardPage() {
   }, []);
 
   // Extracted hooks
-  const prefs = useBoardPreferences();
+  const prefs = useBoardPreferences(activeProjectId);
   const panels = useBoardPanels();
   const agentQuestionsCount = useAgentQuestionsCount(activeProjectId);
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
@@ -1098,13 +1098,18 @@ export function BoardPage() {
         (col) =>
           !ARCHIVE_STATUS_NAMES.has(col.name) &&
           col.name !== BACKLOG_STATUS_NAME &&
-          (col.name !== "AI Reviewed" || showAiReviewedColumn),
+          (col.name !== "AI Reviewed" || showAiReviewedColumn) &&
+          !prefs.hiddenColumns.has(col.name),
       ),
-    [filteredColumns, showAiReviewedColumn],
+    [filteredColumns, showAiReviewedColumn, prefs.hiddenColumns],
   );
   const archiveColumns = useMemo(
     () => filteredColumns.filter((col) => ARCHIVE_STATUS_NAMES.has(col.name)),
     [filteredColumns],
+  );
+  const visibilityColumns = useMemo(
+    () => columns.filter((col) => !ARCHIVE_STATUS_NAMES.has(col.name) && col.name !== BACKLOG_STATUS_NAME),
+    [columns],
   );
   const archiveExpanded = !collapsedGroups.has("archive");
   const visibleKanbanIssues = useMemo(
@@ -1252,7 +1257,11 @@ export function BoardPage() {
           document.getElementById("search-input")?.blur();
         }
       }
-      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const isArrowKey = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key);
+      const isVimNavKey = ["j", "k", "h", "l"].includes(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey;
+      // j/k/h/l only act as nav when a card is already selected (avoids conflict with panel shortcuts)
+      const vimNavActive = isVimNavKey && keyboardCursorIssueIdRef.current !== null;
+      if ((isArrowKey && !e.ctrlKey && !e.metaKey && !e.altKey) || vimNavActive) {
         if (isTextEntryTarget(e.target)) return;
         const navColumns = viewMode === "kanban" ? [...activeColumns, ...(archiveExpanded ? archiveColumns : [])] : [];
         if (navColumns.length === 0) return;
@@ -1274,15 +1283,15 @@ export function BoardPage() {
         }
         let newColIdx = colIdx;
         let newIssueIdx = issueIdx;
-        if (e.key === "ArrowDown") {
+        if (e.key === "ArrowDown" || e.key === "j") {
           if (issueIdx < navColumns[colIdx].issues.length - 1) {
             newIssueIdx = issueIdx + 1;
           }
-        } else if (e.key === "ArrowUp") {
+        } else if (e.key === "ArrowUp" || e.key === "k") {
           if (issueIdx > 0) {
             newIssueIdx = issueIdx - 1;
           }
-        } else if (e.key === "ArrowRight") {
+        } else if (e.key === "ArrowRight" || e.key === "l") {
           for (let c = colIdx + 1; c < navColumns.length; c++) {
             if (navColumns[c].issues.length > 0) {
               newColIdx = c;
@@ -1290,7 +1299,7 @@ export function BoardPage() {
               break;
             }
           }
-        } else if (e.key === "ArrowLeft") {
+        } else if (e.key === "ArrowLeft" || e.key === "h") {
           for (let c = colIdx - 1; c >= 0; c--) {
             if (navColumns[c].issues.length > 0) {
               newColIdx = c;
@@ -1713,6 +1722,9 @@ export function BoardPage() {
           onViewAllHealthEvents={() => handleViewModeChange("health-events")}
           cardDensity={prefs.cardDensity}
           onCardDensityChange={prefs.handleCardDensityChange}
+          visibilityColumns={visibilityColumns}
+          hiddenColumns={prefs.hiddenColumns}
+          onHiddenColumnsChange={prefs.handleHiddenColumnsChange}
           milestones={milestones}
           activeMilestoneId={milestoneFilterId}
           onMilestoneFilterChange={setMilestoneFilterId}

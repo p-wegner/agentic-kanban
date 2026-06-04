@@ -903,6 +903,68 @@ describe("Board API", () => {
   });
 });
 
+describe("Board archived-issue filtering (AK-457)", () => {
+  const { app, db: database } = createTestApp();
+
+  it("omits Archived issues from default board response and includes them with ?includeArchived=true", async () => {
+    const pid = await createProjectDirectly(database, { name: "Archived Filter Project" });
+    const doneStatusId = await createStatusDirectly(database, pid, "Done", 1);
+    const archivedStatusId = await createStatusDirectly(database, pid, "Archived", 99);
+
+    const now = new Date().toISOString();
+
+    const doneIssueId = randomUUID();
+    await database.insert(schema.issues).values({
+      id: doneIssueId,
+      projectId: pid,
+      statusId: doneStatusId,
+      issueNumber: 4571,
+      title: "Done issue",
+      priority: "medium",
+      issueType: "feature",
+      sortOrder: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const archivedIssueId = randomUUID();
+    await database.insert(schema.issues).values({
+      id: archivedIssueId,
+      projectId: pid,
+      statusId: archivedStatusId,
+      issueNumber: 4572,
+      title: "Archived issue",
+      priority: "medium",
+      issueType: "feature",
+      sortOrder: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    // Default board: Archived column and its issues must be absent
+    const defaultRes = await app.request(`/api/projects/${pid}/board`);
+    expect(defaultRes.status).toBe(200);
+    const defaultBody = await defaultRes.json() as any[];
+    const defaultAllIssues = defaultBody.flatMap((col: any) => col.issues);
+    const defaultColumnNames = defaultBody.map((col: any) => col.name);
+
+    expect(defaultColumnNames).not.toContain("Archived");
+    expect(defaultAllIssues.map((i: any) => i.id)).not.toContain(archivedIssueId);
+    expect(defaultAllIssues.map((i: any) => i.id)).toContain(doneIssueId);
+
+    // includeArchived=true: Archived column and its issues must be present
+    const includedRes = await app.request(`/api/projects/${pid}/board?includeArchived=true`);
+    expect(includedRes.status).toBe(200);
+    const includedBody = await includedRes.json() as any[];
+    const includedAllIssues = includedBody.flatMap((col: any) => col.issues);
+    const includedColumnNames = includedBody.map((col: any) => col.name);
+
+    expect(includedColumnNames).toContain("Archived");
+    expect(includedAllIssues.map((i: any) => i.id)).toContain(archivedIssueId);
+    expect(includedAllIssues.map((i: any) => i.id)).toContain(doneIssueId);
+  });
+});
+
 describe("Board ETag / conditional-GET", () => {
   const { app, db: database } = createTestApp();
 
