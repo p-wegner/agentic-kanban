@@ -16,6 +16,13 @@ export function ColumnMinimap({ issues, totalScrollHeight, scrollContainerRef }:
   const [railHeight, setRailHeight] = useState(0);
   const [hoveredTick, setHoveredTick] = useState<number | null>(null);
   const isDragging = useRef(false);
+  const dragCleanupRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    return () => {
+      dragCleanupRef.current?.();
+    };
+  }, []);
 
   const tickCount = Math.min(issues.length, MAX_TICKS);
   const tickGroupSize = tickCount > 0 ? Math.ceil(issues.length / tickCount) : 1;
@@ -69,11 +76,16 @@ export function ColumnMinimap({ issues, totalScrollHeight, scrollContainerRef }:
     function onMove(ev: MouseEvent) {
       if (isDragging.current) scrollToY(ev.clientY);
     }
-    function onUp() {
+    function cleanup() {
       isDragging.current = false;
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      dragCleanupRef.current = null;
     }
+    function onUp() {
+      cleanup();
+    }
+    dragCleanupRef.current = cleanup;
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
   }
@@ -85,13 +97,13 @@ export function ColumnMinimap({ issues, totalScrollHeight, scrollContainerRef }:
     setHoveredTick(Math.max(0, Math.min(Math.floor((y / rect.height) * tickCount), tickCount - 1)));
   }
 
-  const indicatorTop =
-    totalScrollHeight > 0 && railHeight > 0
-      ? (scrollTop / totalScrollHeight) * railHeight
-      : 0;
   const indicatorHeight =
     totalScrollHeight > 0 && railHeight > 0
       ? Math.max(12, (clientHeight / totalScrollHeight) * railHeight)
+      : 0;
+  const indicatorTop =
+    totalScrollHeight > 0 && railHeight > 0
+      ? Math.min((scrollTop / totalScrollHeight) * railHeight, railHeight - indicatorHeight)
       : 0;
 
   const hoveredIssue =
