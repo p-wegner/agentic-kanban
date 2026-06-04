@@ -117,6 +117,22 @@ export function createWorkspaceMergeService(deps: {
     const workspace = await getWorkspaceById(id, database);
     if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
 
+    if (workspace.status === "closed" && workspace.mergedAt) {
+      throw new WorkspaceError(
+        "Workspace has already been merged.",
+        "CONFLICT",
+        { mergeReason: "already_merged" },
+      );
+    }
+
+    if (!workspace.isDirect && !workspace.readyForMerge) {
+      throw new WorkspaceError(
+        "Workspace is not approved for merge. Mark it as ready-for-merge before merging.",
+        "CONFLICT",
+        { mergeReason: "not_approved", status: workspace.status },
+      );
+    }
+
     const { project, repoPath, defaultBranch } = await resolveProjectFull(id, database);
 
     const existingLock = activeMerges.get(repoPath);
@@ -321,8 +337,8 @@ export function createWorkspaceMergeService(deps: {
         );
         throw new WorkspaceError(
           "Merge conflicts detected",
-          "BAD_REQUEST",
-          { conflictingFiles: conflicts.conflictingFiles },
+          "CONFLICT",
+          { mergeReason: "conflict", conflictFiles: conflicts.conflictingFiles },
         );
       }
 
@@ -363,6 +379,22 @@ export function createWorkspaceMergeService(deps: {
 
     const targetBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
 
+    if (!workspace.isDirect && typeof gitService.getUncommittedTrackedChanges === "function") {
+      try {
+        const uncommitted = await gitService.getUncommittedTrackedChanges(repoPath);
+        if (uncommitted.length > 0) {
+          throw new WorkspaceError(
+            `Main checkout has ${uncommitted.length} uncommitted tracked change(s) — commit or stash those changes first.`,
+            "CONFLICT",
+            { mergeReason: "dirty_main", uncommittedFiles: uncommitted },
+          );
+        }
+      } catch (err) {
+        if (err instanceof WorkspaceError) throw err;
+        console.warn("[workspace-merge] dirty-main check failed (non-fatal):", err instanceof Error ? err.message : String(err));
+      }
+    }
+
     console.log(`[workspace-service] merge: workspaceId=${id} branch=${workspace.branch} targetBranch=${targetBranch} repoPath=${repoPath}`);
 
     if (workspace.workingDir) {
@@ -396,7 +428,7 @@ export function createWorkspaceMergeService(deps: {
       throw new WorkspaceError(
         `Merge failed (git-merge step): ${err instanceof Error ? err.message : String(err)}`,
         "CONFLICT",
-        { step: "git-merge", branch: workspace.branch, targetBranch },
+        { mergeReason: "conflict", step: "git-merge", branch: workspace.branch, targetBranch },
       );
     }
     let mergeCommitSha = "";

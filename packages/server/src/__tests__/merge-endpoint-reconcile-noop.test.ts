@@ -95,7 +95,7 @@ async function seedScenario(db: ReturnType<typeof createTestDb>["db"]) {
     baseBranch: "master",
     isDirect: false,
     status: "idle",
-    readyForMerge: false,
+    readyForMerge: true,
     provider: "claude",
     createdAt: now,
     updatedAt: now,
