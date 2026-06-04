@@ -5,6 +5,8 @@ import { createWorkspaceService } from "../services/workspace.service.js";
 import type { CreateWorkspaceInput } from "../services/workspace.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
+import { and, eq, gte } from "drizzle-orm";
+import { workspaces, issues } from "@agentic-kanban/shared/schema";
 
 export function createWorkspacesRoute(
   database: Database,
@@ -17,6 +19,66 @@ export function createWorkspacesRoute(
     database,
     getSessionManager,
     boardEvents: options?.boardEvents,
+  });
+
+  // GET /api/workspaces/provider-mix?projectId=&days= — workspaces grouped by provider+profile per day
+  // Must be registered BEFORE /:id to avoid being matched as an ID param
+  router.get("/provider-mix", async (c) => {
+    const projectId = c.req.query("projectId");
+    if (!projectId) return c.json({ error: "projectId required" }, 400);
+    const daysRaw = parseInt(c.req.query("days") ?? "14", 10);
+    const days = Math.min(Math.max(Number.isNaN(daysRaw) ? 14 : daysRaw, 1), 365);
+
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - days + 1);
+    const cutoffDay = cutoffDate.toISOString().slice(0, 10);
+
+    const rows = await database
+      .select({
+        provider: workspaces.provider,
+        claudeProfile: workspaces.claudeProfile,
+        createdAt: workspaces.createdAt,
+      })
+      .from(workspaces)
+      .innerJoin(issues, eq(workspaces.issueId, issues.id))
+      .where(
+        and(
+          eq(issues.projectId, projectId),
+          gte(workspaces.createdAt, cutoffDay)
+        )
+      );
+
+    // Build date axis
+    const today = new Date();
+    const dates: string[] = [];
+    for (let d = new Date(cutoffDate); d <= today; d.setDate(d.getDate() + 1)) {
+      dates.push(d.toISOString().slice(0, 10));
+    }
+
+    // Collect all provider+profile combos
+    const seriesSet = new Set<string>();
+    for (const r of rows) {
+      const key = r.provider ?? "unknown";
+      seriesSet.add(key);
+    }
+    const series = [...seriesSet].sort();
+
+    // Count per day per series
+    const counts: Record<string, Record<string, number>> = {};
+    for (const date of dates) {
+      counts[date] = {};
+      for (const s of series) counts[date][s] = 0;
+    }
+    for (const r of rows) {
+      if (!r.createdAt) continue;
+      const day = r.createdAt.slice(0, 10);
+      if (!counts[day]) continue;
+      const key = r.provider ?? "unknown";
+      counts[day][key] = (counts[day][key] ?? 0) + 1;
+    }
+
+    const points = dates.map((date) => ({ date, counts: counts[date] ?? {} }));
+    return c.json({ series, points });
   });
 
   // GET /api/workspaces/stale-worktrees — list closed workspaces with directories still on disk
