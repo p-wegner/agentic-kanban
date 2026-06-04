@@ -28,6 +28,7 @@ export const SETTINGS_KEYS = [
   "backlog_empty_last_run",
   "backlog_stale_days",
   "inprogress_stale_days",
+  "stale_column_threshold_days",
   "auto_commit_strategy_objective",
   "issue_templates",
   ...allHarnessSettingKeys(),
