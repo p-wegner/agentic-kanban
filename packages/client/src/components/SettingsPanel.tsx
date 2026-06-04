@@ -749,6 +749,78 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
     maintenanceEnd?: string | null;
   } | null>(null);
 
+  // Config export/import state
+  const [configExporting, setConfigExporting] = useState(false);
+  const [configImporting, setConfigImporting] = useState(false);
+  const [configImportPreview, setConfigImportPreview] = useState<{
+    statusChanges: { toAdd: unknown[]; toUpdate: unknown[] };
+    prefChanges: Record<string, { from: string | undefined; to: string }>;
+    strategyChanged: boolean;
+    pendingFile: File;
+  } | null>(null);
+
+  async function handleConfigExport() {
+    if (!activeProjectId || configExporting) return;
+    setConfigExporting(true);
+    try {
+      const resp = await fetch(`/api/projects/${activeProjectId}/config/export`);
+      if (!resp.ok) throw new Error(`Export failed: ${resp.status}`);
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `board-config-${activeProjectId}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast("Config exported", "success");
+    } catch {
+      showToast("Export failed", "error");
+    } finally {
+      setConfigExporting(false);
+    }
+  }
+
+  async function handleConfigImportFile(file: File) {
+    if (!activeProjectId || configImporting) return;
+    setConfigImporting(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const preview = await apiFetch<{
+        statusChanges: { toAdd: unknown[]; toUpdate: unknown[] };
+        prefChanges: Record<string, { from: string | undefined; to: string }>;
+        strategyChanged: boolean;
+      }>(`/api/projects/${activeProjectId}/config/import?dryRun=true`, {
+        method: "POST",
+        body: formData,
+      });
+      setConfigImportPreview({ ...preview, pendingFile: file });
+    } catch {
+      showToast("Could not parse config file", "error");
+    } finally {
+      setConfigImporting(false);
+    }
+  }
+
+  async function handleConfigImportConfirm() {
+    if (!activeProjectId || !configImportPreview) return;
+    setConfigImporting(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", configImportPreview.pendingFile);
+      await apiFetch(`/api/projects/${activeProjectId}/config/import`, {
+        method: "POST",
+        body: formData,
+      });
+      setConfigImportPreview(null);
+      showToast("Config imported successfully", "success");
+    } catch {
+      showToast("Import failed", "error");
+    } finally {
+      setConfigImporting(false);
+    }
+  }
+
   const disabledTools = new Set((settings.disabled_mcp_tools || "").split(",").filter(Boolean));
   function isToolDisabled(name: string) {
     return disabledTools.has(name);
@@ -2042,6 +2114,93 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                       </CollapsibleSection>
                       <div className="pt-4 border-t border-gray-100">
                         <ArchiveDoneSection projectId={activeProjectId} />
+                      </div>
+                      <div className="pt-4 border-t border-gray-100">
+                        <CollapsibleSection title="Export / Import Config" configured={false} defaultOpen={false}>
+                          <p className="text-xs text-gray-500 mb-3">
+                            Export board configuration (statuses, strategy, workflow preferences) to a JSON file and import it on another project.
+                          </p>
+                          <div className="flex gap-2 flex-wrap">
+                            <button
+                              onClick={handleConfigExport}
+                              disabled={configExporting}
+                              className="text-sm px-3 py-1.5 bg-brand-600 text-white rounded hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                            >
+                              {configExporting ? (
+                                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                                </svg>
+                              ) : (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
+                                </svg>
+                              )}
+                              Export Config
+                            </button>
+                            <label className="text-sm px-3 py-1.5 bg-white border border-gray-300 rounded hover:bg-gray-50 cursor-pointer flex items-center gap-1.5">
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 6l5-5 5 5M12 2v13" />
+                              </svg>
+                              Import Config
+                              <input
+                                type="file"
+                                accept=".json"
+                                className="hidden"
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) handleConfigImportFile(file);
+                                  e.target.value = "";
+                                }}
+                              />
+                            </label>
+                          </div>
+                          {configImportPreview && (
+                            <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded text-sm space-y-2">
+                              <p className="font-medium text-amber-800">Review changes before applying:</p>
+                              {configImportPreview.statusChanges.toAdd.length > 0 && (
+                                <p className="text-amber-700">
+                                  Add {configImportPreview.statusChanges.toAdd.length} status(es):&nbsp;
+                                  {(configImportPreview.statusChanges.toAdd as Array<{ name: string }>).map((s) => s.name).join(", ")}
+                                </p>
+                              )}
+                              {configImportPreview.statusChanges.toUpdate.length > 0 && (
+                                <p className="text-amber-700">
+                                  Update sort order for {configImportPreview.statusChanges.toUpdate.length} status(es).
+                                </p>
+                              )}
+                              {Object.keys(configImportPreview.prefChanges).length > 0 && (
+                                <p className="text-amber-700">
+                                  Update preferences: {Object.keys(configImportPreview.prefChanges).join(", ")}
+                                </p>
+                              )}
+                              {configImportPreview.strategyChanged && (
+                                <p className="text-amber-700">Update board strategy (Bullseye config).</p>
+                              )}
+                              {configImportPreview.statusChanges.toAdd.length === 0 &&
+                                configImportPreview.statusChanges.toUpdate.length === 0 &&
+                                Object.keys(configImportPreview.prefChanges).length === 0 &&
+                                !configImportPreview.strategyChanged && (
+                                  <p className="text-gray-500">No changes detected.</p>
+                                )}
+                              <div className="flex gap-2 pt-1">
+                                <button
+                                  onClick={handleConfigImportConfirm}
+                                  disabled={configImporting}
+                                  className="text-sm px-3 py-1.5 bg-amber-600 text-white rounded hover:bg-amber-700 disabled:opacity-50"
+                                >
+                                  {configImporting ? "Applying..." : "Apply"}
+                                </button>
+                                <button
+                                  onClick={() => setConfigImportPreview(null)}
+                                  className="text-sm px-3 py-1.5 border border-gray-300 rounded hover:bg-gray-50"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </CollapsibleSection>
                       </div>
                     </div>
                   )}
