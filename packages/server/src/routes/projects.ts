@@ -256,7 +256,8 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
   // GET /api/projects/:id/board
   router.get("/:id/board", async (c) => {
     const projectId = c.req.param("id");
-    const result = await projectService.getBoard(projectId);
+    const includeArchived = c.req.query("includeArchived") === "true";
+    const result = await projectService.getBoard(projectId, undefined, { includeArchived });
     const body = JSON.stringify(result);
     const etag = `"${createHash("sha1").update(body).digest("hex").slice(0, 16)}"`;
     const ifNoneMatch = c.req.header("if-none-match");

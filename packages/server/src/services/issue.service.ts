@@ -738,6 +738,67 @@ export function createIssueService(deps: {
     return deleteArtifactRepo(issueId, artifactId, database);
   }
 
+  async function archiveDoneIssues(
+    projectId: string,
+    olderThanDays: number,
+    nowOverride?: string,
+  ): Promise<{ archived: number }> {
+    if (!Number.isFinite(olderThanDays) || olderThanDays <= 0) {
+      throw new IssueError("olderThanDays must be a positive number", "BAD_REQUEST");
+    }
+
+    const archivedStatus = await database
+      .select({ id: projectStatuses.id })
+      .from(projectStatuses)
+      .where(and(eq(projectStatuses.projectId, projectId), eq(projectStatuses.name, "Archived")))
+      .limit(1);
+
+    if (archivedStatus.length === 0) {
+      throw new IssueError("Archived status not found for this project", "NOT_FOUND");
+    }
+    const archivedStatusId = archivedStatus[0].id;
+
+    const doneStatuses = await database
+      .select({ id: projectStatuses.id })
+      .from(projectStatuses)
+      .where(and(eq(projectStatuses.projectId, projectId), eq(projectStatuses.name, "Done")));
+
+    if (doneStatuses.length === 0) {
+      return { archived: 0 };
+    }
+    const doneStatusIds = doneStatuses.map((s) => s.id);
+
+    const cutoff = new Date(
+      new Date(nowOverride ?? new Date().toISOString()).getTime() - olderThanDays * 24 * 60 * 60 * 1000,
+    ).toISOString();
+
+    const candidates = await database
+      .select({ id: issues.id, statusChangedAt: issues.statusChangedAt, createdAt: issues.createdAt })
+      .from(issues)
+      .where(and(eq(issues.projectId, projectId), inArray(issues.statusId, doneStatusIds)));
+
+    const toArchive = candidates
+      .filter((i) => {
+        const ts = i.statusChangedAt ?? i.createdAt;
+        return ts < cutoff;
+      })
+      .map((i) => i.id);
+
+    if (toArchive.length === 0) {
+      return { archived: 0 };
+    }
+
+    const now = new Date().toISOString();
+    await database
+      .update(issues)
+      .set({ statusId: archivedStatusId, statusChangedAt: now, updatedAt: now })
+      .where(inArray(issues.id, toArchive));
+
+    boardEvents?.broadcast(projectId, "issue_updated");
+
+    return { archived: toArchive.length };
+  }
+
   return {
     createIssue,
     createIssuesBatch,
@@ -749,6 +810,7 @@ export function createIssueService(deps: {
     removeDependency,
     addArtifact,
     deleteArtifact,
+    archiveDoneIssues,
     getEnrichedWorkspaces,
     listIssues,
     getIssueSummary,

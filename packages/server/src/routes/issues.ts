@@ -128,6 +128,24 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     }
   });
 
+  // POST /api/issues/archive-done — move Done issues older than N days to Archived
+  router.post("/archive-done", async (c) => {
+    const body = await parseJsonBody<{ projectId?: string; olderThanDays?: number; nowOverride?: string }>(c);
+    if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
+    const days = Number(body.olderThanDays);
+    if (!Number.isFinite(days) || days <= 0) {
+      return c.json({ error: "olderThanDays must be a positive number" }, 400);
+    }
+    try {
+      const result = await issueService.archiveDoneIssues(body.projectId, days, body.nowOverride);
+      return c.json({ archived: result.archived });
+    } catch (err: any) {
+      if (err.code === "BAD_REQUEST") return c.json({ error: err.message }, 400);
+      if (err.code === "NOT_FOUND") return c.json({ error: err.message }, 404);
+      throw err;
+    }
+  });
+
   // PATCH /api/issues/bulk - update N issues in one request
   router.patch("/bulk", async (c) => {
     const body = await parseJsonBody<{ issueIds?: string[]; updates?: Record<string, unknown> }>(c);

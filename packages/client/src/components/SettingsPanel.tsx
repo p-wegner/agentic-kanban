@@ -258,6 +258,98 @@ function formatHealthTime(value: string): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString("en-US");
 }
 
+const ARCHIVE_THRESHOLDS = [
+  { label: "14 days", value: 14 },
+  { label: "30 days", value: 30 },
+  { label: "60 days", value: 60 },
+  { label: "90 days", value: 90 },
+];
+
+function ArchiveDoneSection({ projectId }: { projectId: string | null | undefined }) {
+  const [threshold, setThreshold] = useState(30);
+  const [running, setRunning] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [lastResult, setLastResult] = useState<{ archived: number } | null>(null);
+
+  if (!projectId) return null;
+
+  async function doArchive() {
+    setRunning(true);
+    setConfirming(false);
+    setLastResult(null);
+    try {
+      const result = await apiFetch<{ archived: number }>("/api/issues/archive-done", {
+        method: "POST",
+        body: JSON.stringify({ projectId, olderThanDays: threshold }),
+      });
+      setLastResult(result);
+      if (result.archived > 0) {
+        showToast(`Archived ${result.archived} Done issue${result.archived === 1 ? "" : "s"}`, "success");
+      } else {
+        showToast("No Done issues older than threshold", "success");
+      }
+    } catch {
+      showToast("Archive failed", "error");
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <div>
+        <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Archive Done Issues</p>
+        <p className="text-xs text-gray-500 mt-0.5">
+          Move Done issues older than a threshold to Archived (hidden from the board by default). Status-change only — no rows are deleted.
+        </p>
+      </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <select
+          value={threshold}
+          onChange={(e) => { setThreshold(Number(e.target.value)); setConfirming(false); setLastResult(null); }}
+          className="text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-800 dark:text-gray-200"
+        >
+          {ARCHIVE_THRESHOLDS.map((t) => (
+            <option key={t.value} value={t.value}>{t.label}</option>
+          ))}
+        </select>
+        {confirming ? (
+          <>
+            <button
+              onClick={doArchive}
+              disabled={running}
+              className="text-sm px-3 py-1.5 rounded bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Confirm archive
+            </button>
+            <button
+              onClick={() => setConfirming(false)}
+              className="text-sm px-3 py-1.5 rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+            >
+              Cancel
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={() => setConfirming(true)}
+            disabled={running}
+            className="text-sm px-3 py-1.5 rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Archive old Done issues
+          </button>
+        )}
+      </div>
+      {lastResult && (
+        <p className="text-xs text-gray-500">
+          {lastResult.archived > 0
+            ? `${lastResult.archived} issue${lastResult.archived === 1 ? "" : "s"} archived.`
+            : "No Done issues matched the threshold."}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1">
@@ -1948,6 +2040,9 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                           </div>
                         )}
                       </CollapsibleSection>
+                      <div className="pt-4 border-t border-gray-100">
+                        <ArchiveDoneSection projectId={activeProjectId} />
+                      </div>
                     </div>
                   )}
                 </>
