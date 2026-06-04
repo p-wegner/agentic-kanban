@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { openSync, closeSync, readSync, statSync, unlinkSync, existsSync, writeFileSync, readFileSync } from "node:fs";
+import { openSync, closeSync, readSync, statSync, unlinkSync, existsSync, writeFileSync, readFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildAgentLaunchConfig, type ProviderId, type ProviderName } from "./agent-provider.js";
@@ -284,10 +284,16 @@ export function launch(
     const watcher = startOutputFileWatcher(sessionId, outPath, onOutput);
     agentState.outputWatchers.set(sessionId, watcher);
   } else {
-    // Pipe-based output: read directly from stdout
+    // Pipe-based output: read directly from stdout and mirror to the .out file
+    // so replay can serve from file (same path as detached agents).
+    const pipedOutPath = sessionOutputPath(sessionId);
+    try { writeFileSync(pipedOutPath, ""); } catch { /* ignore */ }
+
     proc.stdout?.on("data", (chunk: Buffer) => {
       try {
-        onOutput({ type: "stdout", sessionId, data: chunk.toString() });
+        const data = chunk.toString();
+        try { appendFileSync(pipedOutPath, data); } catch { /* ignore */ }
+        onOutput({ type: "stdout", sessionId, data });
       } catch (err) {
         console.error(`[agent] stdout callback error: sessionId=${sessionId}`, err);
       }
@@ -307,12 +313,11 @@ export function launch(
     agentState.activeProcesses.delete(sessionId);
     agentState.activePids.delete(sessionId);
     agentState.stdinOpen.delete(sessionId);
-    // Clean up output file watcher and output file
+    // Close watchers but keep the .out file for post-session replay
     const watcher = agentState.outputWatchers.get(sessionId);
     if (watcher) { watcher.close(); agentState.outputWatchers.delete(sessionId); }
     const pidW = agentState.pidWatchers.get(sessionId);
     if (pidW) { pidW.close(); agentState.pidWatchers.delete(sessionId); }
-    cleanupOutputFile(sessionId);
     try {
       onOutput({ type: "exit", sessionId, exitCode: code });
     } catch (err) {
@@ -333,7 +338,6 @@ export function launch(
     if (watcher) { watcher.close(); agentState.outputWatchers.delete(sessionId); }
     const pidW = agentState.pidWatchers.get(sessionId);
     if (pidW) { pidW.close(); agentState.pidWatchers.delete(sessionId); }
-    cleanupOutputFile(sessionId);
     try {
       onOutput({ type: "exit", sessionId, exitCode: 1 });
     } catch (cbErr) {
@@ -493,7 +497,7 @@ export function reattachSession(
     agentState.activePids.delete(sessionId);
     const w = agentState.outputWatchers.get(sessionId);
     if (w) { w.close(); agentState.outputWatchers.delete(sessionId); }
-    cleanupOutputFile(sessionId);
+    // Keep the .out file for post-session replay
     try {
       onOutput({ type: "exit", sessionId, exitCode: null });
     } catch (err) {

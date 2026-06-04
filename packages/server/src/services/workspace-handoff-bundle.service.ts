@@ -4,6 +4,7 @@ import { parseSessionSummary } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
 import * as realGitService from "./git.service.js";
 import { WorkspaceError, type GitService } from "./workspace-internals.js";
+import { readSessionStdoutFile } from "../repositories/session.repository.js";
 
 export interface WorkspaceHandoffBundle {
   exportedAt: string;
@@ -100,12 +101,26 @@ export async function exportWorkspaceHandoffBundle(args: {
     .orderBy(desc(sessions.startedAt));
 
   const sessionIds = sessionRows.map((s) => s.id);
-  const messageRows = sessionIds.length === 0
-    ? []
-    : await database
+  let messageRows: Array<{ type: string; data: string | null; sessionId: string }> = [];
+  if (sessionIds.length > 0) {
+    // Build per-session stdout from .out file; fall back to DB for historical sessions
+    const needsDb: string[] = [];
+    for (const sid of sessionIds) {
+      const fileContent = readSessionStdoutFile(sid);
+      if (fileContent !== null) {
+        messageRows.push({ type: "stdout", data: fileContent, sessionId: sid });
+      } else {
+        needsDb.push(sid);
+      }
+    }
+    if (needsDb.length > 0) {
+      const dbRows = await database
         .select({ type: sessionMessages.type, data: sessionMessages.data, sessionId: sessionMessages.sessionId })
         .from(sessionMessages)
-        .where(inArray(sessionMessages.sessionId, sessionIds));
+        .where(inArray(sessionMessages.sessionId, needsDb));
+      messageRows = messageRows.concat(dbRows);
+    }
+  }
 
   const summary = parseSessionSummary(messageRows);
 

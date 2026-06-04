@@ -1,6 +1,7 @@
 import { eq, desc, gte, sql } from "drizzle-orm";
 import { testRuns, flakyTestPins, sessionMessages } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
+import { readSessionStdoutFile } from "../repositories/session.repository.js";
 
 export interface TestRunRecord {
   sessionId: string;
@@ -514,16 +515,21 @@ export function createTestRunService(database: Database) {
       .limit(1);
     if (existing.length > 0) return 0;
 
-    const msgs = await database
-      .select({ type: sessionMessages.type, data: sessionMessages.data })
-      .from(sessionMessages)
-      .where(eq(sessionMessages.sessionId, sessionId))
-      .orderBy(sessionMessages.id);
-
     const textParts: string[] = [];
-    for (const m of msgs) {
-      if ((m.type === "stdout" || m.type === "stderr") && m.data) {
-        textParts.push(extractTextFromMessageData(m.data));
+    // Prefer .out file for stdout; fall back to DB for historical sessions
+    const fileContent = readSessionStdoutFile(sessionId);
+    if (fileContent !== null) {
+      textParts.push(extractTextFromMessageData(fileContent));
+    } else {
+      const msgs = await database
+        .select({ type: sessionMessages.type, data: sessionMessages.data })
+        .from(sessionMessages)
+        .where(eq(sessionMessages.sessionId, sessionId))
+        .orderBy(sessionMessages.id);
+      for (const m of msgs) {
+        if ((m.type === "stdout" || m.type === "stderr") && m.data) {
+          textParts.push(extractTextFromMessageData(m.data));
+        }
       }
     }
     if (textParts.length === 0) return 0;

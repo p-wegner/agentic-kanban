@@ -4,7 +4,7 @@ import { eq, inArray, desc } from "drizzle-orm";
 import { extractMeaningfulOutput, isTerminalStatusIdView } from "@agentic-kanban/shared";
 import type { BoardStatusIssue } from "@agentic-kanban/shared";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { requireEntity } from "../db-utils.js";
+import { requireEntity, readSessionStdoutFile } from "../db-utils.js";
 
 function classifyAttention(issue: BoardStatusIssue): BoardStatusIssue["attention"] {
   if (issue.mergeState?.bucket === "pending_merge") return null;
@@ -250,18 +250,24 @@ export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodD
             if (latestSession) {
               asyncWork.push(
                 (async () => {
-                  const msgs = await db
-                    .select({ type: schema.sessionMessages.type, data: schema.sessionMessages.data, createdAt: schema.sessionMessages.createdAt })
-                    .from(schema.sessionMessages)
-                    .where(eq(schema.sessionMessages.sessionId, latestSession.id))
-                    .orderBy(desc(schema.sessionMessages.id))
-                    .limit(50);
+                  // Prefer .out file; fall back to DB for historical sessions
+                  const fileContent = readSessionStdoutFile(latestSession.id);
+                  if (fileContent !== null) {
+                    entry.lastOutput = extractMeaningfulOutput([{ type: "stdout", data: fileContent }], effectiveTailLines);
+                  } else {
+                    const msgs = await db
+                      .select({ type: schema.sessionMessages.type, data: schema.sessionMessages.data, createdAt: schema.sessionMessages.createdAt })
+                      .from(schema.sessionMessages)
+                      .where(eq(schema.sessionMessages.sessionId, latestSession.id))
+                      .orderBy(desc(schema.sessionMessages.id))
+                      .limit(50);
 
-                  if (msgs.length > 0 && msgs[0].createdAt) {
-                    entry.lastActivity = msgs[0].createdAt;
+                    if (msgs.length > 0 && msgs[0].createdAt) {
+                      entry.lastActivity = msgs[0].createdAt;
+                    }
+
+                    entry.lastOutput = extractMeaningfulOutput(msgs.reverse(), effectiveTailLines);
                   }
-
-                  entry.lastOutput = extractMeaningfulOutput(msgs.reverse(), effectiveTailLines);
                 })(),
               );
             }

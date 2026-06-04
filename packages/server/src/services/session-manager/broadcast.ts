@@ -80,26 +80,28 @@ export function createBroadcaster(
     }
     state.messageBuffer.get(sessionId)!.push(message);
 
-    // Accumulate into the DB write buffer and schedule a batched flush
-    if (!state.dbWriteBuffer.has(sessionId)) {
-      state.dbWriteBuffer.set(sessionId, []);
-    }
-    state.dbWriteBuffer.get(sessionId)!.push({
-      type: message.type,
-      data: message.data ?? null,
-      exitCode: message.exitCode != null ? String(message.exitCode) : null,
-    });
+    // Only persist non-stdout messages to DB (exit, stderr). Stdout is already
+    // written to the per-session .out file by agent.service.ts and is served
+    // from there on replay — removing the high-frequency write flood.
+    if (message.type !== "stdout") {
+      if (!state.dbWriteBuffer.has(sessionId)) {
+        state.dbWriteBuffer.set(sessionId, []);
+      }
+      state.dbWriteBuffer.get(sessionId)!.push({
+        type: message.type,
+        data: message.data ?? null,
+        exitCode: message.exitCode != null ? String(message.exitCode) : null,
+      });
 
-    const buf = state.dbWriteBuffer.get(sessionId)!;
-    if (buf.length >= DB_FLUSH_BATCH_SIZE) {
-      // Flush immediately when the batch is full
-      flushDbBuffer(state, sessionId);
-    } else if (!state.dbWriteTimers.has(sessionId)) {
-      // Schedule a flush after the cadence window
-      state.dbWriteTimers.set(
-        sessionId,
-        setTimeout(() => flushDbBuffer(state, sessionId), DB_FLUSH_INTERVAL_MS),
-      );
+      const buf = state.dbWriteBuffer.get(sessionId)!;
+      if (buf.length >= DB_FLUSH_BATCH_SIZE) {
+        flushDbBuffer(state, sessionId);
+      } else if (!state.dbWriteTimers.has(sessionId)) {
+        state.dbWriteTimers.set(
+          sessionId,
+          setTimeout(() => flushDbBuffer(state, sessionId), DB_FLUSH_INTERVAL_MS),
+        );
+      }
     }
 
     // Parse stdout data — may contain multiple JSONL lines in a single chunk
