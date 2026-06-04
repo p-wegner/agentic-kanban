@@ -114,6 +114,18 @@ describe("auto-merge orchestrator", () => {
     expect(ids).toHaveLength(3);
   });
 
+  it("excludes a project that has auto_merge_disabled_<projectId> set", async () => {
+    const { db } = createTestDb();
+    const now = new Date().toISOString();
+    const { projectId, statusIds } = await seedProject(db);
+    const ready = await seedWorkspace(db, { projectId, statusId: statusIds["In Review"], readyForMerge: true });
+    await db.insert(preferences).values({ key: `auto_merge_disabled_${projectId}`, value: "true", updatedAt: now });
+
+    const orchestrator = createAutoMergeOrchestrator({ database: db });
+    await expect(orchestrator.findCompletedWorkspaceIds()).resolves.not.toContain(ready);
+    await expect(orchestrator.findCompletedWorkspaceIds()).resolves.toHaveLength(0);
+  });
+
   it("includes idle In Review workspaces only when auto_merge_in_review is enabled", async () => {
     const { db } = createTestDb();
     const { projectId, statusIds } = await seedProject(db);

@@ -55,6 +55,17 @@ export function createAutoMergeOrchestrator(deps: {
     const prefMap = new Map(prefRows.map((row) => [row.key, row.value]));
     const autoMergeInReview = prefMap.get("auto_merge_in_review") === "true";
 
+    // Per-project opt-out: an `auto_merge_disabled_<projectId>` pref set to "true" keeps
+    // the orchestrator from auto-merging THAT project's workspaces, while other projects
+    // still auto-merge. Used for the agentic-kanban dev board itself — its tickets merge
+    // deliberately (Conductor / human), not via the in-process queue that's meant for
+    // other projects developed with the board.
+    const autoMergeDisabledProjectIds = new Set(
+      [...prefMap]
+        .filter(([key, value]) => /^auto_merge_disabled_[0-9a-f-]+$/.test(key) && value === "true")
+        .map(([key]) => key.replace("auto_merge_disabled_", "")),
+    );
+
     const statusNames = autoMergeInReview
       ? MERGEABLE_STATUS_NAMES
       : (["AI Reviewed"] as const);
@@ -62,6 +73,7 @@ export function createAutoMergeOrchestrator(deps: {
     const rows = await database
       .select({
         workspaceId: workspaces.id,
+        projectId: issues.projectId,
         issueStatusName: projectStatuses.name,
         issueCurrentNodeId: issues.currentNodeId,
         issueCurrentNodeType: workflowNodes.nodeType,
@@ -82,6 +94,8 @@ export function createAutoMergeOrchestrator(deps: {
       ));
 
     return rows
+      // Per-project opt-out (e.g. the dev board merges deliberately, not via this queue).
+      .filter((row) => !autoMergeDisabledProjectIds.has(row.projectId))
       // Terminal-status (Done/Cancelled) workspaces are normally excluded — a user may
       // deliberately park an issue in Done without merging. BUT a workspace that is still
       // OPEN (the query excludes status='closed') with readyForMerge=true is a different
