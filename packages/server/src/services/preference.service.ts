@@ -48,6 +48,7 @@ function isAllowedDynamicKey(key: string): boolean {
     /^wip_limit_[0-9a-f-]+$/.test(key) ||
     /^outbound_webhook_url_[0-9a-f-]+$/.test(key) ||
     /^board_autodrive_[0-9a-f-]+$/.test(key) ||
+    /^verify_script_[0-9a-f-]+$/.test(key) ||
     isBoardStrategyKey(key);
 }
 

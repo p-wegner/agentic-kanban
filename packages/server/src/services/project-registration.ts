@@ -143,6 +143,14 @@ export async function registerProject(path: string, options?: { name?: string })
   const now = new Date().toISOString();
   const projectId = randomUUID();
 
+  // Default skill so a freshly-registered project's worktrees aren't skill-less:
+  // board-navigator teaches the agent how to use the board (MCP/CLI, reflect progress).
+  // Without this, resolveSkillFile writes NO skill into a new project's worktree and the
+  // Builder works blind. Falls back to null gracefully if the builtin isn't seeded. (#531)
+  const [navSkill] = await db.select({ id: agentSkills.id }).from(agentSkills)
+    .where(eq(agentSkills.name, "board-navigator")).limit(1);
+  const defaultSkillId = navSkill?.id ?? null;
+
   await db.insert(projects).values({
     id: projectId,
     name: projectName,
@@ -150,6 +158,7 @@ export async function registerProject(path: string, options?: { name?: string })
     repoName: repoInfo.repoName,
     defaultBranch: repoInfo.defaultBranch,
     remoteUrl: repoInfo.remoteUrl,
+    defaultSkillId,
     createdAt: now,
     updatedAt: now,
   });
@@ -184,6 +193,7 @@ export async function registerProject(path: string, options?: { name?: string })
     repoName: repoInfo.repoName,
     defaultBranch: repoInfo.defaultBranch,
     remoteUrl: repoInfo.remoteUrl,
+    defaultSkillId,
     createdAt: now,
     updatedAt: now,
   };
