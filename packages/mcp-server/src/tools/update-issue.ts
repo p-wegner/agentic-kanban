@@ -1,9 +1,11 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { requireEntity, resolveStatusByName } from "../db-utils.js";
 import { validateWebhookUrl, fireWebhook } from "@agentic-kanban/shared/lib";
+
+const TERMINAL_STATUSES = new Set(["Done", "Cancelled"]);
 
 export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, notifyBoard } = deps;
@@ -36,6 +38,33 @@ export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps
 
       let resolvedStatusId: string | null = null;
       if (statusName) {
+        // Guard: block terminal-status moves when the issue has an open non-direct
+        // workspace. Direct workspaces (isDirect=true) commit directly to master —
+        // no branch to merge — so they are excluded from this check.
+        if (TERMINAL_STATUSES.has(statusName)) {
+          const openWs = await db
+            .select({ id: schema.workspaces.id, branch: schema.workspaces.branch })
+            .from(schema.workspaces)
+            .where(and(
+              eq(schema.workspaces.issueId, issueId),
+              ne(schema.workspaces.status, "closed"),
+              eq(schema.workspaces.isDirect, false),
+            ))
+            .limit(1);
+          if (openWs.length > 0) {
+            return {
+              content: [{
+                type: "text" as const,
+                text: JSON.stringify({
+                  error: `Cannot set issue status to "${statusName}": it has an open workspace (branch: ${openWs[0].branch ?? openWs[0].id}) that has not been merged. Call merge_workspace first — it merges the branch and auto-transitions the issue to Done. To discard without merging, call close_workspace or delete_workspace first.`,
+                  code: "OPEN_WORKSPACE_NOT_MERGED",
+                  workspaceId: openWs[0].id,
+                  branch: openWs[0].branch,
+                }),
+              }],
+            };
+          }
+        }
         const r = await resolveStatusByName(db, schema, existing.projectId, statusName);
         if (!r.ok) return r.error;
         updates.statusId = r.statusId;

@@ -362,6 +362,8 @@ Stage and commit all changed files with a descriptive message.
 \`\`\`
 
 ### 6. Close the issue
+**Branched workspaces:** Done is set automatically by \`merge_workspace\` — do NOT call \`update_issue(statusName="Done")\` manually. Doing so before merging strands the branch and causes silent merge loss.
+**Direct workspaces only** (isDirect: true — no separate branch):
 \`\`\`
 # MCP:  update_issue(issueId, statusName="Done")
 # CLI:  npx agentic-kanban issue move <N> "Done"
@@ -393,9 +395,11 @@ Set priority to high and describe the blocker in the issue description.
 ### "Review #N and merge"
 \`#N\` always means a kanban board issue, never a GitHub PR.
 \`\`\`
-# MCP:  get_board_status → get_workspace_diff → merge_workspace → update_issue(statusName="Done")
+# MCP:  get_board_status → get_workspace_diff → merge_workspace
 # CLI:  npx agentic-kanban issue status <N> → (use REST API for merge)
 \`\`\`
+**Note:** \`merge_workspace\` merges the branch AND auto-transitions the issue to Done.
+Do NOT call \`update_issue(statusName="Done")\` separately — it is redundant and will be blocked if the workspace is still open.
 
 ---
 
