@@ -3,7 +3,7 @@ import { execSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { resolve, sep, join } from "node:path";
 import { projects, projectStatuses, issues, workspaces, preferences } from "@agentic-kanban/shared/schema";
-import { ensureAgentGitignore, ensureStarterClaudeMd, ensureVerifyGateRunner, getDefaultSkillId } from "./project-scaffold.js";
+import { ensureAgentGitignore, ensureStarterClaudeMd, ensureVerifyGateRunner, ensureHookScaffold, getDefaultSkillId } from "./project-scaffold.js";
 import { isSkillsDirAbsentOrEmpty, writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { listAgentSkills } from "../repositories/agent-skill.repository.js";
 import { getPreference } from "../repositories/preferences.repository.js";
@@ -142,11 +142,11 @@ export function createProjectService(deps: { database: Database; workspaceSummar
 
     // Scaffold (clobber-safe for imports): ensure the generic agent-artifact ignores are present
     // (append-if-missing; seeds the chosen language template only when no .gitignore exists), and
-    // drop a starter CLAUDE.md when the repo has none — keeps agent scratch out of the project's
+    // drop a starter CLAUDE.md when the repo has none â€” keeps agent scratch out of the project's
     // history and gives agents a baseline working agreement.
     ensureAgentGitignore(repoInfo.repoPath, body.gitignoreTemplate ? GITIGNORE_TEMPLATES[body.gitignoreTemplate] : undefined);
     ensureStarterClaudeMd(repoInfo.repoPath);
-    ensureVerifyGateRunner(repoInfo.repoPath);
+    ensureHookScaffold(repoInfo.repoPath);
 
     if (body.generateReadme) {
       const readmePath = join(repoInfo.repoPath, "README.md");
@@ -168,7 +168,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
             }
           }
         } catch {
-          // non-fatal — export failure should not block registration
+          // non-fatal â€” export failure should not block registration
         }
       }
     }
@@ -202,7 +202,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
         .limit(1);
       const baseDir = baseDirRows[0]?.value?.trim();
       if (!baseDir) {
-        throw new ProjectError("No base directory configured. Set 'Projects base directory' in Settings › Project, or provide an explicit path.", "BAD_REQUEST");
+        throw new ProjectError("No base directory configured. Set 'Projects base directory' in Settings â€º Project, or provide an explicit path.", "BAD_REQUEST");
       }
       targetPath = resolve(join(baseDir, name));
 
@@ -253,10 +253,10 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       remoteUrl: repoInfo.remoteUrl,
       defaultSkillId: await getDefaultSkillId(database),
     }, database);
-    // Scaffold the fresh repo with the generic agent-artifact ignores + a starter CLAUDE.md.
+    // Scaffold the fresh repo with the generic agent-artifact ignores + a starter CLAUDE.md + hooks.
     ensureAgentGitignore(repoInfo.repoPath);
     ensureStarterClaudeMd(repoInfo.repoPath);
-    ensureVerifyGateRunner(repoInfo.repoPath);
+    ensureHookScaffold(repoInfo.repoPath);
     return result;
   }
 
@@ -493,7 +493,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     const issueIds = projectIssues.map((i) => i.id);
     const defaultBranch = project.defaultBranch;
 
-    // Archive columns (Done/Cancelled) by DB status name — used to skip the heavy
+    // Archive columns (Done/Cancelled) by DB status name â€” used to skip the heavy
     // per-session message scan + lastAssistantMessage/lastTool blobs for archived
     // issues (their cards render via CompletedCard, which shows neither). Exact
     // lowercased match avoids the "Cancelled" collapsed-bar substring footgun.

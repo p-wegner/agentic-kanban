@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { detectRepoInfo } from "../../services/git-info.service.js";
 import { runMigrations, DEFAULT_STATUSES, logDefaultBranch } from "../shared.js";
-import { getDefaultSkillId, ensureAgentGitignore, ensureStarterClaudeMd, ensureVerifyGateRunner } from "../../services/project-scaffold.js";
+import { getDefaultSkillId, ensureAgentGitignore, ensureStarterClaudeMd, ensureHookScaffold } from "../../services/project-scaffold.js";
 
 export function registerRegisterCommand(program: Command) {
   program
@@ -75,10 +75,10 @@ Examples:
             set: { value: projectId, updatedAt: now },
           });
 
-        // Scaffold (clobber-safe): keep agent scratch out of history + drop a starter CLAUDE.md + verify-gate runner.
+        // Scaffold (clobber-safe): keep agent scratch out of history + drop a starter CLAUDE.md + hooks.
         ensureAgentGitignore(repoInfo.repoPath);
         ensureStarterClaudeMd(repoInfo.repoPath);
-        ensureVerifyGateRunner(repoInfo.repoPath);
+        ensureHookScaffold(repoInfo.repoPath);
 
         console.log(`Registered project "${projectName}"`);
         console.log(`  Repo: ${repoInfo.repoPath}`);
