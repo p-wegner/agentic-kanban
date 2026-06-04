@@ -26,6 +26,7 @@ import { createCodemodsRoute } from "./codemods.js";
 import { createBoardMonitorRoute } from "./board-monitor.js";
 import { createRunbooksRoute } from "./runbooks.js";
 import { createIssueExportImportRoute } from "./issue-export-import.js";
+import { createConfigExportImportRoute } from "./config-export-import.js";
 import { createMetricsRoute } from "./metrics.js";
 import { createHealthRoute } from "./health.js";
 import { createMilestonesRoute } from "./milestones.js";
@@ -75,6 +76,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/projects", createBoardMonitorRoute(database));
   routes.route("/projects", createRunbooksRoute(database));
   routes.route("/projects", createIssueExportImportRoute(database, options));
+  routes.route("/projects", createConfigExportImportRoute(database));
   routes.route("/projects", createMilestonesRoute(database));
   routes.route("/codemods", createCodemodsRoute(database));
   routes.route("/workflows", createWorkflowsRoute(database, { ...options, onWorkflowAdvanced }));
