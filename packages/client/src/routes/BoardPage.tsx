@@ -32,6 +32,7 @@ import { useAgentQuestionsCount } from "../components/AgentQuestionsPanel.js";
 import { BoardErrorBoundary } from "../components/BoardErrorBoundary.js";
 import { BacklogView } from "../components/BacklogView.js";
 import { BoardKanbanView } from "../components/BoardKanbanView.js";
+import { RecentlyMergedStrip } from "../components/RecentlyMergedStrip.js";
 import { BoardStats } from "../components/BoardStats.js";
 import { BoardToolbar } from "../components/BoardToolbar.js";
 import { SavedBoardViews } from "../components/SavedBoardViews.js";
@@ -2283,6 +2284,14 @@ export function BoardPage() {
             </div>
           );
         })()}
+        {viewMode === "kanban" && (
+          <RecentlyMergedStrip
+            columns={columns}
+            collapsed={prefs.recentMergesCollapsed}
+            onToggleCollapsed={() => prefs.handleRecentMergesCollapsedChange(!prefs.recentMergesCollapsed)}
+            onOpenDiff={handleOpenDiff}
+          />
+        )}
         {viewMode === "kanban" && (
           <BoardKanbanView
             activeColumns={activeColumns}
