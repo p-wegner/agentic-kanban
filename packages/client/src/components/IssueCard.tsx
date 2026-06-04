@@ -228,6 +228,7 @@ interface IssueCardProps {
   isPendingIssue?: boolean;
   isPendingWorkspace?: boolean;
   isSelected?: boolean;
+  isKeyboardFocused?: boolean;
 }
 
 function HighlightedText({ text, query }: { text: string; query: string }) {
@@ -250,7 +251,7 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   );
 }
 
-export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, onDryRun, onDragStart, onMoveToNext, nextStatusName, tags, allProjectTags, quickUpdate, searchQuery, liveActivity, liveStats, todos, isPendingIssue, isPendingWorkspace, isSelected }: IssueCardProps) {
+export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, onDryRun, onDragStart, onMoveToNext, nextStatusName, tags, allProjectTags, quickUpdate, searchQuery, liveActivity, liveStats, todos, isPendingIssue, isPendingWorkspace, isSelected, isKeyboardFocused }: IssueCardProps) {
   const typeBadgeColor = issue.issueType ? (issueTypeColors[issue.issueType] ?? null) : null;
   const priorityBadgeColor = issue.priority && issue.priority !== "medium" ? (priorityColors[issue.priority] ?? null) : null;
   const ws = issue.workspaceSummary;
@@ -390,10 +391,13 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
       onContextMenu={handleContextMenu}
       onKeyDown={handleCardKeyDown}
       aria-selected={isSelected ? "true" : undefined}
+      aria-current={isKeyboardFocused ? "true" : undefined}
       aria-label={`Open issue ${issue.title}`}
       className={`group bg-surface-raised dark:bg-surface-raised-dark rounded-lg shadow-sm p-2.5 border cursor-pointer hover:shadow-md hover:-translate-y-px transition-all duration-150 relative isolate ${
         isPendingIssue
           ? "border-brand-300 bg-brand-50/70 shadow-brand-100 shadow-md dark:border-brand-700 dark:bg-brand-950/40"
+          : isKeyboardFocused
+          ? "border-sky-500 ring-2 ring-sky-400/70 shadow-sky-100 dark:shadow-sky-950"
           : isSelected
           ? "border-brand-500 ring-2 ring-brand-400/70 shadow-brand-100 dark:shadow-brand-950"
           : depDragOver ? "border-brand-400 bg-brand-50 shadow-brand-200" : isPendingWorkspace ? "border-brand-300 shadow-brand-100 shadow-md" : "border-black/[0.07] dark:border-white/10 hover:border-brand-200 dark:hover:border-gray-600"
