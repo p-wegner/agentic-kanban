@@ -2,9 +2,7 @@ import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createPreferenceService } from "../services/preference.service.js";
 import { createProjectService } from "../services/project.service.js";
-import { parseJsonBody } from "../middleware/parse-body.js";
 import { createRouter } from "../middleware/create-router.js";
-import { isBoardStrategyKey } from "../services/strategy-objective.service.js";
 
 export const CONFIG_EXPORT_VERSION = 1;
 
