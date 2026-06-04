@@ -3,6 +3,8 @@ import { apiFetch } from "../lib/api.js";
 import { getWipLimit, wipLimitKey } from "../lib/wipLimits.js";
 import type { MonitorStatus } from "../components/MonitorPopover.js";
 
+export type CardDensity = "comfortable" | "compact";
+
 export interface BoardPreferences {
   autoReview: boolean;
   setAutoReview: (v: boolean) => void;
@@ -16,6 +18,8 @@ export interface BoardPreferences {
   monitorRunning: boolean;
   wipLimits: Record<string, number | null>;
   dynamicColumnScaling: boolean;
+  cardDensity: CardDensity;
+  handleCardDensityChange: (v: CardDensity) => Promise<void>;
   toggleAutoMonitor: () => Promise<void>;
   handleMonitorRunNow: () => Promise<void>;
   handleIntervalChange: (v: string) => Promise<void>;
@@ -35,12 +39,14 @@ export function useBoardPreferences(): BoardPreferences & { prefsLoaded: boolean
   const [monitorRunning, setMonitorRunning] = useState(false);
   const [wipLimits, setWipLimits] = useState<Record<string, number | null>>({});
   const [dynamicColumnScaling, setDynamicColumnScaling] = useState(false);
+  const [cardDensity, setCardDensity] = useState<CardDensity>("comfortable");
   const [prefsLoaded, setPrefsLoaded] = useState(false);
 
   const loadPreferences = useCallback(async () => {
     try {
       const s = await apiFetch<Record<string, string>>("/api/preferences/settings");
       setDynamicColumnScaling(s.dynamic_column_scaling === "true");
+      setCardDensity(s.card_density === "compact" ? "compact" : "comfortable");
       setAutoReview(s.auto_review !== "false");
       setAutoMerge(s.auto_merge !== "false");
       setAutoMonitor(s.auto_monitor === "true");
@@ -119,6 +125,11 @@ export function useBoardPreferences(): BoardPreferences & { prefsLoaded: boolean
     await apiFetch("/api/preferences/settings", { method: "PUT", body: JSON.stringify({ nudge_wip_limit: v }) }).catch(() => {});
   }, []);
 
+  const handleCardDensityChange = useCallback(async (v: CardDensity) => {
+    setCardDensity(v);
+    await apiFetch("/api/preferences/settings", { method: "PUT", body: JSON.stringify({ card_density: v }) }).catch(() => {});
+  }, []);
+
   const handleSetWipLimit = useCallback(async (statusId: string, limit: number | null) => {
     setWipLimits((prev) => {
       const next = { ...prev };
@@ -148,6 +159,8 @@ export function useBoardPreferences(): BoardPreferences & { prefsLoaded: boolean
     monitorRunning,
     wipLimits,
     dynamicColumnScaling,
+    cardDensity,
+    handleCardDensityChange,
     prefsLoaded,
     toggleAutoMonitor,
     handleMonitorRunNow,
