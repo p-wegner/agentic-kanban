@@ -126,6 +126,9 @@ export interface BoardKanbanViewProps {
   onColumnReorder?: (draggedColumnId: string, targetSortOrder: number) => void;
   swimlaneDimension?: SwimlaneDimension;
   onDropWithLane?: (statusId: string, laneKey: string, sortOrder?: number) => void;
+  showAgingHeatmap?: boolean;
+  agingWarmDays?: number;
+  agingHotDays?: number;
 }
 
 export function BoardKanbanView({
@@ -171,6 +174,9 @@ export function BoardKanbanView({
   onColumnReorder,
   swimlaneDimension = "none",
   onDropWithLane,
+  showAgingHeatmap = false,
+  agingWarmDays = 3,
+  agingHotDays = 7,
 }: BoardKanbanViewProps) {
   // Below sm, columns stack vertically and the board scrolls down through them
   // (instead of a horizontal one-column-at-a-time swipe, where an empty column
@@ -320,6 +326,9 @@ export function BoardKanbanView({
               isColumnDragOver={columnDragOverId === col.id}
               swimlaneDimension={swimlaneDimension}
               onDropWithLane={onDropWithLane}
+              showAgingHeatmap={showAgingHeatmap}
+              agingWarmDays={agingWarmDays}
+              agingHotDays={agingHotDays}
             >
               <CreateIssueForm
                 projectId={projectId}

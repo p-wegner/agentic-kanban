@@ -1896,6 +1896,11 @@ export function BoardPage() {
           onIssueTypeFilterChange={handleIssueTypeFilterChange}
           showPriorityLegend={prefs.showPriorityLegend}
           onShowPriorityLegendChange={prefs.handleShowPriorityLegendChange}
+          showCardAgingHeatmap={prefs.showCardAgingHeatmap}
+          onShowCardAgingHeatmapChange={prefs.handleShowCardAgingHeatmapChange}
+          agingWarmDays={prefs.agingWarmDays}
+          agingHotDays={prefs.agingHotDays}
+          onAgingThresholdsChange={prefs.handleAgingThresholdsChange}
           swimlaneDimension={swimlaneDimension}
           onSwimlaneChange={handleSwimlaneChange}
         />
@@ -2252,6 +2257,9 @@ export function BoardPage() {
             wipLimits={prefs.wipLimits}
             onSetWipLimit={prefs.handleSetWipLimit}
             onColumnReorder={handleColumnReorder}
+            showAgingHeatmap={prefs.showCardAgingHeatmap}
+            agingWarmDays={prefs.agingWarmDays}
+            agingHotDays={prefs.agingHotDays}
           />
         )}
       </div>
