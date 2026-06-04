@@ -37,7 +37,11 @@ export async function tagIfNeedsVisualVerification(repoPath: string, branch: str
     const changedFiles = stdout.split("\n").map((f) => f.trim()).filter(Boolean);
     // Detect frontend file changes regardless of directory structure so the feature works
     // for any project managed by this board, not just the agentic-kanban monorepo.
-    const hasClientChanges = changedFiles.some((f) => /\.(jsx|tsx|css|scss|less|sass|vue|svelte)$/.test(f));
+    // Includes plain .js/.mjs/.cjs + .html/.htm so a vanilla browser app (e.g. an HTML5
+    // Canvas game) is flagged for visual verification too — not just framework projects.
+    // Plain .ts is intentionally excluded: on a TS monorepo it would tag every server-only
+    // change. The tag is a non-blocking nudge, so erring toward more frontend extensions is safe. (#531)
+    const hasClientChanges = changedFiles.some((f) => /\.(jsx|tsx|js|mjs|cjs|html|htm|css|scss|less|sass|vue|svelte)$/.test(f));
     if (!hasClientChanges) return;
 
     const TAG_NAME = "needs-visual-verification";
