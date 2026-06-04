@@ -1463,6 +1463,7 @@ export function BoardPage() {
         if (panels.showRunQueueForecast) { panels.setShowRunQueueForecast(false); return; }
         if (panels.showCodemod) { panels.setShowCodemod(false); return; }
         if (panels.showProjectHealth) { panels.setShowProjectHealth(false); return; }
+        if (panels.showTimeReport) { panels.setShowTimeReport(false); return; }
         if (selectedIssue) { setSelectedIssue(null); return; }
         if (keyboardCursorIssueIdRef.current) { setKeyboardCursorIssueId(null); return; }
         if (searchQuery) {
@@ -1936,6 +1937,7 @@ export function BoardPage() {
           butlerBadgeCount={agentQuestionsCount}
           projectId={activeProjectId}
           onVoiceIssueCreated={() => refetchBoard()}
+          onShowTimeReport={activeProjectId ? () => panels.setShowTimeReport(true) : undefined}
           onShowMergeQueue={() => panels.setShowMergeQueue(true)}
           mergeQueueCount={columns.flatMap(c => c.issues).filter(i => {
             const ws = i.workspaceSummary?.main;
@@ -2399,6 +2401,7 @@ export function BoardPage() {
         showRunQueueForecast={panels.showRunQueueForecast}
         showWorktreeOverview={panels.showWorktreeOverview}
         showProjectHealth={panels.showProjectHealth}
+        showTimeReport={panels.showTimeReport}
         showCommandPalette={panels.showCommandPalette}
         showStartWorkspacePicker={showStartWorkspacePicker}
         showShortcutHelp={panels.showShortcutHelp}
@@ -2414,6 +2417,7 @@ export function BoardPage() {
         onCloseRunQueueForecast={() => panels.setShowRunQueueForecast(false)}
         onCloseWorktreeOverview={() => panels.setShowWorktreeOverview(false)}
         onCloseProjectHealth={() => panels.setShowProjectHealth(false)}
+        onCloseTimeReport={() => panels.setShowTimeReport(false)}
         onCloseCommandPalette={() => panels.setShowCommandPalette(false)}
         onCloseStartWorkspacePicker={() => setShowStartWorkspacePicker(false)}
         onWorkspaceStarted={(workspaceId, issue) => {

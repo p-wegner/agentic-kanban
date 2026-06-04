@@ -95,6 +95,7 @@ function AgingHeatmapLegend({ warmDays, hotDays, onChange }: AgingHeatmapLegendP
 
 interface BoardToolbarProps {
   activeColumns: StatusWithIssues[];
+  onShowTimeReport?: () => void;
   focusMode?: boolean;
   onFocusModeChange?: (v: boolean) => void;
   onShowQuickTasks: () => void;
@@ -148,6 +149,7 @@ interface BoardToolbarProps {
 
 export function BoardToolbar({
   activeColumns,
+  onShowTimeReport,
   focusMode = false,
   onFocusModeChange,
   onShowQuickTasks,
@@ -496,6 +498,19 @@ export function BoardToolbar({
       </button>
       <ProjectScriptsMenu projectId={projectId} />
       <ExportImportMenu projectId={projectId} />
+      {onShowTimeReport && (
+        <button
+          onClick={onShowTimeReport}
+          title="Time Report — aggregate logged time by issue and day"
+          className="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
+        >
+          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <circle cx="12" cy="12" r="9" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 7v5l3 3" />
+          </svg>
+          <span className="hidden sm:inline">Time</span>
+        </button>
+      )}
       {onShowMergeQueue && (
         <button
           onClick={onShowMergeQueue}
