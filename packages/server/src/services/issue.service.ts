@@ -259,6 +259,7 @@ export function createIssueService(deps: {
     if (body.workflowTemplateId !== undefined) updates.workflowTemplateId = body.workflowTemplateId;
     if (body.checklist !== undefined) updates.checklistJson = body.checklist === null ? null : JSON.stringify(body.checklist);
     if (body.pinned !== undefined) updates.pinned = body.pinned;
+    if (body.milestoneId !== undefined) updates.milestoneId = body.milestoneId ?? null;
 
     await database.update(issues).set(updates).where(eq(issues.id, id));
 

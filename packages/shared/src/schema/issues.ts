@@ -32,10 +32,12 @@ export const issues = sqliteTable("issues", {
   // Acceptance-criteria checklist items (JSON array of {id,text,completed}).
   checklistJson: text("checklist_json"),
   pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
+  milestoneId: text("milestone_id").references(() => milestones.id),
 }, (table) => ({
   projectIdIdx: index("idx_issues_project_id").on(table.projectId),
   statusIdIdx: index("idx_issues_status_id").on(table.statusId),
   projectIdStatusIdIdx: index("idx_issues_project_id_status_id").on(table.projectId, table.statusId),
+  milestoneIdIdx: index("idx_issues_milestone_id").on(table.milestoneId),
 }));
 
 export const issuesRelations = relations(issues, ({ one, many }) => ({
@@ -47,6 +49,10 @@ export const issuesRelations = relations(issues, ({ one, many }) => ({
     fields: [issues.projectId],
     references: [projects.id],
   }),
+  milestone: one(milestones, {
+    fields: [issues.milestoneId],
+    references: [milestones.id],
+  }),
   tags: many(issueTags),
   workspaces: many(workspaces),
   dependencies: many(issueDependencies),
@@ -55,3 +61,4 @@ export const issuesRelations = relations(issues, ({ one, many }) => ({
 import { issueDependencies } from "./issue-dependencies.js";
 import { issueTags } from "./tags.js";
 import { workspaces } from "./workspaces.js";
+import { milestones } from "./milestones.js";
