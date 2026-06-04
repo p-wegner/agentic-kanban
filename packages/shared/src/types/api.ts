@@ -282,6 +282,7 @@ export interface MainWorkspaceInfo {
   planOnlyWarning?: boolean;
   scorecard?: { score: number } | null;
   codeMetrics?: WorkspaceCodeMetrics | null;
+  latestCommit?: { sha: string; message: string } | null;
   workflow?: {
     currentNodeId: string;
     currentNodeName: string;
