@@ -181,6 +181,8 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     path?: string;
     description?: string;
     color?: string;
+    gitignoreTemplate?: string;
+    generateReadme?: boolean;
   }) {
     const name = body.name.trim();
     if (!name) {
@@ -254,9 +256,17 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       defaultSkillId: await getDefaultSkillId(database),
     }, database);
     // Scaffold the fresh repo with the generic agent-artifact ignores + a starter CLAUDE.md + hooks.
-    ensureAgentGitignore(repoInfo.repoPath);
+    ensureAgentGitignore(repoInfo.repoPath, body.gitignoreTemplate ? GITIGNORE_TEMPLATES[body.gitignoreTemplate] : undefined);
     ensureStarterClaudeMd(repoInfo.repoPath);
     ensureHookScaffold(repoInfo.repoPath);
+
+    if (body.generateReadme) {
+      const readmePath = join(repoInfo.repoPath, "README.md");
+      if (!existsSync(readmePath)) {
+        try { writeFileSync(readmePath, `# ${projectName}
+`, "utf8"); } catch { /* non-fatal */ }
+      }
+    }
     return result;
   }
 

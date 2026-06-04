@@ -134,6 +134,8 @@ export function Layout({
       setShowRegister(false);
       setCreateName("");
       setCreatePath("");
+      setGitignoreTemplate("");
+      setGenerateReadme(false);
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -158,6 +160,8 @@ export function Layout({
     setRepoPath("");
     setCreateName("");
     setCreatePath("");
+    setGitignoreTemplate("");
+    setGenerateReadme(false);
     setModalTab("import");
     setShowRegister(true);
     setTimeout(() => inputRef.current?.focus(), 50);
@@ -463,6 +467,40 @@ export function Layout({
                     Absolute path to a git repository. Branch and remote URL are auto-detected.
                   </p>
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Language <span className="text-gray-400 dark:text-gray-500 font-normal">(optional)</span>
+                  </label>
+                  <select
+                    value={gitignoreTemplate}
+                    onChange={(e) => setGitignoreTemplate(e.target.value)}
+                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white dark:bg-gray-800"
+                  >
+                    <option value="">None</option>
+                    <option value="node">Node.js</option>
+                    <option value="python">Python</option>
+                    <option value="java">Java</option>
+                    <option value="go">Go</option>
+                    <option value="rust">Rust</option>
+                    <option value="ruby">Ruby</option>
+                    <option value="dotnet">.NET</option>
+                  </select>
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Adds language-specific entries to .gitignore.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="import-generate-readme"
+                    type="checkbox"
+                    checked={generateReadme}
+                    onChange={(e) => setGenerateReadme(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                  />
+                  <label htmlFor="import-generate-readme" className="text-sm text-gray-700 dark:text-gray-300">
+                    Generate README.md <span className="text-gray-400 dark:text-gray-500">(skipped if file already exists)</span>
+                  </label>
+                </div>
                 {registerError && (
                   <p className="text-sm text-red-600">{registerError}</p>
                 )}
@@ -517,6 +555,40 @@ export function Layout({
                   <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                     Leave blank to use the base directory from Settings › Project. A new folder and git repo will be created.
                   </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Language <span className="text-gray-400 dark:text-gray-500 font-normal">(optional)</span>
+                  </label>
+                  <select
+                    value={gitignoreTemplate}
+                    onChange={(e) => setGitignoreTemplate(e.target.value)}
+                    className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white dark:bg-gray-800"
+                  >
+                    <option value="">None</option>
+                    <option value="node">Node.js</option>
+                    <option value="python">Python</option>
+                    <option value="java">Java</option>
+                    <option value="go">Go</option>
+                    <option value="rust">Rust</option>
+                    <option value="ruby">Ruby</option>
+                    <option value="dotnet">.NET</option>
+                  </select>
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Adds language-specific entries to .gitignore.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="create-generate-readme"
+                    type="checkbox"
+                    checked={generateReadme}
+                    onChange={(e) => setGenerateReadme(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                  />
+                  <label htmlFor="create-generate-readme" className="text-sm text-gray-700 dark:text-gray-300">
+                    Generate README.md <span className="text-gray-400 dark:text-gray-500">(skipped if file already exists)</span>
+                  </label>
                 </div>
                 {createError && (
                   <p className="text-sm text-red-600">{createError}</p>
