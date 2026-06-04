@@ -1,7 +1,7 @@
 import { workspaces, sessions, sessionMessages, showdowns, workflowEdges, workflowNodes } from "@agentic-kanban/shared/schema";
 import { eq, inArray, sql, desc } from "drizzle-orm";
 import type { Database } from "../db/index.js";
-import { detectConflicts, getCommitCountAhead, getDiffShortstat } from "./git.service.js";
+import { detectConflicts, getCommitCountAhead, getDiffShortstat, getLatestCommit } from "./git.service.js";
 import type { ProviderName } from "./agent-provider.js";
 import { isAnalyticsNoise } from "./session-filter.js";
 import { computeWorkspaceCodeMetrics, parseStoredWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
@@ -59,6 +59,7 @@ export type WorkspaceSummary = {
     scorecard?: { score: number } | null;
     commitCount?: number | null;
     codeMetrics?: WorkspaceCodeMetrics | null;
+    latestCommit?: { sha: string; message: string } | null;
     workflow?: {
       currentNodeId: string;
       currentNodeName: string;
@@ -244,16 +245,22 @@ export async function buildWorkspaceSummaryMap(
     }
   }
 
-  // Pre-fetch commit counts for all non-direct, non-closed main workspaces in parallel
+  // Pre-fetch commit counts and latest commit for all non-direct, non-closed main workspaces in parallel
   // to avoid an N+1 pattern (one sequential git call per issue).
   const commitCountByIssue = new Map<string, number | null>();
+  const latestCommitByIssue = new Map<string, { sha: string; message: string } | null>();
   await Promise.all(
     [...mainWorkspaceMap.entries()]
-      .filter(([, ws]) => ws.workingDir && ws.status !== "closed" && !ws.isDirect && !!(ws.baseBranch || defaultBranch))
+      .filter(([, ws]) => ws.workingDir && ws.status !== "closed")
       .map(async ([issueId, ws]) => {
-        const base = (ws.baseBranch || defaultBranch) as string;
-        const count = await getCommitCountAhead(ws.workingDir!, base);
-        commitCountByIssue.set(issueId, count);
+        const [latestCommit] = await Promise.all([
+          getLatestCommit(ws.workingDir!),
+          (!ws.isDirect && !!(ws.baseBranch || defaultBranch))
+            ? getCommitCountAhead(ws.workingDir!, (ws.baseBranch || defaultBranch) as string)
+                .then(count => { commitCountByIssue.set(issueId, count); })
+            : Promise.resolve(),
+        ]);
+        latestCommitByIssue.set(issueId, latestCommit);
       })
   );
 
@@ -277,6 +284,7 @@ export async function buildWorkspaceSummaryMap(
       planOnlyWarning: false,
       scorecard: mainWs.scorecardScore !== null ? { score: mainWs.scorecardScore } : null,
       commitCount: commitCountByIssue.get(issueId) ?? null,
+      latestCommit: latestCommitByIssue.get(issueId) ?? null,
       codeMetrics: parseStoredWorkspaceCodeMetrics(mainWs.codeMetricsJson, mainWs.codeMetricsComputedAt),
       workflow: null,
       mergedAt: mainWs.mergedAt,

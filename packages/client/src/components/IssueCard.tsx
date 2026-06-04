@@ -901,6 +901,12 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
               <span className="order-last text-gray-500 font-medium shrink-0">closed</span>
             )
           )}
+          {ws.main.latestCommit && ws.main.status !== "closed" && (
+            <span className="order-last basis-full min-w-0 flex items-center gap-1 pt-0.5 text-[10px] text-gray-500 dark:text-gray-400">
+              <span className="font-mono shrink-0 text-gray-400 dark:text-gray-500">{ws.main.latestCommit.sha}</span>
+              <span className="truncate">{ws.main.latestCommit.message}</span>
+            </span>
+          )}
           <span className="order-last inline-flex basis-full min-w-0 flex-wrap items-center gap-1 pt-0.5 text-[10px] font-mono">
             {ws.main.scorecard && (
               <span
