@@ -132,12 +132,12 @@ describe("capSessionMessages", () => {
     await insertMessages(db as any, sessId, 2010);
 
     const capped = await capSessionMessages(db as any);
-    expect(capped).toBeGreaterThan(0);
+    expect(capped).toBe(10);
 
     const remaining = await (db as any).select().from(sessionMessages).where(
       (await import("drizzle-orm")).eq(sessionMessages.sessionId, sessId)
     );
-    expect(remaining.length).toBeLessThanOrEqual(2000);
+    expect(remaining.length).toBe(2000);
   });
 
   it("does nothing for sessions within the cap", async () => {
