@@ -110,6 +110,7 @@ export function BoardPage() {
   const [tagFilterId, setTagFilterId] = useState<string | null>(null);
   const [milestoneFilterId, setMilestoneFilterId] = useState<string | null>(null);
   const [milestones, setMilestones] = useState<MilestoneResponse[]>([]);
+  const [issueTypeFilter, setIssueTypeFilter] = useState<string | null>(null);
   const [createdDateFilter, setCreatedDateFilter] = useState<string | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
     new Set(["archive"]),
@@ -439,6 +440,31 @@ export function BoardPage() {
     }
     load();
   }, [loadProjects]);
+
+  useEffect(() => {
+    if (!activeProjectId) return;
+    try {
+      const stored = localStorage.getItem(`board-type-filter-${activeProjectId}`);
+      setIssueTypeFilter(stored || null);
+    } catch {
+      // ignore
+    }
+  }, [activeProjectId]);
+
+  const handleIssueTypeFilterChange = useCallback((type: string | null) => {
+    setIssueTypeFilter(type);
+    if (activeProjectId) {
+      try {
+        if (type) {
+          localStorage.setItem(`board-type-filter-${activeProjectId}`, type);
+        } else {
+          localStorage.removeItem(`board-type-filter-${activeProjectId}`);
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }, [activeProjectId]);
 
   async function handleProjectChange(id: string) {
     setActiveProjectId(id);
@@ -1070,6 +1096,9 @@ export function BoardPage() {
           if (milestoneFilterId && issue.milestoneId !== milestoneFilterId) {
             return false;
           }
+          if (issueTypeFilter && issue.issueType !== issueTypeFilter) {
+            return false;
+          }
           if (showBlocked && !(issue as IssueWithStatus & { isBlocked?: boolean }).isBlocked) {
             return false;
           }
@@ -1087,7 +1116,7 @@ export function BoardPage() {
           return true;
         }),
       })),
-    [columns, focusMode, milestoneFilterId, searchQuery, showBlocked, showStaleOnly, statusFilterId, tagFilterId],
+    [columns, focusMode, issueTypeFilter, milestoneFilterId, searchQuery, showBlocked, showStaleOnly, statusFilterId, tagFilterId],
   );
 
   const showAiReviewedColumn = useMemo(
@@ -1738,6 +1767,8 @@ export function BoardPage() {
           milestones={milestones}
           activeMilestoneId={milestoneFilterId}
           onMilestoneFilterChange={setMilestoneFilterId}
+          issueTypeFilter={issueTypeFilter}
+          onIssueTypeFilterChange={handleIssueTypeFilterChange}
         />
         </div>
         {viewMode === "kanban" && (
