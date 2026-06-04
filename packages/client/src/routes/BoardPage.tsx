@@ -1834,6 +1834,8 @@ export function BoardPage() {
           onMilestoneFilterChange={setMilestoneFilterId}
           issueTypeFilter={issueTypeFilter}
           onIssueTypeFilterChange={handleIssueTypeFilterChange}
+          showPriorityLegend={prefs.showPriorityLegend}
+          onShowPriorityLegendChange={prefs.handleShowPriorityLegendChange}
         />
         </div>
         {viewMode === "kanban" && (
