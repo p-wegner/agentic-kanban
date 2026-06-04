@@ -3,6 +3,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { requireEntity, resolveStatusByName } from "../db-utils.js";
+import { validateWebhookUrl, fireWebhook } from "@agentic-kanban/shared/lib";
 
 export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, notifyBoard } = deps;
@@ -33,18 +34,45 @@ export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps
       if (issueType !== undefined) updates.issueType = issueType;
       if (estimate !== undefined) updates.estimate = estimate;
 
+      let resolvedStatusId: string | null = null;
       if (statusName) {
         const r = await resolveStatusByName(db, schema, existing.projectId, statusName);
         if (!r.ok) return r.error;
         updates.statusId = r.statusId;
+        updates.statusChangedAt = now;
+        resolvedStatusId = r.statusId;
       }
 
       await db.update(schema.issues).set(updates).where(eq(schema.issues.id, issueId));
 
       notifyBoard(existing.projectId, "mcp_update_issue");
 
+      // Fire outbound webhook if a status change occurred and a URL is configured
+      if (resolvedStatusId && statusName) {
+        const webhookPref = await db
+          .select({ value: schema.preferences.value })
+          .from(schema.preferences)
+          .where(eq(schema.preferences.key, `outbound_webhook_url_${existing.projectId}`))
+          .limit(1)
+          .then((rows) => rows[0]?.value ?? null)
+          .catch(() => null);
+        const webhookUrl = validateWebhookUrl(webhookPref);
+        if (webhookUrl) {
+          fireWebhook(webhookUrl, {
+            event: "issue.status_changed",
+            issueId,
+            issueNumber: existing.issueNumber,
+            title: title ?? existing.title,
+            projectId: existing.projectId,
+            newStatusId: resolvedStatusId,
+            newStatusName: statusName,
+            statusChangedAt: now,
+          });
+        }
+      }
+
       return {
-        content: [{ type: "text" as const, text: JSON.stringify({ id: issueId, updated: Object.keys(updates).filter(k => k !== "updatedAt") }, null, 2) }],
+        content: [{ type: "text" as const, text: JSON.stringify({ id: issueId, updated: Object.keys(updates).filter(k => k !== "updatedAt" && k !== "statusChangedAt") }, null, 2) }],
       };
     },
   );
