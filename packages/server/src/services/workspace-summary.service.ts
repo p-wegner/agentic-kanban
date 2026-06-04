@@ -195,6 +195,7 @@ export async function buildWorkspaceSummaryMap(
       conflictCacheFiles: workspaces.conflictCacheFiles,
       readyForMerge: workspaces.readyForMerge,
       diffStatCacheCheckedAt: workspaces.diffStatCacheCheckedAt,
+      diffStatCacheHeadSha: workspaces.diffStatCacheHeadSha,
       diffStatCacheFilesChanged: workspaces.diffStatCacheFilesChanged,
       diffStatCacheInsertions: workspaces.diffStatCacheInsertions,
       diffStatCacheDeletions: workspaces.diffStatCacheDeletions,
@@ -317,18 +318,23 @@ export async function buildWorkspaceSummaryMap(
         }
       }
 
-      // Background refresh if cache is stale or missing
+      // Background refresh when HEAD advanced or cache is missing/stale
+      const currentHeadSha = latestCommitByIssue.get(issueId)?.sha ?? null;
+      const headChanged = currentHeadSha !== null && currentHeadSha !== mainWs.diffStatCacheHeadSha;
       const diffCacheAge = mainWs.diffStatCacheCheckedAt
         ? Date.now() - new Date(mainWs.diffStatCacheCheckedAt).getTime()
         : Infinity;
-      if (diffCacheAge >= DIFF_STAT_CACHE_TTL_MS) {
+      const cacheStale = headChanged || diffCacheAge >= DIFF_STAT_CACHE_TTL_MS;
+      if (cacheStale) {
         const wsId = mainWs.id;
         const workingDir = mainWs.workingDir;
+        const headShaAtRefresh = currentHeadSha;
         runBgGit(() =>
           getDiffShortstat(workingDir, diffRef)
             .then(stats => {
               database.update(workspaces).set({
                 diffStatCacheCheckedAt: new Date().toISOString(),
+                diffStatCacheHeadSha: headShaAtRefresh,
                 diffStatCacheFilesChanged: stats.filesChanged,
                 diffStatCacheInsertions: stats.insertions,
                 diffStatCacheDeletions: stats.deletions,
