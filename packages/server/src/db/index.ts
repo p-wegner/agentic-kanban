@@ -6,36 +6,46 @@ import { getDbUrl, ensureDataDir } from "./data-dir.js";
 ensureDataDir();
 const DB_URL = getDbUrl();
 
-// Create the libsql client manually so we can apply performance pragmas before
-// handing it to Drizzle. WAL mode allows concurrent reads without blocking writes,
-// and busy_timeout lets the writer retry for up to 10 seconds instead of immediately
-// throwing SQLITE_BUSY when another connection holds a lock.
+async function applyPragmas(c: ReturnType<typeof createClient>) {
+  // journal_mode=WAL: multiple readers never block a writer; writer doesn't block readers.
+  await c.execute("PRAGMA journal_mode=WAL");
+  // busy_timeout: wait up to 10s for a locked DB before throwing SQLITE_BUSY.
+  await c.execute("PRAGMA busy_timeout=10000");
+  // synchronous=NORMAL: crash-safe with WAL; removes an fsync per commit.
+  await c.execute("PRAGMA synchronous=NORMAL");
+  // temp_store=MEMORY: keep transient B-trees in RAM.
+  await c.execute("PRAGMA temp_store=MEMORY");
+  // cache_size=-65536: 64MB page cache.
+  await c.execute("PRAGMA cache_size=-65536");
+  // mmap_size=256MB: memory-map reads to cut syscall overhead.
+  await c.execute("PRAGMA mmap_size=268435456");
+}
+
+// Read connection — used for board/API queries. With WAL, readers proceed against the
+// last checkpoint while the write connection commits, so board reads no longer queue
+// behind the high-frequency session-message write stream.
 const client = createClient({ url: DB_URL });
 try {
-  // journal_mode=WAL: multiple readers never block a writer; writer doesn't block readers.
-  await client.execute("PRAGMA journal_mode=WAL");
-  // busy_timeout: wait up to 10s for a locked DB before throwing SQLITE_BUSY.
-  await client.execute("PRAGMA busy_timeout=10000");
-  // synchronous=NORMAL: with WAL this is crash-safe (only an OS/power loss can drop the
-  // last few committed txns, acceptable for a local single-user board) and removes an
-  // fsync per commit — the dominant cost of the high-frequency session-message write
-  // stream from many concurrent agents, which was serializing the board read on the
-  // single connection (SQLITE_BUSY / multi-second board spikes).
-  await client.execute("PRAGMA synchronous=NORMAL");
-  // temp_store=MEMORY: keep transient B-trees (ORDER BY / GROUP BY in the board
-  // aggregation) in RAM instead of spilling to disk.
-  await client.execute("PRAGMA temp_store=MEMORY");
-  // cache_size=-65536: 64MB page cache (negative = KiB) so the hot board/issue/workspace
-  // pages stay resident.
-  await client.execute("PRAGMA cache_size=-65536");
-  // mmap_size=256MB: memory-map reads to cut syscall overhead on the read-heavy board path.
-  await client.execute("PRAGMA mmap_size=268435456");
+  await applyPragmas(client);
 } catch {
   // Non-fatal: pragmas may fail on read-only or in-memory DBs.
 }
 
+// Write connection — dedicated to the high-volume session-message write stream and
+// other mutations. Separate from the read connection so WAL's reader/writer isolation
+// actually takes effect: a board aggregation query on `client` runs concurrently with
+// a session-message batch insert on `writeClient`.
+const writeClient = createClient({ url: DB_URL });
+try {
+  await applyPragmas(writeClient);
+} catch {
+  // Non-fatal.
+}
+
 export const db = drizzle({ client, schema });
+export const writeDb = drizzle({ client: writeClient, schema });
 export const rawClient = client;
+export const rawWriteClient = writeClient;
 export { schema };
 export { withDbRetry } from "./retry.js";
 
