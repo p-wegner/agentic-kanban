@@ -325,6 +325,10 @@ export async function getIssueWorkspaces(
       latestSymlinkError: workspaces.latestSymlinkError,
       conflictCacheHasConflicts: workspaces.conflictCacheHasConflicts,
       conflictCacheFiles: workspaces.conflictCacheFiles,
+      diffStatCacheFilesChanged: workspaces.diffStatCacheFilesChanged,
+      diffStatCacheInsertions: workspaces.diffStatCacheInsertions,
+      diffStatCacheDeletions: workspaces.diffStatCacheDeletions,
+      scorecardScore: workspaces.scorecardScore,
     })
     .from(workspaces)
     .leftJoin(agentSkills, eq(workspaces.skillId, agentSkills.id))

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { issues, issueTags, issueDependencies, issueArtifacts, issueComments, showdowns, workspaces, projectStatuses, workflowTemplates } from "@agentic-kanban/shared/schema";
-import { eq, and, or, sql, inArray } from "drizzle-orm";
+import { issues, issueTags, issueDependencies, issueArtifacts, issueComments, showdowns, workspaces, projectStatuses, workflowTemplates, sessions } from "@agentic-kanban/shared/schema";
+import { eq, and, or, sql, inArray, desc } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "./board-events.js";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
@@ -606,6 +606,26 @@ export function createIssueService(deps: {
     const wsRows = await getIssueWorkspaces(issueId, database);
     const wsIds = wsRows.map(w => w.id);
     const { contextTokensMap, lastToolMap } = await enrichWorkspacesWithSessionData(wsIds, database);
+
+    // Fetch latest session per workspace for lastSessionAt / sessionStatus
+    const sessionRows = wsIds.length > 0
+      ? await database
+          .select({
+            workspaceId: sessions.workspaceId,
+            status: sessions.status,
+            startedAt: sessions.startedAt,
+            endedAt: sessions.endedAt,
+            triggerType: sessions.triggerType,
+          })
+          .from(sessions)
+          .where(inArray(sessions.workspaceId, wsIds))
+          .orderBy(desc(sessions.startedAt))
+      : [];
+    const latestSessionByWs = new Map<string, typeof sessionRows[0]>();
+    for (const s of sessionRows) {
+      if (!latestSessionByWs.has(s.workspaceId)) latestSessionByWs.set(s.workspaceId, s);
+    }
+
     return wsRows.map(w => {
       const {
         latestSetupCommand,
@@ -626,6 +646,10 @@ export function createIssueService(deps: {
         latestSymlinkError,
         conflictCacheHasConflicts,
         conflictCacheFiles,
+        diffStatCacheFilesChanged,
+        diffStatCacheInsertions,
+        diffStatCacheDeletions,
+        scorecardScore,
         ...workspace
       } = w;
       const conflicts = conflictCacheHasConflicts !== null && conflictCacheHasConflicts !== undefined
@@ -634,9 +658,22 @@ export function createIssueService(deps: {
             conflictingFiles: parseJsonArray<string>(conflictCacheFiles, []),
           }
         : null;
+      const diffStats = diffStatCacheFilesChanged !== null && diffStatCacheFilesChanged !== undefined
+        ? {
+            filesChanged: diffStatCacheFilesChanged,
+            insertions: diffStatCacheInsertions ?? 0,
+            deletions: diffStatCacheDeletions ?? 0,
+          }
+        : null;
+      const sess = latestSessionByWs.get(w.id);
       return {
         ...workspace,
         conflicts,
+        diffStats,
+        scorecard: scorecardScore !== null && scorecardScore !== undefined ? { score: scorecardScore } : null,
+        lastSessionAt: sess ? (sess.status === "running" ? sess.startedAt : sess.endedAt) : null,
+        sessionStatus: sess?.status ?? null,
+        lastSessionTriggerType: sess?.triggerType ?? null,
         latestSetup: latestSetupState ? {
           command: latestSetupCommand,
           state: latestSetupState,
