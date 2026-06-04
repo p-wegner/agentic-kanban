@@ -8,6 +8,7 @@ import { PRIMARY_VIEWS, SECONDARY_VIEWS, VIEW_REGISTRY } from "../lib/viewRegist
 import type { StatusWithIssues } from "@agentic-kanban/shared";
 import type { CardDensity } from "../hooks/useBoardPreferences.js";
 import type { MilestoneResponse } from "@agentic-kanban/shared";
+import { PRIORITY_META } from "../lib/chartColors.js";
 
 // Re-exported from the canonical view registry (#116). Kept here for back-compat
 // with the many components that import `ViewMode` from BoardToolbar.
@@ -56,6 +57,8 @@ interface BoardToolbarProps {
   onMilestoneFilterChange?: (milestoneId: string | null) => void;
   issueTypeFilter?: string | null;
   onIssueTypeFilterChange?: (type: string | null) => void;
+  showPriorityLegend?: boolean;
+  onShowPriorityLegendChange?: (v: boolean) => void;
 }
 
 export function BoardToolbar({
@@ -96,6 +99,8 @@ export function BoardToolbar({
   onMilestoneFilterChange,
   issueTypeFilter = null,
   onIssueTypeFilterChange,
+  showPriorityLegend = false,
+  onShowPriorityLegendChange,
 }: BoardToolbarProps) {
   const [showMonitorPopover, setShowMonitorPopover] = useState(false);
   const [showColumnVisibility, setShowColumnVisibility] = useState(false);
@@ -174,6 +179,7 @@ export function BoardToolbar({
   const activeSecondaryView = SECONDARY_VIEWS.find((v) => v.id === viewMode);
 
   return (
+    <>
     <div className="flex items-start gap-2 flex-wrap">
       {/* < sm : toggle to reveal the action cluster (collapsed by default for room) */}
       <button
@@ -225,6 +231,28 @@ export function BoardToolbar({
             <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
           </svg>
           <span className="hidden sm:inline">Compact</span>
+        </button>
+      )}
+      {onShowPriorityLegendChange && (
+        <button
+          onClick={() => onShowPriorityLegendChange(!showPriorityLegend)}
+          title={showPriorityLegend ? "Hide priority legend" : "Show priority color legend"}
+          aria-pressed={showPriorityLegend}
+          className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${
+            showPriorityLegend
+              ? "bg-brand-600 text-white border-brand-600 hover:bg-brand-700"
+              : "bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
+          }`}
+        >
+          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <rect x="3" y="3" width="5" height="5" rx="1" />
+            <rect x="3" y="10" width="5" height="5" rx="1" />
+            <rect x="3" y="17" width="5" height="5" rx="1" />
+            <line x1="11" y1="5.5" x2="21" y2="5.5" />
+            <line x1="11" y1="12.5" x2="21" y2="12.5" />
+            <line x1="11" y1="19.5" x2="21" y2="19.5" />
+          </svg>
+          <span className="hidden sm:inline">Priority</span>
         </button>
       )}
       {onHiddenColumnsChange && visibilityColumns && visibilityColumns.length > 0 && (
@@ -579,6 +607,22 @@ export function BoardToolbar({
         )}
       </div>
     </div>
+    {showPriorityLegend && (
+      <div className="flex items-center gap-3 px-1 py-1 flex-wrap" aria-label="Priority color legend">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-ink-faint dark:text-gray-500">Priority:</span>
+        {PRIORITY_META.map((p) => (
+          <span key={p.key} className="flex items-center gap-1">
+            <span
+              aria-hidden="true"
+              className="inline-block h-3 w-[3px] rounded-full flex-shrink-0"
+              style={{ backgroundColor: p.color }}
+            />
+            <span className="text-[10px] text-ink-soft dark:text-gray-400">{p.label}</span>
+          </span>
+        ))}
+      </div>
+    )}
+    </>
   );
 }
 
