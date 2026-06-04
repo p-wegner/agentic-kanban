@@ -3,7 +3,7 @@ import { execSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { resolve, sep, join } from "node:path";
 import { projects, projectStatuses, issues, workspaces, preferences } from "@agentic-kanban/shared/schema";
-import { ensureAgentGitignore, ensureStarterClaudeMd, ensureVerifyGateRunner, ensureHookScaffold, getDefaultSkillId } from "./project-scaffold.js";
+import { ensureAgentGitignore, ensureStarterClaudeMd, ensureHookScaffold, getDefaultSkillId } from "./project-scaffold.js";
 import { isSkillsDirAbsentOrEmpty, writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { listAgentSkills } from "../repositories/agent-skill.repository.js";
 import { getPreference } from "../repositories/preferences.repository.js";
