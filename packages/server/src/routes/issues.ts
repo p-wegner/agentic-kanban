@@ -551,6 +551,51 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     return c.json({ statuses, counts });
   });
 
+  // GET /api/issues/throughput?projectId=&days= — daily throughput: count of issues moved to Done per calendar day.
+  // Uses statusChangedAt to identify when issues entered the Done status.
+  // Returns one data point per day for the trailing `days` window (default 14).
+  router.get("/throughput", async (c) => {
+    const projectId = c.req.query("projectId");
+    if (!projectId) return c.json({ error: "projectId required" }, 400);
+    const daysRaw = parseInt(c.req.query("days") ?? "14", 10);
+    const days = Math.min(Math.max(Number.isNaN(daysRaw) ? 14 : daysRaw, 1), 365);
+
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - days + 1);
+    const cutoffDay = cutoffDate.toISOString().slice(0, 10);
+
+    // Fetch issues currently in "Done" whose statusChangedAt falls in the window.
+    const rows = await database
+      .select({
+        statusChangedAt: issues.statusChangedAt,
+        statusName: projectStatuses.name,
+      })
+      .from(issues)
+      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+      .where(eq(issues.projectId, projectId));
+
+    // Build the date axis: one entry per day in the trailing window.
+    const today = new Date();
+    const dates: string[] = [];
+    for (let d = new Date(cutoffDate); d <= today; d.setDate(d.getDate() + 1)) {
+      dates.push(d.toISOString().slice(0, 10));
+    }
+
+    // Count issues per day that moved into a "Done" status on that exact day.
+    const countByDate = new Map<string, number>(dates.map((d) => [d, 0]));
+    for (const r of rows) {
+      if (r.statusName !== "Done") continue;
+      if (!r.statusChangedAt) continue;
+      const movedDay = r.statusChangedAt.slice(0, 10);
+      if (movedDay >= cutoffDay && countByDate.has(movedDay)) {
+        countByDate.set(movedDay, (countByDate.get(movedDay) ?? 0) + 1);
+      }
+    }
+
+    const points = dates.map((date) => ({ date, count: countByDate.get(date) ?? 0 }));
+    return c.json({ points });
+  });
+
   // GET /api/issues/:id/showdown — get active showdown for this issue
   router.get("/:id/showdown", async (c) => {
     const issueId = c.req.param("id");
