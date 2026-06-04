@@ -48,6 +48,9 @@ interface BoardToolbarProps {
   onViewAllHealthEvents?: () => void;
   cardDensity?: CardDensity;
   onCardDensityChange?: (v: CardDensity) => void;
+  visibilityColumns?: StatusWithIssues[];
+  hiddenColumns?: Set<string>;
+  onHiddenColumnsChange?: (statusName: string, hidden: boolean) => void;
   milestones?: MilestoneResponse[];
   activeMilestoneId?: string | null;
   onMilestoneFilterChange?: (milestoneId: string | null) => void;
@@ -83,11 +86,16 @@ export function BoardToolbar({
   onViewAllHealthEvents,
   cardDensity = "comfortable",
   onCardDensityChange,
+  visibilityColumns,
+  hiddenColumns,
+  onHiddenColumnsChange,
   milestones = [],
   activeMilestoneId = null,
   onMilestoneFilterChange,
 }: BoardToolbarProps) {
   const [showMonitorPopover, setShowMonitorPopover] = useState(false);
+  const [showColumnVisibility, setShowColumnVisibility] = useState(false);
+  const columnVisibilityRef = useRef<HTMLDivElement>(null);
   const [showMoreViews, setShowMoreViews] = useState(false);
   const moreViewsRef = useRef<HTMLDivElement>(null);
   // Below sm the action cluster (Tasks/Scripts/Queue/Capacity/Voice/Monitor) is
@@ -140,6 +148,24 @@ export function BoardToolbar({
       document.removeEventListener("keydown", handleKey);
     };
   }, [showAllViews]);
+
+  useEffect(() => {
+    if (!showColumnVisibility) return;
+    function handleClick(e: MouseEvent) {
+      if (columnVisibilityRef.current && !columnVisibilityRef.current.contains(e.target as Node)) {
+        setShowColumnVisibility(false);
+      }
+    }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setShowColumnVisibility(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [showColumnVisibility]);
 
   const activeSecondaryView = SECONDARY_VIEWS.find((v) => v.id === viewMode);
 
@@ -196,6 +222,54 @@ export function BoardToolbar({
           </svg>
           <span className="hidden sm:inline">Compact</span>
         </button>
+      )}
+      {onHiddenColumnsChange && visibilityColumns && visibilityColumns.length > 0 && (
+        <div className="relative shrink-0" ref={columnVisibilityRef}>
+          <button
+            onClick={() => setShowColumnVisibility((v) => !v)}
+            aria-haspopup="true"
+            aria-expanded={showColumnVisibility}
+            title="Toggle column visibility"
+            className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${
+              hiddenColumns && hiddenColumns.size > 0
+                ? "bg-brand-600 text-white border-brand-600 hover:bg-brand-700"
+                : "bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
+            }`}
+          >
+            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 4.5v15m6-15v15M3 9h18M3 15h18" />
+            </svg>
+            <span className="hidden sm:inline">Columns</span>
+          </button>
+          {showColumnVisibility && (
+            <div className="absolute left-0 top-full z-30 mt-1 w-48 rounded-md border border-gray-200 bg-white p-2 shadow-lg dark:border-gray-700 dark:bg-gray-900">
+              <p className="mb-1.5 px-1 text-[10px] font-semibold uppercase tracking-wide text-ink-faint dark:text-gray-500">
+                Show / hide columns
+              </p>
+              {visibilityColumns.map((col) => {
+                const isHidden = hiddenColumns?.has(col.name) ?? false;
+                const visibleCount = visibilityColumns.filter((c) => !(hiddenColumns?.has(c.name) ?? false)).length;
+                const isLastVisible = !isHidden && visibleCount <= 1;
+                return (
+                  <label
+                    key={col.id}
+                    className={`flex items-center gap-2 rounded px-2 py-1 text-xs transition-colors ${isLastVisible ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-surface-sunken dark:hover:bg-gray-800"}`}
+                    title={isLastVisible ? "At least one column must remain visible" : undefined}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={!isHidden}
+                      disabled={isLastVisible}
+                      onChange={(e) => onHiddenColumnsChange(col.name, !e.target.checked)}
+                      className="h-3 w-3 rounded border-gray-300 text-brand-600 focus:ring-brand-500 disabled:cursor-not-allowed"
+                    />
+                    <span className="flex-1 text-ink dark:text-gray-200">{col.name}</span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </div>
       )}
       {onMilestoneFilterChange && milestones.length > 0 && (
         <div className="relative shrink-0">
