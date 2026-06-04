@@ -604,5 +604,12 @@
       "when": 1780906800004,
       "tag": "0085_session_messages_composite_index",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "6",
+      "when": 1780906800005,
+      "tag": "0086_diff_stat_cache_head_sha",
+      "breakpoints": true
     }]
 }

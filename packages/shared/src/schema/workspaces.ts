@@ -46,6 +46,7 @@ export const workspaces = sqliteTable("workspaces", {
   conflictCacheHasConflicts: integer("conflict_cache_has_conflicts", { mode: "boolean" }),
   conflictCacheFiles: text("conflict_cache_files"),
   diffStatCacheCheckedAt: text("diff_stat_cache_checked_at"),
+  diffStatCacheHeadSha: text("diff_stat_cache_head_sha"),
   diffStatCacheFilesChanged: integer("diff_stat_cache_files_changed"),
   diffStatCacheInsertions: integer("diff_stat_cache_insertions"),
   diffStatCacheDeletions: integer("diff_stat_cache_deletions"),
