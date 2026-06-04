@@ -64,6 +64,7 @@ interface BoardColumnProps {
   onDrop: (statusId: string, sortOrder?: number) => void;
   onDuplicate?: (issue: IssueWithStatus) => void;
   onMoveToNext?: (issue: IssueWithStatus, nextStatusId: string) => void;
+  onDeleteIssue?: (issueId: string) => void;
   searchQuery?: string;
   sessionActivity?: Record<string, string>;
   liveStats?: Record<string, LiveSessionStats>;
@@ -104,6 +105,7 @@ export function BoardColumn({
   onDrop,
   onDuplicate,
   onMoveToNext,
+  onDeleteIssue,
   searchQuery,
   sessionActivity,
   liveStats,
@@ -351,6 +353,8 @@ export function BoardColumn({
                 tags={issue.tags}
                 allProjectTags={allProjectTags}
                 quickUpdate={quickUpdate}
+                allStatuses={allColumns?.map((c) => ({ id: c.id, name: c.name }))}
+                onDeleteIssue={onDeleteIssue}
                 searchQuery={searchQuery}
                 liveActivity={sessionActivity?.[issue.id]}
                 liveStats={liveStats?.[issue.id]}
