@@ -144,11 +144,22 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge }:
       const projectRows = await db.select({ defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.id, projectId)).limit(1);
       const defaultBranch = projectRows.length > 0 ? projectRows[0].defaultBranch : null;
 
+      const autoMergeDisabledProjectIds = new Set(
+        [...prefMap]
+          .filter(([key, value]) => /^auto_merge_disabled_[0-9a-f-]+$/.test(key) && value === "true")
+          .map(([key]) => key.replace("auto_merge_disabled_", "")),
+      );
+
       if (fixAndMergeSessionIds.has(sessionId)) {
         fixAndMergeSessionIds.delete(sessionId);
         if (exitCode === 0) {
-          console.log(`[workflow] fix-and-merge session ${sessionId} completed  retrying merge`);
-          await autoMerge(workspace, projectId, issueId, findStatus("Done")?.id ?? null, now);
+          if (autoMergeDisabledProjectIds.has(projectId)) {
+            console.log(`[workflow] fix-and-merge session ${sessionId} completed but auto_merge_disabled for project ${projectId} — skipping retry merge`);
+            boardEvents.broadcast(projectId, "workspace_idle");
+          } else {
+            console.log(`[workflow] fix-and-merge session ${sessionId} completed  retrying merge`);
+            await autoMerge(workspace, projectId, issueId, findStatus("Done")?.id ?? null, now);
+          }
         } else {
           console.log(`[workflow] fix-and-merge session ${sessionId} exited with code ${exitCode}  not retrying merge`);
           boardEvents.broadcast(projectId, "workflow_error");

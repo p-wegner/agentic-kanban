@@ -370,3 +370,61 @@ describe("processWorkspaceCandidates — auto_merge gating", () => {
     expect(calls.some(([url]) => String(url).includes("/merge"))).toBe(true);
   });
 });
+
+describe("processWorkspaceCandidates — per-project auto_merge_disabled", () => {
+  it("does NOT merge an idle+readyForMerge workspace when its project is in autoMergeDisabledProjectIds", async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: true } as Response);
+
+    const deps = { ...makeDeps(), autoMergeEnabled: true, autoMergeDisabledProjectIds: new Set(["proj-1"]) };
+    const stats = await processWorkspaceCandidates([baseCandidate], deps);
+
+    expect(stats.merged).toBe(0);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  it("still merges an idle+readyForMerge workspace from a DIFFERENT project when one project is disabled", async () => {
+    vi.mocked(db.select).mockReset();
+    for (let i = 0; i < 2; i++) {
+      vi.mocked(db.select)
+        .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>)
+        .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>);
+    }
+    vi.mocked(fetch).mockResolvedValue({ ok: true } as Response);
+
+    const deps = { ...makeDeps(), autoMergeEnabled: true, autoMergeDisabledProjectIds: new Set(["proj-disabled"]) };
+    const disabledCandidate: WorkspaceCandidate = { ...baseCandidate, wsId: "ws-disabled", issueId: "issue-disabled", projectId: "proj-disabled" };
+    const enabledCandidate: WorkspaceCandidate = { ...baseCandidate, wsId: "ws-enabled", issueId: "issue-enabled", projectId: "proj-1" };
+    const stats = await processWorkspaceCandidates([disabledCandidate, enabledCandidate], deps);
+
+    expect(stats.merged).toBe(1);
+    const calls = vi.mocked(fetch).mock.calls;
+    expect(calls.some(([url]) => String(url).includes("/ws-enabled/merge"))).toBe(true);
+    expect(calls.some(([url]) => String(url).includes("/ws-disabled/merge"))).toBe(false);
+  });
+
+  it("does NOT merge a reviewing+stopped workspace when its project is in autoMergeDisabledProjectIds", async () => {
+    vi.mocked(db.select).mockReset();
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "sess-1", status: "stopped", startedAt: new Date().toISOString() }]) as ReturnType<typeof db.select>)
+      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]) as ReturnType<typeof db.select>);
+    vi.mocked(fetch).mockResolvedValue({ ok: true } as Response);
+
+    const deps = { ...makeDeps(), autoMergeEnabled: true, autoMergeDisabledProjectIds: new Set(["proj-1"]) };
+    const candidate: WorkspaceCandidate = { ...baseCandidate, wsStatus: "reviewing", readyForMerge: false };
+    const stats = await processWorkspaceCandidates([candidate], deps);
+
+    expect(stats.merged).toBe(0);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  it("does NOT merge an idle In-Review workspace via auto_merge_in_review when its project is disabled", async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: true } as Response);
+
+    const deps = { ...makeDeps(), autoMergeEnabled: true, autoMergeInReview: true, autoMergeDisabledProjectIds: new Set(["proj-1"]) };
+    const candidate: WorkspaceCandidate = { ...baseCandidate, readyForMerge: false };
+    const stats = await processWorkspaceCandidates([candidate], deps);
+
+    expect(stats.merged).toBe(0);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+});

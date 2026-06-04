@@ -195,12 +195,18 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort }: 
           OR (${issues.currentNodeId} IS NULL AND ${issues.statusId} IN (${sql.join(activeStatusIds.map((id) => sql`${id}`), sql`, `)}))
         )`);
       const allowedCandidates = candidates.filter((candidate) => allowProject(candidate.projectId));
+      const autoMergeDisabledProjectIds = new Set(
+        [...prefMap]
+          .filter(([key, value]) => /^auto_merge_disabled_[0-9a-f-]+$/.test(key) && value === "true")
+          .map(([key]) => key.replace("auto_merge_disabled_", "")),
+      );
       Object.assign(cycleStats, await processWorkspaceCandidates(allowedCandidates, {
         sessionManager,
         boardEvents,
         serverPort,
         autoMergeEnabled: prefMap.get("auto_merge") === "true" && mergeStrategy === "monitor",
         autoMergeInReview: prefMap.get("auto_merge_in_review") === "true",
+        autoMergeDisabledProjectIds,
         monitorRecentActions: monitorState.recentActions,
         logMonitorAction,
         buildMonitorNudgePrompt,
