@@ -1,5 +1,5 @@
 import type * as agentService from "../services/agent.service.js";
-import { rawClient } from "../db/index.js";
+import { rawClient, rawWriteClient } from "../db/index.js";
 import { createBackup } from "../db/backup.js";
 import { isTransientNetworkError } from "./transient-errors.js";
 import { activeMerges } from "../services/workspace-internals.js";
@@ -9,7 +9,8 @@ async function checkpointAndBackup(): Promise<void> {
   const work = (async () => {
     try {
       // Flush committed WAL into the main db so a later hard-kill can't strand data.
-      await rawClient.execute("PRAGMA wal_checkpoint(TRUNCATE)");
+      await rawWriteClient.execute("PRAGMA wal_checkpoint(TRUNCATE)");
+      await rawClient.execute("PRAGMA wal_checkpoint(PASSIVE)");
     } catch (e) {
       console.warn("[backup] shutdown WAL checkpoint failed:", e instanceof Error ? e.message : e);
     }
