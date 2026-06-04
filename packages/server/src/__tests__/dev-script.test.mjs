@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { checkDrizzleFiles, findDrizzlePnpmDirs } from "../../../../scripts/drizzle-preflight.mjs";
 import { buildDevPortEnv } from "../../../../scripts/dev-env.mjs";
 import { resolveDevPorts } from "../../../../scripts/dev-port-plan.mjs";
 import {
@@ -222,5 +223,97 @@ describe("stale shared dist detection and recovery", () => {
     expect(recovery.rebuilds).toBe(1);
     expect(recovery.markRebuilt()).toBe(2);
     expect(recovery.rebuilds).toBe(2);
+  });
+});
+
+describe("drizzle preflight check", () => {
+  function makeDrizzleRoot(version = "drizzle-orm@0.45.2_@libsql+client@0.14.0") {
+    const root = mkdtempSync(join(tmpdir(), "ak-drizzle-preflight-"));
+    const drizzleDir = join(root, "node_modules", ".pnpm", version, "node_modules", "drizzle-orm");
+    mkdirSync(join(drizzleDir, "libsql"), { recursive: true });
+    writeFileSync(join(drizzleDir, "alias.js"), "");
+    writeFileSync(join(drizzleDir, "errors.js"), "");
+    writeFileSync(join(drizzleDir, "libsql", "index.js"), "");
+    return { root, drizzleDir };
+  }
+
+  it("returns empty list when all critical files are present", () => {
+    const { root } = makeDrizzleRoot();
+    try {
+      expect(checkDrizzleFiles(root)).toHaveLength(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("returns missing paths when libsql/index.js is absent", () => {
+    const { root, drizzleDir } = makeDrizzleRoot();
+    try {
+      rmSync(join(drizzleDir, "libsql", "index.js"));
+      const missing = checkDrizzleFiles(root);
+      expect(missing.length).toBeGreaterThan(0);
+      expect(missing.some((p) => p.includes("libsql"))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("returns missing paths when alias.js is absent", () => {
+    const { root, drizzleDir } = makeDrizzleRoot();
+    try {
+      rmSync(join(drizzleDir, "alias.js"));
+      const missing = checkDrizzleFiles(root);
+      expect(missing.some((p) => p.endsWith("alias.js"))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("reports all missing files at once when multiple are absent", () => {
+    const { root, drizzleDir } = makeDrizzleRoot();
+    try {
+      rmSync(join(drizzleDir, "alias.js"));
+      rmSync(join(drizzleDir, "errors.js"));
+      rmSync(join(drizzleDir, "libsql", "index.js"));
+      expect(checkDrizzleFiles(root)).toHaveLength(3);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("returns empty list when node_modules/.pnpm does not exist", () => {
+    const root = mkdtempSync(join(tmpdir(), "ak-drizzle-preflight-empty-"));
+    try {
+      expect(checkDrizzleFiles(root)).toHaveLength(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("finds drizzle-orm pnpm virtual-store dirs by prefix", () => {
+    const { root } = makeDrizzleRoot("drizzle-orm@0.45.2_@libsql+client@0.14.0");
+    try {
+      const dirs = findDrizzlePnpmDirs(root);
+      expect(dirs).toHaveLength(1);
+      expect(dirs[0]).toContain("drizzle-orm");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("ignores non-drizzle packages in .pnpm", () => {
+    const root = mkdtempSync(join(tmpdir(), "ak-drizzle-preflight-mixed-"));
+    try {
+      mkdirSync(join(root, "node_modules", ".pnpm", "hono@4.0.0", "node_modules"), { recursive: true });
+      mkdirSync(join(root, "node_modules", ".pnpm", "drizzle-orm@0.45.2", "node_modules", "drizzle-orm", "libsql"), { recursive: true });
+      writeFileSync(join(root, "node_modules", ".pnpm", "drizzle-orm@0.45.2", "node_modules", "drizzle-orm", "alias.js"), "");
+      writeFileSync(join(root, "node_modules", ".pnpm", "drizzle-orm@0.45.2", "node_modules", "drizzle-orm", "errors.js"), "");
+      writeFileSync(join(root, "node_modules", ".pnpm", "drizzle-orm@0.45.2", "node_modules", "drizzle-orm", "libsql", "index.js"), "");
+      const dirs = findDrizzlePnpmDirs(root);
+      expect(dirs).toHaveLength(1);
+      expect(dirs[0]).toContain("drizzle-orm@0.45.2");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
