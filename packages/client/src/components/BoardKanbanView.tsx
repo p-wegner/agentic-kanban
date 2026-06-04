@@ -8,6 +8,7 @@ import { CreateIssueForm } from "./CreateIssueForm.js";
 import type { CreateIssueFormState } from "./CreateIssueForm.js";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { useIsNarrow } from "../hooks/useMediaQuery.js";
+import type { CardDensity } from "../hooks/useBoardPreferences.js";
 
 interface PinnedStripProps {
   issues: IssueWithStatus[];
@@ -116,6 +117,7 @@ export interface BoardKanbanViewProps {
   quickUpdate?: QuickUpdateCallbacks;
   wipLimits?: Record<string, number | null>;
   onSetWipLimit?: (statusId: string, limit: number | null) => void;
+  cardDensity?: CardDensity;
 }
 
 export function BoardKanbanView({
@@ -155,6 +157,7 @@ export function BoardKanbanView({
   quickUpdate,
   wipLimits,
   onSetWipLimit,
+  cardDensity = "comfortable",
 }: BoardKanbanViewProps) {
   // Below sm, columns stack vertically and the board scrolls down through them
   // (instead of a horizontal one-column-at-a-time swipe, where an empty column
@@ -242,6 +245,7 @@ export function BoardKanbanView({
               quickUpdate={quickUpdate}
               wipLimit={wipLimits?.[col.id]}
               onSetWipLimit={onSetWipLimit}
+              cardDensity={cardDensity}
             >
               <CreateIssueForm
                 projectId={projectId}

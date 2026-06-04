@@ -6,6 +6,7 @@ import { ProjectScriptsMenu } from "./ProjectScriptsMenu.js";
 import { ExportImportMenu } from "./ExportImportMenu.js";
 import { PRIMARY_VIEWS, SECONDARY_VIEWS, VIEW_REGISTRY } from "../lib/viewRegistry.js";
 import type { StatusWithIssues } from "@agentic-kanban/shared";
+import type { CardDensity } from "../hooks/useBoardPreferences.js";
 
 // Re-exported from the canonical view registry (#116). Kept here for back-compat
 // with the many components that import `ViewMode` from BoardToolbar.
@@ -44,6 +45,8 @@ interface BoardToolbarProps {
   onShowRunQueueForecast?: () => void;
   runQueueOpenSlots?: number;
   onViewAllHealthEvents?: () => void;
+  cardDensity?: CardDensity;
+  onCardDensityChange?: (v: CardDensity) => void;
 }
 
 export function BoardToolbar({
@@ -74,6 +77,8 @@ export function BoardToolbar({
   onShowRunQueueForecast,
   runQueueOpenSlots = 0,
   onViewAllHealthEvents,
+  cardDensity = "comfortable",
+  onCardDensityChange,
 }: BoardToolbarProps) {
   const [showMonitorPopover, setShowMonitorPopover] = useState(false);
   const [showMoreViews, setShowMoreViews] = useState(false);
@@ -166,6 +171,23 @@ export function BoardToolbar({
             <path strokeLinecap="round" d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
           </svg>
           <span className="hidden sm:inline">Focus</span>
+        </button>
+      )}
+      {onCardDensityChange && (
+        <button
+          onClick={() => onCardDensityChange(cardDensity === "compact" ? "comfortable" : "compact")}
+          title={cardDensity === "compact" ? "Compact density — click for comfortable" : "Comfortable density — click for compact"}
+          aria-pressed={cardDensity === "compact"}
+          className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${
+            cardDensity === "compact"
+              ? "bg-brand-600 text-white border-brand-600 hover:bg-brand-700"
+              : "bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
+          }`}
+        >
+          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+          </svg>
+          <span className="hidden sm:inline">Compact</span>
         </button>
       )}
       <button
