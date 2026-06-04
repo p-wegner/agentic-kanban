@@ -13,13 +13,12 @@ This is a FRESH session every run — you have NO memory of previous runs. The k
 - **ACTIVE_AGENTS_TARGET = 3** - keep this many workspaces actively In Progress at all times.
 - **BACKLOG_FLOOR = 12** - never let the backlog drop below this; refill before it does.
 - **MAX_NEW_STARTS_PER_CYCLE = 3** - cap on how many NEW workspaces to launch in a single cycle.
-- **REFILL_FOCUS = balanced** - derived from work-type marker weights; `bugfix-only` emphasizes reproducible bugs, `balanced` allows feature/quality mix.
+- **REFILL_FOCUS = bugfix-only** - derived from work-type marker weights; `bugfix-only` emphasizes reproducible bugs, `balanced` allows feature/quality mix.
 
 ## STRATEGY WEIGHTS (generated - do not hand-edit)
-- REST API Performance: weight 5/5, area, provider claude
-- Backend Efficiency: weight 5/5, area, provider claude
+- Architecture & Code Health: weight 5/5, area, provider claude
 - Quality: weight 5/5, work-type, provider claude
-- Bugfix: weight 5/5, work-type
+- Bugfix: weight 5/5, work-type, provider claude
 - Feature: weight 1/5, work-type
 
 ## PROVIDER POLICY (generated - do not hand-edit)
@@ -27,7 +26,7 @@ When selecting a provider for a new workspace, apply these rules in priority ord
 1. **FILL** profiles should always have capacity — start work on them first.
 2. **THROTTLE** profiles are preferred for main work. Respect their headroom percentage.
 3. **FALLBACK-ONLY** profiles are last resort — only use if all others are exhausted or the user explicitly selects them.
-- **Claude (Anthropic)** [claude:]: FILL — use aggressively, keep busy at all times (Primary harness - all new workspaces launch on Claude. Keep 3 agents busy.)
+- **Claude (anth)** [claude:anth]: FILL — use aggressively, keep busy at all times (Primary harness — all new workspaces launch on Claude profile 'anth'. Keep 3 agents busy.)
 <!-- STRATEGY_BULLSEYE_GENERATED_END -->
 FIRST, READ YOUR RECENT MEMORY: `scripts/board-monitor/state.md` is a short rolling log of what the last several cycles did. Read it before choosing an action and use it to ESCALATE rather than repeat — if a prior cycle (or two) already nudged an item with no change, take the stronger action this time (stop the stale session and inspect the branch, rebuild, or flag for a human) instead of nudging it again. If the file is missing or empty, just proceed.
 
