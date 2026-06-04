@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api.js";
+import { STATUS_COLORS } from "../lib/chartColors.js";
 
 interface NodeStat {
   nodeId: string;
@@ -233,6 +234,193 @@ function BurnDownChart({ points }: { points: BurnDownPoint[] }) {
   );
 }
 
+interface CfdPoint {
+  date: string;
+  status: string;
+  count: number;
+}
+
+interface CfdData {
+  statuses: string[];
+  counts: CfdPoint[];
+}
+
+type CfdWindow = 7 | 30 | 90;
+
+function fallbackColor(index: number): string {
+  const fallbacks = ["#a8a195", "#8a8175", "#c25f36", "#d17d54", "#719161", "#547446", "#b3a89a"];
+  return fallbacks[index % fallbacks.length];
+}
+
+function CumulativeFlowChart({ projectId }: { projectId: string }) {
+  const [days, setDays] = useState<CfdWindow>(30);
+  const [data, setData] = useState<CfdData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    apiFetch<CfdData>(`/api/issues/cfd?projectId=${encodeURIComponent(projectId)}&days=${days}`)
+      .then((d) => { if (!cancelled) { setData(d); setLoading(false); } })
+      .catch(() => { if (!cancelled) { setData(null); setLoading(false); } });
+    return () => { cancelled = true; };
+  }, [projectId, days]);
+
+  const chart = useMemo(() => {
+    if (!data || data.counts.length === 0) return null;
+
+    const dates = [...new Set(data.counts.map((c) => c.date))].sort();
+    const statuses = data.statuses;
+
+    // Build per-date, per-status count map.
+    const byDateStatus = new Map<string, Map<string, number>>();
+    for (const pt of data.counts) {
+      if (!byDateStatus.has(pt.date)) byDateStatus.set(pt.date, new Map());
+      byDateStatus.get(pt.date)!.set(pt.status, pt.count);
+    }
+
+    // Max total for y-axis.
+    let maxTotal = 0;
+    for (const date of dates) {
+      let total = 0;
+      for (const s of statuses) total += byDateStatus.get(date)?.get(s) ?? 0;
+      if (total > maxTotal) maxTotal = total;
+    }
+    if (maxTotal === 0) return null;
+
+    return { dates, statuses, byDateStatus, maxTotal };
+  }, [data]);
+
+  const svgW = 760;
+  const svgH = 220;
+  const padX = 44;
+  const padTop = 12;
+  const padBottom = 32;
+  const plotW = svgW - padX * 2;
+  const plotH = svgH - padTop - padBottom;
+
+  const xOf = (index: number, total: number) =>
+    padX + (total === 1 ? plotW / 2 : (index / (total - 1)) * plotW);
+  const yOf = (value: number, max: number) =>
+    padTop + plotH - (value / max) * plotH;
+
+  if (loading) {
+    return (
+      <div className="flex h-48 items-center justify-center text-sm text-gray-400 dark:text-gray-500">
+        Loading…
+      </div>
+    );
+  }
+
+  if (!chart) {
+    return <EmptyChart>No issue history in this period</EmptyChart>;
+  }
+
+  const { dates, statuses, byDateStatus, maxTotal } = chart;
+
+  // Build stacked area paths (bottom-up stacking).
+  const stackedPaths = statuses.map((status, si) => {
+    // Compute cumulative floor for this band.
+    const lowerStatuses = statuses.slice(0, si);
+    const points = dates.map((date, di) => {
+      const floor = lowerStatuses.reduce((sum, s) => sum + (byDateStatus.get(date)?.get(s) ?? 0), 0);
+      const top = floor + (byDateStatus.get(date)?.get(status) ?? 0);
+      return { x: xOf(di, dates.length), yFloor: yOf(floor, maxTotal), yTop: yOf(top, maxTotal) };
+    });
+
+    const polygonPoints = [
+      ...points.map((p) => `${p.x},${p.yTop}`),
+      ...[...points].reverse().map((p) => `${p.x},${p.yFloor}`),
+    ].join(" ");
+
+    const color = STATUS_COLORS[status] ?? fallbackColor(si);
+    return { status, polygonPoints, color, topPoints: points.map((p) => `${p.x},${p.yTop}`).join(" ") };
+  });
+
+  // Date labels: show at most 8 evenly-spaced labels.
+  const labelStep = Math.max(1, Math.floor(dates.length / 8));
+  const labelDates = dates.filter((_, i) => i % labelStep === 0 || i === dates.length - 1);
+
+  return (
+    <div>
+      <div className="mb-3 flex items-baseline justify-between gap-3">
+        <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">Cumulative Flow</h3>
+        <div className="flex gap-1">
+          {([7, 30, 90] as CfdWindow[]).map((w) => (
+            <button
+              key={w}
+              onClick={() => setDays(w)}
+              className={`rounded px-2 py-0.5 text-xs font-medium transition-colors ${
+                days === w
+                  ? "bg-gray-800 text-white dark:bg-gray-200 dark:text-gray-900"
+                  : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              }`}
+            >
+              {w}d
+            </button>
+          ))}
+        </div>
+      </div>
+      <svg viewBox={`0 0 ${svgW} ${svgH}`} className="h-56 w-full overflow-visible">
+        <line x1={padX} y1={padTop + plotH} x2={svgW - padX} y2={padTop + plotH} stroke="#d1d5db" />
+        <line x1={padX} y1={padTop} x2={padX} y2={padTop + plotH} stroke="#d1d5db" />
+        {[0, 0.5, 1].map((tick) => {
+          const yTick = padTop + plotH - tick * plotH;
+          return (
+            <g key={tick}>
+              <line x1={padX} x2={svgW - padX} y1={yTick} y2={yTick} stroke="#e5e7eb" />
+              <text x={8} y={yTick + 4} className="fill-gray-500 text-[11px] dark:fill-gray-400">
+                {Math.round(maxTotal * tick)}
+              </text>
+            </g>
+          );
+        })}
+        {stackedPaths.map(({ status, polygonPoints, color }) => (
+          <polygon
+            key={status}
+            points={polygonPoints}
+            fill={color}
+            fillOpacity={0.75}
+            stroke={color}
+            strokeWidth={0.5}
+          >
+            <title>{status}</title>
+          </polygon>
+        ))}
+        {stackedPaths.map(({ status, topPoints, color }) => (
+          <polyline
+            key={`line-${status}`}
+            points={topPoints}
+            fill="none"
+            stroke={color}
+            strokeWidth={1.5}
+            strokeLinejoin="round"
+          />
+        ))}
+        {labelDates.map((date) => {
+          const di = dates.indexOf(date);
+          return (
+            <text key={date} x={xOf(di, dates.length)} y={svgH - 8} textAnchor="middle" className="fill-gray-500 text-[11px] dark:fill-gray-400">
+              {fmtDate(date)}
+            </text>
+          );
+        })}
+      </svg>
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+        {statuses.map((status, si) => {
+          const color = STATUS_COLORS[status] ?? fallbackColor(si);
+          return (
+            <div key={status} className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
+              <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: color }} />
+              <span>{status}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function WorkflowAnalyticsDashboard({ projectId }: { projectId: string }) {
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -331,6 +519,10 @@ export function WorkflowAnalyticsDashboard({ projectId }: { projectId: string })
         <div className="rounded-md border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
           <h3 className="mb-3 text-sm font-semibold text-gray-800 dark:text-gray-100">Drop-Off Funnel</h3>
           <FunnelChart stages={analytics.funnel} />
+        </div>
+
+        <div className="rounded-md border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
+          <CumulativeFlowChart projectId={projectId} />
         </div>
       </div>
     </div>
