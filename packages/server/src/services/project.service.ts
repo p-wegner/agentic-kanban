@@ -3,7 +3,7 @@ import { execSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { resolve, sep, join } from "node:path";
 import { projects, projectStatuses, issues, workspaces, preferences } from "@agentic-kanban/shared/schema";
-import { eq, and, notInArray } from "drizzle-orm";
+import { eq, and, notInArray, sql } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { branchExists, detectRepoInfo, getProjectGitStats } from "./git-info.service.js";
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree } from "./git.service.js";
@@ -707,6 +707,26 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     }
   }
 
+  async function getBoardSummary(projectId: string) {
+    const project = await getProjectById(projectId, database);
+    if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
+
+    const rows = await database
+      .select({
+        statusId: projectStatuses.id,
+        name: projectStatuses.name,
+        sortOrder: projectStatuses.sortOrder,
+        count: sql<number>`count(${issues.id})`,
+      })
+      .from(projectStatuses)
+      .leftJoin(issues, eq(issues.statusId, projectStatuses.id))
+      .where(eq(projectStatuses.projectId, projectId))
+      .groupBy(projectStatuses.id, projectStatuses.name, projectStatuses.sortOrder)
+      .orderBy(projectStatuses.sortOrder);
+
+    return rows.map((r) => ({ ...r, count: Number(r.count) }));
+  }
+
   return {
     registerProject,
     createProject,
@@ -716,6 +736,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     removeWorktreeById,
     getStats,
     getBoard,
+    getBoardSummary,
     getGraph,
     getCrossProjectWorkspaces,
     openInExplorer,
