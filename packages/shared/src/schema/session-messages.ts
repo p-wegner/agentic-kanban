@@ -12,6 +12,7 @@ export const sessionMessages = sqliteTable("session_messages", {
 }, (table) => ({
   sessionIdIdx: index("idx_session_messages_session_id").on(table.sessionId),
   createdAtIdx: index("idx_session_messages_created_at").on(table.createdAt),
+  sessionIdCreatedAtIdx: index("idx_session_messages_session_id_created_at").on(table.sessionId, table.createdAt),
 }));
 
 export const sessionMessagesRelations = relations(sessionMessages, ({ one }) => ({
