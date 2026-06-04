@@ -706,6 +706,19 @@ export function BoardPage() {
     }
   }
 
+  async function handleQuickTogglePinned(issueId: string, pinned: boolean) {
+    applyOptimisticIssueUpdate(issueId, (iss) => ({ ...iss, pinned }));
+    try {
+      await apiFetch(`/api/issues/${issueId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ pinned }),
+      });
+    } catch {
+      applyOptimisticIssueUpdate(issueId, (iss) => ({ ...iss, pinned: !pinned }));
+      showToast("Failed to update pin", "error");
+    }
+  }
+
   function handleDragStart(e: React.DragEvent, issue: IssueWithStatus) {
     e.dataTransfer.setData("application/json", JSON.stringify({
       issueId: issue.id,
@@ -1948,6 +1961,7 @@ export function BoardPage() {
               onPriorityChange: handleQuickPriorityChange,
               onAddTag: handleQuickAddTag,
               onRemoveTag: handleQuickRemoveTag,
+              onTogglePinned: handleQuickTogglePinned,
             }}
             wipLimits={prefs.wipLimits}
             onSetWipLimit={prefs.handleSetWipLimit}
