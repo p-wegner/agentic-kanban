@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
@@ -267,7 +267,7 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   );
 }
 
-export function IssueCard({ issue, onClick, onWorkspaceClick, onOpenDiff, onStartWorkspace, onDryRun, onDragStart, onDuplicate, onMoveToNext, nextStatusName, tags, allProjectTags, quickUpdate, allStatuses, onDeleteIssue, searchQuery, liveActivity, liveStats, todos, isPendingIssue, isPendingWorkspace, isSelected, isKeyboardFocused, cardDensity = "comfortable", showAgingHeatmap = false, agingWarmDays = 3, agingHotDays = 7 }: IssueCardProps) {
+function IssueCardImpl({ issue, onClick, onWorkspaceClick, onOpenDiff, onStartWorkspace, onDryRun, onDragStart, onDuplicate, onMoveToNext, nextStatusName, tags, allProjectTags, quickUpdate, allStatuses, onDeleteIssue, searchQuery, liveActivity, liveStats, todos, isPendingIssue, isPendingWorkspace, isSelected, isKeyboardFocused, cardDensity = "comfortable", showAgingHeatmap = false, agingWarmDays = 3, agingHotDays = 7 }: IssueCardProps) {
   const compact = cardDensity === "compact";
   const agingDays = issue.columnAgeDays ?? 0;
   const agingBucket = !showAgingHeatmap || agingDays < agingWarmDays
@@ -1133,6 +1133,38 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onOpenDiff, onStar
     </div>
   );
 }
+
+// Handler props are excluded from the memo comparison: they take the issue/value as an
+// argument and don't capture per-card mutable state, so the parent recreating them on a
+// live-session tick should NOT force every card to re-render. This is safe because the
+// only time a retained (older) handler is kept is when no compared data prop changed —
+// i.e. board data is unchanged, so the handler's captured state is identical. Whenever
+// board data actually changes (issue edit, project switch) the data props differ and the
+// card re-renders with fresh handlers. Every non-handler prop is compared by identity,
+// so new data props are covered automatically.
+const ISSUE_CARD_HANDLER_PROPS = new Set<keyof IssueCardProps>([
+  "onClick", "onWorkspaceClick", "onOpenDiff", "onStartWorkspace", "onDryRun",
+  "onDragStart", "onDuplicate", "onMoveToNext", "onDeleteIssue", "quickUpdate",
+]);
+
+function areIssueCardPropsEqual(prev: IssueCardProps, next: IssueCardProps): boolean {
+  const keys = new Set<keyof IssueCardProps>([
+    ...(Object.keys(prev) as (keyof IssueCardProps)[]),
+    ...(Object.keys(next) as (keyof IssueCardProps)[]),
+  ]);
+  for (const key of keys) {
+    if (ISSUE_CARD_HANDLER_PROPS.has(key)) continue;
+    if (!Object.is(prev[key], next[key])) return false;
+  }
+  return true;
+}
+
+/**
+ * Memoized so a board re-render (e.g. a live-session WebSocket tick that updates the
+ * liveStats/activity/todos maps without touching `columns`) only re-renders the cards
+ * whose own data changed, not every card on the board. See areIssueCardPropsEqual.
+ */
+export const IssueCard = memo(IssueCardImpl, areIssueCardPropsEqual);
 
 const PRIORITIES = ["critical", "high", "medium", "low"] as const;
 
