@@ -26,6 +26,7 @@ import { MomentumView } from "../components/MomentumView.js";
 import { StaleWorkDashboard } from "../components/StaleWorkDashboard.js";
 import { ThroughputChart } from "../components/ThroughputChart.js";
 import { ProviderMixChart } from "../components/ProviderMixChart.js";
+import { LeadTimeTrendChart } from "../components/LeadTimeTrendChart.js";
 import { useAgentQuestionsCount } from "../components/AgentQuestionsPanel.js";
 import { BoardErrorBoundary } from "../components/BoardErrorBoundary.js";
 import { BacklogView } from "../components/BacklogView.js";
@@ -2131,6 +2132,11 @@ export function BoardPage() {
         {viewMode === "provider-mix" && activeProjectId && (
           <BoardErrorBoundary columnName="Provider Mix">
             <ProviderMixChart projectId={activeProjectId} />
+          </BoardErrorBoundary>
+        )}
+        {viewMode === "lead-time" && activeProjectId && (
+          <BoardErrorBoundary columnName="Lead Time Trend">
+            <LeadTimeTrendChart projectId={activeProjectId} />
           </BoardErrorBoundary>
         )}
         {viewMode === "strategy" && activeProjectId && (
