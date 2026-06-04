@@ -233,6 +233,9 @@ interface IssueCardProps {
   isSelected?: boolean;
   isKeyboardFocused?: boolean;
   cardDensity?: CardDensity;
+  showAgingHeatmap?: boolean;
+  agingWarmDays?: number;
+  agingHotDays?: number;
 }
 
 function HighlightedText({ text, query }: { text: string; query: string }) {
@@ -255,8 +258,14 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   );
 }
 
-export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, onDryRun, onDragStart, onDuplicate, onMoveToNext, nextStatusName, tags, allProjectTags, quickUpdate, allStatuses, onDeleteIssue, searchQuery, liveActivity, liveStats, todos, isPendingIssue, isPendingWorkspace, isSelected, isKeyboardFocused, cardDensity = "comfortable" }: IssueCardProps) {
+export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, onDryRun, onDragStart, onDuplicate, onMoveToNext, nextStatusName, tags, allProjectTags, quickUpdate, allStatuses, onDeleteIssue, searchQuery, liveActivity, liveStats, todos, isPendingIssue, isPendingWorkspace, isSelected, isKeyboardFocused, cardDensity = "comfortable", showAgingHeatmap = false, agingWarmDays = 3, agingHotDays = 7 }: IssueCardProps) {
   const compact = cardDensity === "compact";
+  const agingDays = issue.columnAgeDays ?? 0;
+  const agingBucket = !showAgingHeatmap || agingDays < agingWarmDays
+    ? "fresh"
+    : agingDays < agingHotDays
+    ? "warm"
+    : "hot";
   const typeBadgeColor = issue.issueType ? (issueTypeColors[issue.issueType] ?? null) : null;
   const priorityBadgeColor = issue.priority && issue.priority !== "medium" ? (priorityColors[issue.priority] ?? null) : null;
   const priorityAccentColor = issue.priority ? (PRIORITY_META.find((p) => p.key === issue.priority)?.color ?? null) : null;
@@ -450,6 +459,16 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
           aria-hidden="true"
           className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-lg"
           style={{ backgroundColor: priorityAccentColor }}
+        />
+      )}
+      {agingBucket !== "fresh" && (
+        <span
+          aria-hidden="true"
+          className={`absolute inset-0 rounded-lg pointer-events-none ${
+            agingBucket === "hot"
+              ? "bg-red-500/[0.09] dark:bg-red-500/[0.13]"
+              : "bg-amber-400/[0.09] dark:bg-amber-400/[0.13]"
+          }`}
         />
       )}
       {isSelected && (
