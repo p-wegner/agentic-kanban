@@ -28,6 +28,13 @@ When selecting a provider for a new workspace, apply these rules in priority ord
 3. **FALLBACK-ONLY** profiles are last resort — only use if all others are exhausted or the user explicitly selects them.
 - **Claude (anth)** [claude:anth]: FILL — use aggressively, keep busy at all times (Primary harness — all new workspaces launch on Claude profile 'anth'. Keep 3 agents busy.)
 <!-- STRATEGY_BULLSEYE_GENERATED_END -->
+
+## FOCUS POLICY (operator directive 2026-06-05 — authoritative; overrides the REFILL_FOCUS wording above)
+**Work on BUGFIX, QUALITY, and ARCHITECTURE / code-health improvements ONLY. NO new features.**
+- **Starting work (priority 3):** pull bugfix / quality / architecture tickets. **SKIP every Feature/enhancement ticket** — leave it in the backlog and pick the next eligible non-feature item instead. Never start a feature.
+- **Refill (priority 4):** create ONLY bugfix, quality, and architecture/code-health tickets — real reproducible bugs (from merged diffs, `docs/learnings/`, server error logs, failing tests), reliability/test/guardrail/hardening work, and refactors/decoupling/tech-debt/hotspot cleanups. **NEVER create feature or enhancement tickets**, regardless of the REFILL_FOCUS value above. (REFILL_FOCUS=bugfix-only here means no features; quality + architecture refill is also allowed and encouraged.)
+- **WIP limit = ACTIVE_AGENTS_TARGET = 3** concurrent agents. **Provider/profile = claude:anth.**
+
 FIRST, READ YOUR RECENT MEMORY: `scripts/board-monitor/state.md` is a short rolling log of what the last several cycles did. Read it before choosing an action and use it to ESCALATE rather than repeat — if a prior cycle (or two) already nudged an item with no change, take the stronger action this time (stop the stale session and inspect the branch, rebuild, or flag for a human) instead of nudging it again. If the file is missing or empty, just proceed.
 
 Each run, make as much bounded progress toward a healthy, moving board as the priorities below allow, then stop. This is **NOT** a strict one-action-per-cycle rule — do every safe, high-value action the priorities call for this run (e.g. you may launch up to MAX_NEW_STARTS_PER_CYCLE workspaces in a single cycle to fill agent slots). Use the $board-monitor skill for the health/conflict checks. In priority order:
