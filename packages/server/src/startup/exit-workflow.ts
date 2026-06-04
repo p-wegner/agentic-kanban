@@ -1,4 +1,5 @@
 import { isSpecPlanningStageName, syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import { issues, preferences, projectStatuses, projects, scheduledRunHistory, scheduledRuns, sessions, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { desc, eq } from "drizzle-orm";
 import { execFile } from "node:child_process";
@@ -197,6 +198,23 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge }:
           console.log("[workflow] reviewer flagged issues (non-auto-fix mode)  skipping auto-merge, leaving in In Progress");
           boardEvents.broadcast(projectId, "issue_updated");
           return;
+        }
+        // #531 quality gate: run the project's verify_script (build/test/run) in the
+        // worktree before approving for merge. Opt-in per project via the
+        // verify_script_<projectId> preference — a pure no-op when unset, so existing
+        // projects/the dev board are unaffected. A non-zero exit WITHHOLDS readyForMerge
+        // so code that doesn't compile/test/run can't be auto-approved and merged
+        // (the diff-only LLM review can't catch that on its own).
+        const verifyScript = prefMap.get(`verify_script_${projectId}`);
+        if (verifyScript && verifyScript.trim() && workspace.workingDir) {
+          const result = await runSetupScript(workspace.workingDir, verifyScript).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e) }));
+          if (result.exitCode !== 0) {
+            console.log(`[workflow] verify_script failed (exit ${result.exitCode}) for workspace ${workspaceId} — withholding readyForMerge`);
+            boardEvents.broadcast(projectId, "workflow_error");
+            emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Verify script failed (exit ${result.exitCode}) for workspace ${workspaceId}; not approved for merge. ${(result.stderr || result.stdout || "").slice(0, 300)}` });
+            return;
+          }
+          console.log(`[workflow] verify_script passed for workspace ${workspaceId}`);
         }
         await db.update(workspaces).set({ readyForMerge: true, updatedAt: now }).where(eq(workspaces.id, workspaceId));
         boardEvents.broadcast(projectId, "workspace_ready_for_merge");
