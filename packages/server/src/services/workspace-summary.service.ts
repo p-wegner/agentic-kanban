@@ -244,6 +244,19 @@ export async function buildWorkspaceSummaryMap(
     }
   }
 
+  // Pre-fetch commit counts for all non-direct, non-closed main workspaces in parallel
+  // to avoid an N+1 pattern (one sequential git call per issue).
+  const commitCountByIssue = new Map<string, number | null>();
+  await Promise.all(
+    [...mainWorkspaceMap.entries()]
+      .filter(([, ws]) => ws.workingDir && ws.status !== "closed" && !ws.isDirect && !!(ws.baseBranch || defaultBranch))
+      .map(async ([issueId, ws]) => {
+        const base = (ws.baseBranch || defaultBranch) as string;
+        const count = await getCommitCountAhead(ws.workingDir!, base);
+        commitCountByIssue.set(issueId, count);
+      })
+  );
+
   // Attach main workspace summary and schedule stale-while-revalidate cache refreshes
   for (const [issueId, summary] of workspaceSummaryMap) {
     const mainWs = mainWorkspaceMap.get(issueId);
@@ -263,17 +276,13 @@ export async function buildWorkspaceSummaryMap(
       pendingPlanPath: mainWs.pendingPlanPath,
       planOnlyWarning: false,
       scorecard: mainWs.scorecardScore !== null ? { score: mainWs.scorecardScore } : null,
-      commitCount: null,
+      commitCount: commitCountByIssue.get(issueId) ?? null,
       codeMetrics: parseStoredWorkspaceCodeMetrics(mainWs.codeMetricsJson, mainWs.codeMetricsComputedAt),
       workflow: null,
       mergedAt: mainWs.mergedAt,
     };
 
     if (mainWs.workingDir && mainWs.status !== "closed") {
-      const baseForCommitCount = mainWs.baseBranch || defaultBranch;
-      if (!mainWs.isDirect && baseForCommitCount) {
-        summary.main.commitCount = await getCommitCountAhead(mainWs.workingDir, baseForCommitCount);
-      }
 
       const diffRef = mainWs.isDirect ? "HEAD" : (mainWs.baseBranch || defaultBranch);
       if (!diffRef) continue;
