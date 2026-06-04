@@ -78,27 +78,39 @@ async function main() {
   const shell = isWindows ? "cmd.exe" : "/bin/sh";
   const shellArgs = isWindows ? ["/c", command] : ["-c", command];
 
+  // Capture both stdout and stderr from the sub-command so they don't leak
+  // onto the hook's stdout (Claude Stop hooks use stdout for JSON decisions).
   let exitCode = 0;
+  let cmdOutput = "";
   try {
-    execFileSync(shell, shellArgs, {
+    const result = execFileSync(shell, shellArgs, {
       cwd,
-      stdio: "inherit",
+      stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
       timeout: TIMEOUT_MS,
+      encoding: "utf8",
     });
+    // On success execFileSync returns stdout; relay it to stderr for visibility.
+    if (result) process.stderr.write(result);
   } catch (e) {
     exitCode = typeof e.status === "number" ? e.status : 1;
     if (e.killed) {
       process.stderr.write(`[verify-gate] Command timed out after 5 minutes.\n`);
       exitCode = 1;
     }
+    // Relay captured output to stderr so the agent can see what failed.
+    cmdOutput = [e.stdout, e.stderr].filter(Boolean).join("\n");
+    if (cmdOutput) process.stderr.write(cmdOutput + "\n");
   }
 
   if (exitCode !== 0) {
-    process.stderr.write(
+    const reason =
       `[verify-gate] FAILED (exit ${exitCode}): ${command}\n` +
-        `[verify-gate] Fix the above errors before this workspace can be merged.\n`
-    );
+      (cmdOutput ? `\n${cmdOutput}\n` : "") +
+      `\nFix the above errors before this workspace can be merged.`;
+    process.stderr.write(reason + "\n");
+    // Emit a structured block decision so Claude shows the failure reason.
+    process.stdout.write(JSON.stringify({ decision: "block", reason }) + "\n");
     process.exit(1);
   }
 

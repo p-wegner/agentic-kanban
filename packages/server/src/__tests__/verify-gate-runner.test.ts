@@ -86,6 +86,10 @@ describe("verify-gate-runner", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("[verify-gate] FAILED");
     expect(result.stderr).toContain("Fix the above errors");
+    // Structured block decision on stdout so Claude can display the failure reason.
+    const decision = JSON.parse(result.stdout.trim());
+    expect(decision.decision).toBe("block");
+    expect(decision.reason).toContain("[verify-gate] FAILED");
   });
 
   it("reads command from VERIFY_GATE_COMMAND env var when no config file", () => {
