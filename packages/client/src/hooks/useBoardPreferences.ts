@@ -21,9 +21,14 @@ export interface BoardPreferences {
   cardDensity: CardDensity;
   hiddenColumns: Set<string>;
   showPriorityLegend: boolean;
+  showCardAgingHeatmap: boolean;
+  agingWarmDays: number;
+  agingHotDays: number;
   handleCardDensityChange: (v: CardDensity) => Promise<void>;
   handleHiddenColumnsChange: (statusName: string, hidden: boolean) => Promise<void>;
   handleShowPriorityLegendChange: (v: boolean) => Promise<void>;
+  handleShowCardAgingHeatmapChange: (v: boolean) => Promise<void>;
+  handleAgingThresholdsChange: (warm: number, hot: number) => Promise<void>;
   toggleAutoMonitor: () => Promise<void>;
   handleMonitorRunNow: () => Promise<void>;
   handleIntervalChange: (v: string) => Promise<void>;
@@ -46,6 +51,9 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
   const [cardDensity, setCardDensity] = useState<CardDensity>("comfortable");
   const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set());
   const [showPriorityLegend, setShowPriorityLegend] = useState(false);
+  const [showCardAgingHeatmap, setShowCardAgingHeatmap] = useState(false);
+  const [agingWarmDays, setAgingWarmDays] = useState(3);
+  const [agingHotDays, setAgingHotDays] = useState(7);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
 
   const loadPreferences = useCallback(async () => {
@@ -57,6 +65,11 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
         const raw = s[`board_hidden_columns_${projectId}`];
         setHiddenColumns(raw ? new Set(raw.split(",").filter(Boolean)) : new Set());
         setShowPriorityLegend(s[`board_show_priority_legend_${projectId}`] === "true");
+        setShowCardAgingHeatmap(s[`board_card_aging_heatmap_${projectId}`] === "true");
+        const warm = parseInt(s[`board_aging_warm_days_${projectId}`] ?? "3", 10);
+        const hot = parseInt(s[`board_aging_hot_days_${projectId}`] ?? "7", 10);
+        setAgingWarmDays(isNaN(warm) ? 3 : warm);
+        setAgingHotDays(isNaN(hot) ? 7 : hot);
       }
       setAutoReview(s.auto_review !== "false");
       setAutoMerge(s.auto_merge !== "false");
@@ -150,6 +163,28 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
     }).catch(() => {});
   }, [projectId]);
 
+  const handleShowCardAgingHeatmapChange = useCallback(async (v: boolean) => {
+    if (!projectId) return;
+    setShowCardAgingHeatmap(v);
+    await apiFetch("/api/preferences/settings", {
+      method: "PUT",
+      body: JSON.stringify({ [`board_card_aging_heatmap_${projectId}`]: String(v) }),
+    }).catch(() => {});
+  }, [projectId]);
+
+  const handleAgingThresholdsChange = useCallback(async (warm: number, hot: number) => {
+    if (!projectId) return;
+    setAgingWarmDays(warm);
+    setAgingHotDays(hot);
+    await apiFetch("/api/preferences/settings", {
+      method: "PUT",
+      body: JSON.stringify({
+        [`board_aging_warm_days_${projectId}`]: String(warm),
+        [`board_aging_hot_days_${projectId}`]: String(hot),
+      }),
+    }).catch(() => {});
+  }, [projectId]);
+
   const handleHiddenColumnsChange = useCallback(async (statusName: string, hidden: boolean) => {
     if (!projectId) return;
     const next = new Set(hiddenColumns);
@@ -197,9 +232,14 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
     cardDensity,
     hiddenColumns,
     showPriorityLegend,
+    showCardAgingHeatmap,
+    agingWarmDays,
+    agingHotDays,
     handleCardDensityChange,
     handleHiddenColumnsChange,
     handleShowPriorityLegendChange,
+    handleShowCardAgingHeatmapChange,
+    handleAgingThresholdsChange,
     prefsLoaded,
     toggleAutoMonitor,
     handleMonitorRunNow,
