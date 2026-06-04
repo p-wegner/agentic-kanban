@@ -1,4 +1,6 @@
 import { readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { projects } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import type { Database } from "../db/index.js";
@@ -89,6 +91,80 @@ Use || true for commands that may fail (e.g. "docker compose down || true").
 If no teardown is needed, respond with an empty string.
 
 ${contextParts.join("\n")}`;
+
+  return (await invokeClaudePrompt(prompt, { timeout: 30000, database })).trim();
+}
+
+/** Rule-based heuristic: derive a verify command from detected marker files. */
+export function deriveVerifyScript(repoPath: string, detected: string[]): string {
+  const detectedSet = new Set(detected);
+
+  if (detectedSet.has("package.json")) {
+    try {
+      const pkgRaw = readFileSync(join(repoPath, "package.json"), "utf8");
+      const pkg = JSON.parse(pkgRaw) as { scripts?: Record<string, string> };
+      const scripts = pkg.scripts ?? {};
+      const hasTest = "test" in scripts;
+      const hasBuild = "build" in scripts;
+      const hasBuildTs = "build:ts" in scripts;
+      const pm = detectedSet.has("pnpm-lock.yaml") ? "pnpm" : detectedSet.has("yarn.lock") ? "yarn" : "npm";
+      const parts: string[] = [];
+      if (hasTest) parts.push(`${pm} test`);
+      if (hasBuild) parts.push(`${pm} run build`);
+      else if (hasBuildTs) parts.push(`${pm} run build:ts`);
+      if (parts.length > 0) return parts.join(" && ");
+    } catch {
+      // fall through to AI
+    }
+  }
+
+  if (detectedSet.has("Cargo.toml")) return "cargo test";
+  if (detectedSet.has("go.mod")) return "go test ./...";
+  if (detectedSet.has("pom.xml")) return "mvn test";
+  if (detectedSet.has("build.gradle") || detectedSet.has("build.gradle.kts")) return "./gradlew test";
+  if (detectedSet.has("Makefile")) {
+    try {
+      const makefile = readFileSync(join(repoPath, "Makefile"), "utf8");
+      if (/^test:/m.test(makefile)) return "make test";
+    } catch {
+      // fall through
+    }
+  }
+  if (detectedSet.has("Pipfile") || detectedSet.has("pyproject.toml") || detectedSet.has("requirements.txt")) {
+    return "python -m pytest";
+  }
+  if (detectedSet.has("Gemfile")) return "bundle exec rake test";
+  if (detectedSet.has("mix.exs")) return "mix test";
+
+  return "";
+}
+
+export async function generateVerifyScript(projectId: string, database: Database): Promise<string> {
+  const projectRows = await database
+    .select({ repoPath: projects.repoPath, repoName: projects.repoName })
+    .from(projects)
+    .where(eq(projects.id, projectId))
+    .limit(1);
+  if (projectRows.length === 0) {
+    throw Object.assign(new Error("Project not found"), { statusCode: 404 });
+  }
+
+  const { repoPath, repoName } = projectRows[0];
+  const detected = detectProjectMarkers(repoPath);
+
+  const rule = deriveVerifyScript(repoPath, detected);
+  if (rule) return rule;
+
+  const prompt = `You are analyzing a software project to determine the correct verify/test command(s) to run to confirm that the code is correct and all tests pass.
+Based on the files detected in the project root, suggest the appropriate verify command(s) for the project "${repoName}".
+
+IMPORTANT: Respond ONLY with the raw shell command(s) to run. No explanation, no markdown, no code fences.
+If multiple commands are needed, chain them with &&.
+Use platform-neutral syntax (e.g., "pnpm test" not "npm test", prefer the package manager indicated by lock files).
+Prefer commands that run fast. Favor test commands over build-only commands when available.
+If no verify command can be determined, respond with an empty string.
+
+Detected files: ${detected.length > 0 ? detected.join(", ") : "none"}`;
 
   return (await invokeClaudePrompt(prompt, { timeout: 30000, database })).trim();
 }

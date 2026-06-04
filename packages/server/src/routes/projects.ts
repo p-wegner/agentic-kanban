@@ -119,6 +119,14 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
     return c.json({ setupScript });
   });
 
+  // POST /api/projects/generate-verify-script
+  router.post("/generate-verify-script", async (c) => {
+    const body = await parseJsonBody<{ projectId?: string }>(c);
+    if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
+    const verifyScript = await wrapAiOperation("generate-verify-script", () => projectService.generateVerifyScript(body.projectId!));
+    return c.json({ verifyScript });
+  });
+
   // POST /api/projects/generate-teardown-script
   router.post("/generate-teardown-script", async (c) => {
     const body = await parseJsonBody<{ projectId?: string }>(c);
