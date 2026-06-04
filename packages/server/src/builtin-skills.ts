@@ -1,3 +1,5 @@
+import { MERGE_RECONCILER_PROMPT } from "./services/merge-reconciler-prompt.js";
+
 const SPEC_PHASE_CONSTITUTION_GATE = `## Constitution Gate
 
 Before drafting or revising this phase artifact, load the project's constitution:
@@ -841,6 +843,12 @@ Use stable metric keys:
 - \`pnpm exec tsc -b --noEmit\`
 - \`Invoke-RestMethod -Method Post -ContentType "application/json" -Uri "$api/projects/$projectId/quality-metrics" -Body ($body | ConvertTo-Json -Depth 10)\`
 `,
+    model: null,
+  },
+  {
+    name: "merge-reconciler",
+    description: "Land a whole batch of stranded/conflicting workspaces efficiently: resolve each overlapping cluster's union ONCE, sequence migration collisions, reconcile siblings as Done. Launched automatically by the auto-merge orchestrator.",
+    prompt: MERGE_RECONCILER_PROMPT,
     model: null,
   },
 ] as const;

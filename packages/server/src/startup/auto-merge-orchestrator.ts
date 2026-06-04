@@ -1,6 +1,6 @@
 import { isTerminalStatusView } from "@agentic-kanban/shared";
-import { issues, preferences, projectStatuses, workspaces, workflowNodes, sessions } from "@agentic-kanban/shared/schema";
-import { and, eq, inArray, ne, or } from "drizzle-orm";
+import { issues, preferences, projectStatuses, workspaces, workflowNodes, sessions, sessionMessages } from "@agentic-kanban/shared/schema";
+import { and, count, eq, inArray, ne, or } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import { createMergeQueueService } from "../services/merge-queue.service.js";
@@ -14,6 +14,8 @@ const DEFAULT_INTERVAL_MS = 30_000;
 const MERGEABLE_STATUS_NAMES = ["In Review", "AI Reviewed"] as const;
 /** Cap on how many times the orchestrator launches a batch reconciler for the SAME stranded set before leaving it for a human. */
 const MAX_RECONCILER_ATTEMPTS = 2;
+/** A reconciler session with 0 output messages after this many ms is treated as a zombie and reaped. */
+const ZOMBIE_TIMEOUT_MS = 5 * 60_000;
 
 export interface AutoMergeOrchestratorState {
   running: boolean;
@@ -183,9 +185,28 @@ export function createAutoMergeOrchestrator(deps: {
     // skip this tick entirely (don't double-launch or re-queue its members); on exit, clear the
     // marker, free the integration workspace, and fall through to re-scan what landed.
     if (state.reconciler) {
-      const [sess] = await database.select({ status: sessions.status }).from(sessions)
+      const [sess] = await database.select({ status: sessions.status, startedAt: sessions.startedAt }).from(sessions)
         .where(eq(sessions.id, state.reconciler.sessionId)).limit(1);
-      if (sess && sess.status === "running") return state;
+      if (sess && sess.status === "running") {
+        // Zombie detection: a session that has been running for > ZOMBIE_TIMEOUT_MS with 0 output
+        // messages is almost certainly a launch-failed session (0-token, never received input).
+        // Reap it so the next tick can relaunch.
+        const ageMs = sess.startedAt ? Date.now() - new Date(sess.startedAt).getTime() : 0;
+        if (ageMs >= ZOMBIE_TIMEOUT_MS) {
+          const [{ msgCount }] = await database
+            .select({ msgCount: count() })
+            .from(sessionMessages)
+            .where(eq(sessionMessages.sessionId, state.reconciler.sessionId));
+          if (msgCount === 0) {
+            console.warn(`[auto-merge] reconciler session ${state.reconciler.sessionId} is a zombie (0 output after ${Math.round(ageMs / 60000)}m) — reaping`);
+            // Fall through to the cleanup below (don't return early).
+          } else {
+            return state; // session is live, wait longer
+          }
+        } else {
+          return state;
+        }
+      }
       console.log(`[auto-merge] reconciler session ${state.reconciler.sessionId} finished (status=${sess?.status ?? "gone"})`);
       try {
         await database.update(workspaces).set({ status: "idle", updatedAt: new Date().toISOString() })

@@ -684,6 +684,16 @@ Be helpful and well-organized; lead with the answer and avoid unnecessary preamb
         .set({ prompt: specSkill.prompt, description: specSkill.description, updatedAt: now })
         .where(sql`${agentSkills.name} = ${specSkill.name} AND ${agentSkills.projectId} IS NULL AND ${agentSkills.isBuiltin} = 1`);
     }
+
+    // The merge-reconciler prompt is the orchestrator's injected playbook — keep it current
+    // so existing installs pick up playbook improvements without a full re-seed. Project-scoped
+    // overrides are untouched.
+    const reconcilerSkill = BUILTIN_SKILLS.find((s) => s.name === "merge-reconciler");
+    if (reconcilerSkill) {
+      await database.update(agentSkills)
+        .set({ prompt: reconcilerSkill.prompt, description: reconcilerSkill.description, updatedAt: now })
+        .where(sql`${agentSkills.name} = 'merge-reconciler' AND ${agentSkills.projectId} IS NULL AND ${agentSkills.isBuiltin} = 1`);
+    }
   }
 
   // Upsert code-review-thorough skill (may not exist in older installs)

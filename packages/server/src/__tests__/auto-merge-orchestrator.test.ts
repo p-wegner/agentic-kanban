@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
-import { issues, projectStatuses, projects, workspaces, preferences } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses, projects, workspaces, preferences, sessions } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { createTestDb } from "./helpers/test-db.js";
 import { createAutoMergeOrchestrator } from "../startup/auto-merge-orchestrator.js";
@@ -141,5 +141,44 @@ describe("auto-merge orchestrator", () => {
     });
 
     await expect(orchestrator.findCompletedWorkspaceIds()).resolves.toContain(inReview);
+  });
+
+  it("reaps a zombie reconciler session (running >5m with 0 output) so the next tick can relaunch", async () => {
+    const { db } = createTestDb();
+    const now = new Date().toISOString();
+    await db.insert(preferences).values([
+      { key: "auto_merge", value: "true", updatedAt: now },
+      { key: "merge_strategy", value: "merge_queue", updatedAt: now },
+    ]);
+
+    const { projectId } = await seedProject(db);
+    const workspaceId = await seedWorkspace(db, { projectId, statusId: randomUUID(), workspaceStatus: "fixing" });
+
+    // Plant a "running" session started 6 minutes ago with no output messages → zombie
+    const sessionId = randomUUID();
+    const sixMinAgo = new Date(Date.now() - 6 * 60_000).toISOString();
+    await db.insert(sessions).values({
+      id: sessionId,
+      workspaceId,
+      status: "running",
+      startedAt: sixMinAgo,
+    });
+
+    const orchestrator = createAutoMergeOrchestrator({ database: db });
+    // Inject the zombie into state as if it were launched on a prior tick.
+    orchestrator.state.reconciler = {
+      sessionId,
+      integrationWorkspaceId: workspaceId,
+      baseBranch: "main",
+      strandedKey: "fake-key",
+      launchedAt: sixMinAgo,
+    };
+
+    // runOnce should detect the zombie, reap it (state.reconciler = null), and free the workspace.
+    await orchestrator.runOnce(true /* force — skip isEnabled() */);
+
+    expect(orchestrator.state.reconciler).toBeNull();
+    const [ws] = await db.select({ status: workspaces.status }).from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws?.status).toBe("idle");
   });
 });
