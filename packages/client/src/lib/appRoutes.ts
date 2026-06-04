@@ -24,6 +24,8 @@ const VIEW_ROUTE_PATHS: Record<ViewMode, string> = {
   capacity: "/capacity",
   constellation: "/constellation",
   momentum: "/momentum",
+  activity: "/activity",
+  "stale-work": "/stale-work",
 };
 
 const ROUTE_ALIASES: Record<string, ViewMode> = {
