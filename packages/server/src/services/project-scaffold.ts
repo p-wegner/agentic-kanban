@@ -351,6 +351,39 @@ export function ensureHookScaffold(repoPath: string, options: HookScaffoldOption
   }
 }
 
+// ---------------------------------------------------------------------------
+// Verify-gate runner scaffold
+// ---------------------------------------------------------------------------
+
+const RUNNER_SRC = join(dirname(fileURLToPath(import.meta.url)), "../scaffold/verify-gate-runner.js");
+
+const VERIFY_GATE_CONFIG_STUB = JSON.stringify({ command: "" }, null, 2) + "\n";
+
+/**
+ * Copy the generic verify-gate runner and its config stub into .claude/hooks/.
+ * - Never overwrites an existing runner (idempotent, clobber-safe).
+ * - Creates the hooks dir if absent.
+ * Non-fatal on any error.
+ */
+export function ensureVerifyGateRunner(repoPath: string): void {
+  try {
+    const hooksDir = join(repoPath, ".claude", "hooks");
+    if (!existsSync(hooksDir)) mkdirSync(hooksDir, { recursive: true });
+
+    const destRunner = join(hooksDir, "verify-gate-runner.js");
+    if (!existsSync(destRunner) && existsSync(RUNNER_SRC)) {
+      writeFileSync(destRunner, readFileSync(RUNNER_SRC, "utf8"), "utf8");
+    }
+
+    const destConfig = join(hooksDir, "verify-gate.config.json");
+    if (!existsSync(destConfig)) {
+      writeFileSync(destConfig, VERIFY_GATE_CONFIG_STUB, "utf8");
+    }
+  } catch {
+    /* non-fatal: scaffolding must never block registration */
+  }
+}
+
 /**
  * Resolve the default onboarding skill (board-navigator) so a freshly-registered project's
  * worktrees aren't skill-less. Returns null gracefully if the builtin isn't seeded. (#531)
