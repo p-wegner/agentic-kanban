@@ -96,6 +96,26 @@ export function setupMonitorRoutes(app: Hono, monitorState: MonitorState, runMon
 export function createMonitorSetup({ sessionManager, boardEvents, serverPort }: MonitorSetupDeps) {
   const monitorState: MonitorState = { timer: null, nextRunAt: null, lastRun: null, currentIntervalMin: null, recentActions: [], lastResourceSnapshot: null, warnings: [], lastHealthCheckAt: null };
   let lastWarningFingerprint = "";
+
+  // Event-driven trigger state. The deterministic monitor is poll-based by default
+  // (auto_monitor_interval), but most of its work is a reaction to a board mutation we
+  // already know about in-process (a merge just landed → start the next unblocked ticket;
+  // a session exited → relaunch/refill). Rather than wait up to one poll interval, board
+  // events fire a debounced, re-entrancy-guarded cycle ~immediately. The poll remains as a
+  // safety net for time-based / event-less conditions (stale detection, crash recovery,
+  // external git changes, orphaned-worktree sweep).
+  let cycleRunning = false;
+  let rerunRequested = false;
+  let triggerTimer: ReturnType<typeof setTimeout> | null = null;
+  const EVENT_TRIGGER_DEBOUNCE_MS = 1500;
+  function triggerMonitorSoon() {
+    if (triggerTimer) return; // a trigger is already pending — coalesce this burst into it
+    triggerTimer = setTimeout(() => {
+      triggerTimer = null;
+      runMonitorCycle().catch(() => {});
+    }, EVENT_TRIGGER_DEBOUNCE_MS);
+    (triggerTimer as NodeJS.Timeout).unref?.();
+  }
   async function refreshDirtyMainCheckoutWarnings() {
     const warnings = await scanDirtyMainCheckouts(db);
     monitorState.warnings = warnings;
@@ -120,6 +140,12 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort }: 
   }
 
   async function runMonitorCycle(force = false) {
+    // Re-entrancy guard: an event-triggered cycle must never overlap a scheduled one —
+    // two concurrent cycles could both see the same unblocked issue (no open workspace yet)
+    // and each POST a workspace, double-starting it. If a trigger arrives mid-cycle, note it
+    // and run exactly one more pass at the end so freshly-unblocked work isn't missed.
+    if (cycleRunning) { rerunRequested = true; return; }
+    cycleRunning = true;
     const cycleStats = { relaunched: 0, merged: 0, nudged: 0 };
     let resourceSummary: MonitorResourceSummary | null = null;
     let warningCount = monitorState.warnings.length;
@@ -186,16 +212,24 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort }: 
     } catch (err) {
       console.warn("[monitor] Cycle error:", err);
     } finally {
+      cycleRunning = false;
       monitorState.lastRun = { at: new Date().toISOString(), ...cycleStats, resources: resourceSummary, warnings: warningCount };
       const prefRows = await db.select().from(preferences).catch(() => []);
       const prefMap = new Map(prefRows.map((r: { key: string; value: string }) => [r.key, r.value]));
       if (monitorShouldRun(prefMap)) {
         const intervalMin = parseInt(prefMap.get("auto_monitor_interval") || "4", 10);
         monitorState.nextRunAt = new Date(Date.now() + intervalMin * 60 * 1000).toISOString();
+        // Always clear the previous timer before re-arming: event-triggered runs call
+        // runMonitorCycle directly (not via the timer), so without this the old periodic
+        // timer would leak and accumulate, firing redundant cycles.
+        if (monitorState.timer) clearTimeout(monitorState.timer);
         monitorState.timer = setTimeout(runMonitorCycle, intervalMin * 60 * 1000);
       } else {
         monitorState.nextRunAt = null;
       }
+      // A board mutation arrived while this cycle was running — run one more pass promptly
+      // so we don't strand freshly-unblocked work until the next poll.
+      if (rerunRequested) { rerunRequested = false; triggerMonitorSoon(); }
     }
   }
 
@@ -247,6 +281,13 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort }: 
       return null;
     }
   }
+
+  // Subscribe the deterministic monitor to in-process board mutations. broadcast() invokes
+  // every invalidation listener on merge / session-exit / ticket-created / etc., so a just-
+  // merged ticket triggers the next unblocked one within EVENT_TRIGGER_DEBOUNCE_MS instead of
+  // up to a full poll interval later. The cycle itself early-returns when nothing is auto-
+  // driven and is idempotent, so events for non-driven projects cost at most one no-op pass.
+  boardEvents.addInvalidationListener(() => triggerMonitorSoon());
 
   setInterval(syncMonitorState, 30_000);
   syncMonitorState().catch(() => {});
