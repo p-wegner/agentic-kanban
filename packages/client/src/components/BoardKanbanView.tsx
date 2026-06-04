@@ -105,6 +105,7 @@ export interface BoardKanbanViewProps {
   onCreateCancel: () => void;
   onIssueClick: (issue: IssueWithStatus, event: React.MouseEvent) => void;
   onWorkspaceClick: (issue: IssueWithStatus, workspaceId?: string) => void;
+  onOpenDiff?: (issue: IssueWithStatus, workspaceId: string) => void;
   onStartWorkspace: (issue: IssueWithStatus) => void;
   onDryRun?: (issue: IssueWithStatus) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
@@ -153,6 +154,7 @@ export function BoardKanbanView({
   onCreateCancel,
   onIssueClick,
   onWorkspaceClick,
+  onOpenDiff,
   onStartWorkspace,
   onDryRun,
   onDragStart,
@@ -297,6 +299,7 @@ export function BoardKanbanView({
               onCreateCancel={onCreateCancel}
               onIssueClick={onIssueClick}
               onWorkspaceClick={onWorkspaceClick}
+              onOpenDiff={onOpenDiff}
               onStartWorkspace={onStartWorkspace}
               onDryRun={onDryRun}
               onDragStart={onDragStart}

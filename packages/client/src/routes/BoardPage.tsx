@@ -103,6 +103,7 @@ export function BoardPage() {
   const [mutating, setMutating] = useState(false);
   const [workspaceIssue, setWorkspaceIssue] = useState<IssueWithStatus | null>(null);
   const [workspaceInitial, setWorkspaceInitial] = useState<{ workspaceId: string; sessionId: string } | null>(null);
+  const [workspaceInitialDiff, setWorkspaceInitialDiff] = useState(false);
   const [workspaceOpenCreate, setWorkspaceOpenCreate] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [focusMode, setFocusMode] = useState(() => {
@@ -1060,9 +1061,18 @@ export function BoardPage() {
     setSelectedIssue(null);
     setWorkspaceIssue(issue);
     setWorkspaceOpenCreate(false);
+    setWorkspaceInitialDiff(false);
     if (workspaceId) {
       setWorkspaceInitial({ workspaceId, sessionId });
     }
+  }
+
+  function handleOpenDiff(issue: IssueWithStatus, workspaceId: string) {
+    setSelectedIssue(null);
+    setWorkspaceIssue(issue);
+    setWorkspaceOpenCreate(false);
+    setWorkspaceInitialDiff(true);
+    setWorkspaceInitial({ workspaceId, sessionId: "" });
   }
 
   async function handleOpenWorkspaceById(workspaceId: string, issueId: string) {
@@ -2204,6 +2214,7 @@ export function BoardPage() {
               canStartWorkspace={canStartWorkspace}
               onIssueClick={handleIssueClick}
               onWorkspaceClick={handleManageWorkspaces}
+              onOpenDiff={handleOpenDiff}
               onStartWorkspace={handleStartWorkspace}
               onDryRun={panels.setDryRunIssue}
               onDragStart={handleBoardDragStart}
@@ -2278,6 +2289,7 @@ export function BoardPage() {
             onCreateCancel={() => setCreatingInColumnId(null)}
             onIssueClick={handleBoardIssueClick}
             onWorkspaceClick={handleManageWorkspaces}
+            onOpenDiff={handleOpenDiff}
             onStartWorkspace={handleStartWorkspace}
             onDryRun={panels.setDryRunIssue}
             onDragStart={handleBoardDragStart}
@@ -2338,7 +2350,7 @@ export function BoardPage() {
           key={`${workspaceIssue.id}:${workspaceInitial?.workspaceId ?? "new"}:${workspaceOpenCreate ? "create" : "view"}`}
           issue={workspaceIssue}
           project={activeProject ?? null}
-          onClose={() => { setWorkspaceIssue(null); setWorkspaceInitial(null); setWorkspaceOpenCreate(false); }}
+          onClose={() => { setWorkspaceIssue(null); setWorkspaceInitial(null); setWorkspaceOpenCreate(false); setWorkspaceInitialDiff(false); }}
           onWorkspaceChange={() => refetchBoard()}
           onWorkspaceCreating={(issueId) => setPendingWorkspaceIssueIds((prev) => new Set([...prev, issueId]))}
           onWorkspaceCreateSettled={(issueId) => setPendingWorkspaceIssueIds((prev) => {
@@ -2349,6 +2361,7 @@ export function BoardPage() {
           initialWorkspaceId={workspaceInitial?.workspaceId}
           initialSessionId={workspaceInitial?.sessionId}
           initialShowCreate={workspaceOpenCreate}
+          initialShowDiff={workspaceInitialDiff}
         />
       )}
       <ToastContainer />

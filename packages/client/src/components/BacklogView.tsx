@@ -117,6 +117,7 @@ export interface BacklogViewProps {
   canStartWorkspace: boolean;
   onIssueClick: (issue: IssueWithStatus) => void;
   onWorkspaceClick: (issue: IssueWithStatus, workspaceId?: string) => void;
+  onOpenDiff?: (issue: IssueWithStatus, workspaceId: string) => void;
   onStartWorkspace: (issue: IssueWithStatus) => void;
   onDryRun?: (issue: IssueWithStatus) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
@@ -140,6 +141,7 @@ export function BacklogView({
   canStartWorkspace,
   onIssueClick,
   onWorkspaceClick,
+  onOpenDiff,
   onStartWorkspace,
   onDryRun,
   onDragStart,
@@ -655,6 +657,7 @@ export function BacklogView({
                           issue={issue}
                           onClick={onIssueClick}
                           onWorkspaceClick={onWorkspaceClick}
+                          onOpenDiff={onOpenDiff}
                           onStartWorkspace={onStartWorkspace}
                           onDryRun={onDryRun}
                           onDragStart={onDragStart}
