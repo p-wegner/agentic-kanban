@@ -2,6 +2,7 @@ param(
   [string]$Url = "http://127.0.0.1:5173",
   [int]$TimeoutSeconds = 20,
   [int]$SnippetLength = 500,
+  [int]$PruneRetentionMinutes = 30,
   [switch]$SelfTest
 )
 
@@ -53,7 +54,75 @@ function Assert-SelfTest {
   }
 }
 
+function Remove-StalePlaywrightArtifacts {
+  param(
+    [string]$ArtifactDir,
+    [int]$RetentionMinutes = 30
+  )
+
+  if (-not (Test-Path $ArtifactDir)) {
+    return
+  }
+
+  $cutoff = (Get-Date).AddMinutes(-$RetentionMinutes)
+  $removed = 0
+
+  Get-ChildItem -Path $ArtifactDir -File -Recurse |
+    Where-Object { $_.LastWriteTimeUtc -lt $cutoff.ToUniversalTime() } |
+    ForEach-Object {
+      try {
+        Remove-Item $_.FullName -Force -ErrorAction Stop
+        $removed++
+      } catch {
+        Write-Host "prune: could not remove $($_.FullName): $_"
+      }
+    }
+
+  # Remove empty subdirectories left behind (bottom-up so nested dirs clear)
+  Get-ChildItem -Path $ArtifactDir -Directory -Recurse |
+    Sort-Object { $_.FullName.Length } -Descending |
+    Where-Object { @(Get-ChildItem $_.FullName -Force).Count -eq 0 } |
+    ForEach-Object {
+      try { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue } catch {}
+    }
+
+  if ($removed -gt 0) {
+    Write-Host "prune: removed $removed stale artifact(s) older than $RetentionMinutes min"
+  }
+}
+
 function Invoke-SelfTest {
+  # --- Prune logic tests ---
+  $testDir = Join-Path $env:TEMP "pw-smoke-prune-test-$(Get-Random)"
+  try {
+    New-Item -ItemType Directory -Path $testDir -Force | Out-Null
+
+    # Create stale file (old enough to prune)
+    $stale = Join-Path $testDir "stale.yml"
+    Set-Content -Path $stale -Value "old" -Force
+    $staleItem = Get-Item $stale
+    $staleItem.LastWriteTimeUtc = (Get-Date).AddMinutes(-60).ToUniversalTime()
+
+    # Create recent file (within retention window)
+    $recent = Join-Path $testDir "recent.yml"
+    Set-Content -Path $recent -Value "fresh" -Force
+
+    # Prune with 30-min retention
+    Remove-StalePlaywrightArtifacts -ArtifactDir $testDir -RetentionMinutes 30
+
+    Assert-SelfTest (-not (Test-Path $stale)) "Stale file should have been removed."
+    Assert-SelfTest (Test-Path $recent) "Recent file should have been kept."
+
+    # --- Empty-dir cleanup ---
+    $nested = Join-Path $testDir "sub"
+    New-Item -ItemType Directory -Path $nested -Force | Out-Null
+    Remove-StalePlaywrightArtifacts -ArtifactDir $testDir -RetentionMinutes 30
+    Assert-SelfTest (-not (Test-Path $nested)) "Empty subdir should have been removed."
+  } finally {
+    Remove-Item $testDir -Recurse -Force -ErrorAction SilentlyContinue
+  }
+
+  # --- Snippet formatter tests ---
   $shapes = @(
     $null,
     "",
@@ -88,6 +157,12 @@ function Invoke-SelfTest {
 if ($SelfTest) {
   Invoke-SelfTest
   exit 0
+}
+
+# Prune stale .playwright-cli artifacts to avoid ENOSPC from unbounded accumulation.
+$artifactDir = Join-Path $PSScriptRoot ".." ".playwright-cli" -Resolve -ErrorAction SilentlyContinue
+if ($artifactDir) {
+  Remove-StalePlaywrightArtifacts -ArtifactDir $artifactDir -RetentionMinutes $PruneRetentionMinutes
 }
 
 $matcher = "Todo|In Progress|No issues|No projects registered"
