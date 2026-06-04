@@ -13,6 +13,28 @@ import { snapshotAndCleanStaleDevProcesses, type BoardMonitorResourceSnapshot } 
 import { scanDirtyMainCheckouts, type DirtyMainCheckoutWarning } from "../services/dirty-main-checkout.js";
 import { resolveMergeStrategy } from "./merge-strategy.js";
 
+/**
+ * Per-project hands-off mode. A `board_autodrive_<projectId>` preference set to
+ * "true" opts that project into autonomous driving (auto-start / relaunch / refill)
+ * EVEN WHEN the global `auto_monitor` toggle is off. This is what lets a freshly-
+ * registered project be developed hands-off: the monitor engine already iterates all
+ * projects, so a durable per-project flag is enough. The flag is a separate pref key,
+ * so the boot-time reset of the GLOBAL `auto_monitor` (startup-tasks.ts) never clobbers it.
+ */
+const AUTODRIVE_KEY_RE = /^board_autodrive_([0-9a-f-]+)$/;
+export function autoDriveProjectIds(prefMap: Map<string, string>): Set<string> {
+  const ids = new Set<string>();
+  for (const [key, value] of prefMap) {
+    const m = AUTODRIVE_KEY_RE.exec(key);
+    if (m && value === "true") ids.add(m[1]);
+  }
+  return ids;
+}
+/** The monitor cycle should run/reschedule when the global toggle is on OR any project is auto-driven. */
+export function monitorShouldRun(prefMap: Map<string, string>): boolean {
+  return prefMap.get("auto_monitor") === "true" || autoDriveProjectIds(prefMap).size > 0;
+}
+
 export interface MonitorState {
   timer: ReturnType<typeof setTimeout> | null;
   nextRunAt: string | null;
@@ -104,7 +126,16 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort }: 
     try {
       const prefRows = await db.select().from(preferences);
       const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
-      if (!force && prefMap.get("auto_monitor") !== "true") return;
+      if (!force && !monitorShouldRun(prefMap)) return;
+      // Scope this cycle's actions: when the global toggle is on, act on every project
+      // (legacy behaviour); otherwise act only on projects in per-project hands-off mode.
+      const globalOn = prefMap.get("auto_monitor") === "true";
+      const driveIds = autoDriveProjectIds(prefMap);
+      const allowProject = (projectId: string) => globalOn || driveIds.has(projectId);
+      const nudgeStart = prefMap.get("nudge_auto_start") === "true";
+      // Auto-start is opt-in: under the global monitor it still requires nudge_auto_start;
+      // an auto-driven project auto-starts unconditionally (that is the point of the mode).
+      const shouldAutoStartProject = (projectId: string) => driveIds.has(projectId) || (globalOn && nudgeStart);
       if (isInMaintenanceWindow(prefMap)) {
         warningCount = (await refreshDirtyMainCheckoutWarnings()).length;
         const endTime = prefMap.get("monitor_maintenance_window_end");
@@ -137,7 +168,8 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort }: 
           (${issues.currentNodeId} IS NOT NULL AND (${workflowNodes.nodeType} IS NULL OR ${workflowNodes.nodeType} != 'end'))
           OR (${issues.currentNodeId} IS NULL AND ${issues.statusId} IN (${sql.join(activeStatusIds.map((id) => sql`${id}`), sql`, `)}))
         )`);
-      Object.assign(cycleStats, await processWorkspaceCandidates(candidates, {
+      const allowedCandidates = candidates.filter((candidate) => allowProject(candidate.projectId));
+      Object.assign(cycleStats, await processWorkspaceCandidates(allowedCandidates, {
         sessionManager,
         boardEvents,
         serverPort,
@@ -149,15 +181,15 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort }: 
         getRecentAgentExcerpts,
         shouldSkipNudge,
       }));
-      await runAutoStart(prefMap, { serverPort, boardEvents, logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
-      await runBacklogEmptyStrategy(prefMap, { serverPort, boardEvents, logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
+      await runAutoStart(prefMap, { serverPort, boardEvents, allowProject: shouldAutoStartProject, logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
+      await runBacklogEmptyStrategy(prefMap, { serverPort, boardEvents, allowProject, logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
     } catch (err) {
       console.warn("[monitor] Cycle error:", err);
     } finally {
       monitorState.lastRun = { at: new Date().toISOString(), ...cycleStats, resources: resourceSummary, warnings: warningCount };
       const prefRows = await db.select().from(preferences).catch(() => []);
       const prefMap = new Map(prefRows.map((r: { key: string; value: string }) => [r.key, r.value]));
-      if (prefMap.get("auto_monitor") === "true") {
+      if (monitorShouldRun(prefMap)) {
         const intervalMin = parseInt(prefMap.get("auto_monitor_interval") || "4", 10);
         monitorState.nextRunAt = new Date(Date.now() + intervalMin * 60 * 1000).toISOString();
         monitorState.timer = setTimeout(runMonitorCycle, intervalMin * 60 * 1000);
@@ -171,7 +203,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort }: 
     await refreshDirtyMainCheckoutWarnings().catch((err) => console.warn("[monitor] Dirty main-checkout health check failed:", err));
     const prefRows = await db.select().from(preferences).catch(() => []);
     const prefMap = new Map(prefRows.map((r: { key: string; value: string }) => [r.key, r.value]));
-    const enabled = prefMap.get("auto_monitor") === "true";
+    const enabled = monitorShouldRun(prefMap);
     const intervalMin = parseInt(prefMap.get("auto_monitor_interval") || "4", 10);
     if (enabled && (!monitorState.timer || intervalMin !== monitorState.currentIntervalMin)) {
       if (monitorState.timer && intervalMin !== monitorState.currentIntervalMin) {
@@ -203,7 +235,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort }: 
       if (!force) {
         const prefRows = await db.select().from(preferences).catch(() => []);
         const prefMap = new Map(prefRows.map((r: { key: string; value: string }) => [r.key, r.value]));
-        if (prefMap.get("auto_monitor") === "true") return null;
+        if (monitorShouldRun(prefMap)) return null;
       }
       const snapshot = await snapshotAndCleanStaleDevProcesses(db);
       monitorState.lastResourceSnapshot = snapshot;
