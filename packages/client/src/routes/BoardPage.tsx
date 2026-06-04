@@ -165,6 +165,7 @@ export function BoardPage() {
   const [sessionTodos, setSessionTodos] = useState<Record<string, TodoItem[]>>({});
   const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>([]);
   const pendingBoardRefreshRef = useRef(false);
+  const boardEtagRef = useRef<Record<string, string>>({});
   const pendingGRef = useRef(false);
   const pendingGTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
@@ -270,9 +271,24 @@ export function BoardPage() {
   const refetchBoard = useCallback(async (projectId?: string) => {
     const pid = projectId || activeProjectId;
     if (!pid) return;
-    const board = await apiFetch<StatusWithIssues[]>(
-      `/api/projects/${pid}/board`,
-    );
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const cachedEtag = boardEtagRef.current[pid];
+    if (cachedEtag) headers["If-None-Match"] = cachedEtag;
+    const res = await fetch(`/api/projects/${pid}/board`, { headers });
+    if (res.status === 304) {
+      return columnsRef.current;
+    }
+    if (!res.ok) {
+      let message = `API error: ${res.status} ${res.statusText}`;
+      try {
+        const body: unknown = await res.json();
+        if ((body as any).error) message = (body as any).error;
+      } catch {}
+      throw new Error(message);
+    }
+    const etag = res.headers.get("ETag");
+    if (etag) boardEtagRef.current[pid] = etag;
+    const board = await res.json() as StatusWithIssues[];
     setColumns(board);
     columnsRef.current = board;
     // Clear stale live data for issues whose agent is no longer running
