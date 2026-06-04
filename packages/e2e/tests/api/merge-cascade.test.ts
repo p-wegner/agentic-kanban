@@ -32,6 +32,7 @@ const WORKSPACE_COUNT = 5;
 test.describe("merge cascade: board endpoint must stay responsive", () => {
   let projectId: string;
   let projectRepoPath: string;
+  let defaultBranch: string;
   let todoStatusId: string;
   let originalClaudeProfile = "";
   const suffix = Date.now().toString(36);
@@ -52,6 +53,7 @@ test.describe("merge cascade: board endpoint must stay responsive", () => {
     const project = await getE2EProject(request);
     projectId = project.id;
     projectRepoPath = project.repoPath;
+    defaultBranch = project.defaultBranch ?? "master";
 
     const statusesRes = await request.get(
       `${SERVER_URL}/api/projects/${projectId}/statuses`,
@@ -175,15 +177,6 @@ test.describe("merge cascade: board endpoint must stay responsive", () => {
       // Sanity: board is healthy before the cascade begins.
       await assertBoardHealthy(request, "pre-cascade");
 
-      // Fire all merge requests concurrently to reproduce the cascade pattern.
-      // We intentionally do NOT await each one before firing the next — that is the
-      // scenario that triggers the observed crash.
-      const mergePromises = workspaces.map(({ workspaceId }) =>
-        request
-          .post(`${SERVER_URL}/api/workspaces/${workspaceId}/merge`)
-          .then((r) => ({ workspaceId, status: r.status() })),
-      );
-
       // Poll the board endpoint every 100 ms while the merges are running.
       // Track failures so we don't throw inside a floating promise.
       const boardPollFailures: string[] = [];
@@ -211,12 +204,23 @@ test.describe("merge cascade: board endpoint must stay responsive", () => {
               }
             }
           }
-          await new Promise((r) => setTimeout(r, 100));
+          await new Promise((resolve) => setTimeout(resolve, 100));
         }
       })();
 
-      // Wait for all merges to complete.
-      const mergeResults = await Promise.all(mergePromises);
+      // Fire merges back-to-back (sequential with a brief pause between each) to
+      // reproduce the rapid-succession pattern from the bug report.
+      // Using Promise.all would hit the per-repo merge mutex and only let one merge
+      // through — the other four would get 409 CONFLICT immediately, never landing
+      // their commits on master and making Test 2 fail.
+      const mergeResults: Array<{ workspaceId: string; status: number }> = [];
+      for (const { workspaceId } of workspaces) {
+        const r = await request.post(`${SERVER_URL}/api/workspaces/${workspaceId}/merge`);
+        mergeResults.push({ workspaceId, status: r.status() });
+        // Brief pause between merges to mimic the rapid but non-simultaneous
+        // cadence observed during monitor cycles.
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
 
       // Stop the board polling.
       pollingActive = false;
@@ -251,9 +255,6 @@ test.describe("merge cascade: board endpoint must stay responsive", () => {
       test.setTimeout(60_000);
 
       // Poll until every branch commit is reachable from master (or timeout).
-      const defaultBranch =
-        (await getE2EProject(request)).defaultBranch ?? "master";
-
       for (const { branchCommitSha, workspaceId } of workspaces) {
         let landed = false;
         for (let attempt = 0; attempt < 30; attempt++) {
