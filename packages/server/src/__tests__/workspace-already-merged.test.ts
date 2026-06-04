@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
@@ -159,6 +160,53 @@ describe("checkAlreadyMerged", () => {
     const { workspaceId } = await seedScenario(db, { isDirect: true });
     const svc = createWorkspaceMergeService({ database: db, gitService: makeGitService() as never, createBackup: async () => {} });
     await expect(svc.checkAlreadyMerged(workspaceId)).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+});
+
+describe("mergeWorkspace not-approved guard", () => {
+  let db: ReturnType<typeof createTestDb>["db"];
+  beforeEach(() => {
+    ({ db } = createTestDb());
+  });
+
+  it("throws CONFLICT with mergeReason=not_approved when readyForMerge=false", async () => {
+    const { workspaceId } = await seedScenario(db, {
+      workspaceStatus: "idle",
+      readyForMerge: false,
+    });
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: makeGitService() as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+
+    await expect(svc.mergeWorkspace(workspaceId)).rejects.toMatchObject({
+      code: "CONFLICT",
+      data: { mergeReason: "not_approved" },
+    });
+  });
+
+  it("throws CONFLICT with mergeReason=already_merged when workspace is closed+mergedAt", async () => {
+    const now = new Date().toISOString();
+    const { workspaceId } = await seedScenario(db, {
+      workspaceStatus: "closed",
+      readyForMerge: false,
+    });
+    // Mark mergedAt directly so the guard fires
+    await db.update(workspaces).set({ mergedAt: now }).where(eq(workspaces.id, workspaceId));
+
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: makeGitService() as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+
+    await expect(svc.mergeWorkspace(workspaceId)).rejects.toMatchObject({
+      code: "CONFLICT",
+      data: { mergeReason: "already_merged" },
+    });
   });
 });
 
