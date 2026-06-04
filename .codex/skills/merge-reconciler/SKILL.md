@@ -117,6 +117,7 @@ For ONE cluster:
    ```bash
    git merge --no-ff <other-feature-branch>   # repeat per other cluster member
    ```
+   **CRITICAL: always use `--no-ff`. NEVER use `--squash`.** A squash merge repackages the other branch's commits into a single new commit that is NOT a descendant of the other branch — so `checkAlreadyMerged` (which verifies the sibling's HEAD is reachable from base) will return `isAlreadyMerged: false` even after the combined branch lands, making `reconcile-as-done` fail and leaving the sibling stranded. `--no-ff` preserves the original commits as ancestors, so `isAncestor` succeeds.
    (The other branches exist as refs in the shared repo, reachable from this worktree.) Resolve conflict markers, `git add`, commit. If a branch is better cherry-picked (small, independent commits), use `git cherry-pick` instead — your choice; goal is ONE combined branch with the cluster's union of work, resolved a single time.
 4. Make the build sane: don't leave conflict markers; if there are colliding migrations WITHIN the cluster, renumber by re-running through the board (land the combined branch and let auto-renumber handle siblings) — do NOT hand-edit. Commit everything (`git status` must be clean).
 5. **Land the combined branch** via the board (this is the only write to base):
@@ -134,7 +135,9 @@ For ONE cluster:
    # only if isAlreadyMerged === true:
    curl -s -X POST http://localhost:{{serverPort}}/api/workspaces/<siblingId>/reconcile-as-done
    ```
-   If `already-merged-status` says NOT merged for a sibling, that sibling's work did not actually land (you cherry-picked a subset, or skipped it) — do NOT reconcile it; leave it for a follow-up or escalate it.
+   **Wait for the integration workspace's `/merge` to return 200 before calling `already-merged-status`** — the merge must fully commit to base before the ancestry check can succeed.
+   If `already-merged-status` says NOT merged for a sibling, that sibling's work did not actually land. The most common cause is that you used `git merge --squash` (which breaks ancestry — see the `--no-ff` note in Step 4.3). Do NOT reconcile it; escalate it via Step 6.
+   The `reconcile-as-done` endpoint re-runs `checkAlreadyMerged` server-side — it is a second guard, not a bypass. If it returns a 400 error ("Branch is not fully merged"), trust it and do NOT force-close the workspace.
 
 Repeat Step 4 per cluster. Attempt cap: 2 tries per cluster.
 
