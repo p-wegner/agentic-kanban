@@ -5,3 +5,4 @@ export * from "./failure-keywords.js";
 export * from "./status-view.js";
 export * from "./workspace-activity-state.js";
 export * from "./branch.js";
+export * from "./outbound-webhook.js";

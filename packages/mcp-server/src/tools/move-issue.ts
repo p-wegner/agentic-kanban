@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { notifyBoard } from "../notify.js";
 import { syncCurrentNodeToStatus, getOutgoingTransitions } from "@agentic-kanban/shared/lib/workflow-engine";
 import { requireEntity, resolveStatusByName } from "../db-utils.js";
+import { validateWebhookUrl, fireWebhook } from "@agentic-kanban/shared/lib";
 
 export function registerMoveIssue(server: McpServer) {
   server.tool(
@@ -15,14 +16,19 @@ export function registerMoveIssue(server: McpServer) {
       statusName: z.string().describe("Target status column name (e.g., 'Todo', 'In Progress', 'In Review', 'Done', 'Cancelled')"),
     },
     async ({ issueId, statusName }) => {
-      const existingRows = await db.select({ projectId: schema.issues.projectId, currentNodeId: schema.issues.currentNodeId })
+      const existingRows = await db.select({
+          projectId: schema.issues.projectId,
+          currentNodeId: schema.issues.currentNodeId,
+          issueNumber: schema.issues.issueNumber,
+          title: schema.issues.title,
+        })
         .from(schema.issues)
         .where(eq(schema.issues.id, issueId))
         .limit(1);
       const r0 = requireEntity(existingRows, issueId, "Issue");
       if (!r0.ok) return r0.error;
 
-      const { projectId, currentNodeId } = r0.value;
+      const { projectId, currentNodeId, issueNumber, title } = r0.value;
 
       // For workflow-driven issues: validate that the target status is reachable
       // via an outgoing edge from the current node.
@@ -61,6 +67,28 @@ export function registerMoveIssue(server: McpServer) {
       await syncCurrentNodeToStatus(db, issueId).catch(() => {});
 
       notifyBoard(projectId, "mcp_move_issue");
+
+      // Fire outbound webhook if configured for this project (best-effort)
+      const webhookPref = await db
+        .select({ value: schema.preferences.value })
+        .from(schema.preferences)
+        .where(eq(schema.preferences.key, `outbound_webhook_url_${projectId}`))
+        .limit(1)
+        .then((rows) => rows[0]?.value ?? null)
+        .catch(() => null);
+      const webhookUrl = validateWebhookUrl(webhookPref);
+      if (webhookUrl) {
+        fireWebhook(webhookUrl, {
+          event: "issue.status_changed",
+          issueId,
+          issueNumber,
+          title,
+          projectId,
+          newStatusId: r.statusId,
+          newStatusName: statusName,
+          statusChangedAt: now,
+        });
+      }
 
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ id: issueId, movedTo: statusName }, null, 2) }],
