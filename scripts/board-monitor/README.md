@@ -49,9 +49,22 @@ kill "$(cat scripts/board-monitor/loop.pid)"
 # Run the real render check against the main board UI.
 .\scripts\board-monitor\frontend-smoke.ps1 -Url "http://127.0.0.1:5173"
 
-# Exercise the snippet formatter without launching a browser.
+# Exercise the snippet formatter and prune logic without launching a browser.
 .\scripts\board-monitor\frontend-smoke.ps1 -SelfTest
 ```
+
+### Artifact Pruning
+
+Each smoke check run prunes stale files from the repo's `.playwright-cli/` directory **before**
+launching the browser. This prevents unbounded snapshot/log accumulation from triggering ENOSPC
+errors on repeated monitor cycles.
+
+**Retention rule:** files with `LastWriteTimeUtc` older than **30 minutes** are removed
+(configurable via `-PruneRetentionMinutes`). The most recent artifacts from the current or
+previous run are always kept. Empty subdirectories left after file removal are also cleaned up.
+
+The prune step is scoped to `.playwright-cli/` only — it never touches screenshots, logs, or
+other files outside that directory.
 
 > **`objective.md` is re-read at the start of every iteration** — edit it (including its TUNABLE
 > TARGETS block: agent target, backlog floor, per-cycle start cap) and the **next cycle picks it up
