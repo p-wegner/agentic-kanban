@@ -381,6 +381,16 @@ export function IssueDetailPanel({
   const [newChecklistItem, setNewChecklistItem] = useState("");
   const [savingChecklist, setSavingChecklist] = useState(false);
 
+  // Inline edit state (independent of the full edit form)
+  const [inlineEditingTitle, setInlineEditingTitle] = useState(false);
+  const [inlineTitleValue, setInlineTitleValue] = useState(issue.title);
+  const [inlineEditingDescription, setInlineEditingDescription] = useState(false);
+  const [inlineDescriptionValue, setInlineDescriptionValue] = useState(issue.description ?? "");
+  const [inlineSaving, setInlineSaving] = useState<"title" | "description" | null>(null);
+  const [inlineError, setInlineError] = useState<string | null>(null);
+  const inlineTitleRef = useRef<HTMLInputElement>(null);
+  const inlineDescriptionRef = useRef<HTMLTextAreaElement>(null);
+
   // Track unsaved changes for warning
   const hasChanges = editing && (
     title !== issue.title ||
@@ -455,7 +465,17 @@ export function IssueDetailPanel({
       setSkipAutoReview(issue.skipAutoReview ?? false);
       setChecklist(issue.checklist ?? []);
     }
+    if (!inlineEditingTitle) setInlineTitleValue(issue.title);
+    if (!inlineEditingDescription) setInlineDescriptionValue(issue.description ?? "");
   }, [issue, editing]);
+
+  useEffect(() => {
+    if (inlineEditingTitle) inlineTitleRef.current?.focus();
+  }, [inlineEditingTitle]);
+
+  useEffect(() => {
+    if (inlineEditingDescription) inlineDescriptionRef.current?.focus();
+  }, [inlineEditingDescription]);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -815,6 +835,58 @@ export function IssueDetailPanel({
       // Don't close panel — F1 fix. Parent will re-render with updated data.
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleInlineTitleSave() {
+    const trimmed = inlineTitleValue.trim();
+    if (!trimmed || inlineSaving) return;
+    if (trimmed === issue.title) {
+      setInlineEditingTitle(false);
+      return;
+    }
+    setInlineSaving("title");
+    setInlineError(null);
+    const prev = issue.title;
+    onIssueUpdate({ ...issue, title: trimmed });
+    try {
+      await apiFetch(`/api/issues/${issue.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ title: trimmed }),
+      });
+      setInlineEditingTitle(false);
+    } catch (err) {
+      onIssueUpdate({ ...issue, title: prev });
+      setInlineTitleValue(prev);
+      setInlineError(err instanceof Error ? err.message : "Failed to save title");
+    } finally {
+      setInlineSaving(null);
+    }
+  }
+
+  async function handleInlineDescriptionSave() {
+    if (inlineSaving) return;
+    const value = inlineDescriptionValue.trim();
+    const prev = issue.description ?? "";
+    if (value === prev) {
+      setInlineEditingDescription(false);
+      return;
+    }
+    setInlineSaving("description");
+    setInlineError(null);
+    onIssueUpdate({ ...issue, description: value || undefined });
+    try {
+      await apiFetch(`/api/issues/${issue.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ description: value || undefined }),
+      });
+      setInlineEditingDescription(false);
+    } catch (err) {
+      onIssueUpdate({ ...issue, description: prev || undefined });
+      setInlineDescriptionValue(prev);
+      setInlineError(err instanceof Error ? err.message : "Failed to save description");
+    } finally {
+      setInlineSaving(null);
     }
   }
 
@@ -1184,7 +1256,7 @@ export function IssueDetailPanel({
             );
           })()}
 
-          {/* Title - always visible, editable in edit mode */}
+          {/* Title - always visible, editable in edit mode or via inline click */}
           <div>
             {editing ? (
               <>
@@ -1199,12 +1271,39 @@ export function IssueDetailPanel({
                   className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
                 />
               </>
+            ) : inlineEditingTitle ? (
+              <input
+                ref={inlineTitleRef}
+                type="text"
+                aria-label="Issue title"
+                value={inlineTitleValue}
+                onChange={(e) => setInlineTitleValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.preventDefault(); handleInlineTitleSave(); }
+                  if (e.key === "Escape") { e.stopPropagation(); setInlineEditingTitle(false); setInlineTitleValue(issue.title); setInlineError(null); }
+                }}
+                onBlur={handleInlineTitleSave}
+                disabled={inlineSaving === "title"}
+                className="w-full text-base font-medium border border-brand-400 dark:border-brand-500 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 disabled:opacity-60"
+              />
             ) : (
-              <h3 className="text-base font-medium text-gray-900 dark:text-gray-100">
+              <h3
+                className="text-base font-medium text-gray-900 dark:text-gray-100 cursor-text hover:bg-gray-50 dark:hover:bg-gray-800 rounded px-1 -mx-1 py-0.5 transition-colors"
+                title="Click to edit title"
+                onClick={() => { setInlineTitleValue(issue.title); setInlineEditingTitle(true); }}
+              >
                 {issue.title}
               </h3>
             )}
           </div>
+
+          {/* Non-blocking inline save error */}
+          {inlineError && (
+            <div className="flex items-center justify-between gap-2 text-xs text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded px-2.5 py-1.5">
+              <span>{inlineError}</span>
+              <button type="button" onClick={() => setInlineError(null)} className="shrink-0 text-red-500 hover:text-red-700">&times;</button>
+            </div>
+          )}
 
           {/* Description - always visible, editable in edit mode */}
           <div>
@@ -1212,6 +1311,16 @@ export function IssueDetailPanel({
               <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
                 Description
               </label>
+              {!editing && !inlineEditingDescription && (
+                <button
+                  type="button"
+                  onClick={() => { setInlineDescriptionValue(issue.description ?? ""); setInlineEditingDescription(true); }}
+                  className="text-xs text-gray-400 dark:text-gray-500 hover:text-brand-600 dark:hover:text-brand-400 transition-colors"
+                  title="Edit description inline"
+                >
+                  Edit
+                </button>
+              )}
               {editing && (
                 <div className="flex border border-gray-300 dark:border-gray-600 rounded overflow-hidden">
                   <button
@@ -1287,6 +1396,39 @@ export function IssueDetailPanel({
               </>
               )}
               </>
+            ) : inlineEditingDescription ? (
+              <div>
+                <textarea
+                  ref={inlineDescriptionRef}
+                  value={inlineDescriptionValue}
+                  onChange={(e) => setInlineDescriptionValue(e.target.value)}
+                  rows={panelMode !== "sidebar" ? 16 : 10}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") { e.stopPropagation(); setInlineEditingDescription(false); setInlineDescriptionValue(issue.description ?? ""); setInlineError(null); }
+                  }}
+                  disabled={inlineSaving === "description"}
+                  className="w-full text-sm border border-brand-400 dark:border-brand-500 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 disabled:opacity-60"
+                  placeholder="Add a description..."
+                />
+                <div className="flex items-center gap-2 mt-1.5">
+                  <button
+                    type="button"
+                    onClick={handleInlineDescriptionSave}
+                    disabled={inlineSaving === "description"}
+                    className="text-xs font-medium bg-brand-600 text-white px-2.5 py-1 rounded hover:bg-brand-700 disabled:opacity-50 transition-colors"
+                  >
+                    {inlineSaving === "description" ? "Saving..." : "Save"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setInlineEditingDescription(false); setInlineDescriptionValue(issue.description ?? ""); setInlineError(null); }}
+                    className="text-xs font-medium text-gray-500 dark:text-gray-400 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <span className="text-xs text-gray-400 dark:text-gray-500">Esc to cancel</span>
+                </div>
+              </div>
             ) : issue.description ? (
               <div className="markdown-body">
                 <ReactMarkdown>{normalizeMarkdown(issue.description)}</ReactMarkdown>
