@@ -40,6 +40,7 @@ export interface BoardKanbanViewProps {
   onCreateIssue: (data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; skipAutoReview?: boolean; profile?: ProfileSelection; model?: string; isDirect?: boolean; skillId?: string }) => Promise<void>;
   onExpandCreate: (statusId: string, statusName: string, state: Partial<CreateIssueFormState>) => void;
   selectedIssueIds?: Set<string>;
+  keyboardCursorIssueId?: string | null;
   allProjectTags?: ProjectTag[];
   quickUpdate?: QuickUpdateCallbacks;
   wipLimits?: Record<string, number | null>;
@@ -78,6 +79,7 @@ export function BoardKanbanView({
   onCreateIssue,
   onExpandCreate,
   selectedIssueIds,
+  keyboardCursorIssueId,
   allProjectTags,
   quickUpdate,
   wipLimits,
@@ -157,6 +159,7 @@ export function BoardKanbanView({
               pendingIssueIds={pendingIssueIds}
               pendingWorkspaceIssueIds={pendingWorkspaceIssueIds}
               selectedIssueIds={selectedIssueIds}
+              keyboardCursorIssueId={keyboardCursorIssueId}
               allProjectTags={allProjectTags}
               quickUpdate={quickUpdate}
               wipLimit={wipLimits?.[col.id]}

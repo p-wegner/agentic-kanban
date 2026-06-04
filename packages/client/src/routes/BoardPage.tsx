@@ -128,6 +128,9 @@ export function BoardPage() {
   const pendingGRef = useRef(false);
   const pendingGTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
+  const [keyboardCursorIssueId, setKeyboardCursorIssueId] = useState<string | null>(null);
+  const keyboardCursorIssueIdRef = useRef<string | null>(null);
+  keyboardCursorIssueIdRef.current = keyboardCursorIssueId;
 
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     const routeView = getAppRouteView(window.location.pathname);
@@ -895,6 +898,7 @@ export function BoardPage() {
   function handleIssueClick(issue: IssueWithStatus) {
     if (pendingIssueIds.has(issue.id)) return;
     setSelectedIssue(issue);
+    setKeyboardCursorIssueId(null);
   }
 
   function handleManageWorkspaces(issue: IssueWithStatus, workspaceId?: string, sessionId = "") {
@@ -1133,6 +1137,12 @@ export function BoardPage() {
     });
   }, [selectedIssue?.id, selectedIssue?.issueNumber, selectedIssue?.title, ticketTrail.visit]);
 
+  useEffect(() => {
+    if (!keyboardCursorIssueId) return;
+    const el = document.querySelector(`[aria-current="true"]`);
+    el?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [keyboardCursorIssueId]);
+
   function toggleGroup(group: string) {
     setCollapsedGroups((prev) => {
       const next = new Set(prev);
@@ -1194,10 +1204,74 @@ export function BoardPage() {
         if (panels.showRunQueueForecast) { panels.setShowRunQueueForecast(false); return; }
         if (panels.showCodemod) { panels.setShowCodemod(false); return; }
         if (panels.showProjectHealth) { panels.setShowProjectHealth(false); return; }
+        if (selectedIssue) { setSelectedIssue(null); return; }
+        if (keyboardCursorIssueIdRef.current) { setKeyboardCursorIssueId(null); return; }
         if (searchQuery) {
           setSearchQuery("");
           document.getElementById("search-input")?.blur();
         }
+      }
+      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (isTextEntryTarget(e.target)) return;
+        const navColumns = viewMode === "kanban" ? [...activeColumns, ...(archiveExpanded ? archiveColumns : [])] : [];
+        if (navColumns.length === 0) return;
+        e.preventDefault();
+        const cursorId = keyboardCursorIssueIdRef.current;
+        let colIdx = -1;
+        let issueIdx = -1;
+        if (cursorId) {
+          for (let c = 0; c < navColumns.length; c++) {
+            const i = navColumns[c].issues.findIndex((issue) => issue.id === cursorId);
+            if (i !== -1) { colIdx = c; issueIdx = i; break; }
+          }
+        }
+        if (colIdx === -1) {
+          const firstCol = navColumns.find((c) => c.issues.length > 0);
+          if (!firstCol) return;
+          setKeyboardCursorIssueId(firstCol.issues[0].id);
+          return;
+        }
+        let newColIdx = colIdx;
+        let newIssueIdx = issueIdx;
+        if (e.key === "ArrowDown") {
+          if (issueIdx < navColumns[colIdx].issues.length - 1) {
+            newIssueIdx = issueIdx + 1;
+          }
+        } else if (e.key === "ArrowUp") {
+          if (issueIdx > 0) {
+            newIssueIdx = issueIdx - 1;
+          }
+        } else if (e.key === "ArrowRight") {
+          for (let c = colIdx + 1; c < navColumns.length; c++) {
+            if (navColumns[c].issues.length > 0) {
+              newColIdx = c;
+              newIssueIdx = Math.min(issueIdx, navColumns[c].issues.length - 1);
+              break;
+            }
+          }
+        } else if (e.key === "ArrowLeft") {
+          for (let c = colIdx - 1; c >= 0; c--) {
+            if (navColumns[c].issues.length > 0) {
+              newColIdx = c;
+              newIssueIdx = Math.min(issueIdx, navColumns[c].issues.length - 1);
+              break;
+            }
+          }
+        }
+        const target = navColumns[newColIdx]?.issues[newIssueIdx];
+        if (target) setKeyboardCursorIssueId(target.id);
+        return;
+      }
+      if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (isTextEntryTarget(e.target)) return;
+        const cursorId = keyboardCursorIssueIdRef.current;
+        if (!cursorId) return;
+        const issue = columnsRef.current.flatMap((c) => c.issues).find((i) => i.id === cursorId);
+        if (issue) {
+          e.preventDefault();
+          handleIssueClick(issue);
+        }
+        return;
       }
       if (e.key === "?" && !e.ctrlKey && !e.metaKey) {
         if (isTextEntryTarget(e.target)) return;
@@ -1296,7 +1370,7 @@ export function BoardPage() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [searchQuery, panels, filteredColumns, columns, handleViewModeChange, activeColumns]);
+  }, [searchQuery, panels, filteredColumns, columns, handleViewModeChange, activeColumns, archiveColumns, archiveExpanded, viewMode, selectedIssue]);
 
   // Register command palette actions
   useEffect(() => {
@@ -1868,6 +1942,7 @@ export function BoardPage() {
             onCreateIssue={handleCreateIssue}
             onExpandCreate={(statusId, statusName, state) => setExpandedCreatePanel({ statusId, statusName, state })}
             selectedIssueIds={bulk.selectedBoardIssueIds}
+            keyboardCursorIssueId={keyboardCursorIssueId}
             allProjectTags={allTags}
             quickUpdate={{
               onPriorityChange: handleQuickPriorityChange,
