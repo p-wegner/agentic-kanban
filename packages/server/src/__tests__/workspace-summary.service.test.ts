@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { issues, projects, projectStatuses, sessions, workflowEdges, workflowNodes, workflowTemplates, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { buildWorkspaceSummaryMap } from "../services/workspace-summary.service.js";
@@ -213,5 +213,77 @@ describe("workspace-summary.service", () => {
     const summaryMap = await buildWorkspaceSummaryMap([issueId], "main", db);
 
     expect(summaryMap.get(issueId)?.main?.contextTokens).toBe(42_000);
+  });
+
+  it("issues a bounded number of DB queries independent of issue count", async () => {
+    // Verifies the N+1 fix: DB round-trips must not grow linearly with issueCount.
+    // We seed N issues each with a workspace, count the execute() calls for N=2 vs
+    // N=6, and assert the delta is zero (all queries use IN-clauses over all IDs).
+    async function countQueriesForIssues(n: number): Promise<number> {
+      const { client, db } = createTestDb();
+      const now = new Date().toISOString();
+      const projectId = randomUUID();
+      const statusId = randomUUID();
+
+      await db.insert(projects).values({
+        id: projectId,
+        name: "Batch Project",
+        repoPath: "/tmp/batch-project",
+        repoName: "batch-project",
+        defaultBranch: "main",
+        createdAt: now,
+        updatedAt: now,
+      });
+      await db.insert(projectStatuses).values({
+        id: statusId,
+        projectId,
+        name: "Todo",
+        sortOrder: 0,
+        isDefault: true,
+        createdAt: now,
+      });
+
+      const issueIds: string[] = [];
+      for (let i = 0; i < n; i++) {
+        const issueId = randomUUID();
+        issueIds.push(issueId);
+        await db.insert(issues).values({
+          id: issueId,
+          issueNumber: i + 1,
+          title: `Issue ${i}`,
+          statusId,
+          projectId,
+          createdAt: now,
+          updatedAt: now,
+        });
+        await db.insert(workspaces).values({
+          id: randomUUID(),
+          issueId,
+          branch: `feature/issue-${i}`,
+          // closed so no git operations are triggered
+          status: "closed",
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+
+      let queryCount = 0;
+      const originalExecute = client.execute.bind(client);
+      const spy = vi.spyOn(client, "execute").mockImplementation((...args) => {
+        queryCount++;
+        return originalExecute(...args);
+      });
+
+      await buildWorkspaceSummaryMap(issueIds, "main", db);
+
+      spy.mockRestore();
+      return queryCount;
+    }
+
+    const queriesFor2 = await countQueriesForIssues(2);
+    const queriesFor6 = await countQueriesForIssues(6);
+
+    // Query count must be identical — all queries use IN clauses over all issue IDs.
+    expect(queriesFor6).toBe(queriesFor2);
   });
 });
