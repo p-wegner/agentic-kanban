@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, Fragment } from "react";
+import React, { useState, useRef, useEffect, useMemo, Fragment } from "react";
 import type { DiffComment, CreateDiffCommentRequest } from "@agentic-kanban/shared";
 
 interface DiffViewerProps {
@@ -77,6 +77,104 @@ function computeFileStats(lines: DiffLine[]): { additions: number; deletions: nu
     if (line.type === "delete") deletions++;
   }
   return { additions, deletions };
+}
+
+interface FileTreeNode {
+  name: string;
+  fullPath: string;
+  isFile: boolean;
+  children: FileTreeNode[];
+  additions: number;
+  deletions: number;
+  fileIdx: number;
+}
+
+function buildFileTree(files: DiffFile[]): FileTreeNode[] {
+  const root: FileTreeNode[] = [];
+  for (let i = 0; i < files.length; i++) {
+    const { additions, deletions } = computeFileStats(files[i].lines);
+    const parts = files[i].filePath.split("/");
+    let nodes = root;
+    for (let j = 0; j < parts.length; j++) {
+      const part = parts[j];
+      const isFile = j === parts.length - 1;
+      let node = nodes.find(n => n.name === part);
+      if (!node) {
+        node = { name: part, fullPath: parts.slice(0, j + 1).join("/"), isFile, children: [], additions, deletions, fileIdx: isFile ? i : -1 };
+        nodes.push(node);
+      } else {
+        node.additions += additions;
+        node.deletions += deletions;
+      }
+      nodes = node.children;
+    }
+  }
+  return root;
+}
+
+function FileTreeNodeView({
+  node,
+  depth,
+  onSelectFile,
+}: {
+  node: FileTreeNode;
+  depth: number;
+  onSelectFile: (fileIdx: number) => void;
+}) {
+  const [open, setOpen] = useState(true);
+  const indentPx = 8 + depth * 12;
+
+  if (node.isFile) {
+    return (
+      <button
+        onClick={() => onSelectFile(node.fileIdx)}
+        className="w-full flex items-center gap-1 py-0.5 text-left hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+        style={{ paddingLeft: `${indentPx}px`, paddingRight: "6px" }}
+        title={node.fullPath}
+      >
+        <svg className="w-3 h-3 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>
+        <span className="text-xs font-mono truncate flex-1 min-w-0 text-gray-700 dark:text-gray-300">{node.name}</span>
+        <span className="text-[10px] text-green-600 shrink-0 ml-1">+{node.additions}</span>
+        <span className="text-[10px] text-red-600 shrink-0">-{node.deletions}</span>
+      </button>
+    );
+  }
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center gap-1 py-0.5 text-left hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+        style={{ paddingLeft: `${indentPx}px`, paddingRight: "6px" }}
+      >
+        <svg
+          className={`w-3 h-3 text-gray-400 shrink-0 transition-transform duration-100 ${open ? "rotate-90" : ""}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+        <span className="text-xs font-mono truncate flex-1 min-w-0 text-gray-500 dark:text-gray-400">{node.name}</span>
+        <span className="text-[10px] text-green-600 shrink-0 ml-1">+{node.additions}</span>
+        <span className="text-[10px] text-red-600 shrink-0">-{node.deletions}</span>
+      </button>
+      {open && node.children.map((child, i) => (
+        <FileTreeNodeView key={i} node={child} depth={depth + 1} onSelectFile={onSelectFile} />
+      ))}
+    </div>
+  );
+}
+
+function DiffFileTree({ files, onSelectFile }: { files: DiffFile[]; onSelectFile: (fileIdx: number) => void }) {
+  const tree = useMemo(() => buildFileTree(files), [files]);
+  return (
+    <div className="py-1">
+      {tree.map((node, i) => (
+        <FileTreeNodeView key={i} node={node} depth={0} onSelectFile={onSelectFile} />
+      ))}
+    </div>
+  );
 }
 
 function commentKey(filePath: string, lineNumOld: number | null | undefined, lineNumNew: number | null | undefined, side: string): string {
@@ -604,7 +702,7 @@ function FileDiffAccordion({
   const { additions, deletions } = computeFileStats(file.lines);
 
   return (
-    <div>
+    <div id={`diff-file-${fileIdx}`}>
       <button
         onClick={onToggle}
         className="w-full flex items-center gap-2 px-3 py-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 cursor-pointer select-none transition-colors text-left"
@@ -642,10 +740,24 @@ export function DiffViewer({ diff, stats, comments = [], onCreateComment, onEdit
   const unresolvedCount = comments.filter((c) => c.resolvedAt == null).length;
 
   const [expandedFiles, setExpandedFiles] = useState<Set<number>>(() => new Set(files.map((_, i) => i)));
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
+    try { return localStorage.getItem("ak-diff-sidebar-open") !== "false"; } catch { return true; }
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem("ak-diff-sidebar-open", sidebarOpen ? "true" : "false"); } catch {}
+  }, [sidebarOpen]);
 
   useEffect(() => {
     setExpandedFiles(new Set(files.map((_, i) => i)));
   }, [diff]);
+
+  function handleSelectFile(fileIdx: number) {
+    setExpandedFiles(prev => { const n = new Set(prev); n.add(fileIdx); return n; });
+    setTimeout(() => {
+      document.getElementById(`diff-file-${fileIdx}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
+  }
 
   const allExpanded = expandedFiles.size === files.length;
 
@@ -677,6 +789,16 @@ export function DiffViewer({ diff, stats, comments = [], onCreateComment, onEdit
           )}
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setSidebarOpen(o => !o)}
+            className={`p-0.5 rounded transition-colors ${sidebarOpen ? "text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/30" : "text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"}`}
+            title={sidebarOpen ? "Hide file tree" : "Show file tree"}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 7h18M3 12h18M3 17h18" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M7 7v10" />
+            </svg>
+          </button>
           {files.length > 1 && (
             <button
               onClick={() => {
@@ -707,29 +829,36 @@ export function DiffViewer({ diff, stats, comments = [], onCreateComment, onEdit
           </div>
         </div>
       </div>
-      <div className="divide-y divide-gray-200 dark:divide-gray-700">
-        {files.map((file, fi) => (
-          <FileDiffAccordion
-            key={fi}
-            file={file}
-            fileIdx={fi}
-            expanded={expandedFiles.has(fi)}
-            onToggle={() => {
-              setExpandedFiles(prev => {
-                const next = new Set(prev);
-                if (next.has(fi)) next.delete(fi);
-                else next.add(fi);
-                return next;
-              });
-            }}
-            viewMode={viewMode}
-            commentMap={commentMap}
-            onCreateComment={onCreateComment}
-            onEditComment={onEditComment}
-            onDeleteComment={onDeleteComment}
-            onResolveComment={onResolveComment}
-          />
-        ))}
+      <div className="flex">
+        {sidebarOpen && files.length > 0 && (
+          <div className="w-48 min-w-[140px] shrink-0 border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-y-auto max-h-96">
+            <DiffFileTree files={files} onSelectFile={handleSelectFile} />
+          </div>
+        )}
+        <div className="flex-1 min-w-0 divide-y divide-gray-200 dark:divide-gray-700">
+          {files.map((file, fi) => (
+            <FileDiffAccordion
+              key={fi}
+              file={file}
+              fileIdx={fi}
+              expanded={expandedFiles.has(fi)}
+              onToggle={() => {
+                setExpandedFiles(prev => {
+                  const next = new Set(prev);
+                  if (next.has(fi)) next.delete(fi);
+                  else next.add(fi);
+                  return next;
+                });
+              }}
+              viewMode={viewMode}
+              commentMap={commentMap}
+              onCreateComment={onCreateComment}
+              onEditComment={onEditComment}
+              onDeleteComment={onDeleteComment}
+              onResolveComment={onResolveComment}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );
