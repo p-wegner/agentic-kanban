@@ -73,6 +73,16 @@ describe("runAutoStart dependency resolution (blocker must be MERGED, not just t
     await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "5"]]), makeDeps());
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
   });
+
+  // Regression for #537: a workflow-driven blocker (currentNodeId != null) whose node
+  // was never advanced to `end` (node desync) but whose STATUS is terminal MUST still
+  // unblock its dependent once merged.
+  it("starts a dependent whose workflow blocker is Done-STATUS but stuck on a non-end node (node desync)", async () => {
+    mockUpToDepCheck({ id: "blocker-1", statusId: "done-1", currentNodeId: "node-review", currentNodeType: "normal" }, []);
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ id: "ws-new" }) } as Response);
+    await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "5"]]), makeDeps());
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces", expect.any(Object));
+  });
 });
 
 describe("runAutoStart URL construction", () => {
