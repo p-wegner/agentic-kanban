@@ -203,6 +203,11 @@ interface TagBadge {
   color: string | null;
 }
 
+interface StatusOption {
+  id: string;
+  name: string;
+}
+
 interface IssueCardProps {
   issue: IssueWithStatus;
   onClick: (issue: IssueWithStatus, event: React.MouseEvent) => void;
@@ -216,6 +221,8 @@ interface IssueCardProps {
   tags?: TagBadge[];
   allProjectTags?: ProjectTag[];
   quickUpdate?: QuickUpdateCallbacks;
+  allStatuses?: StatusOption[];
+  onDeleteIssue?: (issueId: string) => void;
   searchQuery?: string;
   liveActivity?: string;
   liveStats?: LiveSessionStats;
@@ -247,7 +254,7 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   );
 }
 
-export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, onDryRun, onDragStart, onDuplicate, onMoveToNext, nextStatusName, tags, allProjectTags, quickUpdate, searchQuery, liveActivity, liveStats, todos, isPendingIssue, isPendingWorkspace, isSelected, isKeyboardFocused, cardDensity = "comfortable" }: IssueCardProps) {
+export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, onDryRun, onDragStart, onDuplicate, onMoveToNext, nextStatusName, tags, allProjectTags, quickUpdate, allStatuses, onDeleteIssue, searchQuery, liveActivity, liveStats, todos, isPendingIssue, isPendingWorkspace, isSelected, isKeyboardFocused, cardDensity = "comfortable" }: IssueCardProps) {
   const compact = cardDensity === "compact";
   const typeBadgeColor = issue.issueType ? (issueTypeColors[issue.issueType] ?? null) : null;
   const priorityBadgeColor = issue.priority && issue.priority !== "medium" ? (priorityColors[issue.priority] ?? null) : null;
@@ -256,6 +263,8 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
   const [depDragOver, setDepDragOver] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [prioritySubmenuOpen, setPrioritySubmenuOpen] = useState(false);
+  const [statusSubmenuOpen, setStatusSubmenuOpen] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -274,12 +283,12 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
     firstItem?.focus();
 
     function handlePointerDown(event: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) setContextMenu(null);
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) closeContextMenu();
     }
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        setContextMenu(null);
+        closeContextMenu();
         cardRef.current?.focus();
       }
     }
@@ -293,10 +302,18 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
   }, [contextMenu]);
 
   function openContextMenu(x: number, y: number) {
+    setPrioritySubmenuOpen(false);
+    setStatusSubmenuOpen(false);
     setContextMenu({
       x: Math.min(x, window.innerWidth - 220),
-      y: Math.min(y, window.innerHeight - 190),
+      y: Math.min(y, window.innerHeight - 380),
     });
+  }
+
+  function closeContextMenu() {
+    setContextMenu(null);
+    setPrioritySubmenuOpen(false);
+    setStatusSubmenuOpen(false);
   }
 
   function handleContextMenu(e: React.MouseEvent) {
@@ -332,13 +349,39 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
     } catch {
       showToast("Failed to copy issue reference", "error");
     } finally {
-      setContextMenu(null);
+      closeContextMenu();
     }
   }
 
   function runContextAction(action: () => void) {
     action();
-    setContextMenu(null);
+    closeContextMenu();
+  }
+
+  async function handleChangePriority(priority: string) {
+    closeContextMenu();
+    if (quickUpdate?.onPriorityChange) {
+      await quickUpdate.onPriorityChange(issue.id, priority);
+    }
+  }
+
+  async function handleMoveToStatus(statusName: string) {
+    closeContextMenu();
+    try {
+      await apiFetch(`/api/issues/${issue.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ statusName }),
+      });
+    } catch {
+      showToast("Failed to move issue", "error");
+    }
+  }
+
+  function handleDeleteIssueClick() {
+    const confirmed = window.confirm(`Delete "${issue.title}"? This cannot be undone.`);
+    if (!confirmed) return;
+    closeContextMenu();
+    onDeleteIssue?.(issue.id);
   }
 
   function handleDragOver(e: React.DragEvent) {
@@ -509,6 +552,89 @@ export function IssueCard({ issue, onClick, onWorkspaceClick, onStartWorkspace, 
                 <span className="truncate">Duplicate issue</span>
               </button>
             </>
+          )}
+          <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
+          {quickUpdate?.onPriorityChange && (
+            <div className="relative">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={(e) => { e.stopPropagation(); setPrioritySubmenuOpen((v) => !v); setStatusSubmenuOpen(false); }}
+                className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
+              >
+                <svg className="h-3.5 w-3.5 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 7h18M3 12h12M3 17h6" />
+                </svg>
+                <span className="flex-1 truncate">Change priority</span>
+                <svg className="h-3 w-3 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+              {prioritySubmenuOpen && (
+                <div className="absolute left-full top-0 ml-1 w-36 rounded-md border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900 z-10">
+                  {(["critical", "high", "medium", "low"] as const).map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => handleChangePriority(p)}
+                      className={`flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:hover:bg-gray-800 dark:focus:bg-gray-800 ${issue.priority === p ? "font-semibold text-brand-700 dark:text-brand-300" : "text-gray-700 dark:text-gray-200"}`}
+                    >
+                      <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${p === "critical" ? "bg-red-500" : p === "high" ? "bg-orange-500" : p === "medium" ? "bg-yellow-400" : "bg-gray-400"}`} />
+                      <span className="capitalize">{p}</span>
+                      {issue.priority === p && <svg className="ml-auto h-3 w-3 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {allStatuses && allStatuses.length > 0 && (
+            <div className="relative">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={(e) => { e.stopPropagation(); setStatusSubmenuOpen((v) => !v); setPrioritySubmenuOpen(false); }}
+                className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
+              >
+                <svg className="h-3.5 w-3.5 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m-8 6H4m0 0l4 4m-4-4l4-4" />
+                </svg>
+                <span className="flex-1 truncate">Move to status</span>
+                <svg className="h-3 w-3 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+              {statusSubmenuOpen && (
+                <div className="absolute left-full top-0 ml-1 w-40 rounded-md border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900 z-10">
+                  {allStatuses.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => handleMoveToStatus(s.name)}
+                      className={`flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:hover:bg-gray-800 dark:focus:bg-gray-800 ${issue.statusName === s.name ? "font-semibold text-brand-700 dark:text-brand-300" : "text-gray-700 dark:text-gray-200"}`}
+                    >
+                      <span className="truncate">{s.name}</span>
+                      {issue.statusName === s.name && <svg className="ml-auto h-3 w-3 shrink-0 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {onDeleteIssue && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={handleDeleteIssueClick}
+              className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-red-600 hover:bg-red-50 focus:bg-red-50 focus:outline-none dark:text-red-400 dark:hover:bg-red-900/20 dark:focus:bg-red-900/20"
+            >
+              <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              <span className="truncate">Delete issue</span>
+            </button>
           )}
         </div>,
         document.body,

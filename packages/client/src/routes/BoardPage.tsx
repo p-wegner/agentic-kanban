@@ -2084,6 +2084,7 @@ export function BoardPage() {
             onDrop={handleDrop}
             onDuplicate={handleDuplicateIssue}
             onMoveToNext={handleMoveToNext}
+            onDeleteIssue={handleDeleteIssue}
             onColumnResizeStart={handleColumnResizeStart}
             onColumnResizeReset={(colId) => setColumnWidths((prev) => {
               const next = { ...prev };

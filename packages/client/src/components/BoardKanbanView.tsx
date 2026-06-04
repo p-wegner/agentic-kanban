@@ -108,6 +108,7 @@ export interface BoardKanbanViewProps {
   onDrop: (statusId: string, sortOrder?: number) => void;
   onDuplicate?: (issue: IssueWithStatus) => void;
   onMoveToNext: (issue: IssueWithStatus, nextStatusId: string) => void;
+  onDeleteIssue?: (issueId: string) => void;
   onColumnResizeStart: (colId: string, e: React.MouseEvent) => void;
   onColumnResizeReset: (colId: string) => void;
   onCreateIssue: (data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; skipAutoReview?: boolean; profile?: ProfileSelection; model?: string; isDirect?: boolean; skillId?: string }) => Promise<void>;
@@ -149,6 +150,7 @@ export function BoardKanbanView({
   onDrop,
   onDuplicate,
   onMoveToNext,
+  onDeleteIssue,
   onColumnResizeStart,
   onColumnResizeReset,
   onCreateIssue,
@@ -235,6 +237,7 @@ export function BoardKanbanView({
               onDrop={onDrop}
               onDuplicate={onDuplicate}
               onMoveToNext={onMoveToNext}
+              onDeleteIssue={onDeleteIssue}
               allColumns={allColumns}
               searchQuery={searchQuery}
               sessionActivity={sessionActivity}
