@@ -37,4 +37,5 @@ export const SHORTCUT_REGISTRY: ShortcutEntry[] = [
   { keys: ["a"], description: "Toggle All Workspaces panel", category: "Panels" },
   { keys: ["q"], description: "Open Quick Tasks panel", category: "Panels" },
   { keys: ["x"], description: "Open Codemod Factory", category: "Panels" },
+  { keys: ["l"], description: "Toggle Live Activity ticker (no card selected)", category: "Panels" },
 ];
