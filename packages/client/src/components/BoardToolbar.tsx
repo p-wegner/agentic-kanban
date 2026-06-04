@@ -19,6 +19,79 @@ const ACTIVE_DEFAULT = "bg-brand-600 text-white hover:bg-brand-700";
 const INACTIVE = "text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-700";
 const BOARD_ACTIVITY_STATUS_ORDER = ["In Progress", "In Review", "AI Reviewed", "Todo"];
 
+interface AgingHeatmapLegendProps {
+  warmDays: number;
+  hotDays: number;
+  onChange: (warm: number, hot: number) => void;
+}
+
+function AgingHeatmapLegend({ warmDays, hotDays, onChange }: AgingHeatmapLegendProps) {
+  const [warmInput, setWarmInput] = useState(String(warmDays));
+  const [hotInput, setHotInput] = useState(String(hotDays));
+
+  useEffect(() => { setWarmInput(String(warmDays)); }, [warmDays]);
+  useEffect(() => { setHotInput(String(hotDays)); }, [hotDays]);
+
+  function commitWarm(raw: string) {
+    const v = parseInt(raw, 10);
+    if (!isNaN(v) && v >= 1 && v < hotDays) {
+      onChange(v, hotDays);
+    } else {
+      setWarmInput(String(warmDays));
+    }
+  }
+
+  function commitHot(raw: string) {
+    const v = parseInt(raw, 10);
+    if (!isNaN(v) && v > warmDays) {
+      onChange(warmDays, v);
+    } else {
+      setHotInput(String(hotDays));
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-3 px-1 py-1 flex-wrap" aria-label="Card aging heatmap legend">
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-ink-faint dark:text-gray-500">Aging:</span>
+      <span className="flex items-center gap-1">
+        <span aria-hidden="true" className="inline-block h-3 w-3 rounded-sm bg-surface-raised dark:bg-surface-raised-dark border border-black/[0.07] dark:border-white/10" />
+        <span className="text-[10px] text-ink-soft dark:text-gray-400">Fresh</span>
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span aria-hidden="true" className="inline-block h-3 w-3 rounded-sm" style={{ backgroundColor: "rgba(251,191,36,0.35)" }} />
+        <span className="text-[10px] text-ink-soft dark:text-gray-400">Warm ≥</span>
+        <input
+          type="number"
+          min={1}
+          max={hotDays - 1}
+          value={warmInput}
+          onChange={(e) => setWarmInput(e.target.value)}
+          onBlur={(e) => commitWarm(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") commitWarm((e.target as HTMLInputElement).value); }}
+          className="w-10 text-[10px] rounded px-1 py-0.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-ink dark:text-gray-100 outline-none"
+          title="Warm threshold (days)"
+        />
+        <span className="text-[10px] text-ink-faint dark:text-gray-500">d</span>
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span aria-hidden="true" className="inline-block h-3 w-3 rounded-sm" style={{ backgroundColor: "rgba(239,68,68,0.3)" }} />
+        <span className="text-[10px] text-ink-soft dark:text-gray-400">Hot ≥</span>
+        <input
+          type="number"
+          min={warmDays + 1}
+          value={hotInput}
+          onChange={(e) => setHotInput(e.target.value)}
+          onBlur={(e) => commitHot(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") commitHot((e.target as HTMLInputElement).value); }}
+          className="w-10 text-[10px] rounded px-1 py-0.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-ink dark:text-gray-100 outline-none"
+          title="Hot threshold (days)"
+        />
+        <span className="text-[10px] text-ink-faint dark:text-gray-500">d</span>
+      </span>
+    </div>
+  );
+}
+
 interface BoardToolbarProps {
   activeColumns: StatusWithIssues[];
   focusMode?: boolean;
@@ -59,6 +132,11 @@ interface BoardToolbarProps {
   onIssueTypeFilterChange?: (type: string | null) => void;
   showPriorityLegend?: boolean;
   onShowPriorityLegendChange?: (v: boolean) => void;
+  showCardAgingHeatmap?: boolean;
+  onShowCardAgingHeatmapChange?: (v: boolean) => void;
+  agingWarmDays?: number;
+  agingHotDays?: number;
+  onAgingThresholdsChange?: (warm: number, hot: number) => void;
   swimlaneDimension?: "none" | "priority" | "tag";
   onSwimlaneChange?: (v: "none" | "priority" | "tag") => void;
 }
@@ -103,6 +181,11 @@ export function BoardToolbar({
   onIssueTypeFilterChange,
   showPriorityLegend = false,
   onShowPriorityLegendChange,
+  showCardAgingHeatmap = false,
+  onShowCardAgingHeatmapChange,
+  agingWarmDays = 3,
+  agingHotDays = 7,
+  onAgingThresholdsChange,
   swimlaneDimension = "none",
   onSwimlaneChange,
 }: BoardToolbarProps) {
@@ -257,6 +340,23 @@ export function BoardToolbar({
             <line x1="11" y1="19.5" x2="21" y2="19.5" />
           </svg>
           <span className="hidden sm:inline">Priority</span>
+        </button>
+      )}
+      {onShowCardAgingHeatmapChange && (
+        <button
+          onClick={() => onShowCardAgingHeatmapChange(!showCardAgingHeatmap)}
+          title={showCardAgingHeatmap ? "Hide card aging heatmap" : "Tint cards by time in column (aging heatmap)"}
+          aria-pressed={showCardAgingHeatmap}
+          className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${
+            showCardAgingHeatmap
+              ? "bg-brand-600 text-white border-brand-600 hover:bg-brand-700"
+              : "bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
+          }`}
+        >
+          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span className="hidden sm:inline">Aging</span>
         </button>
       )}
       {onHiddenColumnsChange && visibilityColumns && visibilityColumns.length > 0 && (
@@ -648,6 +748,13 @@ export function BoardToolbar({
           </span>
         ))}
       </div>
+    )}
+    {showCardAgingHeatmap && onAgingThresholdsChange && (
+      <AgingHeatmapLegend
+        warmDays={agingWarmDays}
+        hotDays={agingHotDays}
+        onChange={onAgingThresholdsChange}
+      />
     )}
     </>
   );

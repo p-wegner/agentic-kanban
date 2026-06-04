@@ -138,6 +138,9 @@ interface BoardColumnProps {
   isColumnDragOver?: boolean;
   swimlaneDimension?: SwimlaneDimension;
   onDropWithLane?: (statusId: string, laneKey: string, sortOrder?: number) => void;
+  showAgingHeatmap?: boolean;
+  agingWarmDays?: number;
+  agingHotDays?: number;
 }
 
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
@@ -185,6 +188,9 @@ export function BoardColumn({
   isColumnDragOver = false,
   swimlaneDimension = "none",
   onDropWithLane,
+  showAgingHeatmap = false,
+  agingWarmDays = 3,
+  agingHotDays = 7,
 }: BoardColumnProps) {
   const [dragOver, setDragOver] = useState(false);
   const dragCounterRef = useRef(0);
@@ -443,6 +449,9 @@ export function BoardColumn({
                     isSelected={selectedIssueIds?.has(issue.id)}
                     isKeyboardFocused={keyboardCursorIssueId === issue.id}
                     cardDensity={cardDensity}
+                    showAgingHeatmap={showAgingHeatmap}
+                    agingWarmDays={agingWarmDays}
+                    agingHotDays={agingHotDays}
                   />
                 </div>
               ))}
