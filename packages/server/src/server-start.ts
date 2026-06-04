@@ -19,10 +19,12 @@ import { runSessionRestore } from "./startup/session-restore.js";
 import { startBackupScheduler } from "./startup/backup-scheduler.js";
 import { getPreference } from "./repositories/preferences.repository.js";
 import { domainErrorHandler } from "./middleware/error-handler.js";
+import { slowRequestLogger } from "./middleware/slow-request-logger.js";
 
 export async function startServer(port?: number, hostname?: string) {
   const app = new Hono();
   app.use("/api/*", cors());
+  app.use("/api/*", slowRequestLogger);
   app.get("/health", (c) => c.json({ status: "ok" }));
   app.onError(domainErrorHandler);
 
