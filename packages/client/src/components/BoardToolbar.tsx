@@ -7,6 +7,7 @@ import { ExportImportMenu } from "./ExportImportMenu.js";
 import { PRIMARY_VIEWS, SECONDARY_VIEWS, VIEW_REGISTRY } from "../lib/viewRegistry.js";
 import type { StatusWithIssues } from "@agentic-kanban/shared";
 import type { CardDensity } from "../hooks/useBoardPreferences.js";
+import type { MilestoneResponse } from "@agentic-kanban/shared";
 
 // Re-exported from the canonical view registry (#116). Kept here for back-compat
 // with the many components that import `ViewMode` from BoardToolbar.
@@ -47,6 +48,9 @@ interface BoardToolbarProps {
   onViewAllHealthEvents?: () => void;
   cardDensity?: CardDensity;
   onCardDensityChange?: (v: CardDensity) => void;
+  milestones?: MilestoneResponse[];
+  activeMilestoneId?: string | null;
+  onMilestoneFilterChange?: (milestoneId: string | null) => void;
 }
 
 export function BoardToolbar({
@@ -79,6 +83,9 @@ export function BoardToolbar({
   onViewAllHealthEvents,
   cardDensity = "comfortable",
   onCardDensityChange,
+  milestones = [],
+  activeMilestoneId = null,
+  onMilestoneFilterChange,
 }: BoardToolbarProps) {
   const [showMonitorPopover, setShowMonitorPopover] = useState(false);
   const [showMoreViews, setShowMoreViews] = useState(false);
@@ -189,6 +196,28 @@ export function BoardToolbar({
           </svg>
           <span className="hidden sm:inline">Compact</span>
         </button>
+      )}
+      {onMilestoneFilterChange && milestones.length > 0 && (
+        <div className="relative shrink-0">
+          <select
+            value={activeMilestoneId ?? ""}
+            onChange={(e) => onMilestoneFilterChange(e.target.value || null)}
+            title="Filter by milestone"
+            className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors appearance-none pr-6 cursor-pointer ${
+              activeMilestoneId
+                ? "bg-brand-600 text-white border-brand-600 hover:bg-brand-700"
+                : "bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
+            }`}
+          >
+            <option value="">Milestone</option>
+            {milestones.map((m) => (
+              <option key={m.id} value={m.id}>{m.name}</option>
+            ))}
+          </select>
+          <svg className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
+          </svg>
+        </div>
       )}
       <button
         onClick={onShowQuickTasks}
