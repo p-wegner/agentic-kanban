@@ -22,6 +22,7 @@ export function ThroughputChart({ projectId }: { projectId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [days, setDays] = useState<14 | 30>(14);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -31,7 +32,7 @@ export function ThroughputChart({ projectId }: { projectId: string }) {
       .then((d) => { if (!cancelled) { setData(d); setLoading(false); } })
       .catch((err) => { if (!cancelled) { setError(err instanceof Error ? err.message : "Failed to load throughput data"); setLoading(false); } });
     return () => { cancelled = true; };
-  }, [projectId, days]);
+  }, [projectId, days, retryKey]);
 
   const chart = useMemo(() => {
     if (!data || data.points.length === 0) return null;
@@ -86,7 +87,7 @@ export function ThroughputChart({ projectId }: { projectId: string }) {
           <div className="flex h-64 flex-col items-center justify-center gap-2 text-sm text-red-600 dark:text-red-400">
             <span>{error}</span>
             <button
-              onClick={() => { setLoading(true); setError(null); }}
+              onClick={() => { setError(null); setRetryKey((k) => k + 1); }}
               className="rounded bg-red-100 px-3 py-1 text-xs text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300 dark:hover:bg-red-900/50"
             >
               Retry
@@ -94,7 +95,7 @@ export function ThroughputChart({ projectId }: { projectId: string }) {
           </div>
         )}
 
-        {!loading && !error && chart && data && (
+        {!loading && !error && chart && chart.total > 0 && data && (
           <>
             <div className="grid grid-cols-3 gap-3">
               <div className="rounded-md border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
@@ -172,7 +173,7 @@ export function ThroughputChart({ projectId }: { projectId: string }) {
           </>
         )}
 
-        {!loading && !error && (!chart || (data && data.points.every((p) => p.count === 0))) && (
+        {!loading && !error && (!chart || chart.total === 0) && (
           <div className="flex h-64 flex-col items-center justify-center gap-2 rounded-md border border-dashed border-gray-200 text-sm text-gray-400 dark:border-gray-700 dark:text-gray-500">
             <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h4v7H3zM10 8h4v11h-4zM17 4h4v15h-4zM3 19h18" />
