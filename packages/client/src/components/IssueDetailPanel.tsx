@@ -538,6 +538,10 @@ export function IssueDetailPanel({
     await onUpdate(issue.id, { estimate: newEstimate });
   }
 
+  async function handleTogglePinned() {
+    await onUpdate(issue.id, { pinned: !issue.pinned });
+  }
+
   async function handleAiEstimate() {
     if (estimating) return;
     setEstimating(true);
@@ -1062,6 +1066,16 @@ export function IssueDetailPanel({
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                     <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                </button>
+                <button
+                  onClick={handleTogglePinned}
+                  title={issue.pinned ? "Unpin issue" : "Pin issue"}
+                  aria-label={issue.pinned ? "Unpin issue" : "Pin issue"}
+                  className={`p-0.5 rounded transition-colors ${issue.pinned ? "text-amber-400 hover:text-amber-500" : "text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"}`}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill={issue.pinned ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.562.562 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.562.562 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" />
                   </svg>
                 </button>
                 {((issue.description?.length ?? 0) > 500 || issueTags.some(t => t.name === "epic")) && (
