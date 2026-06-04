@@ -36,30 +36,41 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn());
 });
 
-describe("runAutoStart dependency resolution", () => {
-  it("does not treat a workflow blocker as resolved from the derived status column", async () => {
+describe("runAutoStart dependency resolution (blocker must be MERGED, not just terminal)", () => {
+  // Mock prefix for: 1 In-Progress status, 0 In-Progress issues, 1 Todo issue with 1 blocker.
+  // The final two mocks are blockerIssues + the open-workspace check.
+  function mockUpToDepCheck(blockerRow: Record<string, unknown>, openWsRows: unknown[]) {
     vi.mocked(db.select)
-      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]) as ReturnType<typeof db.select>)
-      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>)
-      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>)
-      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>)
-      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]) as ReturnType<typeof db.select>)
-      .mockReturnValueOnce(makeSelectChain([{ id: "issue-1", title: "Dependent", projectId: "proj-1", issueNumber: 42 }]) as ReturnType<typeof db.select>)
-      .mockReturnValueOnce(makeSelectChain([{ id: "done-1" }]) as ReturnType<typeof db.select>)
-      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>)
-      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // no-auto-start tag check (none)
-      .mockReturnValueOnce(makeSelectChain([{ dependsOnId: "blocker-1" }]) as ReturnType<typeof db.select>)
-      .mockReturnValueOnce(makeSelectChain([{
-        statusId: "done-1",
-        currentNodeId: "node-build",
-        currentNodeType: "normal",
-      }]) as ReturnType<typeof db.select>);
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]) as ReturnType<typeof db.select>) // inProgressStatuses
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop1 activeWip
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // loop1 inProgressIssues (none)
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop2 inProgressCount
+      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]) as ReturnType<typeof db.select>) // todoStatus
+      .mockReturnValueOnce(makeSelectChain([{ id: "issue-1", title: "Dependent", projectId: "proj-1", issueNumber: 42 }]) as ReturnType<typeof db.select>) // todoIssues
+      .mockReturnValueOnce(makeSelectChain([{ id: "done-1" }]) as ReturnType<typeof db.select>) // doneStatuses
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // existingWs (none)
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // no-auto-start tag (none)
+      .mockReturnValueOnce(makeSelectChain([{ dependsOnId: "blocker-1" }]) as ReturnType<typeof db.select>) // deps
+      .mockReturnValueOnce(makeSelectChain([blockerRow]) as ReturnType<typeof db.select>) // blockerIssues
+      .mockReturnValueOnce(makeSelectChain(openWsRows) as ReturnType<typeof db.select>); // open-workspace check
+  }
 
-    await runAutoStart(new Map([
-      ["nudge_auto_start", "true"],
-      ["nudge_wip_limit", "5"],
-    ]), makeDeps());
+  it("does NOT start a dependent whose blocker is Done but not yet merged (open workspace)", async () => {
+    mockUpToDepCheck({ id: "blocker-1", statusId: "done-1", currentNodeId: null, currentNodeType: null }, [{ issueId: "blocker-1" }]);
+    await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "5"]]), makeDeps());
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
 
+  it("starts a dependent once its blocker is terminal AND merged (no open workspace)", async () => {
+    mockUpToDepCheck({ id: "blocker-1", statusId: "done-1", currentNodeId: null, currentNodeType: null }, []);
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ id: "ws-new" }) } as Response);
+    await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "5"]]), makeDeps());
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces", expect.any(Object));
+  });
+
+  it("does not start a dependent whose workflow blocker is on a non-end node and non-terminal status", async () => {
+    mockUpToDepCheck({ id: "blocker-1", statusId: "inprog-1", currentNodeId: "node-build", currentNodeType: "normal" }, []);
+    await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "5"]]), makeDeps());
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
   });
 });

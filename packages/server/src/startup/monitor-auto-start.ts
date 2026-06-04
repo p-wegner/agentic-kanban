@@ -115,6 +115,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
         const blockerIds = deps.map((d) => d.dependsOnId);
         const blockerIssues = await db
           .select({
+            id: issues.id,
             statusId: issues.statusId,
             currentNodeId: issues.currentNodeId,
             currentNodeType: workflowNodes.nodeType,
@@ -123,7 +124,21 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
           .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
           .where(inArray(issues.id, blockerIds));
 
-        const allResolved = blockerIssues.every((b) => isTerminalStatusIdView(b, doneStatusIds));
+        // A blocker only unblocks its dependents once its work is actually MERGED — not merely
+        // when the issue reaches a terminal STATUS. A successful merge closes the workspace, so
+        // an open (non-closed) workspace means the merge hasn't landed yet. Requiring "terminal
+        // AND no open workspace" stops a dependent from auto-starting against a premature-Done
+        // blocker (#535) and branching its worktree from a pre-merge base — which guaranteed
+        // rebase conflicts (seen live: a dependent branched from the scaffold commit before its
+        // blocker's merge landed). A terminal blocker with no workspace at all (manually done)
+        // still counts as resolved.
+        const openWsRows = await db.select({ issueId: workspaces.issueId }).from(workspaces)
+          .where(and(inArray(workspaces.issueId, blockerIds), sql`${workspaces.status} != 'closed'`));
+        const blockersWithOpenWorkspace = new Set(openWsRows.map((r) => r.issueId));
+
+        const allResolved = blockerIssues.every(
+          (b) => isTerminalStatusIdView(b, doneStatusIds) && !blockersWithOpenWorkspace.has(b.id),
+        );
         if (!allResolved) continue;
       }
 
