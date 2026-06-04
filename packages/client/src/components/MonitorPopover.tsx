@@ -109,6 +109,8 @@ interface MonitorPopoverProps {
   orchestrator?: OrchestratorStatus | null;
   orchestratorNotify?: boolean;
   onOrchestratorNotifyChange?: (v: boolean) => void;
+  monitorButlerEnabled?: boolean;
+  monitorButlerInterval?: number;
   onViewAllHealthEvents?: () => void;
 }
 
@@ -130,6 +132,8 @@ export function MonitorPopover({
   orchestrator,
   orchestratorNotify = false,
   onOrchestratorNotifyChange,
+  monitorButlerEnabled = false,
+  monitorButlerInterval = 15,
   onViewAllHealthEvents,
 }: MonitorPopoverProps) {
   const [now, setNow] = useState(Date.now());
@@ -225,7 +229,7 @@ export function MonitorPopover({
         {/* Header */}
         <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between shrink-0 rounded-t-xl bg-gray-50 dark:bg-gray-950">
           <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full shrink-0 ${autoMonitor ? "bg-green-500 animate-pulse" : "bg-gray-300 dark:bg-gray-600"}`} />
+            <MonitorStatusDots autoMonitor={autoMonitor} butlerEnabled={monitorButlerEnabled} />
             <span className="font-semibold text-gray-800 dark:text-gray-200 text-[13px]">Board Monitor</span>
             {autoMonitor && status?.nextRunAt && (
               <span className="text-gray-400 dark:text-gray-500 text-[10px] font-mono">in {formatCountdown(status.nextRunAt)}</span>
@@ -263,6 +267,12 @@ export function MonitorPopover({
               formatAge={formatAge}
             />
           )}
+
+          {/* Monitor Butler section */}
+          <MonitorButlerSection
+            enabled={monitorButlerEnabled}
+            intervalMin={monitorButlerInterval}
+          />
 
           {/* Auto-monitor toggle row */}
           <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
@@ -556,6 +566,48 @@ function parseCycleLine(line: string): { age: string | null; text: string } {
     return { age, text: parts.slice(1).join(" · ") };
   }
   return { age: null, text: line };
+}
+
+function MonitorStatusDots({ autoMonitor, butlerEnabled }: { autoMonitor: boolean; butlerEnabled: boolean }) {
+  if (!autoMonitor && !butlerEnabled) {
+    return <div className="w-2 h-2 rounded-full shrink-0 bg-gray-300 dark:bg-gray-600" />;
+  }
+  return (
+    <div className="flex items-center gap-0.5">
+      {autoMonitor && <span className="w-2 h-2 rounded-full shrink-0 bg-green-500 animate-pulse" title="Auto-monitor" />}
+      {butlerEnabled && <span className="w-2 h-2 rounded-full shrink-0 bg-violet-500 animate-pulse" title="Monitor Butler" />}
+    </div>
+  );
+}
+
+export function MonitorButlerSection({
+  enabled,
+  intervalMin,
+}: {
+  enabled: boolean;
+  intervalMin: number;
+}) {
+  return (
+    <div className={`px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 ${enabled ? "bg-violet-50/40 dark:bg-violet-950/20" : ""}`}>
+      <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center gap-2">
+          <span
+            className={`w-2 h-2 rounded-full shrink-0 ${enabled ? "bg-violet-500 animate-pulse" : "bg-gray-300 dark:bg-gray-600"}`}
+            title={enabled ? "Monitor Butler active" : "Monitor Butler disabled"}
+          />
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-violet-700 dark:text-violet-300">Monitor Butler</span>
+        </div>
+        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${enabled ? "bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300" : "bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500"}`}>
+          {enabled ? `every ${intervalMin}m` : "off"}
+        </span>
+      </div>
+      <div className="text-[11px] text-gray-500 dark:text-gray-400 leading-snug">
+        {enabled
+          ? "LLM-driven monitor — reads objective.md and runs a fresh agent session on schedule."
+          : "LLM-driven monitor is off. Enable via Settings → Workflow → Board Monitoring."}
+      </div>
+    </div>
+  );
 }
 
 export function OrchestratorSection({
