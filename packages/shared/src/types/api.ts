@@ -250,6 +250,7 @@ export interface UpdateIssueRequest {
   externalUrl?: string | null;
   /** Acceptance-criteria checklist items. Replaces the full list when provided. */
   checklist?: { id: string; text: string; completed: boolean }[] | null;
+  pinned?: boolean;
 }
 
 export interface MainWorkspaceInfo {
@@ -409,6 +410,7 @@ export interface IssueWithStatus {
   externalUrl?: string | null;
   tags?: { id: string; name: string; color: string | null }[];
   checklist?: { id: string; text: string; completed: boolean }[];
+  pinned?: boolean;
 }
 
 export interface StatusWithIssues {

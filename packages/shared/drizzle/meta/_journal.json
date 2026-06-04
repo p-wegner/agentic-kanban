@@ -547,6 +547,13 @@
                         "when":  1748764530000,
                         "tag":  "0077_hot_status_composite_indexes",
                         "breakpoints":  true
+                    },
+                    {
+                        "idx":  78,
+                        "version":  "6",
+                        "when":  1748764531000,
+                        "tag":  "0078_pinned_issues",
+                        "breakpoints":  true
                     }
                 ]
 }

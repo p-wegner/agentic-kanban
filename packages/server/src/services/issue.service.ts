@@ -258,6 +258,7 @@ export function createIssueService(deps: {
     if (body.externalUrl !== undefined) updates.externalUrl = validateExternalUrl(body.externalUrl);
     if (body.workflowTemplateId !== undefined) updates.workflowTemplateId = body.workflowTemplateId;
     if (body.checklist !== undefined) updates.checklistJson = body.checklist === null ? null : JSON.stringify(body.checklist);
+    if (body.pinned !== undefined) updates.pinned = body.pinned;
 
     await database.update(issues).set(updates).where(eq(issues.id, id));
 
