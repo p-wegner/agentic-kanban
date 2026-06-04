@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, stat, writeFile, lstat, unlink, readdir } from "node:fs/promises";
 import { join, dirname, sep, resolve, parse, relative } from "node:path";
 
 function execGit(args: string[], cwd: string): Promise<string> {
@@ -141,6 +141,10 @@ export async function removeWorktree(
   repoPath: string,
   worktreePath: string,
 ): Promise<void> {
+  // Unlink junctions first so neither git nor the fs.rm fallback can traverse
+  // into the main checkout via a Windows junction (data-loss bug #518).
+  await unlinkTopLevelJunctions(worktreePath).catch(() => undefined);
+
   try {
     await execGit(["worktree", "remove", "--force", worktreePath], repoPath);
   } catch (err) {
@@ -161,6 +165,30 @@ export async function pruneWorktrees(repoPath: string): Promise<void> {
   await execGit(["worktree", "prune"], repoPath);
 }
 
+/**
+ * Unlink any top-level symlinks/junctions in a directory WITHOUT recursing into them.
+ * This prevents `fs.rm({ recursive })` from following a junction into the main checkout.
+ */
+async function unlinkTopLevelJunctions(dirPath: string): Promise<void> {
+  let entries: string[];
+  try {
+    entries = await readdir(dirPath);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const entryPath = join(dirPath, entry);
+    try {
+      const st = await lstat(entryPath);
+      if (st.isSymbolicLink()) {
+        await unlink(entryPath);
+      }
+    } catch {
+      // ignore — entry may have disappeared between readdir and lstat
+    }
+  }
+}
+
 async function removeLeftoverWorktreeDirectory(repoPath: string, worktreePath: string): Promise<boolean> {
   if (!existsSync(worktreePath)) return false;
 
@@ -177,6 +205,10 @@ async function removeLeftoverWorktreeDirectory(repoPath: string, worktreePath: s
   if (targetResolved === repoResolved || targetResolved === root || !isInsideWorktreesRoot) {
     throw new Error(`Refusing to recursively remove unsafe worktree path: ${worktreePath}`);
   }
+
+  // Unlink top-level symlinks/junctions before recursive delete to prevent
+  // fs.rm from following them into the main checkout (Windows junction data-loss bug).
+  await unlinkTopLevelJunctions(worktreePath);
 
   await rm(worktreePath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   return !existsSync(worktreePath);
