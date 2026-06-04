@@ -1,10 +1,40 @@
 import { randomUUID } from "node:crypto";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import { issues, projects, projectStatuses, sessions, workflowEdges, workflowNodes, workflowTemplates, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
+
+const getDiffShortstat = vi.fn();
+const getLatestCommit = vi.fn();
+const getCommitCountAhead = vi.fn();
+const detectConflicts = vi.fn();
+const computeWorkspaceCodeMetrics = vi.fn();
+
+vi.mock("../services/git.service.js", () => ({
+  getDiffShortstat: (...args: unknown[]) => getDiffShortstat(...args),
+  getLatestCommit: (...args: unknown[]) => getLatestCommit(...args),
+  getCommitCountAhead: (...args: unknown[]) => getCommitCountAhead(...args),
+  detectConflicts: (...args: unknown[]) => detectConflicts(...args),
+}));
+
+vi.mock("../services/workspace-code-metrics.service.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../services/workspace-code-metrics.service.js")>();
+  return {
+    ...actual,
+    computeWorkspaceCodeMetrics: (...args: unknown[]) => computeWorkspaceCodeMetrics(...args),
+  };
+});
+
 import { buildWorkspaceSummaryMap } from "../services/workspace-summary.service.js";
 
 describe("workspace-summary.service", () => {
+  beforeEach(() => {
+    getDiffShortstat.mockReset();
+    getLatestCommit.mockReset().mockResolvedValue(null);
+    getCommitCountAhead.mockReset().mockResolvedValue(0);
+    detectConflicts.mockReset().mockResolvedValue({ hasConflicts: false, conflictingFiles: [] });
+    computeWorkspaceCodeMetrics.mockReset().mockResolvedValue(null);
+  });
+
   it("includes stored code metrics in the board workspace summary", async () => {
     const { db } = createTestDb();
     const now = new Date().toISOString();
@@ -285,5 +315,133 @@ describe("workspace-summary.service", () => {
 
     // Query count must be identical — all queries use IN clauses over all issue IDs.
     expect(queriesFor6).toBe(queriesFor2);
+  });
+
+  it("serves cached diff stats without triggering a refresh when HEAD SHA is unchanged", async () => {
+    const { db } = createTestDb();
+    const now = new Date().toISOString();
+    const recentCheckedAt = new Date(Date.now() - 5_000).toISOString(); // 5s ago — within TTL
+    const projectId = randomUUID();
+    const statusId = randomUUID();
+    const issueId = randomUUID();
+    const workspaceId = randomUUID();
+    const headSha = "abc123def456";
+
+    getLatestCommit.mockResolvedValue({ sha: headSha, message: "latest commit" });
+
+    await db.insert(projects).values({
+      id: projectId,
+      name: "Cache Project",
+      repoPath: "/tmp/cache-project",
+      repoName: "cache-project",
+      defaultBranch: "main",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(projectStatuses).values({
+      id: statusId,
+      projectId,
+      name: "In Progress",
+      sortOrder: 0,
+      isDefault: true,
+      createdAt: now,
+    });
+    await db.insert(issues).values({
+      id: issueId,
+      issueNumber: 10,
+      title: "Cached diff issue",
+      statusId,
+      projectId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(workspaces).values({
+      id: workspaceId,
+      issueId,
+      branch: "feature/cached",
+      workingDir: "/tmp/cache-project/.worktrees/cached",
+      baseBranch: "main",
+      status: "idle",
+      // Cache is fresh and HEAD SHA matches
+      diffStatCacheCheckedAt: recentCheckedAt,
+      diffStatCacheHeadSha: headSha,
+      diffStatCacheFilesChanged: 3,
+      diffStatCacheInsertions: 42,
+      diffStatCacheDeletions: 7,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const summaryMap = await buildWorkspaceSummaryMap([issueId], "main", db);
+
+    const main = summaryMap.get(issueId)?.main;
+    expect(main?.diffStats).toEqual({ filesChanged: 3, insertions: 42, deletions: 7 });
+    expect(getDiffShortstat).not.toHaveBeenCalled();
+  });
+
+  it("triggers background diff refresh immediately when HEAD SHA advances", async () => {
+    const { db } = createTestDb();
+    const now = new Date().toISOString();
+    const recentCheckedAt = new Date(Date.now() - 5_000).toISOString(); // 5s ago — within TTL
+    const projectId = randomUUID();
+    const statusId = randomUUID();
+    const issueId = randomUUID();
+    const workspaceId = randomUUID();
+    const oldHeadSha = "old111sha";
+    const newHeadSha = "new222sha";
+
+    getLatestCommit.mockResolvedValue({ sha: newHeadSha, message: "new commit" });
+    getDiffShortstat.mockResolvedValue({ filesChanged: 5, insertions: 100, deletions: 20 });
+
+    await db.insert(projects).values({
+      id: projectId,
+      name: "Head Changed Project",
+      repoPath: "/tmp/head-changed",
+      repoName: "head-changed",
+      defaultBranch: "main",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(projectStatuses).values({
+      id: statusId,
+      projectId,
+      name: "In Progress",
+      sortOrder: 0,
+      isDefault: true,
+      createdAt: now,
+    });
+    await db.insert(issues).values({
+      id: issueId,
+      issueNumber: 11,
+      title: "HEAD changed issue",
+      statusId,
+      projectId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(workspaces).values({
+      id: workspaceId,
+      issueId,
+      branch: "feature/head-changed",
+      workingDir: "/tmp/head-changed/.worktrees/head-changed",
+      baseBranch: "main",
+      status: "idle",
+      // Cache is within TTL but HEAD SHA is outdated
+      diffStatCacheCheckedAt: recentCheckedAt,
+      diffStatCacheHeadSha: oldHeadSha,
+      diffStatCacheFilesChanged: 3,
+      diffStatCacheInsertions: 42,
+      diffStatCacheDeletions: 7,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await buildWorkspaceSummaryMap([issueId], "main", db);
+
+    // Background refresh must be triggered because HEAD advanced
+    await vi.waitFor(() => expect(getDiffShortstat).toHaveBeenCalledWith(
+      "/tmp/head-changed/.worktrees/head-changed",
+      "main",
+    ));
   });
 });
