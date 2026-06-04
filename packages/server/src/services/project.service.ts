@@ -3,7 +3,7 @@ import { execSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { resolve, sep, join } from "node:path";
 import { projects, projectStatuses, issues, workspaces, preferences } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
+import { eq, and, notInArray } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { branchExists, detectRepoInfo, getProjectGitStats } from "./git-info.service.js";
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree } from "./git.service.js";
@@ -408,7 +408,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     return { commitCount, recentCommits, issueCounts, detectedBranch, codeMetrics, history, hotspots };
   }
 
-  async function getBoard(projectId: string, nowOverride?: string) {
+  async function getBoard(projectId: string, nowOverride?: string, opts?: { includeArchived?: boolean }) {
     const project = await getProjectById(projectId, database);
     if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
 
@@ -417,6 +417,14 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       .from(projectStatuses)
       .where(eq(projectStatuses.projectId, projectId))
       .orderBy(projectStatuses.sortOrder);
+
+    const archivedStatusIds = new Set(
+      statuses.filter((s) => s.name === "Archived").map((s) => s.id),
+    );
+
+    const visibleStatuses = opts?.includeArchived
+      ? statuses
+      : statuses.filter((s) => !archivedStatusIds.has(s.id));
 
     const projectIssues = await database
       .select({
@@ -442,7 +450,11 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       })
       .from(issues)
       .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-      .where(eq(issues.projectId, projectId))
+      .where(
+        opts?.includeArchived || archivedStatusIds.size === 0
+          ? eq(issues.projectId, projectId)
+          : and(eq(issues.projectId, projectId), notInArray(issues.statusId, [...archivedStatusIds])),
+      )
       .orderBy(issues.sortOrder);
 
     const issueIds = projectIssues.map((i) => i.id);
@@ -510,7 +522,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       };
     });
 
-    return statuses.map((s) => ({
+    return visibleStatuses.map((s) => ({
       id: s.id,
       name: s.name,
       projectId: s.projectId,

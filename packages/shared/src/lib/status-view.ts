@@ -1,4 +1,4 @@
-export const LEGACY_TERMINAL_STATUS_NAMES = new Set(["Done", "Cancelled"]);
+export const LEGACY_TERMINAL_STATUS_NAMES = new Set(["Done", "Cancelled", "Archived"]);
 export const LEGACY_RESOLVED_DEPENDENCY_STATUS_NAMES = new Set(["Done", "AI Reviewed", "Cancelled"]);
 
 export interface StatusViewIssue {

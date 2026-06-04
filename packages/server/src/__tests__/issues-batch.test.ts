@@ -185,3 +185,127 @@ describe("PATCH /api/issues/bulk", () => {
     ]);
   });
 });
+
+describe("POST /api/issues/archive-done", () => {
+  async function seedWithStatuses(db: TestDb) {
+    const now = new Date().toISOString();
+    const projectId = randomUUID();
+    await db.insert(schema.projects).values({
+      id: projectId, name: "P", repoPath: "/tmp/p", repoName: "p",
+      defaultBranch: "main", createdAt: now, updatedAt: now,
+    });
+    const todoId = randomUUID();
+    await db.insert(schema.projectStatuses).values({
+      id: todoId, projectId, name: "Todo", sortOrder: 0, isDefault: true, createdAt: now,
+    });
+    const doneId = randomUUID();
+    await db.insert(schema.projectStatuses).values({
+      id: doneId, projectId, name: "Done", sortOrder: 1, isDefault: false, createdAt: now,
+    });
+    const archivedId = randomUUID();
+    await db.insert(schema.projectStatuses).values({
+      id: archivedId, projectId, name: "Archived", sortOrder: 99, isDefault: false, createdAt: now,
+    });
+    return { projectId, todoId, doneId, archivedId };
+  }
+
+  async function insertIssueWithStatus(
+    db: TestDb,
+    projectId: string,
+    statusId: string,
+    num: number,
+    statusChangedAt: string,
+  ) {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    await db.insert(schema.issues).values({
+      id, issueNumber: num, title: `I${num}`, priority: "medium",
+      sortOrder: 0, statusId, projectId, createdAt: now, updatedAt: now,
+      statusChangedAt,
+    });
+    return id;
+  }
+
+  it("archives exactly the Done issues older than the threshold and leaves newer ones", async () => {
+    const { app, db } = createTestApp();
+    const { projectId, doneId, archivedId } = await seedWithStatuses(db);
+    const now = new Date("2026-06-04T12:00:00.000Z");
+
+    // Exactly at cutoff (30 days old) — should NOT be archived (strict older than)
+    const atCutoff = await insertIssueWithStatus(
+      db, projectId, doneId, 1,
+      new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+    );
+
+    // 1 ms before cutoff — should NOT be archived
+    const justUnder = await insertIssueWithStatus(
+      db, projectId, doneId, 2,
+      new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000 + 1).toISOString(),
+    );
+
+    // 1 ms after cutoff — should be archived
+    const justOver = await insertIssueWithStatus(
+      db, projectId, doneId, 3,
+      new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000 - 1).toISOString(),
+    );
+
+    // 60 days old — should be archived
+    const old = await insertIssueWithStatus(
+      db, projectId, doneId, 4,
+      new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000).toISOString(),
+    );
+
+    const res = await app.request("/api/issues/archive-done", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId, olderThanDays: 30, nowOverride: now.toISOString() }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.archived).toBe(2);
+
+    const rows = await db.select({ id: schema.issues.id, statusId: schema.issues.statusId })
+      .from(schema.issues);
+    const statusById = new Map(rows.map((r) => [r.id, r.statusId]));
+
+    // Not archived — still Done
+    expect(statusById.get(atCutoff)).toBe(doneId);
+    expect(statusById.get(justUnder)).toBe(doneId);
+
+    // Archived
+    expect(statusById.get(justOver)).toBe(archivedId);
+    expect(statusById.get(old)).toBe(archivedId);
+  });
+
+  it("returns 0 when no Done issues exceed the threshold", async () => {
+    const { app, db } = createTestApp();
+    const { projectId, doneId } = await seedWithStatuses(db);
+    const now = new Date("2026-06-04T12:00:00.000Z");
+
+    // Issue 1 day old
+    await insertIssueWithStatus(
+      db, projectId, doneId, 1,
+      new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString(),
+    );
+
+    const res = await app.request("/api/issues/archive-done", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId, olderThanDays: 30, nowOverride: now.toISOString() }),
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ archived: 0 });
+  });
+
+  it("returns 400 for invalid olderThanDays", async () => {
+    const { app } = createTestApp();
+    const res = await app.request("/api/issues/archive-done", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId: randomUUID(), olderThanDays: -5 }),
+    });
+    expect(res.status).toBe(400);
+  });
+});
