@@ -19,11 +19,12 @@ import { runTicketPreflight, formatClarificationsBlock, type PreflightClarificat
 import { WorkspaceError } from "../services/workspace-internals.js";
 import { getIssueActivity } from "../services/issue-activity.service.js";
 import { getIssueCycleTime } from "../services/cycle-time.service.js";
+import { createWebhookSender } from "../services/outbound-webhook.service.js";
 
 export function createIssuesRoute(database: Database = db, options?: { boardEvents?: BoardEvents; getSessionManager?: () => SessionManager }) {
   const router = createRouter();
 
-  const issueService = createIssueService({ database, boardEvents: options?.boardEvents });
+  const issueService = createIssueService({ database, boardEvents: options?.boardEvents, sendWebhook: createWebhookSender(database) });
   const issueCommentsService = createIssueCommentsService({ database, boardEvents: options?.boardEvents });
   const timeEntriesService = createIssueTimeEntriesService({ database });
   const showdownService = createShowdownService({

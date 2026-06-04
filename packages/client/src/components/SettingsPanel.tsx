@@ -2202,6 +2202,28 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                           )}
                         </CollapsibleSection>
                       </div>
+                      {activeProjectId && (
+                        <div className="pt-4 border-t border-gray-100">
+                          <CollapsibleSection
+                            title="Outbound Webhook"
+                            configured={!!(settings[`outbound_webhook_url_${activeProjectId}` as keyof Settings])}
+                            defaultOpen={false}
+                          >
+                            <p className="text-xs text-gray-500 mb-3">
+                              Fire a POST request to a local URL whenever an issue changes status. Only localhost / 127.0.0.1 targets are accepted.
+                            </p>
+                            <Field label="Webhook URL" hint="e.g. http://localhost:9000/webhook">
+                              <input
+                                type="url"
+                                placeholder="http://localhost:9000/webhook"
+                                value={settings[`outbound_webhook_url_${activeProjectId}` as keyof Settings] ?? ""}
+                                onChange={(e) => setSettings((s) => ({ ...s, [`outbound_webhook_url_${activeProjectId}`]: e.target.value } as Settings))}
+                                className="w-full px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500 font-mono"
+                              />
+                            </Field>
+                          </CollapsibleSection>
+                        </div>
+                      )}
                     </div>
                   )}
                 </>

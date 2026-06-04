@@ -3,6 +3,7 @@ import { issues, issueTags, issueDependencies, issueArtifacts, issueComments, sh
 import { eq, and, or, sql, inArray, desc } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "./board-events.js";
+import type { WebhookIssueStatusPayload } from "@agentic-kanban/shared/lib";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
 import { getStartNode, resolveStatusId, syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import {
@@ -97,11 +98,14 @@ export interface CreateIssueResult {
   title: string;
 }
 
+export type WebhookSender = (projectId: string, payload: WebhookIssueStatusPayload) => void;
+
 export function createIssueService(deps: {
   database: Database;
   boardEvents?: BoardEvents;
+  sendWebhook?: WebhookSender;
 }) {
-  const { database, boardEvents } = deps;
+  const { database, boardEvents, sendWebhook } = deps;
 
   async function createIssue(input: CreateIssueInput): Promise<CreateIssueResult> {
     const now = new Date().toISOString();
@@ -261,12 +265,45 @@ export function createIssueService(deps: {
     if (body.pinned !== undefined) updates.pinned = body.pinned;
     if (body.milestoneId !== undefined) updates.milestoneId = body.milestoneId ?? null;
 
+    // Capture issue number before update for webhook payload
+    let issueNumberForWebhook: number | null = null;
+    let issueTitleForWebhook = "";
+    if (body.statusId !== undefined && sendWebhook) {
+      const issueRow = await database
+        .select({ issueNumber: issues.issueNumber, title: issues.title })
+        .from(issues)
+        .where(eq(issues.id, id))
+        .limit(1);
+      if (issueRow[0]) {
+        issueNumberForWebhook = issueRow[0].issueNumber;
+        issueTitleForWebhook = issueRow[0].title;
+      }
+    }
+
     await database.update(issues).set(updates).where(eq(issues.id, id));
 
     // If a manual status change moved an issue that runs a workflow, keep its
     // currentNode consistent with the new board status (#78 status-as-view).
     if (body.statusId !== undefined) {
       await syncCurrentNodeToStatus(database, id).catch(() => {});
+    }
+
+    if (body.statusId !== undefined && sendWebhook) {
+      const statusRow = await database
+        .select({ name: projectStatuses.name })
+        .from(projectStatuses)
+        .where(eq(projectStatuses.id, body.statusId as string))
+        .limit(1);
+      sendWebhook(projectId, {
+        event: "issue.status_changed",
+        issueId: id,
+        issueNumber: issueNumberForWebhook,
+        title: issueTitleForWebhook,
+        projectId,
+        newStatusId: body.statusId as string,
+        newStatusName: statusRow[0]?.name ?? null,
+        statusChangedAt: now,
+      });
     }
 
     boardEvents?.broadcast(projectId, "issue_updated");
