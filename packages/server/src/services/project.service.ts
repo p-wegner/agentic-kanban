@@ -461,10 +461,21 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     const issueIds = projectIssues.map((i) => i.id);
     const defaultBranch = project.defaultBranch;
 
+    // Archive columns (Done/Cancelled) by DB status name — used to skip the heavy
+    // per-session message scan + lastAssistantMessage/lastTool blobs for archived
+    // issues (their cards render via CompletedCard, which shows neither). Exact
+    // lowercased match avoids the "Cancelled" collapsed-bar substring footgun.
+    const ARCHIVE_STATUS_NAMES = new Set(["done", "cancelled"]);
+    const archivedIssueIds = new Set(
+      projectIssues
+        .filter((i) => i.statusName && ARCHIVE_STATUS_NAMES.has(i.statusName.toLowerCase()))
+        .map((i) => i.id),
+    );
+
     const cachedSummaryMap = workspaceSummaryCache?.get(projectId) ?? null;
     const summaryMapPromise = cachedSummaryMap
       ? Promise.resolve(cachedSummaryMap)
-      : buildWorkspaceSummaryMap(issueIds, defaultBranch, database).then((m) => {
+      : buildWorkspaceSummaryMap(issueIds, defaultBranch, database, archivedIssueIds).then((m) => {
           workspaceSummaryCache?.set(projectId, m);
           return m;
         });

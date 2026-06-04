@@ -138,6 +138,10 @@ export async function buildWorkspaceSummaryMap(
   issueIds: string[],
   defaultBranch: string | null,
   database: Database,
+  // Issues in archive columns (Done/Cancelled). Their cards render via CompletedCard,
+  // which never shows lastAssistantMessage/lastTool — so the per-session message scan
+  // is skipped for their main workspaces regardless of workspace status.
+  archivedIssueIds?: Set<string>,
 ): Promise<Map<string, WorkspaceSummary>> {
   const workspaceSummaryMap = new Map<string, WorkspaceSummary>();
   if (issueIds.length === 0) return workspaceSummaryMap;
@@ -495,7 +499,22 @@ export async function buildWorkspaceSummaryMap(
       if (!latestByWs.has(wsId)) latestByWs.set(wsId, noiseSession);
     }
 
-    const latestSessionIds = [...latestByWs.values()].map(s => s.id);
+    // lastTool / lastAssistantMessage are only consumed for non-closed, non-archived
+    // workspaces (AgentGrid hides closed; MonitorPopover only shows active/reviewing/
+    // fixing; board cards never render lastAssistantMessage; archived issues render via
+    // CompletedCard which shows neither). For closed (merged) workspaces and archived
+    // (Done/Cancelled) issues — the overwhelming majority on a mature board — the
+    // assistant-message text blob is pure payload weight. Skip the (potentially large)
+    // session_messages scan for them so those fields stay null: this is the dominant
+    // board-payload reduction.
+    const skipMessageScanWsIds = new Set(
+      [...mainWorkspaceMap.values()]
+        .filter((w) => w.status === "closed" || archivedIssueIds?.has(w.issueId))
+        .map((w) => w.id),
+    );
+    const latestSessionIds = [...latestByWs.entries()]
+      .filter(([wsId]) => !skipMessageScanWsIds.has(wsId))
+      .map(([, s]) => s.id);
     const lastToolBySession = new Map<string, string>();
     const lastAssistantMsgBySession = new Map<string, string>();
 
