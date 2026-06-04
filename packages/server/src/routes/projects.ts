@@ -17,6 +17,7 @@ import { getProjectHealth } from "../services/project-health.service.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 import { createHash } from "node:crypto";
+import { createWorkspaceSummaryCache } from "../services/workspace-summary-cache.service.js";
 
 function parseBoardHealthEventsLimit(raw: string | undefined): number {
   const parsed = Number.parseInt(raw ?? "", 10);
@@ -67,7 +68,12 @@ function compactBoardHealthEventDetails(raw: string | null): string | null {
 export function createProjectsRoute(database: Database = db, options?: { boardEvents?: BoardEvents; getSessionManager?: () => SessionManager }) {
   const router = createRouter();
 
-  const projectService = createProjectService({ database });
+  const workspaceSummaryCache = createWorkspaceSummaryCache();
+  if (options?.boardEvents) {
+    options.boardEvents.addInvalidationListener((projectId) => workspaceSummaryCache.invalidate(projectId));
+  }
+
+  const projectService = createProjectService({ database, workspaceSummaryCache });
 
   // GET /api/projects
   router.get("/", async (c) => {

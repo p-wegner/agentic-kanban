@@ -110,9 +110,20 @@ interface BoardEventSubscriber {
   ws: WSContext;
 }
 
+type InvalidationListener = (projectId: string) => void;
+
 function createBoardEvents() {
   const subscribers = new Map<string, Map<WSContext, BoardEventSubscriber>>();
+  const invalidationListeners = new Set<InvalidationListener>();
   let cleanupTimer: ReturnType<typeof setInterval> | null = null;
+
+  function addInvalidationListener(listener: InvalidationListener): void {
+    invalidationListeners.add(listener);
+  }
+
+  function removeInvalidationListener(listener: InvalidationListener): void {
+    invalidationListeners.delete(listener);
+  }
 
   function subscribe(projectId: string, ws: WSContext) {
     if (!subscribers.has(projectId)) {
@@ -166,6 +177,9 @@ function createBoardEvents() {
   }
 
   function broadcast(projectId: string, reason: BoardEventType) {
+    for (const listener of invalidationListeners) {
+      listener(projectId);
+    }
     const subs = subscribers.get(projectId);
     if (!subs) return;
     const message: BoardEventMessage = { type: "board_changed", projectId, reason };
@@ -236,6 +250,8 @@ function createBoardEvents() {
     startCleanup,
     stopCleanup,
     cleanupStaleConnections,
+    addInvalidationListener,
+    removeInvalidationListener,
   };
 }
 
