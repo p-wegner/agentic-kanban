@@ -762,8 +762,14 @@ exit 1
     // (pre-insert failure) in the catch block.
     let workspaceInserted = false;
 
+    const phaseStart = Date.now();
+    const timing = (phase: string, startMs: number) =>
+      console.log(`[workspaces-timing] workspaceId=${id} phase=${phase} durationMs=${Date.now() - startMs}`);
+
     try {
+      let t = Date.now();
       const { issue, project, setupConfig, symlinkConfig } = await resolveIssueAndProject(input.issueId);
+      timing("resolve-issue", t);
       repoPath = project.repoPath;
 
       // Default plan mode on for high/critical priority when not explicitly set.
@@ -771,13 +777,16 @@ exit 1
       const isHighPriority = issue.priority === "high" || issue.priority === "critical";
       planMode = input.planMode !== undefined ? input.planMode === true : isHighPriority;
 
+      t = Date.now();
       ({ branch, worktreePath, baseBranch, baseCommitSha, latestSetup, setupCompletion, symlinkRun: latestSymlink } = await setupWorktree(
         isDirect, project.repoPath, project.defaultBranch, input, setupConfig, symlinkConfig, id, issue,
       ));
+      timing("worktree-setup", t);
 
       // Run context packer (best-effort: never blocks workspace creation).
       let contextPrimer: string | null = null;
       if (!isDirect && !input.skipContextPacker) {
+        t = Date.now();
         try {
           const packed = await buildContextPrimer(
             {
@@ -793,6 +802,7 @@ exit 1
         } catch (err) {
           console.warn(`[workspaces] context-packer failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
         }
+        timing("context-packer", t);
       }
 
       // Inject ticket details (+ optional context primer) into the worktree as
@@ -841,6 +851,7 @@ exit 1
       agentCommand = agentConfig.agentCommand;
       resolvedProvider = agentConfig.resolvedProvider;
 
+      t = Date.now();
       await insertWorkspaceRecord({
         id, issueId: input.issueId, branch, worktreePath, baseBranch, isDirect,
         baseCommitSha, requiresReview, thoroughReview, planMode, tddMode, includeVisualProof,
@@ -848,6 +859,7 @@ exit 1
         contextPrimer, latestSetup, latestSymlink, now,
       });
       workspaceInserted = true;
+      timing("db-insert", t);
 
       if (setupCompletion) {
         setupCompletion
@@ -869,6 +881,7 @@ exit 1
         await moveIssueToInProgress(input.issueId, issue.projectId, now, database);
       }
 
+      t = Date.now();
       const sessionId = await launchAgent({
         workspaceId: id, branch, isDirect, agentPrompt,
         agentCommand, agentArgs: agentConfig.agentArgs,
@@ -880,6 +893,8 @@ exit 1
         contextFiles: ticketContextPath ? [ticketContextPath] : undefined,
         skillName,
       });
+      timing("agent-launch", t);
+      timing("total", phaseStart);
 
       boardEvents?.broadcast(issue.projectId, "workspace_created");
 
@@ -903,25 +918,35 @@ exit 1
     } catch (err) {
       if (err instanceof WorkspaceError) throw err;
       if (workspaceInserted) {
-        // The workspace row was committed but the agent failed to start.
-        // Atomically roll back: delete the row and remove the orphaned worktree,
-        // then re-throw so the route returns 500 instead of a misleading 201.
+        // The workspace row was committed but the agent failed to start (e.g. bad
+        // profile, missing binary). Per the one-step contract the route must still
+        // return 201 with the workspace record — dropping the connection here would
+        // force the caller to retry without knowing whether creation succeeded.
+        // Keep the row so the client can see and fix the workspace; mark it idle.
         const errorMsg = err instanceof Error ? err.message : String(err);
-        console.error(`[workspaces] agent launch failed, rolling back workspace ${id}: ${errorMsg}`);
+        console.error(`[workspaces] agent launch failed for workspace ${id}: ${errorMsg}`);
         try {
-          await database.delete(workspaces).where(eq(workspaces.id, id));
+          await database.update(workspaces).set({ status: "idle", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, id));
         } catch (dbErr) {
-          console.warn(`[workspaces] failed to delete workspace row during rollback: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`);
+          console.warn(`[workspaces] failed to update workspace status after agent-launch failure: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`);
         }
-        if (!isDirect && worktreePath && repoPath) {
-          try {
-            await gitService.removeWorktree(repoPath, worktreePath);
-            console.log(`[workspaces] cleaned up orphaned worktree during rollback: ${worktreePath}`);
-          } catch (cleanupErr) {
-            console.warn(`[workspaces] failed to remove worktree during rollback: ${cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)}`);
-          }
-        }
-        throw err;
+        return {
+          id,
+          issueId: input.issueId,
+          branch,
+          workingDir: worktreePath,
+          baseBranch,
+          isDirect,
+          planMode,
+          includeVisualProof,
+          status: "idle",
+          provider: resolvedProvider,
+          latestSetup,
+          latestSymlink,
+          createdAt: now,
+          updatedAt: now,
+          error: errorMsg,
+        };
       }
       return handleCreateFailure(err, {
         id, issueId: input.issueId, branch, worktreePath, repoPath, baseBranch, isDirect,
