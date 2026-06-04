@@ -11,6 +11,7 @@ import { buildWorkspaceSummaryMap, buildBlockedMap, buildTagMap, buildGraphEdges
 import { getProjectById, getProjectByRepoPath, getAllProjects, insertProject, deleteProjectCascade, getProjectStats, getProjectStatuses, createProjectStatus, deleteProjectStatus } from "../repositories/project.repository.js";
 import { generateSetupScript as generateSetupScriptAI, generateTeardownScript as generateTeardownScriptAI } from "./project-setup.service.js";
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
+import type { WorkspaceSummaryCache } from "./workspace-summary-cache.service.js";
 
 export class ProjectError extends Error {
   constructor(
@@ -92,8 +93,8 @@ obj/
 `,
 };
 
-export function createProjectService(deps: { database: Database }) {
-  const { database } = deps;
+export function createProjectService(deps: { database: Database; workspaceSummaryCache?: WorkspaceSummaryCache }) {
+  const { database, workspaceSummaryCache } = deps;
 
   async function registerProject(body: {
     repoPath: string;
@@ -445,8 +446,16 @@ export function createProjectService(deps: { database: Database }) {
     const issueIds = projectIssues.map((i) => i.id);
     const defaultBranch = project.defaultBranch;
 
+    const cachedSummaryMap = workspaceSummaryCache?.get(projectId) ?? null;
+    const summaryMapPromise = cachedSummaryMap
+      ? Promise.resolve(cachedSummaryMap)
+      : buildWorkspaceSummaryMap(issueIds, defaultBranch, database).then((m) => {
+          workspaceSummaryCache?.set(projectId, m);
+          return m;
+        });
+
     const [workspaceSummaryMap, blockedMap, issueTagMap, staleDaysRow, inProgressStaleDaysRow] = await Promise.all([
-      buildWorkspaceSummaryMap(issueIds, defaultBranch, database),
+      summaryMapPromise,
       buildBlockedMap(issueIds, database),
       buildTagMap(issueIds, database),
       database.select({ value: preferences.value }).from(preferences).where(eq(preferences.key, "backlog_stale_days")).limit(1),
