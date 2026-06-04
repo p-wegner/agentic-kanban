@@ -7,6 +7,7 @@ import { isAnalyticsNoise } from "./session-filter.js";
 import { computeWorkspaceCodeMetrics, parseStoredWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import type { WorkspaceCodeMetrics } from "@agentic-kanban/shared";
 import { ACTIVE_WORKSPACE_STATUSES, workspaceStatusPriority } from "@agentic-kanban/shared";
+import { readSessionStdoutFile } from "../repositories/session.repository.js";
 
 // Limit concurrent background git operations to avoid hammering the filesystem
 let _bgGitRunning = 0;
@@ -519,24 +520,40 @@ export async function buildWorkspaceSummaryMap(
     const lastAssistantMsgBySession = new Map<string, string>();
 
     if (latestSessionIds.length > 0) {
-      const msgRows = await database
-        .select({ sessionId: sessionMessages.sessionId, data: sessionMessages.data })
-        .from(sessionMessages)
-        .where(inArray(sessionMessages.sessionId, latestSessionIds))
-        .orderBy(desc(sessionMessages.id));
-
-      for (const msg of msgRows) {
-        const hasTool = lastToolBySession.has(msg.sessionId);
-        const hasMsg = lastAssistantMsgBySession.has(msg.sessionId);
-        if (hasTool && hasMsg) continue;
-        if (!msg.data) continue;
-        if (!hasTool) {
-          const toolName = extractToolName(msg.data);
-          if (toolName) lastToolBySession.set(msg.sessionId, toolName);
+      // Prefer .out file for stdout; fall back to DB for historical sessions
+      const needsDb: string[] = [];
+      for (const sid of latestSessionIds) {
+        const fileContent = readSessionStdoutFile(sid);
+        if (fileContent !== null) {
+          const toolName = extractToolName(fileContent);
+          if (toolName) lastToolBySession.set(sid, toolName);
+          const assistantMessage = extractAssistantMessage(fileContent);
+          if (assistantMessage) lastAssistantMsgBySession.set(sid, assistantMessage);
+        } else {
+          needsDb.push(sid);
         }
-        if (!hasMsg) {
-          const assistantMessage = extractAssistantMessage(msg.data);
-          if (assistantMessage) lastAssistantMsgBySession.set(msg.sessionId, assistantMessage);
+      }
+
+      if (needsDb.length > 0) {
+        const msgRows = await database
+          .select({ sessionId: sessionMessages.sessionId, data: sessionMessages.data })
+          .from(sessionMessages)
+          .where(inArray(sessionMessages.sessionId, needsDb))
+          .orderBy(desc(sessionMessages.id));
+
+        for (const msg of msgRows) {
+          const hasTool = lastToolBySession.has(msg.sessionId);
+          const hasMsg = lastAssistantMsgBySession.has(msg.sessionId);
+          if (hasTool && hasMsg) continue;
+          if (!msg.data) continue;
+          if (!hasTool) {
+            const toolName = extractToolName(msg.data);
+            if (toolName) lastToolBySession.set(msg.sessionId, toolName);
+          }
+          if (!hasMsg) {
+            const assistantMessage = extractAssistantMessage(msg.data);
+            if (assistantMessage) lastAssistantMsgBySession.set(msg.sessionId, assistantMessage);
+          }
         }
       }
     }

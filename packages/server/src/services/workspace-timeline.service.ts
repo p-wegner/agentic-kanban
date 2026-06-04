@@ -2,6 +2,7 @@ import { sessions, workspaces, sessionMessages } from "@agentic-kanban/shared/sc
 import { eq, desc, and, inArray } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import type { WorkspaceTimelineEvent, WorkspaceTimelineResponse, WorkspaceTimelineEventType } from "@agentic-kanban/shared";
+import { readSessionStdoutFile } from "../repositories/session.repository.js";
 
 function isZeroOutputSession(session: { startedAt: string; endedAt: string | null; stats: string | null }): boolean {
   if (!session.endedAt) return false;
@@ -40,27 +41,56 @@ function extractMessageText(data: string | null): string | null {
   return data.slice(0, 500).trim() || null;
 }
 
+function extractLastAssistantFromStdout(content: string): string | null {
+  let last: string | null = null;
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const obj = JSON.parse(trimmed) as Record<string, unknown>;
+      if (obj.type === "assistant") last = extractMessageText(trimmed);
+    } catch { /* ignore */ }
+  }
+  return last;
+}
+
 async function getLastAssistantMessagesBatch(
   database: Database,
   sessionIds: string[],
 ): Promise<Map<string, string | null>> {
   if (sessionIds.length === 0) return new Map();
-  const rows = await database
-    .select({ sessionId: sessionMessages.sessionId, data: sessionMessages.data, createdAt: sessionMessages.createdAt })
-    .from(sessionMessages)
-    .where(and(
-      inArray(sessionMessages.sessionId, sessionIds),
-      eq(sessionMessages.type, "assistant"),
-    ))
-    .orderBy(desc(sessionMessages.createdAt));
 
-  // Pick the most recent message per session (rows ordered desc, so first seen = latest)
   const result = new Map<string, string | null>();
-  for (const row of rows) {
-    if (!result.has(row.sessionId)) {
-      result.set(row.sessionId, extractMessageText(row.data));
+
+  // Try .out file first for each session
+  const needsDb: string[] = [];
+  for (const sid of sessionIds) {
+    const fileContent = readSessionStdoutFile(sid);
+    if (fileContent !== null) {
+      result.set(sid, extractLastAssistantFromStdout(fileContent));
+    } else {
+      needsDb.push(sid);
     }
   }
+
+  // Fall back to DB for historical sessions
+  if (needsDb.length > 0) {
+    const rows = await database
+      .select({ sessionId: sessionMessages.sessionId, data: sessionMessages.data, createdAt: sessionMessages.createdAt })
+      .from(sessionMessages)
+      .where(and(
+        inArray(sessionMessages.sessionId, needsDb),
+        eq(sessionMessages.type, "assistant"),
+      ))
+      .orderBy(desc(sessionMessages.createdAt));
+
+    for (const row of rows) {
+      if (!result.has(row.sessionId)) {
+        result.set(row.sessionId, extractMessageText(row.data));
+      }
+    }
+  }
+
   for (const id of sessionIds) {
     if (!result.has(id)) result.set(id, null);
   }

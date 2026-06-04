@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
-import { requireEntity } from "../db-utils.js";
+import { requireEntity, readSessionStdoutFile } from "../db-utils.js";
 
 // Strip ANSI escape sequences
 function stripAnsi(str: string): string {
@@ -32,23 +32,46 @@ export function registerReadTerminal(server: McpServer) {
       const r = requireEntity(sessionRows, sessionId, "Session");
       if (!r.ok) return r.error;
 
-      const rows = await db.select().from(schema.sessionMessages)
-        .where(eq(schema.sessionMessages.sessionId, sessionId))
-        .orderBy(schema.sessionMessages.id);
+      // Prefer .out file for stdout; non-stdout (exit/stderr) from DB; fall back to DB-only for historical sessions
+      const fileContent = readSessionStdoutFile(sessionId);
+      let messages: Array<{ type: string; data?: string; exitCode?: number }>;
+      let totalMessages: number;
 
-      // Take the last N messages
-      const messages = rows.slice(-effectiveLimit).map(row => ({
-        type: row.type,
-        data: row.data ? stripAnsi(row.data) : undefined,
-        exitCode: row.exitCode != null ? Number(row.exitCode) : undefined,
-      }));
+      if (fileContent !== null) {
+        const stdoutMsg = { type: "stdout", data: stripAnsi(fileContent) };
+        const nonStdoutRows = await db
+          .select({ type: schema.sessionMessages.type, data: schema.sessionMessages.data, exitCode: schema.sessionMessages.exitCode })
+          .from(schema.sessionMessages)
+          .where(eq(schema.sessionMessages.sessionId, sessionId))
+          .orderBy(schema.sessionMessages.id);
+        const nonStdout = nonStdoutRows
+          .filter(r => r.type !== "stdout")
+          .map(row => ({
+            type: row.type,
+            data: row.data ? stripAnsi(row.data) : undefined,
+            exitCode: row.exitCode != null ? Number(row.exitCode) : undefined,
+          }));
+        const allMessages = [stdoutMsg, ...nonStdout];
+        totalMessages = allMessages.length;
+        messages = allMessages.slice(-effectiveLimit);
+      } else {
+        const rows = await db.select().from(schema.sessionMessages)
+          .where(eq(schema.sessionMessages.sessionId, sessionId))
+          .orderBy(schema.sessionMessages.id);
+        totalMessages = rows.length;
+        messages = rows.slice(-effectiveLimit).map(row => ({
+          type: row.type,
+          data: row.data ? stripAnsi(row.data) : undefined,
+          exitCode: row.exitCode != null ? Number(row.exitCode) : undefined,
+        }));
+      }
 
       return {
         content: [{
           type: "text" as const,
           text: JSON.stringify({
             sessionId,
-            totalMessages: rows.length,
+            totalMessages,
             returned: messages.length,
             sessionStatus: r.value.status,
             messages,

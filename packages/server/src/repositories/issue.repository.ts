@@ -5,6 +5,7 @@ import { eq, inArray, desc, sql, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { getSessionMessageRows } from "./session.repository.js";
 
 type Issue = typeof issues.$inferSelect;
 type Workspace = typeof workspaces.$inferSelect;
@@ -134,11 +135,7 @@ export async function getIssueSummary(
     return { issueId: issue.id, issueNumber: issue.issueNumber, title: issue.title, status: "no session", summary: null, workspace: null, session: null, stats: null, agentSummary: null, filesEdited: [], filesRead: [], commandsRun: [], errors: [], model: null };
   }
 
-  const msgRows = await database
-    .select()
-    .from(sessionMessages)
-    .where(eq(sessionMessages.sessionId, completedSession.id))
-    .orderBy(sessionMessages.id);
+  const msgRows = await getSessionMessageRows(completedSession.id, database);
 
   let parsedStats: Record<string, unknown> | null = null;
   if (completedSession.stats) {

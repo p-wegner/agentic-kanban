@@ -5,6 +5,7 @@ import { parseSessionSummary } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
 import * as realGitService from "./git.service.js";
 import { WorkspaceError, type GitService } from "./workspace-internals.js";
+import { readSessionStdoutFile, getSessionMessageRows } from "../repositories/session.repository.js";
 
 export const GITHUB_HANDOFF_DRAFT_CAPTION = "github-handoff-draft";
 
@@ -159,12 +160,25 @@ export async function generateGithubHandoffDraft(args: {
     .where(eq(sessions.workspaceId, workspaceId))
     .orderBy(desc(sessions.startedAt));
   const sessionIds = sessionRows.map((session) => session.id);
-  const messageRows = sessionIds.length === 0
-    ? []
-    : await database
+  let messageRows: Array<{ type: string; data: string | null; sessionId: string }> = [];
+  if (sessionIds.length > 0) {
+    const needsDb: string[] = [];
+    for (const sid of sessionIds) {
+      const fileContent = readSessionStdoutFile(sid);
+      if (fileContent !== null) {
+        messageRows.push({ type: "stdout", data: fileContent, sessionId: sid });
+      } else {
+        needsDb.push(sid);
+      }
+    }
+    if (needsDb.length > 0) {
+      const dbRows = await database
         .select({ type: sessionMessages.type, data: sessionMessages.data, sessionId: sessionMessages.sessionId })
         .from(sessionMessages)
-        .where(inArray(sessionMessages.sessionId, sessionIds));
+        .where(inArray(sessionMessages.sessionId, needsDb));
+      messageRows = messageRows.concat(dbRows);
+    }
+  }
   const summary = parseSessionSummary(messageRows);
   const statsSummary = sessionRows
     .map((session) => {
@@ -222,10 +236,7 @@ async function collectReviewerNotes(
   });
 
   for (const session of sessionRows.filter((row) => row.triggerType === "review")) {
-    const rows = await database
-      .select({ type: sessionMessages.type, data: sessionMessages.data })
-      .from(sessionMessages)
-      .where(eq(sessionMessages.sessionId, session.id));
+    const rows = await getSessionMessageRows(session.id, database);
     const summary = finalSummary(parseSessionSummary(rows).agentSummary);
     if (summary) notes.push(summary);
   }

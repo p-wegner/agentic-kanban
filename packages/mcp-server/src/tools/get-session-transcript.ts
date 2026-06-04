@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { eq, desc } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { requireEntity } from "../db-utils.js";
+import { requireEntity, readSessionStdoutFile } from "../db-utils.js";
 
 export function registerGetSessionTranscript(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema } = deps;
@@ -47,25 +47,34 @@ export function registerGetSessionTranscript(server: McpServer, deps: ToolDeps =
       if (!r.ok) return r.error;
 
       const messageLimit = limit ?? 200;
-      const newestMessages = await db
-        .select({
-          id: schema.sessionMessages.id,
-          type: schema.sessionMessages.type,
-          data: schema.sessionMessages.data,
-          exitCode: schema.sessionMessages.exitCode,
-          createdAt: schema.sessionMessages.createdAt,
-        })
-        .from(schema.sessionMessages)
-        .where(eq(schema.sessionMessages.sessionId, sessionId))
-        .orderBy(desc(schema.sessionMessages.id))
-        .limit(messageLimit);
+      // Prefer .out file for stdout; non-stdout rows from DB; fall back to DB-only for historical sessions
+      let messages: Array<{ id?: number; type: string; data?: string | null; exitCode?: number | null; createdAt?: string | null }>;
+      const fileContent = readSessionStdoutFile(sessionId);
+      if (fileContent !== null) {
+        const stdoutMsg = { type: "stdout", data: fileContent };
+        const nonStdoutRows = await db
+          .select({ id: schema.sessionMessages.id, type: schema.sessionMessages.type, data: schema.sessionMessages.data, exitCode: schema.sessionMessages.exitCode, createdAt: schema.sessionMessages.createdAt })
+          .from(schema.sessionMessages)
+          .where(eq(schema.sessionMessages.sessionId, sessionId))
+          .orderBy(desc(schema.sessionMessages.id));
+        const nonStdout = nonStdoutRows.filter(r => r.type !== "stdout").reverse();
+        messages = [stdoutMsg, ...nonStdout].slice(-messageLimit);
+      } else {
+        const newestMessages = await db
+          .select({ id: schema.sessionMessages.id, type: schema.sessionMessages.type, data: schema.sessionMessages.data, exitCode: schema.sessionMessages.exitCode, createdAt: schema.sessionMessages.createdAt })
+          .from(schema.sessionMessages)
+          .where(eq(schema.sessionMessages.sessionId, sessionId))
+          .orderBy(desc(schema.sessionMessages.id))
+          .limit(messageLimit);
+        messages = newestMessages.reverse();
+      }
 
       return {
         content: [{
           type: "text" as const,
           text: JSON.stringify({
             ...r.value,
-            messages: newestMessages.reverse(),
+            messages,
           }, null, 2),
         }],
       };

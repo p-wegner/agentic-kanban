@@ -4,6 +4,7 @@ import { issues, projectStatuses, workspaces, sessions, sessionMessages } from "
 import { eq, inArray, desc, gte, isNotNull, and } from "drizzle-orm";
 import { parseSessionSummary, computeFrictionStats } from "@agentic-kanban/shared";
 import { runMigrations } from "../shared.js";
+import { getSessionMessageRows } from "../../repositories/session.repository.js";
 
 export function registerSessionCommand(program: Command) {
   const sessionCmd = program.command("session").description("Inspect agent sessions.\n\nSubcommands: analyze, recent");
@@ -37,11 +38,7 @@ export function registerSessionCommand(program: Command) {
           issue = issueRows[0] ?? null;
         }
 
-        const msgRows = await db
-          .select()
-          .from(sessionMessages)
-          .where(eq(sessionMessages.sessionId, sessionId))
-          .orderBy(sessionMessages.id);
+        const msgRows = await getSessionMessageRows(sessionId);
 
         const summary = parseSessionSummary(msgRows);
 
@@ -167,11 +164,7 @@ export function registerSessionCommand(program: Command) {
           }
           if (stats.friction && !options.force) { skipped++; continue; }
 
-          const msgRows = await db
-            .select({ type: sessionMessages.type, data: sessionMessages.data })
-            .from(sessionMessages)
-            .where(eq(sessionMessages.sessionId, s.id))
-            .orderBy(sessionMessages.id);
+          const msgRows = await getSessionMessageRows(s.id);
 
           const summary = parseSessionSummary(msgRows);
           const friction = computeFrictionStats(summary);

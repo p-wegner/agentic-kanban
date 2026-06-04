@@ -3,7 +3,7 @@ import { z } from "zod";
 import { db, schema } from "../db.js";
 import { eq, inArray, desc } from "drizzle-orm";
 import { parseSessionSummary, formatDurationStr } from "@agentic-kanban/shared";
-import { requireEntity } from "../db-utils.js";
+import { requireEntity, readSessionStdoutFile } from "../db-utils.js";
 
 export function registerGetIssueSummary(server: McpServer) {
   server.tool(
@@ -74,12 +74,23 @@ export function registerGetIssueSummary(server: McpServer) {
           };
         }
 
-        // 4. Fetch session messages
-        const msgRows = await db
-          .select()
-          .from(schema.sessionMessages)
-          .where(eq(schema.sessionMessages.sessionId, completedSession.id))
-          .orderBy(schema.sessionMessages.id);
+        // 4. Fetch session messages — prefer .out file for stdout, fall back to DB
+        let msgRows: Array<{ type: string; data: string | null }>;
+        const fileContent = readSessionStdoutFile(completedSession.id);
+        if (fileContent !== null) {
+          const nonStdout = await db
+            .select({ type: schema.sessionMessages.type, data: schema.sessionMessages.data })
+            .from(schema.sessionMessages)
+            .where(eq(schema.sessionMessages.sessionId, completedSession.id))
+            .orderBy(schema.sessionMessages.id);
+          msgRows = [{ type: "stdout", data: fileContent }, ...nonStdout.filter(r => r.type !== "stdout")];
+        } else {
+          msgRows = await db
+            .select()
+            .from(schema.sessionMessages)
+            .where(eq(schema.sessionMessages.sessionId, completedSession.id))
+            .orderBy(schema.sessionMessages.id);
+        }
 
         // 5. Parse stats
         let stats: Record<string, unknown> | null = null;
