@@ -185,6 +185,44 @@ describe("Issues API", () => {
     expect(res.status).toBe(400);
   });
 
+  it("GET /api/issues?statusName= filters to matching issues and leaves unfiltered path unchanged", async () => {
+    const p = await createProjectDirectly(database, { name: "StatusFilter Project" });
+    const todoId = await createStatusDirectly(database, p, "Todo", 0);
+    const inProgressId = await createStatusDirectly(database, p, "In Progress", 1);
+
+    // Create one issue in each status
+    await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Todo issue", statusId: todoId, projectId: p }),
+    });
+    await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "In Progress issue", statusId: inProgressId, projectId: p }),
+    });
+
+    // Filtered: only "In Progress"
+    const filtered = await app.request(`/api/issues?projectId=${p}&statusName=In%20Progress`);
+    expect(filtered.status).toBe(200);
+    const filteredBody = await filtered.json() as any[];
+    expect(filteredBody.length).toBe(1);
+    expect(filteredBody[0].statusName).toBe("In Progress");
+    expect(filteredBody[0].title).toBe("In Progress issue");
+
+    // Unfiltered: both issues returned
+    const all = await app.request(`/api/issues?projectId=${p}`);
+    expect(all.status).toBe(200);
+    const allBody = await all.json() as any[];
+    expect(allBody.length).toBe(2);
+
+    // Non-matching status returns empty array
+    const none = await app.request(`/api/issues?projectId=${p}&statusName=Done`);
+    expect(none.status).toBe(200);
+    const noneBody = await none.json() as any[];
+    expect(noneBody.length).toBe(0);
+  });
+
   it("PATCH /api/issues/:id updates an issue", async () => {
     // Create issue
     const createRes = await app.request("/api/issues", {
