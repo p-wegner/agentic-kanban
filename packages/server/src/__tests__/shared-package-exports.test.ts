@@ -80,4 +80,30 @@ describe("shared package exports", () => {
       )
     ).toEqual([]);
   });
+
+  it("every export subpath has a 'development' condition pointing to src/ (stale-dist regression)", () => {
+    // Regression guard for AK-567: every subpath in shared/package.json exports must
+    // have a "development" condition so that `tsx --conditions development` resolves
+    // to live TypeScript source rather than stale dist/ after merging a shared change.
+    const sharedPackage = JSON.parse(readFileSync(sharedPackageJson, "utf8")) as {
+      exports?: Record<string, Record<string, string>>;
+    };
+    const exports = sharedPackage.exports ?? {};
+    const missing: string[] = [];
+
+    for (const [subpath, conditions] of Object.entries(exports)) {
+      if (typeof conditions !== "object" || conditions === null) {
+        missing.push(`${subpath}: not an object`);
+        continue;
+      }
+      const devEntry = (conditions as Record<string, string>)["development"];
+      if (!devEntry) {
+        missing.push(`${subpath}: missing "development" condition`);
+      } else if (!devEntry.startsWith("./src/")) {
+        missing.push(`${subpath}: "development" condition "${devEntry}" does not point to ./src/`);
+      }
+    }
+
+    expect(missing).toEqual([]);
+  });
 });
