@@ -442,6 +442,19 @@ export function createWorkspaceMergeService(deps: {
     let mergeCommitSha = "";
     try { mergeCommitSha = await gitService.revParse(repoPath, "HEAD"); } catch { /* tolerate */ }
 
+    // Post-merge invariant: verify the branch tip is now reachable from targetBranch.
+    // If not, the git merge did not actually land the work — refuse to set Done.
+    // This guards against plumbing anomalies or interrupted ref updates that leave
+    // the branch ahead-but-not-ancestor (the #585/#588 silent-merge-loss scenario).
+    const postMergeAncestry = await gitService.checkBranchTipIsAncestor(repoPath, workspace.branch, targetBranch);
+    if (!postMergeAncestry.isAncestor) {
+      throw new WorkspaceError(
+        `Post-merge invariant violated: branch '${workspace.branch}' is still not an ancestor of '${targetBranch}' after merge — refusing to move issue to Done`,
+        "CONFLICT",
+        { mergeReason: "post_merge_ancestry_check_failed", branch: workspace.branch, targetBranch },
+      );
+    }
+
     // Stamp mergedAt immediately so the startup reconciler can detect this workspace
     // and move it to Done even if the server dies before the full status write below.
     // This write is intentionally separate and early — it must happen before any step

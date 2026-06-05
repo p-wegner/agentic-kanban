@@ -122,7 +122,11 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
 
       if (!workspace.isDirect) {
         const projectRows = await db.select({ repoPath: projects.repoPath, teardownScript: projects.teardownScript, defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.id, projectId)).limit(1);
-        if (projectRows.length > 0) {
+        if (projectRows.length === 0) {
+          // Guard: project not found — refuse to set Done without a verified merge.
+          throw new Error(`Auto-merge aborted: project ${projectId} not found — cannot verify merge for workspace ${workspace.id} (branch ${workspace.branch})`);
+        }
+        {
           const { repoPath, teardownScript, defaultBranch } = projectRows[0];
 
           const mergePromise = (async () => {
@@ -159,6 +163,17 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
 
               const targetBranch = workspace.baseBranch || defaultBranch || "main";
               const mergeOutput = await gitService.mergeBranch(repoPath, workspace.branch, targetBranch);
+
+              // Post-merge invariant: verify the branch tip is now reachable from target.
+              // If not, the git merge did not actually land the work (e.g. plumbing anomaly
+              // or interrupted ref update) — refuse to set Done so the scanner can catch it.
+              const postMergeAncestry = await gitService.checkBranchTipIsAncestor(repoPath, workspace.branch, targetBranch);
+              if (!postMergeAncestry.isAncestor) {
+                throw new Error(
+                  `Post-merge invariant violated: branch '${workspace.branch}' is still not an ancestor of '${targetBranch}' after merge — refusing to move issue to Done (workspace ${workspace.id})`,
+                );
+              }
+
               let mergeCommitSha = "";
               try { mergeCommitSha = await gitService.revParse(repoPath, "HEAD"); } catch { /* tolerate */ }
               await recordMergeAttempt(

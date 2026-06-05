@@ -28,13 +28,19 @@ function makeGitService(overrides: Partial<{
 }> = {}) {
   const defaultRevParse = overrides.revParse ?? (async (_repo: string, ref: string) => ref);
   const defaultIsAncestor = overrides.isAncestor ?? (async () => false);
+  // Default checkBranchTipIsAncestor: first call delegates to isAncestor (pre-merge check),
+  // subsequent calls return isAncestor:true (simulating successful post-merge state).
+  let checkAncestorCallCount = 0;
   const defaultCheckBranchTipIsAncestor = overrides.checkBranchTipIsAncestor ?? (async (repo: string, branch: string, base: string) => {
+    checkAncestorCallCount++;
     let branchSha: string;
     try { branchSha = await defaultRevParse(repo, branch); }
     catch { return { isAncestor: false as const, branchSha: null as null, reason: "branch-not-found" }; }
     let baseSha: string;
     try { baseSha = await defaultRevParse(repo, base); }
     catch { return { isAncestor: false as const, branchSha: null as null, reason: "base-not-found" }; }
+    // Post-merge calls (2+) always return isAncestor:true — simulates successful merge landing.
+    if (checkAncestorCallCount > 1) return { isAncestor: true as const, branchSha, baseSha };
     const ancestor = await defaultIsAncestor(repo, branchSha, baseSha);
     return ancestor ? { isAncestor: true as const, branchSha, baseSha } : { isAncestor: false as const, branchSha, baseSha };
   });
@@ -52,6 +58,8 @@ function makeGitService(overrides: Partial<{
     getChangedFilesBetween: vi.fn(async () => []),
     getCurrentBranch: vi.fn(async () => "master"),
     autoRenumberMigrations: vi.fn(async () => ({ renumbered: false, renames: [] })),
+    countUniqueCommits: vi.fn(async () => 1),
+    getUncommittedTrackedChanges: vi.fn(async () => []),
   };
 }
 
