@@ -114,6 +114,41 @@ interface Tag {
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
 const BACKLOG_STATUS_NAME = "Backlog";
 
+function stringifyForIssueCard(issue: IssueWithStatus): string {
+  const normalized = {
+    id: issue.id,
+    issueNumber: issue.issueNumber,
+    title: issue.title,
+    description: issue.description,
+    priority: issue.priority,
+    issueType: issue.issueType,
+    sortOrder: issue.sortOrder,
+    statusId: issue.statusId,
+    statusName: issue.statusName,
+    projectId: issue.projectId,
+    createdAt: issue.createdAt,
+    updatedAt: issue.updatedAt,
+    statusChangedAt: issue.statusChangedAt,
+    workspaceSummary: issue.workspaceSummary,
+    isBlocked: issue.isBlocked,
+    isStale: issue.isStale,
+    staleDays: issue.staleDays,
+    columnAgeDays: issue.columnAgeDays,
+    isColumnStale: issue.isColumnStale,
+    skipAutoReview: issue.skipAutoReview,
+    estimate: issue.estimate,
+    dueDate: issue.dueDate,
+    externalKey: issue.externalKey,
+    externalUrl: issue.externalUrl,
+    tags: issue.tags,
+    checklist: issue.checklist,
+    pinned: issue.pinned,
+    milestoneId: issue.milestoneId,
+    readyForMerge: (issue as IssueWithStatus & { readyForMerge?: boolean }).readyForMerge,
+  };
+  return JSON.stringify(normalized);
+}
+
 export function BoardPage() {
   const { theme: _theme, setTheme, isDark } = useTheme();
   // Warm the overlay-panels chunk shortly after the board paints. It is lazy (keeps it
@@ -267,19 +302,13 @@ export function BoardPage() {
     const prevCols = columnsRef.current;
     if (prevCols.length > 0) {
       const prevByIssueId = new Map(prevCols.flatMap(c => c.issues).map(i => [i.id, i]));
+      const prevIssueSignatures = new Map<string, string>(Array.from(prevByIssueId, ([issueId, issue]) => [issueId, stringifyForIssueCard(issue)]));
       for (const col of board) {
         col.issues = col.issues.map(issue => {
           const prev = prevByIssueId.get(issue.id);
           if (!prev) return issue;
-          // Quick field-level compare on the fields IssueCard.memo cares about
-          if (
-            prev.statusId === issue.statusId &&
-            prev.updatedAt === issue.updatedAt &&
-            prev.workspaceSummary?.main?.lastSessionAt === issue.workspaceSummary?.main?.lastSessionAt &&
-            prev.workspaceSummary?.main?.status === issue.workspaceSummary?.main?.status &&
-            prev.workspaceSummary?.main?.sessionStatus === issue.workspaceSummary?.main?.sessionStatus &&
-            prev.readyForMerge === issue.readyForMerge
-          ) return prev;
+          const prevSignature = prevIssueSignatures.get(issue.id);
+          if (prevSignature !== undefined && prevSignature === stringifyForIssueCard(issue)) return prev;
           return issue;
         });
       }
