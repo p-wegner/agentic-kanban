@@ -29,6 +29,7 @@ import { planPortOwnerKill, parseNetstatListeners } from "./dev-port-guard.mjs";
 import { writeProcessAudit } from "./process-audit.mjs";
 import { repairDrizzleIfNeeded } from "./drizzle-preflight.mjs";
 import { repairSharedIfNeeded } from "./shared-preflight.mjs";
+import { reapStaleSupervisors } from "./stale-supervisor.mjs";
 
 function run(cmd) {
   try {
@@ -297,6 +298,8 @@ async function main() {
   repairDrizzleIfNeeded(process.cwd());
 
   const { serverPort, clientPort } = configurePorts();
+
+  reapStaleSupervisors({ checkoutRoot: process.cwd(), serverPort });
 
   await freePort(serverPort, "server");
   await freePort(clientPort, "client");
