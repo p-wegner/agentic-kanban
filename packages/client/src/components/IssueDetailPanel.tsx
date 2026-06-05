@@ -509,11 +509,9 @@ export function IssueDetailPanel({
     loadData();
   }, [issue.id]);
 
-  // Lazy-load description for archived issues (stripped from board payload to reduce size)
+  // Lazy-load description on demand (stripped from board payload to reduce size)
   useEffect(() => {
-    const ARCHIVE_STATUS_NAMES = new Set(["done", "cancelled"]);
-    const isArchived = issue.statusName && ARCHIVE_STATUS_NAMES.has(issue.statusName.toLowerCase());
-    if (issue.description !== null || !isArchived) return;
+    if (issue.description !== undefined) return;
     let cancelled = false;
     setDescriptionFetching(true);
     apiFetch<{ id: string; description: string | null }>(`/api/issues/${issue.id}`)
@@ -524,7 +522,7 @@ export function IssueDetailPanel({
       .catch(() => {})
       .finally(() => { if (!cancelled) setDescriptionFetching(false); });
     return () => { cancelled = true; };
-  }, [issue.id, issue.statusName]);
+  }, [issue.id]);
 
   // Sync local state when issue prop changes (stale data fix - F6)
   useEffect(() => {
