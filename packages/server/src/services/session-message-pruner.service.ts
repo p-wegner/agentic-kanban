@@ -6,6 +6,9 @@ const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000; // every 6 hours
 const MERGED_WORKSPACE_RETENTION_DAYS = 3;
 const MAX_MESSAGES_PER_ACTIVE_SESSION = 2_000;
 
+let activePruneTimeout: ReturnType<typeof setTimeout> | null = null;
+let activePruneInterval: ReturnType<typeof setInterval> | null = null;
+
 /**
  * Delete session_messages for workspaces that were merged/closed more than
  * MERGED_WORKSPACE_RETENTION_DAYS ago. These rows are never needed again once
@@ -97,6 +100,15 @@ export async function capSessionMessages(database: Database): Promise<number> {
  * short delay) and then every PRUNE_INTERVAL_MS.
  */
 export function startSessionMessagePruner(database: Database): void {
+  if (activePruneTimeout !== null) {
+    clearTimeout(activePruneTimeout);
+    activePruneTimeout = null;
+  }
+  if (activePruneInterval !== null) {
+    clearInterval(activePruneInterval);
+    activePruneInterval = null;
+  }
+
   async function runPruneCycle() {
     try {
       const deleted = await pruneOldSessionMessages(database);
@@ -113,6 +125,6 @@ export function startSessionMessagePruner(database: Database): void {
   }
 
   // First run after 30s (let server fully start)
-  setTimeout(() => { runPruneCycle().catch(() => {}); }, 30_000);
-  setInterval(() => { runPruneCycle().catch(() => {}); }, PRUNE_INTERVAL_MS);
+  activePruneTimeout = setTimeout(() => { runPruneCycle().catch(() => {}); }, 30_000);
+  activePruneInterval = setInterval(() => { runPruneCycle().catch(() => {}); }, PRUNE_INTERVAL_MS);
 }

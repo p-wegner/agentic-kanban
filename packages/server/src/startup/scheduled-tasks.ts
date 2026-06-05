@@ -4,7 +4,20 @@ import { eq } from "drizzle-orm";
 import { getNextCronRun } from "@agentic-kanban/shared/lib/cron-utils";
 import { randomUUID } from "node:crypto";
 
-export function setupScheduledTasks(serverPort: number): void {
+export interface ScheduledTaskTimers {
+  timer: ReturnType<typeof setTimeout>;
+  interval: ReturnType<typeof setInterval>;
+}
+
+let activeScheduledTaskTimers: ScheduledTaskTimers | null = null;
+
+export function setupScheduledTasks(serverPort: number): ScheduledTaskTimers {
+  if (activeScheduledTaskTimers) {
+    clearTimeout(activeScheduledTaskTimers.timer);
+    clearInterval(activeScheduledTaskTimers.interval);
+    activeScheduledTaskTimers = null;
+  }
+
   async function runScheduledRunsCycle() {
     try {
       const now = new Date();
@@ -43,9 +56,13 @@ export function setupScheduledTasks(serverPort: number): void {
   }
 
   // Check every minute
-  setInterval(() => { runScheduledRunsCycle().catch(() => {}); }, 60 * 1000);
+  const interval = setInterval(() => { runScheduledRunsCycle().catch(() => {}); }, 60 * 1000);
   // Initial check after 10s (let server fully start)
-  setTimeout(() => { runScheduledRunsCycle().catch(() => {}); }, 10 * 1000);
+  const timer = setTimeout(() => { runScheduledRunsCycle().catch(() => {}); }, 10 * 1000);
+
+  const handles: ScheduledTaskTimers = { timer, interval };
+  activeScheduledTaskTimers = handles;
+  return handles;
 }
 
 async function recordSchedulerFailure(run: typeof scheduledRuns.$inferSelect, reason: string) {
