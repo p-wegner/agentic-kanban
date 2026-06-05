@@ -389,7 +389,7 @@ export async function runStartupTasks(sessionManager: SessionManager, _deps?: { 
     console.warn("[startup] reconcileAncestorBranchWorkspaces failed (non-fatal):", err instanceof Error ? err.message : String(err));
   }
   try {
-    await scanDoneUnmergedWorkspaces();
+    await scanDoneUnmergedWorkspaces({ reopenToInReview: false });
   } catch (err) {
     console.warn("[startup] scanDoneUnmergedWorkspaces failed (non-fatal):", err instanceof Error ? err.message : String(err));
   }
