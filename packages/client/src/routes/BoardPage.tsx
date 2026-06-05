@@ -41,7 +41,7 @@ import { RecentlyMergedStrip } from "../components/RecentlyMergedStrip.js";
 import { BoardStats } from "../components/BoardStats.js";
 import { BoardToolbar } from "../components/BoardToolbar.js";
 import { SavedBoardViews } from "../components/SavedBoardViews.js";
-import { VIEW_REGISTRY, VIEW_IDS, SHORTCUT_TO_VIEW, type ViewMode } from "../lib/viewRegistry.js";
+import { VIEW_REGISTRY } from "../lib/viewRegistry.js";
 import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
 // Lazy: opened on user action (issue click / workspace open), and they pull in
 // react-markdown — no need to ship them on the initial board paint.
@@ -56,8 +56,9 @@ import { useBoardEvents, type LiveSessionStats, type TodoItem, type ApprovalRequ
 import { sendDesktopNotification } from "../lib/desktop.js";
 import { registerAction } from "../lib/actions.js";
 import { useActivityNotifications, type NotificationEvent } from "../hooks/useActivityNotifications.js";
-import { getAppRouteView, getViewRoutePath } from "../lib/appRoutes.js";
 import { buildRunQueueForecast } from "../components/RunQueueForecastPanel.js";
+import { useBoardPageKeyboardShortcuts } from "./useBoardPageKeyboardShortcuts.js";
+import { useBoardPageRoute } from "./useBoardPageRoute.js";
 import { useBoardPreferences } from "../hooks/useBoardPreferences.js";
 import { useBoardPanels } from "../hooks/useBoardPanels.js";
 import { useBoardNavigation } from "../hooks/useBoardNavigation.js";
@@ -215,42 +216,12 @@ export function BoardPage() {
   const keyboardCursorIssueIdRef = useRef<string | null>(null);
   keyboardCursorIssueIdRef.current = keyboardCursorIssueId;
 
-  const [viewMode, setViewMode] = useState<ViewMode>(() => {
-    const routeView = getAppRouteView(window.location.pathname);
-    if (routeView) return routeView;
-    const stored = localStorage.getItem("kanban-board-view");
-    return VIEW_IDS.includes(stored as ViewMode) ? (stored as ViewMode) : "kanban";
-  });
-  const [graphFocusIssueId, setGraphFocusIssueId] = useState<string | undefined>(undefined);
-
-  const navigateToViewRoute = useCallback((mode: ViewMode, replace = false) => {
-    const nextPath = getViewRoutePath(mode);
-    if (window.location.pathname === nextPath) return;
-    const nextUrl = `${nextPath}${window.location.search}${window.location.hash}`;
-    if (replace) {
-      window.history.replaceState(null, "", nextUrl);
-    } else {
-      window.history.pushState(null, "", nextUrl);
-    }
-  }, []);
-
-  const handleViewModeChange = useCallback((mode: ViewMode) => {
-    setViewMode(mode);
-    localStorage.setItem("kanban-board-view", mode);
-    navigateToViewRoute(mode);
-    if (mode !== "graph") setGraphFocusIssueId(undefined);
-  }, [navigateToViewRoute]);
-
-  useEffect(() => {
-    function handlePopState() {
-      const routeView = getAppRouteView(window.location.pathname);
-      if (!routeView) return;
-      setViewMode(routeView);
-      localStorage.setItem("kanban-board-view", routeView);
-    }
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
-  }, []);
+  const {
+    viewMode,
+    graphFocusIssueId,
+    setGraphFocusIssueId,
+    handleViewModeChange,
+  } = useBoardPageRoute();
 
   const [activeAgentsTarget, setActiveAgentsTarget] = useState<number | undefined>(undefined);
 
@@ -1334,9 +1305,7 @@ export function BoardPage() {
     setShowStaleOnly(state.showStaleOnly);
     setStatusFilterId(state.statusId);
     setActiveTagIds(state.tagId ? new Set([state.tagId]) : new Set());
-    if (VIEW_IDS.includes(state.viewMode)) {
-      handleViewModeChange(state.viewMode);
-    }
+    handleViewModeChange(state.viewMode);
   }, [handleViewModeChange]);
 
   const filteredColumns = useMemo(
@@ -1505,229 +1474,28 @@ export function BoardPage() {
     handleViewModeChange("table");
   }, [handleViewModeChange]);
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    function isTextEntryTarget(target: EventTarget | null) {
-      if (!(target instanceof HTMLElement)) return false;
-      return target.tagName === "INPUT"
-        || target.tagName === "TEXTAREA"
-        || target.tagName === "SELECT"
-        || target.isContentEditable
-        || target.closest("[contenteditable='true']") !== null;
-    }
-
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "k" && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        e.stopPropagation();
-        panels.setShowCommandPalette(true);
-        return;
-      }
-      if (e.key === "/" && !e.ctrlKey && !e.metaKey) {
-        if (isTextEntryTarget(e.target)) return;
-        e.preventDefault();
-        const input = document.getElementById("search-input") as HTMLInputElement | null;
-        if (input) {
-          input.focus();
-          requestAnimationFrame(() => {
-            if (input.value === "/") {
-              input.value = "";
-              setSearchQuery("");
-            }
-          });
-        }
-      }
-      if (e.key === "Escape") {
-        if (panels.showCommandPalette) { panels.setShowCommandPalette(false); return; }
-        if (panels.showAllWorkspaces) { panels.setShowAllWorkspaces(false); return; }
-        if (panels.showLiveActivityTicker) { panels.setShowLiveActivityTicker(false); return; }
-        if (panels.showLaunchFailures) { panels.setShowLaunchFailures(false); return; }
-        if (panels.showCleanupQueue) { panels.setShowCleanupQueue(false); return; }
-        if (panels.showFileContention) { panels.setShowFileContention(false); return; }
-        if (panels.showWorktreeOverview) { panels.setShowWorktreeOverview(false); return; }
-        if (panels.showShortcutHelp) { panels.setShowShortcutHelp(false); return; }
-        if (panels.showQuickTasks) { panels.setShowQuickTasks(false); return; }
-        if (panels.showRunQueueForecast) { panels.setShowRunQueueForecast(false); return; }
-        if (panels.showCodemod) { panels.setShowCodemod(false); return; }
-        if (panels.showProjectHealth) { panels.setShowProjectHealth(false); return; }
-        if (panels.showTimeReport) { panels.setShowTimeReport(false); return; }
-        if (selectedIssue) { setSelectedIssue(null); return; }
-        if (keyboardCursorIssueIdRef.current) { setKeyboardCursorIssueId(null); return; }
-        if (searchQuery) {
-          setSearchQuery("");
-          document.getElementById("search-input")?.blur();
-        }
-      }
-      const isArrowKey = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key);
-      const isVimNavKey = ["j", "k", "h", "l"].includes(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey;
-      // j/k/h/l only act as nav when a card is already selected (avoids conflict with panel shortcuts)
-      const vimNavActive = isVimNavKey && keyboardCursorIssueIdRef.current !== null;
-      if ((isArrowKey && !e.ctrlKey && !e.metaKey && !e.altKey) || vimNavActive) {
-        if (isTextEntryTarget(e.target)) return;
-        const navColumns = viewMode === "kanban" ? [...activeColumns, ...(archiveExpanded ? archiveColumns : [])] : [];
-        if (navColumns.length === 0) return;
-        e.preventDefault();
-        const cursorId = keyboardCursorIssueIdRef.current;
-        let colIdx = -1;
-        let issueIdx = -1;
-        if (cursorId) {
-          for (let c = 0; c < navColumns.length; c++) {
-            const i = navColumns[c].issues.findIndex((issue) => issue.id === cursorId);
-            if (i !== -1) { colIdx = c; issueIdx = i; break; }
-          }
-        }
-        if (colIdx === -1) {
-          const firstCol = navColumns.find((c) => c.issues.length > 0);
-          if (!firstCol) return;
-          setKeyboardCursorIssueId(firstCol.issues[0].id);
-          return;
-        }
-        let newColIdx = colIdx;
-        let newIssueIdx = issueIdx;
-        if (e.key === "ArrowDown" || e.key === "j") {
-          if (issueIdx < navColumns[colIdx].issues.length - 1) {
-            newIssueIdx = issueIdx + 1;
-          }
-        } else if (e.key === "ArrowUp" || e.key === "k") {
-          if (issueIdx > 0) {
-            newIssueIdx = issueIdx - 1;
-          }
-        } else if (e.key === "ArrowRight" || e.key === "l") {
-          for (let c = colIdx + 1; c < navColumns.length; c++) {
-            if (navColumns[c].issues.length > 0) {
-              newColIdx = c;
-              newIssueIdx = Math.min(issueIdx, navColumns[c].issues.length - 1);
-              break;
-            }
-          }
-        } else if (e.key === "ArrowLeft" || e.key === "h") {
-          for (let c = colIdx - 1; c >= 0; c--) {
-            if (navColumns[c].issues.length > 0) {
-              newColIdx = c;
-              newIssueIdx = Math.min(issueIdx, navColumns[c].issues.length - 1);
-              break;
-            }
-          }
-        }
-        const target = navColumns[newColIdx]?.issues[newIssueIdx];
-        if (target) setKeyboardCursorIssueId(target.id);
-        return;
-      }
-      if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (isTextEntryTarget(e.target)) return;
-        const cursorId = keyboardCursorIssueIdRef.current;
-        if (!cursorId) return;
-        const issue = columnsRef.current.flatMap((c) => c.issues).find((i) => i.id === cursorId);
-        if (issue) {
-          e.preventDefault();
-          handleIssueClick(issue);
-        }
-        return;
-      }
-      if (e.key === "?" && !e.ctrlKey && !e.metaKey) {
-        if (isTextEntryTarget(e.target)) return;
-        e.preventDefault();
-        panels.setShowShortcutHelp((prev) => !prev);
-      }
-      if (e.key === "g" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (isTextEntryTarget(e.target)) return;
-        e.preventDefault();
-        pendingGRef.current = true;
-        if (pendingGTimerRef.current) clearTimeout(pendingGTimerRef.current);
-        pendingGTimerRef.current = setTimeout(() => {
-          if (pendingGRef.current) {
-            pendingGRef.current = false;
-            handleViewModeChange("graph");
-          }
-        }, 400);
-        return;
-      }
-      if (e.key === "s" && pendingGRef.current && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        pendingGRef.current = false;
-        if (pendingGTimerRef.current) { clearTimeout(pendingGTimerRef.current); pendingGTimerRef.current = null; }
-        e.preventDefault();
-        panels.setShowSettings(true);
-        return;
-      }
-      if (SHORTCUT_TO_VIEW[e.key] && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (isTextEntryTarget(e.target)) return;
-        e.preventDefault();
-        handleViewModeChange(SHORTCUT_TO_VIEW[e.key]);
-        return;
-      }
-      if (e.key === "a" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (isTextEntryTarget(e.target)) return;
-        e.preventDefault();
-        panels.setShowAllWorkspaces(prev => !prev);
-        return;
-      }
-      if (e.key === "h" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (isTextEntryTarget(e.target)) return;
-        e.preventDefault();
-        panels.setShowFileContention(prev => !prev);
-        return;
-      }
-      if (e.key === "t" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (isTextEntryTarget(e.target)) return;
-        e.preventDefault();
-        panels.setShowTranscriptSearch(true);
-        return;
-      }
-      if (e.key === "q" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (isTextEntryTarget(e.target)) return;
-        e.preventDefault();
-        panels.setShowQuickTasks(true);
-        return;
-      }
-      if (e.key === "l" && !e.ctrlKey && !e.metaKey && !e.altKey && keyboardCursorIssueIdRef.current === null) {
-        if (isTextEntryTarget(e.target)) return;
-        e.preventDefault();
-        panels.setShowLiveActivityTicker((prev) => !prev);
-        return;
-      }
-      if (e.key === "x" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (isTextEntryTarget(e.target)) return;
-        e.preventDefault();
-        panels.setShowCodemod((prev) => !prev);
-        return;
-      }
-      if (e.key === "p" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (isTextEntryTarget(e.target)) return;
-        e.preventDefault();
-        panels.setShowProjectHealth((prev) => !prev);
-        return;
-      }
-      if (e.key === "V" && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (isTextEntryTarget(e.target)) return;
-        e.preventDefault();
-        window.dispatchEvent(new CustomEvent("voice-inbox-trigger"));
-        return;
-      }
-      if (e.key === "f" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (isTextEntryTarget(e.target)) return;
-        e.preventDefault();
-        setFocusMode((v) => {
-          const next = !v;
-          try { sessionStorage.setItem("board-focus-mode", next ? "1" : "0"); } catch { /* ignore */ }
-          return next;
-        });
-        return;
-      }
-      if ((e.key === "c" || e.key === "w") && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (isTextEntryTarget(e.target)) return;
-        e.preventDefault();
-        const col = activeColumns[0] ?? filteredColumns[0] ?? columns[0];
-        if (!col) return;
-        if (e.key === "w") {
-          setExpandedCreatePanel({ statusId: col.id, statusName: col.name, state: { startWorkspace: true } });
-        } else {
-          setCreatingInColumnId(col.id);
-        }
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [searchQuery, panels, filteredColumns, columns, handleViewModeChange, activeColumns, archiveColumns, archiveExpanded, viewMode, selectedIssue]);
+  useBoardPageKeyboardShortcuts({
+    searchQuery,
+    setSearchQuery,
+    viewMode,
+    panels,
+    selectedIssue,
+    setSelectedIssue,
+    columns,
+    activeColumns,
+    filteredColumns,
+    archiveColumns,
+    archiveExpanded,
+    keyboardCursorIssueIdRef,
+    setKeyboardCursorIssueId,
+    pendingGRef,
+    pendingGTimerRef,
+    handleViewModeChange,
+    handleIssueClick,
+    setFocusMode,
+    setExpandedCreatePanel,
+    setCreatingInColumnId,
+  });
 
   // Register command palette actions
   useEffect(() => {
@@ -2118,7 +1886,7 @@ export function BoardPage() {
               sessionTodos={sessionTodos}
               onIssueClick={handleIssueClick}
               onWorkspaceClick={handleManageWorkspaces}
-              onGoToBoard={() => setViewMode("kanban")}
+              onGoToBoard={() => handleViewModeChange("kanban")}
               activeAgentsTarget={activeAgentsTarget}
               onDropIssue={canStartWorkspace ? handleDropOnAgentSlot : undefined}
             />
