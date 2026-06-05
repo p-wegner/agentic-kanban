@@ -57,6 +57,14 @@ Based on state.md recurring failure patterns from recent agent cycles, prioritiz
 - **dev.mjs / server supervisor** (`scripts/dev.mjs`) — recurring orphaned supervisor stacking; add a preflight that detects and reaps stale same-checkout supervisors before launching
 - **MCP server tool routing** (`packages/mcp-server/src/`) — integration tested only at the happy path; error/edge cases untested
 
+### Tier 4 — Code quality / structural (from code-metrics analysis, 30-day churn + size)
+- **`packages/client/src/routes/BoardPage.tsx`** (2430 lines, 643 changes) — monolithic view router: state management + routing + keyboard shortcuts + panel lifecycle all in one; split into sub-components
+- **`packages/client/src/components/SettingsPanel.tsx`** (3110 lines, 393 changes) — largest component; hundreds of preference toggles; split into domain sections
+- **`packages/server/src/routes/workflows.ts`** (815 lines) — workflow state machine mixed with route handlers; extract into service layer; no integration tests
+- **`packages/server/src/routes/issues.ts`** (726 lines) — dense CRUD + filters + import/export; missing edge-case tests (comments, activity, AI-touched files)
+- **`packages/client/src/components/IssueDetailPanel.tsx`** (2627 lines, 257 changes) — tight state coupling; difficult to extend; needs decoupling of edit form / activity feed / comments
+- **`packages/server/src/services/butler-sdk.service.ts`** (656 lines) — session resume + model-switching untested; high user surface area
+
 FIRST, READ YOUR RECENT MEMORY: `scripts/board-monitor/state.md` is a short rolling log of what the last several cycles did. Read it before choosing an action and use it to ESCALATE rather than repeat — if a prior cycle (or two) already nudged an item with no change, take the stronger action this time (stop the stale session and inspect the branch, rebuild, or flag for a human) instead of nudging it again. If the file is missing or empty, just proceed.
 
 Each run, make as much bounded progress toward a healthy, moving board as the priorities below allow, then stop. This is **NOT** a strict one-action-per-cycle rule — do every safe, high-value action the priorities call for this run (e.g. you may launch up to MAX_NEW_STARTS_PER_CYCLE workspaces in a single cycle to fill agent slots). Use the $board-monitor skill for the health/conflict checks. In priority order:
