@@ -99,6 +99,145 @@ export interface CreateWorkspaceResult {
 /** Subset of the git service that workspace services depend on. Injectable for tests. */
 export type GitService = typeof realGitService;
 
+// ─── Merge-resolution state machine ─────────────────────────────────────────
+
+/**
+ * Explicit outcomes from the merge pre-flight checks.
+ *
+ * `conflict-ready`  — conflicts exist; caller should invoke fix-and-merge.
+ * `error-skip`      — a non-conflict error blocked the merge (dirty main, bad
+ *                     branch state, stale build); caller should surface the
+ *                     WorkspaceError and stop without launching fix-and-merge.
+ * `proceed`         — all checks passed; caller should execute the git merge.
+ * `reconcile`       — branch is already an ancestor (previously merged); caller
+ *                     should mark Done without a git merge.
+ * `already-merged`  — mergedAt already stamped (dropped-response retry); caller
+ *                     should 409.
+ * `direct-close`    — isDirect workspace; no git op, just close.
+ */
+export type MergeResolutionState =
+  | { kind: "already-merged" }
+  | { kind: "direct-close" }
+  | { kind: "reconcile"; branchSha: string; baseSha: string; uniqueCommits: number }
+  | { kind: "conflict-ready"; conflictFiles: string[]; behindCount?: number; error: WorkspaceError }
+  | { kind: "error-skip"; error: WorkspaceError }
+  | { kind: "proceed" };
+
+export type ResolveMergeStateDeps = {
+  gitService: GitService;
+};
+
+/**
+ * Run the merge pre-flight state machine for a workspace.
+ *
+ * All decision branches that previously lived inline inside `doMerge` are
+ * consolidated here so each path is independently testable without standing up
+ * a full merge pipeline.
+ */
+export async function resolveMergeState(
+  workspace: typeof workspaces.$inferSelect,
+  repoPath: string,
+  baseBranch: string,
+  deps: ResolveMergeStateDeps,
+): Promise<MergeResolutionState> {
+  const { gitService } = deps;
+
+  // mergedAt is stamped immediately after git merge lands (#575 crash-recovery guard).
+  // If it's set, the merge already completed — run cleanup and move to Done without
+  // another git merge, regardless of workspace.status.
+  if (workspace.mergedAt) {
+    return { kind: "already-merged" };
+  }
+
+  if (workspace.isDirect) {
+    return { kind: "direct-close" };
+  }
+
+  // Branch-level checks require a non-null workingDir; skip cleanly if absent.
+  // Dirty-main guard: main checkout must not have uncommitted tracked changes.
+  if (!workspace.isDirect && typeof gitService.getUncommittedTrackedChanges === "function") {
+    try {
+      const uncommitted = await gitService.getUncommittedTrackedChanges(repoPath);
+      if (uncommitted.length > 0) {
+        return {
+          kind: "error-skip",
+          error: new WorkspaceError(
+            `Main checkout has ${uncommitted.length} uncommitted tracked change(s) — commit or stash those changes first.`,
+            "CONFLICT",
+            { mergeReason: "dirty_main", uncommittedFiles: uncommitted },
+          ),
+        };
+      }
+    } catch (err) {
+      if (err instanceof WorkspaceError) return { kind: "error-skip", error: err };
+      // Non-fatal: getUncommittedTrackedChanges is a best-effort guard.
+    }
+  }
+
+  if (workspace.workingDir) {
+    // Ancestry check: if the branch tip is already reachable from the base, the work
+    // was merged in a previous run that didn't update the DB.  Guard: require ≥1
+    // unique commit so a 0-commit branch isn't mistakenly reconciled.
+    const ancestryResult = await gitService.checkBranchTipIsAncestor(
+      repoPath, workspace.branch, baseBranch, workspace.workingDir,
+    );
+    if (ancestryResult.isAncestor) {
+      const { branchSha, baseSha } = ancestryResult;
+      const uniqueCommits = await gitService.countUniqueCommits(repoPath, baseSha, branchSha).catch(() => 0);
+      if (uniqueCommits > 0) {
+        return { kind: "reconcile", branchSha, baseSha, uniqueCommits };
+      }
+    }
+
+    // Behind-count: auto-rebase if the branch has fallen behind the base.
+    let behindCount = 0;
+    try {
+      if (typeof gitService.countBehindCommits === "function") {
+        behindCount = await gitService.countBehindCommits(repoPath, workspace.branch, baseBranch);
+      }
+    } catch {
+      // Non-fatal — behind-count is advisory; proceed to conflict detection.
+    }
+
+    if (behindCount > 0) {
+      const rebaseResult = await gitService.rebaseOntoBase(
+        workspace.workingDir, baseBranch, workspace.branch, { preferLocalBase: true },
+      );
+      if (!rebaseResult.success) {
+        const conflictFiles = rebaseResult.conflictingFiles ?? [];
+        // Best-effort abort so the worktree is usable for fix-and-merge.
+        try { await gitService.abortRebase(workspace.workingDir); } catch { /* best-effort */ }
+        return {
+          kind: "conflict-ready",
+          conflictFiles,
+          behindCount,
+          error: new WorkspaceError(
+            `Merge conflicts detected after auto-rebase (branch was ${behindCount} commit(s) behind ${baseBranch})`,
+            "CONFLICT",
+            { mergeReason: "conflict", conflictFiles, behindCount },
+          ),
+        };
+      }
+    }
+
+    // Conflict detection: use read-only merge-tree against the (now up-to-date) branch.
+    const conflicts = await gitService.detectConflicts(workspace.workingDir, baseBranch);
+    if (conflicts.hasConflicts) {
+      return {
+        kind: "conflict-ready",
+        conflictFiles: conflicts.conflictingFiles,
+        error: new WorkspaceError(
+          "Merge conflicts detected",
+          "CONFLICT",
+          { mergeReason: "conflict", conflictFiles: conflicts.conflictingFiles },
+        ),
+      };
+    }
+  }
+
+  return { kind: "proceed" };
+}
+
 export const MERGE_LOCK_STALE_MS = 15 * 60 * 1000;
 
 export interface ActiveMergeLock {

@@ -37,6 +37,7 @@ import {
   requireBaseBranch,
   activeMerges,
   describeMergeLock,
+  resolveMergeState,
   type GitService,
 } from "./workspace-internals.js";
 import { buildReconcilerPrompt } from "./reconciler.service.js";
@@ -196,7 +197,11 @@ export function createWorkspaceMergeService(deps: {
     repoPath: string,
     defaultBranch: string | null,
   ) {
-    if (workspace.mergedAt) {
+    const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
+
+    const resolution = await resolveMergeState(workspace, repoPath, baseBranch, { gitService });
+
+    if (resolution.kind === "already-merged") {
       const warnings: MergeWarning[] = [];
       if (workspace.workingDir && !workspace.isDirect) {
         await teardownWorktree(
@@ -251,7 +256,7 @@ export function createWorkspaceMergeService(deps: {
       };
     }
 
-    if (workspace.isDirect) {
+    if (resolution.kind === "direct-close") {
       const now = new Date().toISOString();
       await computeWorkspaceCodeMetrics(id, database).catch(() => null);
       await updateWorkspaceStatus(id, "closed", { closedAt: now, readyForMerge: false }, database);
@@ -270,13 +275,71 @@ export function createWorkspaceMergeService(deps: {
       return { id, mergeOutput: "Direct workspace closed (no merge needed)" };
     }
 
+    if (resolution.kind === "reconcile") {
+      const { branchSha, baseSha, uniqueCommits } = resolution;
+      const now = new Date().toISOString();
+      console.log(
+        `[workspace-merge] auto-Done audit: ws=${id} baseSha=${baseSha} branchSha=${branchSha} uniqueCommits=${uniqueCommits} reconciledAt=${now}`,
+      );
+      await updateWorkspaceStatus(id, "closed", { workingDir: null, closedAt: now, mergedAt: now, readyForMerge: false }, database);
+      await moveIssueToDone(id, workspace.issueId, now, database);
+      await recordMergeAttempt(
+        workspace,
+        "merged",
+        `Branch '${workspace.branch}' tip (${branchSha}) is already an ancestor of ${baseBranch} — reconciled as already-merged no-op.`,
+        { targetBranch: baseBranch, commitSha: branchSha, mergedAt: now, uniqueCommitCount: uniqueCommits },
+        now,
+      );
+      const projectId = await resolveProjectId(id, database);
+      if (projectId) boardEvents?.broadcast(projectId, "workspace_merged");
+      return {
+        id,
+        merged: false,
+        reconciled: true,
+        baseBranch,
+        baseHeadShaBefore: baseSha,
+        baseHeadShaAfter: baseSha,
+        mergeOutput: `Branch '${workspace.branch}' was already fully merged into ${baseBranch} (tip ${branchSha} is an ancestor). Reconciled as successful no-op.`,
+      };
+    }
+
+    if (resolution.kind === "error-skip") {
+      throw resolution.error;
+    }
+
+    if (resolution.kind === "conflict-ready") {
+      // Downgrade the stale readyForMerge flag so the monitor stops churning.
+      try {
+        await database.update(workspaces).set({ readyForMerge: false, updatedAt: new Date().toISOString() }).where(eq(workspaces.id, id));
+      } catch (dbErr) {
+        console.warn("[workspace-merge] failed to clear stale readyForMerge flag:", dbErr instanceof Error ? dbErr.message : String(dbErr));
+      }
+      const { conflictFiles, behindCount } = resolution;
+      if (behindCount) {
+        await recordMergeAttempt(
+          workspace,
+          "conflict",
+          `Merge blocked: branch ${workspace.branch} was ${behindCount} commit(s) behind ${baseBranch} and rebase found conflicts in ${conflictFiles.length} file(s): ${conflictFiles.join(", ")}. readyForMerge cleared.`,
+          { targetBranch: baseBranch, conflictingFiles: conflictFiles, behindCount },
+        );
+      } else {
+        await recordMergeAttempt(
+          workspace,
+          "conflict",
+          `Merge attempt blocked by conflicts in ${conflictFiles.length} file${conflictFiles.length === 1 ? "" : "s"}: ${conflictFiles.join(", ")}`,
+          { targetBranch: baseBranch, conflictingFiles: conflictFiles },
+        );
+      }
+      throw resolution.error;
+    }
+
+    // resolution.kind === "proceed" — run the actual git merge.
+
     const prefMap = new Map<string, string>(
       (await database.select().from(preferences)).map((r) => [r.key, r.value]),
     );
 
     if (workspace.workingDir) {
-      const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
-
       // Auto-renumber any Drizzle migration the feature branch added that collides
       // with one already on the base branch (parallel branches all pick the same
       // "next" number). This rewrites the incoming branch in place so the merge
@@ -293,105 +356,6 @@ export function createWorkspaceMergeService(deps: {
         console.warn(
           "[workspace-merge] migration auto-renumber failed (continuing to conflict check):",
           err instanceof Error ? err.message : String(err),
-        );
-      }
-
-      // Before conflict detection: check whether the branch tip is already an ancestor
-      // of the target. If so, the branch was fully merged by a previous run that never
-      // updated the DB. Treat it as a successful no-op instead of reporting 409.
-      // Guard: require >=1 unique commit — a 0-commit workspace (tip==base or base
-      // advanced past an empty branch) is trivially an ancestor but has no merged work.
-      const ancestryResult = await gitService.checkBranchTipIsAncestor(repoPath, workspace.branch, baseBranch, workspace.workingDir ?? undefined);
-      if (ancestryResult.isAncestor) {
-        const { branchSha, baseSha } = ancestryResult;
-        const uniqueCommits = await gitService.countUniqueCommits(repoPath, baseSha, branchSha).catch(() => 0);
-        if (uniqueCommits === 0) {
-          console.log(`[workspace-merge] branch ${workspace.branch} tip (${branchSha}) is an ancestor of ${baseBranch} but has 0 unique commits — not reconciling as merged`);
-        } else {
-          const now = new Date().toISOString();
-          console.log(
-            `[workspace-merge] auto-Done audit: ws=${id} baseSha=${baseSha} branchSha=${branchSha} uniqueCommits=${uniqueCommits} reconciledAt=${now}`,
-          );
-          await updateWorkspaceStatus(id, "closed", { workingDir: null, closedAt: now, mergedAt: now, readyForMerge: false }, database);
-          await moveIssueToDone(id, workspace.issueId, now, database);
-          await recordMergeAttempt(
-            workspace,
-            "merged",
-            `Branch '${workspace.branch}' tip (${branchSha}) is already an ancestor of ${baseBranch} — reconciled as already-merged no-op.`,
-            { targetBranch: baseBranch, commitSha: branchSha, mergedAt: now, uniqueCommitCount: uniqueCommits },
-            now,
-          );
-          const projectId = await resolveProjectId(id, database);
-          if (projectId) boardEvents?.broadcast(projectId, "workspace_merged");
-          return {
-            id,
-            merged: false,
-            reconciled: true,
-            baseBranch,
-            baseHeadShaBefore: baseSha,
-            baseHeadShaAfter: baseSha,
-            mergeOutput: `Branch '${workspace.branch}' was already fully merged into ${baseBranch} (tip ${branchSha} is an ancestor). Reconciled as successful no-op.`,
-          };
-        }
-      }
-
-      // If the branch is behind base (master advanced since it was marked ready),
-      // attempt a clean rebase first. This handles the "stale ready flag" scenario
-      // where the flag was set against an older base and master since advanced.
-      // If behind > 0, rebase succeeds → proceed to merge; rebase fails (real
-      // conflict) → downgrade readyForMerge and throw so the monitor stops churning.
-      let behindCount = 0;
-      try {
-        if (typeof gitService.countBehindCommits === "function") {
-          behindCount = await gitService.countBehindCommits(repoPath, workspace.branch, baseBranch);
-        }
-      } catch (err) {
-        console.warn("[workspace-merge] behind-count check failed (non-fatal):", err instanceof Error ? err.message : String(err));
-      }
-
-      if (behindCount > 0) {
-        console.log(`[workspace-merge] branch ${workspace.branch} is ${behindCount} commit(s) behind ${baseBranch}; attempting auto-rebase before merge`);
-        const rebaseResult = await gitService.rebaseOntoBase(workspace.workingDir, baseBranch, workspace.branch, { preferLocalBase: true });
-        if (!rebaseResult.success) {
-          // Real content conflict after rebase attempt — downgrade the stale flag so
-          // auto-merge stops churning, then surface the conflict for fix-and-merge.
-          try {
-            await database.update(workspaces).set({ readyForMerge: false, updatedAt: new Date().toISOString() }).where(eq(workspaces.id, id));
-          } catch (dbErr) {
-            console.warn("[workspace-merge] failed to clear stale readyForMerge flag:", dbErr instanceof Error ? dbErr.message : String(dbErr));
-          }
-          const conflictFiles = rebaseResult.conflictingFiles ?? [];
-          await recordMergeAttempt(
-            workspace,
-            "conflict",
-            `Merge blocked: branch ${workspace.branch} was ${behindCount} commit(s) behind ${baseBranch} and rebase found conflicts in ${conflictFiles.length} file(s): ${conflictFiles.join(", ")}. readyForMerge cleared.`,
-            { targetBranch: baseBranch, conflictingFiles: conflictFiles, behindCount },
-          );
-          // Abort the leftover rebase state so the worktree is usable for fix-and-merge.
-          try {
-            await gitService.abortRebase(workspace.workingDir);
-          } catch { /* best-effort */ }
-          throw new WorkspaceError(
-            `Merge conflicts detected after auto-rebase (branch was ${behindCount} commit(s) behind ${baseBranch})`,
-            "CONFLICT",
-            { mergeReason: "conflict", conflictFiles, behindCount },
-          );
-        }
-        console.log(`[workspace-merge] auto-rebase succeeded; branch ${workspace.branch} is now up-to-date with ${baseBranch}`);
-      }
-
-      const conflicts = await gitService.detectConflicts(workspace.workingDir, baseBranch);
-      if (conflicts.hasConflicts) {
-        await recordMergeAttempt(
-          workspace,
-          "conflict",
-          `Merge attempt blocked by conflicts in ${conflicts.conflictingFiles.length} file${conflicts.conflictingFiles.length === 1 ? "" : "s"}: ${conflicts.conflictingFiles.join(", ")}`,
-          { targetBranch: baseBranch, conflictingFiles: conflicts.conflictingFiles },
-        );
-        throw new WorkspaceError(
-          "Merge conflicts detected",
-          "CONFLICT",
-          { mergeReason: "conflict", conflictFiles: conflicts.conflictingFiles },
         );
       }
 
@@ -430,23 +394,7 @@ export function createWorkspaceMergeService(deps: {
       }
     }
 
-    const targetBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
-
-    if (!workspace.isDirect && typeof gitService.getUncommittedTrackedChanges === "function") {
-      try {
-        const uncommitted = await gitService.getUncommittedTrackedChanges(repoPath);
-        if (uncommitted.length > 0) {
-          throw new WorkspaceError(
-            `Main checkout has ${uncommitted.length} uncommitted tracked change(s) — commit or stash those changes first.`,
-            "CONFLICT",
-            { mergeReason: "dirty_main", uncommittedFiles: uncommitted },
-          );
-        }
-      } catch (err) {
-        if (err instanceof WorkspaceError) throw err;
-        console.warn("[workspace-merge] dirty-main check failed (non-fatal):", err instanceof Error ? err.message : String(err));
-      }
-    }
+    const targetBranch = baseBranch;
 
     console.log(`[workspace-service] merge: workspaceId=${id} branch=${workspace.branch} targetBranch=${targetBranch} repoPath=${repoPath}`);
 
