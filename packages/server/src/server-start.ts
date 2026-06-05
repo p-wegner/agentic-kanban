@@ -62,6 +62,13 @@ export async function startServer(port?: number, hostname?: string) {
   const server = serve({ fetch: app.fetch, port: serverPort, hostname: serverHost }, (info) => {
     console.log(`Server running at http://${serverHost}:${info.port}`);
   });
+  // Short keep-alive timeout so idle persistent connections close promptly when
+  // tsx-watch restarts the server after a merge lands new TypeScript files.
+  // The Node default is 5 s — long enough for a second request to arrive on the
+  // same socket right as the process is shutting down, producing ECONNRESET.
+  // 1 s is short enough to clear idle connections quickly while still amortising
+  // the TCP handshake cost across rapid back-to-back requests.
+  (server as { keepAliveTimeout?: number }).keepAliveTimeout = 1000;
   injectWebSocket(server);
 
   setupScheduledTasks(serverPort);
