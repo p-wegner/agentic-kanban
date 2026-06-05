@@ -47,12 +47,145 @@ export interface MigrationCollisionEntry {
   }[];
 }
 
+/**
+ * A reconcile strategy the queue should apply to land a (sub)set of the batch.
+ * Cheapest/most-deterministic first; the last two require an agent (semantic work).
+ *
+ *  - `direct`             — independent, clean, no overlap. Plain `/merge`.
+ *  - `rebase`             — stale-only (base moved) but no conflict. Rebase then merge.
+ *  - `sequence-migrations`— same drizzle NNNN; land one-at-a-time, let auto-renumber bump siblings.
+ *  - `integration-union`  — overlapping cluster whose union git can resolve mechanically:
+ *                           merge all members into one worktree once, land combined branch.
+ *  - `agent-reapply-intent`— overlapping cluster with semantic conflicts and/or branches that
+ *                           carry committed conflict markers: take additive files + union the
+ *                           hub files by INTENT, supersede the originals. Needs an agent.
+ *  - `escalate`           — could not classify safely (e.g. base not checked out, ancient
+ *                           divergent phantom): hand to a human.
+ */
+export type ReconcileStrategy =
+  | "direct"
+  | "rebase"
+  | "sequence-migrations"
+  | "integration-union"
+  | "agent-reapply-intent"
+  | "escalate";
+
+export interface ClusterPlan {
+  /** Workspace ids in this connected component (share ≥1 changed file with another member). */
+  workspaceIds: string[];
+  /** Files shared across the cluster (the union the reconciler must resolve once). */
+  sharedFiles: string[];
+  /** Any member conflicts vs base (real semantic conflict, not just overlap). */
+  hasConflicts: boolean;
+  /** Recommended strategy for THIS cluster. */
+  strategy: ReconcileStrategy;
+}
+
 export interface MergeQueuePlan {
   order: WorkspaceQueueInfo[];
   overlaps: OverlapEntry[];
   totalOverlapScore: number;
   migrationCollisions: MigrationCollisionEntry[];
   conflictPreviews: WorkspaceConflictPreview[];
+  /** Connected components over `overlaps` (overlapCount>0). Singletons are omitted. */
+  clusters: ClusterPlan[];
+  /** The single hardest strategy the batch requires (drives queue routing/escalation). */
+  recommendedStrategy: ReconcileStrategy;
+  /** Human-readable why, for observability in the dry-run plan + SSE. */
+  strategyReason: string;
+}
+
+/** Rank strategies cheapest→hardest so we can pick the "hardest required" for the batch. */
+const STRATEGY_RANK: Record<ReconcileStrategy, number> = {
+  direct: 0,
+  rebase: 1,
+  "sequence-migrations": 2,
+  "integration-union": 3,
+  "agent-reapply-intent": 4,
+  escalate: 5,
+};
+
+/**
+ * Pure classifier: given the already-computed plan signals, group the batch into clusters
+ * (connected components over file-overlap) and recommend a reconcile strategy per cluster and
+ * for the whole batch. No I/O — unit-testable in isolation. This is the routing brain that
+ * `executeQueue` should dispatch on instead of always doing naive sequential rebase→merge.
+ */
+export function classifyReconcileStrategies(
+  infos: Pick<WorkspaceQueueInfo, "id">[],
+  overlaps: OverlapEntry[],
+  conflictPreviews: WorkspaceConflictPreview[],
+  migrationCollisions: MigrationCollisionEntry[],
+): { clusters: ClusterPlan[]; recommendedStrategy: ReconcileStrategy; strategyReason: string } {
+  const previewById = new Map(conflictPreviews.map((p) => [p.workspaceId, p]));
+
+  // Union-Find over workspaces connected by a real file overlap.
+  const parent = new Map<string, string>();
+  for (const info of infos) parent.set(info.id, info.id);
+  const find = (x: string): string => {
+    let r = x;
+    while (parent.get(r) !== r) r = parent.get(r)!;
+    let c = x;
+    while (parent.get(c) !== c) { const n = parent.get(c)!; parent.set(c, r); c = n; }
+    return r;
+  };
+  const union = (a: string, b: string) => { const ra = find(a), rb = find(b); if (ra !== rb) parent.set(ra, rb); };
+
+  for (const o of overlaps) {
+    if (o.overlapCount > 0 && parent.has(o.workspaceIdA) && parent.has(o.workspaceIdB)) {
+      union(o.workspaceIdA, o.workspaceIdB);
+    }
+  }
+
+  // Collect components, keep only multi-member ones (singletons aren't clusters).
+  const groups = new Map<string, string[]>();
+  for (const info of infos) {
+    const root = find(info.id);
+    if (!groups.has(root)) groups.set(root, []);
+    groups.get(root)!.push(info.id);
+  }
+
+  const clusters: ClusterPlan[] = [];
+  for (const members of groups.values()) {
+    if (members.length < 2) continue;
+    const memberSet = new Set(members);
+    const sharedFiles = Array.from(
+      new Set(
+        overlaps
+          .filter((o) => o.overlapCount > 0 && memberSet.has(o.workspaceIdA) && memberSet.has(o.workspaceIdB))
+          .flatMap((o) => o.files),
+      ),
+    );
+    const hasConflicts = members.some((id) => previewById.get(id)?.hasConflicts);
+    // A cluster whose union git cannot auto-resolve (real semantic conflict) needs an agent;
+    // otherwise the union can be merged mechanically in one worktree.
+    const strategy: ReconcileStrategy = hasConflicts ? "agent-reapply-intent" : "integration-union";
+    clusters.push({ workspaceIds: members, sharedFiles, hasConflicts, strategy });
+  }
+
+  // Batch-level recommendation = the hardest strategy any part of it needs.
+  const candidates: { strategy: ReconcileStrategy; reason: string }[] = [];
+  if (migrationCollisions.length > 0) {
+    candidates.push({
+      strategy: "sequence-migrations",
+      reason: `${migrationCollisions.length} migration-number collision(s) — land sequentially, auto-renumber siblings`,
+    });
+  }
+  for (const c of clusters) {
+    candidates.push({
+      strategy: c.strategy,
+      reason: `cluster of ${c.workspaceIds.length} sharing ${c.sharedFiles.length} file(s)` +
+        (c.hasConflicts ? " with semantic conflicts → re-apply intent (agent)" : " → integration-union (resolve once)"),
+    });
+  }
+  if (conflictPreviews.some((p) => p.isStale && !p.hasConflicts) && clusters.length === 0) {
+    candidates.push({ strategy: "rebase", reason: "stale workspace(s), no overlap — rebase then merge" });
+  }
+  if (candidates.length === 0) {
+    return { clusters, recommendedStrategy: "direct", strategyReason: "independent & clean — direct merge" };
+  }
+  const hardest = candidates.reduce((a, b) => (STRATEGY_RANK[b.strategy] > STRATEGY_RANK[a.strategy] ? b : a));
+  return { clusters, recommendedStrategy: hardest.strategy, strategyReason: hardest.reason };
 }
 
 export type MergeQueueEvent =
@@ -268,7 +401,22 @@ export function createMergeQueueService(deps: {
     const totalOverlapScore = overlaps.reduce((s, e) => s + e.overlapCount, 0);
     const migrationCollisions = computeMigrationCollisions(infos);
     const conflictPreviews = await Promise.all(infos.map(detectConflictPreview));
-    return { order: sortedInfos, overlaps, totalOverlapScore, migrationCollisions, conflictPreviews };
+    const { clusters, recommendedStrategy, strategyReason } = classifyReconcileStrategies(
+      infos,
+      overlaps,
+      conflictPreviews,
+      migrationCollisions,
+    );
+    return {
+      order: sortedInfos,
+      overlaps,
+      totalOverlapScore,
+      migrationCollisions,
+      conflictPreviews,
+      clusters,
+      recommendedStrategy,
+      strategyReason,
+    };
   }
 
   async function verifyWorkspaceMerged(ws: WorkspaceQueueInfo, featureSha: string | null): Promise<void> {
