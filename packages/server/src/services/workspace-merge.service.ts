@@ -642,9 +642,17 @@ export function createWorkspaceMergeService(deps: {
       }
     }
 
+    let postMergeChangedFiles: string[] = [];
+    if (preMergeHead) {
+      try {
+        postMergeChangedFiles = await gitService.getChangedFilesBetween(repoPath, preMergeHead, "HEAD");
+      } catch (err) {
+        console.warn("[workspace-merge] getChangedFilesBetween failed (non-fatal):", err instanceof Error ? err.message : String(err));
+      }
+    }
+
     try {
       if (preMergeHead) {
-        const changedFiles = await gitService.getChangedFilesBetween(repoPath, preMergeHead, "HEAD");
         const commits = typeof gitService.getCommitSummariesBetween === "function"
           ? await gitService.getCommitSummariesBetween(repoPath, preMergeHead, "HEAD")
           : [];
@@ -655,14 +663,19 @@ export function createWorkspaceMergeService(deps: {
           repoPath,
           fromRef: preMergeHead,
           toRef: "HEAD",
-          changedFiles,
+          changedFiles: postMergeChangedFiles,
           commits,
           gitService,
         });
-        await rebuildSharedIfChanged(repoPath, changedFiles);
       }
     } catch (err) {
-      console.warn("[workspace-merge] post-merge draft/rebuild failed:", err);
+      console.warn("[workspace-merge] post-merge handoff draft failed:", err instanceof Error ? err.message : String(err));
+    }
+
+    try {
+      await rebuildSharedIfChanged(repoPath, postMergeChangedFiles);
+    } catch (err) {
+      console.warn("[workspace-merge] shared dist rebuild failed (non-fatal):", err instanceof Error ? err.message : String(err));
     }
 
     try {
