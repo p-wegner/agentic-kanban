@@ -1,5 +1,6 @@
-import { eq } from "drizzle-orm";
-import { preferences, projects, workspaces } from "@agentic-kanban/shared/schema";
+import { desc, eq } from "drizzle-orm";
+import { preferences, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { isFailedLaunchSession } from "@agentic-kanban/shared/lib/workspace-activity-state.js";
 import { applyOpenSpecDeltas, OPENSPEC_CHANGES_DIR, OPENSPEC_SPECS_DIR, validateOpenSpecChange } from "@agentic-kanban/shared/lib/openspec";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
@@ -113,6 +114,36 @@ export function createWorkspaceMergeService(deps: {
     } catch (err) {
       console.warn(`[workspace-merge] ${label}: killWorktreeProcesses failed (non-fatal):`, err instanceof Error ? err.message : String(err));
     }
+  }
+
+  async function recoverFailedFixAndMergeSessionIfNeeded(workspace: typeof workspaces.$inferSelect) {
+    if (workspace.status !== "fixing") return;
+    if (!getSessionManager) return;
+
+    const latestSessionRows = await database
+      .select()
+      .from(sessions)
+      .where(eq(sessions.workspaceId, workspace.id))
+      .orderBy(desc(sessions.startedAt))
+      .limit(1);
+
+    const latestSession = latestSessionRows[0];
+    if (!latestSession) return;
+
+    const isFailed = isFailedLaunchSession({
+      status: latestSession.status,
+      startedAt: latestSession.startedAt,
+      endedAt: latestSession.endedAt,
+      stats: latestSession.stats,
+    });
+    if (!isFailed) return;
+
+    try {
+      await getSessionManager().stopSession(latestSession.id);
+    } catch (err) {
+      console.warn(`[workspace-merge] failed to force-stop stale session ${latestSession.id}:`, err instanceof Error ? err.message : String(err));
+    }
+    await updateWorkspaceStatus(workspace.id, "idle", {}, database);
   }
 
   async function mergeWorkspace(id: string) {
@@ -791,19 +822,22 @@ export function createWorkspaceMergeService(deps: {
     const workspace = await getWorkspaceById(id, database);
     if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
     if (!workspace.workingDir) throw new WorkspaceError("Workspace not set up", "BAD_REQUEST");
-    if (workspace.status === "fixing") throw new WorkspaceError("Conflict resolution already in progress", "CONFLICT");
+    await recoverFailedFixAndMergeSessionIfNeeded(workspace);
+    const refreshedWorkspace = await getWorkspaceById(id, database);
+    if (!refreshedWorkspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
+    if (refreshedWorkspace.status === "fixing") throw new WorkspaceError("Conflict resolution already in progress", "CONFLICT");
     if (!getSessionManager) throw new WorkspaceError("Session manager not available", "BAD_REQUEST");
 
     // Kill leftover worktree processes before spawning the resolution agent.
-    await killWorktreeProcesses(workspace.workingDir, "resolve-conflicts");
+    await killWorktreeProcesses(refreshedWorkspace.workingDir, "resolve-conflicts");
 
-    const conflictingFiles = await getConflictingFiles(workspace.workingDir);
+    const conflictingFiles = await getConflictingFiles(refreshedWorkspace.workingDir);
     const { defaultBranch } = await resolveProjectRepo(id, database);
-    const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
+    const baseBranch = requireBaseBranch(refreshedWorkspace.baseBranch || defaultBranch);
     const prompt = buildConflictResolutionPrompt(conflictingFiles, baseBranch);
 
     const { agentCommand, agentArgs, claudeProfile, profile, provider } =
-      applyWorkspaceAgentSelection(await loadAgentSettings(database), workspace);
+      applyWorkspaceAgentSelection(await loadAgentSettings(database), refreshedWorkspace);
     const executorProvider = toExecutorProvider(provider);
 
     const sessionId = await getSessionManager().startSession({
@@ -823,12 +857,15 @@ export function createWorkspaceMergeService(deps: {
     const workspace = await getWorkspaceById(id, database);
     if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
     if (!workspace.workingDir) throw new WorkspaceError("Workspace not set up", "BAD_REQUEST");
-    if (workspace.status === "fixing") throw new WorkspaceError("Fix already in progress", "CONFLICT");
+    await recoverFailedFixAndMergeSessionIfNeeded(workspace);
+    const refreshedWorkspace = await getWorkspaceById(id, database);
+    if (!refreshedWorkspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
+    if (refreshedWorkspace.status === "fixing") throw new WorkspaceError("Fix already in progress", "CONFLICT");
     if (!getSessionManager) throw new WorkspaceError("Session manager not available", "BAD_REQUEST");
 
     const errorMessage = mergeError || "Unknown merge error";
     const { repoPath, defaultBranch } = await resolveProjectRepo(id, database);
-    const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
+    const baseBranch = requireBaseBranch(refreshedWorkspace.baseBranch || defaultBranch);
 
     // Refuse if main checkout HEAD has drifted off the target branch (consistent with /merge guard).
     const currentHeadBranch = await gitService.getCurrentBranch(repoPath);
@@ -842,15 +879,15 @@ export function createWorkspaceMergeService(deps: {
     }
 
     // Kill leftover worktree processes (e.g. dev.mjs from the prior agent) before rewriting or spawning.
-    await killWorktreeProcesses(workspace.workingDir, "fix-and-merge");
+    await killWorktreeProcesses(refreshedWorkspace.workingDir, "fix-and-merge");
 
     let rebuildNote = "";
     try {
-      const synced = await gitService.syncBranchToHead(workspace.workingDir, workspace.branch);
+      const synced = await gitService.syncBranchToHead(refreshedWorkspace.workingDir, refreshedWorkspace.branch);
       if (synced) {
-        console.log(`[workspace-merge] fix-and-merge synced branch ${workspace.branch} to worktree HEAD`);
+        console.log(`[workspace-merge] fix-and-merge synced branch ${refreshedWorkspace.branch} to worktree HEAD`);
       }
-      const rebaseResult = await gitService.rebaseOntoBase(workspace.workingDir, baseBranch, workspace.branch, {
+      const rebaseResult = await gitService.rebaseOntoBase(refreshedWorkspace.workingDir, baseBranch, refreshedWorkspace.branch, {
         preferLocalBase: true,
       });
       if (rebaseResult.success) {
