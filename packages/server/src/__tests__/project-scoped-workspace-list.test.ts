@@ -99,4 +99,67 @@ describe("GET /api/workspaces?projectId= (project-scoped workspace list)", () =>
     const body = await res.json() as any[];
     expect(body).toEqual([]);
   });
+
+  it("?status=active returns only active workspaces and excludes terminal ones", async () => {
+    const { app, db } = createTestApp();
+    const projectId = await seedProject(db, "project-status-filter");
+    const issueId = await seedIssue(db, projectId);
+
+    const activeId = randomUUID();
+    const closedId = randomUUID();
+    await db.insert(schema.workspaces).values([
+      { id: activeId, issueId, branch: "feature/active", status: "active" },
+      { id: closedId, issueId, branch: "feature/closed", status: "closed" },
+    ]);
+
+    const res = await app.request(`/api/workspaces?projectId=${projectId}&status=active`);
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as any[];
+    expect(body.length).toBe(1);
+    expect(body[0].id).toBe(activeId);
+    expect(body.some((w: any) => w.id === closedId)).toBe(false);
+  });
+
+  it("?status=active,idle returns workspaces with either status", async () => {
+    const { app, db } = createTestApp();
+    const projectId = await seedProject(db, "project-multi-status");
+    const issueId = await seedIssue(db, projectId);
+
+    const activeId = randomUUID();
+    const idleId = randomUUID();
+    const closedId = randomUUID();
+    await db.insert(schema.workspaces).values([
+      { id: activeId, issueId, branch: "feature/active2", status: "active" },
+      { id: idleId, issueId, branch: "feature/idle2", status: "idle" },
+      { id: closedId, issueId, branch: "feature/closed2", status: "closed" },
+    ]);
+
+    const res = await app.request(`/api/workspaces?projectId=${projectId}&status=active,idle`);
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as any[];
+    expect(body.length).toBe(2);
+    const ids = body.map((w: any) => w.id);
+    expect(ids).toContain(activeId);
+    expect(ids).toContain(idleId);
+    expect(ids).not.toContain(closedId);
+  });
+
+  it("?limit=1 returns at most one workspace", async () => {
+    const { app, db } = createTestApp();
+    const projectId = await seedProject(db, "project-limit");
+    const issueId = await seedIssue(db, projectId);
+
+    await db.insert(schema.workspaces).values([
+      { id: randomUUID(), issueId, branch: "feature/lim1", status: "idle" },
+      { id: randomUUID(), issueId, branch: "feature/lim2", status: "idle" },
+    ]);
+
+    const res = await app.request(`/api/workspaces?projectId=${projectId}&limit=1`);
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as any[];
+    expect(body.length).toBe(1);
+  });
 });

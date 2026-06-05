@@ -5,7 +5,7 @@ import { createWorkspaceService } from "../services/workspace.service.js";
 import type { CreateWorkspaceInput } from "../services/workspace.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
-import { and, eq, gte, isNotNull } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull } from "drizzle-orm";
 import { workspaces, issues } from "@agentic-kanban/shared/schema";
 
 export function createWorkspacesRoute(
@@ -171,6 +171,7 @@ export function createWorkspacesRoute(
 
   // GET /api/workspaces?projectId= — flat project-scoped workspace list (slim: id/status/readyForMerge/issueId/branch/provider)
   // GET /api/workspaces?issueId= — workspaces for a single issue (same shape, no join needed)
+  // Optional: status=active,idle (comma-separated), limit=N, offset=N
   router.get("/", async (c) => {
     const projectId = c.req.query("projectId");
     const issueId = c.req.query("issueId");
@@ -178,6 +179,16 @@ export function createWorkspacesRoute(
     if (!projectId && !issueId) {
       return c.json({ error: "projectId or issueId required" }, 400);
     }
+
+    const statusParam = c.req.query("status");
+    const statusFilter = statusParam
+      ? statusParam.split(",").map((s) => s.trim()).filter(Boolean)
+      : null;
+
+    const limitParam = c.req.query("limit");
+    const offsetParam = c.req.query("offset");
+    const limit = limitParam ? Math.max(1, parseInt(limitParam, 10)) : undefined;
+    const offset = offsetParam ? Math.max(0, parseInt(offsetParam, 10)) : undefined;
 
     const selectShape = {
       id: workspaces.id,
@@ -191,20 +202,29 @@ export function createWorkspacesRoute(
     };
 
     if (issueId) {
-      const rows = await database
+      const conditions = [eq(workspaces.issueId, issueId)];
+      if (statusFilter) conditions.push(inArray(workspaces.status, statusFilter));
+      let query = database
         .select(selectShape)
         .from(workspaces)
-        .where(eq(workspaces.issueId, issueId));
-      return c.json(rows);
+        .where(and(...conditions))
+        .$dynamic();
+      if (limit !== undefined) query = query.limit(limit);
+      if (offset !== undefined) query = query.offset(offset);
+      return c.json(await query);
     }
 
-    const rows = await database
+    const conditions = [eq(issues.projectId, projectId!)];
+    if (statusFilter) conditions.push(inArray(workspaces.status, statusFilter));
+    let query = database
       .select(selectShape)
       .from(workspaces)
       .innerJoin(issues, eq(workspaces.issueId, issues.id))
-      .where(eq(issues.projectId, projectId!));
-
-    return c.json(rows);
+      .where(and(...conditions))
+      .$dynamic();
+    if (limit !== undefined) query = query.limit(limit);
+    if (offset !== undefined) query = query.offset(offset);
+    return c.json(await query);
   });
 
   // POST /api/workspaces — create workspace with worktree + auto-launch agent
