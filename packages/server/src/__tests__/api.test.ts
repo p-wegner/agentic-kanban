@@ -1113,6 +1113,51 @@ describe("Board terminal column cap (AK-569)", () => {
     expect(cancelledCol.count).toBe(5);
     expect(cancelledCol.issues.length).toBe(5);
   });
+
+  it("non-terminal columns (Backlog/In Progress/In Review/AI Reviewed) are never capped", async () => {
+    // Regression for #570: capping must only apply to terminal columns.
+    // Seed 60 issues in every standard non-terminal column name and assert none are capped.
+    const projectId = await createProjectDirectly(database, { name: "Non-Terminal Cap Project" });
+    const now = new Date();
+
+    const nonTerminalNames = ["Backlog", "In Progress", "In Review", "AI Reviewed"];
+    const statusIds: Record<string, string> = {};
+    for (let i = 0; i < nonTerminalNames.length; i++) {
+      statusIds[nonTerminalNames[i]] = await createStatusDirectly(database, projectId, nonTerminalNames[i], i);
+    }
+
+    const OVER_CAP = 60;
+    let issueCounter = 5000;
+    for (const [name, statusId] of Object.entries(statusIds)) {
+      const issues = Array.from({ length: OVER_CAP }, (_, idx) => ({
+        id: randomUUID(),
+        projectId,
+        statusId,
+        issueNumber: issueCounter++,
+        title: `${name} issue ${idx}`,
+        priority: "medium" as const,
+        issueType: "feature" as const,
+        sortOrder: idx,
+        createdAt: new Date(now.getTime() - idx * 1000).toISOString(),
+        updatedAt: new Date(now.getTime() - idx * 1000).toISOString(),
+      }));
+      for (const issue of issues) {
+        await database.insert(schema.issues).values(issue);
+      }
+    }
+
+    const res = await app.request(`/api/projects/${projectId}/board`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+
+    for (const name of nonTerminalNames) {
+      const col = body.find((c: any) => c.name === name);
+      expect(col, `column "${name}" should be present`).toBeDefined();
+      // Non-terminal columns must never be capped: issues.length === count === OVER_CAP
+      expect(col.issues.length).toBe(OVER_CAP);
+      expect(col.count).toBe(OVER_CAP);
+    }
+  });
 });
 
 describe("Board archived-issue filtering (AK-457)", () => {
