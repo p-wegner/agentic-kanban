@@ -451,7 +451,13 @@ export function createWorkspaceMergeService(deps: {
     // All post-merge work (OpenSpec, worktree cleanup, branch deletion, learning step,
     // followup auto-start) runs in the background so the HTTP connection is never
     // held open by slow filesystem or git operations.
-    void runPostMergeTasks({
+    //
+    // setImmediate defers the first tick of runPostMergeTasks past the current call
+    // stack so the Hono response write (including the JSON body flush) happens first.
+    // Without this deferral, the async function's synchronous preamble (entering
+    // teardownWorktree → invoking processKiller) runs before the Promise resolves to
+    // the caller, which is the exact keep-alive drop we are fixing (#563).
+    const postMergeArgs = {
       workspaceId: id,
       issueId: workspace.issueId,
       repoPath,
@@ -464,7 +470,8 @@ export function createWorkspaceMergeService(deps: {
       teardownScript: project?.teardownScript ?? null,
       setupEnabled: project?.setupEnabled ?? true,
       isDirect: workspace.isDirect,
-    });
+    };
+    setImmediate(() => { void runPostMergeTasks(postMergeArgs); });
 
     return {
       id,
@@ -517,14 +524,14 @@ export function createWorkspaceMergeService(deps: {
       }
     }
 
-    // Code metrics — run before worktree is torn down.
+    // Code metrics — run before worktree directory is removed (teardown only kills procs).
     if (workingDir) {
       await computeWorkspaceCodeMetrics(workspaceId, database).catch((err) => {
         addRecoverableWarning(warnings, "code-metrics", err);
       });
     }
 
-    // OpenSpec delta application — must run before worktree is torn down.
+    // OpenSpec delta application — must run before worktree directory is removed.
     try {
       const changedFiles = preMergeHead
         ? await getChangedFilesBetweenSafe(repoPath, preMergeHead, "HEAD")
