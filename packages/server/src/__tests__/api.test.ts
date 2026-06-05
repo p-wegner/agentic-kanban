@@ -1033,6 +1033,78 @@ describe("Board API", () => {
     expect(active.workspaceSummary.main.lastAssistantMessage).toBe("Live agent message.");
   });
 
+  it("GET /api/projects/:id/board flags zero-diff In Review workspace with planOnlyWarning (AK-607)", async () => {
+    const p = await createProjectDirectly(database, { name: "AK-607 Zero-Diff In Review Project" });
+    const inReviewStatusId = await createStatusDirectly(database, p, "In Review", 1);
+    const now = new Date().toISOString();
+
+    // Zero-diff idle workspace in In Review — branch present but no diff committed
+    const zeroDiffIssueId = randomUUID();
+    const zeroDiffWsId = randomUUID();
+    await database.insert(schema.issues).values({
+      id: zeroDiffIssueId, projectId: p, statusId: inReviewStatusId, issueNumber: 607,
+      title: "Zero diff In Review", priority: "medium", issueType: "bug", sortOrder: 0,
+      createdAt: now, updatedAt: now,
+    });
+    await database.insert(schema.workspaces).values({
+      id: zeroDiffWsId, issueId: zeroDiffIssueId,
+      branch: "feature/ak-607-zero-diff",
+      workingDir: "/repo/.worktrees/ak-607-zero-diff",
+      baseBranch: "master",
+      status: "idle",
+      isDirect: false,
+      readyForMerge: false,
+      diffStatCacheCheckedAt: now,
+      diffStatCacheFilesChanged: 0,
+      diffStatCacheInsertions: 0,
+      diffStatCacheDeletions: 0,
+      provider: "claude",
+      createdAt: now, updatedAt: now,
+    });
+
+    // Non-zero diff workspace in In Review — should NOT get planOnlyWarning
+    const nonZeroDiffIssueId = randomUUID();
+    const nonZeroDiffWsId = randomUUID();
+    await database.insert(schema.issues).values({
+      id: nonZeroDiffIssueId, projectId: p, statusId: inReviewStatusId, issueNumber: 608,
+      title: "Non-zero diff In Review", priority: "medium", issueType: "feature", sortOrder: 1,
+      createdAt: now, updatedAt: now,
+    });
+    await database.insert(schema.workspaces).values({
+      id: nonZeroDiffWsId, issueId: nonZeroDiffIssueId,
+      branch: "feature/ak-607-has-diff",
+      status: "idle",
+      isDirect: false,
+      readyForMerge: false,
+      diffStatCacheCheckedAt: now,
+      diffStatCacheFilesChanged: 3,
+      diffStatCacheInsertions: 42,
+      diffStatCacheDeletions: 5,
+      provider: "claude",
+      createdAt: now, updatedAt: now,
+    });
+
+    const res = await app.request(`/api/projects/${p}/board`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    const allIssues = body.flatMap((col: any) => col.issues);
+
+    const zeroDiffIssue = allIssues.find((i: any) => i.id === zeroDiffIssueId);
+    expect(zeroDiffIssue).toBeDefined();
+    expect(zeroDiffIssue.workspaceSummary).toBeDefined();
+    expect(zeroDiffIssue.workspaceSummary.main).toBeDefined();
+    // Zero-diff idle workspace in In Review must expose planOnlyWarning so the UI/reconciler
+    // can treat it as stale and close it rather than leaving it stranded.
+    expect(zeroDiffIssue.workspaceSummary.main.planOnlyWarning).toBe(true);
+
+    const nonZeroDiffIssue = allIssues.find((i: any) => i.id === nonZeroDiffIssueId);
+    expect(nonZeroDiffIssue).toBeDefined();
+    expect(nonZeroDiffIssue.workspaceSummary).toBeDefined();
+    expect(nonZeroDiffIssue.workspaceSummary.main).toBeDefined();
+    // Workspace with actual changes must NOT be flagged as plan-only.
+    expect(nonZeroDiffIssue.workspaceSummary.main.planOnlyWarning).toBe(false);
+  });
+
   it("GET /api/issues tolerates Done issue with null/stale workspace summary data (AK-324)", async () => {
     const p = await createProjectDirectly(database, { name: "AK-324 Issues Null Summary Project" });
     const doneStatusId = await createStatusDirectly(database, p, "Done", 1);
