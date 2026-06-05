@@ -7,6 +7,9 @@
  */
 import { createBackup } from "../db/backup.js";
 
+let activeBackupTimeout: ReturnType<typeof setTimeout> | null = null;
+let activeBackupInterval: ReturnType<typeof setInterval> | null = null;
+
 /**
  * Start the periodic backup scheduler.
  * @param intervalMin minutes between backups; <= 0 disables periodic backups
@@ -14,6 +17,15 @@ import { createBackup } from "../db/backup.js";
  * @returns the interval handle (or null if periodic backups are disabled).
  */
 export function startBackupScheduler(intervalMin = 30): NodeJS.Timeout | null {
+  if (activeBackupTimeout !== null) {
+    clearTimeout(activeBackupTimeout);
+    activeBackupTimeout = null;
+  }
+  if (activeBackupInterval !== null) {
+    clearInterval(activeBackupInterval);
+    activeBackupInterval = null;
+  }
+
   const run = () =>
     createBackup("periodic").catch((e) =>
       console.warn(
@@ -23,7 +35,8 @@ export function startBackupScheduler(intervalMin = 30): NodeJS.Timeout | null {
     );
 
   // One shortly after boot.
-  setTimeout(run, 60_000).unref();
+  activeBackupTimeout = setTimeout(run, 60_000);
+  activeBackupTimeout.unref?.();
 
   if (intervalMin <= 0) {
     console.log("[backup] periodic interval disabled (backup_interval_min=0)");
@@ -31,6 +44,7 @@ export function startBackupScheduler(intervalMin = 30): NodeJS.Timeout | null {
   }
   console.log(`[backup] periodic backups every ${intervalMin} min`);
   const handle = setInterval(run, intervalMin * 60_000);
+  activeBackupInterval = handle;
   handle.unref();
   return handle;
 }

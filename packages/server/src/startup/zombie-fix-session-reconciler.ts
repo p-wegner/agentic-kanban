@@ -166,16 +166,29 @@ export async function reconcileZombieFixSessions(deps: ZombieFixSessionReconcile
 
 const DEFAULT_INTERVAL_MS = 60_000;
 
+let activeZombieFixTimeout: ReturnType<typeof setTimeout> | null = null;
+let activeZombieFixInterval: ReturnType<typeof setInterval> | null = null;
+
 /** Run the zombie reconciler shortly after boot and then on an interval. */
 export function startZombieFixSessionReconciler(
   deps: ZombieFixSessionReconcilerDeps,
   intervalMs = DEFAULT_INTERVAL_MS,
 ): ReturnType<typeof setInterval> {
+  if (activeZombieFixTimeout !== null) {
+    clearTimeout(activeZombieFixTimeout);
+    activeZombieFixTimeout = null;
+  }
+  if (activeZombieFixInterval !== null) {
+    clearInterval(activeZombieFixInterval);
+    activeZombieFixInterval = null;
+  }
+
   const tick = () => {
     reconcileZombieFixSessions(deps).catch((err) =>
       console.warn("[zombie-fix] cycle error:", err instanceof Error ? err.message : err),
     );
   };
-  setTimeout(tick, 30_000);
-  return setInterval(tick, intervalMs);
+  activeZombieFixTimeout = setTimeout(tick, 30_000);
+  activeZombieFixInterval = setInterval(tick, intervalMs);
+  return activeZombieFixInterval;
 }
