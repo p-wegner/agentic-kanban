@@ -5,7 +5,7 @@ import { detectConflicts, getCommitCountAhead, getDiffShortstat, getLatestCommit
 import type { ProviderName } from "./agent-provider.js";
 import { isAnalyticsNoise } from "./session-filter.js";
 import { computeWorkspaceCodeMetrics, parseStoredWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
-import type { WorkspaceCodeMetrics } from "@agentic-kanban/shared";
+import type { WorkspaceCodeMetrics, WorkspaceSummary } from "@agentic-kanban/shared";
 import { ACTIVE_WORKSPACE_STATUSES, workspaceStatusPriority } from "@agentic-kanban/shared";
 import { readSessionStdoutFile } from "../repositories/session.repository.js";
 
@@ -23,54 +23,7 @@ const CONFLICT_CACHE_TTL_MS = 5 * 60 * 1000;
 const DIFF_STAT_CACHE_TTL_MS = 30 * 1000;
 const CODE_METRICS_CACHE_TTL_MS = 5 * 60 * 1000;
 
-export type WorkspaceSummary = {
-  total: number;
-  active: number;
-  idle: number;
-  closed: number;
-  branches: string[];
-  showdown?: {
-    id: string;
-    status: string;
-    total: number;
-    doneCount: number;
-  };
-  main?: {
-    id: string;
-    branch: string;
-    workingDir: string | null;
-    status: "active" | "reviewing" | "fixing" | "idle" | "awaiting-plan-approval" | "error" | "closed";
-    claudeProfile: string | null;
-    profile?: { provider: ProviderName; name: string } | null;
-    model?: string | null;
-    agentCommand: string | null;
-    readyForMerge?: boolean;
-    planMode?: boolean;
-    diffStats?: { filesChanged: number; insertions: number; deletions: number } | null;
-    conflicts?: { hasConflicts: boolean; conflictingFiles: string[] } | null;
-    lastSessionAt?: string | null;
-    sessionStatus?: string | null;
-    lastSessionTriggerType?: string | null;
-    mergedAt?: string | null;
-    contextTokens?: number | null;
-    lastTool?: string | null;
-    lastAssistantMessage?: string | null;
-    pendingPlanPath?: string | null;
-    planOnlyWarning?: boolean;
-    scorecard?: { score: number } | null;
-    commitCount?: number | null;
-    codeMetrics?: WorkspaceCodeMetrics | null;
-    latestCommit?: { sha: string; message: string } | null;
-    workflow?: {
-      currentNodeId: string;
-      currentNodeName: string;
-      currentNodeType: string;
-      currentNodeStatusName: string | null;
-      state: "active" | "waiting" | "terminal";
-      nextStages: string[];
-    } | null;
-  };
-};
+export type { WorkspaceSummary } from "@agentic-kanban/shared";
 
 function safeParseStringArray(raw: string | null | undefined): string[] {
   if (!raw) return [];
