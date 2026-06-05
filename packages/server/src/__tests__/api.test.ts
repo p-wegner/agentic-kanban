@@ -1291,6 +1291,33 @@ describe("Workspaces API", () => {
     expect(body[0].branch).toBeDefined();
   });
 
+  it("GET /api/workspaces?projectId= lists workspaces for a project", async () => {
+    const res = await app.request(`/api/workspaces?projectId=${projectId}`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(Array.isArray(body)).toBe(true);
+    expect(body.length).toBeGreaterThanOrEqual(1);
+    const ws = body[0];
+    expect(ws.id).toBeDefined();
+    expect(ws.issueId).toBeDefined();
+    expect(ws.branch).toBeDefined();
+    expect(ws.status).toBeDefined();
+    expect("readyForMerge" in ws).toBe(true);
+  });
+
+  it("GET /api/workspaces without projectId returns 400", async () => {
+    const res = await app.request("/api/workspaces");
+    expect(res.status).toBe(400);
+  });
+
+  it("GET /api/workspaces?projectId= only returns workspaces for that project", async () => {
+    const otherProjectId = await createProjectDirectly(database, { name: "Other Project" });
+    const res = await app.request(`/api/workspaces?projectId=${otherProjectId}`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.length).toBe(0);
+  });
+
   it("PATCH /api/workspaces/:id updates status", async () => {
     const createRes = await app.request("/api/workspaces", {
       method: "POST",

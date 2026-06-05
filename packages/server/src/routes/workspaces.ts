@@ -169,6 +169,29 @@ export function createWorkspacesRoute(
     return c.json(result);
   });
 
+  // GET /api/workspaces?projectId= — flat project-scoped workspace list (slim: id/status/readyForMerge/issueId/branch/provider)
+  router.get("/", async (c) => {
+    const projectId = c.req.query("projectId");
+    if (!projectId) return c.json({ error: "projectId required" }, 400);
+
+    const rows = await database
+      .select({
+        id: workspaces.id,
+        issueId: workspaces.issueId,
+        branch: workspaces.branch,
+        status: workspaces.status,
+        readyForMerge: workspaces.readyForMerge,
+        provider: workspaces.provider,
+        createdAt: workspaces.createdAt,
+        updatedAt: workspaces.updatedAt,
+      })
+      .from(workspaces)
+      .innerJoin(issues, eq(workspaces.issueId, issues.id))
+      .where(eq(issues.projectId, projectId));
+
+    return c.json(rows);
+  });
+
   // POST /api/workspaces — create workspace with worktree + auto-launch agent
   router.post("/", async (c) => {
     const body = await parseJsonBody(c);
