@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { issues, preferences, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { checkBranchTipIsAncestor, countUniqueCommits } from "@agentic-kanban/shared/lib/git-service";
 import type { Database } from "../db/index.js";
@@ -85,15 +85,16 @@ export async function scanDoneUnmergedWorkspaces(
     return { findings: [], reopened: 0 };
   }
 
-  // Find non-direct, non-closed workspaces whose issue IS in a terminal Done status
-  // and whose branch exists (non-null branch + baseBranch + repoPath).
+  // Find non-direct workspaces whose issue IS in a terminal Done status
+  // and whose branch was NOT recorded as merged (mergedAt IS NULL).
+  // mergedAt set = the workspace was genuinely merged; those are not violations.
+  // This mirrors the ancestor-branch-reconciler's mergedAt guard.
   const candidates = await database
     .select({
       wsId: workspaces.id,
       branch: workspaces.branch,
       baseBranch: workspaces.baseBranch,
       workingDir: workspaces.workingDir,
-      wsStatus: workspaces.status,
       issueId: issues.id,
       issueNumber: issues.issueNumber,
       projectId: issues.projectId,
@@ -107,6 +108,7 @@ export async function scanDoneUnmergedWorkspaces(
     .where(
       and(
         eq(workspaces.isDirect, false),
+        isNull(workspaces.mergedAt),
         inArray(projectStatuses.name, DONE_STATUS_NAMES),
       ),
     );
@@ -116,6 +118,9 @@ export async function scanDoneUnmergedWorkspaces(
   const findings: DoneUnmergedFinding[] = [];
   let reopened = 0;
   const now = new Date().toISOString();
+  // Track which issues have already been re-opened this scan to avoid double-counting
+  // when an issue has multiple non-merged workspaces (e.g. one abandoned, one done-but-unmerged).
+  const reopenedIssueIds = new Set<string>();
 
   for (const c of candidates) {
     if (!c.branch || !c.baseBranch || !c.repoPath) continue;
@@ -174,7 +179,7 @@ export async function scanDoneUnmergedWorkspaces(
       }, database);
     } catch { /* health event logging is non-fatal */ }
 
-    if (reopenToInReview) {
+    if (reopenToInReview && !reopenedIssueIds.has(c.issueId)) {
       try {
         // Resolve the In Review status for this project.
         const statuses = await database
@@ -200,6 +205,7 @@ export async function scanDoneUnmergedWorkspaces(
           .where(eq(workspaces.id, c.wsId));
 
         reopened++;
+        reopenedIssueIds.add(c.issueId);
 
         console.log(
           `[done-unmerged-scanner] re-opened issue #${c.issueNumber ?? "?"} to 'In Review' and workspace ${c.wsId} to idle (branch has ${uniqueCommits} unmerged commit(s))`,
