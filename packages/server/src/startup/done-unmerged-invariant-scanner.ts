@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { issues, preferences, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import {
   checkBranchTipIsAncestor,
@@ -15,11 +15,20 @@ import { PREF_DONE_UNMERGED_SCANNER_ENABLED } from "../constants/preference-keys
 /** Issue status names that count as "terminal Done" — these are the ones we scan. */
 const DONE_STATUS_NAMES = ["Done", "AI Reviewed"];
 
+<<<<<<< HEAD
 /** Max commits behind base for auto-merge to proceed. Branches further behind are left log-only. */
 const MAX_BEHIND_FOR_AUTO_MERGE = 20;
 
 /** Max auto-merge attempts per scanner cycle to limit blast radius. */
 const MAX_AUTO_MERGES_PER_CYCLE = 3;
+=======
+/**
+ * If a branch is more than this many commits behind its base it is an ancient abandoned
+ * workspace (observed: 60-658 behind in the #590 mass-reopen incident) — NOT a
+ * recoverable silent-merge-loss candidate; skip it.
+ */
+const MAX_COMMITS_BEHIND_BASE = 20;
+>>>>>>> d935ccbf (fix(#590): guard scanner against already-merged workspaces and stale branches)
 
 export interface DoneUnmergedScannerDeps {
   database?: Database;
@@ -38,6 +47,12 @@ export interface DoneUnmergedScannerDeps {
    * reads the live preference from the DB at call time.
    */
   enabled?: boolean;
+  /**
+   * Override the staleness threshold for testing. Defaults to MAX_COMMITS_BEHIND_BASE (20).
+   * Branches more than this many commits behind base are ancient abandoned workspaces —
+   * not recoverable silent-merge-loss.
+   */
+  maxCommitsBehindBase?: number;
 }
 
 export interface DoneUnmergedFinding {
@@ -79,9 +94,14 @@ export async function scanDoneUnmergedWorkspaces(
   const database = deps.database ?? db;
   const ancestorCheck = deps.checkAncestor ?? checkBranchTipIsAncestor;
   const commitCounter = deps.countCommits ?? countUniqueCommits;
+<<<<<<< HEAD
   const conflictDetector = deps.detectConflicts ?? detectConflictsByBranch;
   const behindCounter = deps.countBehind ?? countBehindCommits;
   const gitMerge = deps.mergeGitBranch ?? mergeBranch;
+=======
+  const reopenToInReview = deps.reopenToInReview ?? true;
+  const maxBehind = deps.maxCommitsBehindBase ?? MAX_COMMITS_BEHIND_BASE;
+>>>>>>> d935ccbf (fix(#590): guard scanner against already-merged workspaces and stale branches)
 
   const isEnabled = deps.enabled !== undefined
     ? deps.enabled
@@ -128,6 +148,16 @@ export async function scanDoneUnmergedWorkspaces(
 
   if (candidates.length === 0) return { findings: [], reopened: 0, autoMerged: 0 };
 
+  // Guard #1 (false-positive fix #590): collect issue IDs that have ANY merged workspace.
+  // An issue whose workspace A was genuinely merged (mergedAt set) must not be flagged
+  // just because a stale workspace B (mergedAt null) also exists on it.
+  const candidateIssueIds = [...new Set(candidates.map(c => c.issueId))];
+  const mergedRows = await database
+    .select({ issueId: workspaces.issueId })
+    .from(workspaces)
+    .where(and(inArray(workspaces.issueId, candidateIssueIds), isNotNull(workspaces.mergedAt)));
+  const issuesWithAMergedWorkspace = new Set(mergedRows.map(r => r.issueId));
+
   const findings: DoneUnmergedFinding[] = [];
   let autoMerged = 0;
   const now = new Date().toISOString();
@@ -136,6 +166,12 @@ export async function scanDoneUnmergedWorkspaces(
 
   for (const c of candidates) {
     if (!c.branch || !c.baseBranch || !c.repoPath) continue;
+
+    // Guard #1: issue already has a genuinely-merged workspace — not a silent-merge-loss.
+    if (issuesWithAMergedWorkspace.has(c.issueId)) {
+      console.log(`[done-unmerged-scanner] skipping issue #${c.issueNumber ?? "?"} — has a merged workspace (not a silent-merge-loss)`);
+      continue;
+    }
 
     let result: Awaited<ReturnType<typeof checkBranchTipIsAncestor>>;
     try {
@@ -150,6 +186,20 @@ export async function scanDoneUnmergedWorkspaces(
 
     // Branch is not reachable from base — check how many unique commits it has.
     if (!result.branchSha) continue;
+
+    // Guard #2: staleness check — count how many commits base has that the branch does NOT.
+    // A branch 60-658 commits behind is an ancient abandoned workspace (#590 incident), not
+    // a recoverable silent-merge-loss. Skip it to avoid false positives.
+    let commitsBehind: number;
+    try {
+      commitsBehind = await commitCounter(c.repoPath, result.branchSha, result.baseSha);
+    } catch {
+      commitsBehind = 0;
+    }
+    if (commitsBehind > maxBehind) {
+      console.log(`[done-unmerged-scanner] skipping issue #${c.issueNumber ?? "?"} workspace ${c.wsId} — branch is ${commitsBehind} commits behind ${c.baseBranch} (staleness threshold: ${maxBehind})`);
+      continue;
+    }
 
     let uniqueCommits: number;
     try {
