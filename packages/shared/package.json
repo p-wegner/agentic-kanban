@@ -16,6 +16,8 @@
     "./lib/openspec": { "development": "./src/lib/openspec.ts", "types": "./dist/lib/openspec.d.ts", "import": "./dist/lib/openspec.js", "default": "./src/lib/openspec.ts" },
     "./lib/session-output": { "development": "./src/lib/session-output.ts", "types": "./dist/lib/session-output.d.ts", "import": "./dist/lib/session-output.js", "default": "./src/lib/session-output.ts" },
     "./lib/status-view": { "development": "./src/lib/status-view.ts", "types": "./dist/lib/status-view.d.ts", "import": "./dist/lib/status-view.js", "default": "./src/lib/status-view.ts" },
+    "./lib/workspace-activity-state": { "development": "./src/lib/workspace-activity-state.ts", "types": "./dist/lib/workspace-activity-state.d.ts", "import": "./dist/lib/workspace-activity-state.js", "default": "./src/lib/workspace-activity-state.ts" },
+    "./lib/workspace-activity-state.js": { "development": "./src/lib/workspace-activity-state.ts", "types": "./dist/lib/workspace-activity-state.d.ts", "import": "./dist/lib/workspace-activity-state.js", "default": "./src/lib/workspace-activity-state.ts" },
     "./lib/setup-script": { "development": "./src/lib/setup-script.ts", "types": "./dist/lib/setup-script.d.ts", "import": "./dist/lib/setup-script.js", "default": "./src/lib/setup-script.ts" },
     "./lib/ticket-context": { "development": "./src/lib/ticket-context.ts", "types": "./dist/lib/ticket-context.d.ts", "import": "./dist/lib/ticket-context.js", "default": "./src/lib/ticket-context.ts" },
     "./lib/cron-utils": { "development": "./src/lib/cron-utils.ts", "types": "./dist/lib/cron-utils.d.ts", "import": "./dist/lib/cron-utils.js", "default": "./src/lib/cron-utils.ts" },
