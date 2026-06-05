@@ -320,18 +320,21 @@ export async function checkMainCheckoutHeads(): Promise<void> {
  */
 export async function reconcileSilentlyMergedWorkspaces(database: Database = db): Promise<void> {
   try {
-    const stale = await database
+  const stale = await database
       .select({
         id: workspaces.id,
         issueId: workspaces.issueId,
         mergedAt: workspaces.mergedAt,
         closedAt: workspaces.closedAt,
         branch: workspaces.branch,
+        isDirect: workspaces.isDirect,
+        repoPath: projects.repoPath,
         issueNumber: issues.issueNumber,
         projectId: issues.projectId,
       })
       .from(workspaces)
       .innerJoin(issues, eq(workspaces.issueId, issues.id))
+      .innerJoin(projects, eq(issues.projectId, projects.id))
       .where(
         // mergedAt is set (git merge already landed) but workspace is not closed
         and(isNotNull(workspaces.mergedAt), ne(workspaces.status, "closed")),
@@ -344,6 +347,16 @@ export async function reconcileSilentlyMergedWorkspaces(database: Database = db)
 
     for (const ws of stale) {
       try {
+        if (!ws.isDirect && ws.repoPath && ws.branch) {
+          try {
+            await gitService.deleteBranch(ws.repoPath, ws.branch);
+          } catch (err) {
+            console.warn(
+              `[startup] reconcileSilentlyMergedWorkspaces: failed to delete branch ${ws.branch} for workspace ${ws.id}:`,
+              err instanceof Error ? err.message : String(err),
+            );
+          }
+        }
         await updateWorkspaceStatus(ws.id, "closed", {
           closedAt: ws.closedAt ?? now,
           mergedAt: ws.mergedAt!,
