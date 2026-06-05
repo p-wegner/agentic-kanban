@@ -168,7 +168,7 @@ if ($artifactDir) {
 }
 
 $matcher = "Todo|In Progress|No issues|No projects registered"
-# Pattern for "Vite up but React not yet hydrated" — matches empty/whitespace/loading
+# Pattern for "Vite up but React not yet hydrated" -- matches empty/whitespace/loading
 $emptyRenderMatcher = "^[\s]*$|^loading[…\.]*$"
 $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
 $found = $false
@@ -176,12 +176,22 @@ $emptyRenderStreak = 0
 # After this many consecutive empty-render probes, emit a diagnostic and keep waiting
 $emptyRenderWarnAfter = 5
 
+# Store JS expressions in variables so the || operators are never inline-parsed by PS 5.1.
+$jsInnerText = "document.querySelector('main')?.innerText || document.querySelector('#root')?.innerText || document.body?.innerText || ''"
+$jsInnerTextFallback = "document.querySelector('main')?.innerText || document.querySelector('#root')?.innerText || document.body?.innerText || '<empty rendered text>'"
+$jsInnerHtml = "document.querySelector('main')?.innerHTML || document.querySelector('#root')?.innerHTML || document.body?.innerHTML || '<empty rendered html>'"
+
 try {
   $env:npm_config_loglevel = "silent"
   & playwright-cli open $Url | Out-Host
 
   while ((Get-Date) -lt $deadline) {
-    $renderedText = & playwright-cli eval "document.querySelector('main')?.innerText || document.querySelector('#root')?.innerText || document.body?.innerText || ''" 2>&1
+    $renderedText = $null
+    try {
+      $renderedText = & playwright-cli eval $jsInnerText
+    } catch {
+      $renderedText = ""
+    }
     $renderedTextString = ConvertTo-SmokeText $renderedText
 
     if ($renderedTextString -match $matcher) {
@@ -194,9 +204,14 @@ try {
     if ($renderedTextString -imatch $emptyRenderMatcher) {
       $emptyRenderStreak++
       if ($emptyRenderStreak -eq $emptyRenderWarnAfter) {
-        Write-Host "smoke: Vite is serving the page but React has not hydrated after $emptyRenderStreak probes — still waiting."
+        Write-Host "smoke: Vite is serving the page but React has not hydrated after $emptyRenderStreak probes -- still waiting."
         Write-Host "--- app root html (hydration fallback snapshot) ---"
-        $html = & playwright-cli eval "document.querySelector('main')?.innerHTML || document.querySelector('#root')?.innerHTML || document.body?.innerHTML || '<empty rendered html>'" 2>&1
+        $html = $null
+        try {
+          $html = & playwright-cli eval $jsInnerHtml
+        } catch {
+          $html = ""
+        }
         Write-Host (Format-SmokeSnippet $html 1500)
         Write-Host "--- console (hydration fallback snapshot) ---"
         try { & playwright-cli console | Out-Host } catch { Write-Host $_ }
@@ -219,11 +234,21 @@ try {
     try { & playwright-cli console | Out-Host } catch { Write-Host $_ }
 
     Write-Host "--- rendered text ---"
-    $text = & playwright-cli eval "document.querySelector('main')?.innerText || document.querySelector('#root')?.innerText || document.body?.innerText || '<empty rendered text>'" 2>&1
+    $text = $null
+    try {
+      $text = & playwright-cli eval $jsInnerTextFallback
+    } catch {
+      $text = ""
+    }
     Write-Host (Format-SmokeSnippet $text 1000)
 
     Write-Host "--- app root html ---"
-    $html = & playwright-cli eval "document.querySelector('main')?.innerHTML || document.querySelector('#root')?.innerHTML || document.body?.innerHTML || '<empty rendered html>'" 2>&1
+    $html = $null
+    try {
+      $html = & playwright-cli eval $jsInnerHtml
+    } catch {
+      $html = ""
+    }
     Write-Host (Format-SmokeSnippet $html 1500)
 
     exit 1
