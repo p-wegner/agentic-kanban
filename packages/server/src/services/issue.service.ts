@@ -189,7 +189,7 @@ export function createIssueService(deps: {
       }
     }
 
-    const results: CreateIssueResult[] = await database.transaction(async (tx) => {
+    const results: string[] = await database.transaction(async (tx) => {
       const maxRow = await tx
         .select({ maxNum: sql<number | null>`max(${issues.issueNumber})` })
         .from(issues)
@@ -208,7 +208,7 @@ export function createIssueService(deps: {
       const defaultStatusId = defaultStatusRows[0].id;
 
       const now = new Date().toISOString();
-      const out: CreateIssueResult[] = [];
+      const insertedIds: string[] = [];
       for (const input of inputs) {
         const id = randomUUID();
         const issueNumber = nextNumber++;
@@ -227,13 +227,17 @@ export function createIssueService(deps: {
           createdAt: now,
           updatedAt: now,
         });
-        out.push({ id, issueNumber, title: input.title });
+        insertedIds.push(id);
       }
-      return out;
+      return insertedIds;
     });
 
+    const out: CreateIssueResult[] = [];
+    for (const id of results) {
+      out.push((await getIssueDescription(id, database))!);
+    }
     boardEvents?.broadcast(projectId, "issue_created");
-    return results;
+    return out;
   }
 
   async function updateIssue(
