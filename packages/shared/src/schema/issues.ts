@@ -40,6 +40,7 @@ export const issues = sqliteTable("issues", {
   milestoneIdIdx: index("idx_issues_milestone_id").on(table.milestoneId),
   statusIdStatusChangedAtIdx: index("idx_issues_status_id_status_changed_at").on(table.statusId, table.statusChangedAt),
   projectIdStatusIdStatusChangedAtIdx: index("idx_issues_project_id_status_id_status_changed_at").on(table.projectId, table.statusId, table.statusChangedAt),
+  projectIdIssueNumberIdx: index("idx_issues_project_id_issue_number").on(table.projectId, table.issueNumber),
 }));
 
 export const issuesRelations = relations(issues, ({ one, many }) => ({

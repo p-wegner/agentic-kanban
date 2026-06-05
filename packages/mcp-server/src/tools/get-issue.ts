@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { isResolvedDependencyStatusView } from "@agentic-kanban/shared";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { requireEntity } from "../db-utils.js";
@@ -9,14 +9,17 @@ export function registerGetIssue(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema } = deps;
   server.tool(
     "get_issue",
-    "Get detailed information about a specific issue, including workspaces and dependencies. Accepts either a UUID issue ID or a numeric issue number (e.g. 42).",
+    "Get detailed information about a specific issue, including workspaces and dependencies. Accepts either a UUID issue ID or a numeric issue number (e.g. 42). When resolving by number, pass projectId to scope to the correct project.",
     {
       issueId: z.string().describe("The issue ID (UUID) or issue number (e.g. '42')"),
+      projectId: z.string().optional().describe("Project ID — required when resolving by issue number to avoid cross-project ambiguity"),
     },
-    async ({ issueId }) => {
+    async ({ issueId, projectId }) => {
       const isNumeric = /^\d+$/.test(issueId);
       const whereClause = isNumeric
-        ? eq(schema.issues.issueNumber, Number(issueId))
+        ? (projectId
+            ? and(eq(schema.issues.issueNumber, Number(issueId)), eq(schema.issues.projectId, projectId))
+            : eq(schema.issues.issueNumber, Number(issueId)))
         : eq(schema.issues.id, issueId);
 
       const issues = await db.select({
