@@ -7,7 +7,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, preferences, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { reconcileAncestorBranchWorkspaces } from "../startup/ancestor-branch-reconciler.js";
 import type { BranchTipAncestryResult } from "@agentic-kanban/shared/lib/git-service";
@@ -266,6 +266,52 @@ describe("reconcileAncestorBranchWorkspaces", () => {
     const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
     const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
     expect(status.name).toBe("In Progress");
+    const [ws] = await db.select({ status: workspaces.status }).from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.status).toBe("idle");
+  });
+
+  it("regression #582: performs zero mutations when disabled via deps.enabled=false", async () => {
+    // Regression guard: disabling the reconciler (hot-reload-safe pref path) must
+    // result in zero mutations even when there are eligible workspaces.
+    const { issueId, workspaceId } = await seedWorkspace(db, { statusName: "In Review" });
+    const checkAncestor = makeCheckAncestor(true);
+    const countCommits = makeCountCommits(1);
+
+    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor, countCommits, enabled: false });
+
+    expect(count).toBe(0);
+    expect(checkAncestor).not.toHaveBeenCalled();
+
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+    expect(status.name).toBe("In Review");
+
+    const [ws] = await db.select({ status: workspaces.status }).from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.status).toBe("idle");
+  });
+
+  it("regression #582: performs zero mutations when disabled via DB preference", async () => {
+    // Regression guard for the hot-reload scenario: even if an old setInterval keeps
+    // firing after tsx --watch re-evaluates the module, the live pref read at tick time
+    // causes the reconciler to no-op — no restart required to take effect.
+    const { issueId, workspaceId } = await seedWorkspace(db, { statusName: "In Review" });
+    const checkAncestor = makeCheckAncestor(true);
+    const countCommits = makeCountCommits(1);
+
+    // Write the disable preference to the DB.
+    const now = new Date().toISOString();
+    await db.insert(preferences).values({ key: "reconciler_ancestor_branch_enabled", value: "false", updatedAt: now })
+      .onConflictDoUpdate({ target: preferences.key, set: { value: "false", updatedAt: now } });
+
+    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor, countCommits });
+
+    expect(count).toBe(0);
+    expect(checkAncestor).not.toHaveBeenCalled();
+
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+    expect(status.name).toBe("In Review");
+
     const [ws] = await db.select({ status: workspaces.status }).from(workspaces).where(eq(workspaces.id, workspaceId));
     expect(ws.status).toBe("idle");
   });

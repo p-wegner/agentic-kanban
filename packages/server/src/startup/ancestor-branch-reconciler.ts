@@ -1,10 +1,11 @@
 import { and, eq, isNull, ne, notInArray } from "drizzle-orm";
-import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, preferences, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { checkBranchTipIsAncestor, countUniqueCommits } from "@agentic-kanban/shared/lib/git-service";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { moveIssueToDone, updateWorkspaceStatus } from "../repositories/workspace.repository.js";
 import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
+import { PREF_RECONCILER_ANCESTOR_BRANCH_ENABLED } from "../constants/preference-keys.js";
 
 /** Issue status names that are already terminal — skip these workspaces. */
 const TERMINAL_STATUS_NAMES = ["Done", "AI Reviewed", "Closed", "Cancelled"];
@@ -23,6 +24,12 @@ export interface AncestorBranchReconcilerDeps {
   checkAncestor?: typeof checkBranchTipIsAncestor;
   /** Injectable for testing. Defaults to the real countUniqueCommits from git-service. */
   countCommits?: typeof countUniqueCommits;
+  /**
+   * Override enabled state for testing. When undefined (production path), the reconciler
+   * reads the live `reconciler_ancestor_branch_enabled` preference from the DB at call time,
+   * so a source-level or pref-level disable takes effect on the next tick with no restart.
+   */
+  enabled?: boolean;
 }
 
 /**
@@ -48,6 +55,24 @@ export async function reconcileAncestorBranchWorkspaces(
   const database = deps.database ?? db;
   const ancestorCheck = deps.checkAncestor ?? checkBranchTipIsAncestor;
   const commitCounter = deps.countCommits ?? countUniqueCommits;
+
+  // Live pref read at every tick so disabling via pref takes effect without a restart.
+  // The `enabled` override in deps lets tests inject the state directly.
+  const isEnabled = deps.enabled !== undefined
+    ? deps.enabled
+    : await (async () => {
+        try {
+          const row = await database.select({ value: preferences.value }).from(preferences)
+            .where(eq(preferences.key, PREF_RECONCILER_ANCESTOR_BRANCH_ENABLED)).limit(1);
+          return row.length === 0 || row[0].value !== "false";
+        } catch {
+          return true;
+        }
+      })();
+  if (!isEnabled) {
+    console.log("[ancestor-reconciler] disabled via preference — skipping tick");
+    return 0;
+  }
 
   // Find non-closed, non-direct workspaces whose issue is NOT in a terminal status
   // and whose mergedAt is null (mergedAt set = already handled by reconcileSilentlyMergedWorkspaces).
@@ -148,4 +173,32 @@ export async function reconcileAncestorBranchWorkspaces(
     console.log(`[ancestor-reconciler] reconciled ${reconciled} stranded workspace(s) whose branch was already merged`);
   }
   return reconciled;
+}
+
+const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
+
+/**
+ * Schedule the ancestor-branch reconciler to run shortly after boot and then periodically.
+ *
+ * Both handles are unref'd so they don't prevent the process from exiting cleanly.
+ * Returns both handles so callers can clearTimeout/clearInterval them if needed.
+ *
+ * Hot-reload-safe: the tick reads the live `reconciler_ancestor_branch_enabled` preference
+ * at call time, so even if tsx --watch keeps an old interval alive, the disabled pref
+ * causes it to no-op on every subsequent tick.
+ */
+export function startAncestorBranchReconciler(
+  deps: Omit<AncestorBranchReconcilerDeps, "enabled"> = {},
+  intervalMs = DEFAULT_INTERVAL_MS,
+): { timer: NodeJS.Timeout; interval: NodeJS.Timeout } {
+  const tick = () => {
+    reconcileAncestorBranchWorkspaces(deps).catch((err) =>
+      console.warn("[ancestor-reconciler] periodic tick error:", err instanceof Error ? err.message : err),
+    );
+  };
+  const timer = setTimeout(tick, 35_000);
+  const interval = setInterval(tick, intervalMs);
+  (timer as NodeJS.Timeout).unref?.();
+  (interval as NodeJS.Timeout).unref?.();
+  return { timer, interval };
 }
