@@ -40,12 +40,12 @@ export function BoardStats({
 }: BoardStatsProps) {
   const isFiltered = !!searchQuery;
   const allColumns = [...activeColumns, ...archiveColumns];
-  const totalActive = activeColumns.reduce((sum, col) => sum + col.issues.length, 0);
-  const totalArchive = archiveColumns.reduce((sum, col) => sum + col.issues.length, 0);
+  const totalActive = activeColumns.reduce((sum, col) => sum + col.count, 0);
+  const totalArchive = archiveColumns.reduce((sum, col) => sum + col.count, 0);
   const total = totalActive + totalArchive;
 
-  const doneCount = archiveColumns.find((c) => c.name === "Done")?.issues.length ?? 0;
-  const cancelledCount = archiveColumns.find((c) => c.name === "Cancelled")?.issues.length ?? 0;
+  const doneCount = archiveColumns.find((c) => c.name === "Done")?.count ?? 0;
+  const cancelledCount = archiveColumns.find((c) => c.name === "Cancelled")?.count ?? 0;
   const nonCancelledTotal = total - cancelledCount;
   const completionPct = nonCancelledTotal > 0 ? Math.round((doneCount / nonCancelledTotal) * 100) : 0;
 
@@ -191,15 +191,15 @@ export function BoardStats({
             {total > 0 && (
               <div className="flex h-3 rounded-full overflow-hidden gap-px bg-gray-100 dark:bg-gray-800 shadow-inner">
                 {allColumns.map((col) => {
-                  if (col.issues.length === 0) return null;
-                  const pct = (col.issues.length / total) * 100;
+                  if (col.count === 0) return null;
+                  const pct = (col.count / total) * 100;
                   const cfg = getConfig(col.name);
                   return (
                     <div
                       key={col.id}
                       className={`${cfg.bar} transition-all duration-300`}
                       style={{ width: `${pct}%` }}
-                      title={`${col.name}: ${col.issues.length} (${Math.round(pct)}%)`}
+                      title={`${col.name}: ${col.count} (${Math.round(pct)}%)`}
                     />
                   );
                 })}
@@ -209,7 +209,7 @@ export function BoardStats({
             <div className="flex items-center gap-1.5 flex-wrap">
               {allColumns.map((col) => {
                 const cfg = getConfig(col.name);
-                if (col.issues.length === 0) return null;
+                if (col.count === 0) return null;
                 return (
                   <div
                     key={col.id}
@@ -217,7 +217,7 @@ export function BoardStats({
                   >
                     <span className={`w-1.5 h-1.5 rounded-full ${cfg.bar} shrink-0`} />
                     <span>{col.name}</span>
-                    <span className="font-bold">{col.issues.length}</span>
+                    <span className="font-bold">{col.count}</span>
                   </div>
                 );
               })}

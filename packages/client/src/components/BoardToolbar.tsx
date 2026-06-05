@@ -923,7 +923,7 @@ export function formatBoardActivitySummary(activeColumns: StatusWithIssues[]) {
   return orderedNames
     .map((name) => columnsByName.get(name))
     .filter((col): col is StatusWithIssues => col !== undefined)
-    .filter((col) => col.issues.length > 0)
-    .map((col) => `${col.issues.length} ${col.name}`)
+    .filter((col) => col.count > 0)
+    .map((col) => `${col.count} ${col.name}`)
     .join(", ");
 }
