@@ -351,6 +351,9 @@ export async function reconcileSilentlyMergedWorkspaces(database: Database = db)
         }, database);
         await moveIssueToDone(ws.id, ws.issueId, now, database);
 
+        console.log(
+          `[startup] auto-Done audit: issue=${ws.issueNumber ?? "?"} ws=${ws.id} mergedAt=${ws.mergedAt} reconciledAt=${now}`,
+        );
         try {
           await logBoardHealthEvent({
             projectId: ws.projectId,
@@ -362,8 +365,6 @@ export async function reconcileSilentlyMergedWorkspaces(database: Database = db)
             details: { workspaceId: ws.id, mergedAt: ws.mergedAt, reconciledAt: now },
           }, database);
         } catch { /* health event logging is non-fatal */ }
-
-        console.log(`[startup] reconciled workspace ${ws.id} (issue #${ws.issueNumber ?? ws.issueId}, mergedAt=${ws.mergedAt})`);
       } catch (err) {
         console.warn(`[startup] reconcileSilentlyMergedWorkspaces: failed for workspace ${ws.id}:`, err instanceof Error ? err.message : String(err));
       }

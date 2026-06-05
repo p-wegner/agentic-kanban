@@ -15,13 +15,17 @@ import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
 import type { BranchTipAncestryResult } from "@agentic-kanban/shared/lib/git-service";
 
-function makeGitService(checkBranchTipIsAncestor: (repo: string, branch: string, base: string, worktree?: string) => Promise<BranchTipAncestryResult>) {
+function makeGitService(
+  checkBranchTipIsAncestor: (repo: string, branch: string, base: string, worktree?: string) => Promise<BranchTipAncestryResult>,
+  countUniqueCommits: (_repo: string, _baseSha: string, _branchSha: string) => Promise<number> = async () => 1,
+) {
   return {
     getDiff: vi.fn(async () => ""),
     getDiffFromRepo: vi.fn(async () => ""),
     revParse: vi.fn(async (_repo: string, ref: string) => ref),
     isAncestor: vi.fn(async () => false),
     checkBranchTipIsAncestor: vi.fn(checkBranchTipIsAncestor),
+    countUniqueCommits: vi.fn(countUniqueCommits),
     removeWorktree: vi.fn(async () => {}),
     mergeBranch: vi.fn(async () => "Merge made by the 'ort' strategy."),
     detectConflicts: vi.fn(async () => ({ hasConflicts: false, conflictingFiles: [] })),
@@ -99,6 +103,43 @@ describe("checkBranchTipIsAncestor helper — three AC paths", () => {
     expect(result.merged).toBe(false);
     expect(result.reconciled).toBe(true);
     expect(mergeBranch).not.toHaveBeenCalled();
+  });
+
+  it("regression #583: 0-commit workspace (branchSha===baseSha) — mergeWorkspace does NOT reconcile as done", async () => {
+    // A fresh workspace has 0 unique commits: countUniqueCommits returns 0.
+    // Even though tip is trivially an ancestor, the reconciler must NOT auto-Done it.
+    const { workspaceId } = await seedScenario(db, { readyForMerge: true });
+    const mergeBranch = vi.fn(async () => "Merge made by the 'ort' strategy.");
+    const countUniqueCommits = vi.fn(async () => 0);
+    const git = {
+      ...makeGitService(async () => ({ isAncestor: true, branchSha: "sha-branch", baseSha: "sha-branch" }), countUniqueCommits),
+      mergeBranch,
+    };
+
+    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {}, processKiller: async () => 0 });
+    const result = await svc.mergeWorkspace(workspaceId);
+
+    // Must not have been reconciled as already-done; the real merge runs instead
+    expect(result.reconciled).toBeFalsy();
+    expect(countUniqueCommits).toHaveBeenCalled();
+  });
+
+  it("regression #583: 0-commit workspace (base advanced) — mergeWorkspace does NOT reconcile as done", async () => {
+    // Branch was created when base was at commitX; base later advanced to commitY.
+    // Branch still has 0 unique commits. branchSha !== baseSha but countUniqueCommits returns 0.
+    const { workspaceId } = await seedScenario(db, { readyForMerge: true });
+    const mergeBranch = vi.fn(async () => "Merge made by the 'ort' strategy.");
+    const countUniqueCommits = vi.fn(async () => 0);
+    const git = {
+      ...makeGitService(async () => ({ isAncestor: true, branchSha: "sha-original-base", baseSha: "sha-current-base" }), countUniqueCommits),
+      mergeBranch,
+    };
+
+    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {}, processKiller: async () => 0 });
+    const result = await svc.mergeWorkspace(workspaceId);
+
+    expect(result.reconciled).toBeFalsy();
+    expect(countUniqueCommits).toHaveBeenCalled();
   });
 
   it("non-ancestor → checkAlreadyMerged returns isAlreadyMerged: false with reason", async () => {
