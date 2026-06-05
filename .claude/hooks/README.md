@@ -42,6 +42,24 @@ Config file for the smart-hooks-runner pattern (if you add it later). Currently 
 add PreToolUse / Stop hook entries here and wire `smart-hooks-runner.js` in
 `.claude/settings.json` to activate them.
 
+## check-conflict-markers.js
+
+Stop hook that scans committed `packages/**/*.{ts,tsx,sql}` in the current HEAD for
+unresolved git conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`).  Uses `git grep`
+against HEAD so it catches only what is already committed — working-tree edits are
+ignored.
+
+If markers are found the hook blocks agent exit, lists each affected `file:line`, and
+asks the agent to resolve and commit the fix.  Wired as a direct Stop hook in both
+`.claude/settings.json` (Claude) and `.codex/hooks.json` (Codex) — it does NOT go
+through smart-hooks-runner so it fires regardless of which files were edited.
+
+**Why:** On 2026-06-05 a merge committed unresolved markers into a server startup file.
+Nothing caught it until esbuild failed on tsx-watch reload and the whole server went
+down.  `done-unmerged-invariant-scanner.ts` also calls `assertNoCommittedConflictMarkers`
+at server startup so a `[fatal]` alert appears in the server log even if the hook was
+bypassed.  See ticket #599.
+
 ## settings.json entries
 
 Hook entries were **appended** to `.claude/settings.json` (never overwritten). The

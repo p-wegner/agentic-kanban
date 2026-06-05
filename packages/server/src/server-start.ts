@@ -25,6 +25,7 @@ import { startSessionMessagePruner } from "./services/session-message-pruner.ser
 import { getPreference } from "./repositories/preferences.repository.js";
 import { domainErrorHandler } from "./middleware/error-handler.js";
 import { slowRequestLogger } from "./middleware/slow-request-logger.js";
+import { assertNoCommittedConflictMarkers } from "./startup/conflict-marker-scanner.js";
 
 export async function startServer(port?: number, hostname?: string) {
   const app = new Hono();
@@ -52,6 +53,17 @@ export async function startServer(port?: number, hostname?: string) {
   runWorkflowOnExit = workflow.runWorkflowOnExit;
 
   await runStartupTasks(sessionManager, { agentService });
+
+  // Fail-fast guard: scan committed source files for conflict markers.
+  // Logs a [fatal] alert for every affected file+line.  Non-crashing so the
+  // server can still start and the developer can reach the board to fix it.
+  try {
+    const repoRoot = new URL("../../..", import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1").replace(/\//g, "\\");
+    assertNoCommittedConflictMarkers(repoRoot);
+  } catch (err) {
+    console.warn("[conflict-marker-scanner] scan failed (non-fatal):", err instanceof Error ? err.message : err);
+  }
+
   await runSessionRestore(workflow);
   setupRoutes(app, { sessionManager, boardEvents, reviewSessionIds: workflow.reviewSessionIds, fixAndMergeSessionIds: workflow.fixAndMergeSessionIds, db, upgradeWebSocket });
 
