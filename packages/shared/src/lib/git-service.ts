@@ -1288,6 +1288,49 @@ export async function countUniqueCommits(repoPath: string, baseSha: string, bran
   }
 }
 
+/**
+ * Read-only conflict detection between two named branches, operating from the main repo.
+ * Uses `git merge-tree --write-tree baseBranch featureBranch` — never touches the working tree.
+ * Safe to call even when the feature branch has no worktree checked out.
+ */
+export async function detectConflictsByBranch(
+  repoPath: string,
+  featureBranch: string,
+  baseBranch: string,
+): Promise<{ hasConflicts: boolean; conflictingFiles: string[] }> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      "git",
+      ["merge-tree", "--write-tree", "--no-messages", baseBranch, featureBranch],
+      { cwd: repoPath, maxBuffer: 10 * 1024 * 1024 },
+      (err, stdout, stderr) => {
+        const output = stdout.toString().trim();
+        if (err && !output) {
+          reject(new Error(`git merge-tree (detectConflictsByBranch) failed: ${stderr?.toString().trim() || err.message}`));
+          return;
+        }
+        const lines = output.split("\n").slice(1).filter(Boolean);
+        const seen = new Set<string>();
+        for (const line of lines) {
+          const m = line.match(/^\d+ \w+ [123]\t(.+)$/);
+          if (m) seen.add(m[1].replace(/\r$/, ""));
+        }
+        const conflictingFiles = [...seen];
+        resolve({ hasConflicts: conflictingFiles.length > 0, conflictingFiles });
+      },
+    );
+  });
+}
+
+/**
+ * Count how many commits base has that featureBranch does not (the "behind" count).
+ * Throws on git error so callers can treat the failure as a safety signal.
+ */
+export async function countBehindCommits(repoPath: string, featureBranch: string, baseBranch: string): Promise<number> {
+  const out = await execGit(["rev-list", "--count", `${featureBranch}..${baseBranch}`], repoPath);
+  return parseInt(out.trim(), 10) || 0;
+}
+
 /** Check if a rebase is in progress in the worktree. */
 export async function isRebaseInProgress(worktreePath: string): Promise<boolean> {
   try {
