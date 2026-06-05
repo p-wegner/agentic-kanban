@@ -1163,14 +1163,14 @@ export function IssueDetailPanel({
 
     // Snap thresholds based on mouse position (not panel edge)
     const EDGE_SNAP_THRESHOLD = 100; // px from screen edge where mouse triggers snap
-    const MODAL_WIDTH = Math.min(800, window.innerWidth * 0.96);
+  const MODAL_WIDTH = Math.min(1200, window.innerWidth * 0.96);
     // Track current drag mode via ref to avoid stale closure issues
     let currentDragMode: "sidebar" | "modal" | "fullscreen" = panelMode;
     let cleanup: (() => void) | null = null;
 
     // If starting drag from sidebar, immediately switch to modal mode
     if (currentDragMode === "sidebar") {
-      const modalWidth = Math.min(800, window.innerWidth * 0.96);
+      const modalWidth = Math.min(1200, window.innerWidth * 0.96);
       // Position modal so the grab offset relative to panel left is preserved
       const grabOffsetX = e.clientX - rect.left;
       const idealModalX = e.clientX - Math.min(grabOffsetX, modalWidth - 80);
@@ -1268,7 +1268,7 @@ export function IssueDetailPanel({
           panelMode === "fullscreen"
             ? "inset-0"
             : panelMode === "modal"
-            ? `w-[min(800px,96vw)] h-[90vh] rounded-lg border border-gray-200 dark:border-gray-700${dragPos ? "" : " top-[5vh] left-1/2 -translate-x-1/2"}`
+            ? `w-[min(1200px,96vw)] h-[90vh] rounded-lg border border-gray-200 dark:border-gray-700${dragPos ? "" : " top-[5vh] left-1/2 -translate-x-1/2"}`
             : sidebarSide === "left"
             ? "left-0 top-0 h-full border-r border-gray-200 dark:border-gray-700"
             : "right-0 top-0 h-full border-l border-gray-200 dark:border-gray-700"
