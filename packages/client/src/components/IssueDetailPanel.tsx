@@ -22,6 +22,7 @@ import type { TrailEntry } from "../hooks/useTicketTrail.js";
 import { TicketTrailStrip } from "./TicketTrailStrip.js";
 import { IssueCycleTimeBadge } from "./IssueCycleTimeBadge.js";
 import { IssueWorkLogSection } from "./IssueWorkLogSection.js";
+import { useIssueDisplayData } from "./IssueCard.js";
 
 // Some issues were created via MCP/CLI calls whose JSON descriptions ended up
 // with literal `\n` / `\t` sequences rather than real newlines. Unescape when
@@ -86,18 +87,161 @@ export function issueArtifactAuthor(artifact: IssueArtifact): string {
   return artifact.workspaceId ? "agent" : "system";
 }
 
-export function issueArtifactPreview(artifact: IssueArtifact, maxLength = 140): string {
-  const source = artifact.type === "text"
-    ? normalizeMarkdown(artifact.content)
-    : artifact.caption || artifact.content;
-  const preview = source
+const DEFAULT_ARTIFACT_PREVIEW_LENGTH = 140;
+
+type IssueArtifactRendererType = "text" | "diff" | "image" | "link" | "video" | "other";
+
+interface IssueArtifactRendererProps {
+  artifact: IssueArtifact;
+  expanded: boolean;
+  previewLength?: number;
+}
+
+function isDiffTextArtifact(artifact: IssueArtifact): boolean {
+  if (artifact.type !== "text") return false;
+  const caption = artifact.caption?.trim().toLowerCase() ?? "";
+  const mime = artifact.mimeType?.trim().toLowerCase() ?? "";
+  return caption === "diff" || caption === "patch" || caption === "unified-diff" || mime.includes("diff");
+}
+
+function artifactPreviewSource(artifact: IssueArtifact): string {
+  return artifact.type === "text" ? normalizeMarkdown(artifact.content) : artifact.caption || artifact.content;
+}
+
+function sanitizeArtifactPreview(source: string): string {
+  return source
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/[#*_`>\-[\]()]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+export function issueArtifactPreview(artifact: IssueArtifact, maxLength = DEFAULT_ARTIFACT_PREVIEW_LENGTH): string {
+  const preview = sanitizeArtifactPreview(artifactPreviewSource(artifact));
   if (!preview) return artifact.type === "text" ? "Empty text artifact" : artifact.content;
   return preview.length > maxLength ? `${preview.slice(0, maxLength - 1).trimEnd()}...` : preview;
 }
+
+function getIssueArtifactRenderer(artifact: IssueArtifact): IssueArtifactRendererType {
+  if (isDiffTextArtifact(artifact)) return "diff";
+  if (artifact.type === "text") return "text";
+  if (artifact.type === "image") return "image";
+  if (artifact.type === "link") return "link";
+  if (artifact.type === "video") return "video";
+  return "other";
+}
+
+function DiffArtifact({ artifact, expanded, previewLength = DEFAULT_ARTIFACT_PREVIEW_LENGTH }: IssueArtifactRendererProps) {
+  return (
+    <>
+      <p className="mt-1 text-xs text-gray-600 dark:text-gray-300 line-clamp-2">
+        {issueArtifactPreview(artifact, previewLength)}
+      </p>
+      {expanded && (
+        <pre className="mt-2 max-h-80 overflow-y-auto text-xs text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-900 p-2 rounded border border-gray-200 dark:border-gray-700 whitespace-pre-wrap">
+          {artifact.content}
+        </pre>
+      )}
+    </>
+  );
+}
+
+function TextArtifact({ artifact, expanded, previewLength = DEFAULT_ARTIFACT_PREVIEW_LENGTH }: IssueArtifactRendererProps) {
+  return (
+    <>
+      <p className="mt-1 text-xs text-gray-600 dark:text-gray-300 line-clamp-2">
+        {issueArtifactPreview(artifact, previewLength)}
+      </p>
+      {expanded && (
+        <div className="markdown-body mt-2 max-h-80 overflow-y-auto text-sm">
+          <ReactMarkdown>{normalizeMarkdown(artifact.content)}</ReactMarkdown>
+        </div>
+      )}
+    </>
+  );
+}
+
+function ImageArtifact({ artifact, expanded, previewLength = DEFAULT_ARTIFACT_PREVIEW_LENGTH }: IssueArtifactRendererProps) {
+  return (
+    <>
+      <p className="mt-1 text-xs text-gray-600 dark:text-gray-300 line-clamp-2">
+        {issueArtifactPreview(artifact, previewLength)}
+      </p>
+      {expanded && (
+        <a href={artifact.content} target="_blank" rel="noreferrer" className="block mt-2 max-h-80 overflow-y-auto">
+          <img
+            src={artifact.content}
+            alt={artifact.caption || "artifact image"}
+            className="max-w-full rounded border border-gray-200 dark:border-gray-700"
+          />
+        </a>
+      )}
+    </>
+  );
+}
+
+function LinkArtifact({ artifact, expanded }: IssueArtifactRendererProps) {
+  return (
+    <>
+      <p className="mt-1 text-xs text-gray-600 dark:text-gray-300 line-clamp-2 break-all">
+        {issueArtifactPreview(artifact)}
+      </p>
+      {expanded && (
+        <a
+          href={artifact.content}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-2 block break-all text-blue-600 hover:text-blue-700 dark:text-blue-400"
+        >
+          {artifact.content}
+        </a>
+      )}
+    </>
+  );
+}
+
+function VideoArtifact({ artifact, expanded, previewLength = DEFAULT_ARTIFACT_PREVIEW_LENGTH }: IssueArtifactRendererProps) {
+  return (
+    <>
+      <p className="mt-1 text-xs text-gray-600 dark:text-gray-300 line-clamp-2">
+        {issueArtifactPreview(artifact, previewLength)}
+      </p>
+      {expanded && (
+        <video
+          src={artifact.content}
+          controls
+          className="mt-2 max-h-80 w-full rounded border border-gray-200 dark:border-gray-700"
+        >
+          Your browser does not support the video tag.
+        </video>
+      )}
+    </>
+  );
+}
+
+function UnknownArtifact({ artifact, expanded, previewLength = DEFAULT_ARTIFACT_PREVIEW_LENGTH }: IssueArtifactRendererProps) {
+  return (
+    <>
+      <p className="mt-1 text-xs text-gray-600 dark:text-gray-300 line-clamp-2">
+        {issueArtifactPreview(artifact, previewLength)}
+      </p>
+      {expanded && (
+        <div className="markdown-body mt-2 max-h-80 overflow-y-auto text-sm break-all">
+          {artifact.content}
+        </div>
+      )}
+    </>
+  );
+}
+
+const issueArtifactRenderers: Record<IssueArtifactRendererType, (props: IssueArtifactRendererProps) => JSX.Element> = {
+  text: TextArtifact,
+  diff: DiffArtifact,
+  image: ImageArtifact,
+  link: LinkArtifact,
+  video: VideoArtifact,
+  other: UnknownArtifact,
+};
 
 export async function copyIssueArtifactContent(
   artifact: IssueArtifact,
@@ -158,6 +302,7 @@ export function IssueArtifactsSection({
         <ul className="space-y-1.5">
           {orderedArtifacts.map((artifact) => {
             const expanded = expandedArtifactId === artifact.id;
+            const ArtifactRenderer = issueArtifactRenderers[getIssueArtifactRenderer(artifact)];
             return (
               <li
                 key={artifact.id}
@@ -170,9 +315,7 @@ export function IssueArtifactsSection({
                   <span className="text-gray-400 dark:text-gray-500 capitalize">{issueArtifactAuthor(artifact)}</span>
                   <span className="text-gray-400 dark:text-gray-500 ml-auto">{formatRelativeTime(artifact.createdAt)}</span>
                 </div>
-                <p className="mt-1 text-xs text-gray-600 dark:text-gray-300 line-clamp-2">
-                  {issueArtifactPreview(artifact)}
-                </p>
+                <ArtifactRenderer artifact={artifact} expanded={expanded} />
                 <div className="mt-1.5 flex items-center gap-2 text-[11px]">
                   <button
                     type="button"
@@ -197,22 +340,6 @@ export function IssueArtifactsSection({
                     {deletingArtifactId === artifact.id ? "Deleting..." : "Delete"}
                   </button>
                 </div>
-                {expanded && (
-                  <div className="markdown-body mt-2 max-h-80 overflow-y-auto text-sm">
-                    {artifact.type === "text" ? (
-                      <ReactMarkdown>{normalizeMarkdown(artifact.content)}</ReactMarkdown>
-                    ) : (
-                      <a
-                        href={artifact.content}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="break-all text-blue-600 hover:text-blue-700 dark:text-blue-400"
-                      >
-                        {artifact.content}
-                      </a>
-                    )}
-                  </div>
-                )}
               </li>
             );
           })}
@@ -249,13 +376,6 @@ export interface TicketTrailControls {
   onSelect: (id: string) => void;
   onRemove: (id: string) => void;
 }
-
-const issueTypeColors: Record<string, string> = {
-  task: "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300",
-  bug: "bg-red-100 text-red-700",
-  feature: "bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300",
-  chore: "bg-amber-100 text-amber-700",
-};
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -1125,7 +1245,7 @@ export function IssueDetailPanel({
     onClose();
   }
 
-  const badgeColor = issueTypeColors[issue.issueType ?? "task"] ?? "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300";
+  const { issueType: issueTypeDisplay, issueTypeClassName: badgeColor } = useIssueDisplayData(issue);
 
   return (
     <>
@@ -1674,7 +1794,7 @@ export function IssueDetailPanel({
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs text-gray-500 dark:text-gray-400">Type:</span>
                   <span className={`inline-block text-xs font-medium px-1.5 py-0.5 rounded capitalize ${badgeColor}`}>
-                    {issue.issueType ?? "task"}
+                    {issueTypeDisplay}
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5">
