@@ -579,10 +579,12 @@ describe("Board API", () => {
     expect(body.length).toBe(2);
     expect(body[0].name).toBe("Todo");
     expect(body[0].issues.length).toBe(1);
+    expect(body[0].count).toBe(1);
     expect(body[0].issues[0].title).toBe("Task 1");
     expect(body[0].issues[0].statusName).toBe("Todo");
     expect(body[1].name).toBe("Done");
     expect(body[1].issues.length).toBe(1);
+    expect(body[1].count).toBe(1);
   });
 
   it("GET /api/projects/:id/board/summary returns per-column counts with no issue bodies", async () => {
@@ -1030,6 +1032,86 @@ describe("Board API", () => {
     expect(Array.isArray(body)).toBe(true);
     expect(body.length).toBe(1);
     expect(body[0].id).toBe(issueId);
+  });
+});
+
+describe("Board terminal column cap (AK-569)", () => {
+  const { app, db: database } = createTestApp();
+
+  it("caps Done/Cancelled columns to 50 issues and exposes the true count", async () => {
+    const projectId = await createProjectDirectly(database, { name: "Board Cap Project" });
+    const todoStatusId = await createStatusDirectly(database, projectId, "Todo", 0);
+    const doneStatusId = await createStatusDirectly(database, projectId, "Done", 1);
+    const cancelledStatusId = await createStatusDirectly(database, projectId, "Cancelled", 2);
+
+    const now = new Date();
+    // Insert 60 Done issues and 5 Cancelled issues
+    const doneIssues = Array.from({ length: 60 }, (_, idx) => ({
+      id: randomUUID(),
+      projectId,
+      statusId: doneStatusId,
+      issueNumber: 1000 + idx,
+      title: `Done issue ${idx}`,
+      priority: "medium" as const,
+      issueType: "feature" as const,
+      sortOrder: idx,
+      createdAt: new Date(now.getTime() - (60 - idx) * 60000).toISOString(),
+      updatedAt: new Date(now.getTime() - (60 - idx) * 60000).toISOString(),
+      statusChangedAt: new Date(now.getTime() - (60 - idx) * 60000).toISOString(),
+    }));
+    for (const issue of doneIssues) {
+      await database.insert(schema.issues).values(issue);
+    }
+
+    const cancelledIssues = Array.from({ length: 5 }, (_, idx) => ({
+      id: randomUUID(),
+      projectId,
+      statusId: cancelledStatusId,
+      issueNumber: 2000 + idx,
+      title: `Cancelled issue ${idx}`,
+      priority: "medium" as const,
+      issueType: "feature" as const,
+      sortOrder: idx,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    }));
+    for (const issue of cancelledIssues) {
+      await database.insert(schema.issues).values(issue);
+    }
+
+    // Insert 3 active (Todo) issues — should be returned in full
+    for (let idx = 0; idx < 3; idx++) {
+      await app.request("/api/issues", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: `Todo issue ${idx}`, statusId: todoStatusId, projectId }),
+      });
+    }
+
+    const res = await app.request(`/api/projects/${projectId}/board`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+
+    const todoCol = body.find((c: any) => c.name === "Todo");
+    const doneCol = body.find((c: any) => c.name === "Done");
+    const cancelledCol = body.find((c: any) => c.name === "Cancelled");
+
+    // Active column: all issues returned, count matches
+    expect(todoCol.issues.length).toBe(3);
+    expect(todoCol.count).toBe(3);
+
+    // Terminal Done column: capped at 50, count = true total (60)
+    expect(doneCol.count).toBe(60);
+    expect(doneCol.issues.length).toBe(50);
+
+    // Issues are ordered by statusChangedAt desc (most recent first)
+    const firstTs = new Date(doneCol.issues[0].statusChangedAt ?? doneCol.issues[0].updatedAt).getTime();
+    const lastTs = new Date(doneCol.issues[49].statusChangedAt ?? doneCol.issues[49].updatedAt).getTime();
+    expect(firstTs).toBeGreaterThanOrEqual(lastTs);
+
+    // Terminal Cancelled column: under cap, count = issues.length
+    expect(cancelledCol.count).toBe(5);
+    expect(cancelledCol.issues.length).toBe(5);
   });
 });
 
