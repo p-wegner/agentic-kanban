@@ -881,8 +881,15 @@ exit 1
         await moveIssueToInProgress(input.issueId, issue.projectId, now, database);
       }
 
-      t = Date.now();
-      const sessionId = await launchAgent({
+      timing("total", phaseStart);
+
+      boardEvents?.broadcast(issue.projectId, "workspace_created");
+
+      // Defer agent launch off the hot path so the HTTP response is sent before any
+      // long-running git/binary operations begin.  setImmediate ensures the Hono
+      // response write (including the JSON body flush) happens before the first tick
+      // of launchAgent — the same pattern used by the merge endpoint fix (#578).
+      const agentLaunchArgs = {
         workspaceId: id, branch, isDirect, agentPrompt,
         agentCommand, agentArgs: agentConfig.agentArgs,
         resolvedProfile: agentConfig.resolvedProfile,
@@ -892,11 +899,18 @@ exit 1
         model: agentConfig.model,
         contextFiles: ticketContextPath ? [ticketContextPath] : undefined,
         skillName,
+      };
+      setImmediate(() => {
+        const t = Date.now();
+        void launchAgent(agentLaunchArgs)
+          .then(() => timing("agent-launch", t))
+          .catch((err: unknown) => {
+            const errorMsg = err instanceof Error ? err.message : String(err);
+            console.error(`[workspaces] deferred agent launch failed for workspace ${id}: ${errorMsg}`);
+            database.update(workspaces).set({ status: "idle", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, id))
+              .catch((dbErr: unknown) => console.warn(`[workspaces] failed to update workspace status after deferred launch failure: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`));
+          });
       });
-      timing("agent-launch", t);
-      timing("total", phaseStart);
-
-      boardEvents?.broadcast(issue.projectId, "workspace_created");
 
       return {
         id,
@@ -911,43 +925,14 @@ exit 1
         provider: resolvedProvider,
         latestSetup,
         latestSymlink,
-        sessionId,
         createdAt: now,
         updatedAt: now,
       };
     } catch (err) {
       if (err instanceof WorkspaceError) throw err;
-      if (workspaceInserted) {
-        // The workspace row was committed but the agent failed to start (e.g. bad
-        // profile, missing binary). Per the one-step contract the route must still
-        // return 201 with the workspace record — dropping the connection here would
-        // force the caller to retry without knowing whether creation succeeded.
-        // Keep the row so the client can see and fix the workspace; mark it idle.
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        console.error(`[workspaces] agent launch failed for workspace ${id}: ${errorMsg}`);
-        try {
-          await database.update(workspaces).set({ status: "idle", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, id));
-        } catch (dbErr) {
-          console.warn(`[workspaces] failed to update workspace status after agent-launch failure: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`);
-        }
-        return {
-          id,
-          issueId: input.issueId,
-          branch,
-          workingDir: worktreePath,
-          baseBranch,
-          isDirect,
-          planMode,
-          includeVisualProof,
-          status: "idle",
-          provider: resolvedProvider,
-          latestSetup,
-          latestSymlink,
-          createdAt: now,
-          updatedAt: now,
-          error: errorMsg,
-        };
-      }
+      // Agent launch is now deferred (setImmediate), so failures there are handled
+      // in the background callback and never reach this catch block. Only pre-return
+      // failures (worktree setup, DB insert, workflow init) land here.
       return handleCreateFailure(err, {
         id, issueId: input.issueId, branch, worktreePath, repoPath, baseBranch, isDirect,
         baseCommitSha, requiresReview, thoroughReview, planMode, includeVisualProof,
