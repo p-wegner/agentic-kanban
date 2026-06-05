@@ -183,7 +183,9 @@ describe("reconcileZombieFixSessions", () => {
     expect(ws.status).toBe("idle");
 
     // Board events should be broadcast.
-    expect((deps.boardEvents.broadcast as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(0);
+    expect((deps.boardEvents.broadcast as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(2);
+    expect(deps.boardEvents.broadcast).toHaveBeenCalledWith(data.projectId, "workspace_idle");
+    expect(deps.boardEvents.broadcast).toHaveBeenCalledWith(data.projectId, "issue_updated");
   });
 
   it("reconciles a zombie review session", async () => {
