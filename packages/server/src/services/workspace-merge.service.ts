@@ -251,22 +251,6 @@ export function createWorkspaceMergeService(deps: {
       };
     }
 
-    if (workspace.workingDir && !workspace.isDirect) {
-      // Full teardown before merge: kill dir procs + free the worktree's dev ports +
-      // run the project's generic teardownScript (with worktree context env).
-      await teardownWorktree(
-        {
-          workingDir: workspace.workingDir,
-          branch: workspace.branch,
-          isDirect: workspace.isDirect,
-          teardownScript: project?.teardownScript,
-          setupEnabled: project?.setupEnabled,
-          label: "merge",
-        },
-        { killDir: killProcesses },
-      );
-    }
-
     if (workspace.isDirect) {
       const now = new Date().toISOString();
       await computeWorkspaceCodeMetrics(id, database).catch(() => null);
@@ -467,7 +451,13 @@ export function createWorkspaceMergeService(deps: {
     // All post-merge work (OpenSpec, worktree cleanup, branch deletion, learning step,
     // followup auto-start) runs in the background so the HTTP connection is never
     // held open by slow filesystem or git operations.
-    void runPostMergeTasks({
+    //
+    // setImmediate defers the first tick of runPostMergeTasks past the current call
+    // stack so the Hono response write (including the JSON body flush) happens first.
+    // Without this deferral, the async function's synchronous preamble (entering
+    // teardownWorktree → invoking processKiller) runs before the Promise resolves to
+    // the caller, which is the exact keep-alive drop we are fixing (#563).
+    const postMergeArgs = {
       workspaceId: id,
       issueId: workspace.issueId,
       repoPath,
@@ -477,7 +467,11 @@ export function createWorkspaceMergeService(deps: {
       workingDir: workspace.workingDir,
       branch: workspace.branch,
       mergeResult: result,
-    });
+      teardownScript: project?.teardownScript ?? null,
+      setupEnabled: project?.setupEnabled ?? true,
+      isDirect: workspace.isDirect,
+    };
+    setImmediate(() => { void runPostMergeTasks(postMergeArgs); });
 
     return {
       id,
@@ -500,19 +494,44 @@ export function createWorkspaceMergeService(deps: {
     workingDir: string | null | undefined;
     branch: string;
     mergeResult: string;
+    teardownScript: string | null;
+    setupEnabled: boolean;
+    isDirect: boolean;
   }) {
     const { workspaceId, issueId, repoPath, preMergeHead, prefMap, projectId, workingDir, branch } = args;
     let mergeResult = args.mergeResult;
     const warnings: MergeWarning[] = [];
 
-    // Code metrics — run before worktree is torn down.
+    // Worktree teardown deferred off the hot request path: kill dir procs, free
+    // dev ports, and run the project teardownScript. The plumbing-based merge
+    // (`mergeBranch`) only manipulates git refs — it never touches the worktree
+    // directory — so teardown is safe to run here rather than before the merge.
+    if (workingDir && !args.isDirect) {
+      try {
+        await teardownWorktree(
+          {
+            workingDir,
+            branch,
+            isDirect: false,
+            teardownScript: args.teardownScript ?? undefined,
+            setupEnabled: args.setupEnabled,
+            label: "merge",
+          },
+          { killDir: killProcesses },
+        );
+      } catch (err) {
+        addRecoverableWarning(warnings, "teardown-worktree", err);
+      }
+    }
+
+    // Code metrics — run before worktree directory is removed (teardown only kills procs).
     if (workingDir) {
       await computeWorkspaceCodeMetrics(workspaceId, database).catch((err) => {
         addRecoverableWarning(warnings, "code-metrics", err);
       });
     }
 
-    // OpenSpec delta application — must run before worktree is torn down.
+    // OpenSpec delta application — must run before worktree directory is removed.
     try {
       const changedFiles = preMergeHead
         ? await getChangedFilesBetweenSafe(repoPath, preMergeHead, "HEAD")
@@ -555,9 +574,7 @@ export function createWorkspaceMergeService(deps: {
       addRecoverableWarning(warnings, "openspec-post-merge", err);
     }
 
-    // Kill any agent-spawned processes (e.g. leaked dev.mjs) before removing the worktree.
     if (workingDir) {
-      await killWorktreeProcesses(workingDir, "merge:post");
       try {
         await gitService.removeWorktree(repoPath, workingDir);
       } catch (err) {

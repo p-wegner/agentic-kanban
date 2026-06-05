@@ -25,6 +25,8 @@ function makeGitService(overrides: Partial<Record<string, (...args: unknown[]) =
     getChangedFilesBetween: vi.fn(async () => []),
     getCurrentBranch: vi.fn(async () => "master"),
     autoRenumberMigrations: vi.fn(async () => ({ renumbered: false, renames: [] })),
+    checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: false, branchSha: "branch-sha-456", baseSha: "base-sha-789" })),
+    getUncommittedTrackedChanges: vi.fn(async () => []),
     ...overrides,
   };
 }
@@ -184,5 +186,80 @@ describe("merge endpoint response before cleanup", () => {
     if (removeWorktreeCalled.length > 0) {
       expect(removeWorktreeCalled.every((wasResolved) => wasResolved)).toBe(true);
     }
+  });
+
+  it("teardown (processKiller) is deferred: not called before mergeWorkspace resolves", async () => {
+    // Regression for #563: worktree teardown (kill procs + free ports) was on the
+    // hot request path before mergeBranch, blocking the HTTP keep-alive socket.
+    // The fix moves it to runPostMergeTasks (fire-and-forget) — this test asserts
+    // processKiller is never invoked until after mergeWorkspace has already returned.
+    const { workspaceId } = await seedWorkspace(db);
+
+    let mergeResolved = false;
+    const killerCalledWhileUnresolved: boolean[] = [];
+
+    const processKiller = vi.fn(async () => {
+      killerCalledWhileUnresolved.push(mergeResolved);
+      return 0;
+    });
+    const git = makeGitService();
+
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller,
+    });
+
+    const result = await svc.mergeWorkspace(workspaceId);
+    mergeResolved = true;
+
+    // Allow the background post-merge task to run.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(result).toMatchObject({ id: workspaceId, mergeOutput: expect.any(String) });
+    // If processKiller ran, mergeResolved must have been true at that point —
+    // i.e. it must NEVER have been called before mergeWorkspace resolved.
+    // (The array is empty if the background task hadn't started yet — that also passes.)
+    expect(killerCalledWhileUnresolved.every((resolvedAtCallTime) => resolvedAtCallTime)).toBe(true);
+  });
+
+  it("slow processKiller does not delay the merge response (keep-alive regression)", async () => {
+    // Regression for #563: if teardown runs synchronously, a slow processKiller
+    // (e.g. Windows WMIC scan) blocks the event loop and drops the HTTP keep-alive
+    // connection before the JSON response is flushed. Teardown must be deferred.
+    //
+    // We assert ordering (killer runs after resolve) rather than wall-clock time so
+    // the test stays green on loaded CI machines.
+    const { workspaceId } = await seedWorkspace(db);
+
+    let mergeResolved = false;
+    let killerCalledBeforeResolve = false;
+
+    const processKiller = vi.fn(async () => {
+      if (!mergeResolved) killerCalledBeforeResolve = true;
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+      return 1;
+    });
+    const git = makeGitService();
+
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller,
+    });
+
+    const result = await svc.mergeWorkspace(workspaceId);
+    mergeResolved = true;
+
+    // Allow the background post-merge task to run.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(result).toMatchObject({ id: workspaceId, mergeOutput: expect.any(String) });
+    // The processKiller must never have run while mergeResolved was still false.
+    expect(killerCalledBeforeResolve).toBe(false);
   });
 });
