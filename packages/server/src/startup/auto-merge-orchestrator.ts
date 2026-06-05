@@ -30,6 +30,9 @@ export interface AutoMergeOrchestratorState {
   reconcilerAttempts: Map<string, number>;
 }
 
+let activeAutoMergeInterval: ReturnType<typeof setInterval> | null = null;
+let activeAutoMergeTimeout: ReturnType<typeof setTimeout> | null = null;
+
 export function createAutoMergeOrchestrator(deps: {
   database: Database;
   boardEvents?: BoardEvents;
@@ -288,6 +291,15 @@ export function startAutoMergeOrchestrator(deps: {
   getSessionManager?: () => SessionManager;
   intervalMs?: number;
 }): AutoMergeOrchestratorState {
+  if (activeAutoMergeTimeout !== null) {
+    clearTimeout(activeAutoMergeTimeout);
+    activeAutoMergeTimeout = null;
+  }
+  if (activeAutoMergeInterval !== null) {
+    clearInterval(activeAutoMergeInterval);
+    activeAutoMergeInterval = null;
+  }
+
   const orchestrator = createAutoMergeOrchestrator(deps);
   const intervalMs = deps.intervalMs ?? DEFAULT_INTERVAL_MS;
 
@@ -297,7 +309,8 @@ export function startAutoMergeOrchestrator(deps: {
     });
   };
 
-  orchestrator.state.timer = setInterval(tick, intervalMs);
-  setTimeout(tick, Math.min(20_000, intervalMs));
+  activeAutoMergeTimeout = setTimeout(tick, Math.min(20_000, intervalMs));
+  activeAutoMergeInterval = setInterval(tick, intervalMs);
+  orchestrator.state.timer = activeAutoMergeInterval;
   return orchestrator.state;
 }
