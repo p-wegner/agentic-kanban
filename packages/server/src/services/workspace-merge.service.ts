@@ -1037,6 +1037,23 @@ export function createWorkspaceMergeService(deps: {
       };
     }
 
+    let uniqueCommits = 0;
+    try {
+      uniqueCommits = await gitService.countUniqueCommits(repoPath, baseSha, branchSha);
+    } catch {
+      uniqueCommits = 0;
+    }
+    if (uniqueCommits === 0) {
+      return {
+        isAlreadyMerged: false,
+        branch: workspace.branch,
+        baseBranch,
+        mergeCommitSha: null,
+        issueNumber,
+        reason: "Branch has no unique commits relative to " + baseBranch,
+      };
+    }
+
     // Find the merge commit: the commit on baseBranch that first introduced this SHA
     let mergeCommitSha: string | null = null;
     try {
