@@ -10,7 +10,7 @@ import { AgentSkillError } from "../services/agent-skill.service.js";
 import { TagError } from "../services/tag.service.js";
 import { ScheduledRunError } from "../services/scheduled-run.service.js";
 
-type StatusCode = 400 | 403 | 404 | 409 | 500;
+type StatusCode = 400 | 403 | 404 | 409 | 500 | 503;
 
 function codeToStatus(code: string): StatusCode {
   switch (code) {
@@ -63,12 +63,14 @@ export function domainErrorHandler(err: Error, c: Context): Response {
 
   const domainErr = toDomainError(err);
   if (domainErr) {
-    // Structured 409 for merge endpoint: return { reason, message, conflictFiles? }
+    // Structured response for merge endpoint: return { reason, message, conflictFiles? }
     if (domainErr instanceof WorkspaceError && domainErr.data?.mergeReason) {
       const reason = domainErr.data.mergeReason as string;
       const body: Record<string, unknown> = { reason, message: domainErr.message };
       if (domainErr.data.conflictFiles) body.conflictFiles = domainErr.data.conflictFiles;
-      return c.json(body, 409);
+      // Stale-build errors are service-unavailable (503), not merge conflicts (409).
+      const status = reason === "server_build_stale" ? 503 : 409;
+      return c.json(body, status);
     }
     return c.json({ error: domainErr.message }, codeToStatus(domainErr.code));
   }
