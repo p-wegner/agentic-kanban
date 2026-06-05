@@ -127,6 +127,26 @@ describe("checkAlreadyMerged", () => {
     expect(result.mergeCommitSha).toBeTruthy();
   });
 
+  it("does not report already-merged when branch is ancestor but has 0 unique commits", async () => {
+    const { workspaceId } = await seedScenario(db, {});
+    const countUniqueCommits = vi.fn(async () => 0);
+    const git = {
+      ...makeGitService({
+        getDiff: async () => "",
+        revParse: async (_repo, ref) => ref === "feature/ak-42-test" ? "deadbeef" : "headsha",
+        isAncestor: async () => true,
+      }),
+      countUniqueCommits,
+    };
+
+    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+    const result = await svc.checkAlreadyMerged(workspaceId);
+
+    expect(result.isAlreadyMerged).toBe(false);
+    expect(result.reason).toMatch(/no unique commits/i);
+    expect(countUniqueCommits).toHaveBeenCalled();
+  });
+
   it("returns false when branch still has a real diff", async () => {
     const { workspaceId } = await seedScenario(db, {});
     const git = makeGitService({
@@ -165,6 +185,25 @@ describe("checkAlreadyMerged", () => {
 
     expect(result.isAlreadyMerged).toBe(true);
     expect(getDiffFromRepo).toHaveBeenCalledWith("/repo", "feature/ak-42-test", "master");
+  });
+
+  it("does not report already-merged when worktree is missing and branch has 0 unique commits", async () => {
+    const { workspaceId } = await seedScenario(db, { workingDir: null });
+    const countUniqueCommits = vi.fn(async () => 0);
+    const git = {
+      ...makeGitService({
+        getDiffFromRepo: async () => "",
+        isAncestor: async () => true,
+      }),
+      countUniqueCommits,
+    };
+
+    const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
+    const result = await svc.checkAlreadyMerged(workspaceId);
+
+    expect(result.isAlreadyMerged).toBe(false);
+    expect(result.reason).toMatch(/no unique commits/i);
+    expect(countUniqueCommits).toHaveBeenCalled();
   });
 
   it("throws NOT_FOUND for a missing workspace", async () => {
