@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createWorkspaceSummaryCache } from "../services/workspace-summary-cache.service.js";
-import { createBoardEvents } from "../services/board-events.js";
+import { createBoardEvents, type BoardEventType } from "../services/board-events.js";
 import type { WorkspaceSummary } from "../services/workspace-summary.service.js";
 
 function makeMap(...ids: string[]): Map<string, WorkspaceSummary> {
@@ -139,4 +139,77 @@ describe("workspace-summary cache + board-events invalidation", () => {
     boardEvents.broadcast("proj-1", "issue_moved" as any);
     expect(cache.get("proj-1")).not.toBeNull();
   });
+});
+
+/**
+ * Table-driven cache-freshness test.
+ *
+ * Each row names a mutation event type and asserts that broadcasting it
+ * invalidates the cache for the affected project.  This is the canonical
+ * exhaustive list — any new mutation route that emits an event type not
+ * listed here will show up as a gap.
+ */
+describe("board cache invalidated by every mutation event type", () => {
+  const MUTATION_EVENTS: BoardEventType[] = [
+    // Issue lifecycle
+    "issue_created",
+    "issue_updated",
+    "issue_deleted",
+    // Dependency edges
+    "dependency_added",
+    "dependency_removed",
+    // Workspace lifecycle
+    "workspace_created",
+    "workspace_setup",
+    "workspace_idle",
+    "workspace_merged",
+    "workspace_closed",
+    "workspace_ready_for_merge",
+    // Session signals that change visible board state
+    "session_completed",
+    "session_launched",
+    "session_stopped",
+    // Workflow mutations
+    "workflow_error",
+    "workflow_fork",
+    "workflow_join",
+    "workflow_template_saved",
+    "workflow_template_deleted",
+    "workflow_transition",
+    // Generic board change (e.g. monitor-cycle)
+    "board_changed",
+    // Internal notifications
+    "internal_notify",
+  ];
+
+  for (const eventType of MUTATION_EVENTS) {
+    it(`invalidates cache on "${eventType}"`, () => {
+      const boardEvents = createBoardEvents();
+      const cache = createWorkspaceSummaryCache({ ttlMs: 5_000 });
+
+      boardEvents.addInvalidationListener((projectId) => cache.invalidate(projectId));
+
+      cache.set("proj-x", makeMap("issue-1"));
+      expect(cache.get("proj-x")).not.toBeNull();
+
+      boardEvents.broadcast("proj-x", eventType);
+
+      expect(cache.get("proj-x")).toBeNull();
+    });
+
+    it(`"${eventType}" does not invalidate unrelated projects`, () => {
+      const boardEvents = createBoardEvents();
+      const cache = createWorkspaceSummaryCache({ ttlMs: 5_000 });
+
+      boardEvents.addInvalidationListener((projectId) => cache.invalidate(projectId));
+
+      cache.set("proj-x", makeMap("issue-1"));
+      cache.set("proj-y", makeMap("issue-2"));
+
+      boardEvents.broadcast("proj-x", eventType);
+
+      expect(cache.get("proj-x")).toBeNull();
+      expect(cache.get("proj-y")).not.toBeNull();
+    });
+  }
 });

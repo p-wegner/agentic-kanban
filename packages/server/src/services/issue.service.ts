@@ -753,11 +753,17 @@ export function createIssueService(deps: {
   }
 
   async function assignTag(issueId: string, tagId: string) {
-    return assignTagRepo(issueId, tagId, database);
+    const result = await assignTagRepo(issueId, tagId, database);
+    const projectId = await getIssueProjectId(issueId, database);
+    if (projectId) boardEvents?.broadcast(projectId, "issue_updated");
+    return result;
   }
 
   async function removeTag(issueId: string, tagId: string) {
-    return removeTagRepo(issueId, tagId, database);
+    const result = await removeTagRepo(issueId, tagId, database);
+    const projectId = await getIssueProjectId(issueId, database);
+    if (projectId) boardEvents?.broadcast(projectId, "issue_updated");
+    return result;
   }
 
   async function getDependencies(issueId: string) {
