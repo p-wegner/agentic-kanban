@@ -528,7 +528,15 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       if (workspaceSummaryCache && !workspaceSummaryCache.isRebuilding(projectId)) {
         workspaceSummaryCache.markRebuilding(projectId);
         buildWorkspaceSummaryMap(issueIds, defaultBranch, database, archivedIssueIds)
-          .then((m) => { workspaceSummaryCache.set(projectId, m); })
+          .then((m) => {
+            // Only write back if the cache entry still exists (not invalidated during rebuild).
+            // An invalidate() deletes the entry, so isRebuilding() returns false — meaning
+            // a status-change PATCH arrived while we were rebuilding and we must not overwrite
+            // with stale workspace-summary data.
+            if (workspaceSummaryCache.isRebuilding(projectId)) {
+              workspaceSummaryCache.set(projectId, m);
+            }
+          })
           .catch(() => {})
           .finally(() => { workspaceSummaryCache.clearRebuilding(projectId); });
       }
