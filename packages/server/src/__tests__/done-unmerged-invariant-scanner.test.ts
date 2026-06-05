@@ -668,6 +668,120 @@ describe("scanDoneUnmergedWorkspaces", () => {
     expect(ws.mergedAt).toBeNull();
   });
 
+  it("#632 guard: merged Done issue is not flagged when stale worktree was cleaned after merge", async () => {
+    const now = new Date().toISOString();
+    const projectId = randomUUID();
+    const doneStatusId = randomUUID();
+    const issueId = randomUUID();
+    const wsMergedId = randomUUID();
+    const wsStaleId = randomUUID();
+
+    await db.insert(projects).values({
+      id: projectId,
+      name: "P",
+      repoPath: "/repo",
+      repoName: "repo",
+      defaultBranch: "master",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(projectStatuses).values([
+      { id: doneStatusId, projectId, name: "Done", sortOrder: 3, isDefault: false, createdAt: now },
+    ]);
+    await db.insert(issues).values({
+      id: issueId,
+      issueNumber: 632,
+      title: "AK-632 stale cleanup false-positive",
+      priority: "medium",
+      sortOrder: 0,
+      statusId: doneStatusId,
+      projectId,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await db.insert(workspaces).values({
+      id: wsMergedId,
+      issueId,
+      branch: "feature/ak-632-done",
+      workingDir: "/repo/.w/done",
+      baseBranch: "master",
+      isDirect: false,
+      status: "closed",
+      readyForMerge: false,
+      mergedAt: now,
+      provider: "claude",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await db.insert(workspaces).values({
+      id: wsStaleId,
+      issueId,
+      branch: "feature/ak-632-stale",
+      workingDir: null,
+      baseBranch: "master",
+      isDirect: false,
+      status: "closed",
+      readyForMerge: false,
+      mergedAt: null,
+      provider: "claude",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const checkAncestor = makeCheckAncestor(false);
+    const countCommits = makeCountCommits(2);
+
+    const result = await scanDoneUnmergedWorkspaces({
+      database: db,
+      checkAncestor,
+      countCommits,
+      detectConflicts: makeDetectConflicts(false),
+      countBehind: makeCountBehind(0),
+      mergeGitBranch: makeMergeGitBranch(),
+    });
+
+    expect(result.findings).toHaveLength(0);
+    expect(result.reopened).toBe(0);
+    expect(result.autoMerged).toBe(0);
+    expect(checkAncestor).not.toHaveBeenCalled();
+    expect(countCommits).not.toHaveBeenCalled();
+
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+    expect(status.name).toBe("Done");
+  });
+
+  it("#632 guard: already-merged cleanup-cleaned Done workspace is not a false-positive", async () => {
+    const { issueId, workspaceId } = await seedWorkspace(db, { issueStatusName: "Done" });
+    await db.update(workspaces).set({ workingDir: null }).where(eq(workspaces.id, workspaceId));
+    const checkAncestor = makeCheckAncestor(true);
+    const countCommits = makeCountCommits(4);
+
+    const result = await scanDoneUnmergedWorkspaces({
+      database: db,
+      checkAncestor,
+      countCommits,
+      detectConflicts: makeDetectConflicts(false),
+      countBehind: makeCountBehind(0),
+      mergeGitBranch: makeMergeGitBranch(),
+    });
+
+    expect(result.findings).toHaveLength(0);
+    expect(result.autoMerged).toBe(0);
+    expect(checkAncestor).toHaveBeenCalledTimes(1);
+    expect(countCommits).not.toHaveBeenCalled();
+
+    // Existing Done ticket remains done (log-only check for already-merged branch).
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+    expect(status.name).toBe("Done");
+
+    const [ws] = await db.select({ mergedAt: workspaces.mergedAt }).from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.mergedAt).toBeNull();
+  });
+
   it("#590 guard 2: skips workspace whose branch is more than maxCommitsBehindBase commits behind base (stale abandoned branch)", async () => {
     const { issueId } = await seedWorkspace(db);
     const checkAncestor = makeCheckAncestor(false);
