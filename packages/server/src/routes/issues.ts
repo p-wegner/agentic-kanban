@@ -340,7 +340,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     const body = await parseJsonBody(c);
     try {
       const result = await issueService.updateIssue(id, body);
-      return c.json({ id: result.id });
+      return c.json(result);
     } catch (err: any) {
       if (err.code === "BAD_REQUEST") return c.json({ error: err.message }, 400);
       if (err.code === "NOT_FOUND") return c.json({ error: err.message }, 404);
