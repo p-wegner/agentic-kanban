@@ -59,7 +59,7 @@ export function createAgentSkillService({ database }: { database: Database }) {
   async function getSkill(id: string) {
     const skill = await getAgentSkillById(id, database);
     if (!skill) throw new AgentSkillError("Skill not found", "NOT_FOUND");
-    return skill;
+    return { ...skill, source: "db" as const };
   }
 
   async function createSkill(input: {
