@@ -270,6 +270,51 @@ describe("reconcileAncestorBranchWorkspaces", () => {
     expect(ws.status).toBe("idle");
   });
 
+  it("regression #585: freshly-launched In-Progress active workspace with 0 commits is NEVER auto-Doned (incident scenario)", async () => {
+    // Exact incident pattern from cycles 39-40: a freshly-launched workspace had
+    // wsStatus="active" and 0 unique commits (branch tip == base HEAD).
+    // The ancestor-branch reconciler auto-Doned it, flipping its issue to Done
+    // while master never advanced = mass silent-merge-loss.
+    // This test pins BOTH guards: the In-Progress DB-level filter AND the
+    // uniqueCommitCount guard (#581), so a regression in either fails CI.
+    const { issueId, workspaceId } = await seedWorkspace(db, { statusName: "In Progress", wsStatus: "active" });
+    const checkAncestor = makeCheckAncestor(true);
+    const countCommits = makeCountCommits(0);
+
+    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor, countCommits });
+
+    expect(count).toBe(0);
+    // The In-Progress status guard filters at DB level — git is never consulted.
+    expect(checkAncestor).not.toHaveBeenCalled();
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+    expect(status.name).toBe("In Progress");
+    const [ws] = await db.select({ status: workspaces.status }).from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.status).toBe("active");
+  });
+
+  it("regression #585: positive case — genuinely merged workspace (In Review, >0 unique commits) IS reconciled to Done", async () => {
+    // Counterpart to the incident guard: a workspace whose branch tip is a real
+    // ancestor AND has >0 unique commits (i.e. real work was merged into base)
+    // MUST be reconciled to Done. Verifies the uniqueCommitCount guard is called
+    // and does not block legitimate reconciliation.
+    const { issueId, workspaceId } = await seedWorkspace(db, { statusName: "In Review", wsStatus: "idle" });
+    const checkAncestor = makeCheckAncestor(true);
+    const countCommits = makeCountCommits(3); // 3 real commits on the branch
+
+    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor, countCommits });
+
+    expect(count).toBe(1);
+    expect(checkAncestor).toHaveBeenCalled();
+    expect(countCommits).toHaveBeenCalled();
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+    expect(status.name).toBe("Done");
+    const [ws] = await db.select({ status: workspaces.status, mergedAt: workspaces.mergedAt }).from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.status).toBe("closed");
+    expect(ws.mergedAt).toBeTruthy();
+  });
+
   it("regression #582: performs zero mutations when disabled via deps.enabled=false", async () => {
     // Regression guard: disabling the reconciler (hot-reload-safe pref path) must
     // result in zero mutations even when there are eligible workspaces.
