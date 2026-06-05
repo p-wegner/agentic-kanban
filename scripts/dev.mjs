@@ -30,6 +30,7 @@ import { writeProcessAudit } from "./process-audit.mjs";
 import { repairDrizzleIfNeeded } from "./drizzle-preflight.mjs";
 import { repairSharedIfNeeded } from "./shared-preflight.mjs";
 import { reapStaleSupervisors } from "./stale-supervisor.mjs";
+import { binShimsPreflight } from "./bin-shims-preflight.mjs";
 
 function run(cmd) {
   try {
@@ -296,6 +297,7 @@ function spawnProcess(label, cmd, args, opts) {
 async function main() {
   repairSharedIfNeeded(process.cwd());
   repairDrizzleIfNeeded(process.cwd());
+  binShimsPreflight(process.cwd());
 
   const { serverPort, clientPort } = configurePorts();
 
