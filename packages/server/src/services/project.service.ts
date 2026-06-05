@@ -476,7 +476,6 @@ export function createProjectService(deps: { database: Database; workspaceSummar
         id: issues.id,
         issueNumber: issues.issueNumber,
         title: issues.title,
-        description: issues.description,
         priority: issues.priority,
         issueType: issues.issueType,
         sortOrder: issues.sortOrder,
