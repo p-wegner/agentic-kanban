@@ -114,6 +114,48 @@ export function isPortListening(port, checkPort) {
 }
 
 /**
+ * List process IDs actively listening on `port`.
+ *
+ * @param {number} port
+ */
+export function listListeningPidsOnPort(port) {
+  const pids = new Set();
+  try {
+    if (process.platform === "win32") {
+      const out = execSync("netstat -ano", {
+        encoding: "utf8",
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
+        timeout: 5000,
+      });
+      for (const line of out.split("\n")) {
+        const parts = line.trim().split(/\s+/);
+        if (parts[0]?.toLowerCase() !== "tcp") continue;
+        if (parts[3] !== "LISTENING") continue;
+        if (!(parts[1]?.endsWith(`:${port}`) ?? false)) continue;
+        const pid = Number(parts[4]);
+        if (!Number.isInteger(pid) || pid <= 0) continue;
+        pids.add(pid);
+      }
+      return pids;
+    }
+
+    const out = execSync(`ss -tlnp 'sport = :${port}'`, {
+      encoding: "utf8",
+      stdio: ["pipe", "pipe", "pipe"],
+      timeout: 5000,
+    });
+    for (const match of out.matchAll(/pid=(\d+)/g)) {
+      const pid = Number(match[1]);
+      if (Number.isInteger(pid) && pid > 0) pids.add(pid);
+    }
+    return pids;
+  } catch {
+    return pids;
+  }
+}
+
+/**
  * Kill a process tree by PID.
  * Windows: taskkill /PID <pid> /T /F
  * Unix: kill -9 <pid>
@@ -153,6 +195,7 @@ export function killSupervisorTree(pid) {
  *   checkoutRoot: string,
  *   serverPort: number,
  *   listProcs?: () => Array<{pid: number, commandLine: string}>,
+ *   isServingPid?: (pid: number) => boolean,
  *   checkPort?: (port: number) => boolean,
  *   kill?: (pid: number) => boolean,
  *   exitProcess?: (code: number) => never,
@@ -163,6 +206,7 @@ export function reapStaleSupervisors({
   serverPort,
   listProcs,
   checkPort,
+  isServingPid,
   kill = killSupervisorTree,
   exitProcess = (code) => process.exit(code),
 }) {
@@ -171,6 +215,71 @@ export function reapStaleSupervisors({
   );
 
   if (candidates.length === 0) return;
+
+  if (typeof isServingPid === "function") {
+    let servingCandidatePid = null;
+
+    for (const { pid, commandLine } of candidates) {
+      if (isServingPid(pid)) {
+        servingCandidatePid = pid;
+        continue;
+      }
+
+      writeProcessAudit({
+        action: "dev-stale-supervisor-found",
+        stalePid: pid,
+        serverPort,
+        checkoutRoot,
+        commandLine,
+      });
+      console.warn(
+        `[dev] Stale supervisor found (pid ${pid}) — not serving port ${serverPort}. Reaping...`,
+      );
+      const killed = kill(pid);
+      if (killed) {
+        writeProcessAudit({
+          action: "dev-stale-supervisor-reaped",
+          stalePid: pid,
+          serverPort,
+          checkoutRoot,
+        });
+        console.warn(`[dev] Stale supervisor (pid ${pid}) reaped.`);
+      } else {
+        writeProcessAudit({
+          action: "dev-stale-supervisor-reap-failed",
+          stalePid: pid,
+          serverPort,
+          checkoutRoot,
+        });
+        console.error(`[dev] Failed to reap stale supervisor (pid ${pid}).`);
+      }
+    }
+
+    if (servingCandidatePid !== null) {
+      writeProcessAudit({
+        action: "dev-supervisor-already-running",
+        existingPid: servingCandidatePid,
+        serverPort,
+        checkoutRoot,
+      });
+      console.log(
+        `[dev] Server already running on port ${serverPort} (pid ${servingCandidatePid}). Exiting — no second supervisor needed.`,
+      );
+      exitProcess(0);
+      return;
+    }
+
+    if (isPortListening(serverPort, checkPort)) {
+      writeProcessAudit({
+        action: "dev-supervisor-blocked-by-port",
+        serverPort,
+        checkoutRoot,
+      });
+      console.log(`[dev] Port ${serverPort} is already in use. Exiting without starting another dev supervisor.`);
+      exitProcess(0);
+    }
+    return;
+  }
 
   const serving = isPortListening(serverPort, checkPort);
 
@@ -222,3 +331,5 @@ export function reapStaleSupervisors({
     }
   }
 }
+
+
