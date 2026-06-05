@@ -11,7 +11,8 @@ import * as gitService from "../services/git.service.js";
 
 /**
  * Every function the server routes/services/startup actually call on gitService.
- * Derived from `grep -r "gitService\." packages/server/src/{services,startup}`.
+ * Derived from all imports of git.service.js across packages/server/src/{services,startup}.
+ * Covers both `gitService.X()` call-style and named imports like `import { X } from`.
  */
 const REQUIRED_METHODS = [
   "abortMerge",
@@ -25,6 +26,7 @@ const REQUIRED_METHODS = [
   "ensureOnBranch",
   "getChangedFileNames",
   "getChangedFilesBetween",
+  "getCommitCountAhead",
   "getCommitSummariesBetween",
   "getCurrentBranch",
   "getDiff",
