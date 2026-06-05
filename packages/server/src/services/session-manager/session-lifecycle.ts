@@ -13,6 +13,7 @@ import type { ProviderName } from "../agent-provider.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import type { SessionManagerOptions, SessionState, StartSessionOptions } from "./types.js";
 import { workspaceLaunchPreflight } from "../preflight-check.js";
+import { WorkspaceError } from "../workspace-internals.js";
 
 /** Subset of agent.service that the lifecycle depends on. Injectable for tests. */
 export type AgentService = typeof realAgentService;
@@ -130,7 +131,10 @@ export function createSessionLifecycle(
           isDirect: workspace.isDirect ?? false,
         });
         if (!preflight.ok) {
-          throw new Error(preflight.errors.join("\n"));
+          throw new WorkspaceError(preflight.errors.join("\n"), "CONFLICT", {
+            code: "STALE_SAFETY_POLICY",
+            staleFiles: preflight.staleFiles,
+          });
         }
         if (preflight.refreshed) {
           console.log(`[session] launch preflight refreshed workspace ${workspaceId} from ${workspace.baseBranch || project.defaultBranch}`);
