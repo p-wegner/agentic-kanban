@@ -86,7 +86,12 @@ export async function startServer(port?: number, hostname?: string) {
     reviewSessionIds: workflow.reviewSessionIds,
   });
   startAncestorBranchReconciler();
-  startDoneUnmergedScanner();
+  // Log-only: detect Done-but-unmerged silent-merge-loss and emit board health
+  // events, but do NOT auto-reopen. Auto-reopen flips ancient stale branches
+  // (observed 60-658 commits behind base) back to In Review, polluting the board
+  // and luring the merge chain into dangerous stale-merges; it also false-positives
+  // on issues already merged via a different workspace. Detection stays; mutation off.
+  startDoneUnmergedScanner({ reopenToInReview: false });
   // Autonomous Monitor Butler — cron-driven board-health agent (gated by the
   // monitor_butler_enabled preference; off by default). See services/monitor-butler.ts.
   startMonitorButler();
