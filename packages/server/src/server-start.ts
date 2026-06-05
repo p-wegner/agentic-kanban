@@ -11,6 +11,7 @@ import { createAutoMerge } from "./startup/merge-workflow.js";
 import { startAutoMergeOrchestrator } from "./startup/auto-merge-orchestrator.js";
 import { startStrandedReviewReconciler } from "./startup/stranded-review-reconciler.js";
 import { startAncestorBranchReconciler } from "./startup/ancestor-branch-reconciler.js";
+import { startDoneUnmergedScanner } from "./startup/done-unmerged-invariant-scanner.js";
 import { createMonitorSetup } from "./startup/monitor-setup.js";
 import { setupProcessHandlers } from "./startup/process-handlers.js";
 import { setupRoutes } from "./startup/route-setup.js";
@@ -85,6 +86,7 @@ export async function startServer(port?: number, hostname?: string) {
     reviewSessionIds: workflow.reviewSessionIds,
   });
   startAncestorBranchReconciler();
+  startDoneUnmergedScanner();
   // Autonomous Monitor Butler — cron-driven board-health agent (gated by the
   // monitor_butler_enabled preference; off by default). See services/monitor-butler.ts.
   startMonitorButler();
