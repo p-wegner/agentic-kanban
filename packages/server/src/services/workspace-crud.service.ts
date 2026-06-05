@@ -509,7 +509,7 @@ export function createWorkspaceCrudService(deps: {
     }
 
     const { agentCommand, agentArgs, claudeProfile: resolvedProfile, profile: resolvedProfileSelection, provider, permissionPromptTool } = resolveAgentSettings(prefMap);
-    const claudeProfile = provider === "claude"
+    const selectedProfile = provider === "claude"
       ? (resolvedProfile || legacyProfileOverride || prefMap.get("claude_profile") || undefined)
       : resolvedProfileSelection?.name;
 
@@ -520,7 +520,16 @@ export function createWorkspaceCrudService(deps: {
         ? (requestedModel || undefined)
         : undefined;
 
-    return { agentCommand, agentArgs, claudeProfile, resolvedProfile, resolvedProvider: provider, resolvedProfileSelection, permissionPromptTool, model };
+    return {
+      agentCommand,
+      agentArgs,
+      claudeProfile: selectedProfile,
+      resolvedProfile: selectedProfile,
+      resolvedProvider: provider,
+      resolvedProfileSelection,
+      permissionPromptTool,
+      model,
+    };
   }
 
   async function insertWorkspaceRecord(params: {
