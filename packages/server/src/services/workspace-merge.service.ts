@@ -433,7 +433,19 @@ export function createWorkspaceMergeService(deps: {
     let mergeCommitSha = "";
     try { mergeCommitSha = await gitService.revParse(repoPath, "HEAD"); } catch { /* tolerate */ }
 
+    // Stamp mergedAt immediately so the startup reconciler can detect this workspace
+    // and move it to Done even if the server dies before the full status write below.
+    // This write is intentionally separate and early — it must happen before any step
+    // that could be interrupted by a client disconnect or server crash.
     const now = new Date().toISOString();
+    try {
+      await database.update(workspaces).set({ mergedAt: now, updatedAt: now }).where(eq(workspaces.id, id));
+    } catch (err) {
+      // Non-fatal — the full status write below will set mergedAt anyway. Log it so
+      // we know the pre-stamp failed if the reconciler later needs to fire.
+      console.warn("[workspace-merge] early mergedAt stamp failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    }
+
     await updateWorkspaceStatus(id, "closed", { workingDir: null, closedAt: now, mergedAt: now, readyForMerge: false }, database);
     await moveIssueToDone(id, workspace.issueId, now, database);
     await recordMergeAttempt(

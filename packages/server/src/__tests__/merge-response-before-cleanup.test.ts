@@ -225,6 +225,54 @@ describe("merge endpoint response before cleanup", () => {
     expect(killerCalledWhileUnresolved.every((resolvedAtCallTime) => resolvedAtCallTime)).toBe(true);
   });
 
+  it("mergedAt is stamped in DB immediately after git merge, independent of response flush (#575)", async () => {
+    // Regression for #575: if the HTTP connection drops or the server restarts between
+    // gitService.mergeBranch() completing and the full status write, the workspace must
+    // still have mergedAt set so the startup reconciler can move it to Done.
+    //
+    // We simulate this by injecting a failure into updateWorkspaceStatus (the combined
+    // status write that follows the early mergedAt stamp) and verifying that mergedAt
+    // was still written to the DB before the failure.
+    const { workspaceId, issueId } = await seedWorkspace(db);
+
+    // Allow the early mergedAt stamp to succeed but fail the full status update
+    let updateCallCount = 0;
+    const originalUpdate = db.update.bind(db);
+    const updateSpy = vi.spyOn(db, "update").mockImplementation((...args: Parameters<typeof db.update>) => {
+      updateCallCount++;
+      // First call is the early mergedAt stamp — let it through; subsequent calls are the combined status write
+      if (updateCallCount === 1) return originalUpdate(...args);
+      // Simulate a crash/interrupted write on the combined status write
+      throw new Error("Simulated connection drop mid-merge");
+    });
+
+    const git = makeGitService();
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+    });
+
+    try {
+      await svc.mergeWorkspace(workspaceId);
+    } catch {
+      // Expected — the combined status write threw
+    }
+
+    updateSpy.mockRestore();
+
+    // The early mergedAt stamp must have persisted
+    const { workspaces: wsTable } = await import("@agentic-kanban/shared/schema");
+    const { eq: eqFn } = await import("drizzle-orm");
+    const [ws] = await db.select({ mergedAt: wsTable.mergedAt, status: wsTable.status })
+      .from(wsTable)
+      .where(eqFn(wsTable.id, workspaceId));
+
+    expect(ws.mergedAt).toBeTruthy();
+    // Status may still be non-closed (the reconciler would fix this on startup)
+    // — the important thing is mergedAt is set so it CAN be reconciled
+  });
+
   it("slow processKiller does not delay the merge response (keep-alive regression)", async () => {
     // Regression for #563: if teardown runs synchronously, a slow processKiller
     // (e.g. Windows WMIC scan) blocks the event loop and drops the HTTP keep-alive
