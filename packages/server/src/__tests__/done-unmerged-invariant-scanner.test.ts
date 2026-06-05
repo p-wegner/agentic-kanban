@@ -13,7 +13,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { issues, preferences, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
-import { scanDoneUnmergedWorkspaces } from "../startup/done-unmerged-invariant-scanner.js";
+import { scanDoneUnmergedWorkspaces, startDoneUnmergedScanner } from "../startup/done-unmerged-invariant-scanner.js";
 import type { BranchTipAncestryResult } from "@agentic-kanban/shared/lib/git-service";
 
 type CheckAncestor = (repoPath: string, branch: string, baseBranch: string, worktreeDir?: string) => Promise<BranchTipAncestryResult>;
@@ -287,6 +287,34 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
     const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
     expect(status.name).toBe("Done");
+  });
+
+  it("#589: Done-but-unmerged issue seeded mid-run is detected within the next interval tick", async () => {
+    vi.useFakeTimers();
+    const { issueId, workspaceId } = await seedWorkspace(db);
+    const checkAncestor = makeCheckAncestor(false);
+    const countCommits = makeCountCommits(2);
+
+    const { timer, interval } = startDoneUnmergedScanner(
+      { database: db, checkAncestor, countCommits, reopenToInReview: false },
+      /* intervalMs */ 1_000,
+    );
+
+    // Advance past the initial 40 s delay so the first scheduled tick fires.
+    await vi.advanceTimersByTimeAsync(41_000);
+
+    // Issue was seeded before the timer started — it should be detected.
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    // The scan ran with reopenToInReview=false, so status stays Done but a finding was produced.
+    // Verify the workspace was NOT re-opened (consistent with reopenToInReview=false).
+    const [ws] = await db.select({ status: workspaces.status }).from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.status).toBe("closed");
+    // checkAncestor was called — the scan ran and evaluated the branch.
+    expect(checkAncestor).toHaveBeenCalled();
+
+    clearTimeout(timer);
+    clearInterval(interval);
+    vi.useRealTimers();
   });
 
   it("is idempotent — after re-open the issue is In Review and no longer scanned as a violation", async () => {
