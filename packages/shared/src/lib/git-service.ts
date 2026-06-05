@@ -319,6 +319,9 @@ async function scanTreeForConflictMarkers(repoPath: string, treeSha: string): Pr
     // git grep exits 0 when matches found, 1 when no matches, 128+ on error.
     // We treat all errors as "no markers" (safe default — the stage-entry check
     // is the primary gate; this is belt-and-suspenders only).
+    // Use --perl-regexp with ^ anchor so we only match lines where "<<<<<<<" starts
+    // the line (i.e. actual git conflict markers), not string literals or comments
+    // that happen to contain the substring.
     execFile(
       "git",
       ["grep", "--name-only", "-l", "--perl-regexp", "-e", "^<<<<<<<", treeSha],
