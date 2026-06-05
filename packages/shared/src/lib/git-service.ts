@@ -1324,15 +1324,11 @@ export async function detectConflictsByBranch(
 
 /**
  * Count how many commits base has that featureBranch does not (the "behind" count).
- * Returns 0 on error.
+ * Throws on git error so callers can treat the failure as a safety signal.
  */
 export async function countBehindCommits(repoPath: string, featureBranch: string, baseBranch: string): Promise<number> {
-  try {
-    const out = await execGit(["rev-list", "--count", `${featureBranch}..${baseBranch}`], repoPath);
-    return parseInt(out.trim(), 10) || 0;
-  } catch {
-    return 0;
-  }
+  const out = await execGit(["rev-list", "--count", `${featureBranch}..${baseBranch}`], repoPath);
+  return parseInt(out.trim(), 10) || 0;
 }
 
 /** Check if a rebase is in progress in the worktree. */
