@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkDrizzleFiles, findDrizzlePnpmDirs } from "../../../../scripts/drizzle-preflight.mjs";
 import { checkSharedPackage, isTsxMissing, repairSharedIfNeeded } from "../../../../scripts/shared-preflight.mjs";
+import { checkBinShims, repairBinShims } from "../../../../scripts/bin-shims-preflight.mjs";
 import { buildDevPortEnv } from "../../../../scripts/dev-env.mjs";
 import { resolveDevPorts } from "../../../../scripts/dev-port-plan.mjs";
 import {
@@ -500,6 +501,168 @@ describe("shared-package preflight", () => {
       mkdirSync(serverBinDir, { recursive: true });
       writeFileSync(join(serverBinDir, "tsx"), "");
       expect(isTsxMissing(root)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("bin shims preflight", () => {
+  function makeHealthyShimsRoot({ platform = "linux" } = {}) {
+    const root = mkdtempSync(join(tmpdir(), "ak-bin-shims-"));
+    const ext = platform === "win32" ? ".cmd" : "";
+    mkdirSync(join(root, "node_modules", ".bin"), { recursive: true });
+    mkdirSync(join(root, "packages", "server", "node_modules", ".bin"), { recursive: true });
+    mkdirSync(join(root, "packages", "client", "node_modules", ".bin"), { recursive: true });
+    writeFileSync(join(root, "node_modules", ".bin", `tsx${ext}`), "");
+    writeFileSync(join(root, "packages", "server", "node_modules", ".bin", `tsx${ext}`), "");
+    writeFileSync(join(root, "packages", "client", "node_modules", ".bin", `vite${ext}`), "");
+    return root;
+  }
+
+  it("returns empty when all shims are present (linux)", () => {
+    const root = makeHealthyShimsRoot({ platform: "linux" });
+    try {
+      expect(checkBinShims(root, { platform: "linux" })).toHaveLength(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("returns empty when all shims are present (windows .cmd)", () => {
+    const root = makeHealthyShimsRoot({ platform: "win32" });
+    try {
+      expect(checkBinShims(root, { platform: "win32" })).toHaveLength(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("detects missing root tsx shim", () => {
+    const root = makeHealthyShimsRoot({ platform: "linux" });
+    try {
+      rmSync(join(root, "node_modules", ".bin", "tsx"));
+      const missing = checkBinShims(root, { platform: "linux" });
+      expect(missing.length).toBeGreaterThan(0);
+      expect(missing.some((s) => s.label.includes("node_modules/.bin/tsx"))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("detects missing server tsx shim", () => {
+    const root = makeHealthyShimsRoot({ platform: "linux" });
+    try {
+      rmSync(join(root, "packages", "server", "node_modules", ".bin", "tsx"));
+      const missing = checkBinShims(root, { platform: "linux" });
+      expect(missing.some((s) => s.label.includes("packages/server"))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("detects missing client vite shim", () => {
+    const root = makeHealthyShimsRoot({ platform: "linux" });
+    try {
+      rmSync(join(root, "packages", "client", "node_modules", ".bin", "vite"));
+      const missing = checkBinShims(root, { platform: "linux" });
+      expect(missing.some((s) => s.label.includes("vite"))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("detects all three shims missing simultaneously", () => {
+    const root = mkdtempSync(join(tmpdir(), "ak-bin-shims-empty-"));
+    try {
+      expect(checkBinShims(root, { platform: "linux" })).toHaveLength(3);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("is a no-op when all shims are healthy", () => {
+    const root = makeHealthyShimsRoot({ platform: "linux" });
+    try {
+      const calls = [];
+      const ok = repairBinShims(root, {
+        runPnpmInstallForce: () => { calls.push("pnpm-force"); },
+        platform: "linux",
+      });
+      expect(ok).toBe(true);
+      expect(calls).toHaveLength(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("calls pnpm install --force when a shim is missing", () => {
+    const root = mkdtempSync(join(tmpdir(), "ak-bin-shims-repair-"));
+    try {
+      const calls = [];
+      repairBinShims(root, {
+        runPnpmInstallForce: (r) => {
+          calls.push(r);
+          // Simulate the shims being created by the forced install
+          mkdirSync(join(r, "node_modules", ".bin"), { recursive: true });
+          mkdirSync(join(r, "packages", "server", "node_modules", ".bin"), { recursive: true });
+          mkdirSync(join(r, "packages", "client", "node_modules", ".bin"), { recursive: true });
+          writeFileSync(join(r, "node_modules", ".bin", "tsx"), "");
+          writeFileSync(join(r, "packages", "server", "node_modules", ".bin", "tsx"), "");
+          writeFileSync(join(r, "packages", "client", "node_modules", ".bin", "vite"), "");
+        },
+        platform: "linux",
+      });
+      expect(calls).toHaveLength(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("returns true after successful forced reinstall", () => {
+    const root = mkdtempSync(join(tmpdir(), "ak-bin-shims-success-"));
+    try {
+      const ok = repairBinShims(root, {
+        runPnpmInstallForce: (r) => {
+          mkdirSync(join(r, "node_modules", ".bin"), { recursive: true });
+          mkdirSync(join(r, "packages", "server", "node_modules", ".bin"), { recursive: true });
+          mkdirSync(join(r, "packages", "client", "node_modules", ".bin"), { recursive: true });
+          writeFileSync(join(r, "node_modules", ".bin", "tsx"), "");
+          writeFileSync(join(r, "packages", "server", "node_modules", ".bin", "tsx"), "");
+          writeFileSync(join(r, "packages", "client", "node_modules", ".bin", "vite"), "");
+        },
+        platform: "linux",
+      });
+      expect(ok).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("returns false when shims are still missing after forced reinstall", () => {
+    const root = mkdtempSync(join(tmpdir(), "ak-bin-shims-fail-"));
+    try {
+      const ok = repairBinShims(root, {
+        runPnpmInstallForce: () => { /* does not create shims */ },
+        platform: "linux",
+      });
+      expect(ok).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts the extension-less shim as present on Windows when .cmd is missing", () => {
+    const root = mkdtempSync(join(tmpdir(), "ak-bin-shims-win-compat-"));
+    try {
+      mkdirSync(join(root, "node_modules", ".bin"), { recursive: true });
+      mkdirSync(join(root, "packages", "server", "node_modules", ".bin"), { recursive: true });
+      mkdirSync(join(root, "packages", "client", "node_modules", ".bin"), { recursive: true });
+      // Write extension-less variants only (no .cmd)
+      writeFileSync(join(root, "node_modules", ".bin", "tsx"), "");
+      writeFileSync(join(root, "packages", "server", "node_modules", ".bin", "tsx"), "");
+      writeFileSync(join(root, "packages", "client", "node_modules", ".bin", "vite"), "");
+      expect(checkBinShims(root, { platform: "win32" })).toHaveLength(0);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
