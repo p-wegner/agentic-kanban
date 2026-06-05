@@ -119,6 +119,7 @@ export type MergeResolutionState =
   | { kind: "already-merged" }
   | { kind: "direct-close" }
   | { kind: "reconcile"; branchSha: string; baseSha: string; uniqueCommits: number }
+  | { kind: "clean-ancestor"; branchSha: string; baseSha: string; uniqueCommits: number }
   | { kind: "conflict-ready"; conflictFiles: string[]; behindCount?: number; error: WorkspaceError }
   | { kind: "error-skip"; error: WorkspaceError }
   | { kind: "proceed" };
@@ -185,6 +186,9 @@ export async function resolveMergeState(
     const uniqueCommits = await gitService.countUniqueCommits(repoPath, baseSha, branchSha).catch(() => 0);
     if (uniqueCommits > 0) {
       return { kind: "reconcile", branchSha, baseSha, uniqueCommits };
+    }
+    if (uniqueCommits === 0) {
+      return { kind: "clean-ancestor", branchSha, baseSha, uniqueCommits };
     }
   }
 

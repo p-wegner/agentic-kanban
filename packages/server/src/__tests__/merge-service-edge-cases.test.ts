@@ -237,14 +237,22 @@ describe("merge — 0-commit branch is NOT reconciled as Done (false positive gu
       processKiller: async () => 0,
     });
 
-    // The 0-commit guard falls through to the regular merge path (no early reconcile).
-    // With mergeBranch succeeding (default mock), a clean merge still completes.
-    // The key assertion: countUniqueCommits=0 must NOT trigger the "already merged" no-op
-    // that would skip the real merge gate.
-    await svc.mergeWorkspace(workspaceId);
+    const result = await svc.mergeWorkspace(workspaceId);
 
-    // The merge actually ran (countUniqueCommits=0 should NOT skip the real mergeBranch)
-    expect(git.mergeBranch).toHaveBeenCalledWith("/repo", "feature/ak-608-edge-case", "master");
+    const [ws] = await db.select({ status: workspaces.status, mergedAt: workspaces.mergedAt })
+      .from(workspaces).where(eq(workspaces.id, workspaceId));
+    const [wsReady] = await db.select({ readyForMerge: workspaces.readyForMerge })
+      .from(workspaces).where(eq(workspaces.id, workspaceId));
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+
+    expect(git.mergeBranch).not.toHaveBeenCalled();
+    expect(result.merged).toBe(false);
+    expect(result.reconciled).toBe(false);
+    expect(ws.status).not.toBe("closed");
+    expect(ws.mergedAt).toBeNull();
+    expect(wsReady.readyForMerge).toBe(false);
+    expect(status.name).toBe("In Review");
   });
 
   it("returns reconciled=true only when branch has >=1 unique commit AND tip is ancestor", async () => {
@@ -273,9 +281,8 @@ describe("merge — 0-commit branch is NOT reconciled as Done (false positive gu
     expect(git.mergeBranch).not.toHaveBeenCalled();
   });
 
-  it("workspace stays open and issue stays In Review when 0-commit guard fires and merge succeeds", async () => {
-    // When countUniqueCommits=0, the reconcile path is skipped and the standard merge
-    // runs instead. A failing merge (conflict) must not close the workspace.
+  it("returns clean-ancestor no-op when 0-commit branch is reconciled as clean ancestor", async () => {
+    // The 0-commit guard runs before normal merge.
     const { workspaceId, issueId } = await seedWorkspace(db);
     const git = makeGit({
       checkBranchTipIsAncestor: vi.fn().mockResolvedValueOnce({
@@ -284,8 +291,7 @@ describe("merge — 0-commit branch is NOT reconciled as Done (false positive gu
         baseSha: "same-sha",
       }),
       countUniqueCommits: vi.fn(async () => 0),
-      // After skipping reconcile, the normal merge path runs and hits a conflict
-      mergeBranch: vi.fn(async () => { throw new Error("Conflict markers found in tree"); }),
+      mergeBranch: vi.fn(async () => { throw new Error("must not be called"); }),
     });
 
     const svc = createWorkspaceMergeService({
@@ -295,19 +301,21 @@ describe("merge — 0-commit branch is NOT reconciled as Done (false positive gu
       processKiller: async () => 0,
     });
 
-    try {
-      await svc.mergeWorkspace(workspaceId);
-    } catch {
-      // expected — conflict
-    }
+    const result = await svc.mergeWorkspace(workspaceId);
 
     const [ws] = await db.select({ status: workspaces.status, mergedAt: workspaces.mergedAt })
       .from(workspaces).where(eq(workspaces.id, workspaceId));
-    expect(ws.status).not.toBe("closed");
-    expect(ws.mergedAt).toBeNull();
-
+    const [wsReady] = await db.select({ readyForMerge: workspaces.readyForMerge })
+      .from(workspaces).where(eq(workspaces.id, workspaceId));
     const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
     const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+
+    expect(ws.status).not.toBe("closed");
+    expect(ws.mergedAt).toBeNull();
+    expect(wsReady.readyForMerge).toBe(false);
+    expect(result.merged).toBe(false);
+    expect(result.reconciled).toBe(false);
+    expect(git.mergeBranch).not.toHaveBeenCalled();
     expect(status.name).toBe("In Review");
   });
 });
