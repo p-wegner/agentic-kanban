@@ -36,7 +36,7 @@ export async function waitForActiveMergesToSettle(timeoutMs = 60_000): Promise<n
   ]);
 }
 
-export function setupProcessHandlers(server: { close: (cb: () => void) => void }, agentServiceModule: typeof agentService) {
+export function setupProcessHandlers(server: { close: (cb: () => void) => void; closeIdleConnections?: () => void }, agentServiceModule: typeof agentService) {
   process.on("uncaughtException", (err: NodeJS.ErrnoException) => {
     if (err.code === "EADDRINUSE") {
       console.error("[fatal] Port already in use — exiting:", err.message);
@@ -75,6 +75,11 @@ export function setupProcessHandlers(server: { close: (cb: () => void) => void }
     await waitForActiveMergesToSettle();
     // Checkpoint + verified backup before closing (non-fatal, bounded to ~5s).
     await checkpointAndBackup();
+    // Immediately close idle keep-alive connections so server.close() drains
+    // quickly without waiting for the keepAliveTimeout window (Node ≥18.2).
+    // closeIdleConnections (not closeAllConnections) preserves in-flight requests
+    // so they can finish before the process exits.
+    server.closeIdleConnections?.();
     server.close(() => {
       console.log("[shutdown] Server closed.");
       process.exit(0);
