@@ -166,8 +166,13 @@ if ($artifactDir) {
 }
 
 $matcher = "Todo|In Progress|No issues|No projects registered"
+# Pattern for "Vite up but React not yet hydrated" — matches empty/whitespace/loading
+$emptyRenderMatcher = "^[\s]*$|^loading[…\.]*$"
 $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
 $found = $false
+$emptyRenderStreak = 0
+# After this many consecutive empty-render probes, emit a diagnostic and keep waiting
+$emptyRenderWarnAfter = 5
 
 try {
   $env:npm_config_loglevel = "silent"
@@ -183,11 +188,31 @@ try {
       break
     }
 
+    # Detect "Vite compiled OK but React not hydrated" separately from wrong content
+    if ($renderedTextString -imatch $emptyRenderMatcher) {
+      $emptyRenderStreak++
+      if ($emptyRenderStreak -eq $emptyRenderWarnAfter) {
+        Write-Host "smoke: Vite is serving the page but React has not hydrated after $emptyRenderStreak probes — still waiting."
+        Write-Host "--- app root html (hydration fallback snapshot) ---"
+        $html = & playwright-cli eval "document.querySelector('main')?.innerHTML || document.querySelector('#root')?.innerHTML || document.body?.innerHTML || '<empty rendered html>'" 2>&1
+        Write-Host (Format-SmokeSnippet $html 1500)
+        Write-Host "--- console (hydration fallback snapshot) ---"
+        try { & playwright-cli console | Out-Host } catch { Write-Host $_ }
+      }
+    } else {
+      $emptyRenderStreak = 0
+    }
+
     Start-Sleep -Seconds 1
   }
 
   if (-not $found) {
-    Write-Host "Timed out waiting for hydrated board content."
+    if ($emptyRenderStreak -gt 0) {
+      Write-Host "Timed out: Vite compiled and served the page but React never hydrated (render was persistently empty)."
+      Write-Host "Possible causes: JS bundle failed to execute, React threw during mount, or a lazy chunk failed to load."
+    } else {
+      Write-Host "Timed out waiting for hydrated board content."
+    }
     Write-Host "--- console ---"
     try { & playwright-cli console | Out-Host } catch { Write-Host $_ }
 
