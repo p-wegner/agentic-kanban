@@ -65,8 +65,8 @@ When launching auto-review/manual-review from `index.ts`, read `claude_profile` 
 ## Session summary endpoint
 `GET /api/sessions/:id/summary` parses JSONL stream events into structured summary (files read/edited/written, commands, excerpts, errors, model, duration). No LLM call — pure server-side parsing in `parseSessionSummary()` in `sessions.ts`.
 
-## Shared package must be rebuilt after schema changes
-`@agentic-kanban/shared` consumed via compiled `dist/` output. `tsx watch` does NOT rebuild the shared package. After adding columns to `packages/shared/src/schema/*.ts`, run `pnpm --filter @agentic-kanban/shared build` before restarting server.
+## Shared package src resolved live in dev
+In dev (`pnpm dev`), `tsx watch --conditions development` resolves `@agentic-kanban/shared` to its `src/` TypeScript files directly — no manual `pnpm --filter shared build` needed after merging shared changes. The `"development"` export condition in `packages/shared/package.json` maps each subpath to its `src/` entry. Production builds still use the compiled `dist/` output (esbuild bundles shared in).
 
 ## Butler (warm Claude Agent SDK session)
 
