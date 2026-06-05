@@ -37,13 +37,13 @@ export function CompletedGrid({
   const isNarrow = useIsNarrow();
 
   const totalIssues = useMemo(
-    () => columns.reduce((sum, col) => sum + col.issues.length, 0),
+    () => columns.reduce((sum, col) => sum + col.count, 0),
     [columns],
   );
 
   const breakdown = useMemo(() => {
-    const done = columns.find((c) => c.name === "Done")?.issues.length ?? 0;
-    const cancelled = columns.find((c) => c.name === "Cancelled")?.issues.length ?? 0;
+    const done = columns.find((c) => c.name === "Done")?.count ?? 0;
+    const cancelled = columns.find((c) => c.name === "Cancelled")?.count ?? 0;
     return { done, cancelled };
   }, [columns]);
 

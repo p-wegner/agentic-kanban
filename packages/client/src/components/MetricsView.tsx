@@ -453,6 +453,7 @@ export function MetricsView({ columns, projectId, onIssueClick, onCreatedDateCli
   const [projectStats, setProjectStats] = useState<ProjectStatsResponse | null>(null);
   const [statsError, setStatsError] = useState<string | null>(null);
   const allIssues = useMemo(() => columns.flatMap((c) => c.issues), [columns]);
+  const totalCount = useMemo(() => columns.reduce((sum, c) => sum + c.count, 0), [columns]);
   const statsRefreshKey = useMemo(
     () => allIssues.reduce((latest, issue) => issue.updatedAt > latest ? issue.updatedAt : latest, ""),
     [allIssues],
@@ -487,7 +488,7 @@ export function MetricsView({ columns, projectId, onIssueClick, onCreatedDateCli
   const statusSegments = useMemo(() =>
     columns.map((col) => ({
       label: col.name,
-      count: col.issues.length,
+      count: col.count,
       color: STATUS_COLORS[col.name] ?? "#94a3b8",
     })).filter((s) => s.count > 0),
     [columns]
@@ -512,7 +513,7 @@ export function MetricsView({ columns, projectId, onIssueClick, onCreatedDateCli
   }, [allIssues]);
 
   const doneCount = useMemo(
-    () => columns.filter((c) => c.name === "Done").reduce((s, c) => s + c.issues.length, 0),
+    () => columns.filter((c) => c.name === "Done").reduce((s, c) => s + c.count, 0),
     [columns]
   );
   const activeCount = useMemo(
@@ -523,7 +524,7 @@ export function MetricsView({ columns, projectId, onIssueClick, onCreatedDateCli
     () => allIssues.filter((i) => i.isBlocked).length,
     [allIssues]
   );
-  const completionRate = allIssues.length > 0 ? Math.round((doneCount / allIssues.length) * 100) : 0;
+  const completionRate = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
   const testSignal = projectStats
     ? projectStats.codeMetrics.testRatio >= 30
       ? "healthy test weight"
@@ -558,7 +559,7 @@ export function MetricsView({ columns, projectId, onIssueClick, onCreatedDateCli
 
         {/* Summary cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <StatCard label="Total Issues" value={allIssues.length} sub={`across ${columns.filter(c => c.issues.length > 0).length} statuses`} />
+          <StatCard label="Total Issues" value={totalCount} sub={`across ${columns.filter(c => c.count > 0).length} statuses`} />
           <StatCard label="Active" value={activeCount} sub="In Progress + In Review" color={BRAND} />
           <StatCard label="Completed" value={doneCount} sub={`${completionRate}% completion rate`} color={ACCENT} />
           <StatCard label="Blocked" value={blockedCount} sub="have blocking dependencies" color={blockedCount > 0 ? "#ef4444" : undefined} />
