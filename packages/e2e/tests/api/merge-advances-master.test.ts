@@ -137,6 +137,61 @@ test.describe("merge endpoint advances master and moves issue to Done", () => {
     throw new Error(`[pollUntil] Timed out waiting for ${label}`);
   }
 
+  async function createCommittedWorkspace(
+    label: string,
+    request: Parameters<Parameters<typeof test>[1]>[0]["request"],
+  ) {
+    const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
+      data: {
+        title: `Merge-advances-master ${label} ${suffix}`,
+        statusId: todoStatusId,
+        projectId,
+        skipAutoReview: true,
+      },
+    });
+    expect(issueRes.status(), `POST /api/issues returned ${issueRes.status()} for ${label}`).toBe(201);
+    const issue = await issueRes.json();
+
+    const wsRes = await request.post(`${SERVER_URL}/api/workspaces`, {
+      data: {
+        issueId: issue.id,
+        branch: `feature/merge-master-${label}-${suffix}`,
+      },
+    });
+    expect(wsRes.status(), `POST /api/workspaces returned ${wsRes.status()} for ${label}`).toBe(201);
+    const ws = await wsRes.json();
+
+    await request.post(`${SERVER_URL}/api/workspaces/${ws.id}/stop`).catch(() => {});
+
+    execSync("git config user.email e2e@test.local", { cwd: ws.workingDir });
+    execSync("git config user.name E2ETest", { cwd: ws.workingDir });
+    const markerFile = join(ws.workingDir, `e2e-merge-marker-${label}-${suffix}.txt`);
+    writeFileSync(markerFile, `marker for merge ${label} ${suffix}\n`);
+    execSync("git add -A", { cwd: ws.workingDir });
+    execSync(`git commit -m "e2e: marker commit for merge ${label} ${suffix}"`, {
+      cwd: ws.workingDir,
+    });
+    const branchCommitSha = execSync("git rev-parse HEAD", { cwd: ws.workingDir }).toString().trim();
+
+    return {
+      issueId: issue.id,
+      issueNumber: issue.issueNumber as number,
+      workspaceId: ws.id as string,
+      workingDir: ws.workingDir as string,
+      branchCommitSha,
+      branch: `feature/merge-master-${label}-${suffix}`,
+    };
+  }
+
+  async function branchDeleted(repoPath: string, branch: string): Promise<boolean> {
+    try {
+      execSync(`git show-ref --verify --quiet refs/heads/${branch}`, { cwd: repoPath, stdio: "pipe" });
+      return false;
+    } catch {
+      return true;
+    }
+  }
+
   test("POST /merge closes workspace and moves issue to Done", async ({ request }) => {
     test.setTimeout(90_000);
     // Call merge — the HTTP response body may be dropped, so we only assert it
@@ -190,6 +245,78 @@ test.describe("merge endpoint advances master and moves issue to Done", () => {
       { attempts: 20, delayMs: 500, label: `issue #${issueNumber} to reach Done status` },
     );
     expect(issueAfter.statusId).toBe(doneStatusId);
+  });
+
+  test("POST /merge converges state even when client disconnects", async ({ request }) => {
+    test.setTimeout(120_000);
+    const { workspaceId: disconnectedWorkspaceId, issueNumber, issueId, branchCommitSha, branch } =
+      await createCommittedWorkspace("disconnect", request);
+
+    const abortController = new AbortController();
+    try {
+      const mergeUrl = `${SERVER_URL}/api/workspaces/${disconnectedWorkspaceId}/merge`;
+      const mergePromise = fetch(mergeUrl, {
+        method: "POST",
+        signal: abortController.signal,
+      });
+
+      setTimeout(() => abortController.abort(), 25);
+      try {
+        await mergePromise;
+      } catch {
+        // Expected for an intentionally dropped connection.
+      }
+
+      const ws = await pollUntil(
+        async () => {
+          const res = await request.get(`${SERVER_URL}/api/workspaces/${disconnectedWorkspaceId}`);
+          if (!res.ok()) return null;
+          const body = await res.json();
+          return body.status === "closed" ? body : null;
+        },
+        { attempts: 30, delayMs: 500, label: "workspace.status === closed after interrupted merge" },
+      );
+      expect(ws.status, "interrupted merge should still close workspace").toBe("closed");
+
+      const issueAfter = await pollUntil(
+        async () => {
+          const res = await request.get(
+            `${SERVER_URL}/api/issues?projectId=${projectId}&issueNumber=${issueNumber}`,
+          );
+          if (!res.ok()) return null;
+          const found = await res.json();
+          return found?.statusId === doneStatusId ? found : null;
+        },
+        { attempts: 30, delayMs: 500, label: `issue #${issueNumber} to reach Done after interrupted merge` },
+      );
+      expect(issueAfter.statusId).toBe(doneStatusId);
+
+      await pollUntil(
+        async () => {
+          try {
+            execSync(`git merge-base --is-ancestor ${branchCommitSha} ${defaultBranch}`, {
+              cwd: projectRepoPath,
+              stdio: "pipe",
+            });
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        { attempts: 30, delayMs: 500, label: `commit ${branchCommitSha} to appear on ${defaultBranch}` },
+      );
+
+      await pollUntil(
+        async () => {
+          return (await branchDeleted(projectRepoPath, branch)) ? true : null;
+        },
+        { attempts: 30, delayMs: 500, label: `branch ${branch} should be deleted` },
+      );
+    } finally {
+      abortController.abort();
+      await request.delete(`${SERVER_URL}/api/workspaces/${disconnectedWorkspaceId}`).catch(() => {});
+      await request.delete(`${SERVER_URL}/api/issues/${issueId}`).catch(() => {});
+    }
   });
 
   test("second POST /merge on already-merged workspace does not error the test", async ({
