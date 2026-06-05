@@ -673,6 +673,301 @@ function formatNextFire(value: string | null | undefined): string {
   return `at ${date.toLocaleTimeString("en-US")}`;
 }
 
+type WorkflowSectionProps = {
+  settings: Settings;
+  set: (key: keyof Settings) => (value: string) => void;
+  setBool: (key: keyof Settings) => (checked: boolean) => void;
+};
+
+function WorkflowProcessPipelineSection({ settings }: { settings: Settings }) {
+  return (
+    <div className="bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-lg p-3 mb-2">
+      <div className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">Process pipeline</div>
+      <div className="flex items-center gap-1 flex-wrap">
+        {[
+          { label: "Agent runs", always: true },
+          { label: "Manual approval", key: "require_manual_approval", enabled: settings.require_manual_approval === "true" },
+          { label: "Learn (after agent)", key: "learning_step_after_agent", enabled: settings.learning_step_after_agent === "true" },
+          { label: "AI Review", key: "auto_review", enabled: settings.auto_review !== "false" },
+          { label: "Auto-fix", key: "review_auto_fix", enabled: settings.auto_review !== "false" && settings.review_auto_fix !== "false", indent: true },
+          { label: "Learn (after review)", key: "learning_step_after_review", enabled: settings.learning_step_after_review === "true" },
+          { label: "Auto-merge", key: "auto_merge", enabled: settings.auto_review !== "false" && settings.auto_merge !== "false", indent: true },
+          { label: "Learn (before merge)", key: "learning_step_before_merge", enabled: settings.learning_step_before_merge === "true" },
+          { label: "Merge", always: true },
+          { label: "Visual verify", key: "visual_verification_mode", enabled: settings.visual_verification_mode === "after_merge" },
+        ].filter((s) => s.always || s.enabled).map((step, i) => (
+          <div key={step.label} className="flex items-center gap-1">
+            {i > 0 && <span className="text-gray-400 dark:text-gray-500 text-xs">→</span>}
+            <span className={`px-2 py-0.5 rounded text-xs font-medium ${step.always ? "bg-brand-100 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300" : "bg-green-100 text-green-700"}`}>
+              {step.label}
+            </span>
+          </div>
+        ))}
+      </div>
+      <div className="text-xs text-gray-400 dark:text-gray-500 mt-1.5">Green steps are optional — toggle them below to add/remove from pipeline.</div>
+    </div>
+  );
+}
+
+function WorkflowAgentBehaviourSection({ settings, setBool }: WorkflowSectionProps) {
+  return (
+    <div className="pt-2">
+      <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Agent behaviour</div>
+      <div className="space-y-3">
+        <Toggle
+          checked={(settings["harness.codex.plan_auto_continue"] ?? settings.plan_auto_continue) !== "false"}
+          onChange={setBool("harness.codex.plan_auto_continue")}
+          label="Auto-continue after plan (Codex)"
+          hint="When a Codex plan-mode run finishes, the plan is saved to PLAN.md. If on, an implementation turn starts automatically. If off, the workspace waits for you to review the plan and click Accept & Implement."
+        />
+        <Toggle
+          checked={(settings["harness.copilot.plan_auto_continue"] ?? settings.plan_auto_continue) !== "false"}
+          onChange={setBool("harness.copilot.plan_auto_continue")}
+          label="Auto-continue after plan (Copilot)"
+          hint="Same as the Codex setting, but for Copilot plan-mode runs."
+        />
+        <Toggle
+          checked={settings.resume_with_new_model === "true"}
+          onChange={setBool("resume_with_new_model")}
+          label="Use new profile on resume"
+          hint="When continuing a chat, start a fresh session using the current profile instead of resuming the previous one. Use this when switching providers via a different Claude profile."
+        />
+        <Toggle
+          checked={settings.persistent_agent === "true"}
+          onChange={setBool("persistent_agent")}
+          label="Persistent agent (warm pool)"
+          hint="Keep a warm agent process alive between sessions to reduce startup latency. Experimental."
+        />
+      </div>
+    </div>
+  );
+}
+
+function WorkflowReviewMergeSection({ settings, set, setBool, autoReviewOn }: WorkflowSectionProps & { autoReviewOn: boolean }) {
+  return (
+    <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+      <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Code review &amp; merge pipeline</div>
+      <div className="space-y-3">
+        <Toggle
+          checked={autoReviewOn}
+          onChange={setBool("auto_review")}
+          label="Auto Code Review"
+          hint="When an agent commits and exits successfully, automatically launch a review agent that checks the diff for issues."
+        />
+        <div className={`pl-5 space-y-3 border-l-2 ${autoReviewOn ? "border-brand-200 dark:border-brand-700" : "border-gray-100 dark:border-gray-800"}`}>
+          <Toggle
+            checked={settings.review_auto_fix !== "false"}
+            onChange={setBool("review_auto_fix")}
+            label="Auto-fix issues found in review"
+            hint="When the review agent finds CRITICAL or MAJOR issues, it edits the code and commits fixes directly. Requires 'Skip permission prompts' to be enabled so the agent can write files. When disabled, the agent reports issues but makes no changes."
+            disabled={!autoReviewOn}
+          />
+          <Toggle
+            checked={settings.auto_merge !== "false"}
+            onChange={setBool("auto_merge")}
+            label="Auto-merge after review"
+            hint="Merge the branch and close the workspace automatically once the review agent passes. When disabled, the issue moves to AI Reviewed and waits for manual merge."
+            disabled={!autoReviewOn}
+          />
+          <Field
+            label="Merge strategy"
+            hint="Choose who owns reviewed branches. Direct leaves merges to manual per-workspace actions. Monitor lets the board monitor merge immediately. Merge queue batches reviewed workspaces into the queue release train."
+          >
+            <select
+              value={settings.merge_strategy || (settings.auto_monitor === "true" ? "monitor" : "merge_queue")}
+              onChange={(e) => set("merge_strategy")(e.target.value)}
+              disabled={!autoReviewOn || settings.auto_merge === "false"}
+              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
+            >
+              <option value="direct">Direct/manual - one workspace at a time</option>
+              <option value="monitor">Monitor - merge as soon as ready</option>
+              <option value="merge_queue">Merge queue - batch and land in order</option>
+            </select>
+          </Field>
+          <Toggle
+            checked={settings.auto_merge_in_review === "true"}
+            onChange={setBool("auto_merge_in_review")}
+            label="Auto-merge In Review without 'ready' gate"
+            hint="When on, the board monitor merges any idle In-Review workspace whose work is committed — even if the agent never marked it 'ready for merge'. This lands In-Review work to master with no human gating. When off (default), not-yet-ready In-Review work is left waiting. Still respects the Auto-merge kill-switch above."
+            disabled={!autoReviewOn || settings.auto_merge === "false"}
+          />
+        </div>
+        <Toggle
+          checked={settings.require_manual_approval === "true"}
+          onChange={setBool("require_manual_approval")}
+          label="Require manual approval before review"
+          hint="When enabled, issues must be manually approved before the AI review step is triggered. Useful for gating expensive review sessions on deliberate human sign-off."
+        />
+        <Toggle
+          checked={settings.skip_preflight === "true"}
+          onChange={setBool("skip_preflight")}
+          label="Skip pre-flight check"
+          hint="Disable the AI ticket sanity check that runs before 'Start workspace'. When enabled, workspaces are created immediately without checking if the ticket is clear, unambiguous, and not a duplicate."
+        />
+        <Field
+          label="Visual verification timing"
+          hint="Controls when UI changes are visually verified via browser snapshot. 'Before merge' blocks the agent until it verifies (default, Claude only). 'After merge' lets the agent stop without verifying — the issue is tagged with 'needs-visual-verification' after merge and verification runs on master."
+        >
+          <select
+            value={settings.visual_verification_mode || "before_merge"}
+            onChange={(e) => set("visual_verification_mode")(e.target.value)}
+            className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500"
+          >
+            <option value="before_merge">Before merge (default) — agent must verify UI before stopping</option>
+            <option value="after_merge">After merge — verification runs on master after merge completes</option>
+          </select>
+        </Field>
+        {(settings.visual_verification_mode || "before_merge") === "after_merge" && (
+          <Field
+            label="After-merge verification agent"
+            hint="Who performs visual verification after merge. 'None' just tags the issue. 'Reviewer' instructs the review agent to merge then verify UI. 'Dedicated agent' spawns a separate verification-only session after the merge completes."
+          >
+            <select
+              value={settings.after_merge_verify_agent || "none"}
+              onChange={(e) => set("after_merge_verify_agent")(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500"
+            >
+              <option value="none">None (default) — tag issue, manual verification</option>
+              <option value="reviewer">Reviewer — review agent merges + verifies UI</option>
+              <option value="dedicated">Dedicated agent — separate verification session after merge</option>
+            </select>
+          </Field>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function WorkflowLearningSection({ settings, setBool }: WorkflowSectionProps) {
+  return (
+    <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+      <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Learning steps</div>
+      <div className="space-y-3">
+        <Toggle
+          checked={settings.learning_step_after_agent === "true"}
+          onChange={setBool("learning_step_after_agent")}
+          label="Learning step after agent (parallel)"
+          hint="When an agent session completes with committed changes, runs a learning session in parallel with code review. Extracts insights from session transcripts and updates docs and hooks without blocking the review."
+        />
+        <Toggle
+          checked={settings.learning_step_after_review === "true"}
+          onChange={setBool("learning_step_after_review")}
+          label="Learning step after review (parallel)"
+          hint="When a review session completes, runs a learning session in parallel with the auto-merge step. Extracts insights without delaying the merge."
+        />
+        <Toggle
+          checked={settings.learning_step_before_merge === "true"}
+          onChange={setBool("learning_step_before_merge")}
+          label="Learning step before merge (blocking)"
+          hint="When enabled, runs an agent session before merging that reads the worktree's session transcripts and updates docs and Claude hooks with extracted insights. Blocks merge until complete (up to 3 minutes)."
+        />
+      </div>
+    </div>
+  );
+}
+
+function WorkflowFollowUpSection({
+  settings,
+  setBool,
+  activeProjectId,
+  onButlerEventFeedOverrideChange,
+}: WorkflowSectionProps & {
+  onButlerEventFeedOverrideChange: (value: string) => void;
+  activeProjectId?: string | null;
+}) {
+  return (
+    <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+      <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Follow-up &amp; automation</div>
+      <div className="space-y-3">
+        <Toggle
+          checked={settings.auto_start_followup === "true"}
+          onChange={setBool("auto_start_followup")}
+          label="Auto-start follow-up tasks after merge"
+          hint="When a workspace is merged and the issue has outgoing 'depends_on' or 'child_of' dependencies, automatically create workspaces for unblocked follow-up issues."
+        />
+        <Toggle
+          checked={settings.dependency_auto_chain === "true"}
+          onChange={setBool("dependency_auto_chain")}
+          label="Auto-chain unblocked dependencies"
+          hint="After an upstream issue merges, start newly unblocked dependent or child issues when WIP capacity is available. Add the no-auto-start tag to opt out individual issues."
+        />
+        <Toggle
+          checked={settings.auto_rebase_on_continue === "true"}
+          onChange={setBool("auto_rebase_on_continue")}
+          label="Auto-rebase on continue"
+          hint="Before resuming a workspace agent (via /turn or /launch), automatically rebase the feature branch onto the latest base branch. If rebase conflicts arise, the operation fails with a clear error rather than starting the agent on a stale base."
+        />
+        <Toggle
+          checked={settings.butler_event_feed === "true"}
+          onChange={setBool("butler_event_feed")}
+          label="Butler event feed"
+          hint="Notify the butler about critical board events (merge failures, agent crashes, stuck workspaces, permission requests). The butler receives them as tagged [system event] messages and can react when next addressed. Rate-limited per project."
+        />
+        <Toggle
+          checked={settings.butler_auto_answer === "true"}
+          onChange={setBool("butler_auto_answer")}
+          label="Butler auto-answer agent questions"
+          hint="Butler will reply to agents without asking you first. Review the audit log to catch mistakes. Only applies when the butler has a confident recommendation for every sub-question."
+        />
+        {settings.butler_event_feed === "true" && (
+          <div className="pl-5 flex items-center gap-2">
+            <label className="text-xs text-gray-600 dark:text-gray-400">Min interval</label>
+            <input
+              type="number"
+              min="1000"
+              step="1000"
+              value={settings.butler_event_feed_min_interval_ms || "30000"}
+              onChange={(e) => set("butler_event_feed_min_interval_ms")(e.target.value)}
+              className="w-24 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
+            />
+            <span className="text-xs text-gray-500 dark:text-gray-400">ms (bursts collapse into a summary)</span>
+          </div>
+        )}
+        {activeProjectId && (
+          <div className="pl-5">
+            <Field
+              label="Per-project override"
+              hint="Override the global setting for this project. 'Inherit' uses the global toggle above."
+            >
+              <select
+                value={settings[`butler_event_feed_${activeProjectId}` as keyof Settings] ?? ""}
+                onChange={(e) => onButlerEventFeedOverrideChange(e.target.value)}
+                className="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500"
+              >
+                <option value="">Inherit (global)</option>
+                <option value="true">Force on for this project</option>
+                <option value="false">Force off for this project</option>
+              </select>
+            </Field>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AdvancedSettingsSection({ settings, setBool }: WorkflowSectionProps) {
+  return (
+    <>
+      <Toggle
+        checked={settings.skip_permissions === "true"}
+        onChange={setBool("skip_permissions")}
+        label="Skip Permissions (--dangerously-skip-permissions)"
+        hint="Bypass all permission checks. Recommended only for sandboxes with no internet access."
+      />
+      <Toggle
+        checked={settings.permission_prompt_tool !== "false"}
+        onChange={setBool("permission_prompt_tool")}
+        label="Permission Prompt Tool"
+        hint="Pass --permission-prompt-tool to Claude Code. Routes tool approval requests through the UI instead of the terminal."
+      />
+      <div className="pt-4 border-t border-gray-100">
+        <SlowRequestsPanel />
+      </div>
+    </>
+  );
+}
+
 export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [profiles, setProfiles] = useState<string[]>([]);
@@ -1250,228 +1545,27 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
               {/* Workflow tab */}
               {tab === "workflow" && (
                 <>
-                  {/* Process pipeline visualization */}
-                  <div className="bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-lg p-3 mb-2">
-                    <div className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">Process pipeline</div>
-                    <div className="flex items-center gap-1 flex-wrap">
-                      {[
-                        { label: "Agent runs", always: true },
-                        { label: "Manual approval", key: "require_manual_approval", enabled: settings.require_manual_approval === "true" },
-                        { label: "Learn (after agent)", key: "learning_step_after_agent", enabled: settings.learning_step_after_agent === "true" },
-                        { label: "AI Review", key: "auto_review", enabled: settings.auto_review !== "false" },
-                        { label: "Auto-fix", key: "review_auto_fix", enabled: settings.auto_review !== "false" && settings.review_auto_fix !== "false", indent: true },
-                        { label: "Learn (after review)", key: "learning_step_after_review", enabled: settings.learning_step_after_review === "true" },
-                        { label: "Auto-merge", key: "auto_merge", enabled: settings.auto_review !== "false" && settings.auto_merge !== "false", indent: true },
-                        { label: "Learn (before merge)", key: "learning_step_before_merge", enabled: settings.learning_step_before_merge === "true" },
-                        { label: "Merge", always: true },
-                        { label: "Visual verify", key: "visual_verification_mode", enabled: settings.visual_verification_mode === "after_merge" },
-                      ].filter(s => s.always || s.enabled).map((step, i, arr) => (
-                        <div key={step.label} className="flex items-center gap-1">
-                          {i > 0 && <span className="text-gray-400 dark:text-gray-500 text-xs">→</span>}
-                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${step.always ? "bg-brand-100 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300" : "bg-green-100 text-green-700"}`}>
-                            {step.label}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="text-xs text-gray-400 dark:text-gray-500 mt-1.5">Green steps are optional — toggle them below to add/remove from pipeline.</div>
-                  </div>
-                  {/* Agent behaviour */}
-                  <div className="pt-2">
-                    <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Agent behaviour</div>
-                    <div className="space-y-3">
-                      <Toggle
-                        checked={(settings["harness.codex.plan_auto_continue"] ?? settings.plan_auto_continue) !== "false"}
-                        onChange={setBool("harness.codex.plan_auto_continue")}
-                        label="Auto-continue after plan (Codex)"
-                        hint="When a Codex plan-mode run finishes, the plan is saved to PLAN.md. If on, an implementation turn starts automatically. If off, the workspace waits for you to review the plan and click Accept & Implement."
-                      />
-                      <Toggle
-                        checked={(settings["harness.copilot.plan_auto_continue"] ?? settings.plan_auto_continue) !== "false"}
-                        onChange={setBool("harness.copilot.plan_auto_continue")}
-                        label="Auto-continue after plan (Copilot)"
-                        hint="Same as the Codex setting, but for Copilot plan-mode runs."
-                      />
-                      <Toggle
-                        checked={settings.resume_with_new_model === "true"}
-                        onChange={setBool("resume_with_new_model")}
-                        label="Use new profile on resume"
-                        hint="When continuing a chat, start a fresh session using the current profile instead of resuming the previous one. Use this when switching providers via a different Claude profile."
-                      />
-                      <Toggle
-                        checked={settings.persistent_agent === "true"}
-                        onChange={setBool("persistent_agent")}
-                        label="Persistent agent (warm pool)"
-                        hint="Keep a warm agent process alive between sessions to reduce startup latency. Experimental."
-                      />
-                    </div>
-                  </div>
-
-                  {/* Code review & merge pipeline */}
-                  <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
-                    <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Code review &amp; merge pipeline</div>
-                    <div className="space-y-3">
-                      <Toggle
-                        checked={autoReviewOn}
-                        onChange={setBool("auto_review")}
-                        label="Auto Code Review"
-                        hint="When an agent commits and exits successfully, automatically launch a review agent that checks the diff for issues."
-                      />
-                      <div className={`pl-5 space-y-3 border-l-2 ${autoReviewOn ? "border-brand-200 dark:border-brand-700" : "border-gray-100 dark:border-gray-800"}`}>
-                        <Toggle
-                          checked={settings.review_auto_fix !== "false"}
-                          onChange={setBool("review_auto_fix")}
-                          label="Auto-fix issues found in review"
-                          hint="When the review agent finds CRITICAL or MAJOR issues, it edits the code and commits fixes directly. Requires 'Skip permission prompts' to be enabled so the agent can write files. When disabled, the agent reports issues but makes no changes."
-                          disabled={!autoReviewOn}
-                        />
-                        <Toggle
-                          checked={settings.auto_merge !== "false"}
-                          onChange={setBool("auto_merge")}
-                          label="Auto-merge after review"
-                          hint="Merge the branch and close the workspace automatically once the review agent passes. When disabled, the issue moves to AI Reviewed and waits for manual merge."
-                          disabled={!autoReviewOn}
-                        />
-                        <Field
-                          label="Merge strategy"
-                          hint="Choose who owns reviewed branches. Direct leaves merges to manual per-workspace actions. Monitor lets the board monitor merge immediately. Merge queue batches reviewed workspaces into the queue release train."
-                        >
-                          <select
-                            value={settings.merge_strategy || (settings.auto_monitor === "true" ? "monitor" : "merge_queue")}
-                            onChange={(e) => set("merge_strategy")(e.target.value)}
-                            disabled={!autoReviewOn || settings.auto_merge === "false"}
-                            className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
-                          >
-                            <option value="direct">Direct/manual - one workspace at a time</option>
-                            <option value="monitor">Monitor - merge as soon as ready</option>
-                            <option value="merge_queue">Merge queue - batch and land in order</option>
-                          </select>
-                        </Field>
-                        <Toggle
-                          checked={settings.auto_merge_in_review === "true"}
-                          onChange={setBool("auto_merge_in_review")}
-                          label="Auto-merge In Review without 'ready' gate"
-                          hint="When on, the board monitor merges any idle In-Review workspace whose work is committed — even if the agent never marked it 'ready for merge'. This lands In-Review work to master with no human gating. When off (default), not-yet-ready In-Review work is left waiting. Still respects the Auto-merge kill-switch above."
-                          disabled={!autoReviewOn || settings.auto_merge === "false"}
-                        />
-                      </div>
-                      <Toggle
-                        checked={settings.require_manual_approval === "true"}
-                        onChange={setBool("require_manual_approval")}
-                        label="Require manual approval before review"
-                        hint="When enabled, issues must be manually approved before the AI review step is triggered. Useful for gating expensive review sessions on deliberate human sign-off."
-                      />
-                      <Toggle
-                        checked={settings.skip_preflight === "true"}
-                        onChange={setBool("skip_preflight")}
-                        label="Skip pre-flight check"
-                        hint="Disable the AI ticket sanity check that runs before 'Start workspace'. When enabled, workspaces are created immediately without checking if the ticket is clear, unambiguous, and not a duplicate."
-                      />
-                      <Field
-                        label="Visual verification timing"
-                        hint="Controls when UI changes are visually verified via browser snapshot. 'Before merge' blocks the agent until it verifies (default, Claude only). 'After merge' lets the agent stop without verifying — the issue is tagged with 'needs-visual-verification' after merge and verification runs on master."
-                      >
-                        <select
-                          value={settings.visual_verification_mode || "before_merge"}
-                          onChange={(e) => set("visual_verification_mode")(e.target.value)}
-                          className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500"
-                        >
-                          <option value="before_merge">Before merge (default) — agent must verify UI before stopping</option>
-                          <option value="after_merge">After merge — verification runs on master after merge completes</option>
-                        </select>
-                      </Field>
-                      {(settings.visual_verification_mode || "before_merge") === "after_merge" && (
-                        <Field
-                          label="After-merge verification agent"
-                          hint="Who performs visual verification after merge. 'None' just tags the issue. 'Reviewer' instructs the review agent to merge then verify. 'Dedicated agent' spawns a separate verification-only session after the merge completes."
-                        >
-                          <select
-                            value={settings.after_merge_verify_agent || "none"}
-                            onChange={(e) => set("after_merge_verify_agent")(e.target.value)}
-                            className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500"
-                          >
-                            <option value="none">None (default) — tag issue, manual verification</option>
-                            <option value="reviewer">Reviewer — review agent merges + verifies UI</option>
-                            <option value="dedicated">Dedicated agent — separate verification session after merge</option>
-                          </select>
-                        </Field>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Learning steps */}
-                  <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
-                    <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Learning steps</div>
-                    <div className="space-y-3">
-                      <Toggle
-                        checked={settings.learning_step_after_agent === "true"}
-                        onChange={setBool("learning_step_after_agent")}
-                        label="Learning step after agent (parallel)"
-                        hint="When an agent session completes with committed changes, runs a learning session in parallel with code review. Extracts insights from session transcripts and updates docs and hooks without blocking the review."
-                      />
-                      <Toggle
-                        checked={settings.learning_step_after_review === "true"}
-                        onChange={setBool("learning_step_after_review")}
-                        label="Learning step after review (parallel)"
-                        hint="When a review session completes, runs a learning session in parallel with the auto-merge step. Extracts insights without delaying the merge."
-                      />
-                      <Toggle
-                        checked={settings.learning_step_before_merge === "true"}
-                        onChange={setBool("learning_step_before_merge")}
-                        label="Learning step before merge (blocking)"
-                        hint="When enabled, runs an agent session before merging that reads the worktree's session transcripts and updates docs and Claude hooks with extracted insights. Blocks merge until complete (up to 3 minutes)."
-                      />
-                    </div>
-                  </div>
-
-                  {/* Follow-up & automation */}
-                  <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
-                    <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Follow-up &amp; automation</div>
-                    <div className="space-y-3">
-                      <Toggle
-                        checked={settings.auto_start_followup === "true"}
-                        onChange={setBool("auto_start_followup")}
-                        label="Auto-start follow-up tasks after merge"
-                        hint="When a workspace is merged and the issue has outgoing 'depends_on' or 'child_of' dependencies, automatically create workspaces for unblocked follow-up issues."
-                      />
-                      <Toggle
-                        checked={settings.dependency_auto_chain === "true"}
-                        onChange={setBool("dependency_auto_chain")}
-                        label="Auto-chain unblocked dependencies"
-                        hint="After an upstream issue merges, start newly unblocked dependent or child issues when WIP capacity is available. Add the no-auto-start tag to opt out individual issues."
-                      />
-                      <Toggle
-                        checked={settings.auto_rebase_on_continue === "true"}
-                        onChange={setBool("auto_rebase_on_continue")}
-                        label="Auto-rebase on continue"
-                        hint="Before resuming a workspace agent (via /turn or /launch), automatically rebase the feature branch onto the latest base branch. If rebase conflicts arise, the operation fails with a clear error rather than starting the agent on a stale base."
-                      />
-                      <Toggle
-                        checked={settings.butler_event_feed === "true"}
-                        onChange={setBool("butler_event_feed")}
-                        label="Butler event feed"
-                        hint="Notify the butler about critical board events (merge failures, agent crashes, stuck workspaces, permission requests). The butler receives them as tagged [system event] messages and can react when next addressed. Rate-limited per project."
-                      />
-                      <Toggle
-                        checked={settings.butler_auto_answer === "true"}
-                        onChange={setBool("butler_auto_answer")}
-                        label="Butler auto-answer agent questions"
-                        hint="Butler will reply to agents without asking you first. Review the audit log to catch mistakes. Only applies when the butler has a confident recommendation for every sub-question."
-                      />
-                      {settings.butler_event_feed === "true" && (
-                        <div className="pl-5 flex items-center gap-2">
-                          <label className="text-xs text-gray-600 dark:text-gray-400">Min interval</label>
-                          <input
-                            type="number"
-                            min="1000"
-                            step="1000"
-                            value={settings.butler_event_feed_min_interval_ms || "30000"}
-                            onChange={(e) => set("butler_event_feed_min_interval_ms")(e.target.value)}
-                            className="w-24 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
-                          />
-                          <span className="text-xs text-gray-500 dark:text-gray-400">ms (bursts collapse into a summary)</span>
-                        </div>
-                      )}
+                  <WorkflowProcessPipelineSection settings={settings} />
+                  <WorkflowAgentBehaviourSection settings={settings} setBool={setBool} />
+                  <WorkflowReviewMergeSection
+                    settings={settings}
+                    set={set}
+                    setBool={setBool}
+                    autoReviewOn={autoReviewOn}
+                  />
+                  <WorkflowLearningSection settings={settings} setBool={setBool} />
+                  <WorkflowFollowUpSection
+                    settings={settings}
+                    set={set}
+                    setBool={setBool}
+                    activeProjectId={activeProjectId}
+                    onButlerEventFeedOverrideChange={(value) => {
+                      setSettings((s) => ({
+                        ...s,
+                        [`butler_event_feed_${activeProjectId}` as keyof Settings]: value,
+                      }));
+                    }}
+                  />
                       {activeProjectId && (
                         <div className="pl-5">
                           <Field
@@ -3163,23 +3257,7 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
 
               {/* Advanced tab */}
               {tab === "advanced" && (
-                <>
-                  <Toggle
-                    checked={settings.skip_permissions === "true"}
-                    onChange={setBool("skip_permissions")}
-                    label="Skip Permissions (--dangerously-skip-permissions)"
-                    hint="Bypass all permission checks. Recommended only for sandboxes with no internet access."
-                  />
-                  <Toggle
-                    checked={settings.permission_prompt_tool !== "false"}
-                    onChange={setBool("permission_prompt_tool")}
-                    label="Permission Prompt Tool"
-                    hint="Pass --permission-prompt-tool to Claude Code. Routes tool approval requests through the UI instead of the terminal."
-                  />
-                  <div className="pt-4 border-t border-gray-100">
-                    <SlowRequestsPanel />
-                  </div>
-                </>
+                <AdvancedSettingsSection settings={settings} setBool={setBool} />
               )}
             </div>
           )}
