@@ -119,15 +119,11 @@ export function createWorkspaceMergeService(deps: {
     const workspace = await getWorkspaceById(id, database);
     if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
 
-    if (workspace.status === "closed" && workspace.mergedAt) {
-      throw new WorkspaceError(
-        "Workspace has already been merged.",
-        "CONFLICT",
-        { mergeReason: "already_merged" },
-      );
+    if (workspace.status === "closed" && !workspace.mergedAt) {
+      throw new WorkspaceError("Workspace is already closed.", "CONFLICT", { mergeReason: "already_closed" });
     }
 
-    if (!workspace.isDirect && !workspace.readyForMerge) {
+    if (!workspace.isDirect && !workspace.readyForMerge && !workspace.mergedAt) {
       throw new WorkspaceError(
         "Workspace is not approved for merge. Mark it as ready-for-merge before merging.",
         "CONFLICT",

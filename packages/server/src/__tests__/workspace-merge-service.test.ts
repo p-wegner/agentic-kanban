@@ -3,7 +3,7 @@
  * Covers the three acceptance-criteria paths from ticket #548:
  *   1. Clean merge: advances the base branch, workspace closes, issue moves to Done.
  *   2. Already-merged (tip is ancestor): reconciles as no-op instead of throwing 409.
- *   3. Idempotency on retry: mergedAt workspace returns a deterministic 409 body.
+ *   3. Idempotency on retry: mergedAt workspace reconciles as already-merged.
  *
  * Also covers the state machine paths from ticket #610:
  *   4. conflict-ready: conflict detected → throws CONFLICT, clears readyForMerge.
@@ -231,9 +231,13 @@ describe("MergeService — idempotency: retry after dropped response", () => {
     ({ db } = createTestDb());
   });
 
-  it("throws CONFLICT with mergeReason=already_merged when mergedAt is set (dropped-response retry)", async () => {
+  it("reconciles idempotently when mergedAt is set (dropped-response retry)", async () => {
     const now = new Date().toISOString();
-    const { workspaceId } = await seedWorkspace(db, { mergedAt: now });
+    const { workspaceId, issueId } = await seedWorkspace(db, {
+      mergedAt: now,
+      status: "closed",
+      readyForMerge: false,
+    });
     const git = makeGit();
 
     const svc = createWorkspaceMergeService({
@@ -243,15 +247,26 @@ describe("MergeService — idempotency: retry after dropped response", () => {
       processKiller: async () => 0,
     });
 
-    await expect(svc.mergeWorkspace(workspaceId)).rejects.toMatchObject({
-      code: "CONFLICT",
-      data: { mergeReason: "already_merged" },
+    await expect(svc.mergeWorkspace(workspaceId)).resolves.toMatchObject({
+      mergeOutput: expect.stringContaining("already marked as merged"),
     });
+
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+    expect(status.name).toBe("Done");
+
+    const [ws] = await db.select({ status: workspaces.status, mergedAt: workspaces.mergedAt }).from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.status).toBe("closed");
+    expect(ws.mergedAt).toBe(now);
   });
 
   it("does not call mergeBranch on a dropped-response retry", async () => {
     const now = new Date().toISOString();
-    const { workspaceId } = await seedWorkspace(db, { mergedAt: now });
+    const { workspaceId } = await seedWorkspace(db, {
+      mergedAt: now,
+      status: "closed",
+      readyForMerge: false,
+    });
     const mergeBranch = vi.fn(async () => "Merge made by the 'ort' strategy.");
     const git = makeGit({ mergeBranch });
 
@@ -262,7 +277,7 @@ describe("MergeService — idempotency: retry after dropped response", () => {
       processKiller: async () => 0,
     });
 
-    await expect(svc.mergeWorkspace(workspaceId)).rejects.toThrow();
+    await expect(svc.mergeWorkspace(workspaceId)).resolves.toBeDefined();
     expect(mergeBranch).not.toHaveBeenCalled();
   });
 });
