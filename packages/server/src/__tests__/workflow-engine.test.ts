@@ -437,6 +437,58 @@ describe("workflow-engine", () => {
     expect(node.name).toBe("Review");
   });
 
+  it("syncCurrentNodeToStatus also updates non-closed workspaces (regression: board endpoint staleness)", async () => {
+    // Regression test for #552: after PATCH /api/issues/:id changes statusId, the board
+    // endpoint was returning the old workflow-column because workspaces.currentNodeId was
+    // never updated — only issues.currentNodeId was. The board reads workspaces.currentNodeId
+    // for its workflow-column override, so both must be synced together.
+    const { syncCurrentNodeToStatus } = await import("@agentic-kanban/shared/lib/workflow-engine");
+    const { projectId, statusIds } = await seedProject(db);
+    const issueId = await seedIssue(db, projectId, statusIds["Todo"], "bug");
+    const wsId = await seedWorkspace(db, issueId);
+    await initWorkspaceWorkflow(db as any, { workspaceId: wsId, issueId }); // starts at In Progress node
+
+    // Verify the workspace has a currentNodeId pointing to an "In Progress" node.
+    const wsBefore = (await db.select().from(schema.workspaces).where(eq(schema.workspaces.id, wsId)))[0];
+    expect(wsBefore.currentNodeId).toBeTruthy();
+    const nodeBefore = (await db.select().from(schema.workflowNodes).where(eq(schema.workflowNodes.id, wsBefore.currentNodeId!)))[0];
+    expect(nodeBefore.statusName).toBe("In Progress");
+
+    // Simulate PATCH /api/issues/:id moving the issue to Done.
+    await db.update(schema.issues).set({ statusId: statusIds["Done"] }).where(eq(schema.issues.id, issueId));
+    await syncCurrentNodeToStatus(db as any, issueId);
+
+    // The issue's currentNodeId should now point to the Done node.
+    const issueAfter = (await db.select().from(schema.issues).where(eq(schema.issues.id, issueId)))[0];
+    const issueNode = (await db.select().from(schema.workflowNodes).where(eq(schema.workflowNodes.id, issueAfter.currentNodeId!)))[0];
+    expect(issueNode.statusName).toBe("Done");
+
+    // The workspace's currentNodeId must ALSO be updated — otherwise the board endpoint
+    // overrides the fresh DB statusId with the stale workflow column.
+    const wsAfter = (await db.select().from(schema.workspaces).where(eq(schema.workspaces.id, wsId)))[0];
+    const wsNode = (await db.select().from(schema.workflowNodes).where(eq(schema.workflowNodes.id, wsAfter.currentNodeId!)))[0];
+    expect(wsNode.statusName).toBe("Done");
+  });
+
+  it("syncCurrentNodeToStatus does not update closed workspaces", async () => {
+    const { syncCurrentNodeToStatus } = await import("@agentic-kanban/shared/lib/workflow-engine");
+    const { projectId, statusIds } = await seedProject(db);
+    const issueId = await seedIssue(db, projectId, statusIds["Todo"], "bug");
+    const wsId = await seedWorkspace(db, issueId);
+    await initWorkspaceWorkflow(db as any, { workspaceId: wsId, issueId });
+
+    // Close the workspace so it should NOT be updated by syncCurrentNodeToStatus.
+    await db.update(schema.workspaces).set({ status: "closed" }).where(eq(schema.workspaces.id, wsId));
+    const wsClosedBefore = (await db.select().from(schema.workspaces).where(eq(schema.workspaces.id, wsId)))[0];
+    const closedNodeId = wsClosedBefore.currentNodeId;
+
+    await db.update(schema.issues).set({ statusId: statusIds["Done"] }).where(eq(schema.issues.id, issueId));
+    await syncCurrentNodeToStatus(db as any, issueId);
+
+    const wsClosedAfter = (await db.select().from(schema.workspaces).where(eq(schema.workspaces.id, wsId)))[0];
+    expect(wsClosedAfter.currentNodeId).toBe(closedNodeId);
+  });
+
   it("builds a transition block embedding the workspace id", async () => {
     const { projectId } = await seedProject(db);
     const templateId = await resolveTemplateForIssue(db as any, { projectId, issueType: "bug" });
