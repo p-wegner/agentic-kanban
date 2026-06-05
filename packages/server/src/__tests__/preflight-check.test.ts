@@ -251,6 +251,8 @@ describe("workspaceLaunchPreflight", () => {
 
     expect(result.ok).toBe(true);
     expect(calls.some((a) => a[0] === "checkout" && a[1] === "master" && a[2] === "--" && a[3] === ".codex/hooks.json")).toBe(true);
+    // Reconciled files must be committed so the agent launches with a clean worktree.
+    expect(calls.some((a) => a[0] === "commit")).toBe(true);
   });
 
   it("returns ok=false with stale file list when reconciliation checkout fails", async () => {
