@@ -596,24 +596,46 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       };
     });
 
-    return visibleStatuses.map((s) => ({
-      id: s.id,
-      name: s.name,
-      projectId: s.projectId,
-      sortOrder: s.sortOrder,
-      issues: issuesWithBlocked.filter((i) => i.statusId === s.id).map((i) => {
-        const { checklistJson, ...rest } = i;
-        let checklist: { id: string; text: string; completed: boolean }[] | undefined;
-        if (checklistJson) {
-          try { checklist = JSON.parse(checklistJson); } catch { checklist = undefined; }
-        }
-        return {
-          ...rest,
-          tags: issueTagMap.get(i.id) ?? [],
-          ...(checklist && checklist.length > 0 ? { checklist } : {}),
-        };
-      }),
-    }));
+    const TERMINAL_COLUMN_NAMES = new Set(["done", "cancelled"]);
+    const TERMINAL_COLUMN_CAP = 50;
+
+    return visibleStatuses.map((s) => {
+      const isTerminal = TERMINAL_COLUMN_NAMES.has(s.name.toLowerCase());
+      let columnIssues = issuesWithBlocked.filter((i) => i.statusId === s.id);
+      const totalCount = columnIssues.length;
+
+      if (isTerminal && columnIssues.length > TERMINAL_COLUMN_CAP) {
+        // Sort by statusChangedAt desc, falling back to updatedAt, then take top N
+        columnIssues = columnIssues
+          .slice()
+          .sort((a, b) => {
+            const ta = new Date(a.statusChangedAt ?? a.updatedAt).getTime();
+            const tb = new Date(b.statusChangedAt ?? b.updatedAt).getTime();
+            return tb - ta;
+          })
+          .slice(0, TERMINAL_COLUMN_CAP);
+      }
+
+      return {
+        id: s.id,
+        name: s.name,
+        projectId: s.projectId,
+        sortOrder: s.sortOrder,
+        count: totalCount,
+        issues: columnIssues.map((i) => {
+          const { checklistJson, ...rest } = i;
+          let checklist: { id: string; text: string; completed: boolean }[] | undefined;
+          if (checklistJson) {
+            try { checklist = JSON.parse(checklistJson); } catch { checklist = undefined; }
+          }
+          return {
+            ...rest,
+            tags: issueTagMap.get(i.id) ?? [],
+            ...(checklist && checklist.length > 0 ? { checklist } : {}),
+          };
+        }),
+      };
+    });
   }
 
   async function getGraph(projectId: string) {
