@@ -214,10 +214,22 @@ $jsInnerHtml = "document.querySelector('main')?.innerHTML || document.querySelec
 
 try {
   $env:npm_config_loglevel = "silent"
+  $openOutput = @()
+  $openExitCode = 0
   try {
-    & playwright-cli open $Url | Out-Host
+    & playwright-cli open $Url | Tee-Object -Variable openOutput | Out-Host
+    $openExitCode = $LASTEXITCODE
+    if ($openExitCode -ne 0) {
+      if ($openOutput.Count -gt 0) {
+        throw $openOutput
+      }
+      throw "playwright-cli open exited with code $openExitCode."
+    }
   } catch {
     $openError = ConvertTo-SmokeText $_
+    if ([string]::IsNullOrWhiteSpace($openError) -and $openOutput.Count -gt 0) {
+      $openError = ConvertTo-SmokeText $openOutput
+    }
     Write-Host "Unable to reach $Url."
     if ($openError -match "ECONNREFUSED|connection refused|Could not connect|ERR_CONNECTION_REFUSED|No connection could be made") {
       Show-MissingClientBindingHelp -Url $Url
