@@ -997,6 +997,7 @@ exit 1
         isDirect: workspaces.isDirect,
         branch: workspaces.branch,
         repoPath: projects.repoPath,
+        projectId: issues.projectId,
         teardownScript: projects.teardownScript,
         setupEnabled: projects.setupEnabled,
       })
@@ -1008,6 +1009,7 @@ exit 1
     const workingDir = wsRow[0]?.workingDir;
     const isDirect = wsRow[0]?.isDirect;
     const repoPath = wsRow[0]?.repoPath;
+    const deletedProjectId = wsRow[0]?.projectId;
 
     await database.delete(diffComments).where(eq(diffComments.workspaceId, workspaceId));
     if (wsSessions.length > 0) {
@@ -1069,6 +1071,8 @@ exit 1
         console.warn(`[workspaces] failed to fully clean up worktree at ${workingDir} — manual cleanup may be required`);
       }
     }
+
+    if (deletedProjectId) boardEvents?.broadcast(deletedProjectId, "workspace_closed");
   }
 
   /** Force-kill a process tree by pid. Windows: taskkill /F /T; otherwise SIGKILL. Guards already-dead pids. */
