@@ -611,5 +611,12 @@
       "when": 1780906800005,
       "tag": "0086_diff_stat_cache_head_sha",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "6",
+      "when": 1780906800006,
+      "tag": "0087_issue_project_number_index",
+      "breakpoints": true
     }]
 }

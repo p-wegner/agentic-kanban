@@ -1035,6 +1035,55 @@ describe("Board API", () => {
   });
 });
 
+describe("Issue by-number resolution (AK-572)", () => {
+  const { app, db: database } = createTestApp();
+
+  it("GET /api/issues?issueNumber=N returns only the matching issue for the given project", async () => {
+    const now = new Date().toISOString();
+    const projectA = await createProjectDirectly(database, { name: "AK-572 Project A" });
+    const projectB = await createProjectDirectly(database, { name: "AK-572 Project B" });
+    const statusA = await createStatusDirectly(database, projectA, "Todo", 0);
+    const statusB = await createStatusDirectly(database, projectB, "Todo", 0);
+
+    const issueAId = randomUUID();
+    const issueBId = randomUUID();
+    // Both projects have an issue with number 42 — the filter must be project-scoped
+    await database.insert(schema.issues).values({
+      id: issueAId, projectId: projectA, statusId: statusA, issueNumber: 42,
+      title: "Issue 42 in project A", priority: "medium", issueType: "task", sortOrder: 0,
+      createdAt: now, updatedAt: now,
+    });
+    await database.insert(schema.issues).values({
+      id: issueBId, projectId: projectB, statusId: statusB, issueNumber: 42,
+      title: "Issue 42 in project B", priority: "medium", issueType: "task", sortOrder: 0,
+      createdAt: now, updatedAt: now,
+    });
+
+    const resA = await app.request(`/api/issues?projectId=${projectA}&issueNumber=42`);
+    expect(resA.status).toBe(200);
+    const bodyA = await resA.json() as any;
+    expect(Array.isArray(bodyA)).toBe(true);
+    expect(bodyA.length).toBe(1);
+    expect(bodyA[0].id).toBe(issueAId);
+
+    const resB = await app.request(`/api/issues?projectId=${projectB}&issueNumber=42`);
+    expect(resB.status).toBe(200);
+    const bodyB = await resB.json() as any;
+    expect(Array.isArray(bodyB)).toBe(true);
+    expect(bodyB.length).toBe(1);
+    expect(bodyB[0].id).toBe(issueBId);
+  });
+
+  it("GET /api/issues?issueNumber=N returns empty array when no match", async () => {
+    const p = await createProjectDirectly(database, { name: "AK-572 Empty Project" });
+    const res = await app.request(`/api/issues?projectId=${p}&issueNumber=9999`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(Array.isArray(body)).toBe(true);
+    expect(body.length).toBe(0);
+  });
+});
+
 describe("Board terminal column cap (AK-569)", () => {
   const { app, db: database } = createTestApp();
 
