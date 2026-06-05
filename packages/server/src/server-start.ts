@@ -10,7 +10,7 @@ import { createWorkflowEngine } from "./startup/exit-workflow.js";
 import { createAutoMerge } from "./startup/merge-workflow.js";
 import { startAutoMergeOrchestrator } from "./startup/auto-merge-orchestrator.js";
 import { startStrandedReviewReconciler } from "./startup/stranded-review-reconciler.js";
-// import { reconcileAncestorBranchWorkspaces } from "./startup/ancestor-branch-reconciler.js"; // DISABLED (#581)
+import { reconcileAncestorBranchWorkspaces } from "./startup/ancestor-branch-reconciler.js";
 import { createMonitorSetup } from "./startup/monitor-setup.js";
 import { setupProcessHandlers } from "./startup/process-handlers.js";
 import { setupRoutes } from "./startup/route-setup.js";
@@ -77,23 +77,19 @@ export async function startServer(port?: number, hostname?: string) {
     boardEvents,
     reviewSessionIds: workflow.reviewSessionIds,
   });
-  // DISABLED (#581): periodic ancestor-branch reconciler reaped freshly-launched
-  // 0-commit workspaces as "merged" (their tip == base tip is trivially an ancestor),
-  // flipping new In-Progress issues to Done every 5 minutes (mass silent-merge-loss
-  // observed 2026-06-05). Re-enable once #581 adds the 0-commit / In-Progress guard.
-  // {
-  //   const ANCESTOR_RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
-  //   const tick = () => {
-  //     reconcileAncestorBranchWorkspaces().catch((err) =>
-  //       console.warn("[ancestor-reconciler] periodic tick error:", err instanceof Error ? err.message : err),
-  //     );
-  //   };
-  //   const timer = setTimeout(tick, 35_000);
-  //   const interval = setInterval(tick, ANCESTOR_RECONCILE_INTERVAL_MS);
-  //   // Unref so these timers don't prevent the process from exiting during tests.
-  //   (timer as NodeJS.Timeout).unref?.();
-  //   (interval as NodeJS.Timeout).unref?.();
-  // }
+  {
+    const ANCESTOR_RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
+    const tick = () => {
+      reconcileAncestorBranchWorkspaces().catch((err) =>
+        console.warn("[ancestor-reconciler] periodic tick error:", err instanceof Error ? err.message : err),
+      );
+    };
+    const timer = setTimeout(tick, 35_000);
+    const interval = setInterval(tick, ANCESTOR_RECONCILE_INTERVAL_MS);
+    // Unref so these timers don't prevent the process from exiting during tests.
+    (timer as NodeJS.Timeout).unref?.();
+    (interval as NodeJS.Timeout).unref?.();
+  }
   // Autonomous Monitor Butler — cron-driven board-health agent (gated by the
   // monitor_butler_enabled preference; off by default). See services/monitor-butler.ts.
   startMonitorButler();
