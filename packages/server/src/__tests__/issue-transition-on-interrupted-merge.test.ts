@@ -214,8 +214,10 @@ describe("interrupted merge — Path B: server crashed before mergedAt was writt
       branchSha: `sha-${branch}`,
       baseSha: `sha-${base}`,
     }));
+    // The workspace has real commits — countCommits must return > 0 to allow reconciliation.
+    const countCommits = vi.fn(async () => 1);
 
-    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor });
+    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor, countCommits });
 
     expect(count).toBe(1);
     expect(await getIssueStatusName(db, issueId)).toBe("Done");
@@ -249,9 +251,10 @@ describe("interrupted merge — Path B: server crashed before mergedAt was writt
       branchSha: `sha-${branch}`,
       baseSha: `sha-${base}`,
     }));
+    const countCommits = vi.fn(async () => 1);
 
-    const firstRun = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor });
-    const secondRun = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor });
+    const firstRun = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor, countCommits });
+    const secondRun = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor, countCommits });
 
     expect(firstRun).toBe(1);
     expect(secondRun).toBe(0);
@@ -266,8 +269,9 @@ describe("interrupted merge — Path B: server crashed before mergedAt was writt
       branchSha: `sha-${branch}`,
       baseSha: `sha-${base}`,
     }));
+    const countCommits = vi.fn(async () => 1);
 
-    await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor });
+    await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor, countCommits });
 
     // Confirm the workspace was reconciled correctly (branch was ancestor, hence closed)
     const [ws] = await db.select({ status: workspaces.status, mergedAt: workspaces.mergedAt, branch: workspaces.branch, baseBranch: workspaces.baseBranch })
