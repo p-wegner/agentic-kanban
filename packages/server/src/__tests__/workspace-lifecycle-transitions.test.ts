@@ -288,10 +288,8 @@ describe("lifecycle: 0-unique-commit workspace is NOT silently moved to Done", (
 
     // Branch tip is an ancestor (tip==base or empty branch), but no actual commits.
     // The guard should bypass reconciliation and fall through to the real merge path.
-    let ancestorCallCount = 0;
     const git = makeGit({
       checkBranchTipIsAncestor: vi.fn(async () => {
-        ancestorCallCount++;
         // Both pre- and post-merge checks: branch IS ancestor but has 0 unique commits
         return { isAncestor: true as const, branchSha: "base-sha", baseSha: "base-sha" };
       }),
@@ -307,18 +305,17 @@ describe("lifecycle: 0-unique-commit workspace is NOT silently moved to Done", (
       processKiller: async () => 0,
     });
 
-    // With 0 unique commits the pre-merge ancestor check is a no-op guard.
-    // The merge path continues and completes (up-to-date merge is still valid).
-    // What matters: the issue is closed via the normal path, not via reconcile.
-    // We just verify the zero-commit guard ran (countUniqueCommits was consulted).
-    try {
-      await svc.mergeWorkspace(workspaceId);
-    } catch {
-      // May throw if post-merge invariant isn't satisfied — that's acceptable here.
-    }
+    const result = await svc.mergeWorkspace(workspaceId);
 
-    // Regardless of outcome: countUniqueCommits must have been called to check the guard.
+    expect(result.merged).toBe(true);
     expect(git.countUniqueCommits).toHaveBeenCalled();
+    expect(git.mergeBranch).toHaveBeenCalled();
+
+    const [ws] = await db.select({ status: workspaces.status, mergedAt: workspaces.mergedAt })
+      .from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.status).toBe("closed");
+    expect(ws.mergedAt).toBeTruthy();
+    expect(await getIssueStatusName(db, issueId)).toBe("Done");
   });
 
   it("issue remains In Review when no-diff branch cannot be merged (conflict guard)", async () => {
