@@ -128,6 +128,22 @@ const issueTypeColors: Record<string, string> = {
   chore: "bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-200",
 };
 
+const DEFAULT_ISSUE_TYPE = "task";
+const DEFAULT_ISSUE_TYPE_CLASS = "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300";
+
+export interface IssueDisplayData {
+  issueType: string;
+  issueTypeClassName: string;
+}
+
+export function useIssueDisplayData(issue: IssueWithStatus): IssueDisplayData {
+  const issueType = issue.issueType ?? DEFAULT_ISSUE_TYPE;
+  return {
+    issueType,
+    issueTypeClassName: issueTypeColors[issueType] ?? DEFAULT_ISSUE_TYPE_CLASS,
+  };
+}
+
 function CodeMetricsBadges({
   commitCount,
   metrics,
@@ -275,7 +291,7 @@ function IssueCardImpl({ issue, onClick, onWorkspaceClick, onOpenDiff, onStartWo
     : agingDays < agingHotDays
     ? "warm"
     : "hot";
-  const typeBadgeColor = issue.issueType ? (issueTypeColors[issue.issueType] ?? null) : null;
+  const { issueType, issueTypeClassName: typeBadgeColor } = useIssueDisplayData(issue);
   const priorityBadgeColor = issue.priority && issue.priority !== "medium" ? (priorityColors[issue.priority] ?? null) : null;
   const priorityAccentColor = issue.priority ? (PRIORITY_META.find((p) => p.key === issue.priority)?.color ?? null) : null;
   const ws = issue.workspaceSummary;
@@ -756,7 +772,7 @@ function IssueCardImpl({ issue, onClick, onWorkspaceClick, onOpenDiff, onStartWo
         ) : null}
         {typeBadgeColor && (
           <span className={`inline-block max-w-full truncate text-xs font-medium px-1.5 py-0.5 rounded capitalize ${typeBadgeColor}`}>
-            {issue.issueType}
+            {issueType}
           </span>
         )}
         {quickUpdate ? (
