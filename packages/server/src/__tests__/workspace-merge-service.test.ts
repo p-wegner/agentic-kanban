@@ -4,6 +4,11 @@
  *   1. Clean merge: advances the base branch, workspace closes, issue moves to Done.
  *   2. Already-merged (tip is ancestor): reconciles as no-op instead of throwing 409.
  *   3. Idempotency on retry: mergedAt workspace returns a deterministic 409 body.
+ *
+ * Also covers the state machine paths from ticket #610:
+ *   4. conflict-ready: conflict detected → throws CONFLICT, clears readyForMerge.
+ *   5. conflict-ready (behind): rebase fails → conflict-ready with behindCount.
+ *   6. error-skip: dirty-main → throws CONFLICT without git merge.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
@@ -11,6 +16,7 @@ import { eq } from "drizzle-orm";
 import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
+import { resolveMergeState, WorkspaceError } from "../services/workspace-internals.js";
 
 function makeGit(overrides: Partial<Record<string, (...a: unknown[]) => unknown>> = {}) {
   return {
@@ -342,5 +348,320 @@ describe("MergeService — merge from fixing status moves issue to Done", () => 
     const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
     const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
     expect(status.name).toBe("Done");
+  });
+});
+
+// ─── resolveMergeState unit tests (#610) ─────────────────────────────────────
+
+function makeWorkspace(overrides: Partial<typeof workspaces.$inferSelect> = {}): typeof workspaces.$inferSelect {
+  const now = new Date().toISOString();
+  return {
+    id: randomUUID(),
+    issueId: randomUUID(),
+    branch: "feature/ak-548-test",
+    workingDir: "/repo/.worktrees/feature_ak-548-test",
+    baseBranch: "master",
+    isDirect: false,
+    status: "idle",
+    readyForMerge: true,
+    mergedAt: null,
+    provider: "claude",
+    createdAt: now,
+    updatedAt: now,
+    closedAt: null,
+    claudeProfile: null,
+    baseCommitSha: null,
+    requiresReview: false,
+    thoroughReview: false,
+    planMode: false,
+    tddMode: false,
+    includeVisualProof: false,
+    skillId: null,
+    cleanupWarning: null,
+    agentCommand: null,
+    model: null,
+    pendingPlanPath: null,
+    currentNodeId: null,
+    parentWorkspaceId: null,
+    forkNodeId: null,
+    forkJoinNodeId: null,
+    forkStatus: null,
+    showdownId: null,
+    showdownLabel: null,
+    conflictCacheCheckedAt: null,
+    conflictCacheHasConflicts: null,
+    conflictCacheFiles: null,
+    diffStatCacheCheckedAt: null,
+    diffStatCacheHeadSha: null,
+    diffStatCacheFilesChanged: null,
+    diffStatCacheInsertions: null,
+    diffStatCacheDeletions: null,
+    scorecardScore: null,
+    scorecardJson: null,
+    scorecardComputedAt: null,
+    codeMetricsJson: null,
+    codeMetricsComputedAt: null,
+    latestSetupCommand: null,
+    latestSetupState: null,
+    latestSetupStartedAt: null,
+    latestSetupEndedAt: null,
+    latestSetupExitCode: null,
+    latestSetupDurationMs: null,
+    latestSetupStdoutTail: null,
+    latestSetupStderrTail: null,
+    latestSymlinkState: null,
+    latestSymlinkStartedAt: null,
+    latestSymlinkEndedAt: null,
+    latestSymlinkDirs: null,
+    latestSymlinkLinked: null,
+    latestSymlinkSkipped: null,
+    latestSymlinkFailed: null,
+    latestSymlinkError: null,
+    contextPrimer: null,
+    ...overrides,
+  };
+}
+
+function makeGitForStateMachine(overrides: Partial<Record<string, (...a: unknown[]) => unknown>> = {}) {
+  return {
+    checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: false, branchSha: "sha-branch", baseSha: "sha-base" })),
+    countUniqueCommits: vi.fn(async () => 1),
+    getUncommittedTrackedChanges: vi.fn(async () => [] as string[]),
+    countBehindCommits: vi.fn(async () => 0),
+    rebaseOntoBase: vi.fn(async () => ({ success: true })),
+    abortRebase: vi.fn(async () => {}),
+    detectConflicts: vi.fn(async () => ({ hasConflicts: false, conflictingFiles: [] as string[] })),
+    ...overrides,
+  };
+}
+
+describe("resolveMergeState — already-merged (mergedAt set)", () => {
+  it("returns already-merged when mergedAt is stamped regardless of status", async () => {
+    const ws = makeWorkspace({ mergedAt: new Date().toISOString(), status: "idle" });
+    const git = makeGitForStateMachine();
+    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    expect(result.kind).toBe("already-merged");
+    expect(git.checkBranchTipIsAncestor).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveMergeState — direct-close", () => {
+  it("returns direct-close for isDirect workspaces", async () => {
+    const ws = makeWorkspace({ isDirect: true });
+    const git = makeGitForStateMachine();
+    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    expect(result.kind).toBe("direct-close");
+  });
+});
+
+describe("resolveMergeState — reconcile (branch already ancestor)", () => {
+  it("returns reconcile when branch tip is ancestor with ≥1 unique commit", async () => {
+    const ws = makeWorkspace();
+    const git = makeGitForStateMachine({
+      checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: true, branchSha: "sha-branch", baseSha: "sha-base" })),
+      countUniqueCommits: vi.fn(async () => 3),
+    });
+    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    expect(result.kind).toBe("reconcile");
+    if (result.kind === "reconcile") {
+      expect(result.branchSha).toBe("sha-branch");
+      expect(result.baseSha).toBe("sha-base");
+      expect(result.uniqueCommits).toBe(3);
+    }
+  });
+
+  it("falls through to proceed when branch is trivially an ancestor (0 unique commits)", async () => {
+    const ws = makeWorkspace();
+    const git = makeGitForStateMachine({
+      checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: true, branchSha: "sha-branch", baseSha: "sha-base" })),
+      countUniqueCommits: vi.fn(async () => 0),
+    });
+    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    expect(result.kind).toBe("proceed");
+  });
+});
+
+describe("resolveMergeState — conflict-ready (direct conflict detection)", () => {
+  it("returns conflict-ready when detectConflicts finds conflicts", async () => {
+    const ws = makeWorkspace();
+    const git = makeGitForStateMachine({
+      detectConflicts: vi.fn(async () => ({ hasConflicts: true, conflictingFiles: ["src/foo.ts", "src/bar.ts"] })),
+    });
+    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    expect(result.kind).toBe("conflict-ready");
+    if (result.kind === "conflict-ready") {
+      expect(result.conflictFiles).toEqual(["src/foo.ts", "src/bar.ts"]);
+      expect(result.behindCount).toBeUndefined();
+      expect(result.error).toBeInstanceOf(WorkspaceError);
+      expect(result.error.data).toMatchObject({ mergeReason: "conflict" });
+    }
+  });
+
+  it("does not set behindCount on a direct conflict (branch is up-to-date)", async () => {
+    const ws = makeWorkspace();
+    const git = makeGitForStateMachine({
+      countBehindCommits: vi.fn(async () => 0),
+      detectConflicts: vi.fn(async () => ({ hasConflicts: true, conflictingFiles: ["src/x.ts"] })),
+    });
+    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    if (result.kind === "conflict-ready") {
+      expect(result.behindCount).toBeUndefined();
+    }
+  });
+});
+
+describe("resolveMergeState — conflict-ready (rebase fails when behind)", () => {
+  it("returns conflict-ready with behindCount when auto-rebase finds conflicts", async () => {
+    const ws = makeWorkspace();
+    const git = makeGitForStateMachine({
+      countBehindCommits: vi.fn(async () => 5),
+      rebaseOntoBase: vi.fn(async () => ({ success: false, conflictingFiles: ["src/service.ts"] })),
+      abortRebase: vi.fn(async () => {}),
+    });
+    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    expect(result.kind).toBe("conflict-ready");
+    if (result.kind === "conflict-ready") {
+      expect(result.behindCount).toBe(5);
+      expect(result.conflictFiles).toEqual(["src/service.ts"]);
+      expect(result.error.data).toMatchObject({ mergeReason: "conflict", behindCount: 5 });
+    }
+  });
+
+  it("aborts the leftover rebase state so the worktree is usable for fix-and-merge", async () => {
+    const ws = makeWorkspace();
+    const abortRebase = vi.fn(async () => {});
+    const git = makeGitForStateMachine({
+      countBehindCommits: vi.fn(async () => 2),
+      rebaseOntoBase: vi.fn(async () => ({ success: false, conflictingFiles: [] })),
+      abortRebase,
+    });
+    await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    expect(abortRebase).toHaveBeenCalledWith(ws.workingDir);
+  });
+
+  it("proceeds to conflict detection when auto-rebase succeeds", async () => {
+    const ws = makeWorkspace();
+    const git = makeGitForStateMachine({
+      countBehindCommits: vi.fn(async () => 3),
+      rebaseOntoBase: vi.fn(async () => ({ success: true })),
+      detectConflicts: vi.fn(async () => ({ hasConflicts: false, conflictingFiles: [] })),
+    });
+    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    expect(result.kind).toBe("proceed");
+  });
+});
+
+describe("resolveMergeState — error-skip (dirty main checkout)", () => {
+  it("returns error-skip when main checkout has uncommitted tracked changes", async () => {
+    const ws = makeWorkspace();
+    const git = makeGitForStateMachine({
+      getUncommittedTrackedChanges: vi.fn(async () => ["packages/server/src/index.ts"]),
+    });
+    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    expect(result.kind).toBe("error-skip");
+    if (result.kind === "error-skip") {
+      expect(result.error.data).toMatchObject({ mergeReason: "dirty_main" });
+      expect(result.error.code).toBe("CONFLICT");
+    }
+  });
+
+  it("proceeds when main checkout is clean", async () => {
+    const ws = makeWorkspace();
+    const git = makeGitForStateMachine({
+      getUncommittedTrackedChanges: vi.fn(async () => []),
+    });
+    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    expect(result.kind).toBe("proceed");
+  });
+});
+
+describe("resolveMergeState — proceed (all checks pass)", () => {
+  it("returns proceed when branch has no conflicts and is up-to-date", async () => {
+    const ws = makeWorkspace();
+    const git = makeGitForStateMachine();
+    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    expect(result.kind).toBe("proceed");
+  });
+});
+
+// ─── Integration: conflict-ready through mergeWorkspace (#610) ───────────────
+
+describe("MergeService — conflict-ready clears readyForMerge and throws", () => {
+  let db: ReturnType<typeof createTestDb>["db"];
+
+  beforeEach(() => {
+    ({ db } = createTestDb());
+  });
+
+  it("throws CONFLICT with mergeReason=conflict and clears readyForMerge flag", async () => {
+    const { workspaceId } = await seedWorkspace(db, { readyForMerge: true });
+    const git = makeGit({
+      detectConflicts: async () => ({ hasConflicts: true, conflictingFiles: ["src/foo.ts"] }),
+    });
+
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+
+    await expect(svc.mergeWorkspace(workspaceId)).rejects.toMatchObject({
+      code: "CONFLICT",
+      data: expect.objectContaining({ mergeReason: "conflict" }),
+    });
+
+    const [ws] = await db.select({ readyForMerge: workspaces.readyForMerge })
+      .from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.readyForMerge).toBe(false);
+  });
+
+  it("does not call mergeBranch when conflicts are detected", async () => {
+    const { workspaceId } = await seedWorkspace(db, { readyForMerge: true });
+    const mergeBranch = vi.fn(async () => "");
+    const git = makeGit({
+      mergeBranch,
+      detectConflicts: async () => ({ hasConflicts: true, conflictingFiles: ["src/foo.ts"] }),
+    });
+
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+
+    await expect(svc.mergeWorkspace(workspaceId)).rejects.toThrow();
+    expect(mergeBranch).not.toHaveBeenCalled();
+  });
+});
+
+describe("MergeService — error-skip (dirty main) throws without git merge", () => {
+  let db: ReturnType<typeof createTestDb>["db"];
+
+  beforeEach(() => {
+    ({ db } = createTestDb());
+  });
+
+  it("throws CONFLICT with mergeReason=dirty_main when main checkout is dirty", async () => {
+    const { workspaceId } = await seedWorkspace(db, { readyForMerge: true });
+    const mergeBranch = vi.fn(async () => "");
+    const git = makeGit({
+      mergeBranch,
+      getUncommittedTrackedChanges: async () => ["packages/server/src/index.ts"],
+    });
+
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+
+    await expect(svc.mergeWorkspace(workspaceId)).rejects.toMatchObject({
+      code: "CONFLICT",
+      data: expect.objectContaining({ mergeReason: "dirty_main" }),
+    });
+    expect(mergeBranch).not.toHaveBeenCalled();
   });
 });
