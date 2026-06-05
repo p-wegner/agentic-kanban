@@ -312,9 +312,11 @@ function isBranchCheckedOutElsewhereError(err: unknown): boolean {
 /**
  * Scan a git tree object for files whose blob content contains conflict markers.
  * Uses `git grep` on the tree SHA — never touches the working tree.
+ * When `pathspecs` is provided, only those files are scanned (avoids false positives
+ * from pre-existing files in master that legitimately contain "<<<<<<<" in docs/tests).
  * Returns an array of conflicting file paths (empty = no markers found).
  */
-async function scanTreeForConflictMarkers(repoPath: string, treeSha: string): Promise<string[]> {
+async function scanTreeForConflictMarkers(repoPath: string, treeSha: string, pathspecs?: string[]): Promise<string[]> {
   return new Promise((resolve) => {
     // git grep exits 0 when matches found, 1 when no matches, 128+ on error.
     // We treat all errors as "no markers" (safe default — the stage-entry check
@@ -322,9 +324,13 @@ async function scanTreeForConflictMarkers(repoPath: string, treeSha: string): Pr
     // Use --perl-regexp with ^ anchor so we only match lines where "<<<<<<<" starts
     // the line (i.e. actual git conflict markers), not string literals or comments
     // that happen to contain the substring.
+    const args = ["grep", "--name-only", "-l", "--perl-regexp", "-e", "^<<<<<<<", treeSha];
+    if (pathspecs && pathspecs.length > 0) {
+      args.push("--", ...pathspecs);
+    }
     execFile(
       "git",
-      ["grep", "--name-only", "-l", "--perl-regexp", "-e", "^<<<<<<<", treeSha],
+      args,
       { cwd: repoPath, maxBuffer: 10 * 1024 * 1024 },
       (_err, stdout) => {
         const output = stdout.toString().trim();
@@ -478,9 +484,16 @@ export async function mergeBranch(
     throw new Error(`Merge conflict detected (git merge-tree exit 1) in ${featureBranch} → ${targetBranch}: stage entries may be missing. Aborting to prevent committing conflict markers.`);
   }
 
-  // Secondary scan: check the merged tree's blob content for conflict markers.
-  // Uses `git grep` on the written tree SHA (cheaper than cat-file per blob).
-  const conflictingFilesFromTree = await scanTreeForConflictMarkers(repoPath, treeSha);
+  // Secondary scan: check only files changed by featureBranch for conflict markers.
+  // Scoping to changed files prevents false positives from pre-existing files in
+  // targetBranch that legitimately contain "<<<<<<" (docs, tests, skill files).
+  const changedFiles = (await execGit(
+    ["diff", "--name-only", `${targetBranch}...${featureBranch}`],
+    repoPath,
+  )).trim().split("\n").map((f) => f.replace(/\r$/, "")).filter(Boolean);
+  const conflictingFilesFromTree = changedFiles.length > 0
+    ? await scanTreeForConflictMarkers(repoPath, treeSha, changedFiles)
+    : [];
   if (conflictingFilesFromTree.length > 0) {
     throw new Error(`Merge conflict markers found in tree for: ${conflictingFilesFromTree.join(", ")}`);
   }
