@@ -321,7 +321,7 @@ async function scanTreeForConflictMarkers(repoPath: string, treeSha: string): Pr
     // is the primary gate; this is belt-and-suspenders only).
     execFile(
       "git",
-      ["grep", "--name-only", "-l", "-e", "<<<<<<<", treeSha],
+      ["grep", "--name-only", "-l", "--perl-regexp", "-e", "^<<<<<<<", treeSha],
       { cwd: repoPath, maxBuffer: 10 * 1024 * 1024 },
       (_err, stdout) => {
         const output = stdout.toString().trim();
