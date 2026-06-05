@@ -154,6 +154,26 @@ export async function resolveMergeState(
   }
 
   // Branch-level checks require a non-null workingDir; skip cleanly if absent.
+  // Dirty-main guard: main checkout must not have uncommitted tracked changes.
+  if (!workspace.isDirect && typeof gitService.getUncommittedTrackedChanges === "function") {
+    try {
+      const uncommitted = await gitService.getUncommittedTrackedChanges(repoPath);
+      if (uncommitted.length > 0) {
+        return {
+          kind: "error-skip",
+          error: new WorkspaceError(
+            `Main checkout has ${uncommitted.length} uncommitted tracked change(s) — commit or stash those changes first.`,
+            "CONFLICT",
+            { mergeReason: "dirty_main", uncommittedFiles: uncommitted },
+          ),
+        };
+      }
+    } catch (err) {
+      if (err instanceof WorkspaceError) return { kind: "error-skip", error: err };
+      // Non-fatal: getUncommittedTrackedChanges is a best-effort guard.
+    }
+  }
+
   if (workspace.workingDir) {
     // Ancestry check: if the branch tip is already reachable from the base, the work
     // was merged in a previous run that didn't update the DB.  Guard: require ≥1
@@ -166,26 +186,6 @@ export async function resolveMergeState(
       const uniqueCommits = await gitService.countUniqueCommits(repoPath, baseSha, branchSha).catch(() => 0);
       if (uniqueCommits > 0) {
         return { kind: "reconcile", branchSha, baseSha, uniqueCommits };
-      }
-    }
-
-    // Dirty-main guard: main checkout must not have uncommitted tracked changes.
-    if (typeof gitService.getUncommittedTrackedChanges === "function") {
-      try {
-        const uncommitted = await gitService.getUncommittedTrackedChanges(repoPath);
-        if (uncommitted.length > 0) {
-          return {
-            kind: "error-skip",
-            error: new WorkspaceError(
-              `Main checkout has ${uncommitted.length} uncommitted tracked change(s) — commit or stash those changes first.`,
-              "CONFLICT",
-              { mergeReason: "dirty_main", uncommittedFiles: uncommitted },
-            ),
-          };
-        }
-      } catch (err) {
-        if (err instanceof WorkspaceError) return { kind: "error-skip", error: err };
-        // Non-fatal: getUncommittedTrackedChanges is a best-effort guard.
       }
     }
 
