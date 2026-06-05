@@ -178,10 +178,12 @@ export async function getIssuesByProject(
   projectId: string,
   issueNumber?: number,
   database: Database = db,
+  statusName?: string,
 ) {
-  const whereClause = issueNumber
-    ? and(eq(issues.projectId, projectId), eq(issues.issueNumber, issueNumber))
-    : eq(issues.projectId, projectId);
+  const conditions = [eq(issues.projectId, projectId)];
+  if (issueNumber !== undefined) conditions.push(eq(issues.issueNumber, issueNumber));
+  if (statusName !== undefined) conditions.push(eq(projectStatuses.name, statusName));
+  const whereClause = conditions.length === 1 ? conditions[0] : and(...conditions);
 
   return database
     .select({
