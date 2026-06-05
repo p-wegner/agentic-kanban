@@ -431,6 +431,8 @@ export interface StatusWithIssues {
   projectId: string;
   sortOrder: number;
   issues: IssueWithStatus[];
+  /** Total issue count for this column. For terminal columns (Done/Cancelled) only the most-recent N issues are included in `issues`; `count` exposes the true total. */
+  count: number;
 }
 
 export interface CreateWorkspaceRequest {

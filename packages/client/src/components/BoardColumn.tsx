@@ -370,7 +370,11 @@ export function BoardColumn({
                     : "bg-surface-raised/80 dark:bg-gray-900/80 text-ink-faint dark:text-gray-500"
                 }`}
               >
-                {wipLimit != null ? `${column.issues.length} / ${wipLimit}` : column.issues.length}
+                {wipLimit != null
+                  ? `${column.issues.length} / ${wipLimit}`
+                  : column.count > column.issues.length
+                    ? `${column.issues.length} of ${column.count}`
+                    : column.count}
               </span>
             )}
           </h2>
