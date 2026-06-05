@@ -335,6 +335,51 @@ export function createWorkspaceMergeService(deps: {
         }
       }
 
+      // If the branch is behind base (master advanced since it was marked ready),
+      // attempt a clean rebase first. This handles the "stale ready flag" scenario
+      // where the flag was set against an older base and master since advanced.
+      // If behind > 0, rebase succeeds → proceed to merge; rebase fails (real
+      // conflict) → downgrade readyForMerge and throw so the monitor stops churning.
+      let behindCount = 0;
+      try {
+        if (typeof gitService.countBehindCommits === "function") {
+          behindCount = await gitService.countBehindCommits(repoPath, workspace.branch, baseBranch);
+        }
+      } catch (err) {
+        console.warn("[workspace-merge] behind-count check failed (non-fatal):", err instanceof Error ? err.message : String(err));
+      }
+
+      if (behindCount > 0) {
+        console.log(`[workspace-merge] branch ${workspace.branch} is ${behindCount} commit(s) behind ${baseBranch}; attempting auto-rebase before merge`);
+        const rebaseResult = await gitService.rebaseOntoBase(workspace.workingDir, baseBranch, workspace.branch, { preferLocalBase: true });
+        if (!rebaseResult.success) {
+          // Real content conflict after rebase attempt — downgrade the stale flag so
+          // auto-merge stops churning, then surface the conflict for fix-and-merge.
+          try {
+            await database.update(workspaces).set({ readyForMerge: false, updatedAt: new Date().toISOString() }).where(eq(workspaces.id, id));
+          } catch (dbErr) {
+            console.warn("[workspace-merge] failed to clear stale readyForMerge flag:", dbErr instanceof Error ? dbErr.message : String(dbErr));
+          }
+          const conflictFiles = rebaseResult.conflictingFiles ?? [];
+          await recordMergeAttempt(
+            workspace,
+            "conflict",
+            `Merge blocked: branch ${workspace.branch} was ${behindCount} commit(s) behind ${baseBranch} and rebase found conflicts in ${conflictFiles.length} file(s): ${conflictFiles.join(", ")}. readyForMerge cleared.`,
+            { targetBranch: baseBranch, conflictingFiles: conflictFiles, behindCount },
+          );
+          // Abort the leftover rebase state so the worktree is usable for fix-and-merge.
+          try {
+            await gitService.abortRebase(workspace.workingDir);
+          } catch { /* best-effort */ }
+          throw new WorkspaceError(
+            `Merge conflicts detected after auto-rebase (branch was ${behindCount} commit(s) behind ${baseBranch})`,
+            "CONFLICT",
+            { mergeReason: "conflict", conflictFiles, behindCount },
+          );
+        }
+        console.log(`[workspace-merge] auto-rebase succeeded; branch ${workspace.branch} is now up-to-date with ${baseBranch}`);
+      }
+
       const conflicts = await gitService.detectConflicts(workspace.workingDir, baseBranch);
       if (conflicts.hasConflicts) {
         await recordMergeAttempt(
