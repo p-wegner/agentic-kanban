@@ -1,20 +1,19 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { issues, projectStatuses, projects } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceCrudService } from "../services/workspace-crud.service.js";
 
 /**
- * Regression tests for AK-501: POST /api/workspaces must always return a
- * well-formed response — never drop the HTTP connection.
+ * Regression tests for POST /api/workspaces connection-drop hardening.
  *
- * Previously, a post-insert agent-launch failure would roll back the workspace
- * row and re-throw, causing the route to return 500 and the connection to be
- * dropped. The monitor would then retry and create a duplicate workspace.
+ * AK-501: a post-insert agent-launch failure must return 201 with the workspace
+ * record (never roll back and re-throw, which dropped the HTTP connection).
  *
- * After the fix: any failure that occurs after the workspace row is committed
- * returns 201 with the workspace record and an `error` field — identical to the
- * pre-insert failure path (handleCreateFailure).
+ * AK-587: agent launch is now deferred via setImmediate so the HTTP response is
+ * sent BEFORE launch begins.  A slow or failing launch must never block the
+ * response — the caller gets the workspace record immediately and launch proceeds
+ * in the background.
  */
 
 function makeGitService(overrides: Record<string, unknown> = {}) {
@@ -69,17 +68,71 @@ async function seedIssue(db: ReturnType<typeof createTestDb>["db"]) {
   return { projectId, issueId };
 }
 
-describe("workspace creation hardening (AK-501)", () => {
+describe("workspace creation hardening (AK-501 / AK-587)", () => {
   let db: ReturnType<typeof createTestDb>["db"];
 
   beforeEach(() => {
     ({ db } = createTestDb());
+    vi.useFakeTimers();
   });
 
-  it("returns a well-formed response when agent launch fails after worktree is created", async () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("resolves immediately without waiting for agent launch (AK-587: no connection drop)", async () => {
     const { issueId } = await seedIssue(db);
 
-    const git = makeGitService();
+    let launchResolved = false;
+    const slowSessionManager = {
+      startSession: vi.fn(async () => {
+        // Simulate a slow agent launch that takes a long time
+        await new Promise<void>((resolve) => setTimeout(resolve, 10_000));
+        launchResolved = true;
+        return "mock-session-id";
+      }),
+      stopSession: vi.fn(async () => true),
+      subscribe: vi.fn(),
+      unsubscribe: vi.fn(),
+    };
+
+    const svc = createWorkspaceCrudService({
+      database: db,
+      getSessionManager: () => slowSessionManager as never,
+      gitService: makeGitService() as never,
+    });
+
+    const createPromise = svc.createWorkspace({
+      issueId,
+      branch: "feature/ak-1-test",
+      isDirect: false,
+      requiresReview: false,
+      thoroughReview: false,
+      planMode: false,
+      tddMode: false,
+      includeVisualProof: false,
+      skipSetup: true,
+      skipContextPacker: true,
+    });
+
+    // createWorkspace should resolve in the current microtask queue (before setImmediate fires)
+    // Use runAllTicks (microtasks only) — if the result isn't ready before setImmediate it will still
+    // be pending; we then run setImmediate to trigger the deferred launch and confirm the create
+    // already resolved.
+    const result = await createPromise;
+
+    // The workspace record is returned immediately — agent launch has not completed yet
+    expect(result.id).toBeTruthy();
+    expect(result.issueId).toBe(issueId);
+    expect(result.status).toBe("active");
+    expect(result.createdAt).toBeTruthy();
+    // launchResolved is still false because the fake 10s timer hasn't fired
+    expect(launchResolved).toBe(false);
+  });
+
+  it("workspace status updated to idle in background when deferred launch fails (AK-587)", async () => {
+    const { issueId } = await seedIssue(db);
+
     const failingSessionManager = {
       startSession: vi.fn(async () => { throw new Error("agent binary not found"); }),
       stopSession: vi.fn(async () => true),
@@ -90,10 +143,9 @@ describe("workspace creation hardening (AK-501)", () => {
     const svc = createWorkspaceCrudService({
       database: db,
       getSessionManager: () => failingSessionManager as never,
-      gitService: git as never,
+      gitService: makeGitService() as never,
     });
 
-    // Must resolve — not throw — even when agent launch fails
     const result = await svc.createWorkspace({
       issueId,
       branch: "feature/ak-1-test",
@@ -107,17 +159,19 @@ describe("workspace creation hardening (AK-501)", () => {
       skipContextPacker: true,
     });
 
-    // Response must be a well-formed workspace record
+    // Response comes back as active — the failure hasn't happened yet
     expect(result.id).toBeTruthy();
-    expect(result.issueId).toBe(issueId);
-    expect(result.branch).toBe("feature/ak-1-test");
-    // Error field signals that launch failed without 500
-    expect(result.error).toMatch(/agent binary not found/);
-    // Status should be idle (row exists, agent never started)
-    expect(result.status).toBe("idle");
-    // Response has required timestamp fields
-    expect(result.createdAt).toBeTruthy();
-    expect(result.updatedAt).toBeTruthy();
+    expect(result.status).toBe("active");
+    expect(result.error).toBeUndefined();
+
+    // Let the deferred setImmediate fire and the failing launch + DB update run
+    await vi.runAllTimersAsync();
+
+    // The background handler should have updated the workspace status to idle
+    const { workspaces } = await import("@agentic-kanban/shared/schema");
+    const { eq } = await import("drizzle-orm");
+    const [row] = await db.select({ status: workspaces.status }).from(workspaces).where(eq(workspaces.id, result.id));
+    expect(row?.status).toBe("idle");
   });
 
   it("returns a well-formed response when worktree creation itself fails (pre-insert)", async () => {
@@ -192,7 +246,8 @@ describe("workspace creation hardening (AK-501)", () => {
     expect(result.id).toBeTruthy();
     expect(result.issueId).toBe(issueId);
     expect(result.status).toBe("active");
-    expect(result.sessionId).toBe("mock-session-id");
+    // sessionId is not in the synchronous return — launch is deferred via setImmediate
+    expect(result.sessionId).toBeUndefined();
     expect(result.error).toBeUndefined();
   });
 });
