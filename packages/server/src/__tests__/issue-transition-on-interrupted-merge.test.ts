@@ -53,11 +53,16 @@ function makeGit(overrides: Partial<Record<string, (...a: unknown[]) => unknown>
     getChangedFilesBetween: vi.fn(async () => []),
     getCurrentBranch: vi.fn(async () => "master"),
     autoRenumberMigrations: vi.fn(async () => ({ renumbered: false, renames: [] })),
-    checkBranchTipIsAncestor: vi.fn(async () => ({
-      isAncestor: false,
-      branchSha: "branch-sha-456",
-      baseSha: "base-sha-789",
-    })),
+    checkBranchTipIsAncestor: (() => {
+      let calls = 0;
+      return vi.fn(async () => {
+        calls++;
+        // First call: pre-merge check — not ancestor yet
+        // Second+ call: post-merge check — merge landed successfully
+        if (calls === 1) return { isAncestor: false as const, branchSha: "branch-sha-456", baseSha: "base-sha-789" };
+        return { isAncestor: true as const, branchSha: "branch-sha-456", baseSha: "merge-commit-sha" };
+      });
+    })(),
     getUncommittedTrackedChanges: vi.fn(async () => []),
     ...overrides,
   };
