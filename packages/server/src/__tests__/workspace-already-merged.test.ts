@@ -40,6 +40,8 @@ function makeGitService(overrides: Partial<{
     getChangedFilesBetween: vi.fn(async () => []),
     getCurrentBranch: vi.fn(async () => "master"),
     autoRenumberMigrations: vi.fn(async () => ({ renumbered: false, renames: [] })),
+    countUniqueCommits: vi.fn(async () => 1),
+    getUncommittedTrackedChanges: vi.fn(async () => []),
   };
 }
 
