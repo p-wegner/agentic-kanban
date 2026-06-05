@@ -1,6 +1,6 @@
 import { count } from "drizzle-orm/sql";
 import { issues, preferences, sessionMessages, sessions, workspaces } from "@agentic-kanban/shared/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, lt } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
@@ -73,15 +73,13 @@ export async function reconcileZombieFixSessions(deps: ZombieFixSessionReconcile
     .where(
       and(
         eq(sessions.status, "running"),
+        lt(sessions.startedAt, cutoff),
       ),
     );
 
-  // Filter in JS: triggerType in (fix-and-merge, review) and started before cutoff.
-  // Doing this in JS avoids a SQL `IN` that's harder to read, and the result set is small.
+  // Filter in JS: triggerType in (fix-and-merge, review).
   const fixOrReview = candidates.filter(
-    (s) =>
-      (s.triggerType === "fix-and-merge" || s.triggerType === "review") &&
-      s.startedAt < cutoff,
+    (s) => s.triggerType === "fix-and-merge" || s.triggerType === "review",
   );
 
   let recovered = 0;
@@ -110,18 +108,11 @@ export async function reconcileZombieFixSessions(deps: ZombieFixSessionReconcile
     if (msgCount > 0) continue; // Has output — not a zombie.
 
     // Zombie confirmed: dead process + zero messages + past grace window.
+    // Check workspace status first — only act on workspaces still in fixing/reviewing.
+    // A concurrent transition (e.g. manual stop + re-launch) may have already changed it.
     const now = new Date().toISOString();
 
     try {
-      // Mark session stopped.
-      await database
-        .update(sessions)
-        .set({ status: "stopped", endedAt: now })
-        .where(eq(sessions.id, s.sessionId));
-
-      // Reset the workspace to 'idle' so the monitor can re-trigger fix-and-merge.
-      // Only reset if the workspace is still in 'fixing' or 'reviewing' — a concurrent
-      // transition (e.g. manual stop + re-launch) may have already changed it.
       const wsRows = await database
         .select({ id: workspaces.id, status: workspaces.status, issueId: workspaces.issueId })
         .from(workspaces)
@@ -131,30 +122,36 @@ export async function reconcileZombieFixSessions(deps: ZombieFixSessionReconcile
       if (wsRows.length === 0) continue;
       const ws = wsRows[0];
 
-      if (ws.status === "fixing" || ws.status === "reviewing") {
-        await database
-          .update(workspaces)
-          .set({ status: "idle", updatedAt: now })
-          .where(eq(workspaces.id, s.workspaceId));
+      if (ws.status !== "fixing" && ws.status !== "reviewing") continue;
 
-        // Resolve projectId for the board broadcast.
-        const issueRows = await database
-          .select({ projectId: issues.projectId })
-          .from(issues)
-          .where(eq(issues.id, ws.issueId))
-          .limit(1);
-        const projectId = issueRows[0]?.projectId;
+      // Mark session stopped and reset workspace to idle atomically (best-effort).
+      await database
+        .update(sessions)
+        .set({ status: "stopped", endedAt: now })
+        .where(eq(sessions.id, s.sessionId));
 
-        if (projectId) {
-          deps.boardEvents.broadcast(projectId, "workspace_idle");
-          deps.boardEvents.broadcast(projectId, "issue_updated");
-        }
+      await database
+        .update(workspaces)
+        .set({ status: "idle", updatedAt: now })
+        .where(eq(workspaces.id, s.workspaceId));
 
-        console.log(
-          `[zombie-fix] stopped zombie ${s.triggerType} session ${s.sessionId} (ws=${s.workspaceId}, pid=${s.pid ?? "none"}, msgs=0, age=${Math.round((Date.now() - new Date(s.startedAt).getTime()) / 1000)}s) — workspace reset to idle`,
-        );
-        recovered++;
+      // Resolve projectId for the board broadcast.
+      const issueRows = await database
+        .select({ projectId: issues.projectId })
+        .from(issues)
+        .where(eq(issues.id, ws.issueId))
+        .limit(1);
+      const projectId = issueRows[0]?.projectId;
+
+      if (projectId) {
+        deps.boardEvents.broadcast(projectId, "workspace_idle");
+        deps.boardEvents.broadcast(projectId, "issue_updated");
       }
+
+      console.log(
+        `[zombie-fix] stopped zombie ${s.triggerType} session ${s.sessionId} (ws=${s.workspaceId}, pid=${s.pid ?? "none"}, msgs=0, age=${Math.round((Date.now() - new Date(s.startedAt).getTime()) / 1000)}s) — workspace reset to idle`,
+      );
+      recovered++;
     } catch (err) {
       console.warn(
         `[zombie-fix] failed to recover zombie session ${s.sessionId}:`,
