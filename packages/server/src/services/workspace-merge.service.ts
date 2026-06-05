@@ -734,7 +734,7 @@ export function createWorkspaceMergeService(deps: {
     if (mode === "merge") {
       result = await gitService.mergeBaseIntoBranch(workspace.workingDir, baseBranch);
     } else {
-      result = await gitService.rebaseOntoBase(workspace.workingDir, baseBranch, workspace.branch);
+      result = await gitService.rebaseOntoBase(workspace.workingDir, baseBranch, workspace.branch, { preferLocalBase: true });
     }
 
     // And again after — rebase/merge can spawn helpers (hook scripts, editors) that linger.

@@ -42,6 +42,8 @@ function makeGit(overrides: Partial<Record<string, (...a: unknown[]) => unknown>
     })(),
     getUncommittedTrackedChanges: vi.fn(async () => []),
     countUniqueCommits: vi.fn(async () => 1),
+    rebaseOntoBase: vi.fn(async () => ({ success: true })),
+    mergeBaseIntoBranch: vi.fn(async () => ({ success: true })),
     ...overrides,
   };
 }
@@ -256,6 +258,56 @@ describe("MergeService — idempotency: retry after dropped response", () => {
 
     await expect(svc.mergeWorkspace(workspaceId)).rejects.toThrow();
     expect(mergeBranch).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Path 4a: updateBase rebase uses local base, not origin (#601) ──────────
+
+describe("MergeService — updateBase rebase uses preferLocalBase", () => {
+  let db: ReturnType<typeof createTestDb>["db"];
+
+  beforeEach(() => {
+    ({ db } = createTestDb());
+  });
+
+  it("passes preferLocalBase:true to rebaseOntoBase so it rebases onto local master, not origin", async () => {
+    const { workspaceId } = await seedWorkspace(db, { status: "idle" });
+    const rebaseOntoBase = vi.fn(async () => ({ success: true }));
+    const git = makeGit({ rebaseOntoBase });
+
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+    await svc.updateBase(workspaceId, "rebase");
+
+    expect(rebaseOntoBase).toHaveBeenCalledWith(
+      "/repo/.worktrees/feature_ak-548-test",
+      "master",
+      "feature/ak-548-test",
+      { preferLocalBase: true },
+    );
+  });
+
+  it("does NOT pass preferLocalBase when using merge mode (different code path)", async () => {
+    const { workspaceId } = await seedWorkspace(db, { status: "idle" });
+    const mergeBaseIntoBranch = vi.fn(async () => ({ success: true }));
+    const git = makeGit({ mergeBaseIntoBranch });
+
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+    await svc.updateBase(workspaceId, "merge");
+
+    expect(mergeBaseIntoBranch).toHaveBeenCalledWith(
+      "/repo/.worktrees/feature_ak-548-test",
+      "master",
+    );
   });
 });
 
