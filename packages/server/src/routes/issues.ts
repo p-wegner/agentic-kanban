@@ -8,6 +8,7 @@ import type { SessionManager } from "../services/session.manager.js";
 import type { ShowdownContestant } from "@agentic-kanban/shared";
 import { analyzeDependencies, enhanceIssue, aiEstimateIssue, decomposeEpic, confirmEpicDecomposition, analyzeTouchedFiles } from "../services/issue-ai.service.js";
 import { createIssueService } from "../services/issue.service.js";
+import { getIssueDescription } from "../repositories/issue.repository.js";
 import { createIssueCommentsService } from "../services/issue-comments.service.js";
 import { createIssueTimeEntriesService } from "../services/issue-time-entries.service.js";
 import type { IssueCommentKind, IssueCommentAuthor } from "../repositories/issue-comments.repository.js";
@@ -311,6 +312,14 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
   router.get("/:id/activity", async (c) => {
     const issueId = c.req.param("id");
     const result = await getIssueActivity(issueId, database);
+    if (!result) return c.json({ error: "Issue not found" }, 404);
+    return c.json(result);
+  });
+
+  // GET /api/issues/:id — returns the issue with its full description (used for lazy-loading)
+  router.get("/:id", async (c) => {
+    const id = c.req.param("id");
+    const result = await getIssueDescription(id, database);
     if (!result) return c.json({ error: "Issue not found" }, 404);
     return c.json(result);
   });
