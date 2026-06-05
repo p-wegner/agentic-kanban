@@ -9,7 +9,7 @@ import type { SessionManager } from "../services/session.manager.js";
 import type { Database } from "../db/index.js";
 import { moveIssueToDone, updateWorkspaceStatus } from "../repositories/workspace.repository.js";
 import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
-import { reconcileAncestorBranchWorkspaces } from "./ancestor-branch-reconciler.js";
+// import { reconcileAncestorBranchWorkspaces } from "./ancestor-branch-reconciler.js"; // DISABLED (#581)
 
 /** Kill orphaned tsx server processes from previous hot-reload cycles (Windows only). */
 export function shouldKillOrphanedServerProcess(input: {
@@ -381,13 +381,16 @@ export async function runStartupTasks(sessionManager: SessionManager, _deps?: { 
   await abortStaleRebases();
   await cleanupStaleSessions(sessionManager);
   await reconcileSilentlyMergedWorkspaces();
-  // Catch workspaces whose branch was merged (git ancestry) but mergedAt was never written —
-  // runs after reconcileSilentlyMergedWorkspaces (mergedAt-based) so they don't overlap.
-  try {
-    await reconcileAncestorBranchWorkspaces();
-  } catch (err) {
-    console.warn("[startup] reconcileAncestorBranchWorkspaces failed (non-fatal):", err instanceof Error ? err.message : String(err));
-  }
+  // DISABLED (#581): the ancestor-branch reconciler treats any branch whose tip is an
+  // ancestor of base as "merged" — but a freshly-launched 0-commit workspace has its tip
+  // == base tip, which is trivially an ancestor, so it reaped every new In-Progress
+  // workspace as Done (mass silent-merge-loss observed 2026-06-05). Re-enable once #581
+  // adds the 0-commit / In-Progress guard.
+  // try {
+  //   await reconcileAncestorBranchWorkspaces();
+  // } catch (err) {
+  //   console.warn("[startup] reconcileAncestorBranchWorkspaces failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  // }
   await pruneStaleWorktrees();
   await checkMainCheckoutHeads();
 }
