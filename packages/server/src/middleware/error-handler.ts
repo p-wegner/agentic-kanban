@@ -63,11 +63,12 @@ export function domainErrorHandler(err: Error, c: Context): Response {
 
   const domainErr = toDomainError(err);
   if (domainErr) {
-    // Structured response for merge endpoint: return { reason, message, conflictFiles? }
+    // Structured response for merge endpoint: return { reason, message, conflictFiles?, blockingFiles? }
     if (domainErr instanceof WorkspaceError && domainErr.data?.mergeReason) {
       const reason = domainErr.data.mergeReason as string;
       const body: Record<string, unknown> = { reason, message: domainErr.message };
       if (domainErr.data.conflictFiles) body.conflictFiles = domainErr.data.conflictFiles;
+      if (domainErr.data.uncommittedFiles) body.blockingFiles = domainErr.data.uncommittedFiles;
       // Stale-build errors are service-unavailable (503), not merge conflicts (409).
       const status = reason === "server_build_stale" ? 503 : 409;
       return c.json(body, status);
