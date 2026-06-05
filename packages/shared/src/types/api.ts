@@ -392,7 +392,7 @@ export interface IssueWithStatus {
   id: string;
   issueNumber: number | null;
   title: string;
-  description: string | null;
+  description?: string | null;
   priority: string;
   issueType: string;
   sortOrder: number;
