@@ -36,7 +36,7 @@ function makeGit(overrides: Partial<Record<string, (...a: unknown[]) => unknown>
 
 async function seedWorkspace(
   db: ReturnType<typeof createTestDb>["db"],
-  opts: { readyForMerge?: boolean; mergedAt?: string } = {},
+  opts: { readyForMerge?: boolean; mergedAt?: string; status?: string } = {},
 ) {
   const now = new Date().toISOString();
   const projectId = randomUUID();
@@ -76,7 +76,7 @@ async function seedWorkspace(
     workingDir: "/repo/.worktrees/feature_ak-548-test",
     baseBranch: "master",
     isDirect: false,
-    status: opts.mergedAt ? "closed" : "idle",
+    status: opts.status ?? (opts.mergedAt ? "closed" : "idle"),
     readyForMerge: opts.readyForMerge ?? true,
     mergedAt: opts.mergedAt ?? null,
     provider: "claude",
@@ -242,5 +242,39 @@ describe("MergeService — idempotency: retry after dropped response", () => {
 
     await expect(svc.mergeWorkspace(workspaceId)).rejects.toThrow();
     expect(mergeBranch).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Path 4: merge from fixing status (regression #551) ─────────────────────
+
+describe("MergeService — merge from fixing status moves issue to Done", () => {
+  let db: ReturnType<typeof createTestDb>["db"];
+
+  beforeEach(() => {
+    ({ db } = createTestDb());
+  });
+
+  it("closes the workspace and moves the issue to Done when merging from fixing status", async () => {
+    // Workspace in "fixing" (fix-and-merge session running) with readyForMerge=true
+    // — the board monitor or HTTP client calls merge while the agent is still running.
+    const { workspaceId, issueId } = await seedWorkspace(db, { status: "fixing", readyForMerge: true });
+    const git = makeGit();
+
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+    await svc.mergeWorkspace(workspaceId);
+
+    const [ws] = await db.select({ status: workspaces.status, mergedAt: workspaces.mergedAt })
+      .from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.status).toBe("closed");
+    expect(ws.mergedAt).toBeTruthy();
+
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+    expect(status.name).toBe("Done");
   });
 });
