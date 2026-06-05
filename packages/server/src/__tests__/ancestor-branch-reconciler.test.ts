@@ -14,12 +14,14 @@ import type { BranchTipAncestryResult } from "@agentic-kanban/shared/lib/git-ser
 
 type CheckAncestor = (repoPath: string, branch: string, baseBranch: string, worktreeDir?: string) => Promise<BranchTipAncestryResult>;
 
-function makeCheckAncestor(isAncestor: boolean): CheckAncestor {
+function makeCheckAncestor(isAncestor: boolean, sameSha = false): CheckAncestor {
   return vi.fn(async (_repo, branch, base) => {
+    const branchSha = sameSha ? "sha-same" : `sha-${branch}`;
+    const baseSha = sameSha ? "sha-same" : `sha-${base}`;
     if (isAncestor) {
-      return { isAncestor: true as const, branchSha: `sha-${branch}`, baseSha: `sha-${base}` };
+      return { isAncestor: true as const, branchSha, baseSha };
     }
-    return { isAncestor: false as const, branchSha: `sha-${branch}`, baseSha: `sha-${base}` };
+    return { isAncestor: false as const, branchSha, baseSha };
   });
 }
 
@@ -119,16 +121,17 @@ describe("reconcileAncestorBranchWorkspaces", () => {
     expect(ws.mergedAt).toBeTruthy();
   });
 
-  it("moves issue to Done when issue is In Progress (not just In Review)", async () => {
+  it("is a no-op when issue is In Progress (active workspace must never be reaped)", async () => {
     const { issueId } = await seedWorkspace(db, { statusName: "In Progress", wsStatus: "active" });
     const checkAncestor = makeCheckAncestor(true);
 
     const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor });
 
-    expect(count).toBe(1);
+    expect(count).toBe(0);
+    expect(checkAncestor).not.toHaveBeenCalled();
     const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
     const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
-    expect(status.name).toBe("Done");
+    expect(status.name).toBe("In Progress");
   });
 
   it("is a no-op when branch tip is NOT an ancestor", async () => {
@@ -207,6 +210,43 @@ describe("reconcileAncestorBranchWorkspaces", () => {
     const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
     const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
     expect(status.name).toBe("Done");
+  });
+
+  it("regression #581: freshly-created 0-commit workspace (branchSha === baseSha) is left untouched", async () => {
+    // A brand-new workspace has 0 commits: its branch tip == base tip.
+    // The reconciler must NOT reap it even though it is "trivially an ancestor".
+    const { issueId, workspaceId } = await seedWorkspace(db, { statusName: "In Review" });
+    const checkAncestor = makeCheckAncestor(true, /* sameSha */ true);
+
+    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor });
+
+    expect(count).toBe(0);
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+    expect(status.name).toBe("In Review");
+    const [ws] = await db.select({ status: workspaces.status }).from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.status).toBe("idle");
+  });
+
+  it("regression #581: stale 0-commit workspace whose base advanced is left untouched", async () => {
+    // A workspace created when base was at commit X; base later advanced to Y.
+    // The branch still has 0 unique commits (tip == original base == ancestor of current base).
+    // branchSha !== baseSha here (base advanced), but branchSha === originalBaseSha.
+    // However, the branch tip is still an ancestor AND branchSha === baseSha would be false.
+    // The key guard is the isAncestor + sameSha case. This test uses In Progress to cover
+    // the second guard (status guard) for a 0-commit stale-base scenario.
+    const { issueId, workspaceId } = await seedWorkspace(db, { statusName: "In Progress", wsStatus: "idle" });
+    const checkAncestor = makeCheckAncestor(true, /* sameSha */ true);
+
+    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor });
+
+    expect(count).toBe(0);
+    expect(checkAncestor).not.toHaveBeenCalled(); // filtered out by In Progress guard
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+    expect(status.name).toBe("In Progress");
+    const [ws] = await db.select({ status: workspaces.status }).from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.status).toBe("idle");
   });
 
   it("continues processing other workspaces when git check throws for one", async () => {

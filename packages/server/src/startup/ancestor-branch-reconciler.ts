@@ -9,6 +9,14 @@ import { logBoardHealthEvent } from "../repositories/board-health-events.reposit
 /** Issue status names that are already terminal — skip these workspaces. */
 const TERMINAL_STATUS_NAMES = ["Done", "AI Reviewed", "Closed", "Cancelled"];
 
+/**
+ * Issue status names that indicate work is actively in progress.
+ * An interrupted merge always leaves the issue In Review, never In Progress,
+ * so we must never reconcile In-Progress issues — they are freshly launched
+ * or actively running workspaces.
+ */
+const ACTIVE_PROGRESS_STATUS_NAMES = ["In Progress"];
+
 export interface AncestorBranchReconcilerDeps {
   database?: Database;
   /** Injectable for testing. Defaults to the real checkBranchTipIsAncestor from git-service. */
@@ -63,6 +71,7 @@ export async function reconcileAncestorBranchWorkspaces(
         eq(workspaces.isDirect, false),
         isNull(workspaces.mergedAt),
         notInArray(projectStatuses.name, TERMINAL_STATUS_NAMES),
+        notInArray(projectStatuses.name, ACTIVE_PROGRESS_STATUS_NAMES),
       ),
     );
 
@@ -83,6 +92,16 @@ export async function reconcileAncestorBranchWorkspaces(
     }
 
     if (!result.isAncestor) continue;
+
+    // A 0-commit workspace has branchSha === baseSha (trivially an ancestor).
+    // Never reconcile these — they are freshly-launched or stale empty branches,
+    // not genuinely merged work.
+    if (result.branchSha === result.baseSha) {
+      console.log(
+        `[ancestor-reconciler] workspace ${c.wsId} (issue #${c.issueNumber ?? "?"}, branch=${c.branch}) — branch tip equals base tip (0 commits); skipping`,
+      );
+      continue;
+    }
 
     console.log(
       `[ancestor-reconciler] workspace ${c.wsId} (issue #${c.issueNumber ?? "?"}, branch=${c.branch}) — branch tip is ancestor of ${c.baseBranch} but issue is '${c.statusName}'; reconciling`,
