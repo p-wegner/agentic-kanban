@@ -219,20 +219,26 @@ describe("merge endpoint response before cleanup", () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(result).toMatchObject({ id: workspaceId, mergeOutput: expect.any(String) });
-    // processKiller may or may not run in the background, but it must NEVER have
-    // been called while mergeResolved was still false (i.e. before the response).
-    expect(killerCalledWhileUnresolved.every((calledBeforeResolve) => !calledBeforeResolve)).toBe(true);
+    // If processKiller ran, mergeResolved must have been true at that point —
+    // i.e. it must NEVER have been called before mergeWorkspace resolved.
+    // (The array is empty if the background task hadn't started yet — that also passes.)
+    expect(killerCalledWhileUnresolved.every((resolvedAtCallTime) => resolvedAtCallTime)).toBe(true);
   });
 
   it("slow processKiller does not delay the merge response (keep-alive regression)", async () => {
     // Regression for #563: if teardown runs synchronously, a slow processKiller
     // (e.g. Windows WMIC scan) blocks the event loop and drops the HTTP keep-alive
     // connection before the JSON response is flushed. Teardown must be deferred.
+    //
+    // We assert ordering (killer runs after resolve) rather than wall-clock time so
+    // the test stays green on loaded CI machines.
     const { workspaceId } = await seedWorkspace(db);
 
-    // Simulate a slow teardown that takes 50ms — on the hot path this would stall
-    // the response by at least that much and risk dropping the keep-alive connection.
+    let mergeResolved = false;
+    let killerCalledBeforeResolve = false;
+
     const processKiller = vi.fn(async () => {
+      if (!mergeResolved) killerCalledBeforeResolve = true;
       await new Promise<void>((resolve) => setTimeout(resolve, 50));
       return 1;
     });
@@ -245,13 +251,15 @@ describe("merge endpoint response before cleanup", () => {
       processKiller,
     });
 
-    const start = Date.now();
     const result = await svc.mergeWorkspace(workspaceId);
-    const elapsed = Date.now() - start;
+    mergeResolved = true;
+
+    // Allow the background post-merge task to run.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(result).toMatchObject({ id: workspaceId, mergeOutput: expect.any(String) });
-    // If teardown ran synchronously the response would take ≥50ms. With it deferred
-    // the synchronous path should complete well under that threshold.
-    expect(elapsed).toBeLessThan(45);
+    // The processKiller must never have run while mergeResolved was still false.
+    expect(killerCalledBeforeResolve).toBe(false);
   });
 });
