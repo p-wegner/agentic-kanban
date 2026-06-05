@@ -113,6 +113,28 @@ describe("merge 409 structured body", () => {
     expect(body).not.toHaveProperty("conflictFiles");
   });
 
+  it("returns 503 with reason=server_build_stale when mergeWorkspace throws a WorkspaceError for stale build", async () => {
+    const { WorkspaceError } = await import("../services/workspace.service.js");
+    const staleError = new WorkspaceError(
+      "Merge helper unavailable — the server build may be stale. Rebuild shared/dist and restart. (gitService.checkBranchTipIsAncestor is not a function)",
+      "CONFLICT",
+      { mergeReason: "server_build_stale", originalMessage: "gitService.checkBranchTipIsAncestor is not a function" },
+    );
+
+    mockedFactory.mockReturnValue({
+      mergeWorkspace: vi.fn().mockRejectedValue(staleError),
+    } as never);
+
+    const app = buildApp();
+    const res = await app.request("/api/workspaces/ws-stale/merge", { method: "POST" });
+
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.reason).toBe("server_build_stale");
+    expect(body.message).toContain("stale");
+    expect(body).not.toHaveProperty("conflictFiles");
+  });
+
   it("returns 500 with non-empty error body when mergeWorkspace throws a plain Error", async () => {
     mockedFactory.mockReturnValue({
       mergeWorkspace: vi.fn().mockRejectedValue(new Error("something unexpected broke")),
