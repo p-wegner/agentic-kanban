@@ -251,22 +251,6 @@ export function createWorkspaceMergeService(deps: {
       };
     }
 
-    if (workspace.workingDir && !workspace.isDirect) {
-      // Full teardown before merge: kill dir procs + free the worktree's dev ports +
-      // run the project's generic teardownScript (with worktree context env).
-      await teardownWorktree(
-        {
-          workingDir: workspace.workingDir,
-          branch: workspace.branch,
-          isDirect: workspace.isDirect,
-          teardownScript: project?.teardownScript,
-          setupEnabled: project?.setupEnabled,
-          label: "merge",
-        },
-        { killDir: killProcesses },
-      );
-    }
-
     if (workspace.isDirect) {
       const now = new Date().toISOString();
       await computeWorkspaceCodeMetrics(id, database).catch(() => null);
@@ -477,6 +461,9 @@ export function createWorkspaceMergeService(deps: {
       workingDir: workspace.workingDir,
       branch: workspace.branch,
       mergeResult: result,
+      teardownScript: project?.teardownScript ?? null,
+      setupEnabled: project?.setupEnabled ?? true,
+      isDirect: workspace.isDirect,
     });
 
     return {
@@ -500,10 +487,35 @@ export function createWorkspaceMergeService(deps: {
     workingDir: string | null | undefined;
     branch: string;
     mergeResult: string;
+    teardownScript: string | null;
+    setupEnabled: boolean;
+    isDirect: boolean;
   }) {
     const { workspaceId, issueId, repoPath, preMergeHead, prefMap, projectId, workingDir, branch } = args;
     let mergeResult = args.mergeResult;
     const warnings: MergeWarning[] = [];
+
+    // Worktree teardown deferred off the hot request path: kill dir procs, free
+    // dev ports, and run the project teardownScript. The plumbing-based merge
+    // (`mergeBranch`) only manipulates git refs — it never touches the worktree
+    // directory — so teardown is safe to run here rather than before the merge.
+    if (workingDir && !args.isDirect) {
+      try {
+        await teardownWorktree(
+          {
+            workingDir,
+            branch,
+            isDirect: false,
+            teardownScript: args.teardownScript ?? undefined,
+            setupEnabled: args.setupEnabled,
+            label: "merge",
+          },
+          { killDir: killProcesses },
+        );
+      } catch (err) {
+        addRecoverableWarning(warnings, "teardown-worktree", err);
+      }
+    }
 
     // Code metrics — run before worktree is torn down.
     if (workingDir) {
@@ -555,9 +567,7 @@ export function createWorkspaceMergeService(deps: {
       addRecoverableWarning(warnings, "openspec-post-merge", err);
     }
 
-    // Kill any agent-spawned processes (e.g. leaked dev.mjs) before removing the worktree.
     if (workingDir) {
-      await killWorktreeProcesses(workingDir, "merge:post");
       try {
         await gitService.removeWorktree(repoPath, workingDir);
       } catch (err) {

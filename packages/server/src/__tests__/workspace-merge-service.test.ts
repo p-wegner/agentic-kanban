@@ -30,6 +30,8 @@ function makeGit(overrides: Partial<Record<string, (...a: unknown[]) => unknown>
     getChangedFilesBetween: vi.fn(async () => []),
     getCurrentBranch: vi.fn(async () => "master"),
     autoRenumberMigrations: vi.fn(async () => ({ renumbered: false, renames: [] })),
+    checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: false, branchSha: "feature-sha", baseSha: "master-sha-before" })),
+    getUncommittedTrackedChanges: vi.fn(async () => []),
     ...overrides,
   };
 }
@@ -162,6 +164,7 @@ describe("MergeService — already-merged tip reconciles as no-op", () => {
     const git = makeGit({
       revParse: async (_repo: string, ref: string) => ref === "feature/ak-548-test" ? "ancestor-sha" : "master-sha",
       isAncestor: async () => true,
+      checkBranchTipIsAncestor: async () => ({ isAncestor: true, branchSha: "ancestor-sha", baseSha: "master-sha" }),
       mergeBranch,
     });
 
@@ -184,6 +187,7 @@ describe("MergeService — already-merged tip reconciles as no-op", () => {
     const git = makeGit({
       revParse: async (_repo: string, ref: string) => ref === "feature/ak-548-test" ? "ancestor-sha" : "master-sha",
       isAncestor: async () => true,
+      checkBranchTipIsAncestor: async () => ({ isAncestor: true, branchSha: "ancestor-sha", baseSha: "master-sha" }),
     });
 
     const svc = createWorkspaceMergeService({
