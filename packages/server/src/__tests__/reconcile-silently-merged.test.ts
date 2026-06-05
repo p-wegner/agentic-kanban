@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import * as gitService from "../services/git.service.js";
 
 // Mock module-level dependencies that reconcileSilentlyMergedWorkspaces imports
 vi.mock("../db/index.js", () => ({
@@ -11,6 +12,7 @@ vi.mock("../services/git.service.js", () => ({
   removeWorktree: vi.fn(async () => {}),
   isRebaseInProgress: vi.fn(async () => false),
   abortRebase: vi.fn(async () => {}),
+  deleteBranch: vi.fn(async () => {}),
 }));
 vi.mock("../db/manual-migrate.js", () => ({ applyMigrations: vi.fn(async () => {}) }));
 vi.mock("../db/seed.js", () => ({ ensureBuiltinTags: vi.fn(async () => {}), ensureBuiltinSkills: vi.fn(async () => {}) }));
@@ -61,6 +63,8 @@ describe("reconcileSilentlyMergedWorkspaces", () => {
         mergedAt,
         closedAt: null,
         branch: "feature/ak-99-test",
+        isDirect: false,
+        repoPath: "/tmp/repo",
         issueNumber: 99,
         projectId: "proj-1",
       },
@@ -90,6 +94,8 @@ describe("reconcileSilentlyMergedWorkspaces", () => {
         mergedAt,
         closedAt: null,
         branch: "feature/ak-42-thing",
+        isDirect: false,
+        repoPath: "/tmp/repo",
         issueNumber: 42,
         projectId: "proj-2",
       },
@@ -110,8 +116,28 @@ describe("reconcileSilentlyMergedWorkspaces", () => {
   it("handles multiple stale workspaces, reconciling each independently", async () => {
     const mergedAt = new Date(Date.now() - 120_000).toISOString();
     const database = makeDb([
-      { id: "ws-a", issueId: "issue-a", mergedAt, closedAt: null, branch: "feature/a", issueNumber: 1, projectId: "p" },
-      { id: "ws-b", issueId: "issue-b", mergedAt, closedAt: null, branch: "feature/b", issueNumber: 2, projectId: "p" },
+      {
+        id: "ws-a",
+        issueId: "issue-a",
+        mergedAt,
+        closedAt: null,
+        branch: "feature/a",
+        isDirect: false,
+        repoPath: "/tmp/repo",
+        issueNumber: 1,
+        projectId: "p",
+      },
+      {
+        id: "ws-b",
+        issueId: "issue-b",
+        mergedAt,
+        closedAt: null,
+        branch: "feature/b",
+        isDirect: false,
+        repoPath: "/tmp/repo",
+        issueNumber: 2,
+        projectId: "p",
+      },
     ]);
 
     await reconcileSilentlyMergedWorkspaces(database);
@@ -130,6 +156,8 @@ describe("reconcileSilentlyMergedWorkspaces", () => {
         mergedAt,
         closedAt: existingClosedAt,
         branch: "feature/ak-50-x",
+        isDirect: false,
+        repoPath: "/tmp/repo",
         issueNumber: 50,
         projectId: "proj-1",
       },
@@ -153,8 +181,28 @@ describe("reconcileSilentlyMergedWorkspaces", () => {
   it("continues to next workspace when one fails, not throwing", async () => {
     const mergedAt = new Date(Date.now() - 60_000).toISOString();
     const database = makeDb([
-      { id: "ws-fail", issueId: "issue-fail", mergedAt, closedAt: null, branch: "feature/fail", issueNumber: 10, projectId: "p" },
-      { id: "ws-ok", issueId: "issue-ok", mergedAt, closedAt: null, branch: "feature/ok", issueNumber: 11, projectId: "p" },
+      {
+        id: "ws-fail",
+        issueId: "issue-fail",
+        mergedAt,
+        closedAt: null,
+        branch: "feature/fail",
+        isDirect: false,
+        repoPath: "/tmp/repo",
+        issueNumber: 10,
+        projectId: "p",
+      },
+      {
+        id: "ws-ok",
+        issueId: "issue-ok",
+        mergedAt,
+        closedAt: null,
+        branch: "feature/ok",
+        isDirect: false,
+        repoPath: "/tmp/repo",
+        issueNumber: 11,
+        projectId: "p",
+      },
     ]);
 
     mockUpdateWorkspaceStatus
@@ -167,5 +215,48 @@ describe("reconcileSilentlyMergedWorkspaces", () => {
     expect(mockUpdateWorkspaceStatus).toHaveBeenCalledTimes(2);
     expect(mockMoveIssueToDone).toHaveBeenCalledTimes(1);
     expect(mockMoveIssueToDone.mock.calls[0][0]).toBe("ws-ok");
+  });
+
+  it("deletes feature branches for non-direct reconciled workspaces", async () => {
+    const mergedAt = new Date(Date.now() - 60_000).toISOString();
+    const database = makeDb([
+      {
+        id: "ws-4",
+        issueId: "issue-4",
+        mergedAt,
+        closedAt: null,
+        branch: "feature/cleanup",
+        isDirect: false,
+        repoPath: "/tmp/repo",
+        issueNumber: 77,
+        projectId: "proj-4",
+      },
+    ]);
+
+    await reconcileSilentlyMergedWorkspaces(database);
+
+    expect(vi.mocked(gitService.deleteBranch)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(gitService.deleteBranch)).toHaveBeenCalledWith("/tmp/repo", "feature/cleanup");
+  });
+
+  it("skips branch deletion for direct workspaces", async () => {
+    const mergedAt = new Date(Date.now() - 60_000).toISOString();
+    const database = makeDb([
+      {
+        id: "ws-5",
+        issueId: "issue-5",
+        mergedAt,
+        closedAt: null,
+        branch: "feature/direct-cleanup",
+        isDirect: true,
+        repoPath: "/tmp/repo",
+        issueNumber: 78,
+        projectId: "proj-5",
+      },
+    ]);
+
+    await reconcileSilentlyMergedWorkspaces(database);
+
+    expect(vi.mocked(gitService.deleteBranch)).not.toHaveBeenCalled();
   });
 });
