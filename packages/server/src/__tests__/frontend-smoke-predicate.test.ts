@@ -6,12 +6,20 @@ const {
   convertToSmokeText,
   formatSmokeSnippet,
   isSmokeSuccess,
+  isEmptyRender,
+  classifyProbeResult,
   SMOKE_SUCCESS_PATTERN,
+  EMPTY_RENDER_PATTERN,
 } = require("../../../../scripts/board-monitor/frontend-smoke-predicate.js") as {
   convertToSmokeText: (value: unknown) => string;
   formatSmokeSnippet: (value: unknown, maxLength?: number) => string;
   isSmokeSuccess: (value: unknown) => boolean;
+  isEmptyRender: (value: unknown) => boolean;
+  classifyProbeResult: (
+    value: unknown
+  ) => "success" | "empty-render" | "wrong-content";
   SMOKE_SUCCESS_PATTERN: RegExp;
+  EMPTY_RENDER_PATTERN: RegExp;
 };
 
 describe("frontend-smoke predicate — success states", () => {
@@ -185,5 +193,124 @@ describe("SMOKE_SUCCESS_PATTERN — direct regex contract", () => {
 
   it("does not match arbitrary text", () => {
     expect(SMOKE_SUCCESS_PATTERN.test("Hello world")).toBe(false);
+  });
+});
+
+describe("isEmptyRender — detects Vite-up-but-React-not-hydrated states", () => {
+  it("returns true for empty string (blank page after Vite serves HTML shell)", () => {
+    expect(isEmptyRender("")).toBe(true);
+  });
+
+  it("returns true for null (querySelector found nothing yet)", () => {
+    expect(isEmptyRender(null)).toBe(true);
+  });
+
+  it("returns true for undefined", () => {
+    expect(isEmptyRender(undefined)).toBe(true);
+  });
+
+  it("returns true for whitespace-only string", () => {
+    expect(isEmptyRender("   ")).toBe(true);
+  });
+
+  it("returns true for 'Loading…' skeleton text", () => {
+    expect(isEmptyRender("Loading…")).toBe(true);
+  });
+
+  it("returns true for 'loading...' (ASCII variant)", () => {
+    expect(isEmptyRender("loading...")).toBe(true);
+  });
+
+  it("returns true for 'Loading' without punctuation", () => {
+    expect(isEmptyRender("Loading")).toBe(true);
+  });
+
+  it("returns false for hydrated board content", () => {
+    expect(isEmptyRender("Backlog\nTodo\nIn Progress")).toBe(false);
+  });
+
+  it("returns false for wrong-content (non-empty, non-hydrated text)", () => {
+    expect(isEmptyRender("Welcome to the app")).toBe(false);
+  });
+
+  it("returns false for Vite compile error overlay text", () => {
+    expect(isEmptyRender("Failed to compile")).toBe(false);
+  });
+
+  it("returns true for empty array", () => {
+    expect(isEmptyRender([])).toBe(true);
+  });
+
+  it("returns true for array of empty strings", () => {
+    expect(isEmptyRender(["", ""])).toBe(true);
+  });
+
+  it("returns false for array containing board content", () => {
+    expect(isEmptyRender(["Backlog", "Todo"])).toBe(false);
+  });
+});
+
+describe("classifyProbeResult — three-way classification", () => {
+  it('returns "success" for hydrated board content', () => {
+    expect(classifyProbeResult("Backlog\nTodo")).toBe("success");
+  });
+
+  it('returns "success" for "No projects registered" fallback', () => {
+    expect(classifyProbeResult("No projects registered")).toBe("success");
+  });
+
+  it('returns "empty-render" for empty string (Vite up, React not hydrated)', () => {
+    expect(classifyProbeResult("")).toBe("empty-render");
+  });
+
+  it('returns "empty-render" for null (querySelector not yet mounted)', () => {
+    expect(classifyProbeResult(null)).toBe("empty-render");
+  });
+
+  it('returns "empty-render" for loading spinner text', () => {
+    expect(classifyProbeResult("Loading…")).toBe("empty-render");
+  });
+
+  it('returns "wrong-content" for Vite compile error text', () => {
+    expect(classifyProbeResult("Failed to compile")).toBe("wrong-content");
+  });
+
+  it('returns "wrong-content" for arbitrary non-board text', () => {
+    expect(classifyProbeResult("Welcome to the app")).toBe("wrong-content");
+  });
+
+  it('returns "wrong-content" for partial HTML with no board signals', () => {
+    expect(classifyProbeResult('<div id="root"></div>')).toBe("wrong-content");
+  });
+
+  it("covers: empty-render is a subset of failure (not success)", () => {
+    const result = classifyProbeResult("");
+    expect(result).not.toBe("success");
+  });
+});
+
+describe("EMPTY_RENDER_PATTERN — direct regex contract", () => {
+  it("matches empty string", () => {
+    expect(EMPTY_RENDER_PATTERN.test("")).toBe(true);
+  });
+
+  it("matches whitespace-only string", () => {
+    expect(EMPTY_RENDER_PATTERN.test("   ")).toBe(true);
+  });
+
+  it("matches 'Loading…'", () => {
+    expect(EMPTY_RENDER_PATTERN.test("Loading…")).toBe(true);
+  });
+
+  it("matches 'loading...' case-insensitively", () => {
+    expect(EMPTY_RENDER_PATTERN.test("loading...")).toBe(true);
+  });
+
+  it("does not match board content", () => {
+    expect(EMPTY_RENDER_PATTERN.test("Backlog")).toBe(false);
+  });
+
+  it("does not match compile error text", () => {
+    expect(EMPTY_RENDER_PATTERN.test("Failed to compile")).toBe(false);
   });
 });
