@@ -156,7 +156,20 @@ export function createWorkspaceMergeService(deps: {
       }
     }
 
-    const mergePromise = doMerge(id, workspace, project, repoPath, defaultBranch);
+    const rawMergePromise = doMerge(id, workspace, project, repoPath, defaultBranch);
+    const mergePromise = rawMergePromise.catch((err) => {
+      // A TypeError (e.g. "gitService.X is not a function") means shared/dist is stale —
+      // a deploy/build issue, NOT a merge conflict. Return a distinct 503 so the board
+      // monitor can rebuild rather than attempting a wasted fix-and-merge.
+      if (err instanceof TypeError && !(err instanceof WorkspaceError)) {
+        throw new WorkspaceError(
+          `Merge helper unavailable — the server build may be stale. Rebuild shared/dist and restart. (${err.message})`,
+          "CONFLICT",
+          { mergeReason: "server_build_stale", originalMessage: err.message },
+        );
+      }
+      throw err;
+    });
     const lock = {
       promise: mergePromise,
       workspaceId: id,
