@@ -22,14 +22,28 @@ function makeGitService(overrides: Partial<{
   getDiffFromRepo: (repo: string, branch: string, base: string) => Promise<string>;
   revParse: (repo: string, ref: string) => Promise<string>;
   isAncestor: (repo: string, ancestor: string, descendant: string) => Promise<boolean>;
+  checkBranchTipIsAncestor: (repo: string, branch: string, base: string, worktree?: string) => Promise<{ isAncestor: true; branchSha: string; baseSha: string } | { isAncestor: false; branchSha: string; baseSha: string } | { isAncestor: false; branchSha: null; reason: string }>;
   removeWorktree: (repo: string, worktree: string) => Promise<void>;
   mergeBranch: (repo: string, branch: string, targetBranch: string) => Promise<string>;
 }> = {}) {
+  const defaultRevParse = overrides.revParse ?? (async (_repo: string, ref: string) => ref);
+  const defaultIsAncestor = overrides.isAncestor ?? (async () => false);
+  const defaultCheckBranchTipIsAncestor = overrides.checkBranchTipIsAncestor ?? (async (repo: string, branch: string, base: string) => {
+    let branchSha: string;
+    try { branchSha = await defaultRevParse(repo, branch); }
+    catch { return { isAncestor: false as const, branchSha: null as null, reason: "branch-not-found" }; }
+    let baseSha: string;
+    try { baseSha = await defaultRevParse(repo, base); }
+    catch { return { isAncestor: false as const, branchSha: null as null, reason: "base-not-found" }; }
+    const ancestor = await defaultIsAncestor(repo, branchSha, baseSha);
+    return ancestor ? { isAncestor: true as const, branchSha, baseSha } : { isAncestor: false as const, branchSha, baseSha };
+  });
   return {
     getDiff: vi.fn(overrides.getDiff ?? (async () => "")),
     getDiffFromRepo: vi.fn(overrides.getDiffFromRepo ?? (async () => "")),
-    revParse: vi.fn(overrides.revParse ?? (async (_repo: string, ref: string) => ref)),
-    isAncestor: vi.fn(overrides.isAncestor ?? (async () => false)),
+    revParse: vi.fn(defaultRevParse),
+    isAncestor: vi.fn(defaultIsAncestor),
+    checkBranchTipIsAncestor: vi.fn(defaultCheckBranchTipIsAncestor),
     removeWorktree: vi.fn(overrides.removeWorktree ?? (async () => {})),
     mergeBranch: vi.fn(overrides.mergeBranch ?? (async () => "Merge made by the 'ort' strategy.")),
     detectConflicts: vi.fn(async () => ({ hasConflicts: false, conflictingFiles: [] })),
