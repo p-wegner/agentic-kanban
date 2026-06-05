@@ -15,20 +15,18 @@ import { PREF_DONE_UNMERGED_SCANNER_ENABLED } from "../constants/preference-keys
 /** Issue status names that count as "terminal Done" — these are the ones we scan. */
 const DONE_STATUS_NAMES = ["Done", "AI Reviewed"];
 
-<<<<<<< HEAD
 /** Max commits behind base for auto-merge to proceed. Branches further behind are left log-only. */
 const MAX_BEHIND_FOR_AUTO_MERGE = 20;
 
 /** Max auto-merge attempts per scanner cycle to limit blast radius. */
 const MAX_AUTO_MERGES_PER_CYCLE = 3;
-=======
+
 /**
  * If a branch is more than this many commits behind its base it is an ancient abandoned
  * workspace (observed: 60-658 behind in the #590 mass-reopen incident) — NOT a
  * recoverable silent-merge-loss candidate; skip it.
  */
 const MAX_COMMITS_BEHIND_BASE = 20;
->>>>>>> d935ccbf (fix(#590): guard scanner against already-merged workspaces and stale branches)
 
 export interface DoneUnmergedScannerDeps {
   database?: Database;
@@ -94,14 +92,10 @@ export async function scanDoneUnmergedWorkspaces(
   const database = deps.database ?? db;
   const ancestorCheck = deps.checkAncestor ?? checkBranchTipIsAncestor;
   const commitCounter = deps.countCommits ?? countUniqueCommits;
-<<<<<<< HEAD
   const conflictDetector = deps.detectConflicts ?? detectConflictsByBranch;
   const behindCounter = deps.countBehind ?? countBehindCommits;
   const gitMerge = deps.mergeGitBranch ?? mergeBranch;
-=======
-  const reopenToInReview = deps.reopenToInReview ?? true;
   const maxBehind = deps.maxCommitsBehindBase ?? MAX_COMMITS_BEHIND_BASE;
->>>>>>> d935ccbf (fix(#590): guard scanner against already-merged workspaces and stale branches)
 
   const isEnabled = deps.enabled !== undefined
     ? deps.enabled

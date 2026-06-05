@@ -488,10 +488,6 @@ describe("scanDoneUnmergedWorkspaces", () => {
     vi.useRealTimers();
   });
 
-<<<<<<< HEAD
-  it("is idempotent — after auto-merge the workspace has mergedAt and is no longer scanned", async () => {
-    const { workspaceId } = await seedWorkspace(db);
-=======
   it("#590 guard 1: skips issue that has ANY workspace with mergedAt set (false-positive fix)", async () => {
     // Seed issue with two workspaces: ws-A (mergedAt set = genuinely merged), ws-B (mergedAt null = stale)
     const now = new Date().toISOString();
@@ -582,11 +578,8 @@ describe("scanDoneUnmergedWorkspaces", () => {
     expect(result.findings[0].issueId).toBe(issueId);
   });
 
-  it("is idempotent — after re-open the issue is In Review and no longer scanned as a violation", async () => {
-    const { issueId } = await seedWorkspace(db);
-    const checkAncestor = makeCheckAncestor(false);
-    const countCommits = makeCountCommits(2);
->>>>>>> d935ccbf (fix(#590): guard scanner against already-merged workspaces and stale branches)
+  it("is idempotent — after auto-merge the workspace has mergedAt and is no longer scanned", async () => {
+    const { workspaceId } = await seedWorkspace(db);
 
     const first = await scanDoneUnmergedWorkspaces({
       database: db,
