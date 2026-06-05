@@ -242,7 +242,7 @@ describe("mergeWorkspace not-approved guard", () => {
     });
   });
 
-  it("throws CONFLICT with mergeReason=already_merged when workspace is closed+mergedAt", async () => {
+  it("reconciles when workspace is closed+mergedAt", async () => {
     const now = new Date().toISOString();
     const { workspaceId } = await seedScenario(db, {
       workspaceStatus: "closed",
@@ -258,9 +258,8 @@ describe("mergeWorkspace not-approved guard", () => {
       processKiller: async () => 0,
     });
 
-    await expect(svc.mergeWorkspace(workspaceId)).rejects.toMatchObject({
-      code: "CONFLICT",
-      data: { mergeReason: "already_merged" },
+    await expect(svc.mergeWorkspace(workspaceId)).resolves.toMatchObject({
+      mergeOutput: expect.stringContaining("already marked as merged"),
     });
   });
 });

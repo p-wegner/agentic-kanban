@@ -16,6 +16,8 @@
 
 import { test, expect } from "@playwright/test";
 import { execSync } from "node:child_process";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { SERVER_URL } from "../helpers/port.js";
@@ -192,6 +194,40 @@ test.describe("merge endpoint advances master and moves issue to Done", () => {
     }
   }
 
+  async function postMergeAndDropConnection(url: string): Promise<void> {
+    const target = new URL(url);
+    const req = (target.protocol === "https:" ? httpsRequest : httpRequest)({
+      method: "POST",
+      protocol: target.protocol,
+      hostname: target.hostname,
+      port: target.port,
+      path: `${target.pathname}${target.search}`,
+      headers: {
+        Connection: "close",
+      },
+    });
+
+    await new Promise<void>((resolve) => {
+      let done = false;
+      const doneOnce = () => {
+        if (!done) {
+          done = true;
+          resolve();
+        }
+      };
+
+      req.on("error", doneOnce);
+      req.on("close", doneOnce);
+      req.on("response", () => {
+        // Intentionally ignore any response body; the client drops immediately.
+      });
+
+      req.end(() => {
+        req.destroy();
+      });
+    });
+  }
+
   test("POST /merge closes workspace and moves issue to Done", async ({ request }) => {
     test.setTimeout(90_000);
     // Call merge — the HTTP response body may be dropped, so we only assert it
@@ -247,25 +283,14 @@ test.describe("merge endpoint advances master and moves issue to Done", () => {
     expect(issueAfter.statusId).toBe(doneStatusId);
   });
 
-  test("POST /merge converges state even when client disconnects", async ({ request }) => {
+  test("POST /merge converges state even when client connection drops immediately", async ({ request }) => {
     test.setTimeout(120_000);
     const { workspaceId: disconnectedWorkspaceId, issueNumber, issueId, branchCommitSha, branch } =
       await createCommittedWorkspace("disconnect", request);
 
-    const abortController = new AbortController();
     try {
       const mergeUrl = `${SERVER_URL}/api/workspaces/${disconnectedWorkspaceId}/merge`;
-      const mergePromise = fetch(mergeUrl, {
-        method: "POST",
-        signal: abortController.signal,
-      });
-
-      setTimeout(() => abortController.abort(), 25);
-      try {
-        await mergePromise;
-      } catch {
-        // Expected for an intentionally dropped connection.
-      }
+      await postMergeAndDropConnection(mergeUrl);
 
       const ws = await pollUntil(
         async () => {
@@ -314,7 +339,6 @@ test.describe("merge endpoint advances master and moves issue to Done", () => {
         { attempts: 30, delayMs: 500, label: `branch ${branch} should be deleted` },
       );
     } finally {
-      abortController.abort();
       await request.delete(`${SERVER_URL}/api/workspaces/${disconnectedWorkspaceId}`).catch(() => {});
       await request.delete(`${SERVER_URL}/api/issues/${issueId}`).catch(() => {});
     }

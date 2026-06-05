@@ -409,7 +409,7 @@ describe("lifecycle: post-merge ancestry invariant blocks Done transition (#588)
   });
 });
 
-// ─── mergedAt set path: dropped-response → idempotent CONFLICT ───────────────
+// ─── mergedAt set path: dropped-response → idempotent reopen path ───────────────
 
 describe("lifecycle: mergedAt already set — workspace moved to Done, retry is idempotent", () => {
   let db: ReturnType<typeof createTestDb>["db"];
@@ -440,9 +440,13 @@ describe("lifecycle: mergedAt already set — workspace moved to Done, retry is 
     expect(ws.status).toBe("closed");
   });
 
-  it("throws CONFLICT with mergeReason=already_merged when workspace is already closed+mergedAt", async () => {
+  it("reconciles when workspace is already closed+mergedAt", async () => {
     const mergedAt = new Date(Date.now() - 5_000).toISOString();
-    const { workspaceId } = await seedScenario(db, { mergedAt, workspaceStatus: "closed" });
+    const { workspaceId, issueId } = await seedScenario(db, {
+      mergedAt,
+      workspaceStatus: "closed",
+      readyForMerge: false,
+    });
     const git = makeGit();
 
     const svc = createWorkspaceMergeService({
@@ -452,15 +456,22 @@ describe("lifecycle: mergedAt already set — workspace moved to Done, retry is 
       processKiller: async () => 0,
     });
 
-    await expect(svc.mergeWorkspace(workspaceId)).rejects.toMatchObject({
-      code: "CONFLICT",
-      data: { mergeReason: "already_merged" },
-    });
+    const result = await svc.mergeWorkspace(workspaceId);
+    expect(result.mergeOutput).toContain("already recorded");
+
+    expect(await getIssueStatusName(db, issueId)).toBe("Done");
+
+    const [ws] = await db.select({ status: workspaces.status }).from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.status).toBe("closed");
   });
 
   it("does not call mergeBranch when workspace is already closed+mergedAt", async () => {
     const mergedAt = new Date(Date.now() - 5_000).toISOString();
-    const { workspaceId } = await seedScenario(db, { mergedAt, workspaceStatus: "closed" });
+    const { workspaceId } = await seedScenario(db, {
+      mergedAt,
+      workspaceStatus: "closed",
+      readyForMerge: false,
+    });
     const mergeBranch = vi.fn(async () => "Merge made by the 'ort' strategy.");
     const git = makeGit({ mergeBranch });
 
@@ -471,7 +482,7 @@ describe("lifecycle: mergedAt already set — workspace moved to Done, retry is 
       processKiller: async () => 0,
     });
 
-    await expect(svc.mergeWorkspace(workspaceId)).rejects.toThrow();
+    await expect(svc.mergeWorkspace(workspaceId)).resolves.toBeDefined();
     expect(mergeBranch).not.toHaveBeenCalled();
   });
 });
