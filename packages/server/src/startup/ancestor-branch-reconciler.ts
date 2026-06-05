@@ -1,6 +1,6 @@
 import { and, eq, isNull, ne, notInArray } from "drizzle-orm";
 import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
-import { checkBranchTipIsAncestor } from "@agentic-kanban/shared/lib/git-service";
+import { checkBranchTipIsAncestor, countUniqueCommits } from "@agentic-kanban/shared/lib/git-service";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { moveIssueToDone, updateWorkspaceStatus } from "../repositories/workspace.repository.js";
@@ -21,6 +21,8 @@ export interface AncestorBranchReconcilerDeps {
   database?: Database;
   /** Injectable for testing. Defaults to the real checkBranchTipIsAncestor from git-service. */
   checkAncestor?: typeof checkBranchTipIsAncestor;
+  /** Injectable for testing. Defaults to the real countUniqueCommits from git-service. */
+  countCommits?: typeof countUniqueCommits;
 }
 
 /**
@@ -45,6 +47,7 @@ export async function reconcileAncestorBranchWorkspaces(
 ): Promise<number> {
   const database = deps.database ?? db;
   const ancestorCheck = deps.checkAncestor ?? checkBranchTipIsAncestor;
+  const commitCounter = deps.countCommits ?? countUniqueCommits;
 
   // Find non-closed, non-direct workspaces whose issue is NOT in a terminal status
   // and whose mergedAt is null (mergedAt set = already handled by reconcileSilentlyMergedWorkspaces).
@@ -93,12 +96,18 @@ export async function reconcileAncestorBranchWorkspaces(
 
     if (!result.isAncestor) continue;
 
-    // A 0-commit workspace has branchSha === baseSha (trivially an ancestor).
-    // Never reconcile these — they are freshly-launched or stale empty branches,
-    // not genuinely merged work.
-    if (result.branchSha === result.baseSha) {
+    // A 0-commit workspace has no unique commits (branchSha === baseSha for a
+    // fresh branch, or rev-list count==0 when the base advanced past an empty
+    // branch). Never reconcile these — they have no real merged work.
+    let uniqueCommits: number;
+    try {
+      uniqueCommits = await commitCounter(c.repoPath, result.baseSha, result.branchSha);
+    } catch {
+      uniqueCommits = 0;
+    }
+    if (uniqueCommits === 0) {
       console.log(
-        `[ancestor-reconciler] workspace ${c.wsId} (issue #${c.issueNumber ?? "?"}, branch=${c.branch}) — branch tip equals base tip (0 commits); skipping`,
+        `[ancestor-reconciler] workspace ${c.wsId} (issue #${c.issueNumber ?? "?"}, branch=${c.branch}) — 0 unique commits on branch; skipping`,
       );
       continue;
     }
