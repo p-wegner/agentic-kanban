@@ -237,16 +237,26 @@ export async function scanDoneUnmergedWorkspaces(
 
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
 
+// Module-level singleton handles — cleared on each startDoneUnmergedScanner call so
+// tsx hot-reload never accumulates duplicate intervals (cycle-39 reaper incident).
+let _activeTimer: NodeJS.Timeout | null = null;
+let _activeInterval: NodeJS.Timeout | null = null;
+
 /**
  * Schedule the done-unmerged invariant scanner to run shortly after boot and then periodically.
  *
- * Both handles are unref'd so they don't prevent the process from exiting cleanly.
- * Hot-reload-safe: reads the live preference at each tick.
+ * Hot-reload-safe: clears any previously registered timer/interval before installing new ones
+ * so tsx hot-reload never accumulates duplicate ticks. Both handles are unref'd so they don't
+ * prevent the process from exiting cleanly.
  */
 export function startDoneUnmergedScanner(
   deps: Omit<DoneUnmergedScannerDeps, "enabled"> & { reopenToInReview?: boolean } = {},
   intervalMs = DEFAULT_INTERVAL_MS,
 ): { timer: NodeJS.Timeout; interval: NodeJS.Timeout } {
+  // Clear any prior handles from a previous hot-reload cycle.
+  if (_activeTimer !== null) { clearTimeout(_activeTimer); _activeTimer = null; }
+  if (_activeInterval !== null) { clearInterval(_activeInterval); _activeInterval = null; }
+
   const tick = () => {
     scanDoneUnmergedWorkspaces(deps).catch((err) =>
       console.warn("[done-unmerged-scanner] periodic tick error:", err instanceof Error ? err.message : err),
@@ -256,5 +266,19 @@ export function startDoneUnmergedScanner(
   const interval = setInterval(tick, intervalMs);
   (timer as NodeJS.Timeout).unref?.();
   (interval as NodeJS.Timeout).unref?.();
+  _activeTimer = timer;
+  _activeInterval = interval;
   return { timer, interval };
+}
+
+/**
+ * Run the done-unmerged invariant scan immediately (fire-and-forget).
+ * Called after a merge completes to catch silent-merge-loss without waiting for the next interval.
+ */
+export function runDoneUnmergedScannerNow(
+  deps: Omit<DoneUnmergedScannerDeps, "enabled"> & { reopenToInReview?: boolean } = {},
+): void {
+  scanDoneUnmergedWorkspaces(deps).catch((err) =>
+    console.warn("[done-unmerged-scanner] post-merge scan error:", err instanceof Error ? err.message : err),
+  );
 }
