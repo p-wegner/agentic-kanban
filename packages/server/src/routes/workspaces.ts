@@ -170,24 +170,39 @@ export function createWorkspacesRoute(
   });
 
   // GET /api/workspaces?projectId= — flat project-scoped workspace list (slim: id/status/readyForMerge/issueId/branch/provider)
+  // GET /api/workspaces?issueId= — workspaces for a single issue (same shape, no join needed)
   router.get("/", async (c) => {
     const projectId = c.req.query("projectId");
-    if (!projectId) return c.json({ error: "projectId required" }, 400);
+    const issueId = c.req.query("issueId");
+
+    if (!projectId && !issueId) {
+      return c.json({ error: "projectId or issueId required" }, 400);
+    }
+
+    const selectShape = {
+      id: workspaces.id,
+      issueId: workspaces.issueId,
+      branch: workspaces.branch,
+      status: workspaces.status,
+      readyForMerge: workspaces.readyForMerge,
+      provider: workspaces.provider,
+      createdAt: workspaces.createdAt,
+      updatedAt: workspaces.updatedAt,
+    };
+
+    if (issueId) {
+      const rows = await database
+        .select(selectShape)
+        .from(workspaces)
+        .where(eq(workspaces.issueId, issueId));
+      return c.json(rows);
+    }
 
     const rows = await database
-      .select({
-        id: workspaces.id,
-        issueId: workspaces.issueId,
-        branch: workspaces.branch,
-        status: workspaces.status,
-        readyForMerge: workspaces.readyForMerge,
-        provider: workspaces.provider,
-        createdAt: workspaces.createdAt,
-        updatedAt: workspaces.updatedAt,
-      })
+      .select(selectShape)
       .from(workspaces)
       .innerJoin(issues, eq(workspaces.issueId, issues.id))
-      .where(eq(issues.projectId, projectId));
+      .where(eq(issues.projectId, projectId!));
 
     return c.json(rows);
   });
