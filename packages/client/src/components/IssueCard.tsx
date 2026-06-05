@@ -283,152 +283,34 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   );
 }
 
-function IssueCardImpl({ issue, onClick, onWorkspaceClick, onOpenDiff, onStartWorkspace, onDryRun, onDragStart, onDuplicate, onMoveToNext, nextStatusName, tags, allProjectTags, quickUpdate, allStatuses, onDeleteIssue, searchQuery, liveActivity, liveStats, todos, isPendingIssue, isPendingWorkspace, isSelected, isKeyboardFocused, cardDensity = "comfortable", showAgingHeatmap = false, agingWarmDays = 3, agingHotDays = 7 }: IssueCardProps) {
-  const compact = cardDensity === "compact";
-  const agingDays = issue.columnAgeDays ?? 0;
-  const agingBucket = !showAgingHeatmap || agingDays < agingWarmDays
-    ? "fresh"
-    : agingDays < agingHotDays
-    ? "warm"
-    : "hot";
-  const { issueType, issueTypeClassName: typeBadgeColor } = useIssueDisplayData(issue);
-  const priorityBadgeColor = issue.priority && issue.priority !== "medium" ? (priorityColors[issue.priority] ?? null) : null;
-  const priorityAccentColor = issue.priority ? (PRIORITY_META.find((p) => p.key === issue.priority)?.color ?? null) : null;
-  const ws = issue.workspaceSummary;
-  const hasActiveWorkspace = ws?.main && ws.main.status !== "closed";
-  const [depDragOver, setDepDragOver] = useState(false);
+// --- useIssueCardDrag ---
+
+function useIssueCardDrag(
+  issue: IssueWithStatus,
+  isPendingIssue: boolean | undefined,
+  onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void,
+) {
   const [isDragging, setIsDragging] = useState(false);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
-  const [prioritySubmenuOpen, setPrioritySubmenuOpen] = useState(false);
-  const [statusSubmenuOpen, setStatusSubmenuOpen] = useState(false);
-  const cardRef = useRef<HTMLDivElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const [depDragOver, setDepDragOver] = useState(false);
 
-  // Determine which action buttons to show in the action row
-  const showActionRow = !isPendingIssue && issue.statusName !== "Done" && issue.statusName !== "Cancelled";
-  const showResume = showActionRow && hasActiveWorkspace && !!onWorkspaceClick;
-  const showDiff = !isPendingIssue && hasActiveWorkspace && !!onOpenDiff && !!ws?.main?.id;
-  const showStartWorkspace = showActionRow && !hasActiveWorkspace && !!onStartWorkspace;
-  const showDryRun = showActionRow && !hasActiveWorkspace && !!onDryRun;
-  const showMoveToNext = showActionRow && !!onMoveToNext && !!nextStatusName;
-  const hasAnyAction = showResume || showDiff || showStartWorkspace || showDryRun || showMoveToNext;
-
-  useEffect(() => {
-    if (!contextMenu) return;
-
-    const firstItem = menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]');
-    firstItem?.focus();
-
-    function handlePointerDown(event: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) closeContextMenu();
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        closeContextMenu();
-        cardRef.current?.focus();
-      }
-    }
-
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [contextMenu]);
-
-  function openContextMenu(x: number, y: number) {
-    setPrioritySubmenuOpen(false);
-    setStatusSubmenuOpen(false);
-    setContextMenu({
-      x: Math.min(x, window.innerWidth - 220),
-      y: Math.min(y, window.innerHeight - 380),
-    });
+  function handleDragStart(e: React.DragEvent) {
+    if (isPendingIssue) { e.preventDefault(); return; }
+    setIsDragging(true);
+    onDragStart(e, issue);
   }
 
-  function closeContextMenu() {
-    setContextMenu(null);
-    setPrioritySubmenuOpen(false);
-    setStatusSubmenuOpen(false);
-  }
-
-  function handleContextMenu(e: React.MouseEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    openContextMenu(e.clientX, e.clientY);
-  }
-
-  function handleCardKeyDown(e: React.KeyboardEvent) {
-    if (e.key !== "ContextMenu" && !(e.shiftKey && e.key === "F10")) return;
-    e.preventDefault();
-    const rect = cardRef.current?.getBoundingClientRect();
-    openContextMenu((rect?.left ?? 0) + 12, (rect?.top ?? 0) + 12);
-  }
-
-  function handleMenuKeyDown(e: React.KeyboardEvent) {
-    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-    e.preventDefault();
-    const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []);
-    if (items.length === 0) return;
-    const currentIndex = items.findIndex((item) => item === document.activeElement);
-    const nextIndex = e.key === "ArrowDown"
-      ? (currentIndex + 1) % items.length
-      : (currentIndex - 1 + items.length) % items.length;
-    items[nextIndex].focus();
-  }
-
-  async function copyIssueReference() {
-    const prefix = issue.issueNumber != null ? `#${issue.issueNumber}` : issue.id;
-    try {
-      await navigator.clipboard.writeText(`${prefix} ${issue.title}`);
-      showToast("Issue reference copied", "success");
-    } catch {
-      showToast("Failed to copy issue reference", "error");
-    } finally {
-      closeContextMenu();
-    }
-  }
-
-  function runContextAction(action: () => void) {
-    action();
-    closeContextMenu();
-  }
-
-  async function handleChangePriority(priority: string) {
-    closeContextMenu();
-    if (quickUpdate?.onPriorityChange) {
-      await quickUpdate.onPriorityChange(issue.id, priority);
-    }
-  }
-
-  async function handleMoveToStatus(statusName: string) {
-    closeContextMenu();
-    try {
-      await apiFetch(`/api/issues/${issue.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ statusName }),
-      });
-    } catch {
-      showToast("Failed to move issue", "error");
-    }
-  }
-
-  function handleDeleteIssueClick() {
-    const confirmed = window.confirm(`Delete "${issue.title}"? This cannot be undone.`);
-    if (!confirmed) return;
-    closeContextMenu();
-    onDeleteIssue?.(issue.id);
-  }
+  function handleDragEnd() { setIsDragging(false); }
 
   function handleDragOver(e: React.DragEvent) {
-    const dragData = (window as unknown as Record<string, unknown>).__dragData as { issueId?: string; sourceStatusId?: string } | undefined;
+    const dragData = (window as unknown as Record<string, unknown>).__dragData as { issueId?: string } | undefined;
     if (dragData?.issueId && dragData.issueId !== issue.id && e.shiftKey) {
       e.preventDefault();
       e.dataTransfer.dropEffect = "link";
       setDepDragOver(true);
     }
   }
+
+  function handleDragLeave() { setDepDragOver(false); }
 
   async function handleDrop(e: React.DragEvent) {
     setDepDragOver(false);
@@ -447,279 +329,71 @@ function IssueCardImpl({ issue, onClick, onWorkspaceClick, onOpenDiff, onStartWo
     }
   }
 
+  return { isDragging, depDragOver, handleDragStart, handleDragEnd, handleDragOver, handleDragLeave, handleDrop };
+}
+
+// --- IssueCardHeader ---
+
+function IssueCardHeader({
+  issue,
+  searchQuery,
+  isPendingWorkspace,
+}: {
+  issue: IssueWithStatus;
+  searchQuery?: string;
+  isPendingWorkspace?: boolean;
+}) {
   return (
-    <div
-      ref={cardRef}
-      draggable={!isPendingIssue}
-      tabIndex={0}
-      onDragStart={(e) => {
-        if (isPendingIssue) {
-          e.preventDefault();
-          return;
-        }
-        setIsDragging(true);
-        onDragStart(e, issue);
-      }}
-      onDragEnd={() => setIsDragging(false)}
-      onDragOver={handleDragOver}
-      onDragLeave={() => setDepDragOver(false)}
-      onDrop={handleDrop}
-      onClick={(e) => onClick(issue, e)}
-      onContextMenu={handleContextMenu}
-      onKeyDown={handleCardKeyDown}
-      aria-selected={isSelected ? "true" : undefined}
-      aria-current={isKeyboardFocused ? "true" : undefined}
-      aria-label={`Open issue ${issue.title}`}
-      className={`group bg-surface-raised dark:bg-surface-raised-dark rounded-lg shadow-sm border cursor-pointer hover:shadow-md hover:-translate-y-px transition-all duration-150 relative isolate overflow-hidden ${compact ? "p-1.5" : "p-2.5"} ${
-        isPendingIssue
-          ? "border-brand-300 bg-brand-50/70 shadow-brand-100 shadow-md dark:border-brand-700 dark:bg-brand-950/40"
-          : isKeyboardFocused
-          ? "border-sky-500 ring-2 ring-sky-400/70 shadow-sky-100 dark:shadow-sky-950"
-          : isSelected
-          ? "border-brand-500 ring-2 ring-brand-400/70 shadow-brand-100 dark:shadow-brand-950"
-          : depDragOver ? "border-brand-400 bg-brand-50 shadow-brand-200" : isPendingWorkspace ? "border-brand-300 shadow-brand-100 shadow-md" : "border-black/[0.07] dark:border-white/10 hover:border-brand-200 dark:hover:border-gray-600"
-      }`}
-    >
-      {priorityAccentColor && (
-        <span
-          aria-hidden="true"
-          className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-lg"
-          style={{ backgroundColor: priorityAccentColor }}
-        />
-      )}
-      {agingBucket !== "fresh" && (
-        <span
-          aria-hidden="true"
-          className={`absolute inset-0 rounded-lg pointer-events-none ${
-            agingBucket === "hot"
-              ? "bg-red-500/[0.09] dark:bg-red-500/[0.13]"
-              : "bg-amber-400/[0.09] dark:bg-amber-400/[0.13]"
-          }`}
-        />
-      )}
-      {isSelected && (
-        <span className="absolute right-2 top-2 z-10 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-600 px-1.5 text-[10px] font-semibold text-white shadow-sm">
-          ✓
-        </span>
-      )}
-      {contextMenu && createPortal(
-        <div
-          ref={menuRef}
-          role="menu"
-          aria-label={`Issue actions for ${issue.title}`}
-          onClick={(e) => e.stopPropagation()}
-          onContextMenu={(e) => e.preventDefault()}
-          onKeyDown={handleMenuKeyDown}
-          className="fixed z-50 w-52 rounded-md border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-        >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={copyIssueReference}
-            className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
-          >
-            <svg className="h-3.5 w-3.5 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-            </svg>
-            <span className="truncate">Copy issue reference</span>
-          </button>
-          {quickUpdate?.onTogglePinned && (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => runContextAction(() => quickUpdate.onTogglePinned!(issue.id, !issue.pinned))}
-              className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
-            >
-              <svg className="h-3.5 w-3.5 shrink-0 text-amber-400" fill={issue.pinned ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.562.562 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.562.562 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" />
-              </svg>
-              <span className="truncate">{issue.pinned ? "Unpin issue" : "Pin issue"}</span>
-            </button>
-          )}
-          {hasAnyAction && <div className="my-1 border-t border-gray-100 dark:border-gray-800" />}
-          {showResume && (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => runContextAction(() => onWorkspaceClick!(issue, ws?.main?.id))}
-              className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
-            >
-              <svg className="h-3.5 w-3.5 shrink-0 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />
-              </svg>
-              <span className="truncate">Resume</span>
-            </button>
-          )}
-          {showDiff && (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => runContextAction(() => onOpenDiff!(issue, ws!.main!.id!))}
-              className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
-            >
-              <svg className="h-3.5 w-3.5 shrink-0 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25ZM6.75 12h.008v.008H6.75V12Zm0 3h.008v.008H6.75V15Zm0 3h.008v.008H6.75V18Z" />
-              </svg>
-              <span className="truncate">View Diff</span>
-            </button>
-          )}
-          {showStartWorkspace && (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => runContextAction(() => onStartWorkspace!(issue))}
-              className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
-            >
-              <svg className="h-3.5 w-3.5 shrink-0 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-              <span className="truncate">Start Workspace</span>
-            </button>
-          )}
-          {showDryRun && (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => runContextAction(() => onDryRun!(issue))}
-              className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
-            >
-              <svg className="h-3.5 w-3.5 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7Z" />
-              </svg>
-              <span className="truncate">Dry Run Preview</span>
-            </button>
-          )}
-          {showMoveToNext && (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => runContextAction(() => onMoveToNext!(issue))}
-              className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
-            >
-              <svg className="h-3.5 w-3.5 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
-              </svg>
-              <span className="truncate">Move to {nextStatusName}</span>
-            </button>
-          )}
-          {onDuplicate && (
-            <>
-              <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => runContextAction(() => onDuplicate(issue))}
-                className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
-              >
-                <svg className="h-3.5 w-3.5 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-                <span className="truncate">Duplicate issue</span>
-              </button>
-            </>
-          )}
-          <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
-          {quickUpdate?.onPriorityChange && (
-            <div className="relative">
-              <button
-                type="button"
-                role="menuitem"
-                onClick={(e) => { e.stopPropagation(); setPrioritySubmenuOpen((v) => !v); setStatusSubmenuOpen(false); }}
-                className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
-              >
-                <svg className="h-3.5 w-3.5 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 7h18M3 12h12M3 17h6" />
-                </svg>
-                <span className="flex-1 truncate">Change priority</span>
-                <svg className="h-3 w-3 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
-              </button>
-              {prioritySubmenuOpen && (
-                <div className="absolute left-full top-0 ml-1 w-36 rounded-md border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900 z-10">
-                  {(["critical", "high", "medium", "low"] as const).map((p) => (
-                    <button
-                      key={p}
-                      type="button"
-                      role="menuitem"
-                      onClick={() => handleChangePriority(p)}
-                      className={`flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:hover:bg-gray-800 dark:focus:bg-gray-800 ${issue.priority === p ? "font-semibold text-brand-700 dark:text-brand-300" : "text-gray-700 dark:text-gray-200"}`}
-                    >
-                      <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${p === "critical" ? "bg-red-500" : p === "high" ? "bg-orange-500" : p === "medium" ? "bg-yellow-400" : "bg-gray-400"}`} />
-                      <span className="capitalize">{p}</span>
-                      {issue.priority === p && <svg className="ml-auto h-3 w-3 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-          {allStatuses && allStatuses.length > 0 && (
-            <div className="relative">
-              <button
-                type="button"
-                role="menuitem"
-                onClick={(e) => { e.stopPropagation(); setStatusSubmenuOpen((v) => !v); setPrioritySubmenuOpen(false); }}
-                className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
-              >
-                <svg className="h-3.5 w-3.5 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m-8 6H4m0 0l4 4m-4-4l4-4" />
-                </svg>
-                <span className="flex-1 truncate">Move to status</span>
-                <svg className="h-3 w-3 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
-              </button>
-              {statusSubmenuOpen && (
-                <div className="absolute left-full top-0 ml-1 w-40 rounded-md border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900 z-10">
-                  {allStatuses.map((s) => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      role="menuitem"
-                      onClick={() => handleMoveToStatus(s.name)}
-                      className={`flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:hover:bg-gray-800 dark:focus:bg-gray-800 ${issue.statusName === s.name ? "font-semibold text-brand-700 dark:text-brand-300" : "text-gray-700 dark:text-gray-200"}`}
-                    >
-                      <span className="truncate">{s.name}</span>
-                      {issue.statusName === s.name && <svg className="ml-auto h-3 w-3 shrink-0 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-          {onDeleteIssue && (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={handleDeleteIssueClick}
-              className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-red-600 hover:bg-red-50 focus:bg-red-50 focus:outline-none dark:text-red-400 dark:hover:bg-red-900/20 dark:focus:bg-red-900/20"
-            >
-              <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
-              <span className="truncate">Delete issue</span>
-            </button>
-          )}
-        </div>,
-        document.body,
-      )}
-      <div className="flex min-w-0 items-start justify-between gap-2">
-        <p className="min-w-0 text-sm text-ink dark:text-stone-100 break-words">
-          {issue.issueNumber != null && (
-            <span className="text-gray-400 dark:text-gray-500 font-mono mr-1">#{issue.issueNumber}</span>
-          )}
-          <HighlightedText text={issue.title} query={searchQuery ?? ""} />
-        </p>
-        {isPendingWorkspace && (
-          <svg className="w-3.5 h-3.5 shrink-0 text-brand-500 animate-spin mt-0.5" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-          </svg>
+    <div className="flex min-w-0 items-start justify-between gap-2">
+      <p className="min-w-0 text-sm text-ink dark:text-stone-100 break-words">
+        {issue.issueNumber != null && (
+          <span className="text-gray-400 dark:text-gray-500 font-mono mr-1">#{issue.issueNumber}</span>
         )}
-      </div>
+        <HighlightedText text={issue.title} query={searchQuery ?? ""} />
+      </p>
+      {isPendingWorkspace && (
+        <svg className="w-3.5 h-3.5 shrink-0 text-brand-500 animate-spin mt-0.5" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+        </svg>
+      )}
+    </div>
+  );
+}
+
+// --- IssueCardBody ---
+
+function IssueCardBody({
+  issue,
+  compact,
+  liveActivity,
+  liveStats,
+  todos,
+  isPendingIssue,
+  tags,
+  allProjectTags,
+  quickUpdate,
+  searchQuery,
+  onWorkspaceClick,
+}: {
+  issue: IssueWithStatus;
+  compact: boolean;
+  liveActivity?: string;
+  liveStats?: LiveSessionStats;
+  todos?: TodoItem[];
+  isPendingIssue?: boolean;
+  tags?: TagBadge[];
+  allProjectTags?: ProjectTag[];
+  quickUpdate?: QuickUpdateCallbacks;
+  searchQuery?: string;
+  onWorkspaceClick?: (issue: IssueWithStatus, workspaceId?: string) => void;
+}) {
+  const { issueType, issueTypeClassName: typeBadgeColor } = useIssueDisplayData(issue);
+  const priorityBadgeColor = issue.priority && issue.priority !== "medium" ? (priorityColors[issue.priority] ?? null) : null;
+  const ws = issue.workspaceSummary;
+
+  return (
+    <>
       {!compact && issue.description && (
         <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">
           <HighlightedText text={issue.description} query={searchQuery ?? ""} />
@@ -1073,79 +747,612 @@ function IssueCardImpl({ issue, onClick, onWorkspaceClick, onOpenDiff, onStartWo
         </div>
       )}
       {!compact && todos && todos.length > 0 && <TodoProgress todos={todos} />}
-
-      {/* Issue timestamps */}
       <div className="mt-1 flex items-center gap-2 text-[10px] text-gray-400 dark:text-gray-500 px-0.5">
         <span title={formatAbsoluteTime(issue.createdAt)}>{formatRelativeTime(issue.createdAt)}</span>
       </div>
+    </>
+  );
+}
 
-      {/* Action row: appears on hover, contains all card-level actions in one place */}
-      {hasAnyAction && !isDragging && (
-        <div className={`${compact ? "mt-1" : "mt-1.5"} flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity`}>
-          {showResume && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onWorkspaceClick!(issue, ws?.main?.id); }}
-              className="flex-1 flex items-center justify-center gap-1 text-xs text-green-700 hover:text-white hover:bg-green-600 border border-green-200 hover:border-green-600 rounded px-2 py-1 transition-colors"
-              title="Resume the active workspace"
-            >
-              <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />
-              </svg>
-              Resume
-            </button>
-          )}
-          {showDiff && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onOpenDiff!(issue, ws!.main!.id!); }}
-              className="flex items-center justify-center gap-1 text-xs text-brand-600 dark:text-brand-400 hover:text-white hover:bg-brand-600 border border-brand-200 dark:border-brand-800 hover:border-brand-600 rounded px-2 py-1 transition-colors"
-              title="Open live diff for this workspace"
-              aria-label="Open live diff"
-            >
-              <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25ZM6.75 12h.008v.008H6.75V12Zm0 3h.008v.008H6.75V15Zm0 3h.008v.008H6.75V18Z" />
-              </svg>
-              Diff
-            </button>
-          )}
-          {showStartWorkspace && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onStartWorkspace!(issue); }}
-              className="flex-1 flex items-center justify-center gap-1 text-xs text-brand-600 hover:text-white hover:bg-brand-600 border border-brand-200 hover:border-brand-600 rounded px-2 py-1 transition-colors"
-              title="Start a new workspace for this issue"
-            >
-              <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-              Start Workspace
-            </button>
-          )}
-          {showDryRun && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onDryRun!(issue); }}
-              className="flex items-center justify-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 border border-gray-200 dark:border-gray-700 hover:border-brand-300 rounded px-2 py-1 transition-colors"
-              title="Preview launch without creating a workspace"
-            >
-              <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7Z" />
-              </svg>
-              Dry Run
-            </button>
-          )}
-          {showMoveToNext && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onMoveToNext!(issue); }}
-              className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-white hover:bg-brand-600 border border-gray-200 dark:border-gray-700 hover:border-brand-600 rounded px-2 py-1 transition-colors"
-              title={`Move to ${nextStatusName}`}
-            >
-              <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
-              </svg>
-              {nextStatusName}
-            </button>
+// --- IssueCardActions ---
+
+function IssueCardActions({
+  issue,
+  ws,
+  isDragging,
+  compact,
+  showResume,
+  showDiff,
+  showStartWorkspace,
+  showDryRun,
+  showMoveToNext,
+  hasAnyAction,
+  nextStatusName,
+  onWorkspaceClick,
+  onOpenDiff,
+  onStartWorkspace,
+  onDryRun,
+  onMoveToNext,
+}: {
+  issue: IssueWithStatus;
+  ws: IssueWithStatus["workspaceSummary"];
+  isDragging: boolean;
+  compact: boolean;
+  showResume: boolean;
+  showDiff: boolean;
+  showStartWorkspace: boolean;
+  showDryRun: boolean;
+  showMoveToNext: boolean;
+  hasAnyAction: boolean;
+  nextStatusName?: string;
+  onWorkspaceClick?: (issue: IssueWithStatus, workspaceId?: string) => void;
+  onOpenDiff?: (issue: IssueWithStatus, workspaceId: string) => void;
+  onStartWorkspace?: (issue: IssueWithStatus) => void;
+  onDryRun?: (issue: IssueWithStatus) => void;
+  onMoveToNext?: (issue: IssueWithStatus) => void;
+}) {
+  if (!hasAnyAction || isDragging) return null;
+
+  return (
+    <div className={`${compact ? "mt-1" : "mt-1.5"} flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity`}>
+      {showResume && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onWorkspaceClick!(issue, ws?.main?.id); }}
+          className="flex-1 flex items-center justify-center gap-1 text-xs text-green-700 hover:text-white hover:bg-green-600 border border-green-200 hover:border-green-600 rounded px-2 py-1 transition-colors"
+          title="Resume the active workspace"
+        >
+          <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />
+          </svg>
+          Resume
+        </button>
+      )}
+      {showDiff && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onOpenDiff!(issue, ws!.main!.id!); }}
+          className="flex items-center justify-center gap-1 text-xs text-brand-600 dark:text-brand-400 hover:text-white hover:bg-brand-600 border border-brand-200 dark:border-brand-800 hover:border-brand-600 rounded px-2 py-1 transition-colors"
+          title="Open live diff for this workspace"
+          aria-label="Open live diff"
+        >
+          <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25ZM6.75 12h.008v.008H6.75V12Zm0 3h.008v.008H6.75V15Zm0 3h.008v.008H6.75V18Z" />
+          </svg>
+          Diff
+        </button>
+      )}
+      {showStartWorkspace && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onStartWorkspace!(issue); }}
+          className="flex-1 flex items-center justify-center gap-1 text-xs text-brand-600 hover:text-white hover:bg-brand-600 border border-brand-200 hover:border-brand-600 rounded px-2 py-1 transition-colors"
+          title="Start a new workspace for this issue"
+        >
+          <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+          Start Workspace
+        </button>
+      )}
+      {showDryRun && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onDryRun!(issue); }}
+          className="flex items-center justify-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 border border-gray-200 dark:border-gray-700 hover:border-brand-300 rounded px-2 py-1 transition-colors"
+          title="Preview launch without creating a workspace"
+        >
+          <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7Z" />
+          </svg>
+          Dry Run
+        </button>
+      )}
+      {showMoveToNext && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onMoveToNext!(issue); }}
+          className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-white hover:bg-brand-600 border border-gray-200 dark:border-gray-700 hover:border-brand-600 rounded px-2 py-1 transition-colors"
+          title={`Move to ${nextStatusName}`}
+        >
+          <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+          </svg>
+          {nextStatusName}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// --- IssueCardContextMenu ---
+
+function IssueCardContextMenu({
+  issue,
+  position,
+  menuRef,
+  cardRef,
+  onClose,
+  showResume,
+  showDiff,
+  showStartWorkspace,
+  showDryRun,
+  showMoveToNext,
+  hasAnyAction,
+  nextStatusName,
+  ws,
+  quickUpdate,
+  allStatuses,
+  onDeleteIssue,
+  onDuplicate,
+  onWorkspaceClick,
+  onOpenDiff,
+  onStartWorkspace,
+  onDryRun,
+  onMoveToNext,
+}: {
+  issue: IssueWithStatus;
+  position: { x: number; y: number };
+  menuRef: React.MutableRefObject<HTMLDivElement | null>;
+  cardRef: React.RefObject<HTMLDivElement | null>;
+  onClose: () => void;
+  showResume: boolean;
+  showDiff: boolean;
+  showStartWorkspace: boolean;
+  showDryRun: boolean;
+  showMoveToNext: boolean;
+  hasAnyAction: boolean;
+  nextStatusName?: string;
+  ws: IssueWithStatus["workspaceSummary"];
+  quickUpdate?: QuickUpdateCallbacks;
+  allStatuses?: StatusOption[];
+  onDeleteIssue?: (issueId: string) => void;
+  onDuplicate?: (issue: IssueWithStatus) => void;
+  onWorkspaceClick?: (issue: IssueWithStatus, workspaceId?: string) => void;
+  onOpenDiff?: (issue: IssueWithStatus, workspaceId: string) => void;
+  onStartWorkspace?: (issue: IssueWithStatus) => void;
+  onDryRun?: (issue: IssueWithStatus) => void;
+  onMoveToNext?: (issue: IssueWithStatus) => void;
+}) {
+  const [prioritySubmenuOpen, setPrioritySubmenuOpen] = useState(false);
+  const [statusSubmenuOpen, setStatusSubmenuOpen] = useState(false);
+
+  useEffect(() => {
+    const firstItem = menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]');
+    firstItem?.focus();
+
+    function handlePointerDown(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) onClose();
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+        cardRef.current?.focus();
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
+
+  function handleMenuKeyDown(e: React.KeyboardEvent) {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    e.preventDefault();
+    const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []);
+    if (items.length === 0) return;
+    const currentIndex = items.findIndex((item) => item === document.activeElement);
+    const nextIndex = e.key === "ArrowDown"
+      ? (currentIndex + 1) % items.length
+      : (currentIndex - 1 + items.length) % items.length;
+    items[nextIndex].focus();
+  }
+
+  async function copyIssueReference() {
+    const prefix = issue.issueNumber != null ? `#${issue.issueNumber}` : issue.id;
+    try {
+      await navigator.clipboard.writeText(`${prefix} ${issue.title}`);
+      showToast("Issue reference copied", "success");
+    } catch {
+      showToast("Failed to copy issue reference", "error");
+    } finally {
+      onClose();
+    }
+  }
+
+  function runContextAction(action: () => void) {
+    action();
+    onClose();
+  }
+
+  async function handleChangePriority(priority: string) {
+    onClose();
+    if (quickUpdate?.onPriorityChange) {
+      await quickUpdate.onPriorityChange(issue.id, priority);
+    }
+  }
+
+  async function handleMoveToStatus(statusName: string) {
+    onClose();
+    try {
+      await apiFetch(`/api/issues/${issue.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ statusName }),
+      });
+    } catch {
+      showToast("Failed to move issue", "error");
+    }
+  }
+
+  function handleDeleteIssueClick() {
+    const confirmed = window.confirm(`Delete "${issue.title}"? This cannot be undone.`);
+    if (!confirmed) return;
+    onClose();
+    onDeleteIssue?.(issue.id);
+  }
+
+  return createPortal(
+    <div
+      ref={menuRef}
+      role="menu"
+      aria-label={`Issue actions for ${issue.title}`}
+      onClick={(e) => e.stopPropagation()}
+      onContextMenu={(e) => e.preventDefault()}
+      onKeyDown={handleMenuKeyDown}
+      className="fixed z-50 w-52 rounded-md border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+      style={{ left: position.x, top: position.y }}
+    >
+      <button
+        type="button"
+        role="menuitem"
+        onClick={copyIssueReference}
+        className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
+      >
+        <svg className="h-3.5 w-3.5 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+        </svg>
+        <span className="truncate">Copy issue reference</span>
+      </button>
+      {quickUpdate?.onTogglePinned && (
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => runContextAction(() => quickUpdate.onTogglePinned!(issue.id, !issue.pinned))}
+          className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
+        >
+          <svg className="h-3.5 w-3.5 shrink-0 text-amber-400" fill={issue.pinned ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.562.562 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.562.562 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" />
+          </svg>
+          <span className="truncate">{issue.pinned ? "Unpin issue" : "Pin issue"}</span>
+        </button>
+      )}
+      {hasAnyAction && <div className="my-1 border-t border-gray-100 dark:border-gray-800" />}
+      {showResume && (
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => runContextAction(() => onWorkspaceClick!(issue, ws?.main?.id))}
+          className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
+        >
+          <svg className="h-3.5 w-3.5 shrink-0 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />
+          </svg>
+          <span className="truncate">Resume</span>
+        </button>
+      )}
+      {showDiff && (
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => runContextAction(() => onOpenDiff!(issue, ws!.main!.id!))}
+          className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
+        >
+          <svg className="h-3.5 w-3.5 shrink-0 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25ZM6.75 12h.008v.008H6.75V12Zm0 3h.008v.008H6.75V15Zm0 3h.008v.008H6.75V18Z" />
+          </svg>
+          <span className="truncate">View Diff</span>
+        </button>
+      )}
+      {showStartWorkspace && (
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => runContextAction(() => onStartWorkspace!(issue))}
+          className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
+        >
+          <svg className="h-3.5 w-3.5 shrink-0 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+          <span className="truncate">Start Workspace</span>
+        </button>
+      )}
+      {showDryRun && (
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => runContextAction(() => onDryRun!(issue))}
+          className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
+        >
+          <svg className="h-3.5 w-3.5 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7Z" />
+          </svg>
+          <span className="truncate">Dry Run Preview</span>
+        </button>
+      )}
+      {showMoveToNext && (
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => runContextAction(() => onMoveToNext!(issue))}
+          className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
+        >
+          <svg className="h-3.5 w-3.5 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
+          </svg>
+          <span className="truncate">Move to {nextStatusName}</span>
+        </button>
+      )}
+      {onDuplicate && (
+        <>
+          <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => runContextAction(() => onDuplicate(issue))}
+            className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
+          >
+            <svg className="h-3.5 w-3.5 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+            <span className="truncate">Duplicate issue</span>
+          </button>
+        </>
+      )}
+      <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
+      {quickUpdate?.onPriorityChange && (
+        <div className="relative">
+          <button
+            type="button"
+            role="menuitem"
+            onClick={(e) => { e.stopPropagation(); setPrioritySubmenuOpen((v) => !v); setStatusSubmenuOpen(false); }}
+            className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
+          >
+            <svg className="h-3.5 w-3.5 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 7h18M3 12h12M3 17h6" />
+            </svg>
+            <span className="flex-1 truncate">Change priority</span>
+            <svg className="h-3 w-3 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
+          </button>
+          {prioritySubmenuOpen && (
+            <div className="absolute left-full top-0 ml-1 w-36 rounded-md border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900 z-10">
+              {(["critical", "high", "medium", "low"] as const).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => handleChangePriority(p)}
+                  className={`flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:hover:bg-gray-800 dark:focus:bg-gray-800 ${issue.priority === p ? "font-semibold text-brand-700 dark:text-brand-300" : "text-gray-700 dark:text-gray-200"}`}
+                >
+                  <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${p === "critical" ? "bg-red-500" : p === "high" ? "bg-orange-500" : p === "medium" ? "bg-yellow-400" : "bg-gray-400"}`} />
+                  <span className="capitalize">{p}</span>
+                  {issue.priority === p && <svg className="ml-auto h-3 w-3 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+                </button>
+              ))}
+            </div>
           )}
         </div>
       )}
+      {allStatuses && allStatuses.length > 0 && (
+        <div className="relative">
+          <button
+            type="button"
+            role="menuitem"
+            onClick={(e) => { e.stopPropagation(); setStatusSubmenuOpen((v) => !v); setPrioritySubmenuOpen(false); }}
+            className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
+          >
+            <svg className="h-3.5 w-3.5 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m-8 6H4m0 0l4 4m-4-4l4-4" />
+            </svg>
+            <span className="flex-1 truncate">Move to status</span>
+            <svg className="h-3 w-3 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
+          </button>
+          {statusSubmenuOpen && (
+            <div className="absolute left-full top-0 ml-1 w-40 rounded-md border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900 z-10">
+              {allStatuses.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => handleMoveToStatus(s.name)}
+                  className={`flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:hover:bg-gray-800 dark:focus:bg-gray-800 ${issue.statusName === s.name ? "font-semibold text-brand-700 dark:text-brand-300" : "text-gray-700 dark:text-gray-200"}`}
+                >
+                  <span className="truncate">{s.name}</span>
+                  {issue.statusName === s.name && <svg className="ml-auto h-3 w-3 shrink-0 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {onDeleteIssue && (
+        <button
+          type="button"
+          role="menuitem"
+          onClick={handleDeleteIssueClick}
+          className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-red-600 hover:bg-red-50 focus:bg-red-50 focus:outline-none dark:text-red-400 dark:hover:bg-red-900/20 dark:focus:bg-red-900/20"
+        >
+          <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+          </svg>
+          <span className="truncate">Delete issue</span>
+        </button>
+      )}
+    </div>,
+    document.body,
+  );
+}
+
+// --- IssueCardImpl ---
+
+function IssueCardImpl({ issue, onClick, onWorkspaceClick, onOpenDiff, onStartWorkspace, onDryRun, onDragStart, onDuplicate, onMoveToNext, nextStatusName, tags, allProjectTags, quickUpdate, allStatuses, onDeleteIssue, searchQuery, liveActivity, liveStats, todos, isPendingIssue, isPendingWorkspace, isSelected, isKeyboardFocused, cardDensity = "comfortable", showAgingHeatmap = false, agingWarmDays = 3, agingHotDays = 7 }: IssueCardProps) {
+  const compact = cardDensity === "compact";
+  const agingDays = issue.columnAgeDays ?? 0;
+  const agingBucket = !showAgingHeatmap || agingDays < agingWarmDays
+    ? "fresh"
+    : agingDays < agingHotDays
+    ? "warm"
+    : "hot";
+  const priorityAccentColor = issue.priority ? (PRIORITY_META.find((p) => p.key === issue.priority)?.color ?? null) : null;
+  const ws = issue.workspaceSummary;
+  const hasActiveWorkspace = ws?.main && ws.main.status !== "closed";
+
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const { isDragging, depDragOver, handleDragStart, handleDragEnd, handleDragOver, handleDragLeave, handleDrop } = useIssueCardDrag(issue, isPendingIssue, onDragStart);
+
+  const showActionRow = !isPendingIssue && issue.statusName !== "Done" && issue.statusName !== "Cancelled";
+  const showResume = showActionRow && hasActiveWorkspace && !!onWorkspaceClick;
+  const showDiff = !isPendingIssue && hasActiveWorkspace && !!onOpenDiff && !!ws?.main?.id;
+  const showStartWorkspace = showActionRow && !hasActiveWorkspace && !!onStartWorkspace;
+  const showDryRun = showActionRow && !hasActiveWorkspace && !!onDryRun;
+  const showMoveToNext = showActionRow && !!onMoveToNext && !!nextStatusName;
+  const hasAnyAction = showResume || showDiff || showStartWorkspace || showDryRun || showMoveToNext;
+
+  function openContextMenu(x: number, y: number) {
+    setContextMenu({
+      x: Math.min(x, window.innerWidth - 220),
+      y: Math.min(y, window.innerHeight - 380),
+    });
+  }
+
+  function closeContextMenu() { setContextMenu(null); }
+
+  function handleContextMenu(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    openContextMenu(e.clientX, e.clientY);
+  }
+
+  function handleCardKeyDown(e: React.KeyboardEvent) {
+    if (e.key !== "ContextMenu" && !(e.shiftKey && e.key === "F10")) return;
+    e.preventDefault();
+    const rect = cardRef.current?.getBoundingClientRect();
+    openContextMenu((rect?.left ?? 0) + 12, (rect?.top ?? 0) + 12);
+  }
+
+  return (
+    <div
+      ref={cardRef}
+      draggable={!isPendingIssue}
+      tabIndex={0}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      onClick={(e) => onClick(issue, e)}
+      onContextMenu={handleContextMenu}
+      onKeyDown={handleCardKeyDown}
+      aria-selected={isSelected ? "true" : undefined}
+      aria-current={isKeyboardFocused ? "true" : undefined}
+      aria-label={`Open issue ${issue.title}`}
+      className={`group bg-surface-raised dark:bg-surface-raised-dark rounded-lg shadow-sm border cursor-pointer hover:shadow-md hover:-translate-y-px transition-all duration-150 relative isolate overflow-hidden ${compact ? "p-1.5" : "p-2.5"} ${
+        isPendingIssue
+          ? "border-brand-300 bg-brand-50/70 shadow-brand-100 shadow-md dark:border-brand-700 dark:bg-brand-950/40"
+          : isKeyboardFocused
+          ? "border-sky-500 ring-2 ring-sky-400/70 shadow-sky-100 dark:shadow-sky-950"
+          : isSelected
+          ? "border-brand-500 ring-2 ring-brand-400/70 shadow-brand-100 dark:shadow-brand-950"
+          : depDragOver ? "border-brand-400 bg-brand-50 shadow-brand-200" : isPendingWorkspace ? "border-brand-300 shadow-brand-100 shadow-md" : "border-black/[0.07] dark:border-white/10 hover:border-brand-200 dark:hover:border-gray-600"
+      }`}
+    >
+      {priorityAccentColor && (
+        <span
+          aria-hidden="true"
+          className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-lg"
+          style={{ backgroundColor: priorityAccentColor }}
+        />
+      )}
+      {agingBucket !== "fresh" && (
+        <span
+          aria-hidden="true"
+          className={`absolute inset-0 rounded-lg pointer-events-none ${
+            agingBucket === "hot"
+              ? "bg-red-500/[0.09] dark:bg-red-500/[0.13]"
+              : "bg-amber-400/[0.09] dark:bg-amber-400/[0.13]"
+          }`}
+        />
+      )}
+      {isSelected && (
+        <span className="absolute right-2 top-2 z-10 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-600 px-1.5 text-[10px] font-semibold text-white shadow-sm">
+          ✓
+        </span>
+      )}
+      {contextMenu && (
+        <IssueCardContextMenu
+          issue={issue}
+          position={contextMenu}
+          menuRef={menuRef}
+          cardRef={cardRef}
+          onClose={closeContextMenu}
+          showResume={!!showResume}
+          showDiff={!!showDiff}
+          showStartWorkspace={!!showStartWorkspace}
+          showDryRun={!!showDryRun}
+          showMoveToNext={!!showMoveToNext}
+          hasAnyAction={hasAnyAction}
+          nextStatusName={nextStatusName}
+          ws={ws}
+          quickUpdate={quickUpdate}
+          allStatuses={allStatuses}
+          onDeleteIssue={onDeleteIssue}
+          onDuplicate={onDuplicate}
+          onWorkspaceClick={onWorkspaceClick}
+          onOpenDiff={onOpenDiff}
+          onStartWorkspace={onStartWorkspace}
+          onDryRun={onDryRun}
+          onMoveToNext={onMoveToNext}
+        />
+      )}
+      <IssueCardHeader issue={issue} searchQuery={searchQuery} isPendingWorkspace={isPendingWorkspace} />
+      <IssueCardBody
+        issue={issue}
+        compact={compact}
+        liveActivity={liveActivity}
+        liveStats={liveStats}
+        todos={todos}
+        isPendingIssue={isPendingIssue}
+        tags={tags}
+        allProjectTags={allProjectTags}
+        quickUpdate={quickUpdate}
+        searchQuery={searchQuery}
+        onWorkspaceClick={onWorkspaceClick}
+      />
+      <IssueCardActions
+        issue={issue}
+        ws={ws}
+        isDragging={isDragging}
+        compact={compact}
+        showResume={!!showResume}
+        showDiff={!!showDiff}
+        showStartWorkspace={!!showStartWorkspace}
+        showDryRun={!!showDryRun}
+        showMoveToNext={!!showMoveToNext}
+        hasAnyAction={hasAnyAction}
+        nextStatusName={nextStatusName}
+        onWorkspaceClick={onWorkspaceClick}
+        onOpenDiff={onOpenDiff}
+        onStartWorkspace={onStartWorkspace}
+        onDryRun={onDryRun}
+        onMoveToNext={onMoveToNext}
+      />
     </div>
   );
 }
