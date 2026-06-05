@@ -213,6 +213,12 @@ export async function workspaceLaunchPreflight(
       }
     }
     if (reconciled.length > 0) {
+      try {
+        await git(["commit", "-m", `chore: reconcile safety files from ${baseBranch} [preflight]`], options.worktreePath);
+      } catch {
+        // If commit fails the files are staged but not committed; still allow launch
+        // since the policy content is now correct in the working tree.
+      }
       console.log(`[preflight] reconciled safety files from ${baseBranch}: ${reconciled.join(", ")}`);
     }
     if (failed.length > 0) {
