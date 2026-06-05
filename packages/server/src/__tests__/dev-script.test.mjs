@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkDrizzleFiles, findDrizzlePnpmDirs } from "../../../../scripts/drizzle-preflight.mjs";
+import { checkSharedPackage, isTsxMissing, repairSharedIfNeeded } from "../../../../scripts/shared-preflight.mjs";
 import { buildDevPortEnv } from "../../../../scripts/dev-env.mjs";
 import { resolveDevPorts } from "../../../../scripts/dev-port-plan.mjs";
 import {
@@ -312,6 +313,193 @@ describe("drizzle preflight check", () => {
       const dirs = findDrizzlePnpmDirs(root);
       expect(dirs).toHaveLength(1);
       expect(dirs[0]).toContain("drizzle-orm@0.45.2");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("shared-package preflight", () => {
+  function makeHealthySharedRoot() {
+    const root = mkdtempSync(join(tmpdir(), "ak-shared-preflight-"));
+    const sharedDir = join(root, "packages", "shared");
+    const drizzleDir = join(sharedDir, "drizzle");
+    mkdirSync(drizzleDir, { recursive: true });
+    writeFileSync(join(sharedDir, "package.json"), JSON.stringify({ name: "@agentic-kanban/shared" }));
+    writeFileSync(join(drizzleDir, "0001_init.sql"), "-- init");
+    return { root, sharedDir, drizzleDir };
+  }
+
+  it("reports healthy when package.json and drizzle SQL files are present", () => {
+    const { root } = makeHealthySharedRoot();
+    try {
+      const result = checkSharedPackage(root);
+      expect(result.missingFiles).toHaveLength(0);
+      expect(result.drizzleEmpty).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("detects a missing package.json", () => {
+    const { root, sharedDir } = makeHealthySharedRoot();
+    try {
+      rmSync(join(sharedDir, "package.json"));
+      const result = checkSharedPackage(root);
+      expect(result.missingFiles.length).toBeGreaterThan(0);
+      expect(result.missingFiles.some((f) => f.endsWith("package.json"))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("detects an empty drizzle directory", () => {
+    const { root, drizzleDir } = makeHealthySharedRoot();
+    try {
+      rmSync(join(drizzleDir, "0001_init.sql"));
+      const result = checkSharedPackage(root);
+      expect(result.drizzleEmpty).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("detects a missing drizzle directory", () => {
+    const { root, drizzleDir } = makeHealthySharedRoot();
+    try {
+      rmSync(drizzleDir, { recursive: true, force: true });
+      const result = checkSharedPackage(root);
+      expect(result.drizzleEmpty).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("detects both missing package.json and empty drizzle simultaneously", () => {
+    const { root, sharedDir, drizzleDir } = makeHealthySharedRoot();
+    try {
+      rmSync(join(sharedDir, "package.json"));
+      rmSync(join(drizzleDir, "0001_init.sql"));
+      const result = checkSharedPackage(root);
+      expect(result.missingFiles.length).toBeGreaterThan(0);
+      expect(result.drizzleEmpty).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("is a no-op when packages/shared is healthy", () => {
+    const { root } = makeHealthySharedRoot();
+    try {
+      let gitRestoreCalled = false;
+      const repaired = repairSharedIfNeeded(root, {
+        runGitRestore: () => { gitRestoreCalled = true; return true; },
+        runPnpmInstallForce: () => {},
+      });
+      expect(repaired).toBe(false);
+      expect(gitRestoreCalled).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("runs git restore when package.json is missing", () => {
+    const { root, sharedDir } = makeHealthySharedRoot();
+    try {
+      rmSync(join(sharedDir, "package.json"));
+      const calls = [];
+      repairSharedIfNeeded(root, {
+        runGitRestore: (r) => { calls.push({ op: "git-restore", r }); return true; },
+        runPnpmInstallForce: (r) => { calls.push({ op: "pnpm-force", r }); },
+      });
+      expect(calls.some((c) => c.op === "git-restore")).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not run pnpm install --force when tsx is present after restore", () => {
+    const { root, sharedDir } = makeHealthySharedRoot();
+    try {
+      rmSync(join(sharedDir, "package.json"));
+      // Create a fake tsx binary so isTsxMissing returns false
+      const binDir = join(root, "node_modules", ".bin");
+      mkdirSync(binDir, { recursive: true });
+      writeFileSync(join(binDir, "tsx"), "");
+
+      const calls = [];
+      repairSharedIfNeeded(root, {
+        runGitRestore: () => { calls.push("git-restore"); return true; },
+        runPnpmInstallForce: () => { calls.push("pnpm-force"); },
+      });
+      expect(calls).toContain("git-restore");
+      expect(calls).not.toContain("pnpm-force");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("runs pnpm install --force when tsx is missing after restore", () => {
+    const { root, sharedDir } = makeHealthySharedRoot();
+    try {
+      rmSync(join(sharedDir, "package.json"));
+      // No tsx binary exists → isTsxMissing returns true
+      const calls = [];
+      repairSharedIfNeeded(root, {
+        runGitRestore: () => { calls.push("git-restore"); return true; },
+        runPnpmInstallForce: () => { calls.push("pnpm-force"); },
+      });
+      expect(calls).toContain("git-restore");
+      expect(calls).toContain("pnpm-force");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("skips pnpm install when git restore fails", () => {
+    const { root, sharedDir } = makeHealthySharedRoot();
+    try {
+      rmSync(join(sharedDir, "package.json"));
+      const calls = [];
+      repairSharedIfNeeded(root, {
+        runGitRestore: () => { calls.push("git-restore"); return false; },
+        runPnpmInstallForce: () => { calls.push("pnpm-force"); },
+      });
+      expect(calls).toContain("git-restore");
+      expect(calls).not.toContain("pnpm-force");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("detects tsx missing when neither root nor server .bin/tsx exist", () => {
+    const root = mkdtempSync(join(tmpdir(), "ak-tsx-missing-"));
+    try {
+      expect(isTsxMissing(root)).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("detects tsx present when root .bin/tsx exists", () => {
+    const root = mkdtempSync(join(tmpdir(), "ak-tsx-present-"));
+    try {
+      const binDir = join(root, "node_modules", ".bin");
+      mkdirSync(binDir, { recursive: true });
+      writeFileSync(join(binDir, "tsx"), "");
+      expect(isTsxMissing(root)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("detects tsx present when server-local .bin/tsx exists", () => {
+    const root = mkdtempSync(join(tmpdir(), "ak-tsx-server-"));
+    try {
+      const serverBinDir = join(root, "packages", "server", "node_modules", ".bin");
+      mkdirSync(serverBinDir, { recursive: true });
+      writeFileSync(join(serverBinDir, "tsx"), "");
+      expect(isTsxMissing(root)).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
