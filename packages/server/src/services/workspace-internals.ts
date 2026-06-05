@@ -174,21 +174,21 @@ export async function resolveMergeState(
     }
   }
 
-  if (workspace.workingDir) {
-    // Ancestry check: if the branch tip is already reachable from the base, the work
-    // was merged in a previous run that didn't update the DB.  Guard: require ≥1
-    // unique commit so a 0-commit branch isn't mistakenly reconciled.
-    const ancestryResult = await gitService.checkBranchTipIsAncestor(
-      repoPath, workspace.branch, baseBranch, workspace.workingDir,
-    );
-    if (ancestryResult.isAncestor) {
-      const { branchSha, baseSha } = ancestryResult;
-      const uniqueCommits = await gitService.countUniqueCommits(repoPath, baseSha, branchSha).catch(() => 0);
-      if (uniqueCommits > 0) {
-        return { kind: "reconcile", branchSha, baseSha, uniqueCommits };
-      }
+  const ancestryResult = await gitService.checkBranchTipIsAncestor(
+    repoPath,
+    workspace.branch,
+    baseBranch,
+    workspace.workingDir ?? undefined,
+  );
+  if (ancestryResult.isAncestor) {
+    const { branchSha, baseSha } = ancestryResult;
+    const uniqueCommits = await gitService.countUniqueCommits(repoPath, baseSha, branchSha).catch(() => 0);
+    if (uniqueCommits > 0) {
+      return { kind: "reconcile", branchSha, baseSha, uniqueCommits };
     }
+  }
 
+  if (workspace.workingDir) {
     // Behind-count: auto-rebase if the branch has fallen behind the base.
     let behindCount = 0;
     try {
