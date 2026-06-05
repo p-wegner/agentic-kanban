@@ -1275,6 +1275,19 @@ export async function checkBranchTipIsAncestor(
     : { isAncestor: false, branchSha, baseSha };
 }
 
+/**
+ * Count commits reachable from branchSha that are NOT reachable from baseSha.
+ * Returns 0 on any git error (safer to skip reconciliation than to wrongly act).
+ */
+export async function countUniqueCommits(repoPath: string, baseSha: string, branchSha: string): Promise<number> {
+  try {
+    const out = await execGit(["rev-list", "--count", `${baseSha}..${branchSha}`], repoPath);
+    return parseInt(out.trim(), 10) || 0;
+  } catch {
+    return 0;
+  }
+}
+
 /** Check if a rebase is in progress in the worktree. */
 export async function isRebaseInProgress(worktreePath: string): Promise<boolean> {
   try {
