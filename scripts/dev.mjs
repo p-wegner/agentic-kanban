@@ -29,7 +29,7 @@ import { planPortOwnerKill, parseNetstatListeners } from "./dev-port-guard.mjs";
 import { writeProcessAudit } from "./process-audit.mjs";
 import { repairDrizzleIfNeeded } from "./drizzle-preflight.mjs";
 import { repairSharedIfNeeded } from "./shared-preflight.mjs";
-import { reapStaleSupervisors } from "./stale-supervisor.mjs";
+import { listListeningPidsOnPort, reapStaleSupervisors } from "./stale-supervisor.mjs";
 import { binShimsPreflight } from "./bin-shims-preflight.mjs";
 
 function run(cmd) {
@@ -198,6 +198,11 @@ function rebuildSharedDist(label) {
   return false;
 }
 
+function makeServingPidChecker(port) {
+  const servingPids = listListeningPidsOnPort(port);
+  return (pid) => servingPids.has(pid);
+}
+
 function configurePorts() {
   const { isWorktree, branch } = detectWorktree();
   const { serverPort, clientPort } = resolveDevPorts({ isWorktree, branch });
@@ -301,7 +306,11 @@ async function main() {
 
   const { serverPort, clientPort } = configurePorts();
 
-  reapStaleSupervisors({ checkoutRoot: process.cwd(), serverPort });
+  reapStaleSupervisors({
+    checkoutRoot: process.cwd(),
+    serverPort,
+    isServingPid: makeServingPidChecker(serverPort),
+  });
 
   await freePort(serverPort, "server");
   await freePort(clientPort, "client");
