@@ -665,6 +665,14 @@ export async function syncCurrentNodeToStatus(db: WorkflowDb, issueId: string): 
   const match = nodes.find((n) => n.statusName === statusName);
   if (match) {
     await db.update(schema.issues).set({ currentNodeId: match.id }).where(eq(schema.issues.id, issueId));
+    // Also sync non-closed workspaces so the board's workflow-status override
+    // reflects the new node immediately (workspaces.currentNodeId drives the
+    // board column override in getBoard(); without this the board keeps showing
+    // the old workflow column until the workspace-summary cache rebuilds).
+    await db
+      .update(schema.workspaces)
+      .set({ currentNodeId: match.id })
+      .where(and(eq(schema.workspaces.issueId, issueId), sql`${schema.workspaces.status} != 'closed'`));
   }
 }
 
