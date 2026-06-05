@@ -299,31 +299,40 @@ export function createWorkspaceMergeService(deps: {
       // Before conflict detection: check whether the branch tip is already an ancestor
       // of the target. If so, the branch was fully merged by a previous run that never
       // updated the DB. Treat it as a successful no-op instead of reporting 409.
+      // Guard: require >=1 unique commit — a 0-commit workspace (tip==base or base
+      // advanced past an empty branch) is trivially an ancestor but has no merged work.
       const ancestryResult = await gitService.checkBranchTipIsAncestor(repoPath, workspace.branch, baseBranch, workspace.workingDir ?? undefined);
       if (ancestryResult.isAncestor) {
         const { branchSha, baseSha } = ancestryResult;
-        console.log(`[workspace-merge] branch ${workspace.branch} tip (${branchSha}) is already an ancestor of ${baseBranch} — treating as successful no-op merge`);
-        const now = new Date().toISOString();
-        await updateWorkspaceStatus(id, "closed", { workingDir: null, closedAt: now, mergedAt: now, readyForMerge: false }, database);
-        await moveIssueToDone(id, workspace.issueId, now, database);
-        await recordMergeAttempt(
-          workspace,
-          "merged",
-          `Branch '${workspace.branch}' tip (${branchSha}) is already an ancestor of ${baseBranch} — reconciled as already-merged no-op.`,
-          { targetBranch: baseBranch, commitSha: branchSha, mergedAt: now },
-          now,
-        );
-        const projectId = await resolveProjectId(id, database);
-        if (projectId) boardEvents?.broadcast(projectId, "workspace_merged");
-        return {
-          id,
-          merged: false,
-          reconciled: true,
-          baseBranch,
-          baseHeadShaBefore: baseSha,
-          baseHeadShaAfter: baseSha,
-          mergeOutput: `Branch '${workspace.branch}' was already fully merged into ${baseBranch} (tip ${branchSha} is an ancestor). Reconciled as successful no-op.`,
-        };
+        const uniqueCommits = await gitService.countUniqueCommits(repoPath, baseSha, branchSha).catch(() => 0);
+        if (uniqueCommits === 0) {
+          console.log(`[workspace-merge] branch ${workspace.branch} tip (${branchSha}) is an ancestor of ${baseBranch} but has 0 unique commits — not reconciling as merged`);
+        } else {
+          const now = new Date().toISOString();
+          console.log(
+            `[workspace-merge] auto-Done audit: ws=${id} baseSha=${baseSha} branchSha=${branchSha} uniqueCommits=${uniqueCommits} reconciledAt=${now}`,
+          );
+          await updateWorkspaceStatus(id, "closed", { workingDir: null, closedAt: now, mergedAt: now, readyForMerge: false }, database);
+          await moveIssueToDone(id, workspace.issueId, now, database);
+          await recordMergeAttempt(
+            workspace,
+            "merged",
+            `Branch '${workspace.branch}' tip (${branchSha}) is already an ancestor of ${baseBranch} — reconciled as already-merged no-op.`,
+            { targetBranch: baseBranch, commitSha: branchSha, mergedAt: now, uniqueCommitCount: uniqueCommits },
+            now,
+          );
+          const projectId = await resolveProjectId(id, database);
+          if (projectId) boardEvents?.broadcast(projectId, "workspace_merged");
+          return {
+            id,
+            merged: false,
+            reconciled: true,
+            baseBranch,
+            baseHeadShaBefore: baseSha,
+            baseHeadShaAfter: baseSha,
+            mergeOutput: `Branch '${workspace.branch}' was already fully merged into ${baseBranch} (tip ${branchSha} is an ancestor). Reconciled as successful no-op.`,
+          };
+        }
       }
 
       const conflicts = await gitService.detectConflicts(workspace.workingDir, baseBranch);

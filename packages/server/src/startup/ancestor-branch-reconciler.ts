@@ -126,6 +126,9 @@ export async function reconcileAncestorBranchWorkspaces(
       }, database);
       await moveIssueToDone(c.wsId, c.issueId, now, database);
 
+      console.log(
+        `[ancestor-reconciler] auto-Done audit: issue=${c.issueNumber ?? "?"} ws=${c.wsId} baseSha=${result.baseSha} branchSha=${result.branchSha} uniqueCommits=${uniqueCommits} reconciledAt=${now}`,
+      );
       try {
         await logBoardHealthEvent({
           projectId: c.projectId,
@@ -134,7 +137,7 @@ export async function reconcileAncestorBranchWorkspaces(
           category: "merge",
           issueNumber: c.issueNumber ?? undefined,
           summary: `Ancestor-branch reconciliation: workspace ${c.branch} branch tip was already merged into ${c.baseBranch} but issue was '${c.statusName}'. Closed workspace and moved issue to Done.`,
-          details: { workspaceId: c.wsId, branchSha: result.branchSha, baseSha: result.baseSha, reconciledAt: now },
+          details: { workspaceId: c.wsId, branchSha: result.branchSha, baseSha: result.baseSha, uniqueCommitCount: uniqueCommits, reconciledAt: now },
         }, database);
       } catch { /* health event logging is non-fatal */ }
 
