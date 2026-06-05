@@ -263,6 +263,27 @@ export function BoardPage() {
     const etag = res.headers.get("ETag");
     if (etag) boardEtagRef.current[pid] = etag;
     const board = await res.json() as StatusWithIssues[];
+    // Reconcile object identity: reuse unchanged issue refs so IssueCard.memo skips re-render
+    const prevCols = columnsRef.current;
+    if (prevCols.length > 0) {
+      const prevByIssueId = new Map(prevCols.flatMap(c => c.issues).map(i => [i.id, i]));
+      for (const col of board) {
+        col.issues = col.issues.map(issue => {
+          const prev = prevByIssueId.get(issue.id);
+          if (!prev) return issue;
+          // Quick field-level compare on the fields IssueCard.memo cares about
+          if (
+            prev.statusId === issue.statusId &&
+            prev.updatedAt === issue.updatedAt &&
+            prev.workspaceSummary?.main?.lastSessionAt === issue.workspaceSummary?.main?.lastSessionAt &&
+            prev.workspaceSummary?.main?.status === issue.workspaceSummary?.main?.status &&
+            prev.workspaceSummary?.main?.sessionStatus === issue.workspaceSummary?.main?.sessionStatus &&
+            prev.readyForMerge === issue.readyForMerge
+          ) return prev;
+          return issue;
+        });
+      }
+    }
     setColumns(board);
     columnsRef.current = board;
     const inactiveIssueIds = new Set<string>();
