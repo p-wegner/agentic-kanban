@@ -302,13 +302,9 @@ export function createWorkspaceMergeService(deps: {
       // Before conflict detection: check whether the branch tip is already an ancestor
       // of the target. If so, the branch was fully merged by a previous run that never
       // updated the DB. Treat it as a successful no-op instead of reporting 409.
-      let branchSha = "";
-      let baseSha = "";
-      try {
-        branchSha = await gitService.revParse(repoPath, workspace.branch);
-        baseSha = await gitService.revParse(repoPath, baseBranch);
-      } catch { /* tolerate — fall through to normal path */ }
-      if (branchSha && baseSha && await gitService.isAncestor(repoPath, branchSha, baseSha)) {
+      const ancestryResult = await gitService.checkBranchTipIsAncestor(repoPath, workspace.branch, baseBranch, workspace.workingDir);
+      if (ancestryResult.isAncestor) {
+        const { branchSha, baseSha } = ancestryResult;
         console.log(`[workspace-merge] branch ${workspace.branch} tip (${branchSha}) is already an ancestor of ${baseBranch} — treating as successful no-op merge`);
         const now = new Date().toISOString();
         await updateWorkspaceStatus(id, "closed", { workingDir: null, closedAt: now, mergedAt: now, readyForMerge: false }, database);
@@ -946,39 +942,21 @@ export function createWorkspaceMergeService(deps: {
       };
     }
 
-    // Resolve branch HEAD to verify reachability
-    let branchSha: string;
-    try {
-      branchSha = await gitService.revParse(repoPath, workspace.branch);
-    } catch {
-      // Branch ref doesn't exist in the main repo — check worktree
-      if (workspace.workingDir) {
-        try {
-          branchSha = await gitService.revParse(workspace.workingDir, "HEAD");
-        } catch {
-          return {
-            isAlreadyMerged: false,
-            branch: workspace.branch,
-            baseBranch,
-            mergeCommitSha: null,
-            issueNumber,
-            reason: "Could not resolve branch HEAD",
-          };
-        }
-      } else {
-        return {
-          isAlreadyMerged: false,
-          branch: workspace.branch,
-          baseBranch,
-          mergeCommitSha: null,
-          issueNumber,
-          reason: "Branch ref not found and no worktree available",
-        };
-      }
+    const ancestryResult = await gitService.checkBranchTipIsAncestor(repoPath, workspace.branch, baseBranch, workspace.workingDir ?? undefined);
+    if (ancestryResult.branchSha === null) {
+      return {
+        isAlreadyMerged: false,
+        branch: workspace.branch,
+        baseBranch,
+        mergeCommitSha: null,
+        issueNumber,
+        reason: ancestryResult.reason === "base-not-found"
+          ? "Could not resolve base branch " + baseBranch
+          : "Branch ref not found and no worktree available",
+      };
     }
-
-    const reachable = await gitService.isAncestor(repoPath, branchSha, baseBranch);
-    if (!reachable) {
+    const branchSha = ancestryResult.branchSha;
+    if (!ancestryResult.isAncestor) {
       return {
         isAlreadyMerged: false,
         branch: workspace.branch,
