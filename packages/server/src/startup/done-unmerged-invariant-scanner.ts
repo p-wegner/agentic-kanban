@@ -1,6 +1,12 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { issues, preferences, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
-import { checkBranchTipIsAncestor, countUniqueCommits } from "@agentic-kanban/shared/lib/git-service";
+import {
+  checkBranchTipIsAncestor,
+  countUniqueCommits,
+  detectConflictsByBranch,
+  countBehindCommits,
+  mergeBranch,
+} from "@agentic-kanban/shared/lib/git-service";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
@@ -9,12 +15,24 @@ import { PREF_DONE_UNMERGED_SCANNER_ENABLED } from "../constants/preference-keys
 /** Issue status names that count as "terminal Done" — these are the ones we scan. */
 const DONE_STATUS_NAMES = ["Done", "AI Reviewed"];
 
+/** Max commits behind base for auto-merge to proceed. Branches further behind are left log-only. */
+const MAX_BEHIND_FOR_AUTO_MERGE = 20;
+
+/** Max auto-merge attempts per scanner cycle to limit blast radius. */
+const MAX_AUTO_MERGES_PER_CYCLE = 3;
+
 export interface DoneUnmergedScannerDeps {
   database?: Database;
   /** Injectable for testing. Defaults to the real checkBranchTipIsAncestor from git-service. */
   checkAncestor?: typeof checkBranchTipIsAncestor;
   /** Injectable for testing. Defaults to the real countUniqueCommits from git-service. */
   countCommits?: typeof countUniqueCommits;
+  /** Injectable for testing. Defaults to the real detectConflictsByBranch from git-service. */
+  detectConflicts?: typeof detectConflictsByBranch;
+  /** Injectable for testing. Defaults to the real countBehindCommits from git-service. */
+  countBehind?: typeof countBehindCommits;
+  /** Injectable for testing. Defaults to the real mergeBranch from git-service. */
+  mergeGitBranch?: typeof mergeBranch;
   /**
    * Override enabled state for testing. When undefined (production path), the scanner
    * reads the live preference from the DB at call time.
@@ -37,28 +55,23 @@ export interface DoneUnmergedFinding {
 
 export interface DoneUnmergedScanResult {
   findings: DoneUnmergedFinding[];
+  /** @deprecated reopenToInReview was removed; this is always 0 */
   reopened: number;
+  autoMerged: number;
 }
 
 /**
- * Startup invariant scanner that detects issues in a terminal Done status
- * whose latest workspace branch is NOT reachable from base HEAD and is ahead
- * by >=1 unique commit (Done-but-unmerged silent-merge-loss detector).
+ * Startup invariant scanner that detects Done-but-unmerged issues (silent-merge-loss)
+ * and performs SAFE forward-only auto-recovery: merges clean ahead-only branches into base,
+ * leaving the issue Done.
  *
- * This is the INVERSE of the ancestor-branch reconciler (#576): instead of
- * detecting merged-but-stranded issues, this detects Done-but-unmerged issues
- * where the work was never actually landed on base.
- *
- * Grounded in the #581 incident: the buggy ancestor-branch reconciler marked
- * issues Done while master never advanced; real committed work sat on-branch
- * unreachable from base. This scanner flags (and optionally re-opens) those.
- *
- * READ-ONLY by default: logs structured warnings and board health events.
- * Passes `reopenToInReview: true` to also move the issue back to In Review
- * so the normal merge chain can re-land the work.
- *
- * Idempotent: once an issue is re-opened and later genuinely merged and Done,
- * subsequent scans will no longer flag it (branch will be reachable from base).
+ * Safety invariants:
+ * - NEVER reopens an issue (no statusId change).
+ * - NEVER touches a 0-commit branch (ahead==0) — those are the false-positive class.
+ * - Only auto-merges when: ahead>=1, behind<=MAX_BEHIND_FOR_AUTO_MERGE, no conflicts.
+ * - Conflicted / behind-too-far / 0-ahead candidates are logged only.
+ * - Rate-limited: at most MAX_AUTO_MERGES_PER_CYCLE attempts per scan cycle.
+ * - Idempotent: mergedAt stamp prevents re-processing on subsequent scans.
  */
 export async function scanDoneUnmergedWorkspaces(
   deps: DoneUnmergedScannerDeps & { reopenToInReview?: boolean } = {},
@@ -66,7 +79,9 @@ export async function scanDoneUnmergedWorkspaces(
   const database = deps.database ?? db;
   const ancestorCheck = deps.checkAncestor ?? checkBranchTipIsAncestor;
   const commitCounter = deps.countCommits ?? countUniqueCommits;
-  const reopenToInReview = deps.reopenToInReview ?? true;
+  const conflictDetector = deps.detectConflicts ?? detectConflictsByBranch;
+  const behindCounter = deps.countBehind ?? countBehindCommits;
+  const gitMerge = deps.mergeGitBranch ?? mergeBranch;
 
   const isEnabled = deps.enabled !== undefined
     ? deps.enabled
@@ -82,13 +97,11 @@ export async function scanDoneUnmergedWorkspaces(
 
   if (!isEnabled) {
     console.log("[done-unmerged-scanner] disabled via preference — skipping scan");
-    return { findings: [], reopened: 0 };
+    return { findings: [], reopened: 0, autoMerged: 0 };
   }
 
   // Find non-direct workspaces whose issue IS in a terminal Done status
   // and whose branch was NOT recorded as merged (mergedAt IS NULL).
-  // mergedAt set = the workspace was genuinely merged; those are not violations.
-  // This mirrors the ancestor-branch-reconciler's mergedAt guard.
   const candidates = await database
     .select({
       wsId: workspaces.id,
@@ -113,14 +126,13 @@ export async function scanDoneUnmergedWorkspaces(
       ),
     );
 
-  if (candidates.length === 0) return { findings: [], reopened: 0 };
+  if (candidates.length === 0) return { findings: [], reopened: 0, autoMerged: 0 };
 
   const findings: DoneUnmergedFinding[] = [];
-  let reopened = 0;
+  let autoMerged = 0;
   const now = new Date().toISOString();
-  // Track which issues have already been re-opened this scan to avoid double-counting
-  // when an issue has multiple non-merged workspaces (e.g. one abandoned, one done-but-unmerged).
-  const reopenedIssueIds = new Set<string>();
+  // Track which workspaces have already been attempted this cycle (idempotency guard).
+  const attemptedWorkspaceIds = new Set<string>();
 
   for (const c of candidates) {
     if (!c.branch || !c.baseBranch || !c.repoPath) continue;
@@ -179,60 +191,89 @@ export async function scanDoneUnmergedWorkspaces(
       }, database);
     } catch { /* health event logging is non-fatal */ }
 
-    if (reopenToInReview && !reopenedIssueIds.has(c.issueId)) {
-      try {
-        // Resolve the In Review status for this project.
-        const statuses = await database
-          .select({ id: projectStatuses.id, name: projectStatuses.name })
-          .from(projectStatuses)
-          .where(eq(projectStatuses.projectId, c.projectId));
-
-        const inReviewStatus = statuses.find(s => s.name === "In Review");
-        if (!inReviewStatus) {
-          console.warn(`[done-unmerged-scanner] no 'In Review' status found for project ${c.projectId} — cannot reopen issue #${c.issueNumber ?? "?"}`);
-          continue;
-        }
-
-        await database
-          .update(issues)
-          .set({ statusId: inReviewStatus.id, updatedAt: now, statusChangedAt: now })
-          .where(eq(issues.id, c.issueId));
-
-        // Also reopen the workspace so it is no longer closed.
-        await database
-          .update(workspaces)
-          .set({ status: "idle", mergedAt: null, closedAt: null, readyForMerge: true, updatedAt: now })
-          .where(eq(workspaces.id, c.wsId));
-
-        reopened++;
-        reopenedIssueIds.add(c.issueId);
-
-        console.log(
-          `[done-unmerged-scanner] re-opened issue #${c.issueNumber ?? "?"} to 'In Review' and workspace ${c.wsId} to idle (branch has ${uniqueCommits} unmerged commit(s))`,
-        );
-
-        try {
-          await logBoardHealthEvent({
-            projectId: c.projectId,
-            cycleId: `done-unmerged-reopen-${c.wsId}`,
-            eventType: "action",
-            category: "merge",
-            issueNumber: c.issueNumber ?? undefined,
-            summary: `Done-but-unmerged recovery: re-opened issue #${c.issueNumber ?? "?"} to 'In Review' — branch '${c.branch}' has ${uniqueCommits} unmerged commit(s) not yet on ${c.baseBranch}.`,
-            details: { workspaceId: c.wsId, branchSha: result.branchSha, baseSha: result.baseSha, uniqueCommitCount: uniqueCommits, reopenedAt: now },
-          }, database);
-        } catch { /* health event logging is non-fatal */ }
-      } catch (err) {
-        console.warn(`[done-unmerged-scanner] failed to reopen workspace ${c.wsId}:`, err instanceof Error ? err.message : err);
+    // --- SAFE FORWARD-ONLY AUTO-RECOVERY ---
+    // Skip if rate limit reached or already attempted this cycle.
+    if (autoMerged >= MAX_AUTO_MERGES_PER_CYCLE || attemptedWorkspaceIds.has(c.wsId)) {
+      if (autoMerged >= MAX_AUTO_MERGES_PER_CYCLE) {
+        console.log(`[done-unmerged-scanner] auto-merge cap (${MAX_AUTO_MERGES_PER_CYCLE}/cycle) reached — leaving workspace ${c.wsId} log-only this cycle`);
       }
+      continue;
+    }
+
+    // Check how far behind base the branch is.
+    let behind: number;
+    try {
+      behind = await behindCounter(c.repoPath, c.branch, c.baseBranch);
+    } catch {
+      behind = MAX_BEHIND_FOR_AUTO_MERGE + 1; // treat error as too-far-behind
+    }
+
+    if (behind > MAX_BEHIND_FOR_AUTO_MERGE) {
+      console.warn(
+        `[done-unmerged-scanner] issue #${c.issueNumber ?? "?"} branch '${c.branch}' is ${behind} commit(s) behind ${c.baseBranch} (limit ${MAX_BEHIND_FOR_AUTO_MERGE}) — leaving log-only`,
+      );
+      continue;
+    }
+
+    // Read-only conflict check using the branch names directly from the repo.
+    let hasConflicts: boolean;
+    try {
+      const conflictResult = await conflictDetector(c.repoPath, c.branch, c.baseBranch);
+      hasConflicts = conflictResult.hasConflicts;
+      if (hasConflicts) {
+        console.warn(
+          `[done-unmerged-scanner] issue #${c.issueNumber ?? "?"} branch '${c.branch}' has merge conflicts with ${c.baseBranch} — leaving log-only`,
+        );
+        continue;
+      }
+    } catch (err) {
+      console.warn(`[done-unmerged-scanner] conflict check failed for workspace ${c.wsId}:`, err instanceof Error ? err.message : err);
+      continue;
+    }
+
+    // All guards passed: ahead>=1, behind<=limit, no conflicts — attempt auto-merge.
+    attemptedWorkspaceIds.add(c.wsId);
+    try {
+      console.log(
+        `[done-unmerged-scanner] auto-merging: issue #${c.issueNumber ?? "?"} branch '${c.branch}' → ${c.baseBranch} (ahead=${uniqueCommits}, behind=${behind})`,
+      );
+      await gitMerge(c.repoPath, c.branch, c.baseBranch);
+
+      // Stamp mergedAt and close the workspace. Issue stays Done — no status change.
+      await database
+        .update(workspaces)
+        .set({ mergedAt: now, status: "closed", closedAt: now, updatedAt: now })
+        .where(eq(workspaces.id, c.wsId));
+
+      autoMerged++;
+      console.log(
+        `[done-unmerged-scanner] auto-merged issue #${c.issueNumber ?? "?"} — branch '${c.branch}' is now on ${c.baseBranch}; issue remains Done`,
+      );
+
+      try {
+        await logBoardHealthEvent({
+          projectId: c.projectId,
+          cycleId: `done-unmerged-automerge-${c.wsId}`,
+          eventType: "action",
+          category: "merge",
+          issueNumber: c.issueNumber ?? undefined,
+          summary: `Done-but-unmerged auto-recovery: merged branch '${c.branch}' into ${c.baseBranch}. Issue #${c.issueNumber ?? "?"} remains Done.`,
+          details: { workspaceId: c.wsId, branchSha: result.branchSha, baseSha: result.baseSha, uniqueCommitCount: uniqueCommits, behind, autoMergedAt: now },
+        }, database);
+      } catch { /* health event logging is non-fatal */ }
+    } catch (err) {
+      console.warn(
+        `[done-unmerged-scanner] auto-merge failed for workspace ${c.wsId} (issue #${c.issueNumber ?? "?"}):`,
+        err instanceof Error ? err.message : err,
+      );
     }
   }
 
   if (findings.length > 0) {
-    console.warn(`[done-unmerged-scanner] found ${findings.length} Done-but-unmerged issue(s); reopened ${reopened}`);
+    console.warn(`[done-unmerged-scanner] found ${findings.length} Done-but-unmerged issue(s); auto-merged ${autoMerged}`);
   }
 
-  return { findings, reopened };
+  return { findings, reopened: 0, autoMerged };
 }
 
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
@@ -250,7 +291,7 @@ let _activeInterval: NodeJS.Timeout | null = null;
  * prevent the process from exiting cleanly.
  */
 export function startDoneUnmergedScanner(
-  deps: Omit<DoneUnmergedScannerDeps, "enabled"> & { reopenToInReview?: boolean } = {},
+  deps: Omit<DoneUnmergedScannerDeps, "enabled"> = {},
   intervalMs = DEFAULT_INTERVAL_MS,
 ): { timer: NodeJS.Timeout; interval: NodeJS.Timeout } {
   // Clear any prior handles from a previous hot-reload cycle.
@@ -276,7 +317,7 @@ export function startDoneUnmergedScanner(
  * Called after a merge completes to catch silent-merge-loss without waiting for the next interval.
  */
 export function runDoneUnmergedScannerNow(
-  deps: Omit<DoneUnmergedScannerDeps, "enabled"> & { reopenToInReview?: boolean } = {},
+  deps: Omit<DoneUnmergedScannerDeps, "enabled"> = {},
 ): void {
   scanDoneUnmergedWorkspaces(deps).catch((err) =>
     console.warn("[done-unmerged-scanner] post-merge scan error:", err instanceof Error ? err.message : err),
