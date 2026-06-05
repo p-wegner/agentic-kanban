@@ -160,7 +160,9 @@ if ($SelfTest) {
 }
 
 # Prune stale .playwright-cli artifacts to avoid ENOSPC from unbounded accumulation.
-$artifactDir = Join-Path $PSScriptRoot ".." ".playwright-cli" -Resolve -ErrorAction SilentlyContinue
+$artifactDirRaw = Join-Path (Join-Path $PSScriptRoot "..") ".playwright-cli"
+$artifactDir = $null
+try { $artifactDir = (Resolve-Path $artifactDirRaw -ErrorAction Stop).Path } catch {}
 if ($artifactDir) {
   Remove-StalePlaywrightArtifacts -ArtifactDir $artifactDir -RetentionMinutes $PruneRetentionMinutes
 }
