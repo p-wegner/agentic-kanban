@@ -3,7 +3,7 @@ import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import { issues, preferences, projectStatuses, projects, scheduledRunHistory, scheduledRuns, sessions, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { desc, eq } from "drizzle-orm";
 import { execFile } from "node:child_process";
-import { db } from "../db/index.js";
+import { db as defaultDb } from "../db/index.js";
 import { MOCK_AGENT_COMMAND, isMockProfile, toExecutorProvider } from "../services/agent-settings.service.js";
 import { createBoardEvents } from "../services/board-events.js";
 import { emitButlerSystemEvent } from "../services/butler-event-feed.js";
@@ -12,6 +12,7 @@ import { createSessionManager } from "../services/session.manager.js";
 import { buildReviewArgs, buildReviewPrompt, getEffectiveProfile, parseProviderPref } from "./review-helpers.js";
 import type { MergeWorkspace } from "./merge-workflow.js";
 import { isAutomaticMergeEnabled } from "./merge-strategy.js";
+import type { Database } from "../db/index.js";
 
 type WorkspaceRow = typeof workspaces.$inferSelect;
 
@@ -19,13 +20,15 @@ export interface WorkflowDeps {
   sessionManager: ReturnType<typeof createSessionManager>;
   boardEvents: ReturnType<typeof createBoardEvents>;
   autoMerge: (workspace: MergeWorkspace, projectId: string, issueId: string, doneStatusId: string | null, now: string) => Promise<void>;
+  /** Injectable database for testing (defaults to the global singleton). */
+  database?: Database;
 }
 
-async function waitForLearningSession(learnSessId: string, label: string, timeoutMessage: string) {
+async function waitForLearningSession(database: Database, learnSessId: string, label: string, timeoutMessage: string) {
   return new Promise<void>((resolve) => {
     const timeout = setTimeout(() => { console.log(timeoutMessage); resolve(); }, 3 * 60 * 1000);
     const poll = setInterval(async () => {
-      const sessRows = await db.select({ status: sessions.status }).from(sessions).where(eq(sessions.id, learnSessId)).limit(1);
+      const sessRows = await database.select({ status: sessions.status }).from(sessions).where(eq(sessions.id, learnSessId)).limit(1);
       if (sessRows.length > 0 && sessRows[0].status !== "running") {
         clearInterval(poll); clearTimeout(timeout);
         console.log(`[workflow] learning step (${label}) finished`); resolve();
@@ -34,7 +37,7 @@ async function waitForLearningSession(learnSessId: string, label: string, timeou
   });
 }
 
-async function launchLearningStep(sessionManager: ReturnType<typeof createSessionManager>, learningSessionIds: Set<string>, workspaceId: string, prefMap: Map<string, string>, label: "after review" | "after agent", wait = false) {
+async function launchLearningStep(database: Database, sessionManager: ReturnType<typeof createSessionManager>, learningSessionIds: Set<string>, workspaceId: string, prefMap: Map<string, string>, label: "after review" | "after agent", wait = false) {
   try {
     const provider = parseProviderPref(prefMap);
     const profile = prefMap.get("claude_profile") || undefined;
@@ -47,7 +50,7 @@ async function launchLearningStep(sessionManager: ReturnType<typeof createSessio
     const learnSessId = await sessionManager.startSession({ workspaceId, prompt, agentCommand, agentArgs, claudeProfile: effectiveProfile, provider: toExecutorProvider(provider), triggerType: "learning", profile: profileSelection });
     learningSessionIds.add(learnSessId);
     console.log(`[workflow] learning step (${label}) started: session=${learnSessId}`);
-    return wait ? waitForLearningSession(learnSessId, label, `[workflow] learning step (${label}) timed out after 3m`) : Promise.resolve();
+    return wait ? waitForLearningSession(database, learnSessId, label, `[workflow] learning step (${label}) timed out after 3m`) : Promise.resolve();
   } catch (err) {
     console.warn(`[workflow] learning step (${label}) failed (non-fatal):`, err);
     return Promise.resolve();
@@ -70,9 +73,9 @@ async function hasCommittedChanges(workspace: WorkspaceRow, defaultBranch: strin
   } catch { return false; }
 }
 
-async function isSpecPlanningNode(currentNodeId: string | null): Promise<boolean> {
+async function isSpecPlanningNode(database: Database, currentNodeId: string | null): Promise<boolean> {
   if (!currentNodeId) return false;
-  const rows = await db
+  const rows = await database
     .select({ name: workflowNodes.name })
     .from(workflowNodes)
     .where(eq(workflowNodes.id, currentNodeId))
@@ -80,7 +83,8 @@ async function isSpecPlanningNode(currentNodeId: string | null): Promise<boolean
   return isSpecPlanningStageName(rows[0]?.name);
 }
 
-export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge }: WorkflowDeps) {
+export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, database }: WorkflowDeps) {
+  const db = database ?? defaultDb;
   const reviewSessionIds = new Set<string>(), fixAndMergeSessionIds = new Set<string>(), learningSessionIds = new Set<string>();
   async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCode: number | null, wasPlanMode?: boolean) {
     try {
@@ -241,7 +245,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge }:
         }
         await db.update(workspaces).set({ readyForMerge: true, updatedAt: now }).where(eq(workspaces.id, workspaceId));
         boardEvents.broadcast(projectId, "workspace_ready_for_merge");
-        const learningAfterReview = prefMap.get("learning_step_after_review") === "true" && workspace.workingDir ? launchLearningStep(sessionManager, learningSessionIds, workspace.id, prefMap, "after review", true) : Promise.resolve();
+        const learningAfterReview = prefMap.get("learning_step_after_review") === "true" && workspace.workingDir ? launchLearningStep(db, sessionManager, learningSessionIds, workspace.id, prefMap, "after review", true) : Promise.resolve();
         if (autoMergeEnabled) {
           console.log(`[workflow] review session ${sessionId} completed  queued for scheduled auto-merge`);
           await learningAfterReview;
@@ -255,7 +259,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge }:
       }
 
       const committedChanges = await hasCommittedChanges(workspace, defaultBranch, workspaceId);
-      if (await isSpecPlanningNode(workspace.currentNodeId)) {
+      if (await isSpecPlanningNode(db, workspace.currentNodeId)) {
         console.log(`[workflow] planning phase session ${sessionId} completed; waiting for explicit user approval before advancing`);
         boardEvents.broadcast(projectId, "issue_updated");
         return;
@@ -273,7 +277,26 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge }:
         console.log(`[workflow] direct workspace ${workspaceId} closed on agent exit (no committed changes)  issue moved to Done`);
         return;
       }
-      if (!committedChanges) { console.log(`[workflow] agent session ${sessionId} completed but no committed changes  leaving issue in current status`); return; }
+      if (!committedChanges) {
+        // If the issue is already In Review with no committed changes, the workspace
+        // is a zero-diff dead-end: no code to review, no merge possible. Close it and
+        // move to Done so it doesn't block the Done transition (issue #603).
+        const currentIssueRows2 = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId)).limit(1);
+        const currentStatusName2 = currentIssueRows2.length > 0 ? statuses.find((s) => s.id === currentIssueRows2[0].statusId)?.name : undefined;
+        if (currentStatusName2 === "In Review") {
+          const doneStatus = findStatus("Done");
+          await db.update(workspaces).set({ status: "closed", workingDir: null, updatedAt: now }).where(eq(workspaces.id, workspaceId));
+          if (doneStatus) {
+            await db.update(issues).set({ statusId: doneStatus.id, updatedAt: now }).where(eq(issues.id, issueId));
+            await syncCurrentNodeToStatus(db, issueId);
+          }
+          boardEvents.broadcast(projectId, "workspace_merged");
+          console.log(`[workflow] non-direct workspace ${workspaceId} closed on agent exit (no committed changes, was In Review)  issue moved to Done`);
+          return;
+        }
+        console.log(`[workflow] agent session ${sessionId} completed but no committed changes  leaving issue in current status`);
+        return;
+      }
       console.log(`[workflow] agent session ${sessionId} completed with committed changes  moving to In Review`);
       const inReview = findStatus("In Review");
       if (inReview) {
@@ -281,7 +304,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge }:
         await syncCurrentNodeToStatus(db, issueId);
       }
       boardEvents.broadcast(projectId, "issue_updated");
-      if (prefMap.get("learning_step_after_agent") === "true" && workspace.workingDir) await launchLearningStep(sessionManager, learningSessionIds, workspace.id, prefMap, "after agent");
+      if (prefMap.get("learning_step_after_agent") === "true" && workspace.workingDir) await launchLearningStep(db, sessionManager, learningSessionIds, workspace.id, prefMap, "after agent");
       const autoReview = !skipAutoReview && (workspace.requiresReview || prefMap.get("auto_review") !== "false");
       if (!autoReview) return;
 
