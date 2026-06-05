@@ -18,4 +18,5 @@ export const PREF_BUTLER_AUTO_ANSWER_MIN_CONFIDENCE = "butler_auto_answer_min_co
 export const PREF_MERGE_STRATEGY = "merge_strategy";
 export const PREF_RECONCILER_ANCESTOR_BRANCH_ENABLED = "reconciler_ancestor_branch_enabled";
 export const PREF_RECONCILER_STRANDED_REVIEW_ENABLED = "reconciler_stranded_review_enabled";
+export const PREF_RECONCILER_ZOMBIE_FIX_ENABLED = "reconciler_zombie_fix_enabled";
 export const PREF_DONE_UNMERGED_SCANNER_ENABLED = "done_unmerged_scanner_enabled";
