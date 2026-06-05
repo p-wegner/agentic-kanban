@@ -281,6 +281,7 @@ export interface MainWorkspaceInfo {
   lastAssistantMessage?: string | null;
   /** True when a non-plan-mode session completed (idle) but produced no file changes. */
   planOnlyWarning?: boolean;
+  pendingPlanPath?: string | null;
   scorecard?: { score: number } | null;
   codeMetrics?: WorkspaceCodeMetrics | null;
   latestCommit?: { sha: string; message: string } | null;
@@ -288,6 +289,7 @@ export interface MainWorkspaceInfo {
     currentNodeId: string;
     currentNodeName: string;
     currentNodeType: string;
+    currentNodeStatusName?: string | null;
     state: "active" | "waiting" | "terminal";
     nextStages: string[];
   } | null;
