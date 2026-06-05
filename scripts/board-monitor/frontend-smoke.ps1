@@ -54,6 +54,37 @@ function Assert-SelfTest {
   }
 }
 
+function Format-SmokeUrlPort {
+  param(
+    [string]$Value,
+    [int]$Fallback = 5173
+  )
+
+  try {
+    return ([uri]$Value).Port
+  } catch {
+    return $Fallback
+  }
+}
+
+function Show-MissingClientBindingHelp {
+  param(
+    [string]$Url
+  )
+
+  $port = Format-SmokeUrlPort -Value $Url
+  Write-Host "Frontend smoke check could not reach the Vite client on $Url."
+  Write-Host "This usually means the client is not currently bound to port $port."
+  Write-Host "Suggested recovery:"
+  Write-Host "  1) Restart the client process:"
+  Write-Host "     pnpm --filter @agentic-kanban/client dev"
+  Write-Host "  2) Verify tsx/vite tooling is on PATH:"
+  Write-Host "     Get-Command tsx"
+  Write-Host "     Get-Command vite"
+  Write-Host "  3) If either command fails, repair bin shims:"
+  Write-Host "     node scripts/bin-shims-preflight.mjs"
+}
+
 function Remove-StalePlaywrightArtifacts {
   param(
     [string]$ArtifactDir,
@@ -183,7 +214,18 @@ $jsInnerHtml = "document.querySelector('main')?.innerHTML || document.querySelec
 
 try {
   $env:npm_config_loglevel = "silent"
-  & playwright-cli open $Url | Out-Host
+  try {
+    & playwright-cli open $Url | Out-Host
+  } catch {
+    $openError = ConvertTo-SmokeText $_
+    Write-Host "Unable to reach $Url."
+    if ($openError -match "ECONNREFUSED|connection refused|Could not connect|ERR_CONNECTION_REFUSED|No connection could be made") {
+      Show-MissingClientBindingHelp -Url $Url
+    } else {
+      Write-Host $openError
+    }
+    exit 1
+  }
 
   while ((Get-Date) -lt $deadline) {
     $renderedText = $null
