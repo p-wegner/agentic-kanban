@@ -3,8 +3,12 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 // Shim specs: base name + which package subdirectory contains the .bin folder.
+// NOTE: only check the PACKAGE-LOCAL shims the dev servers actually invoke. `tsx` and `vite`
+// are dependencies of packages/server and packages/client respectively, NOT of the workspace
+// root, so pnpm never creates a root-level node_modules/.bin/tsx in this layout. Checking for
+// it made the preflight fail on every start (and `pnpm install --force` can't create a shim for
+// a non-dependency), which blocked `pnpm dev` entirely. (regression from the bin-shim ticket)
 const SHIM_SPECS = [
-  { segments: ["node_modules", ".bin"], name: "tsx", label: "node_modules/.bin/tsx" },
   { segments: ["packages", "server", "node_modules", ".bin"], name: "tsx", label: "packages/server/node_modules/.bin/tsx" },
   { segments: ["packages", "client", "node_modules", ".bin"], name: "vite", label: "packages/client/node_modules/.bin/vite" },
 ];
