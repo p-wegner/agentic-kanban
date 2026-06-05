@@ -868,6 +868,7 @@ function WorkflowLearningSection({ settings, setBool }: WorkflowSectionProps) {
 
 function WorkflowFollowUpSection({
   settings,
+  set,
   setBool,
   activeProjectId,
   onButlerEventFeedOverrideChange,
@@ -963,6 +964,346 @@ function AdvancedSettingsSection({ settings, setBool }: WorkflowSectionProps) {
       />
       <div className="pt-4 border-t border-gray-100">
         <SlowRequestsPanel />
+      </div>
+    </>
+  );
+}
+
+type WorkflowBoardMonitorSectionProps = WorkflowSectionProps & {
+  activeProjectId?: string | null;
+  monitorStatus: {
+    enabled: boolean;
+    intervalMin: number;
+    active: boolean;
+    lastRun: string | null;
+    nextRunAt: string | null;
+    recentActions: string[];
+    maintenanceActive?: boolean;
+    maintenanceEnd?: string | null;
+  } | null;
+  monitorTunables: { tunables: MonitorTunables; source: "strategy" | "prefs" } | null;
+  monitorRunning: boolean;
+  migratingToStrategy: boolean;
+  skills: { id: string; name: string }[];
+  onRunMonitorNow: () => void;
+  onMigrateToStrategy: () => void;
+};
+
+function WorkflowBoardMonitorSection({
+  settings,
+  set,
+  setBool,
+  activeProjectId,
+  monitorStatus,
+  monitorTunables,
+  monitorRunning,
+  migratingToStrategy,
+  skills,
+  onRunMonitorNow,
+  onMigrateToStrategy,
+}: WorkflowBoardMonitorSectionProps) {
+  return (
+    <>
+      {activeProjectId && (
+        <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+          <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Monitor Policy</div>
+          {monitorTunables ? (
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+              <div className="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-950 border-b border-gray-200 dark:border-gray-700">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-600 dark:text-gray-400">Control surface:</span>
+                  {monitorTunables.source === "strategy" ? (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300 border border-brand-200 dark:border-brand-700 font-medium">Strategy Bullseye</span>
+                  ) : (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-200 dark:border-amber-700 font-medium">Legacy prefs (nudge_*)</span>
+                  )}
+                </div>
+                {monitorTunables.source === "prefs" && (
+                  <button
+                    onClick={onMigrateToStrategy}
+                    disabled={migratingToStrategy}
+                    className="text-xs px-2.5 py-1 rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Create a board_strategy pref from current nudge_* values so this project uses the Strategy Bullseye path"
+                  >
+                    {migratingToStrategy ? "Migrating…" : "Migrate to Strategy"}
+                  </button>
+                )}
+              </div>
+              <div className="px-3 py-2 grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-500 dark:text-gray-400">Active agents target</span>
+                  <span className="font-mono font-medium text-gray-800 dark:text-gray-200">{monitorTunables.tunables.activeAgentsTarget}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-500 dark:text-gray-400">Backlog floor</span>
+                  <span className="font-mono font-medium text-gray-800 dark:text-gray-200">{monitorTunables.tunables.backlogFloor}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-500 dark:text-gray-400">Max starts / cycle</span>
+                  <span className="font-mono font-medium text-gray-800 dark:text-gray-200">{monitorTunables.tunables.maxNewStartsPerCycle}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-500 dark:text-gray-400">Refill focus</span>
+                  <span className="font-mono font-medium text-gray-800 dark:text-gray-200">{monitorTunables.tunables.refillFocus}</span>
+                </div>
+              </div>
+              {monitorTunables.source === "prefs" ? (
+                <div className="px-3 pb-2 text-[11px] text-amber-600 dark:text-amber-400 leading-snug">
+                  <span className="font-semibold">nudge_wip_limit</span> and <span className="font-semibold">nudge_auto_start</span> are the active tuning prefs. Open the Strategy Bullseye or click Migrate to upgrade to the full target set.
+                </div>
+              ) : (
+                <div className="px-3 pb-2 text-[11px] text-gray-500 dark:text-gray-400 leading-snug">
+                  <span className="inline-flex items-center gap-1 mr-1 px-1 py-0 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 font-mono text-[10px] border border-gray-200 dark:border-gray-700 line-through">nudge_wip_limit</span>
+                  and
+                  <span className="inline-flex items-center gap-1 mx-1 px-1 py-0 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 font-mono text-[10px] border border-gray-200 dark:border-gray-700 line-through">nudge_auto_start</span>
+                  are superseded — Strategy Bullseye targets are in effect.
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-xs text-gray-400 dark:text-gray-500 italic">Loading policy…</div>
+          )}
+        </div>
+      )}
+
+      {/* Which monitor decision guide */}
+      <details className="pt-4 border-t border-gray-200 dark:border-gray-700 group">
+        <summary className="cursor-pointer list-none flex items-center gap-1.5 text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider select-none">
+          <svg className="w-3 h-3 transition-transform group-open:rotate-90 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+          Which monitor to use?
+        </summary>
+        <div className="mt-2 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden text-[11px] leading-snug">
+          <div className="px-3 py-2 bg-gray-50 dark:bg-gray-950 border-b border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400">
+            Three mechanisms can drive the board. They are independent — enable the one that fits your project.
+          </div>
+          <div className="divide-y divide-gray-100 dark:divide-gray-800">
+            <div className="px-3 py-2 space-y-0.5">
+              <div className="flex items-center gap-1.5">
+                <span className="font-semibold text-gray-700 dark:text-gray-300">In-process monitor</span>
+                <span className="text-[10px] px-1 py-0 rounded bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300 border border-green-200 dark:border-green-700">default on</span>
+              </div>
+              <div className="text-gray-500 dark:text-gray-400">Runs inside the server. Toggle: <span className="font-mono">auto_monitor</span> above. Targets from: Strategy Bullseye when a <span className="font-mono">board_strategy_*</span> pref exists, otherwise <span className="font-mono text-amber-600 dark:text-amber-400">nudge_wip_limit</span> (legacy). Use for any project you develop with agentic-kanban.</div>
+            </div>
+            <div className="px-3 py-2 space-y-0.5">
+              <div className="flex items-center gap-1.5">
+                <span className="font-semibold text-gray-700 dark:text-gray-300">Strategy Bullseye</span>
+                <span className="text-[10px] px-1 py-0 rounded bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300 border border-brand-200 dark:border-brand-700">policy surface</span>
+              </div>
+              <div className="text-gray-500 dark:text-gray-400">Configures all three mechanisms via a single <span className="font-mono">board_strategy_*</span> pref. When saved it supersedes <span className="font-mono line-through text-gray-400 dark:text-gray-500">nudge_wip_limit</span> / <span className="font-mono line-through text-gray-400 dark:text-gray-500">nudge_auto_start</span> for the deterministic monitor. Open via the board toolbar (bullseye icon).</div>
+            </div>
+            <div className="px-3 py-2 space-y-0.5">
+              <div className="flex items-center gap-1.5">
+                <span className="font-semibold text-gray-700 dark:text-gray-300">External Conductor loop</span>
+                <span className="text-[10px] px-1 py-0 rounded bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 border border-gray-200 dark:border-gray-700">dogfooding only</span>
+              </div>
+              <div className="text-gray-500 dark:text-gray-400"><span className="font-mono">scripts/board-monitor/loop.sh</span> — short-lived agent sessions on a fixed cadence. Only needed when you are developing agentic-kanban itself (the server restart blast-radius makes the in-process monitor fragile). Reads <span className="font-mono">objective.md</span> and the Strategy Bullseye targets.</div>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide">Board Monitor</div>
+            {monitorStatus && (
+              <>
+                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${monitorStatus.active ? "bg-green-100 text-green-700" : "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400"}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${monitorStatus.active ? "bg-green-500 animate-pulse" : "bg-gray-400"}`} />
+                  {monitorStatus.active ? "Active" : "Idle"}
+                </span>
+                {monitorStatus.maintenanceActive && (
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                    Maintenance
+                  </span>
+                )}
+              </>
+            )}
+          </div>
+          <button
+            onClick={onRunMonitorNow}
+            disabled={monitorRunning}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            title="Run a monitor cycle now and restart the interval timer"
+          >
+            {monitorRunning ? (
+              <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+            ) : (
+              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z"/></svg>
+            )}
+            {monitorRunning ? "Running…" : "Run now"}
+          </button>
+        </div>
+        <div className="flex items-center gap-4">
+          <Toggle
+            checked={settings.auto_monitor === "true"}
+            onChange={setBool("auto_monitor")}
+            label="Auto-monitor"
+            hint="Periodically checks workspaces and relaunches idle agents, triggers merges, and auto-starts unblocked issues."
+          />
+        </div>
+        {settings.auto_monitor === "true" && (
+          <div className="mt-2 pl-5 flex items-center gap-2">
+            <label className="text-xs text-gray-600 dark:text-gray-400">Interval</label>
+            <input
+              type="number"
+              min="1"
+              max="60"
+              value={settings.auto_monitor_interval || "4"}
+              onChange={(e) => set("auto_monitor_interval")(e.target.value)}
+              className="w-16 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
+            />
+            <span className="text-xs text-gray-500 dark:text-gray-400">min</span>
+          </div>
+        )}
+        <div className="mt-3 pl-5">
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-600 dark:text-gray-400">Stale backlog threshold</label>
+            <input
+              type="number"
+              min="1"
+              value={settings.backlog_stale_days || "14"}
+              onChange={(e) => set("backlog_stale_days")(e.target.value)}
+              className="w-16 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
+            />
+            <span className="text-xs text-gray-500 dark:text-gray-400">days</span>
+          </div>
+          <p className="mt-1 text-[11px] text-gray-400 dark:text-gray-500 leading-snug">
+            Backlog issues with no activity for this many days are flagged as Stale on the board.
+          </p>
+        </div>
+        <div className="mt-3 pl-5">
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-600 dark:text-gray-400">In Progress staleness threshold</label>
+            <input
+              type="number"
+              min="1"
+              value={settings.inprogress_stale_days || "3"}
+              onChange={(e) => set("inprogress_stale_days")(e.target.value)}
+              className="w-16 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
+            />
+            <span className="text-xs text-gray-500 dark:text-gray-400">days</span>
+          </div>
+          <p className="mt-1 text-[11px] text-gray-400 dark:text-gray-500 leading-snug">
+            In Progress cards older than this threshold get a warning badge. Age badges appear on all cards.
+          </p>
+        </div>
+        {settings.auto_monitor === "true" && (
+          <div className="mt-3 pl-5">
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-gray-600 dark:text-gray-400">When backlog is empty</label>
+              <select
+                value={settings.backlog_empty_strategy || "skip"}
+                onChange={(e) => set("backlog_empty_strategy")(e.target.value)}
+                className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white dark:bg-gray-900"
+              >
+                <option value="skip">Do nothing</option>
+                <option value="generate_tickets">Generate new tickets (run a skill)</option>
+              </select>
+            </div>
+            <p className="mt-1 text-[11px] text-gray-400 dark:text-gray-500 leading-snug">
+              When 0 unstarted Todo issues remain, run a skill that creates new high-value, local-only tickets. Respects the WIP limit and the cooldown below.
+            </p>
+            {settings.backlog_empty_strategy === "generate_tickets" && (
+              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-gray-600 dark:text-gray-400">Skill</label>
+                  <select
+                    value={settings.backlog_empty_skill || "architecture-improvement"}
+                    onChange={(e) => set("backlog_empty_skill")(e.target.value)}
+                    className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white dark:bg-gray-900"
+                  >
+                    <option value="architecture-improvement">architecture-improvement</option>
+                    <option value="ui-explorer">ui-explorer</option>
+                    {skills
+                      .filter((s) => s.name !== "architecture-improvement" && s.name !== "ui-explorer")
+                      .map((s) => (
+                        <option key={s.id} value={s.name}>{s.name}</option>
+                      ))}
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-gray-600 dark:text-gray-400">Cooldown</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={settings.backlog_empty_cooldown_min || "120"}
+                    onChange={(e) => set("backlog_empty_cooldown_min")(e.target.value)}
+                    className="w-20 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  />
+                  <span className="text-xs text-gray-500 dark:text-gray-400">min</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        <div className="mt-3">
+          <Toggle
+            checked={settings.monitor_maintenance_window_enabled === "true"}
+            onChange={setBool("monitor_maintenance_window_enabled")}
+            label="Maintenance window"
+            hint="Pause disruptive board actions (merges, relaunches, auto-start) while keeping health checks running. Enable before deployments, migrations, or manual board work."
+          />
+          {settings.monitor_maintenance_window_enabled === "true" && (
+            <div className="mt-2 pl-5 space-y-2">
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-gray-600 dark:text-gray-400">End time</label>
+                <input
+                  type="datetime-local"
+                  value={settings.monitor_maintenance_window_end
+                    ? new Date(new Date(settings.monitor_maintenance_window_end).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+                    : ""}
+                  onChange={(e) => set("monitor_maintenance_window_end")(e.target.value ? new Date(e.target.value).toISOString() : "")}
+                  className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white dark:bg-gray-900"
+                />
+                <span className="text-xs text-gray-500 dark:text-gray-400">(leave blank = indefinite)</span>
+              </div>
+              {monitorStatus?.maintenanceActive && (
+                <p className="text-xs text-amber-600 dark:text-amber-400 font-medium">
+                  Maintenance window active{monitorStatus.maintenanceEnd ? ` — ends ${new Date(monitorStatus.maintenanceEnd).toLocaleString("en-US")}` : " (indefinite)"}
+                </p>
+              )}
+              {settings.monitor_maintenance_window_enabled === "true" && !monitorStatus?.maintenanceActive && settings.monitor_maintenance_window_end && new Date(settings.monitor_maintenance_window_end).getTime() <= Date.now() && (
+                <p className="text-xs text-gray-500 dark:text-gray-400 italic">Window has expired — disable the toggle to clear it.</p>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="mt-3">
+          <Toggle
+            checked={settings.auto_commit_strategy_objective !== "false"}
+            onChange={setBool("auto_commit_strategy_objective")}
+            label="Auto-commit strategy objective.md"
+            hint="When you save the Strategy Bullseye, the board regenerates the git-tracked scripts/board-monitor/objective.md. Commit it automatically (path-scoped) so the main checkout doesn't stay dirty and block the auto-merge queue. Disable to commit it yourself."
+          />
+        </div>
+        {monitorStatus && (
+          <div className="mt-3 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+            <div className="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-950 border-b border-gray-200 dark:border-gray-700">
+              <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Last cycle</span>
+              <div className="flex items-center gap-3 text-[11px] text-gray-500 dark:text-gray-400">
+                {monitorStatus.lastRun && (
+                  <span title={new Date(monitorStatus.lastRun).toLocaleString('en-US')}>{new Date(monitorStatus.lastRun).toLocaleTimeString('en-US')}</span>
+                )}
+                {monitorStatus.nextRunAt && (
+                  <span className="text-blue-500" title="Next scheduled run">→ {new Date(monitorStatus.nextRunAt).toLocaleTimeString('en-US')}</span>
+                )}
+              </div>
+            </div>
+            <div className="max-h-32 overflow-y-auto">
+              {monitorStatus.recentActions.length > 0 ? (
+                <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+                  {monitorStatus.recentActions.slice(0, 10).map((action, i) => (
+                    <li key={i} className="px-3 py-1.5 text-[11px] text-gray-600 dark:text-gray-400 leading-snug">{action}</li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="px-3 py-2.5 text-[11px] text-gray-400 dark:text-gray-500 italic">No actions taken in last cycle</div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </>
   );
@@ -1566,329 +1907,20 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                       }));
                     }}
                   />
-                      {activeProjectId && (
-                        <div className="pl-5">
-                          <Field
-                            label="Per-project override"
-                            hint="Override the global setting for this project. 'Inherit' uses the global toggle above."
-                          >
-                            <select
-                              value={settings[`butler_event_feed_${activeProjectId}` as keyof Settings] ?? ""}
-                              onChange={(e) => setSettings((s) => ({ ...s, [`butler_event_feed_${activeProjectId}`]: e.target.value } as Settings))}
-                              className="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500"
-                            >
-                              <option value="">Inherit (global)</option>
-                              <option value="true">Force on for this project</option>
-                              <option value="false">Force off for this project</option>
-                            </select>
-                          </Field>
-                        </div>
-                      )}
-                    </div>
-                  </div>
 
-                  {activeProjectId && (
-                    <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
-                      <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Monitor Policy</div>
-                      {monitorTunables ? (
-                        <div className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-                          <div className="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-950 border-b border-gray-200 dark:border-gray-700">
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs text-gray-600 dark:text-gray-400">Control surface:</span>
-                              {monitorTunables.source === "strategy" ? (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300 border border-brand-200 dark:border-brand-700 font-medium">Strategy Bullseye</span>
-                              ) : (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-200 dark:border-amber-700 font-medium">Legacy prefs (nudge_*)</span>
-                              )}
-                            </div>
-                            {monitorTunables.source === "prefs" && (
-                              <button
-                                onClick={handleMigrateToStrategy}
-                                disabled={migratingToStrategy}
-                                className="text-xs px-2.5 py-1 rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
-                                title="Create a board_strategy pref from current nudge_* values so this project uses the Strategy Bullseye path"
-                              >
-                                {migratingToStrategy ? "Migrating…" : "Migrate to Strategy"}
-                              </button>
-                            )}
-                          </div>
-                          <div className="px-3 py-2 grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
-                            <div className="flex items-center justify-between">
-                              <span className="text-gray-500 dark:text-gray-400">Active agents target</span>
-                              <span className="font-mono font-medium text-gray-800 dark:text-gray-200">{monitorTunables.tunables.activeAgentsTarget}</span>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-gray-500 dark:text-gray-400">Backlog floor</span>
-                              <span className="font-mono font-medium text-gray-800 dark:text-gray-200">{monitorTunables.tunables.backlogFloor}</span>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-gray-500 dark:text-gray-400">Max starts / cycle</span>
-                              <span className="font-mono font-medium text-gray-800 dark:text-gray-200">{monitorTunables.tunables.maxNewStartsPerCycle}</span>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-gray-500 dark:text-gray-400">Refill focus</span>
-                              <span className="font-mono font-medium text-gray-800 dark:text-gray-200">{monitorTunables.tunables.refillFocus}</span>
-                            </div>
-                          </div>
-                          {monitorTunables.source === "prefs" ? (
-                            <div className="px-3 pb-2 text-[11px] text-amber-600 dark:text-amber-400 leading-snug">
-                              <span className="font-semibold">nudge_wip_limit</span> and <span className="font-semibold">nudge_auto_start</span> are the active tuning prefs. Open the Strategy Bullseye or click Migrate to upgrade to the full target set.
-                            </div>
-                          ) : (
-                            <div className="px-3 pb-2 text-[11px] text-gray-500 dark:text-gray-400 leading-snug">
-                              <span className="inline-flex items-center gap-1 mr-1 px-1 py-0 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 font-mono text-[10px] border border-gray-200 dark:border-gray-700 line-through">nudge_wip_limit</span>
-                              and
-                              <span className="inline-flex items-center gap-1 mx-1 px-1 py-0 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 font-mono text-[10px] border border-gray-200 dark:border-gray-700 line-through">nudge_auto_start</span>
-                              are superseded — Strategy Bullseye targets are in effect.
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="text-xs text-gray-400 dark:text-gray-500 italic">Loading policy…</div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Which monitor decision guide */}
-                  <details className="pt-4 border-t border-gray-200 dark:border-gray-700 group">
-                    <summary className="cursor-pointer list-none flex items-center gap-1.5 text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider select-none">
-                      <svg className="w-3 h-3 transition-transform group-open:rotate-90 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
-                      Which monitor to use?
-                    </summary>
-                    <div className="mt-2 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden text-[11px] leading-snug">
-                      <div className="px-3 py-2 bg-gray-50 dark:bg-gray-950 border-b border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400">
-                        Three mechanisms can drive the board. They are independent — enable the one that fits your project.
-                      </div>
-                      <div className="divide-y divide-gray-100 dark:divide-gray-800">
-                        <div className="px-3 py-2 space-y-0.5">
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-semibold text-gray-700 dark:text-gray-300">In-process monitor</span>
-                            <span className="text-[10px] px-1 py-0 rounded bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300 border border-green-200 dark:border-green-700">default on</span>
-                          </div>
-                          <div className="text-gray-500 dark:text-gray-400">Runs inside the server. Toggle: <span className="font-mono">auto_monitor</span> above. Targets from: Strategy Bullseye when a <span className="font-mono">board_strategy_*</span> pref exists, otherwise <span className="font-mono text-amber-600 dark:text-amber-400">nudge_wip_limit</span> (legacy). Use for any project you develop with agentic-kanban.</div>
-                        </div>
-                        <div className="px-3 py-2 space-y-0.5">
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-semibold text-gray-700 dark:text-gray-300">Strategy Bullseye</span>
-                            <span className="text-[10px] px-1 py-0 rounded bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300 border border-brand-200 dark:border-brand-700">policy surface</span>
-                          </div>
-                          <div className="text-gray-500 dark:text-gray-400">Configures all three mechanisms via a single <span className="font-mono">board_strategy_*</span> pref. When saved it supersedes <span className="font-mono line-through text-gray-400 dark:text-gray-500">nudge_wip_limit</span> / <span className="font-mono line-through text-gray-400 dark:text-gray-500">nudge_auto_start</span> for the deterministic monitor. Open via the board toolbar (bullseye icon).</div>
-                        </div>
-                        <div className="px-3 py-2 space-y-0.5">
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-semibold text-gray-700 dark:text-gray-300">External Conductor loop</span>
-                            <span className="text-[10px] px-1 py-0 rounded bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 border border-gray-200 dark:border-gray-700">dogfooding only</span>
-                          </div>
-                          <div className="text-gray-500 dark:text-gray-400"><span className="font-mono">scripts/board-monitor/loop.sh</span> — short-lived agent sessions on a fixed cadence. Only needed when you are developing agentic-kanban itself (the server restart blast-radius makes the in-process monitor fragile). Reads <span className="font-mono">objective.md</span> and the Strategy Bullseye targets.</div>
-                        </div>
-                      </div>
-                    </div>
-                  </details>
-
-                  <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide">Board Monitor</div>
-                        {monitorStatus && (
-                          <>
-                            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${monitorStatus.active ? "bg-green-100 text-green-700" : "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400"}`}>
-                              <span className={`w-1.5 h-1.5 rounded-full ${monitorStatus.active ? "bg-green-500 animate-pulse" : "bg-gray-400"}`} />
-                              {monitorStatus.active ? "Active" : "Idle"}
-                            </span>
-                            {monitorStatus.maintenanceActive && (
-                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
-                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                                Maintenance
-                              </span>
-                            )}
-                          </>
-                        )}
-                      </div>
-                      <button
-                        onClick={handleMonitorRunNow}
-                        disabled={monitorRunning}
-                        className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                        title="Run a monitor cycle now and restart the interval timer"
-                      >
-                        {monitorRunning ? (
-                          <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
-                        ) : (
-                          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z"/></svg>
-                        )}
-                        {monitorRunning ? "Running…" : "Run now"}
-                      </button>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <Toggle
-                        checked={settings.auto_monitor === "true"}
-                        onChange={setBool("auto_monitor")}
-                        label="Auto-monitor"
-                        hint="Periodically checks workspaces and relaunches idle agents, triggers merges, and auto-starts unblocked issues."
-                      />
-                    </div>
-                    {settings.auto_monitor === "true" && (
-                      <div className="mt-2 pl-5 flex items-center gap-2">
-                        <label className="text-xs text-gray-600 dark:text-gray-400">Interval</label>
-                        <input
-                          type="number"
-                          min="1"
-                          max="60"
-                          value={settings.auto_monitor_interval || "4"}
-                          onChange={(e) => set("auto_monitor_interval")(e.target.value)}
-                          className="w-16 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
-                        />
-                        <span className="text-xs text-gray-500 dark:text-gray-400">min</span>
-                      </div>
-                    )}
-                    <div className="mt-3 pl-5">
-                      <div className="flex items-center gap-2">
-                        <label className="text-xs text-gray-600 dark:text-gray-400">Stale backlog threshold</label>
-                        <input
-                          type="number"
-                          min="1"
-                          value={settings.backlog_stale_days || "14"}
-                          onChange={(e) => set("backlog_stale_days")(e.target.value)}
-                          className="w-16 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
-                        />
-                        <span className="text-xs text-gray-500 dark:text-gray-400">days</span>
-                      </div>
-                      <p className="mt-1 text-[11px] text-gray-400 dark:text-gray-500 leading-snug">
-                        Backlog issues with no activity for this many days are flagged as Stale on the board.
-                      </p>
-                    </div>
-                    <div className="mt-3 pl-5">
-                      <div className="flex items-center gap-2">
-                        <label className="text-xs text-gray-600 dark:text-gray-400">In Progress staleness threshold</label>
-                        <input
-                          type="number"
-                          min="1"
-                          value={settings.inprogress_stale_days || "3"}
-                          onChange={(e) => set("inprogress_stale_days")(e.target.value)}
-                          className="w-16 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
-                        />
-                        <span className="text-xs text-gray-500 dark:text-gray-400">days</span>
-                      </div>
-                      <p className="mt-1 text-[11px] text-gray-400 dark:text-gray-500 leading-snug">
-                        In Progress cards older than this threshold get a warning badge. Age badges appear on all cards.
-                      </p>
-                    </div>
-                    {settings.auto_monitor === "true" && (
-                      <div className="mt-3 pl-5">
-                        <div className="flex items-center gap-2">
-                          <label className="text-xs text-gray-600 dark:text-gray-400">When backlog is empty</label>
-                          <select
-                            value={settings.backlog_empty_strategy || "skip"}
-                            onChange={(e) => set("backlog_empty_strategy")(e.target.value)}
-                            className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white dark:bg-gray-900"
-                          >
-                            <option value="skip">Do nothing</option>
-                            <option value="generate_tickets">Generate new tickets (run a skill)</option>
-                          </select>
-                        </div>
-                        <p className="mt-1 text-[11px] text-gray-400 dark:text-gray-500 leading-snug">
-                          When 0 unstarted Todo issues remain, run a skill that creates new high-value, local-only tickets. Respects the WIP limit and the cooldown below.
-                        </p>
-                        {settings.backlog_empty_strategy === "generate_tickets" && (
-                          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
-                            <div className="flex items-center gap-2">
-                              <label className="text-xs text-gray-600 dark:text-gray-400">Skill</label>
-                              <select
-                                value={settings.backlog_empty_skill || "architecture-improvement"}
-                                onChange={(e) => set("backlog_empty_skill")(e.target.value)}
-                                className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white dark:bg-gray-900"
-                              >
-                                <option value="architecture-improvement">architecture-improvement</option>
-                                <option value="ui-explorer">ui-explorer</option>
-                                {skills
-                                  .filter((s) => s.name !== "architecture-improvement" && s.name !== "ui-explorer")
-                                  .map((s) => (
-                                    <option key={s.id} value={s.name}>{s.name}</option>
-                                  ))}
-                              </select>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <label className="text-xs text-gray-600 dark:text-gray-400">Cooldown</label>
-                              <input
-                                type="number"
-                                min="1"
-                                value={settings.backlog_empty_cooldown_min || "120"}
-                                onChange={(e) => set("backlog_empty_cooldown_min")(e.target.value)}
-                                className="w-20 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
-                              />
-                              <span className="text-xs text-gray-500 dark:text-gray-400">min</span>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    <div className="mt-3">
-                      <Toggle
-                        checked={settings.monitor_maintenance_window_enabled === "true"}
-                        onChange={setBool("monitor_maintenance_window_enabled")}
-                        label="Maintenance window"
-                        hint="Pause disruptive board actions (merges, relaunches, auto-start) while keeping health checks running. Enable before deployments, migrations, or manual board work."
-                      />
-                      {settings.monitor_maintenance_window_enabled === "true" && (
-                        <div className="mt-2 pl-5 space-y-2">
-                          <div className="flex items-center gap-2">
-                            <label className="text-xs text-gray-600 dark:text-gray-400">End time</label>
-                            <input
-                              type="datetime-local"
-                              value={settings.monitor_maintenance_window_end
-                                ? new Date(new Date(settings.monitor_maintenance_window_end).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)
-                                : ""}
-                              onChange={(e) => set("monitor_maintenance_window_end")(e.target.value ? new Date(e.target.value).toISOString() : "")}
-                              className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white dark:bg-gray-900"
-                            />
-                            <span className="text-xs text-gray-500 dark:text-gray-400">(leave blank = indefinite)</span>
-                          </div>
-                          {monitorStatus?.maintenanceActive && (
-                            <p className="text-xs text-amber-600 dark:text-amber-400 font-medium">
-                              Maintenance window active{monitorStatus.maintenanceEnd ? ` — ends ${new Date(monitorStatus.maintenanceEnd).toLocaleString("en-US")}` : " (indefinite)"}
-                            </p>
-                          )}
-                          {settings.monitor_maintenance_window_enabled === "true" && !monitorStatus?.maintenanceActive && settings.monitor_maintenance_window_end && new Date(settings.monitor_maintenance_window_end).getTime() <= Date.now() && (
-                            <p className="text-xs text-gray-500 dark:text-gray-400 italic">Window has expired — disable the toggle to clear it.</p>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    <div className="mt-3">
-                      <Toggle
-                        checked={settings.auto_commit_strategy_objective !== "false"}
-                        onChange={setBool("auto_commit_strategy_objective")}
-                        label="Auto-commit strategy objective.md"
-                        hint="When you save the Strategy Bullseye, the board regenerates the git-tracked scripts/board-monitor/objective.md. Commit it automatically (path-scoped) so the main checkout doesn't stay dirty and block the auto-merge queue. Disable to commit it yourself."
-                      />
-                    </div>
-                    {monitorStatus && (
-                      <div className="mt-3 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-                        <div className="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-950 border-b border-gray-200 dark:border-gray-700">
-                          <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Last cycle</span>
-                          <div className="flex items-center gap-3 text-[11px] text-gray-500 dark:text-gray-400">
-                            {monitorStatus.lastRun && (
-                              <span title={new Date(monitorStatus.lastRun).toLocaleString('en-US')}>{new Date(monitorStatus.lastRun).toLocaleTimeString('en-US')}</span>
-                            )}
-                            {monitorStatus.nextRunAt && (
-                              <span className="text-blue-500" title="Next scheduled run">→ {new Date(monitorStatus.nextRunAt).toLocaleTimeString('en-US')}</span>
-                            )}
-                          </div>
-                        </div>
-                        <div className="max-h-32 overflow-y-auto">
-                          {monitorStatus.recentActions.length > 0 ? (
-                            <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-                              {monitorStatus.recentActions.slice(0, 10).map((action, i) => (
-                                <li key={i} className="px-3 py-1.5 text-[11px] text-gray-600 dark:text-gray-400 leading-snug">{action}</li>
-                              ))}
-                            </ul>
-                          ) : (
-                            <div className="px-3 py-2.5 text-[11px] text-gray-400 dark:text-gray-500 italic">No actions taken in last cycle</div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
+                  <WorkflowBoardMonitorSection
+                    settings={settings}
+                    set={set}
+                    setBool={setBool}
+                    activeProjectId={activeProjectId}
+                    monitorStatus={monitorStatus}
+                    monitorTunables={monitorTunables}
+                    monitorRunning={monitorRunning}
+                    migratingToStrategy={migratingToStrategy}
+                    skills={skills}
+                    onRunMonitorNow={handleMonitorRunNow}
+                    onMigrateToStrategy={handleMigrateToStrategy}
+                  />
                 </>
               )}
 
