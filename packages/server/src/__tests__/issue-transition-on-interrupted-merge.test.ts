@@ -12,6 +12,22 @@
  *     The startup reconciler (reconcileAncestorBranchWorkspaces) finds the
  *     branch tip as an ancestor of base via git and moves the issue to Done.
  */
+
+// startup-tasks.ts imports db/index.js and several services at module level.
+// Mock them so we can import reconcileSilentlyMergedWorkspaces without a real DB connection.
+vi.mock("../db/index.js", () => ({ db: {}, rawClient: {} }));
+vi.mock("../db/manual-migrate.js", () => ({ applyMigrations: vi.fn(async () => {}) }));
+vi.mock("../services/project-registration.js", () => ({ deduplicateProjects: vi.fn(async () => {}) }));
+vi.mock("../services/agent.service.js", () => ({}));
+vi.mock("../services/git.service.js", () => ({
+  isMergeInProgress: vi.fn(async () => false),
+  abortMerge: vi.fn(async () => {}),
+  removeWorktree: vi.fn(async () => {}),
+  isRebaseInProgress: vi.fn(async () => false),
+  abortRebase: vi.fn(async () => {}),
+}));
+vi.mock("../db/seed.js", () => ({ ensureBuiltinTags: vi.fn(async () => {}), ensureBuiltinSkills: vi.fn(async () => {}) }));
+
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
@@ -19,6 +35,7 @@ import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/s
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
 import { reconcileAncestorBranchWorkspaces } from "../startup/ancestor-branch-reconciler.js";
+import { reconcileSilentlyMergedWorkspaces } from "../startup/startup-tasks.js";
 
 // ─── shared helpers ──────────────────────────────────────────────────────────
 
@@ -156,37 +173,16 @@ describe("interrupted merge — Path A: mergedAt stamped, status write dropped",
     // Issue is still In Review — the status update never landed.
     expect(await getIssueStatusName(db, issueId)).toBe("In Review");
 
-    // Now simulate server restart: run the startup reconciler (startup-tasks.ts
-    // calls reconcileSilentlyMergedWorkspaces which imports from startup-tasks.js;
-    // we call the shared repository helpers directly, mirroring what it does).
-    const { moveIssueToDone, updateWorkspaceStatus } = await import("../repositories/workspace.repository.js");
-    await updateWorkspaceStatus(
-      workspaceId,
-      "closed",
-      { mergedAt: ws.mergedAt!, closedAt: new Date().toISOString(), readyForMerge: false, workingDir: null },
-      db,
-    );
-    await moveIssueToDone(workspaceId, issueId, new Date().toISOString(), db);
+    // Simulate server restart: run the real startup reconciler.
+    // It queries for workspaces with mergedAt IS NOT NULL and status != 'closed',
+    // then closes them and moves the issue to Done.
+    await reconcileSilentlyMergedWorkspaces(db);
 
-    // Issue must now be Done and workspace closed — same outcome as the startup reconciler.
+    // Issue must now be Done and workspace closed.
     expect(await getIssueStatusName(db, issueId)).toBe("Done");
 
     const [wsFinal] = await db.select({ status: workspaces.status }).from(workspaces).where(eq(workspaces.id, workspaceId));
     expect(wsFinal.status).toBe("closed");
-  });
-
-  it("workspace branch was confirmed ancestor of base via git after merge (sanity check for Path B)", async () => {
-    // Verifies the git mock produces an ancestor result, so Path B tests below
-    // are internally consistent.
-    const isAncestorGit = makeGit({
-      checkBranchTipIsAncestor: vi.fn(async () => ({
-        isAncestor: true,
-        branchSha: "feature-sha",
-        baseSha: "master-sha",
-      })),
-    });
-    const result = await isAncestorGit.checkBranchTipIsAncestor("/repo", "feature/ak-579-test", "master");
-    expect(result.isAncestor).toBe(true);
   });
 });
 
