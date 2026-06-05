@@ -1536,9 +1536,16 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                               <span className="font-mono font-medium text-gray-800 dark:text-gray-200">{monitorTunables.tunables.refillFocus}</span>
                             </div>
                           </div>
-                          {monitorTunables.source === "prefs" && (
+                          {monitorTunables.source === "prefs" ? (
                             <div className="px-3 pb-2 text-[11px] text-amber-600 dark:text-amber-400 leading-snug">
-                              Editing nudge_wip_limit controls activeAgentsTarget. Open the Strategy Bullseye or click Migrate to use the full target set.
+                              <span className="font-semibold">nudge_wip_limit</span> and <span className="font-semibold">nudge_auto_start</span> are the active tuning prefs. Open the Strategy Bullseye or click Migrate to upgrade to the full target set.
+                            </div>
+                          ) : (
+                            <div className="px-3 pb-2 text-[11px] text-gray-500 dark:text-gray-400 leading-snug">
+                              <span className="inline-flex items-center gap-1 mr-1 px-1 py-0 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 font-mono text-[10px] border border-gray-200 dark:border-gray-700 line-through">nudge_wip_limit</span>
+                              and
+                              <span className="inline-flex items-center gap-1 mx-1 px-1 py-0 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 font-mono text-[10px] border border-gray-200 dark:border-gray-700 line-through">nudge_auto_start</span>
+                              are superseded — Strategy Bullseye targets are in effect.
                             </div>
                           )}
                         </div>
@@ -1547,6 +1554,42 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
                       )}
                     </div>
                   )}
+
+                  {/* Which monitor decision guide */}
+                  <details className="pt-4 border-t border-gray-200 dark:border-gray-700 group">
+                    <summary className="cursor-pointer list-none flex items-center gap-1.5 text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider select-none">
+                      <svg className="w-3 h-3 transition-transform group-open:rotate-90 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+                      Which monitor to use?
+                    </summary>
+                    <div className="mt-2 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden text-[11px] leading-snug">
+                      <div className="px-3 py-2 bg-gray-50 dark:bg-gray-950 border-b border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400">
+                        Three mechanisms can drive the board. They are independent — enable the one that fits your project.
+                      </div>
+                      <div className="divide-y divide-gray-100 dark:divide-gray-800">
+                        <div className="px-3 py-2 space-y-0.5">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-semibold text-gray-700 dark:text-gray-300">In-process monitor</span>
+                            <span className="text-[10px] px-1 py-0 rounded bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300 border border-green-200 dark:border-green-700">default on</span>
+                          </div>
+                          <div className="text-gray-500 dark:text-gray-400">Runs inside the server. Toggle: <span className="font-mono">auto_monitor</span> above. Targets from: Strategy Bullseye when a <span className="font-mono">board_strategy_*</span> pref exists, otherwise <span className="font-mono text-amber-600 dark:text-amber-400">nudge_wip_limit</span> (legacy). Use for any project you develop with agentic-kanban.</div>
+                        </div>
+                        <div className="px-3 py-2 space-y-0.5">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-semibold text-gray-700 dark:text-gray-300">Strategy Bullseye</span>
+                            <span className="text-[10px] px-1 py-0 rounded bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300 border border-brand-200 dark:border-brand-700">policy surface</span>
+                          </div>
+                          <div className="text-gray-500 dark:text-gray-400">Configures all three mechanisms via a single <span className="font-mono">board_strategy_*</span> pref. When saved it supersedes <span className="font-mono line-through text-gray-400 dark:text-gray-500">nudge_wip_limit</span> / <span className="font-mono line-through text-gray-400 dark:text-gray-500">nudge_auto_start</span> for the deterministic monitor. Open via the board toolbar (bullseye icon).</div>
+                        </div>
+                        <div className="px-3 py-2 space-y-0.5">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-semibold text-gray-700 dark:text-gray-300">External Conductor loop</span>
+                            <span className="text-[10px] px-1 py-0 rounded bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 border border-gray-200 dark:border-gray-700">dogfooding only</span>
+                          </div>
+                          <div className="text-gray-500 dark:text-gray-400"><span className="font-mono">scripts/board-monitor/loop.sh</span> — short-lived agent sessions on a fixed cadence. Only needed when you are developing agentic-kanban itself (the server restart blast-radius makes the in-process monitor fragile). Reads <span className="font-mono">objective.md</span> and the Strategy Bullseye targets.</div>
+                        </div>
+                      </div>
+                    </div>
+                  </details>
 
                   <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
                     <div className="flex items-center justify-between mb-3">
