@@ -916,4 +916,152 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const [ws2] = await db.select({ mergedAt: workspaces.mergedAt }).from(workspaces).where(eq(workspaces.id, wsId2));
     expect(ws2.mergedAt).not.toBeNull();
   });
+
+  // --- Integration: 0-commit, n-commit, stale branch reachability (#630) ---
+
+  it("#630 integration: 0-commit closed/behind branch — no finding, no status change", async () => {
+    // Scenario: workspace is closed, branch is behind base, but has 0 unique commits ahead.
+    // The scanner must not flag this as a violation — 0-commit branches have no real work.
+    const { issueId, workspaceId } = await seedWorkspace(db, { wsStatus: "closed" });
+    const checkAncestor = makeCheckAncestor(false);
+    // commitsBehind=5 (within threshold), uniqueCommits=0 (no work ahead)
+    let callCount = 0;
+    const countCommits: CountCommits = vi.fn(async () => {
+      callCount++;
+      return callCount === 1 ? 5 : 0; // first=behind, second=ahead
+    });
+    const mergeGitBranch = makeMergeGitBranch();
+
+    const result = await scanDoneUnmergedWorkspaces({
+      database: db, checkAncestor, countCommits,
+      detectConflicts: makeDetectConflicts(false),
+      countBehind: makeCountBehind(5),
+      mergeGitBranch,
+      maxCommitsBehindBase: 20,
+    });
+
+    expect(result.findings).toHaveLength(0);
+    expect(result.autoMerged).toBe(0);
+    expect(mergeGitBranch).not.toHaveBeenCalled();
+
+    // Issue stays Done
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+    expect(status.name).toBe("Done");
+
+    // Workspace not touched
+    const [ws] = await db.select({ mergedAt: workspaces.mergedAt }).from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.mergedAt).toBeNull();
+  });
+
+  it("#630 integration: n-commit closed/behind branch within threshold — flagged and auto-merged", async () => {
+    // Scenario: workspace is closed, branch has N commits ahead and M commits behind base
+    // (M within the staleness threshold). No conflicts. Scanner flags it and auto-merges.
+    const { issueId, workspaceId } = await seedWorkspace(db, { wsStatus: "closed" });
+    const checkAncestor = makeCheckAncestor(false);
+    // commitsBehind=3 (within threshold 20), uniqueCommits=4 (real work ahead)
+    let callCount = 0;
+    const countCommits: CountCommits = vi.fn(async () => {
+      callCount++;
+      return callCount === 1 ? 3 : 4; // first=behind, second=ahead
+    });
+    const mergeGitBranch = makeMergeGitBranch();
+
+    const result = await scanDoneUnmergedWorkspaces({
+      database: db, checkAncestor, countCommits,
+      detectConflicts: makeDetectConflicts(false),
+      countBehind: makeCountBehind(3),
+      mergeGitBranch,
+      maxCommitsBehindBase: 20,
+    });
+
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0].uniqueCommitCount).toBe(4);
+    expect(result.autoMerged).toBe(1);
+    expect(mergeGitBranch).toHaveBeenCalledOnce();
+
+    // Issue stays Done — scanner never reopens
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+    expect(status.name).toBe("Done");
+
+    // Workspace stamped with mergedAt
+    const [ws] = await db.select({ mergedAt: workspaces.mergedAt }).from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.mergedAt).not.toBeNull();
+  });
+
+  it("#630 integration: n-commit branch with stale reachability (ancestor=true) — no finding", async () => {
+    // Scenario: Done issue, closed workspace, branch has commits but branch tip IS already
+    // reachable from base (ancestor=true). This is the normal merged-work case.
+    // The scanner must stop at the ancestry check and produce 0 findings.
+    const { issueId, workspaceId } = await seedWorkspace(db, { wsStatus: "closed" });
+    const checkAncestor = makeCheckAncestor(true);
+    const countCommits = makeCountCommits(5); // would be non-zero but should never be called
+    const mergeGitBranch = makeMergeGitBranch();
+
+    const result = await scanDoneUnmergedWorkspaces({
+      database: db, checkAncestor, countCommits,
+      detectConflicts: makeDetectConflicts(false),
+      countBehind: makeCountBehind(0),
+      mergeGitBranch,
+    });
+
+    expect(result.findings).toHaveLength(0);
+    expect(result.autoMerged).toBe(0);
+    // Ancestry check fired, but commit-counting was short-circuited
+    expect(checkAncestor).toHaveBeenCalledOnce();
+    expect(countCommits).not.toHaveBeenCalled();
+    expect(mergeGitBranch).not.toHaveBeenCalled();
+
+    // Issue stays Done
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+    expect(status.name).toBe("Done");
+
+    // Workspace untouched
+    const [ws] = await db.select({ mergedAt: workspaces.mergedAt }).from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.mergedAt).toBeNull();
+  });
+
+  it("#630 integration: staleness boundary — exactly maxCommitsBehindBase commits behind is still processed and auto-merged", async () => {
+    // Boundary condition: a branch exactly AT the staleness threshold (not over it) must
+    // still be evaluated and, if clean, auto-merged.
+    // The staleness check is `commitsBehind > maxCommitsBehindBase` (exclusive), so a branch
+    // exactly N==threshold commits behind is NOT skipped — it remains a candidate.
+    const { issueId, workspaceId } = await seedWorkspace(db, { wsStatus: "closed" });
+    const checkAncestor = makeCheckAncestor(false);
+    const THRESHOLD = 20;
+    // commitsBehind = exactly THRESHOLD (at the limit but not over) → still processed
+    // uniqueCommits = 2 (real work ahead)
+    let callCount = 0;
+    const countCommits: CountCommits = vi.fn(async () => {
+      callCount++;
+      return callCount === 1 ? THRESHOLD : 2; // first=behind (=threshold), second=ahead
+    });
+    const mergeGitBranch = makeMergeGitBranch();
+
+    const result = await scanDoneUnmergedWorkspaces({
+      database: db, checkAncestor, countCommits,
+      detectConflicts: makeDetectConflicts(false),
+      // Auto-merge "behind" check also uses > (exclusive): behind=0 → well within limit
+      countBehind: makeCountBehind(0),
+      mergeGitBranch,
+      maxCommitsBehindBase: THRESHOLD,
+    });
+
+    // Branch at exactly the staleness threshold is NOT skipped — it's a finding and is auto-merged
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0].uniqueCommitCount).toBe(2);
+    expect(result.autoMerged).toBe(1);
+    expect(mergeGitBranch).toHaveBeenCalledOnce();
+
+    // Issue stays Done
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+    expect(status.name).toBe("Done");
+
+    // Workspace stamped with mergedAt
+    const [ws] = await db.select({ mergedAt: workspaces.mergedAt }).from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.mergedAt).not.toBeNull();
+  });
 });
