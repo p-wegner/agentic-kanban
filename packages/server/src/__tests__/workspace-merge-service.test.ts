@@ -13,10 +13,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
 import { resolveMergeState, WorkspaceError } from "../services/workspace-internals.js";
+import { createMockSessionManager } from "./helpers/mocks.js";
 
 function makeGit(overrides: Partial<Record<string, (...a: unknown[]) => unknown>> = {}) {
   return {
@@ -105,6 +106,31 @@ async function seedWorkspace(
   });
 
   return { projectId, issueId, workspaceId, doneStatusId };
+}
+
+async function insertSession(
+  db: ReturnType<typeof createTestDb>["db"],
+  payload: {
+    workspaceId: string;
+    status: "stopped" | "running" | "completed";
+    startedAt?: string;
+    endedAt?: string | null;
+    triggerType?: string;
+    stats?: string;
+  },
+): Promise<string> {
+  const id = randomUUID();
+  await db.insert(sessions).values({
+    id,
+    workspaceId: payload.workspaceId,
+    executor: "claude-code",
+    status: payload.status,
+    startedAt: payload.startedAt ?? new Date().toISOString(),
+    endedAt: payload.endedAt ?? null,
+    triggerType: payload.triggerType ?? "fix-and-merge",
+    stats: payload.stats,
+  });
+  return id;
 }
 
 // ─── Path 1: clean merge ────────────────────────────────────────────────────
@@ -449,6 +475,126 @@ function makeGitForStateMachine(overrides: Partial<Record<string, (...a: unknown
     ...overrides,
   };
 }
+
+
+describe("MergeService — retryable sessions recover from stale failed fix-and-merge state", () => {
+  let db: ReturnType<typeof createTestDb>["db"];
+
+  beforeEach(() => {
+    ({ db } = createTestDb());
+  });
+
+  it("recoverFailedFixAndMergeSessionIfNeeded: resolves resolveConflicts from zero-output fixing zombie", async () => {
+    const { workspaceId } = await seedWorkspace(db, { status: "fixing" });
+    const now = Date.now();
+    const sessionId = await insertSession(db, {
+      workspaceId,
+      status: "stopped",
+      startedAt: new Date(now - 500).toISOString(),
+      endedAt: new Date(now).toISOString(),
+      triggerType: "fix-and-merge",
+      stats: JSON.stringify({ inputTokens: 0, outputTokens: 0 }),
+    });
+
+    const sessionManager = createMockSessionManager();
+    const git = makeGit({
+      getConflictingFiles: async () => ["src/foo.ts"],
+    });
+
+    const svc = createWorkspaceMergeService({
+      database: db,
+      getSessionManager: () => sessionManager,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+
+    await expect(svc.resolveConflicts(workspaceId)).resolves.toMatchObject({ sessionId: expect.any(String) });
+
+    expect(sessionManager.stopSession).toHaveBeenCalledWith(sessionId);
+    expect(sessionManager.startSession).toHaveBeenCalledTimes(1);
+
+    const [workspace] = await db
+      .select({ status: workspaces.status })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId));
+    expect(workspace.status).toBe("fixing");
+  });
+
+  it("recoverFailedFixAndMergeSessionIfNeeded: resolves fixAndMerge from zero-output fixing zombie", async () => {
+    const { workspaceId } = await seedWorkspace(db, { status: "fixing" });
+    const now = Date.now();
+    const sessionId = await insertSession(db, {
+      workspaceId,
+      status: "stopped",
+      startedAt: new Date(now - 500).toISOString(),
+      endedAt: new Date(now).toISOString(),
+      triggerType: "fix-and-merge",
+      stats: JSON.stringify({ inputTokens: 0, outputTokens: 0 }),
+    });
+
+    const sessionManager = createMockSessionManager();
+    const git = makeGit({
+      getCurrentBranch: async () => "master",
+    });
+
+    const svc = createWorkspaceMergeService({
+      database: db,
+      getSessionManager: () => sessionManager,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+
+    await expect(svc.fixAndMerge(workspaceId, "merge conflict")).resolves.toMatchObject({ sessionId: expect.any(String) });
+
+    expect(sessionManager.stopSession).toHaveBeenCalledWith(sessionId);
+    expect(sessionManager.startSession).toHaveBeenCalledTimes(1);
+
+    const [workspace] = await db
+      .select({ status: workspaces.status })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId));
+    expect(workspace.status).toBe("fixing");
+  });
+
+  it("recoverZeroOutputRunningFixAndMergeSession: resolves fixAndMerge from a running zombie session with zero output", async () => {
+    const { workspaceId } = await seedWorkspace(db, { status: "fixing" });
+    const now = Date.now();
+    const sessionId = await insertSession(db, {
+      workspaceId,
+      status: "running",
+      startedAt: new Date(now - 120_000).toISOString(),
+      triggerType: "fix-and-merge",
+    });
+
+    const sessionManager = createMockSessionManager();
+    const git = makeGit({
+      getCurrentBranch: async () => "master",
+      rebaseOntoBase: vi.fn(async () => ({ success: true })),
+      syncBranchToHead: vi.fn(async () => false),
+    });
+
+    const svc = createWorkspaceMergeService({
+      database: db,
+      getSessionManager: () => sessionManager,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+
+    await expect(svc.fixAndMerge(workspaceId, "merge conflict")).resolves.toMatchObject({ sessionId: expect.any(String) });
+
+    expect(sessionManager.stopSession).toHaveBeenCalledWith(sessionId);
+    expect(sessionManager.startSession).toHaveBeenCalledTimes(1);
+
+    const [workspace] = await db
+      .select({ status: workspaces.status })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId));
+    expect(workspace.status).toBe("fixing");
+  });
+});
 
 describe("resolveMergeState — already-merged (mergedAt set)", () => {
   it("returns already-merged when mergedAt is stamped regardless of status", async () => {
