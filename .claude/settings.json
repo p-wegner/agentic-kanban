@@ -2,7 +2,11 @@
   "mcpServers": {
     "agentic-kanban": {
       "command": "pnpm",
-      "args": ["--filter", "@agentic-kanban/mcp-server", "dev"],
+      "args": [
+        "--filter",
+        "@agentic-kanban/mcp-server",
+        "dev"
+      ],
       "cwd": "C:/andrena/agentic-kanban"
     }
   },
@@ -23,6 +27,24 @@
           {
             "type": "command",
             "command": "node C:/andrena/agentic-kanban/.claude/hooks/prevent-cross-worktree-writes.js"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $CLAUDE_PROJECT_DIR/.claude/hooks/vital-file-guard.js"
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $CLAUDE_PROJECT_DIR/.claude/hooks/prevent-cross-worktree-writes.js"
           }
         ]
       }
