@@ -345,6 +345,76 @@ describe("GitService", () => {
     expect(journalContent).not.toContain(">>>>>>>");
   }, 30000);
 
+  it("rejects a conflicting plumbing merge and never commits conflict markers (regression: #598)", async () => {
+    // This is the exact failure mode from commit 4bf8c52c: mergeBranch used git plumbing
+    // (merge-tree + commit-tree) without adequately verifying the merged tree was conflict-free,
+    // so a conflicting merge was committed with raw <<<<<< markers in source files.
+    // That caused esbuild to fail on the next server reload ("Unexpected <<").
+    const { writeFileSync } = await import("node:fs");
+
+    // Seed a shared file on main
+    writeFileSync(join(repoPath, "conflict-regression.txt"), "line1\nshared line\nline3\n");
+    await exec("git", ["add", "."], repoPath);
+    await exec("git", ["commit", "-m", "seed conflict regression file"], repoPath);
+
+    // Branch X: change the shared line one way
+    const wtX = await gitService.createWorktree(repoPath, "feature/conflict-regression-x");
+    writeFileSync(join(wtX, "conflict-regression.txt"), "line1\nbranch X edit\nline3\n");
+    await exec("git", ["add", "."], wtX);
+    await exec("git", ["config", "user.email", "test@test.com"], wtX);
+    await exec("git", ["config", "user.name", "Test"], wtX);
+    await exec("git", ["commit", "-m", "branch X edit"], wtX);
+    await gitService.removeWorktree(repoPath, wtX);
+
+    // Record the commit before merging X, so we can branch Y from the same base
+    const baseBeforeX = (await exec("git", ["rev-parse", "main"], repoPath)).trim();
+
+    // Merge X cleanly into main
+    await gitService.mergeBranch(repoPath, "feature/conflict-regression-x", "main");
+    const mainAfterX = (await exec("git", ["rev-parse", "main"], repoPath)).trim();
+
+    // Branch Y from before X was merged: change the same line a different way
+    await exec("git", ["branch", "feature/conflict-regression-y", baseBeforeX], repoPath);
+    const wtY = await gitService.createWorktree(repoPath, "feature/conflict-regression-y");
+    writeFileSync(join(wtY, "conflict-regression.txt"), "line1\nbranch Y edit\nline3\n");
+    await exec("git", ["add", "."], wtY);
+    await exec("git", ["config", "user.email", "test@test.com"], wtY);
+    await exec("git", ["config", "user.name", "Test"], wtY);
+    await exec("git", ["commit", "-m", "branch Y edit"], wtY);
+    await gitService.removeWorktree(repoPath, wtY);
+
+    // Attempt to merge Y into main — must throw (conflict), never commit markers
+    await expect(
+      gitService.mergeBranch(repoPath, "feature/conflict-regression-y", "main")
+    ).rejects.toThrow();
+
+    // (a) main must NOT have advanced past the clean merge of X
+    const mainAfterFailedY = (await exec("git", ["rev-parse", "main"], repoPath)).trim();
+    expect(mainAfterFailedY).toBe(mainAfterX);
+
+    // (b) the conflicting file in the working tree must NOT contain conflict markers
+    //     (the plumbing merge must never touch the working tree on conflict)
+    const { readFileSync } = await import("node:fs");
+    const content = readFileSync(join(repoPath, "conflict-regression.txt"), "utf-8");
+    expect(content).not.toContain("<<<<<<<");
+    expect(content).not.toContain("=======");
+    expect(content).not.toContain(">>>>>>>");
+    expect(content.trim().replace(/\r\n/g, "\n")).toBe("line1\nbranch X edit\nline3");
+
+    // (c) no commit in history contains conflict markers in conflict-regression.txt
+    const logShas = (await exec("git", ["rev-list", "main"], repoPath))
+      .trim().split("\n").filter(Boolean);
+    for (const sha of logShas) {
+      let fileContent: string;
+      try {
+        fileContent = await exec("git", ["show", `${sha}:conflict-regression.txt`], repoPath);
+      } catch {
+        continue; // file didn't exist at this commit
+      }
+      expect(fileContent).not.toContain("<<<<<<<");
+    }
+  }, 30000);
+
   it("isMergeInProgress returns false when no merge is in progress", async () => {
     const result = await gitService.isMergeInProgress(repoPath);
     expect(result).toBe(false);
