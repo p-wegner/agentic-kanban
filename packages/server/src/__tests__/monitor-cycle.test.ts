@@ -162,6 +162,24 @@ describe("processWorkspaceCandidates — idle + readyForMerge=false", () => {
     expect(calls.every(([url]) => String(url).startsWith("http://127.0.0.1:3001/"))).toBe(true);
   });
 
+  it("restarts an idle workspace that likely came from a stalled fix-and-merge session", async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: true } as Response);
+
+    const deps = makeDeps();
+    const candidate: WorkspaceCandidate = { ...baseCandidate, readyForMerge: false, issueStatusName: "In Progress" };
+    const stats = await processWorkspaceCandidates([candidate], deps);
+
+    expect(stats).toEqual({ relaunched: 1, merged: 0, nudged: 0 });
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+      "http://127.0.0.1:3001/api/workspaces/ws-1/launch",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("/fix-and-merge"))).toBe(false);
+    expect(vi.mocked(fetch).mock.calls.every(([url]) => !String(url).includes("/merge"))).toBe(true);
+    const logCalls = vi.mocked(deps.logMonitorAction).mock.calls;
+    expect(logCalls.some(([, action, wsId, issueId]) => action === "relaunch" && wsId === "ws-1" && issueId === "issue-1")).toBe(true);
+  });
+
   it("caps idle workspace relaunches per monitor cycle", async () => {
     vi.mocked(db.select).mockReset();
     for (let i = 0; i < 3; i++) {
