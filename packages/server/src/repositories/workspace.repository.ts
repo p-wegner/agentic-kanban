@@ -1,4 +1,4 @@
-import { workspaces, issues, projects, sessions, sessionMessages, diffComments, projectStatuses } from "@agentic-kanban/shared/schema";
+import { workspaces, issues, projects, sessions, sessionMessages, diffComments, projectStatuses, agentSkills } from "@agentic-kanban/shared/schema";
 import type { WorkspaceSetupRun, WorkspaceSymlinkRun } from "@agentic-kanban/shared";
 import { eq, inArray } from "drizzle-orm";
 
@@ -213,12 +213,28 @@ export interface WorkspaceDetails {
   isDirect: boolean;
   planMode: boolean;
   includeVisualProof: boolean;
+  requiresReview: boolean;
+  thoroughReview: boolean;
   readyForMerge: boolean;
   status: string;
   claudeProfile: string | null;
   agentCommand: string | null;
   provider: string | null;
+  model: string | null;
+  pendingPlanPath: string | null;
+  skillId: string | null;
+  skillName: string | null;
   contextPrimer: string | null;
+  closedAt: string | null;
+  mergedAt: string | null;
+  conflicts: { hasConflicts: boolean; conflictingFiles: string[] } | null;
+  diffStats: { filesChanged: number; insertions: number; deletions: number } | null;
+  scorecard: { score: number } | null;
+  lastSessionAt: string | null;
+  sessionStatus: string | null;
+  lastSessionTriggerType: string | null;
+  contextTokens: number | null;
+  lastTool: string | null;
   latestSetup: WorkspaceSetupRun | null;
   latestSymlink: WorkspaceSymlinkRun | null;
   createdAt: string;
@@ -240,12 +256,25 @@ export async function getWorkspaceDetails(
       isDirect: workspaces.isDirect,
       planMode: workspaces.planMode,
       includeVisualProof: workspaces.includeVisualProof,
+      requiresReview: workspaces.requiresReview,
+      thoroughReview: workspaces.thoroughReview,
       readyForMerge: workspaces.readyForMerge,
       status: workspaces.status,
       claudeProfile: workspaces.claudeProfile,
       agentCommand: workspaces.agentCommand,
       provider: workspaces.provider,
+      model: workspaces.model,
+      pendingPlanPath: workspaces.pendingPlanPath,
+      skillId: workspaces.skillId,
       contextPrimer: workspaces.contextPrimer,
+      closedAt: workspaces.closedAt,
+      mergedAt: workspaces.mergedAt,
+      conflictCacheHasConflicts: workspaces.conflictCacheHasConflicts,
+      conflictCacheFiles: workspaces.conflictCacheFiles,
+      diffStatCacheFilesChanged: workspaces.diffStatCacheFilesChanged,
+      diffStatCacheInsertions: workspaces.diffStatCacheInsertions,
+      diffStatCacheDeletions: workspaces.diffStatCacheDeletions,
+      scorecardScore: workspaces.scorecardScore,
       latestSetupCommand: workspaces.latestSetupCommand,
       latestSetupState: workspaces.latestSetupState,
       latestSetupStartedAt: workspaces.latestSetupStartedAt,
@@ -266,9 +295,11 @@ export async function getWorkspaceDetails(
       updatedAt: workspaces.updatedAt,
       issueTitle: issues.title,
       issuePriority: issues.priority,
+      skillName: agentSkills.name,
     })
     .from(workspaces)
     .innerJoin(issues, eq(workspaces.issueId, issues.id))
+    .leftJoin(agentSkills, eq(workspaces.skillId, agentSkills.id))
     .where(eq(workspaces.id, workspaceId));
 
   if (result.length === 0) return null;
@@ -283,12 +314,32 @@ export async function getWorkspaceDetails(
     isDirect: row.isDirect,
     planMode: row.planMode,
     includeVisualProof: row.includeVisualProof,
+    requiresReview: row.requiresReview,
+    thoroughReview: row.thoroughReview,
     readyForMerge: row.readyForMerge,
     status: row.status,
     claudeProfile: row.claudeProfile,
     agentCommand: row.agentCommand,
     provider: row.provider,
+    model: row.model,
+    pendingPlanPath: row.pendingPlanPath,
+    skillId: row.skillId,
+    skillName: row.skillName ?? null,
     contextPrimer: row.contextPrimer ?? null,
+    closedAt: row.closedAt,
+    mergedAt: row.mergedAt,
+    conflicts: row.conflictCacheHasConflicts !== null && row.conflictCacheHasConflicts !== undefined
+      ? { hasConflicts: row.conflictCacheHasConflicts, conflictingFiles: parseJsonArray<string>(row.conflictCacheFiles, []) }
+      : null,
+    diffStats: row.diffStatCacheFilesChanged !== null && row.diffStatCacheFilesChanged !== undefined
+      ? { filesChanged: row.diffStatCacheFilesChanged, insertions: row.diffStatCacheInsertions ?? 0, deletions: row.diffStatCacheDeletions ?? 0 }
+      : null,
+    scorecard: row.scorecardScore !== null && row.scorecardScore !== undefined ? { score: row.scorecardScore } : null,
+    lastSessionAt: null,
+    sessionStatus: null,
+    lastSessionTriggerType: null,
+    contextTokens: null,
+    lastTool: null,
     latestSetup: row.latestSetupState ? {
       command: row.latestSetupCommand,
       state: row.latestSetupState as WorkspaceSetupRun["state"],
