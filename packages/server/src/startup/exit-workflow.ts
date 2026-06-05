@@ -105,6 +105,18 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge }:
         }
       })();
 
+      // If the workspace was already merged (e.g. via HTTP merge endpoint while a
+      // fix-and-merge session was still running), do not reset the status back to
+      // "idle" — that would overwrite "closed" and strand the issue in "In Review".
+      if (workspace.status === "closed" && workspace.mergedAt) {
+        console.log(`[workflow] session ${sessionId} exited but workspace ${workspaceId} is already merged (mergedAt=${workspace.mergedAt}) — skipping exit workflow`);
+        boardEvents.broadcastActivity(projectId, { issueId, sessionId, activity: "" });
+        boardEvents.broadcast(projectId, "session_completed");
+        fixAndMergeSessionIds.delete(sessionId);
+        reviewSessionIds.delete(sessionId);
+        learningSessionIds.delete(sessionId);
+        return;
+      }
       await db.update(workspaces).set({ status: "idle", updatedAt: now }).where(eq(workspaces.id, workspaceId));
       boardEvents.broadcastActivity(projectId, { issueId, sessionId, activity: "" });
       boardEvents.broadcast(projectId, "session_completed");
