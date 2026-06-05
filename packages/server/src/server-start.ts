@@ -10,6 +10,7 @@ import { createWorkflowEngine } from "./startup/exit-workflow.js";
 import { createAutoMerge } from "./startup/merge-workflow.js";
 import { startAutoMergeOrchestrator } from "./startup/auto-merge-orchestrator.js";
 import { startStrandedReviewReconciler } from "./startup/stranded-review-reconciler.js";
+import { startZombieFixSessionReconciler } from "./startup/zombie-fix-session-reconciler.js";
 import { startAncestorBranchReconciler } from "./startup/ancestor-branch-reconciler.js";
 import { startDoneUnmergedScanner } from "./startup/done-unmerged-invariant-scanner.js";
 import { createMonitorSetup } from "./startup/monitor-setup.js";
@@ -85,6 +86,9 @@ export async function startServer(port?: number, hostname?: string) {
     boardEvents,
     reviewSessionIds: workflow.reviewSessionIds,
   });
+  // Crash-safe recovery for zombie fix-and-merge/review sessions: sessions that are
+  // marked 'running' but have zero output messages and no live process (#596).
+  startZombieFixSessionReconciler({ boardEvents });
   startAncestorBranchReconciler();
   // Safe forward-only auto-recovery: merges clean ahead-only Done-but-unmerged branches
   // directly into base (forward-merging can't lose work). Conflicted / too-far-behind /
