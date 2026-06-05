@@ -227,12 +227,14 @@ export interface WorkspaceDetails {
   contextPrimer: string | null;
   closedAt: string | null;
   mergedAt: string | null;
-  conflictCacheHasConflicts: boolean | null;
-  conflictCacheFiles: string | null;
-  diffStatCacheFilesChanged: number | null;
-  diffStatCacheInsertions: number | null;
-  diffStatCacheDeletions: number | null;
-  scorecardScore: number | null;
+  conflicts: { hasConflicts: boolean; conflictingFiles: string[] } | null;
+  diffStats: { filesChanged: number; insertions: number; deletions: number } | null;
+  scorecard: { score: number } | null;
+  lastSessionAt: string | null;
+  sessionStatus: string | null;
+  lastSessionTriggerType: string | null;
+  contextTokens: number | null;
+  lastTool: string | null;
   latestSetup: WorkspaceSetupRun | null;
   latestSymlink: WorkspaceSymlinkRun | null;
   createdAt: string;
@@ -326,12 +328,18 @@ export async function getWorkspaceDetails(
     contextPrimer: row.contextPrimer ?? null,
     closedAt: row.closedAt,
     mergedAt: row.mergedAt,
-    conflictCacheHasConflicts: row.conflictCacheHasConflicts,
-    conflictCacheFiles: row.conflictCacheFiles,
-    diffStatCacheFilesChanged: row.diffStatCacheFilesChanged,
-    diffStatCacheInsertions: row.diffStatCacheInsertions,
-    diffStatCacheDeletions: row.diffStatCacheDeletions,
-    scorecardScore: row.scorecardScore,
+    conflicts: row.conflictCacheHasConflicts !== null && row.conflictCacheHasConflicts !== undefined
+      ? { hasConflicts: row.conflictCacheHasConflicts, conflictingFiles: parseJsonArray<string>(row.conflictCacheFiles, []) }
+      : null,
+    diffStats: row.diffStatCacheFilesChanged !== null && row.diffStatCacheFilesChanged !== undefined
+      ? { filesChanged: row.diffStatCacheFilesChanged, insertions: row.diffStatCacheInsertions ?? 0, deletions: row.diffStatCacheDeletions ?? 0 }
+      : null,
+    scorecard: row.scorecardScore !== null && row.scorecardScore !== undefined ? { score: row.scorecardScore } : null,
+    lastSessionAt: null,
+    sessionStatus: null,
+    lastSessionTriggerType: null,
+    contextTokens: null,
+    lastTool: null,
     latestSetup: row.latestSetupState ? {
       command: row.latestSetupCommand,
       state: row.latestSetupState as WorkspaceSetupRun["state"],
