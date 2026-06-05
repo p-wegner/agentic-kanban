@@ -187,8 +187,10 @@ export function createWorkspacesRoute(
 
     const limitParam = c.req.query("limit");
     const offsetParam = c.req.query("offset");
-    const limit = limitParam ? Math.max(1, parseInt(limitParam, 10)) : undefined;
-    const offset = offsetParam ? Math.max(0, parseInt(offsetParam, 10)) : undefined;
+    const limitParsed = limitParam ? parseInt(limitParam, 10) : NaN;
+    const offsetParsed = offsetParam ? parseInt(offsetParam, 10) : NaN;
+    const limit = !isNaN(limitParsed) ? Math.max(1, limitParsed) : undefined;
+    const offset = !isNaN(offsetParsed) ? Math.max(0, offsetParsed) : undefined;
 
     const selectShape = {
       id: workspaces.id,
