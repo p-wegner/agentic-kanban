@@ -29,11 +29,33 @@ When selecting a provider for a new workspace, apply these rules in priority ord
 - **Codex** [codex]: FILL — use aggressively, keep busy at all times (Primary harness — all new workspaces launch on Codex. Keep 3 agents busy.)
 <!-- STRATEGY_BULLSEYE_GENERATED_END -->
 
-## FOCUS POLICY (operator directive 2026-06-05 — authoritative; overrides the REFILL_FOCUS wording above)
-**Work on BUGFIX, QUALITY, and ARCHITECTURE / code-health improvements ONLY. NO new features.**
-- **Starting work (priority 3):** pull bugfix / quality / architecture tickets. **SKIP every Feature/enhancement ticket** — leave it in the backlog and pick the next eligible non-feature item instead. Never start a feature.
-- **Refill (priority 4):** create ONLY bugfix, quality, and architecture/code-health tickets — real reproducible bugs (from merged diffs, `docs/learnings/`, server error logs, failing tests), reliability/test/guardrail/hardening work, and refactors/decoupling/tech-debt/hotspot cleanups. **NEVER create feature or enhancement tickets**, regardless of the REFILL_FOCUS value above. (REFILL_FOCUS=bugfix-only here means no features; quality + architecture refill is also allowed and encouraged.)
-- **WIP limit = ACTIVE_AGENTS_TARGET = 3** concurrent agents. **Provider/profile = codex.**
+## FOCUS POLICY (operator directive 2026-06-05 rev2 — authoritative; overrides the REFILL_FOCUS wording above)
+**Work on CODE QUALITY, ARCHITECTURE / code-health, and BUGFIX improvements ONLY. NO new features.**
+- **Starting work (priority 3):** pull quality / architecture / bugfix tickets. **SKIP every Feature/enhancement ticket** — leave it in the backlog and pick the next eligible non-feature item instead. Never start a feature.
+- **Refill (priority 4):** create ONLY quality, architecture/code-health, and bugfix tickets. Priority order for new tickets:
+  1. **Code quality / test coverage** — add or improve unit/integration tests for high-churn or untested modules (see REFILL STRATEGY BULLSEYE below)
+  2. **Architecture / refactoring** — decouple, simplify, or harden hotspot files identified in REFILL STRATEGY BULLSEYE
+  3. **Reproducible bugs** — from merged diffs, `docs/learnings/`, server error logs, failing tests
+  4. **Guardrails / hardening** — stability improvements grounded in observed failure patterns
+  **NEVER create feature or enhancement tickets**, regardless of the REFILL_FOCUS value above.
+- **WIP limit = ACTIVE_AGENTS_TARGET = 3** concurrent agents. **Provider/profile = codex** (use codex for ALL new workspaces — never anth).
+
+## REFILL STRATEGY BULLSEYE (agent-metrics-derived, 2026-06-05)
+Based on state.md recurring failure patterns from recent agent cycles, prioritize tickets in these areas:
+
+### Tier 1 — Highest ROI (directly caused outages this week)
+- **merge / conflict-resolution pipeline** (`packages/server/src/services/merge*.ts`, `git-service.ts`) — conflict markers got committed (server-down), zombie fix-and-merge sessions, stale-origin rebase, readyForMerge 409s. These files have the highest agent-visible defect rate. Add integration tests for each failure mode.
+- **workspace lifecycle / status transitions** (`workspace.service.ts`, `agent.service.ts`) — Done-but-unmerged silent-merge-loss, in-progress→Done false-positive from reconciler, workspace stranding on client-disconnect. Cover each transition with a test that exercises the git+DB state machine.
+- **server startup / hot-reload resilience** (`index.ts`, `startup-tasks.ts`, `server.ts`) — reconciler interval persisting across hot-reload (required full restart to clear); stacked orphaned dev.mjs supervisors (5–6 per outage). Need clearInterval cleanup + startup idempotency tests.
+
+### Tier 2 — Structural debt (contribute to Tier-1 failures)
+- **packages/shared/src/lib/git-service.ts** — all git ops funnel through here; integration tests minimal; mock-free git tests needed (real bare repo in temp dir)
+- **board API endpoint** (`packages/server/src/routes/projects.ts`, `/board` path) — cache staleness bugs (#591, #551/#552) plus repeated regressions; add a test that verifies board column counts after PATCH/merge
+- **done-unmerged invariant scanner** (`done-unmerged-invariant-scanner.ts`) — recent root cause of mass-reopen (#584) and silent-merge-loss recoveries; needs property-based tests covering the edge cases (0-commit, n-commit, reachability)
+
+### Tier 3 — Maintenance debt
+- **dev.mjs / server supervisor** (`scripts/dev.mjs`) — recurring orphaned supervisor stacking; add a preflight that detects and reaps stale same-checkout supervisors before launching
+- **MCP server tool routing** (`packages/mcp-server/src/`) — integration tested only at the happy path; error/edge cases untested
 
 FIRST, READ YOUR RECENT MEMORY: `scripts/board-monitor/state.md` is a short rolling log of what the last several cycles did. Read it before choosing an action and use it to ESCALATE rather than repeat — if a prior cycle (or two) already nudged an item with no change, take the stronger action this time (stop the stale session and inspect the branch, rebuild, or flag for a human) instead of nudging it again. If the file is missing or empty, just proceed.
 

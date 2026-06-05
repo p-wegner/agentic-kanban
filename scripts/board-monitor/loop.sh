@@ -31,7 +31,7 @@ LOG="$DIR/loop.log"
 STOP="$DIR/STOP"
 STATE="$DIR/state.md"
 AGENT="${MONITOR_AGENT:-codex}"
-SLEEP="${MONITOR_SLEEP:-900}"
+SLEEP="${MONITOR_SLEEP:-1800}"
 MAX="${MONITOR_MAX_ITERS:-500}"
 ITER_TIMEOUT="${MONITOR_ITER_TIMEOUT:-1800}"
 # Rolling cross-iteration memory: each fresh session reads state.md for what
