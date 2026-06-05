@@ -1227,6 +1227,54 @@ export async function isAncestor(
   }
 }
 
+export type BranchTipAncestryResult =
+  | { isAncestor: true; branchSha: string; baseSha: string }
+  | { isAncestor: false; branchSha: string; baseSha: string }
+  | { isAncestor: false; branchSha: null; reason: "branch-not-found" | "base-not-found" };
+
+/**
+ * Resolve whether a branch tip is already an ancestor of the base branch.
+ *
+ * Handles deleted-branch: when the branch ref is gone from the main repo but
+ * a worktreeDir is provided, falls back to resolving HEAD from the worktree.
+ * If the branch (or base) cannot be resolved at all, returns branchSha: null
+ * with a reason — callers treat this as "needs further investigation" rather
+ * than an error.
+ */
+export async function checkBranchTipIsAncestor(
+  repoPath: string,
+  branch: string,
+  baseBranch: string,
+  worktreeDir?: string,
+): Promise<BranchTipAncestryResult> {
+  let branchSha: string;
+  try {
+    branchSha = await revParse(repoPath, branch);
+  } catch {
+    if (worktreeDir) {
+      try {
+        branchSha = await revParse(worktreeDir, "HEAD");
+      } catch {
+        return { isAncestor: false, branchSha: null, reason: "branch-not-found" };
+      }
+    } else {
+      return { isAncestor: false, branchSha: null, reason: "branch-not-found" };
+    }
+  }
+
+  let baseSha: string;
+  try {
+    baseSha = await revParse(repoPath, baseBranch);
+  } catch {
+    return { isAncestor: false, branchSha: null, reason: "base-not-found" };
+  }
+
+  const ancestor = await isAncestor(repoPath, branchSha, baseSha);
+  return ancestor
+    ? { isAncestor: true, branchSha, baseSha }
+    : { isAncestor: false, branchSha, baseSha };
+}
+
 /** Check if a rebase is in progress in the worktree. */
 export async function isRebaseInProgress(worktreePath: string): Promise<boolean> {
   try {
