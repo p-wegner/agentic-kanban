@@ -1230,7 +1230,7 @@ export async function isAncestor(
 export type BranchTipAncestryResult =
   | { isAncestor: true; branchSha: string; baseSha: string }
   | { isAncestor: false; branchSha: string; baseSha: string }
-  | { isAncestor: false; branchSha: null; reason: "branch-not-found" | "base-not-found" | "resolve-failed" };
+  | { isAncestor: false; branchSha: null; reason: "branch-not-found" | "base-not-found" };
 
 /**
  * Resolve whether a branch tip is already an ancestor of the base branch.
