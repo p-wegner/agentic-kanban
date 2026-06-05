@@ -37,6 +37,17 @@
             "statusMessage": "Checking for stranded uncommitted source changes"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/check-conflict-markers.js\"",
+            "commandWindows": "node C:/andrena/agentic-kanban/.claude/hooks/check-conflict-markers.js",
+            "timeout": 15,
+            "statusMessage": "Checking for committed conflict markers"
+          }
+        ]
       }
     ]
   }

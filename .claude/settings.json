@@ -68,6 +68,14 @@
             "command": "node C:/andrena/agentic-kanban/.claude/hooks/smart-hooks-runner.js Stop"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node C:/andrena/agentic-kanban/.claude/hooks/check-conflict-markers.js"
+          }
+        ]
       }
     ]
   }
