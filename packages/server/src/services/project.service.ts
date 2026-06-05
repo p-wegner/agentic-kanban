@@ -565,10 +565,16 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     const inProgressStatusNames = new Set(statuses.filter((s) => s.name.toLowerCase() === "in progress").map((s) => s.id));
 
     const statusByName = new Map(statuses.map((status) => [status.name.toLowerCase(), status]));
+    const TERMINAL_STATUS_NAMES = new Set(["done", "cancelled"]);
     const issuesWithBlocked = projectIssues.map((issue) => {
       const wsSummary = workspaceSummaryMap.get(issue.id);
       const blocked = blockedMap.get(issue.id);
-      const workflowStatusName = wsSummary?.main?.status !== "closed"
+      // Never let a stale workspace workflow node override an issue that is already in a
+      // terminal status (Done/Cancelled). The issue's DB statusId is the canonical source
+      // of truth; a workspace's currentNodeStatusName reflects where the workspace was in
+      // its workflow, but if the issue has been moved to Done the board must honour that.
+      const issueIsTerminal = TERMINAL_STATUS_NAMES.has(issue.statusName?.toLowerCase() ?? "");
+      const workflowStatusName = !issueIsTerminal && wsSummary?.main?.status !== "closed"
         ? wsSummary?.main?.workflow?.currentNodeStatusName
         : null;
       const workflowStatus = workflowStatusName
