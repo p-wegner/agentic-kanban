@@ -215,10 +215,32 @@ export async function getIssuesByProject(
 export async function getIssueDescription(
   issueId: string,
   database: Database = db,
-): Promise<{ id: string; description: string | null } | null> {
+) {
   const rows = await database
-    .select({ id: issues.id, description: issues.description })
+    .select({
+      id: issues.id,
+      issueNumber: issues.issueNumber,
+      title: issues.title,
+      description: issues.description,
+      priority: issues.priority,
+      issueType: issues.issueType,
+      sortOrder: issues.sortOrder,
+      statusId: issues.statusId,
+      projectId: issues.projectId,
+      createdAt: issues.createdAt,
+      updatedAt: issues.updatedAt,
+      statusChangedAt: issues.statusChangedAt,
+      skipAutoReview: issues.skipAutoReview,
+      estimate: issues.estimate,
+      dueDate: issues.dueDate,
+      externalKey: issues.externalKey,
+      externalUrl: issues.externalUrl,
+      pinned: issues.pinned,
+      milestoneId: issues.milestoneId,
+      statusName: projectStatuses.name,
+    })
     .from(issues)
+    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
     .where(eq(issues.id, issueId))
     .limit(1);
   return rows[0] ?? null;
