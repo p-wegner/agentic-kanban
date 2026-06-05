@@ -58,6 +58,7 @@ async function seedWorkspace(
     wsStatus?: string;
     isDirect?: boolean;
     issueNumber?: number;
+    mergedAt?: string | null;
   } = {},
 ) {
   const now = new Date().toISOString();
@@ -105,6 +106,7 @@ async function seedWorkspace(
     createdAt: now,
     updatedAt: now,
   });
+  const mergedAt = opts.mergedAt !== undefined ? opts.mergedAt : null;
   await db.insert(workspaces).values({
     id: workspaceId,
     issueId,
@@ -114,7 +116,7 @@ async function seedWorkspace(
     isDirect: opts.isDirect ?? false,
     status: opts.wsStatus ?? "closed",
     readyForMerge: false,
-    mergedAt: null,
+    mergedAt,
     provider: "claude",
     createdAt: now,
     updatedAt: now,
@@ -486,8 +488,105 @@ describe("scanDoneUnmergedWorkspaces", () => {
     vi.useRealTimers();
   });
 
+<<<<<<< HEAD
   it("is idempotent — after auto-merge the workspace has mergedAt and is no longer scanned", async () => {
     const { workspaceId } = await seedWorkspace(db);
+=======
+  it("#590 guard 1: skips issue that has ANY workspace with mergedAt set (false-positive fix)", async () => {
+    // Seed issue with two workspaces: ws-A (mergedAt set = genuinely merged), ws-B (mergedAt null = stale)
+    const now = new Date().toISOString();
+    const projectId = randomUUID();
+    const doneStatusId = randomUUID();
+    const inReviewStatusId = randomUUID();
+    const issueId = randomUUID();
+    const wsAId = randomUUID();
+    const wsBId = randomUUID();
+
+    await db.insert(projects).values({ id: projectId, name: "P", repoPath: "/repo", repoName: "repo", defaultBranch: "master", createdAt: now, updatedAt: now });
+    await db.insert(projectStatuses).values([
+      { id: inReviewStatusId, projectId, name: "In Review", sortOrder: 2, isDefault: false, createdAt: now },
+      { id: doneStatusId, projectId, name: "Done", sortOrder: 3, isDefault: false, createdAt: now },
+    ]);
+    await db.insert(issues).values({ id: issueId, issueNumber: 503, title: "Issue #503", priority: "medium", sortOrder: 0, statusId: doneStatusId, projectId, createdAt: now, updatedAt: now });
+    // ws-A: merged workspace (the real merge) — mergedAt is set
+    await db.insert(workspaces).values({ id: wsAId, issueId, branch: "feature/ak-503-done", workingDir: "/repo/.w/a", baseBranch: "master", isDirect: false, status: "closed", readyForMerge: false, mergedAt: now, provider: "claude", createdAt: now, updatedAt: now });
+    // ws-B: stale workspace with null mergedAt — this was the false-positive trigger
+    await db.insert(workspaces).values({ id: wsBId, issueId, branch: "feature/ak-503-stale", workingDir: "/repo/.w/b", baseBranch: "master", isDirect: false, status: "closed", readyForMerge: false, mergedAt: null, provider: "claude", createdAt: now, updatedAt: now });
+
+    const checkAncestor = makeCheckAncestor(false);
+    const countCommits = makeCountCommits(2);
+
+    const result = await scanDoneUnmergedWorkspaces({ database: db, checkAncestor, countCommits, reopenToInReview: true });
+
+    // The issue must NOT be flagged or reopened — it has a genuinely merged workspace
+    expect(result.findings).toHaveLength(0);
+    expect(result.reopened).toBe(0);
+    // The git check should be skipped entirely for this issue
+    expect(checkAncestor).not.toHaveBeenCalled();
+
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+    expect(status.name).toBe("Done");
+  });
+
+  it("#590 guard 2: skips workspace whose branch is more than maxCommitsBehindBase commits behind base (stale abandoned branch)", async () => {
+    const { issueId } = await seedWorkspace(db);
+    const checkAncestor = makeCheckAncestor(false);
+    // countCommits is called twice: first for commitsBehind (args: branchSha, baseSha → 25 behind),
+    // then for uniqueCommits ahead (would be 3 if not skipped).
+    // We inject a counter that returns 25 on the first call and 3 on any subsequent call.
+    let callCount = 0;
+    const countCommits: CountCommits = vi.fn(async () => {
+      callCount++;
+      return callCount === 1 ? 25 : 3;
+    });
+
+    const result = await scanDoneUnmergedWorkspaces({
+      database: db,
+      checkAncestor,
+      countCommits,
+      reopenToInReview: true,
+      maxCommitsBehindBase: 20,
+    });
+
+    expect(result.findings).toHaveLength(0);
+    expect(result.reopened).toBe(0);
+    // Only the behind-count call was made; uniqueCommits call must be skipped
+    expect(callCount).toBe(1);
+
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+    expect(status.name).toBe("Done");
+  });
+
+  it("#590 guard 2: does NOT skip workspace that is within the staleness threshold (recoverable loss)", async () => {
+    const { issueId, workspaceId } = await seedWorkspace(db);
+    const checkAncestor = makeCheckAncestor(false);
+    // First call = commitsBehind (5, within threshold 20); second call = uniqueCommits ahead (2)
+    let callCount = 0;
+    const countCommits: CountCommits = vi.fn(async () => {
+      callCount++;
+      return callCount === 1 ? 5 : 2;
+    });
+
+    const result = await scanDoneUnmergedWorkspaces({
+      database: db,
+      checkAncestor,
+      countCommits,
+      reopenToInReview: false,
+      maxCommitsBehindBase: 20,
+    });
+
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0].workspaceId).toBe(workspaceId);
+    expect(result.findings[0].issueId).toBe(issueId);
+  });
+
+  it("is idempotent — after re-open the issue is In Review and no longer scanned as a violation", async () => {
+    const { issueId } = await seedWorkspace(db);
+    const checkAncestor = makeCheckAncestor(false);
+    const countCommits = makeCountCommits(2);
+>>>>>>> d935ccbf (fix(#590): guard scanner against already-merged workspaces and stale branches)
 
     const first = await scanDoneUnmergedWorkspaces({
       database: db,
