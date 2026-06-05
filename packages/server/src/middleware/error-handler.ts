@@ -73,6 +73,14 @@ export function domainErrorHandler(err: Error, c: Context): Response {
       const status = reason === "server_build_stale" ? 503 : 409;
       return c.json(body, status);
     }
+    // Structured response for stale safety policy: include machine-readable code and stale file list.
+    if (domainErr instanceof WorkspaceError && domainErr.data?.code === "STALE_SAFETY_POLICY") {
+      return c.json({
+        error: domainErr.message,
+        code: "STALE_SAFETY_POLICY",
+        staleFiles: domainErr.data.staleFiles ?? [],
+      }, 409);
+    }
     return c.json({ error: domainErr.message }, codeToStatus(domainErr.code));
   }
 
