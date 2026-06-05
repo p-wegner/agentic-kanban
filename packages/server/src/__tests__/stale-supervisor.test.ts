@@ -59,6 +59,45 @@ describe("reapStaleSupervisors", () => {
     expect(exitProcess).not.toHaveBeenCalled();
   });
 
+  it("reaps stale supervisors and exits when a serving same-checkout supervisor exists", () => {
+    const kill = vi.fn(() => true);
+    const exitProcess = vi.fn();
+    reapStaleSupervisors({
+      checkoutRoot: CHECKOUT,
+      serverPort: SERVER_PORT,
+      listProcs: () => [
+        makeProc(3001, `node ${CHECKOUT}/scripts/dev.mjs`),
+        makeProc(3002, `node ${CHECKOUT}/scripts/dev.mjs`),
+      ],
+      isServingPid: (pid) => pid === 3001,
+      checkPort: () => true,
+      kill,
+      exitProcess,
+    });
+    expect(kill).toHaveBeenCalledTimes(1);
+    expect(kill).toHaveBeenCalledWith(3002);
+    expect(exitProcess).toHaveBeenCalledWith(0);
+  });
+
+  it("reaps stale supervisors then exits when a same-checkout serving process was not found", () => {
+    const kill = vi.fn(() => true);
+    const exitProcess = vi.fn();
+    reapStaleSupervisors({
+      checkoutRoot: CHECKOUT,
+      serverPort: SERVER_PORT,
+      listProcs: () => [
+        makeProc(4001, `node ${CHECKOUT}/scripts/dev.mjs`),
+      ],
+      isServingPid: () => false,
+      checkPort: () => true,
+      kill,
+      exitProcess,
+    });
+    expect(kill).toHaveBeenCalledWith(4001);
+    expect(kill).toHaveBeenCalledTimes(1);
+    expect(exitProcess).toHaveBeenCalledWith(0);
+  });
+
   it("reaps multiple stale supervisors for the same checkout", () => {
     const kill = vi.fn(() => true);
     const exitProcess = vi.fn();
