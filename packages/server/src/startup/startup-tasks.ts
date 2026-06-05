@@ -9,6 +9,7 @@ import type { SessionManager } from "../services/session.manager.js";
 import type { Database } from "../db/index.js";
 import { moveIssueToDone, updateWorkspaceStatus } from "../repositories/workspace.repository.js";
 import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
+import { reconcileAncestorBranchWorkspaces } from "./ancestor-branch-reconciler.js";
 
 /** Kill orphaned tsx server processes from previous hot-reload cycles (Windows only). */
 export function shouldKillOrphanedServerProcess(input: {
@@ -380,6 +381,13 @@ export async function runStartupTasks(sessionManager: SessionManager, _deps?: { 
   await abortStaleRebases();
   await cleanupStaleSessions(sessionManager);
   await reconcileSilentlyMergedWorkspaces();
+  // Catch workspaces whose branch was merged (git ancestry) but mergedAt was never written —
+  // runs after reconcileSilentlyMergedWorkspaces (mergedAt-based) so they don't overlap.
+  try {
+    await reconcileAncestorBranchWorkspaces();
+  } catch (err) {
+    console.warn("[startup] reconcileAncestorBranchWorkspaces failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  }
   await pruneStaleWorktrees();
   await checkMainCheckoutHeads();
 }
