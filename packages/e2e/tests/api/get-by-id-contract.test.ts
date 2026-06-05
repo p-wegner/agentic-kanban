@@ -79,6 +79,92 @@ test.describe("Contract: GET-by-id returns canonical field set (issues)", () => 
 
     assertContainsListFields(byIdItem, listItem, "GET /api/issues/:id");
   });
+
+  test("POST /api/issues returns the full canonical issue shape including statusName", async ({
+    request,
+  }) => {
+    const suffix = Date.now().toString(36) + "post";
+    const createRes = await request.post(`${SERVER_URL}/api/issues`, {
+      data: {
+        title: `POST contract test issue ${suffix}`,
+        statusId,
+        projectId,
+      },
+    });
+    expect(createRes.status()).toBe(201);
+    const created = await createRes.json();
+    createdIssueIds.push(created.id);
+
+    // Fetch via list endpoint to get the canonical shape
+    const listRes = await request.get(`${SERVER_URL}/api/issues?projectId=${projectId}`);
+    expect(listRes.ok()).toBeTruthy();
+    const list = await listRes.json();
+    const listItem = list.find((i: { id: string }) => i.id === created.id);
+    expect(listItem).toBeDefined();
+
+    assertContainsListFields(created, listItem, "POST /api/issues");
+    expect(created.statusName, "POST response must include statusName").toBeTruthy();
+  });
+
+  test("PATCH /api/issues/:id returns the full canonical issue shape including updated statusName", async ({
+    request,
+  }) => {
+    const suffix = Date.now().toString(36) + "patch";
+    const createRes = await request.post(`${SERVER_URL}/api/issues`, {
+      data: {
+        title: `PATCH contract test issue ${suffix}`,
+        statusId,
+        projectId,
+      },
+    });
+    expect(createRes.status()).toBe(201);
+    const created = await createRes.json();
+    createdIssueIds.push(created.id);
+
+    // PATCH the title
+    const patchRes = await request.patch(`${SERVER_URL}/api/issues/${created.id}`, {
+      data: { title: `${suffix} updated` },
+    });
+    expect(patchRes.status()).toBe(200);
+    const patched = await patchRes.json();
+
+    // Fetch via list endpoint to get the canonical shape
+    const listRes = await request.get(`${SERVER_URL}/api/issues?projectId=${projectId}`);
+    expect(listRes.ok()).toBeTruthy();
+    const list = await listRes.json();
+    const listItem = list.find((i: { id: string }) => i.id === created.id);
+    expect(listItem).toBeDefined();
+
+    assertContainsListFields(patched, listItem, "PATCH /api/issues/:id");
+    expect(patched.statusName, "PATCH response must include statusName").toBeTruthy();
+    expect(patched.title).toBe(`${suffix} updated`);
+  });
+
+  test("PATCH /api/issues/:id with statusId returns updated statusName in response", async ({
+    request,
+  }) => {
+    const statusesRes = await request.get(`${SERVER_URL}/api/projects/${projectId}/statuses`);
+    const statuses = await statusesRes.json();
+    const otherStatus = statuses.find((s: { id: string; name: string }) => s.id !== statusId);
+    if (!otherStatus) return; // skip if project has only one status
+
+    const suffix = Date.now().toString(36) + "statusid";
+    const createRes = await request.post(`${SERVER_URL}/api/issues`, {
+      data: { title: `Status PATCH contract test ${suffix}`, statusId, projectId },
+    });
+    expect(createRes.status()).toBe(201);
+    const created = await createRes.json();
+    createdIssueIds.push(created.id);
+
+    const patchRes = await request.patch(`${SERVER_URL}/api/issues/${created.id}`, {
+      data: { statusId: otherStatus.id },
+    });
+    expect(patchRes.status()).toBe(200);
+    const patched = await patchRes.json();
+
+    expect(patched.statusId).toBe(otherStatus.id);
+    expect(patched.statusName).toBe(otherStatus.name);
+  });
 });
 
 test.describe("Contract: GET-by-id returns canonical field set (workspaces)", () => {
