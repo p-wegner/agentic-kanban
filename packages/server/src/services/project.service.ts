@@ -585,6 +585,8 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       const isColumnStale = isInProgress && columnElapsed >= inProgressStaleMs;
       return {
         ...issue,
+        // Strip description from archived issues — clients lazy-fetch via GET /api/issues/:id
+        ...(archivedIssueIds.has(issue.id) ? { description: null } : {}),
         ...(workflowStatus ? { statusId: workflowStatus.id, statusName: workflowStatus.name } : {}),
         ...(wsSummary ? { workspaceSummary: wsSummary } : {}),
         ...(blocked ? { isBlocked: blocked.isBlocked, dependencyCount: blocked.dependencyCount } : {}),

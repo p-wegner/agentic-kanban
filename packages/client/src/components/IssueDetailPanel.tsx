@@ -431,6 +431,7 @@ export function IssueDetailPanel({
   const [inlineDescriptionValue, setInlineDescriptionValue] = useState(issue.description ?? "");
   const [inlineSaving, setInlineSaving] = useState<"title" | "description" | null>(null);
   const [inlineError, setInlineError] = useState<string | null>(null);
+  const [descriptionFetching, setDescriptionFetching] = useState(false);
   const inlineTitleRef = useRef<HTMLInputElement>(null);
   const inlineDescriptionRef = useRef<HTMLTextAreaElement>(null);
 
@@ -507,6 +508,23 @@ export function IssueDetailPanel({
     }
     loadData();
   }, [issue.id]);
+
+  // Lazy-load description for archived issues (stripped from board payload to reduce size)
+  useEffect(() => {
+    const ARCHIVE_STATUS_NAMES = new Set(["done", "cancelled"]);
+    const isArchived = issue.statusName && ARCHIVE_STATUS_NAMES.has(issue.statusName.toLowerCase());
+    if (issue.description !== null || !isArchived) return;
+    let cancelled = false;
+    setDescriptionFetching(true);
+    apiFetch<{ id: string; description: string | null }>(`/api/issues/${issue.id}`)
+      .then((data) => {
+        if (cancelled) return;
+        onIssueUpdate({ ...issue, description: data.description });
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setDescriptionFetching(false); });
+    return () => { cancelled = true; };
+  }, [issue.id, issue.statusName]);
 
   // Sync local state when issue prop changes (stale data fix - F6)
   useEffect(() => {
@@ -941,7 +959,7 @@ export function IssueDetailPanel({
   }
 
   async function handleInlineDescriptionSave() {
-    if (inlineSaving) return;
+    if (inlineSaving || descriptionFetching) return;
     const value = inlineDescriptionValue.trim();
     const prev = issue.description ?? "";
     if (value === prev) {
@@ -1523,6 +1541,10 @@ export function IssueDetailPanel({
               <div className="markdown-body">
                 <ReactMarkdown>{normalizeMarkdown(issue.description)}</ReactMarkdown>
               </div>
+            ) : descriptionFetching ? (
+              <p className="text-sm text-gray-400 dark:text-gray-500 italic animate-pulse">
+                Loading description…
+              </p>
             ) : (
               <p className="text-sm text-gray-400 dark:text-gray-500 italic">
                 No description. Click edit to add one.

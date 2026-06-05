@@ -212,6 +212,18 @@ export async function getIssuesByProject(
     .orderBy(issues.sortOrder);
 }
 
+export async function getIssueDescription(
+  issueId: string,
+  database: Database = db,
+): Promise<{ id: string; description: string | null } | null> {
+  const rows = await database
+    .select({ id: issues.id, description: issues.description })
+    .from(issues)
+    .where(eq(issues.id, issueId))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
 export async function getIssueProjectId(
   issueId: string,
   database: Database = db,
