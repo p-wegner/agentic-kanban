@@ -1,5 +1,5 @@
-import { desc, eq } from "drizzle-orm";
-import { preferences, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { count, desc, eq } from "drizzle-orm";
+import { preferences, projects, sessions, sessionMessages, workspaces } from "@agentic-kanban/shared/schema";
 import { isFailedLaunchSession } from "@agentic-kanban/shared/lib/workspace-activity-state.js";
 import { applyOpenSpecDeltas, OPENSPEC_CHANGES_DIR, OPENSPEC_SPECS_DIR, validateOpenSpecChange } from "@agentic-kanban/shared/lib/openspec";
 import type { Database } from "../db/index.js";
@@ -142,6 +142,42 @@ export function createWorkspaceMergeService(deps: {
       await getSessionManager().stopSession(latestSession.id);
     } catch (err) {
       console.warn(`[workspace-merge] failed to force-stop stale session ${latestSession.id}:`, err instanceof Error ? err.message : String(err));
+    }
+    await updateWorkspaceStatus(workspace.id, "idle", {}, database);
+  }
+
+  async function recoverZeroOutputRunningFixAndMergeSession(workspace: typeof workspaces.$inferSelect) {
+    if (!getSessionManager) return;
+    const latestSessionRows = await database
+      .select({ id: sessions.id, startedAt: sessions.startedAt, triggerType: sessions.triggerType, status: sessions.status })
+      .from(sessions)
+      .where(eq(sessions.workspaceId, workspace.id))
+      .orderBy(desc(sessions.startedAt))
+      .limit(1);
+    const latestSession = latestSessionRows[0];
+    if (!latestSession) return;
+    if (latestSession.triggerType !== "fix-and-merge") return;
+    const ageMs = Date.now() - new Date(latestSession.startedAt).getTime();
+    if (ageMs < 60_000) return;
+    if (latestSession.status !== "running") return;
+
+    const [msgCountRow] = await database
+      .select({ cnt: count() })
+      .from(sessionMessages)
+      .where(eq(sessionMessages.sessionId, latestSession.id));
+    if (msgCountRow?.cnt !== 0) return;
+
+    try {
+      console.log(
+        `[workspace-merge] stopping stale zero-output fix-and-merge session ${latestSession.id} for workspace ${workspace.id} ` +
+          `after ${Math.round(ageMs / 1000)}s with no messages`,
+      );
+      await getSessionManager().stopSession(latestSession.id);
+    } catch (err) {
+      console.warn(
+        `[workspace-merge] failed to force-stop stale zero-output session ${latestSession.id}:`,
+        err instanceof Error ? err.message : String(err),
+      );
     }
     await updateWorkspaceStatus(workspace.id, "idle", {}, database);
   }
@@ -822,6 +858,7 @@ export function createWorkspaceMergeService(deps: {
     const workspace = await getWorkspaceById(id, database);
     if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
     if (!workspace.workingDir) throw new WorkspaceError("Workspace not set up", "BAD_REQUEST");
+    await recoverZeroOutputRunningFixAndMergeSession(workspace);
     await recoverFailedFixAndMergeSessionIfNeeded(workspace);
     const refreshedWorkspace = await getWorkspaceById(id, database);
     if (!refreshedWorkspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
@@ -858,6 +895,7 @@ export function createWorkspaceMergeService(deps: {
     if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
     if (!workspace.workingDir) throw new WorkspaceError("Workspace not set up", "BAD_REQUEST");
     await recoverFailedFixAndMergeSessionIfNeeded(workspace);
+    await recoverZeroOutputRunningFixAndMergeSession(workspace);
     const refreshedWorkspace = await getWorkspaceById(id, database);
     if (!refreshedWorkspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
     if (refreshedWorkspace.status === "fixing") throw new WorkspaceError("Fix already in progress", "CONFLICT");

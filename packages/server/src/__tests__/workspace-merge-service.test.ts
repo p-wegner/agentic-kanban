@@ -557,6 +557,43 @@ describe("MergeService — retryable sessions recover from stale failed fix-and-
       .where(eq(workspaces.id, workspaceId));
     expect(workspace.status).toBe("fixing");
   });
+
+  it("recoverZeroOutputRunningFixAndMergeSession: resolves fixAndMerge from a running zombie session with zero output", async () => {
+    const { workspaceId } = await seedWorkspace(db, { status: "fixing" });
+    const now = Date.now();
+    const sessionId = await insertSession(db, {
+      workspaceId,
+      status: "running",
+      startedAt: new Date(now - 120_000).toISOString(),
+      triggerType: "fix-and-merge",
+    });
+
+    const sessionManager = createMockSessionManager();
+    const git = makeGit({
+      getCurrentBranch: async () => "master",
+      rebaseOntoBase: vi.fn(async () => ({ success: true })),
+      syncBranchToHead: vi.fn(async () => false),
+    });
+
+    const svc = createWorkspaceMergeService({
+      database: db,
+      getSessionManager: () => sessionManager,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+
+    await expect(svc.fixAndMerge(workspaceId, "merge conflict")).resolves.toMatchObject({ sessionId: expect.any(String) });
+
+    expect(sessionManager.stopSession).toHaveBeenCalledWith(sessionId);
+    expect(sessionManager.startSession).toHaveBeenCalledTimes(1);
+
+    const [workspace] = await db
+      .select({ status: workspaces.status })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId));
+    expect(workspace.status).toBe("fixing");
+  });
 });
 
 describe("resolveMergeState — already-merged (mergedAt set)", () => {
