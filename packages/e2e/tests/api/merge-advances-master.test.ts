@@ -285,7 +285,8 @@ test.describe("merge endpoint advances master and moves issue to Done", () => {
           );
           if (!res.ok()) return null;
           const found = await res.json();
-          return found?.statusId === doneStatusId ? found : null;
+          const issue = Array.isArray(found) ? found[0] : found;
+          return issue?.statusId === doneStatusId ? issue : null;
         },
         { attempts: 30, delayMs: 500, label: `issue #${issueNumber} to reach Done after interrupted merge` },
       );
