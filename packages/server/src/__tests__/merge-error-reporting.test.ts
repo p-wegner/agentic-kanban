@@ -110,6 +110,7 @@ describe("merge 409 structured body", () => {
     const body = await res.json();
     expect(body.reason).toBe("dirty_main");
     expect(body.message).toContain("uncommitted");
+    expect(body.blockingFiles).toEqual(["src/a.ts", "src/b.ts"]);
     expect(body).not.toHaveProperty("conflictFiles");
   });
 
