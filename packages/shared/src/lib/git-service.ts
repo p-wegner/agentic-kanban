@@ -339,9 +339,12 @@ async function scanTreeForConflictMarkers(repoPath: string, treeSha: string, pat
           return;
         }
         // Output format: "<treeSha>:<filepath>", one per line.
+        // Exclude .md files — they legitimately document conflict marker syntax
+        // (e.g. SKILL.md files that describe how to resolve conflicts).
         const files = output.split("\n")
           .map((l) => l.replace(/\r$/, "").replace(/^[^:]+:/, "").trim())
-          .filter(Boolean);
+          .filter(Boolean)
+          .filter((f) => !f.endsWith(".md"));
         resolve(files);
       },
     );
