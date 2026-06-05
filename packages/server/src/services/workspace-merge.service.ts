@@ -299,6 +299,25 @@ export function createWorkspaceMergeService(deps: {
       };
     }
 
+    if (resolution.kind === "clean-ancestor") {
+      const { branchSha, baseSha, uniqueCommits } = resolution;
+      const now = new Date().toISOString();
+      console.log(
+        `[workspace-merge] 0-commit ancestor guard: ws=${id} branchSha=${branchSha} baseSha=${baseSha} uniqueCommits=${uniqueCommits} ` +
+          `refrain from merge, keep workspace in review.`,
+      );
+      await database.update(workspaces).set({ readyForMerge: false, updatedAt: now }).where(eq(workspaces.id, id));
+      return {
+        id,
+        merged: false,
+        reconciled: false,
+        baseBranch,
+        baseHeadShaBefore: baseSha,
+        baseHeadShaAfter: baseSha,
+        mergeOutput: `Branch '${workspace.branch}' has no unique commits relative to ${baseBranch}. Merge skipped as a false-positive guard.`,
+      };
+    }
+
     if (resolution.kind === "error-skip") {
       throw resolution.error;
     }

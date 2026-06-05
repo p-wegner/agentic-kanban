@@ -485,23 +485,28 @@ describe("resolveMergeState — reconcile (branch already ancestor)", () => {
     }
   });
 
-  it("falls through to proceed when branch is trivially an ancestor (0 unique commits)", async () => {
+  it("returns clean-ancestor when branch is trivially an ancestor (0 unique commits)", async () => {
     const ws = makeWorkspace();
     const git = makeGitForStateMachine({
       checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: true, branchSha: "sha-branch", baseSha: "sha-base" })),
       countUniqueCommits: vi.fn(async () => 0),
     });
     const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
-    expect(result.kind).toBe("proceed");
+    expect(result.kind).toBe("clean-ancestor");
+    if (result.kind === "clean-ancestor") {
+      expect(result.branchSha).toBe("sha-branch");
+      expect(result.baseSha).toBe("sha-base");
+      expect(result.uniqueCommits).toBe(0);
+    }
   });
 
-  it("falls through to proceed when workingDir is missing and branch has 0 unique commits", async () => {
+  it("returns clean-ancestor when workingDir is missing and branch has 0 unique commits", async () => {
     const ws = makeWorkspace({ workingDir: null });
     const checkBranchTipIsAncestor = vi.fn(async () => ({ isAncestor: true, branchSha: "sha-branch", baseSha: "sha-base" }));
     const countUniqueCommits = vi.fn(async () => 0);
     const git = makeGitForStateMachine({ checkBranchTipIsAncestor, countUniqueCommits });
     const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
-    expect(result.kind).toBe("proceed");
+    expect(result.kind).toBe("clean-ancestor");
     expect(checkBranchTipIsAncestor).toHaveBeenCalled();
     expect(countUniqueCommits).toHaveBeenCalled();
   });

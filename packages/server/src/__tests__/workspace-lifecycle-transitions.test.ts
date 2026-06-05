@@ -283,18 +283,18 @@ describe("lifecycle: 0-unique-commit workspace is NOT silently moved to Done", (
     ({ db } = createTestDb());
   });
 
-  it("does NOT reconcile as merged when branch is ancestor with 0 unique commits", async () => {
+  it("does NOT close as merged when branch is ancestor with 0 unique commits", async () => {
     const { workspaceId, issueId } = await seedScenario(db);
 
     // Branch tip is an ancestor (tip==base or empty branch), but no actual commits.
-    // The guard should bypass reconciliation and fall through to the real merge path.
+    // The guard should detect this as a clean ancestor and keep the workspace in review.
     const git = makeGit({
       checkBranchTipIsAncestor: vi.fn(async () => {
-        // Both pre- and post-merge checks: branch IS ancestor but has 0 unique commits
+        // Both checks: branch IS ancestor but has 0 unique commits.
         return { isAncestor: true as const, branchSha: "base-sha", baseSha: "base-sha" };
       }),
       countUniqueCommits: vi.fn(async () => 0),
-      // Make mergeBranch succeed and post-merge check also pass to let it complete
+      // mergeBranch must not run for this guard path.
       mergeBranch: vi.fn(async () => "Already up to date."),
     });
 
@@ -307,15 +307,19 @@ describe("lifecycle: 0-unique-commit workspace is NOT silently moved to Done", (
 
     const result = await svc.mergeWorkspace(workspaceId);
 
-    expect(result.merged).toBe(true);
-    expect(git.countUniqueCommits).toHaveBeenCalled();
-    expect(git.mergeBranch).toHaveBeenCalled();
-
     const [ws] = await db.select({ status: workspaces.status, mergedAt: workspaces.mergedAt })
       .from(workspaces).where(eq(workspaces.id, workspaceId));
-    expect(ws.status).toBe("closed");
-    expect(ws.mergedAt).toBeTruthy();
-    expect(await getIssueStatusName(db, issueId)).toBe("Done");
+    const [wsReady] = await db.select({ readyForMerge: workspaces.readyForMerge })
+      .from(workspaces).where(eq(workspaces.id, workspaceId));
+
+    expect(result.merged).toBe(false);
+    expect(result.reconciled).toBe(false);
+    expect(git.mergeBranch).not.toHaveBeenCalled();
+    expect(git.countUniqueCommits).toHaveBeenCalled();
+    expect(ws.status).not.toBe("closed");
+    expect(ws.mergedAt).toBeNull();
+    expect(wsReady.readyForMerge).toBe(false);
+    expect(await getIssueStatusName(db, issueId)).toBe("In Review");
   });
 
   it("issue remains In Review when no-diff branch cannot be merged (conflict guard)", async () => {
