@@ -198,6 +198,32 @@ export async function workspaceLaunchPreflight(
     readFile: readPolicyFile,
     exists: policyExists,
   });
+
+  if (staleAfter.length > 0 && dirtyFiles.length === 0 && baseBranch) {
+    // Worktree is clean but safety files diverge from main (e.g. branch pre-dates a hooks
+    // change). Pull each stale file directly from the base branch so the agent launches safely.
+    const reconciled: SafetyPolicyFile[] = [];
+    const failed: SafetyPolicyFile[] = [];
+    for (const file of staleAfter) {
+      try {
+        await git(["checkout", baseBranch, "--", file], options.worktreePath);
+        reconciled.push(file);
+      } catch {
+        failed.push(file);
+      }
+    }
+    if (reconciled.length > 0) {
+      console.log(`[preflight] reconciled safety files from ${baseBranch}: ${reconciled.join(", ")}`);
+    }
+    if (failed.length > 0) {
+      errors.push(
+        `Workspace safety policy is stale after update-base (${failed.join(", ")}) and could not be reconciled automatically. ` +
+          "Refresh these files from the main checkout manually before relaunching.",
+      );
+    }
+    return { ok: errors.length === 0, errors, staleFiles: failed, refreshed: refreshed || reconciled.length > 0, dirtyFiles };
+  }
+
   if (staleAfter.length > 0) {
     errors.push(
       `Workspace safety policy is stale after update-base (${staleAfter.join(", ")}). ` +
