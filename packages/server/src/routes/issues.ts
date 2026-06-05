@@ -34,14 +34,16 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     boardEvents: options?.boardEvents,
   });
 
-  // GET /api/issues?projectId=...&issueNumber=N
+  // GET /api/issues?projectId=...&issueNumber=N&statusName=InProgress
   router.get("/", async (c) => {
     const projectId = c.req.query("projectId");
     if (!projectId) return c.json({ error: "projectId query parameter required" }, 400);
     const issueNumberParam = c.req.query("issueNumber");
+    const statusName = c.req.query("statusName") || undefined;
     const result = await issueService.listIssues(
       projectId,
       issueNumberParam ? Number(issueNumberParam) : undefined,
+      statusName,
     );
     return c.json(result);
   });
