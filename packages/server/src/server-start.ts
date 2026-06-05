@@ -10,6 +10,7 @@ import { createWorkflowEngine } from "./startup/exit-workflow.js";
 import { createAutoMerge } from "./startup/merge-workflow.js";
 import { startAutoMergeOrchestrator } from "./startup/auto-merge-orchestrator.js";
 import { startStrandedReviewReconciler } from "./startup/stranded-review-reconciler.js";
+import { reconcileAncestorBranchWorkspaces } from "./startup/ancestor-branch-reconciler.js";
 import { createMonitorSetup } from "./startup/monitor-setup.js";
 import { setupProcessHandlers } from "./startup/process-handlers.js";
 import { setupRoutes } from "./startup/route-setup.js";
@@ -76,6 +77,22 @@ export async function startServer(port?: number, hostname?: string) {
     boardEvents,
     reviewSessionIds: workflow.reviewSessionIds,
   });
+  // Periodic check: workspaces whose branch is already merged (git ancestry) but
+  // whose issue is still in a non-terminal status. Runs 35s after boot (after the
+  // stranded-review reconciler at 25s) then every 5 minutes.
+  {
+    const ANCESTOR_RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
+    const tick = () => {
+      reconcileAncestorBranchWorkspaces().catch((err) =>
+        console.warn("[ancestor-reconciler] periodic tick error:", err instanceof Error ? err.message : err),
+      );
+    };
+    const timer = setTimeout(tick, 35_000);
+    const interval = setInterval(tick, ANCESTOR_RECONCILE_INTERVAL_MS);
+    // Unref so these timers don't prevent the process from exiting during tests.
+    (timer as NodeJS.Timeout).unref?.();
+    (interval as NodeJS.Timeout).unref?.();
+  }
   // Autonomous Monitor Butler — cron-driven board-health agent (gated by the
   // monitor_butler_enabled preference; off by default). See services/monitor-butler.ts.
   startMonitorButler();
