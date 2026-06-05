@@ -8,6 +8,7 @@ import { createSessionState } from "../services/session-manager/types.js";
 import { createSessionLifecycle, type AgentService } from "../services/session-manager/session-lifecycle.js";
 import type { AgentOutputCallback } from "../services/agent.service.js";
 import type { workspaceLaunchPreflight } from "../services/preflight-check.js";
+import { WorkspaceError } from "../services/workspace-internals.js";
 
 /**
  * Unit tests for the session lifecycle using an in-memory SQLite DB plus an
@@ -237,7 +238,18 @@ describe("session-lifecycle", () => {
 
     const lifecycle = createSessionLifecycle(createSessionState(), undefined, vi.fn(), { db, agentService, preflight });
 
-    await expect(lifecycle.startSession({ workspaceId, prompt: "do it" })).rejects.toThrow("checkpoint/commit");
+    let thrown: unknown;
+    try {
+      await lifecycle.startSession({ workspaceId, prompt: "do it" });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(WorkspaceError);
+    const wsErr = thrown as WorkspaceError;
+    expect(wsErr.code).toBe("CONFLICT");
+    expect(wsErr.data?.code).toBe("STALE_SAFETY_POLICY");
+    expect(wsErr.data?.staleFiles).toContain(".codex/hooks.json");
+    expect(wsErr.message).toContain("checkpoint/commit");
     expect(preflight).toHaveBeenCalledOnce();
     expect(agentService.launch).not.toHaveBeenCalled();
 

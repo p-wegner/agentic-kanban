@@ -210,6 +210,87 @@ describe("workspaceLaunchPreflight", () => {
     expect(result.errors.join("\n")).toContain("CLAUDE.md");
   });
 
+  it("reconciles stale safety files from base branch when rebase does not update them", async () => {
+    const calls: string[][] = [];
+    const currentBranch = "feature/test";
+    const files = new Map<string, string>([
+      ["main:.codex/hooks.json", "new codex hooks"],
+      ["worktree:.codex/hooks.json", "old codex hooks"],
+      ["main:.claude/hooks/smart-hooks-runner.js", "runner"],
+      ["worktree:.claude/hooks/smart-hooks-runner.js", "runner"],
+      ["main:.claude/hooks/validate-command-safety.js", "validator"],
+      ["worktree:.claude/hooks/validate-command-safety.js", "validator"],
+      ["main:.claude/hooks/prevent-cross-worktree-writes.js", "cross-worktree"],
+      ["worktree:.claude/hooks/prevent-cross-worktree-writes.js", "cross-worktree"],
+      ["main:CLAUDE.md", "guidance"],
+      ["worktree:CLAUDE.md", "guidance"],
+    ]);
+
+    const result = await workspaceLaunchPreflight({
+      repoPath: "main",
+      worktreePath: "worktree",
+      baseBranch: "master",
+      branch: "feature/test",
+      isDirect: false,
+      execGit: async (args) => {
+        calls.push(args);
+        if (args[0] === "status") return "";
+        if (args[0] === "rev-parse") return `${currentBranch}\n`;
+        // rebase does NOT update .codex/hooks.json (simulates branch pre-dating the change)
+        if (args[0] === "rebase") return "";
+        if (args[0] === "checkout" && args[1] === "master" && args[2] === "--") {
+          // Simulate git checkout master -- .codex/hooks.json copying the file
+          files.set("worktree:.codex/hooks.json", "new codex hooks");
+          return "";
+        }
+        return "";
+      },
+      readFile: async (root, path) => files.get(`${root}:${path}`) ?? "",
+      exists: async (root, path) => files.has(`${root}:${path}`),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(calls.some((a) => a[0] === "checkout" && a[1] === "master" && a[2] === "--" && a[3] === ".codex/hooks.json")).toBe(true);
+    // Reconciled files must be committed so the agent launches with a clean worktree.
+    expect(calls.some((a) => a[0] === "commit")).toBe(true);
+  });
+
+  it("returns ok=false with stale file list when reconciliation checkout fails", async () => {
+    const files = new Map<string, string>([
+      ["main:.codex/hooks.json", "new codex hooks"],
+      ["worktree:.codex/hooks.json", "old codex hooks"],
+      ["main:.claude/hooks/smart-hooks-runner.js", "runner"],
+      ["worktree:.claude/hooks/smart-hooks-runner.js", "runner"],
+      ["main:.claude/hooks/validate-command-safety.js", "validator"],
+      ["worktree:.claude/hooks/validate-command-safety.js", "validator"],
+      ["main:.claude/hooks/prevent-cross-worktree-writes.js", "cross-worktree"],
+      ["worktree:.claude/hooks/prevent-cross-worktree-writes.js", "cross-worktree"],
+      ["main:CLAUDE.md", "guidance"],
+      ["worktree:CLAUDE.md", "guidance"],
+    ]);
+
+    const result = await workspaceLaunchPreflight({
+      repoPath: "main",
+      worktreePath: "worktree",
+      baseBranch: "master",
+      branch: "feature/test",
+      isDirect: false,
+      execGit: async (args) => {
+        if (args[0] === "status") return "";
+        if (args[0] === "rev-parse") return "feature/test\n";
+        if (args[0] === "rebase") return "";
+        if (args[0] === "checkout" && args[1] === "master") throw new Error("checkout failed");
+        return "";
+      },
+      readFile: async (root, path) => files.get(`${root}:${path}`) ?? "",
+      exists: async (root, path) => files.has(`${root}:${path}`),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.staleFiles).toContain(".codex/hooks.json");
+    expect(result.errors.join("\n")).toContain("could not be reconciled");
+  });
+
   it("reattaches a clean detached worktree to the workspace branch before rebasing", async () => {
     const calls: string[][] = [];
     let currentBranch: string | null = null;
