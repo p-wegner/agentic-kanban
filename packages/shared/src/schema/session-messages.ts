@@ -10,8 +10,6 @@ export const sessionMessages = sqliteTable("session_messages", {
   exitCode: text("exit_code"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 }, (table) => ({
-  sessionIdIdx: index("idx_session_messages_session_id").on(table.sessionId),
-  createdAtIdx: index("idx_session_messages_created_at").on(table.createdAt),
   sessionIdCreatedAtIdx: index("idx_session_messages_session_id_created_at").on(table.sessionId, table.createdAt),
 }));
 
