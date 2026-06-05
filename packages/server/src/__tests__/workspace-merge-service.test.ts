@@ -565,6 +565,19 @@ describe("resolveMergeState — error-skip (dirty main checkout)", () => {
     }
   });
 
+  it("checks dirty-main even when workingDir is missing", async () => {
+    const ws = makeWorkspace({ workingDir: null });
+    const git = makeGitForStateMachine({
+      getUncommittedTrackedChanges: vi.fn(async () => ["packages/server/src/index.ts"]),
+    });
+    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    expect(result.kind).toBe("error-skip");
+    if (result.kind === "error-skip") {
+      expect(result.error.data).toMatchObject({ mergeReason: "dirty_main" });
+      expect(result.error.code).toBe("CONFLICT");
+    }
+  });
+
   it("proceeds when main checkout is clean", async () => {
     const ws = makeWorkspace();
     const git = makeGitForStateMachine({
