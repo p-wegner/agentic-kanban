@@ -22,6 +22,19 @@ function runBgGit(fn: () => Promise<void>): void {
 const CONFLICT_CACHE_TTL_MS = 5 * 60 * 1000;
 const DIFF_STAT_CACHE_TTL_MS = 30 * 1000;
 const CODE_METRICS_CACHE_TTL_MS = 5 * 60 * 1000;
+const GIT_OPS_CACHE_TTL_MS = 30 * 1000;
+
+// Short-lived per-branch cache for git commit ops. Keyed by workingDir or
+// workingDir:baseBranch. Cleared automatically when TTL expires.
+const gitOpsCache = new Map<string, { value: unknown; expiresAt: number }>();
+function cachedGitOp<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const entry = gitOpsCache.get(key);
+  if (entry && entry.expiresAt > Date.now()) return Promise.resolve(entry.value as T);
+  return fn().then(v => {
+    gitOpsCache.set(key, { value: v, expiresAt: Date.now() + GIT_OPS_CACHE_TTL_MS });
+    return v;
+  });
+}
 
 export type { WorkspaceSummary } from "@agentic-kanban/shared";
 
@@ -210,12 +223,12 @@ export async function buildWorkspaceSummaryMap(
   const latestCommitByIssue = new Map<string, { sha: string; message: string } | null>();
   await Promise.all(
     [...mainWorkspaceMap.entries()]
-      .filter(([, ws]) => ws.workingDir && ws.status !== "closed")
+      .filter(([issueId, ws]) => !archivedIssueIds?.has(issueId) && ws.workingDir && ws.status !== "closed")
       .map(async ([issueId, ws]) => {
         const [latestCommit] = await Promise.all([
-          getLatestCommit(ws.workingDir!),
+          cachedGitOp(`latestCommit:${ws.workingDir}`, () => getLatestCommit(ws.workingDir!)),
           (!ws.isDirect && !!(ws.baseBranch || defaultBranch))
-            ? getCommitCountAhead(ws.workingDir!, (ws.baseBranch || defaultBranch) as string)
+            ? cachedGitOp(`commitCount:${ws.workingDir}:${ws.baseBranch || defaultBranch}`, () => getCommitCountAhead(ws.workingDir!, (ws.baseBranch || defaultBranch) as string))
                 .then(count => { commitCountByIssue.set(issueId, count); })
             : Promise.resolve(),
         ]);
@@ -227,6 +240,8 @@ export async function buildWorkspaceSummaryMap(
   for (const [issueId, summary] of workspaceSummaryMap) {
     const mainWs = mainWorkspaceMap.get(issueId);
     if (!mainWs) continue;
+
+    const isArchivedIssue = archivedIssueIds?.has(issueId) ?? false;
 
     summary.main = {
       id: mainWs.id,
@@ -244,12 +259,14 @@ export async function buildWorkspaceSummaryMap(
       scorecard: mainWs.scorecardScore !== null ? { score: mainWs.scorecardScore } : null,
       commitCount: commitCountByIssue.get(issueId) ?? null,
       latestCommit: latestCommitByIssue.get(issueId) ?? null,
-      codeMetrics: parseStoredWorkspaceCodeMetrics(mainWs.codeMetricsJson, mainWs.codeMetricsComputedAt),
+      // Skip JSON parse for archived issues — CompletedCard never renders codeMetrics
+      codeMetrics: isArchivedIssue ? null : parseStoredWorkspaceCodeMetrics(mainWs.codeMetricsJson, mainWs.codeMetricsComputedAt),
       workflow: null,
       mergedAt: mainWs.mergedAt,
     };
 
-    if (mainWs.workingDir && mainWs.status !== "closed") {
+    // Skip background git/metrics refreshes for archived issues — CompletedCard shows none of these fields
+    if (!isArchivedIssue && mainWs.workingDir && mainWs.status !== "closed") {
 
       const diffRef = mainWs.isDirect ? "HEAD" : (mainWs.baseBranch || defaultBranch);
       if (!diffRef) continue;
@@ -401,6 +418,8 @@ export async function buildWorkspaceSummaryMap(
     }
 
     for (const [issueId, summary] of workspaceSummaryMap) {
+      // Workflow nodes irrelevant for archived issues — CompletedCard never renders them
+      if (archivedIssueIds?.has(issueId)) continue;
       const main = summary.main;
       if (!main) continue;
       const mainWs = mainWorkspaceMap.get(issueId);
