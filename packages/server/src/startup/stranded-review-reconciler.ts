@@ -6,6 +6,7 @@ import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 import { getCommitCountAhead } from "../services/git.service.js";
 import { startManualReview } from "../services/review.service.js";
+import { PREF_RECONCILER_STRANDED_REVIEW_ENABLED } from "../constants/preference-keys.js";
 
 export interface StrandedReviewReconcilerDeps {
   database?: Database;
@@ -13,6 +14,12 @@ export interface StrandedReviewReconcilerDeps {
   boardEvents: BoardEvents;
   /** The SAME set the workflow engine uses, so a re-launched review's exit completes the chain. */
   reviewSessionIds: Set<string>;
+  /**
+   * Override enabled state for testing. When undefined (production path), the reconciler
+   * reads the live `reconciler_stranded_review_enabled` preference from the DB at call time,
+   * so a pref-level disable takes effect on the next tick with no restart.
+   */
+  enabled?: boolean;
 }
 
 /**
@@ -36,6 +43,24 @@ export interface StrandedReviewReconcilerDeps {
 export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDeps): Promise<number> {
   const database = deps.database ?? db;
   const { getSessionManager, boardEvents, reviewSessionIds } = deps;
+
+  // Live pref read at every tick so disabling via pref takes effect without a restart.
+  // The `enabled` override in deps lets tests inject the state directly.
+  const isEnabled = deps.enabled !== undefined
+    ? deps.enabled
+    : await (async () => {
+        try {
+          const row = await database.select({ value: preferences.value }).from(preferences)
+            .where(eq(preferences.key, PREF_RECONCILER_STRANDED_REVIEW_ENABLED)).limit(1);
+          return row.length === 0 || row[0].value !== "false";
+        } catch {
+          return true;
+        }
+      })();
+  if (!isEnabled) {
+    console.log("[reconcile] stranded-review reconciler disabled via preference — skipping tick");
+    return 0;
+  }
 
   const prefRows = await database.select({ key: preferences.key, value: preferences.value }).from(preferences);
   const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
