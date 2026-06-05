@@ -40,8 +40,8 @@ import { BoardKanbanView } from "../components/BoardKanbanView.js";
 import { RecentlyMergedStrip } from "../components/RecentlyMergedStrip.js";
 import { BoardStats } from "../components/BoardStats.js";
 import { BoardToolbar } from "../components/BoardToolbar.js";
-import { SavedBoardViews } from "../components/SavedBoardViews.js";
 import { VIEW_REGISTRY } from "../lib/viewRegistry.js";
+import { SavedBoardViews } from "../components/SavedBoardViews.js";
 import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
 // Lazy: opened on user action (issue click / workspace open), and they pull in
 // react-markdown — no need to ship them on the initial board paint.
@@ -57,12 +57,12 @@ import { sendDesktopNotification } from "../lib/desktop.js";
 import { registerAction } from "../lib/actions.js";
 import { useActivityNotifications, type NotificationEvent } from "../hooks/useActivityNotifications.js";
 import { buildRunQueueForecast } from "../components/RunQueueForecastPanel.js";
-import { useBoardPageKeyboardShortcuts } from "./useBoardPageKeyboardShortcuts.js";
 import { useBoardPageRoute } from "./useBoardPageRoute.js";
 import { useBoardPreferences } from "../hooks/useBoardPreferences.js";
 import { useBoardPanels } from "../hooks/useBoardPanels.js";
 import { useBoardNavigation } from "../hooks/useBoardNavigation.js";
 import { useBoardBulkSelection } from "../hooks/useBoardBulkSelection.js";
+import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts.js";
 import { BoardBulkActionBar } from "../components/BoardBulkActionBar.js";
 // Lazy: aggregates ~20 user-action panels (Settings, Codemod, MergeQueue,
 // TranscriptSearch, CommandPalette, …). Rendered unconditionally though, and it hosts
@@ -208,8 +208,6 @@ export function BoardPage() {
   const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>([]);
   const pendingBoardRefreshRef = useRef(false);
   const boardEtagRef = useRef<Record<string, string>>({});
-  const pendingGRef = useRef(false);
-  const pendingGTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
   const [showStartWorkspacePicker, setShowStartWorkspacePicker] = useState(false);
   const [keyboardCursorIssueId, setKeyboardCursorIssueId] = useState<string | null>(null);
@@ -1474,28 +1472,33 @@ export function BoardPage() {
     handleViewModeChange("table");
   }, [handleViewModeChange]);
 
-  useBoardPageKeyboardShortcuts({
-    searchQuery,
-    setSearchQuery,
-    viewMode,
-    panels,
-    selectedIssue,
-    setSelectedIssue,
-    columns,
-    activeColumns,
-    filteredColumns,
-    archiveColumns,
-    archiveExpanded,
-    keyboardCursorIssueIdRef,
-    setKeyboardCursorIssueId,
-    pendingGRef,
-    pendingGTimerRef,
-    handleViewModeChange,
-    handleIssueClick,
-    setFocusMode,
-    setExpandedCreatePanel,
-    setCreatingInColumnId,
-  });
+  // Keyboard shortcuts
+  useKeyboardShortcuts(
+    {
+      columnsRef,
+      columns,
+      filteredColumns,
+      activeColumns,
+      archiveColumns,
+      archiveExpanded,
+      viewMode,
+      keyboardCursorIssueId,
+      keyboardCursorIssueIdRef,
+      searchQuery,
+      selectedIssue,
+    },
+    {
+      handleIssueClick,
+      handleViewModeChange,
+      setSearchQuery,
+      setKeyboardCursorIssueId,
+      setSelectedIssue,
+      setFocusMode,
+      setExpandedCreatePanel,
+      setCreatingInColumnId,
+      panels,
+    },
+  );
 
   // Register command palette actions
   useEffect(() => {
