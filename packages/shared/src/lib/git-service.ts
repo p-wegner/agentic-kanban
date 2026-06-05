@@ -310,6 +310,36 @@ function isBranchCheckedOutElsewhereError(err: unknown): boolean {
 }
 
 /**
+ * Scan a git tree object for files whose blob content contains conflict markers.
+ * Uses `git grep` on the tree SHA — never touches the working tree.
+ * Returns an array of conflicting file paths (empty = no markers found).
+ */
+async function scanTreeForConflictMarkers(repoPath: string, treeSha: string): Promise<string[]> {
+  return new Promise((resolve) => {
+    // git grep exits 0 when matches found, 1 when no matches, 128+ on error.
+    // We treat all errors as "no markers" (safe default — the stage-entry check
+    // is the primary gate; this is belt-and-suspenders only).
+    execFile(
+      "git",
+      ["grep", "--name-only", "-l", "-e", "<<<<<<<", treeSha],
+      { cwd: repoPath, maxBuffer: 10 * 1024 * 1024 },
+      (_err, stdout) => {
+        const output = stdout.toString().trim();
+        if (!output) {
+          resolve([]);
+          return;
+        }
+        // Output format: "<treeSha>:<filepath>", one per line.
+        const files = output.split("\n")
+          .map((l) => l.replace(/\r$/, "").replace(/^[^:]+:/, "").trim())
+          .filter(Boolean);
+        resolve(files);
+      },
+    );
+  });
+}
+
+/**
  * Merge a feature branch into targetBranch using git plumbing commands only.
  *
  * Steps:
@@ -393,10 +423,16 @@ export async function mergeBranch(
 
   // merge-tree computes the merged tree without touching the working tree.
   // Exit 0 = clean, exit 1 = conflicts; stdout always has the tree SHA on line 1.
-  const { treeSha, conflictingFiles } = await new Promise<{ treeSha: string; conflictingFiles: string[] }>((resolve, reject) => {
+  // NOTE: --no-messages is intentionally omitted so stdout stage entries (which we
+  // parse for conflict detection) are never suppressed by a git version quirk.
+  const { treeSha, conflictingFiles, mergeTreeHadConflictExit } = await new Promise<{
+    treeSha: string;
+    conflictingFiles: string[];
+    mergeTreeHadConflictExit: boolean;
+  }>((resolve, reject) => {
     execFile(
       "git",
-      ["merge-tree", "--write-tree", "--no-messages", targetBranch, featureBranch],
+      ["merge-tree", "--write-tree", targetBranch, featureBranch],
       { cwd: repoPath, maxBuffer: 10 * 1024 * 1024 },
       (err, stdout, stderr) => {
         const output = stdout.toString().trim();
@@ -419,13 +455,31 @@ export async function mergeBranch(
           const m = line.match(/^\d+ \w+ [123]\t(.+)$/);
           if (m) seen.add(m[1].replace(/\r$/, ""));
         }
-        resolve({ treeSha, conflictingFiles: [...seen] });
+        // Track whether git itself reported a conflict exit (belt-and-suspenders).
+        const mergeTreeHadConflictExit = err !== null && (err as NodeJS.ErrnoException & { code?: number }).code === 1;
+        resolve({ treeSha, conflictingFiles: [...seen], mergeTreeHadConflictExit });
       },
     );
   });
 
   if (conflictingFiles.length > 0) {
     throw new Error(`Merge conflict in: ${conflictingFiles.join(", ")}`);
+  }
+
+  // Belt-and-suspenders: even if no stage entries were emitted, scan the written
+  // tree for conflict marker blobs before committing. This catches cases where the
+  // git version emits conflict markers into blob content without stage entries
+  // (observed in production: commit 4bf8c52c contained raw markers).
+  // We also scan when git exited with code 1 (conflict exit) regardless of stage entries.
+  if (mergeTreeHadConflictExit) {
+    throw new Error(`Merge conflict detected (git merge-tree exit 1) in ${featureBranch} → ${targetBranch}: stage entries may be missing. Aborting to prevent committing conflict markers.`);
+  }
+
+  // Secondary scan: check the merged tree's blob content for conflict markers.
+  // Uses `git grep` on the written tree SHA (cheaper than cat-file per blob).
+  const conflictingFilesFromTree = await scanTreeForConflictMarkers(repoPath, treeSha);
+  if (conflictingFilesFromTree.length > 0) {
+    throw new Error(`Merge conflict markers found in tree for: ${conflictingFilesFromTree.join(", ")}`);
   }
 
   // Create the merge commit with two parents
