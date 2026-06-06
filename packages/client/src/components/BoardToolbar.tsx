@@ -210,6 +210,10 @@ export function BoardToolbar({
   const viewMenuRef = useRef<HTMLDivElement>(null);
   const [showActivityMenu, setShowActivityMenu] = useState(false);
   const activityMenuRef = useRef<HTMLDivElement>(null);
+  // Occasional actions (quick tasks, scripts, export/import, voice capture) are
+  // collapsed behind a "⋯" toggle on sm+ so they don't crowd the main bar. The
+  // existing `showActions` toggle still gates the whole cluster on phones.
+  const [showMoreActions, setShowMoreActions] = useState(false);
   const [showMoreViews, setShowMoreViews] = useState(false);
   const moreViewsRef = useRef<HTMLDivElement>(null);
   // Below sm the action cluster (Tasks/Scripts/Queue/Capacity/Voice/Monitor) is
@@ -492,17 +496,37 @@ export function BoardToolbar({
         </div>
       )}
       <button
-        onClick={onShowQuickTasks}
-        title="Quick Tasks - run a skill directly on the current checkout (q)"
-        className="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
+        onClick={() => setShowMoreActions((v) => !v)}
+        aria-expanded={showMoreActions}
+        title="More actions — quick tasks, scripts, export/import, voice capture"
+        className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${
+          showMoreActions
+            ? "bg-surface-sunken dark:bg-gray-800 border-black/[0.07] dark:border-white/10 text-ink dark:text-gray-200"
+            : "bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
+        }`}
       >
-        <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-          <polygon points="5,3 19,12 5,21" />
+        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+          <circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" />
         </svg>
-        <span className="hidden sm:inline">Tasks</span>
+        <span className="hidden sm:inline">More</span>
       </button>
-      <ProjectScriptsMenu projectId={projectId} />
-      <ExportImportMenu projectId={projectId} />
+      {showMoreActions && (
+        <>
+          <button
+            onClick={onShowQuickTasks}
+            title="Quick Tasks - run a skill directly on the current checkout (q)"
+            className="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
+          >
+            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <polygon points="5,3 19,12 5,21" />
+            </svg>
+            <span className="hidden sm:inline">Tasks</span>
+          </button>
+          <ProjectScriptsMenu projectId={projectId} />
+          <ExportImportMenu projectId={projectId} />
+          <VoiceInboxButton projectId={projectId} onIssueCreated={onVoiceIssueCreated} />
+        </>
+      )}
       {/* Activity — observability panels (live pulse, merge queue, capacity
           forecast, time report) collapsed into one menu. Live counts surface as
           a single badge on the trigger so the signal isn't lost. */}
@@ -565,7 +589,6 @@ export function BoardToolbar({
           </div>
         );
       })()}
-      <VoiceInboxButton projectId={projectId} onIssueCreated={onVoiceIssueCreated} />
       <div className="relative shrink-0 flex items-center gap-0.5">
         <button
           onClick={() => setShowMonitorPopover(v => !v)}
