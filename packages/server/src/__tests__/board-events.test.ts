@@ -88,6 +88,22 @@ describe("board-events", () => {
     it("does nothing for projects with no subscribers", () => {
       expect(() => boardEvents.broadcast("no-subs", "board_changed")).not.toThrow();
     });
+
+    it("sends projects_changed events to subscribers across projects", () => {
+      const ws1 = createMockWs();
+      const ws2 = createMockWs();
+      const globalWs = createMockWs();
+      boardEvents.subscribe("proj-1", ws1);
+      boardEvents.subscribe("proj-2", ws2);
+      boardEvents.subscribe("__projects", globalWs);
+
+      boardEvents.broadcastProjectsChanged("proj-3", "project_created");
+
+      const payload = JSON.stringify({ type: "projects_changed", projectId: "proj-3", reason: "project_created" });
+      expect(ws1.send).toHaveBeenCalledWith(payload);
+      expect(ws2.send).toHaveBeenCalledWith(payload);
+      expect(globalWs.send).toHaveBeenCalledWith(payload);
+    });
   });
 
   describe("broadcastActivity", () => {

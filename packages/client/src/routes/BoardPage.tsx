@@ -209,6 +209,7 @@ export function BoardPage() {
   const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>([]);
   const pendingBoardRefreshRef = useRef(false);
   const boardEtagRef = useRef<Record<string, string>>({});
+  const loadProjectsRef = useRef<() => Promise<string | undefined>>(async () => undefined);
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
   const [showStartWorkspacePicker, setShowStartWorkspacePicker] = useState(false);
   const [keyboardCursorIssueId, setKeyboardCursorIssueId] = useState<string | null>(null);
@@ -351,6 +352,23 @@ export function BoardPage() {
 
   // Real-time board updates via WebSocket
   useBoardEvents(activeProjectId, useCallback((reason: string) => {
+    if (reason.startsWith("project_")) {
+      void (async () => {
+        try {
+          const nextProjectId = await loadProjectsRef.current();
+          if (nextProjectId) {
+            await refetchBoard(nextProjectId);
+          } else {
+            setColumns([]);
+            columnsRef.current = [];
+          }
+        } catch {
+          showToast("Failed to refresh projects", "error");
+        }
+      })();
+      return;
+    }
+
     if (reason === "session_completed") {
       sendDesktopNotification("Agentic Kanban", "Agent session completed");
     } else if (reason === "workspace_merged") {
@@ -463,7 +481,10 @@ export function BoardPage() {
   const loadProjects = useCallback(async () => {
     const projs = await apiFetch<Project[]>("/api/projects");
     setProjects(projs);
-    if (projs.length === 0) return;
+    if (projs.length === 0) {
+      setActiveProjectId(null);
+      return undefined;
+    }
     try {
       const pref = await apiFetch<{ projectId: string | null }>("/api/preferences/active-project");
       if (pref.projectId && projs.some((p) => p.id === pref.projectId)) {
@@ -477,6 +498,7 @@ export function BoardPage() {
     setActiveProjectId(firstId);
     return firstId;
   }, []);
+  loadProjectsRef.current = loadProjects;
 
   useEffect(() => {
     async function load() {
