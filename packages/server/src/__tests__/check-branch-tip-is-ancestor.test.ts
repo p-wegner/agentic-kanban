@@ -41,6 +41,7 @@ async function seedScenario(db: ReturnType<typeof createTestDb>["db"], opts: {
   workingDir?: string | null;
   workspaceStatus?: string;
   readyForMerge?: boolean;
+  baseCommitSha?: string | null;
 } = {}) {
   const now = new Date().toISOString();
   const projectId = randomUUID();
@@ -63,6 +64,7 @@ async function seedScenario(db: ReturnType<typeof createTestDb>["db"], opts: {
     id: workspaceId, issueId, branch: "feature/ak-549-test",
     workingDir: opts.workingDir !== undefined ? opts.workingDir : "/repo/.worktrees/ws",
     baseBranch: "master", isDirect: false,
+    baseCommitSha: opts.baseCommitSha ?? null,
     status: opts.workspaceStatus ?? "idle",
     readyForMerge: opts.readyForMerge ?? false,
     provider: "claude", createdAt: now, updatedAt: now,
@@ -108,7 +110,7 @@ describe("checkBranchTipIsAncestor helper — three AC paths", () => {
   it("regression #583: 0-commit workspace (branchSha===baseSha) — mergeWorkspace does NOT reconcile as done", async () => {
     // A fresh workspace has 0 unique commits: countUniqueCommits returns 0.
     // Even though tip is trivially an ancestor, the reconciler must NOT auto-Done it.
-    const { workspaceId } = await seedScenario(db, { readyForMerge: true });
+    const { workspaceId } = await seedScenario(db, { readyForMerge: true, baseCommitSha: "sha-original-base" });
     const mergeBranch = vi.fn(async () => "Merge made by the 'ort' strategy.");
     const countUniqueCommits = vi.fn(async () => 0);
     const git = {
@@ -127,7 +129,7 @@ describe("checkBranchTipIsAncestor helper — three AC paths", () => {
   it("regression #583: 0-commit workspace (base advanced) — mergeWorkspace does NOT reconcile as done", async () => {
     // Branch was created when base was at commitX; base later advanced to commitY.
     // Branch still has 0 unique commits. branchSha !== baseSha but countUniqueCommits returns 0.
-    const { workspaceId } = await seedScenario(db, { readyForMerge: true });
+    const { workspaceId } = await seedScenario(db, { readyForMerge: true, baseCommitSha: "sha-original-base" });
     const mergeBranch = vi.fn(async () => "Merge made by the 'ort' strategy.");
     const countUniqueCommits = vi.fn(async () => 0);
     const git = {

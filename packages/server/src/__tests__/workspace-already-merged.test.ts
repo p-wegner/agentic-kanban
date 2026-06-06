@@ -51,6 +51,7 @@ async function seedScenario(db: ReturnType<typeof createTestDb>["db"], opts: {
   isDirect?: boolean;
   branch?: string;
   readyForMerge?: boolean;
+  baseCommitSha?: string | null;
 }) {
   const now = new Date().toISOString();
   const projectId = randomUUID();
@@ -95,6 +96,7 @@ async function seedScenario(db: ReturnType<typeof createTestDb>["db"], opts: {
     isDirect: opts.isDirect ?? false,
     status: opts.workspaceStatus ?? "idle",
     readyForMerge: opts.readyForMerge ?? false,
+    baseCommitSha: opts.baseCommitSha ?? null,
     provider: "claude",
     createdAt: now,
     updatedAt: now,
@@ -128,8 +130,8 @@ describe("checkAlreadyMerged", () => {
   });
 
   it("reports already-merged when landed branch is an ancestor with 0 current-base unique commits", async () => {
-    const { workspaceId } = await seedScenario(db, {});
-    const countUniqueCommits = vi.fn(async () => 0);
+    const { workspaceId } = await seedScenario(db, { baseCommitSha: "base-sha" });
+    const countUniqueCommits = vi.fn(async (_repo: string, baseSha: string) => baseSha === "base-sha" ? 1 : 0);
     const git = {
       ...makeGitService({
         getDiff: async () => "",
@@ -228,8 +230,8 @@ describe("checkAlreadyMerged", () => {
   });
 
   it("reports already-merged when worktree is missing and landed branch has 0 current-base unique commits", async () => {
-    const { workspaceId } = await seedScenario(db, { workingDir: null });
-    const countUniqueCommits = vi.fn(async () => 0);
+    const { workspaceId } = await seedScenario(db, { workingDir: null, baseCommitSha: "base-sha" });
+    const countUniqueCommits = vi.fn(async (_repo: string, baseSha: string) => baseSha === "base-sha" ? 1 : 0);
     const git = {
       ...makeGitService({
         getDiffFromRepo: async () => "",
@@ -379,14 +381,14 @@ describe("reconcileAlreadyMerged", () => {
   });
 
   it("closes a landed branch that has no current-base unique commits", async () => {
-    const { workspaceId } = await seedScenario(db, {});
+    const { workspaceId } = await seedScenario(db, { baseCommitSha: "base-sha" });
     const git = {
       ...makeGitService({
         getDiff: async () => "",
         revParse: async (_repo, ref) => ref === "feature/ak-42-test" ? "feature-sha" : "merge-sha",
         isAncestor: async () => true,
       }),
-      countUniqueCommits: vi.fn(async () => 0),
+      countUniqueCommits: vi.fn(async (_repo: string, baseSha: string) => baseSha === "base-sha" ? 1 : 0),
     };
 
     const svc = createWorkspaceMergeService({ database: db, gitService: git as never, createBackup: async () => {} });
