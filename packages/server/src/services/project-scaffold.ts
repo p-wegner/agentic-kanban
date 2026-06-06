@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { eq } from "drizzle-orm";
 import { agentSkills } from "@agentic-kanban/shared/schema";
+import { commitPaths, getCurrentBranch } from "@agentic-kanban/shared/lib/git-service";
 import { db, type Database } from "../db/index.js";
 
 /**
@@ -33,6 +34,59 @@ export const GENERIC_AGENT_GITIGNORE = [
 ];
 
 const AGENT_GITIGNORE_HEADER = "# AI agent artifacts (written during a workspace session; not project source)";
+const SCAFFOLD_COMMIT_MESSAGE = "chore: scaffold agent guards and onboarding";
+
+function statusLineToPath(line: string): string {
+  const raw = line.slice(3).trim();
+  if (!raw) return "";
+  const arrow = raw.indexOf(" -> ");
+  return arrow >= 0 ? raw.slice(arrow + 4) : raw;
+}
+
+function isScaffoldTrackedPath(pathName: string): boolean {
+  if (pathName === ".gitignore" || pathName === "CLAUDE.md" || pathName === "AGENTS.md") return true;
+  return pathName === ".claude" || pathName.startsWith(".claude/");
+}
+
+/**
+ * Commit board-authored scaffold files in the main checkout so future workspace
+ * worktrees fork from a clean main branch and auto-merge does not fail on dirty_main.
+ *
+ * Behavior:
+ * - non-fatal on all failures (registration must not block),
+ * - no-op on detached HEAD (explicitly skip),
+ * - no-op unless one of the scaffold paths changed in git status,
+ * - commits only the scaffold paths by explicit message.
+ */
+export async function commitProjectScaffoldArtifacts(repoPath: string): Promise<void> {
+  try {
+    const branch = await getCurrentBranch(repoPath);
+    if (branch === "HEAD") return;
+
+    const status = execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], {
+      cwd: repoPath,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
+    });
+
+    const pathsToCommit = new Set<string>();
+    for (const line of status.split("\n")) {
+      const pathName = statusLineToPath(line);
+      if (!isScaffoldTrackedPath(pathName)) continue;
+
+      if (pathName === ".gitignore") pathsToCommit.add(".gitignore");
+      if (pathName === "CLAUDE.md") pathsToCommit.add("CLAUDE.md");
+      if (pathName === "AGENTS.md") pathsToCommit.add("AGENTS.md");
+      if (pathName === ".claude" || pathName.startsWith(".claude/")) pathsToCommit.add(".claude");
+    }
+
+    if (pathsToCommit.size === 0) return;
+    await commitPaths(repoPath, [...pathsToCommit], SCAFFOLD_COMMIT_MESSAGE);
+  } catch {
+    /* non-fatal: registration must never fail because of scaffold commit */
+  }
+}
 
 /**
  * Ensure the generic agent-artifact ignore lines are present in the repo's .gitignore.
