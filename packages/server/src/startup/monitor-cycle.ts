@@ -1,3 +1,4 @@
+import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { issues, projectStatuses, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { desc, eq, sql, or, isNull, notInArray, and } from "drizzle-orm";
 import { db } from "../db/index.js";
@@ -7,10 +8,15 @@ import { emitButlerSystemEvent } from "../services/butler-event-feed.js";
 import type { createSessionManager } from "../services/session.manager.js";
 import type { MonitorAction } from "./monitor-helpers.js";
 import { NOISE_TRIGGER_TYPES } from "../services/session-filter.js";
+import { commitLeftoverChanges, getCommitCountAhead, getWorkingTreeDiff } from "../services/git.service.js";
+import { startManualReview } from "../services/review.service.js";
 
 const MAX_SESSIONS = 10;
 export const MAX_MONITOR_RELAUNCHES_PER_CYCLE = 2;
 export const MAX_MONITOR_MERGES_PER_CYCLE = 2;
+export const DEFAULT_STUCK_BUILDER_TIMEOUT_MS = 9 * 60 * 1000;
+const NON_TRIVIAL_WORKTREE_DIFF_CHARS = 80;
+const REPEATED_FAILED_COMMAND_MIN_COUNT = 3;
 
 export interface WorkspaceCandidate {
   wsId: string;
@@ -57,6 +63,7 @@ export interface ProcessWorkspaceDeps {
    * `autoMergeEnabled` (the operator kill-switch).
    */
   autoMergeInReview: boolean;
+  reviewSessionIds: Set<string>;
   monitorRecentActions: MonitorAction[];
   logMonitorAction: (recentActions: MonitorAction[], action: MonitorActionName, workspaceId: string, issueId: string, extra?: Pick<MonitorAction, "endpoint" | "httpStatus" | "responseSummary" | "verificationResult">) => void;
   buildMonitorNudgePrompt: (projectId: string) => Promise<string>;
@@ -64,12 +71,118 @@ export interface ProcessWorkspaceDeps {
   shouldSkipNudge: (excerpts: string[]) => boolean;
   maxRelaunchesPerCycle?: number;
   maxMergesPerCycle?: number;
+  stuckBuilderTimeoutMs?: number;
+  getCommitCountAhead?: typeof getCommitCountAhead;
+  getWorkingTreeDiff?: typeof getWorkingTreeDiff;
+  commitLeftoverChanges?: typeof commitLeftoverChanges;
+  startReview?: typeof startManualReview;
+}
+
+type LatestSession = {
+  id: string;
+  status: string;
+  startedAt: string;
+  triggerType: string | null;
+  stats: string | null;
+};
+
+function parseStuckBuilderTimeoutMs(): number {
+  const fromEnv = Number(process.env.STUCK_BUILDER_TIMEOUT_MS);
+  return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : DEFAULT_STUCK_BUILDER_TIMEOUT_MS;
+}
+
+function parseSessionStats(stats: string | null): Record<string, unknown> {
+  if (!stats) return {};
+  try {
+    const parsed = JSON.parse(stats);
+    return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+function hasRepeatedFailedCommand(stats: string | null): boolean {
+  const parsed = parseSessionStats(stats);
+  const friction = parsed.friction && typeof parsed.friction === "object"
+    ? parsed.friction as Record<string, unknown>
+    : null;
+  if (!friction) return false;
+  const failedToolCalls = Number(friction.failedToolCalls ?? 0);
+  const errorCount = Number(friction.errorCount ?? 0);
+  const repeatedCommands = Array.isArray(friction.repeatedCommands) ? friction.repeatedCommands : [];
+  return (failedToolCalls >= 2 || errorCount >= 2)
+    && repeatedCommands.some((cmd) =>
+      cmd
+      && typeof cmd === "object"
+      && Number((cmd as Record<string, unknown>).count ?? 0) >= REPEATED_FAILED_COMMAND_MIN_COUNT,
+    );
+}
+
+function isBuilderSession(sess: LatestSession): boolean {
+  return !sess.triggerType || sess.triggerType === "agent" || sess.triggerType === "chat" || sess.triggerType === "plan-implement";
+}
+
+async function recoverStuckBuilder(
+  ws: WorkspaceCandidate,
+  sess: LatestSession,
+  deps: ProcessWorkspaceDeps,
+  logAction: (action: MonitorActionName, workspaceId: string, issueId: string, extra?: Pick<MonitorAction, "endpoint" | "httpStatus" | "responseSummary" | "verificationResult">) => void,
+): Promise<boolean> {
+  if (ws.isDirect || !ws.workingDir || !ws.baseBranch || !isBuilderSession(sess)) return false;
+
+  const ahead = await (deps.getCommitCountAhead ?? getCommitCountAhead)(ws.workingDir, ws.baseBranch).catch(() => -1);
+  if (ahead !== 0) return false;
+
+  const diff = await (deps.getWorkingTreeDiff ?? getWorkingTreeDiff)(ws.workingDir).catch(() => "");
+  const hasNonTrivialDiff = diff.trim().length >= NON_TRIVIAL_WORKTREE_DIFF_CHARS;
+  const retryLoop = hasRepeatedFailedCommand(sess.stats);
+  if (!hasNonTrivialDiff && !retryLoop) return false;
+
+  console.log(`[monitor] Recovering stuck builder workspace ${ws.wsId} for issue #${ws.issueNumber ?? "?"} (diff=${hasNonTrivialDiff}, retryLoop=${retryLoop})`);
+  await deps.sessionManager.stopSession(sess.id);
+  await db.update(sessions).set({ status: "stopped", endedAt: new Date().toISOString() }).where(eq(sessions.id, sess.id)).catch(() => {});
+
+  const committedFiles = await (deps.commitLeftoverChanges ?? commitLeftoverChanges)(ws.workingDir);
+  await db.update(workspaces).set({ status: "idle", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, ws.wsId));
+
+  if (committedFiles <= 0) {
+    logAction("mark_idle", ws.wsId, ws.issueId, {
+      responseSummary: "Stopped stuck builder, but no leftover files could be committed",
+      verificationResult: "failed",
+    });
+    deps.boardEvents.broadcast(ws.projectId, "board_changed");
+    console.warn(`[monitor] Stuck builder recovery for workspace ${ws.wsId} stopped the session but did not create a commit`);
+    return true;
+  }
+
+  const inReviewSt = await db.select({ id: projectStatuses.id }).from(projectStatuses)
+    .where(sql`${projectStatuses.name} = 'In Review' AND ${projectStatuses.projectId} = ${ws.projectId}`).limit(1);
+  if (inReviewSt[0]) {
+    await db.update(issues).set({ statusId: inReviewSt[0].id, updatedAt: new Date().toISOString() }).where(eq(issues.id, ws.issueId));
+    await syncCurrentNodeToStatus(db, ws.issueId);
+  }
+
+  const { sessionId } = await (deps.startReview ?? startManualReview)(db, () => deps.sessionManager, deps.boardEvents, deps.reviewSessionIds, ws.wsId, false);
+  logAction("mark_idle", ws.wsId, ws.issueId, {
+    responseSummary: `Recovered stuck builder: committed ${committedFiles} leftover file(s), review session ${sessionId}`,
+    verificationResult: "ok",
+  });
+  emitButlerSystemEvent({
+    projectId: ws.projectId,
+    kind: "stuck_agent",
+    workspaceId: ws.wsId,
+    issueNumber: ws.issueNumber ?? undefined,
+    text: `Recovered stuck builder for issue #${ws.issueNumber ?? "?"}: stopped session ${sess.id}, committed ${committedFiles} leftover file(s), and launched review ${sessionId}.`,
+  });
+  deps.boardEvents.broadcast(ws.projectId, "board_changed");
+  return true;
 }
 
 export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[], deps: ProcessWorkspaceDeps): Promise<{ relaunched: number; merged: number; nudged: number }> {
   const stats = { relaunched: 0, merged: 0, nudged: 0 };
   const maxRelaunches = deps.maxRelaunchesPerCycle ?? MAX_MONITOR_RELAUNCHES_PER_CYCLE;
   const maxMerges = deps.maxMergesPerCycle ?? MAX_MONITOR_MERGES_PER_CYCLE;
+  const stuckBuilderTimeoutMs = deps.stuckBuilderTimeoutMs ?? parseStuckBuilderTimeoutMs();
   const logAction = (action: MonitorActionName, workspaceId: string, issueId: string, extra?: Pick<MonitorAction, "endpoint" | "httpStatus" | "responseSummary" | "verificationResult">) => deps.logMonitorAction(deps.monitorRecentActions, action, workspaceId, issueId, extra);
   const canStartRelaunch = (ws: WorkspaceCandidate) => {
     if (stats.relaunched < maxRelaunches) return true;
@@ -91,7 +204,7 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
     && (ws.diffStatCacheDeletions ?? 0) === 0;
   for (const ws of candidates) {
     try {
-      const [sess] = await db.select({ id: sessions.id, status: sessions.status, startedAt: sessions.startedAt }).from(sessions)
+      const [sess] = await db.select({ id: sessions.id, status: sessions.status, startedAt: sessions.startedAt, triggerType: sessions.triggerType, stats: sessions.stats }).from(sessions)
         .where(eq(sessions.workspaceId, ws.wsId)).orderBy(desc(sessions.startedAt)).limit(1);
       const sessionCountRows = await db.select({ count: sql<number>`count(*)` }).from(sessions)
         .where(and(
@@ -268,7 +381,12 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
           logAction("mark_dead", ws.wsId, ws.issueId, { verificationResult: "ok" });
           console.log(`[monitor] Workspace ${ws.wsId} process dead  marking idle`);
           deps.boardEvents.broadcast(ws.projectId, "board_changed");
-        } else if (Date.now() - new Date(sess.startedAt).getTime() > 5 * 60 * 1000) {
+          continue;
+        } else if (Date.now() - new Date(sess.startedAt).getTime() > stuckBuilderTimeoutMs) {
+          const recovered = await recoverStuckBuilder(ws, sess, deps, logAction);
+          if (recovered) continue;
+        }
+        if (Date.now() - new Date(sess.startedAt).getTime() > 5 * 60 * 1000) {
           const previousNudge = deps.monitorRecentActions.find((a) => a.action === "nudge" && a.workspaceId === ws.wsId);
           if (previousNudge) {
             const excerpts = await deps.getRecentAgentExcerpts(sess.id);

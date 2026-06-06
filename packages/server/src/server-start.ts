@@ -69,7 +69,7 @@ export async function startServer(port?: number, hostname?: string) {
 
   const serverPort = port || Number(process.env.PORT) || 3001;
   const serverHost = hostname || process.env.KANBAN_HOST || "127.0.0.1";
-  const { setupMonitorRoutes } = createMonitorSetup({ sessionManager, boardEvents, serverPort });
+  const { setupMonitorRoutes } = createMonitorSetup({ sessionManager, boardEvents, serverPort, reviewSessionIds: workflow.reviewSessionIds });
   setupMonitorRoutes(app);
 
   console.log(`Server starting on port ${serverPort}...`);
