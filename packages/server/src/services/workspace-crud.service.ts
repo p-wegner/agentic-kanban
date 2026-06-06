@@ -1226,6 +1226,8 @@ exit 1
     if (body.status !== undefined) updates.status = body.status;
     if (body.workingDir !== undefined) updates.workingDir = body.workingDir;
     if (body.planMode !== undefined) updates.planMode = body.planMode === true;
+    if (body.claudeProfile !== undefined) updates.claudeProfile = body.claudeProfile ?? null;
+    if (body.provider !== undefined) updates.provider = body.provider ?? null;
 
     await database.update(workspaces).set(updates).where(eq(workspaces.id, id));
 
