@@ -4,7 +4,6 @@ import { useOrchestrator } from "../hooks/useOrchestrator.js";
 import { apiFetch } from "../lib/api.js";
 import { VoiceInboxButton } from "./VoiceInboxButton.js";
 import { ProjectScriptsMenu } from "./ProjectScriptsMenu.js";
-import { ExportImportMenu } from "./ExportImportMenu.js";
 import { PRIMARY_VIEWS, SECONDARY_VIEWS, VIEW_REGISTRY } from "../lib/viewRegistry.js";
 import type { StatusWithIssues } from "@agentic-kanban/shared";
 import type { CardDensity } from "../hooks/useBoardPreferences.js";
@@ -317,121 +316,6 @@ export function BoardToolbar({
         </svg>
       </button>
       <div className={`${showActions ? "flex" : "hidden"} sm:flex items-start gap-2 flex-wrap`}>
-      {/* View options — display toggles (focus, density, legends), grouping and
-          column visibility collapsed into one menu so they stop eating a toolbar row.
-          Focus keeps its `f` shortcut (handled in BoardPage). */}
-      {(onFocusModeChange || onCardDensityChange || onShowPriorityLegendChange || onShowCardAgingHeatmapChange || onSwimlaneChange || (onHiddenColumnsChange && visibilityColumns && visibilityColumns.length > 0)) && (() => {
-        const viewActive =
-          focusMode ||
-          cardDensity === "compact" ||
-          showPriorityLegend ||
-          showCardAgingHeatmap ||
-          (hiddenColumns?.size ?? 0) > 0 ||
-          swimlaneDimension !== "none";
-        return (
-          <div className="relative shrink-0" ref={viewMenuRef}>
-            <button
-              onClick={() => setShowViewMenu((v) => !v)}
-              aria-haspopup="menu"
-              aria-expanded={showViewMenu}
-              title="View options — focus, density, legends, grouping, columns"
-              className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${
-                viewActive
-                  ? "bg-brand-600 text-white border-brand-600 hover:bg-brand-700"
-                  : "bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
-              }`}
-            >
-              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 6h18M6 12h12M10 18h4" />
-              </svg>
-              <span className="hidden sm:inline">View</span>
-              <svg className={`w-2.5 h-2.5 transition-transform ${showViewMenu ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
-              </svg>
-            </button>
-            {showViewMenu && (
-              <div role="menu" className="absolute left-0 top-full z-30 mt-1 w-56 rounded-md border border-gray-200 bg-white p-2 shadow-lg dark:border-gray-700 dark:bg-gray-900 flex flex-col gap-0.5">
-                {onFocusModeChange && (
-                  <label className="flex items-center gap-2 rounded px-2 py-1.5 text-xs cursor-pointer hover:bg-surface-sunken dark:hover:bg-gray-800" title="Show only issues with an active or fixing workspace (f)">
-                    <input type="checkbox" checked={focusMode} onChange={() => onFocusModeChange(!focusMode)} className="h-3 w-3 rounded border-gray-300 text-brand-600 focus:ring-brand-500" />
-                    <span className="flex-1 text-ink dark:text-gray-200">Focus — in-flight only</span>
-                    <kbd className="font-mono text-[10px] opacity-60">f</kbd>
-                  </label>
-                )}
-                {onCardDensityChange && (
-                  <label className="flex items-center gap-2 rounded px-2 py-1.5 text-xs cursor-pointer hover:bg-surface-sunken dark:hover:bg-gray-800" title="Compact card density">
-                    <input type="checkbox" checked={cardDensity === "compact"} onChange={() => onCardDensityChange(cardDensity === "compact" ? "comfortable" : "compact")} className="h-3 w-3 rounded border-gray-300 text-brand-600 focus:ring-brand-500" />
-                    <span className="flex-1 text-ink dark:text-gray-200">Compact density</span>
-                  </label>
-                )}
-                {onShowPriorityLegendChange && (
-                  <label className="flex items-center gap-2 rounded px-2 py-1.5 text-xs cursor-pointer hover:bg-surface-sunken dark:hover:bg-gray-800" title="Show priority color legend">
-                    <input type="checkbox" checked={showPriorityLegend} onChange={() => onShowPriorityLegendChange(!showPriorityLegend)} className="h-3 w-3 rounded border-gray-300 text-brand-600 focus:ring-brand-500" />
-                    <span className="flex-1 text-ink dark:text-gray-200">Priority legend</span>
-                  </label>
-                )}
-                {onShowCardAgingHeatmapChange && (
-                  <label className="flex items-center gap-2 rounded px-2 py-1.5 text-xs cursor-pointer hover:bg-surface-sunken dark:hover:bg-gray-800" title="Tint cards by time in column">
-                    <input type="checkbox" checked={showCardAgingHeatmap} onChange={() => onShowCardAgingHeatmapChange(!showCardAgingHeatmap)} className="h-3 w-3 rounded border-gray-300 text-brand-600 focus:ring-brand-500" />
-                    <span className="flex-1 text-ink dark:text-gray-200">Aging heatmap</span>
-                  </label>
-                )}
-                {onSwimlaneChange && (
-                  <div className="px-2 py-1.5">
-                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-faint dark:text-gray-500">Group by</p>
-                    <div className="flex items-center gap-0 border border-black/[0.07] dark:border-white/10 rounded-md p-0.5 bg-surface-raised dark:bg-surface-raised-dark">
-                      {(["none", "priority", "tag"] as const).map((dim) => {
-                        const label = dim === "none" ? "None" : dim === "priority" ? "Priority" : "Tag";
-                        const isActive = swimlaneDimension === dim;
-                        return (
-                          <button
-                            key={dim}
-                            onClick={() => onSwimlaneChange(dim)}
-                            className={`flex-1 px-2 py-0.5 text-xs rounded transition-colors ${
-                              isActive ? "bg-brand-600 text-white" : "text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-700"
-                            }`}
-                            aria-pressed={isActive}
-                          >
-                            {label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-                {onHiddenColumnsChange && visibilityColumns && visibilityColumns.length > 0 && (
-                  <div className="px-2 py-1.5 border-t border-gray-100 dark:border-gray-800 mt-0.5">
-                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-faint dark:text-gray-500">Show / hide columns</p>
-                    {visibilityColumns.map((col) => {
-                      const isHidden = hiddenColumns?.has(col.name) ?? false;
-                      const visibleCount = visibilityColumns.filter((c) => !(hiddenColumns?.has(c.name) ?? false)).length;
-                      const isLastVisible = !isHidden && visibleCount <= 1;
-                      return (
-                        <label
-                          key={col.id}
-                          className={`flex items-center gap-2 rounded px-1 py-1 text-xs transition-colors ${isLastVisible ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-surface-sunken dark:hover:bg-gray-800"}`}
-                          title={isLastVisible ? "At least one column must remain visible" : undefined}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={!isHidden}
-                            disabled={isLastVisible}
-                            onChange={(e) => onHiddenColumnsChange(col.name, !e.target.checked)}
-                            className="h-3 w-3 rounded border-gray-300 text-brand-600 focus:ring-brand-500 disabled:cursor-not-allowed"
-                          />
-                          <span className="flex-1 text-ink dark:text-gray-200">{col.name}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        );
-      })()}
-      {/* Status / type / milestone / blocked / stale filters now live in the
-          unified BoardFilterMenu (rendered by BoardPage), not on this toolbar. */}
       <button
         onClick={() => setShowMoreActions((v) => !v)}
         aria-expanded={showMoreActions}
@@ -460,72 +344,9 @@ export function BoardToolbar({
             <span className="hidden sm:inline">Tasks</span>
           </button>
           <ProjectScriptsMenu projectId={projectId} />
-          <ExportImportMenu projectId={projectId} />
           <VoiceInboxButton projectId={projectId} onIssueCreated={onVoiceIssueCreated} />
         </>
       )}
-      {/* Activity — observability panels (live pulse, merge queue, capacity
-          forecast, time report) collapsed into one menu. Live counts surface as
-          a single badge on the trigger so the signal isn't lost. */}
-      {(onShowLiveActivityTicker || onShowMergeQueue || onShowRunQueueForecast || onShowTimeReport) && (() => {
-        const activityBadge = liveActivityCount + mergeQueueCount;
-        return (
-          <div className="relative shrink-0" ref={activityMenuRef}>
-            <button
-              onClick={() => setShowActivityMenu((v) => !v)}
-              aria-haspopup="menu"
-              aria-expanded={showActivityMenu}
-              title="Activity — live pulse, merge queue, capacity, time report"
-              className="relative shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
-            >
-              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h4l3 8 4-16 3 8h4" />
-              </svg>
-              <span className="hidden sm:inline">Activity</span>
-              {activityBadge > 0 && (
-                <span className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-emerald-500 text-white text-[10px] font-semibold leading-none">
-                  {activityBadge > 99 ? "99+" : activityBadge}
-                </span>
-              )}
-              <svg className={`w-2.5 h-2.5 transition-transform ${showActivityMenu ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
-              </svg>
-            </button>
-            {showActivityMenu && (
-              <div role="menu" className="absolute left-0 top-full z-30 mt-1 w-52 rounded-md border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900 flex flex-col gap-0.5">
-                {onShowLiveActivityTicker && (
-                  <button role="menuitem" onClick={() => { setShowActivityMenu(false); onShowLiveActivityTicker(); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-ink dark:text-gray-200 hover:bg-surface-sunken dark:hover:bg-gray-800" title="Compact stream of running agent output (l)">
-                    <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 17l6-6-6-6" /></svg>
-                    <span className="flex-1">Pulse — live activity</span>
-                    {liveActivityCount > 0 && <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-emerald-500 text-white text-[10px] font-semibold leading-none">{liveActivityCount > 99 ? "99+" : liveActivityCount}</span>}
-                    <kbd className="font-mono text-[10px] opacity-60">l</kbd>
-                  </button>
-                )}
-                {onShowMergeQueue && (
-                  <button role="menuitem" onClick={() => { setShowActivityMenu(false); onShowMergeQueue(); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-ink dark:text-gray-200 hover:bg-surface-sunken dark:hover:bg-gray-800" title="Review In Review workspaces ordered by conflict risk">
-                    <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 7h18M3 12h12M3 17h6" /><path strokeLinecap="round" strokeLinejoin="round" d="M17 14l3 3-3 3" /></svg>
-                    <span className="flex-1">Merge queue</span>
-                    {mergeQueueCount > 0 && <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-brand-500 text-white text-[10px] font-semibold leading-none">{mergeQueueCount > 99 ? "99+" : mergeQueueCount}</span>}
-                  </button>
-                )}
-                {onShowRunQueueForecast && (
-                  <button role="menuitem" onClick={() => { setShowActivityMenu(false); onShowRunQueueForecast(); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-ink dark:text-gray-200 hover:bg-surface-sunken dark:hover:bg-gray-800" title="Active-agent capacity and next likely starts">
-                    <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 18V6m4 12V9m4 9v-5m4 5V4m4 14v-7" /></svg>
-                    <span className="flex-1">Capacity forecast</span>
-                    {runQueueOpenSlots > 0 && <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-sky-500 text-white text-[10px] font-semibold leading-none">{runQueueOpenSlots > 99 ? "99+" : runQueueOpenSlots}</span>}
-                  </button>
-                )}
-                {onShowTimeReport && (
-                  <button role="menuitem" onClick={() => { setShowActivityMenu(false); onShowTimeReport(); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-ink dark:text-gray-200 hover:bg-surface-sunken dark:hover:bg-gray-800" title="Aggregate logged time by issue and day">
-                    <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="9" /><path strokeLinecap="round" strokeLinejoin="round" d="M12 7v5l3 3" /></svg>
-                    <span className="flex-1">Time report</span>
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        );
-      })()}
       <div className="relative shrink-0 flex items-center gap-0.5">
         <button
           onClick={() => setShowMonitorPopover(v => !v)}
