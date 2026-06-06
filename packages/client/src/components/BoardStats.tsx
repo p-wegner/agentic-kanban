@@ -155,10 +155,7 @@ export function BoardStats({
               <span key={popKey} className={`text-sm font-bold text-gray-800 dark:text-gray-100 ${popKey > 0 ? "count-pop" : ""}`}>
                 {totalActive}
               </span>
-              <span className="text-xs font-medium text-gray-600 dark:text-gray-400">open</span>
-              {doneCount > 0 && (
-                <span className="text-xs text-gray-400 dark:text-gray-500">· {doneCount} done</span>
-              )}
+              <span className="text-xs font-medium text-gray-600 dark:text-gray-400">open</span>{/* done count + % live in the ring popover */}
             </>
           )}
           <svg className={`w-2.5 h-2.5 text-gray-400 transition-transform ${showBreakdown ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
