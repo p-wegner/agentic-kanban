@@ -68,8 +68,10 @@ export async function reconcileAncestorBranchWorkspaces(
 
   // Find non-closed, non-direct workspaces whose issue is NOT in a terminal status
   // and whose mergedAt is null (mergedAt set = already handled by reconcileSilentlyMergedWorkspaces).
-  // In Progress is only eligible when readyForMerge=true: that flag comes from the
-  // review flow, and a dropped merge response can leave reviewed work in that column.
+  // In Progress is only eligible when idle+readyForMerge=true: that flag comes
+  // from the review flow, and a dropped merge response can leave reviewed work
+  // parked in that column. Running In Progress work may have uncommitted changes
+  // even when the current branch tip is already an ancestor.
   const candidates = await database
     .select({
       wsId: workspaces.id,
@@ -104,7 +106,7 @@ export async function reconcileAncestorBranchWorkspaces(
 
   for (const c of candidates) {
     if (!c.branch || !c.baseBranch || !c.repoPath) continue;
-    if (c.statusName === "In Progress" && !c.readyForMerge) continue;
+    if (c.statusName === "In Progress" && (!c.readyForMerge || c.wsStatus !== "idle")) continue;
 
     let result: Awaited<ReturnType<typeof checkBranchTipIsAncestor>>;
     try {
