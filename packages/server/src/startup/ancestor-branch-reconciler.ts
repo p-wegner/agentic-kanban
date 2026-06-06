@@ -3,9 +3,9 @@ import { issues, preferences, projectStatuses, projects, workspaces } from "@age
 import { checkBranchTipIsAncestor, countUniqueCommits } from "@agentic-kanban/shared/lib/git-service";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
-import { moveIssueToDone, updateWorkspaceStatus } from "../repositories/workspace.repository.js";
 import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
 import { PREF_RECONCILER_ANCESTOR_BRANCH_ENABLED } from "../constants/preference-keys.js";
+import { finalizeMergeCleanup } from "../services/merge-cleanup.service.js";
 
 /** Issue status names that are already terminal — skip these workspaces. */
 const TERMINAL_STATUS_NAMES = ["Done", "AI Reviewed", "Closed", "Cancelled"];
@@ -143,13 +143,16 @@ export async function reconcileAncestorBranchWorkspaces(
 
     try {
       const mergedAt = now;
-      await updateWorkspaceStatus(c.wsId, "closed", {
+      await finalizeMergeCleanup({
+        database,
+        workspaceId: c.wsId,
+        issueId: c.issueId,
+        now,
         mergedAt,
         closedAt: now,
-        readyForMerge: false,
         workingDir: null,
-      }, database);
-      await moveIssueToDone(c.wsId, c.issueId, now, database);
+        projectId: c.projectId,
+      });
 
       console.log(
         `[ancestor-reconciler] auto-Done audit: issue=${c.issueNumber ?? "?"} ws=${c.wsId} baseSha=${result.baseSha} branchSha=${result.branchSha} uniqueCommits=${uniqueCommits} reconciledAt=${now}`,

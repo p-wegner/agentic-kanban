@@ -2,9 +2,9 @@ import { eq } from "drizzle-orm";
 import { workspaces } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "./board-events.js";
-import { moveIssueToDone, resolveProjectId, updateWorkspaceStatus } from "../repositories/workspace.repository.js";
 import { WorkspaceError, type GitService } from "./workspace-internals.js";
 import type { RecordMergeAttempt } from "./workspace-merge-prevalidation.service.js";
+import { finalizeMergeCleanup } from "./merge-cleanup.service.js";
 
 export type WorkspaceMergeExecutionResult = {
   response: {
@@ -53,8 +53,16 @@ export async function executeWorkspaceMerge(args: {
 
   const now = new Date().toISOString();
   await stampMergedAtEarly(id, now, database);
-  await updateWorkspaceStatus(id, "closed", { workingDir: null, closedAt: now, mergedAt: now, readyForMerge: false }, database);
-  await moveIssueToDone(id, workspace.issueId, now, database);
+  const finalized = await finalizeMergeCleanup({
+    database,
+    boardEvents,
+    workspaceId: id,
+    issueId: workspace.issueId,
+    now,
+    closedAt: now,
+    mergedAt: now,
+    workingDir: null,
+  });
   await args.recordMergeAttempt(
     workspace,
     "merged",
@@ -62,9 +70,6 @@ export async function executeWorkspaceMerge(args: {
     { targetBranch, commitSha: mergeCommitSha || null, mergedAt: now, mergeOutput: mergeResult },
     now,
   );
-
-  const projectId = await resolveProjectId(id, database);
-  if (projectId) boardEvents?.broadcast(projectId, "workspace_merged");
 
   return {
     response: {
@@ -80,7 +85,7 @@ export async function executeWorkspaceMerge(args: {
       preMergeHead,
       mergeResult,
       mergeCommitSha,
-      projectId,
+      projectId: finalized.projectId,
     },
   };
 }
