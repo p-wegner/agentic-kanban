@@ -26,6 +26,15 @@ describe("resolveRuntimeServerPort", () => {
     })).toBe(3222);
   });
 
+  it("prefers the internal dev backend port over the public proxy port", () => {
+    expect(resolveRuntimeServerPort({
+      KANBAN_INTERNAL_SERVER_PORT: "13001",
+      KANBAN_SERVER_PORT: "3001",
+      SERVER_PORT: "3001",
+      PORT: "3001",
+    })).toBe(13001);
+  });
+
   it("skips invalid port values instead of masking lower-precedence fallbacks", () => {
     expect(resolveRuntimeServerPort({
       KANBAN_WORKTREE_SERVER_PORT: "not-a-port",

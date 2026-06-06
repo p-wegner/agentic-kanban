@@ -8,6 +8,7 @@ function parsePort(value: string | undefined): number | null {
 
 export function resolveRuntimeServerPort(env: NodeJS.ProcessEnv = process.env): number {
   return (
+    parsePort(env.KANBAN_INTERNAL_SERVER_PORT) ??
     parsePort(env.KANBAN_WORKTREE_SERVER_PORT) ??
     parsePort(env.KANBAN_SERVER_PORT) ??
     parsePort(env.SERVER_PORT) ??

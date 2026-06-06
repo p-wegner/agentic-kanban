@@ -133,6 +133,7 @@ function isDevTreeProcess(proc: ProcessRecord): boolean {
   return (
     (cmd.includes("pnpm") && /\sdev(?:\s|$)/.test(cmd)) ||
     cmd.includes("scripts/dev.mjs") ||
+    cmd.includes("scripts/server-dev-proxy.mjs") ||
     cmd.includes("tsx") && cmd.includes("src/index.ts") ||
     cmd.includes("vite/bin/vite") ||
     cmd.includes(" vite ")

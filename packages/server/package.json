@@ -25,7 +25,7 @@
     "dist/migrations/"
   ],
   "scripts": {
-    "dev": "tsx watch --conditions development src/index.ts",
+    "dev": "node ../../scripts/server-dev-proxy.mjs",
     "build": "tsc",
     "start": "node dist/cli/index.js dev",
     "db:migrate": "drizzle-kit migrate",
