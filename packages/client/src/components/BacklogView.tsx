@@ -165,6 +165,10 @@ export function BacklogView({
   const [wavePlan, setWavePlan] = useState<DependencyWavePlan | null>(null);
   const [waveLoading, setWaveLoading] = useState(false);
   const [startingWave, setStartingWave] = useState(false);
+  // Secondary controls collapsed by default so the issue list — the point of the
+  // view — gets the vertical space, especially on small screens.
+  const [showPresets, setShowPresets] = useState(false);
+  const [showWaves, setShowWaves] = useState(false);
 
   const backlogIssues = backlogColumn?.issues ?? [];
   const q = searchQuery.toLowerCase();
@@ -515,51 +519,74 @@ export function BacklogView({
               <option value="type">Type</option>
             </select>
           </label>
-          <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2 py-1 dark:border-gray-700 dark:bg-gray-900">
-            <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Presets</span>
-            <select
-              aria-label="Backlog preset"
-              value={selectedPresetId}
-              onChange={(e) => setSelectedPresetId(e.target.value)}
-              className="min-w-32 rounded border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-300"
-            >
-              <option value="">Select preset</option>
-              {presets.map((preset) => (
-                <option key={preset.id} value={preset.id}>{preset.name}</option>
-              ))}
-            </select>
+          <div className="relative">
             <button
               type="button"
-              disabled={!selectedPresetId}
-              onClick={applyPreset}
-              className="rounded border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+              onClick={() => setShowPresets((v) => !v)}
+              aria-haspopup="menu"
+              aria-expanded={showPresets}
+              className="flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+              title="Filter presets"
             >
-              Apply
+              Presets
+              {presets.length > 0 && (
+                <span className="rounded-full bg-gray-100 px-1.5 text-[10px] font-medium leading-none text-gray-600 dark:bg-gray-800 dark:text-gray-300">{presets.length}</span>
+              )}
+              <svg className={`h-2.5 w-2.5 transition-transform ${showPresets ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
+              </svg>
             </button>
-            <button
-              type="button"
-              disabled={!selectedPresetId || presetsSaving}
-              onClick={deletePreset}
-              className="rounded border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-            >
-              Delete
-            </button>
-            <input
-              aria-label="Backlog preset name"
-              value={presetName}
-              onChange={(e) => setPresetName(e.target.value)}
-              placeholder="Preset name"
-              className="w-32 rounded border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700 placeholder:text-gray-400 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-300"
-            />
-            <button
-              type="button"
-              aria-label="Save backlog preset"
-              disabled={!presetName.trim() || presetsSaving}
-              onClick={savePreset}
-              className="rounded border border-brand-200 bg-brand-50 px-2 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100 disabled:opacity-50 dark:border-brand-800 dark:bg-brand-900/40 dark:text-brand-300"
-            >
-              Save
-            </button>
+            {showPresets && (
+              <div role="menu" className="absolute left-0 top-full z-20 mt-1 flex w-64 max-w-[calc(100vw-2rem)] flex-col gap-2 rounded-md border border-gray-200 bg-white p-2 shadow-lg dark:border-gray-700 dark:bg-gray-900">
+                <div className="flex items-center gap-1">
+                  <select
+                    aria-label="Backlog preset"
+                    value={selectedPresetId}
+                    onChange={(e) => setSelectedPresetId(e.target.value)}
+                    className="min-w-0 flex-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-300"
+                  >
+                    <option value="">Select preset</option>
+                    {presets.map((preset) => (
+                      <option key={preset.id} value={preset.id}>{preset.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    disabled={!selectedPresetId}
+                    onClick={applyPreset}
+                    className="shrink-0 rounded border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                  >
+                    Apply
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!selectedPresetId || presetsSaving}
+                    onClick={deletePreset}
+                    className="shrink-0 rounded border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                  >
+                    Delete
+                  </button>
+                </div>
+                <div className="flex items-center gap-1 border-t border-gray-100 pt-2 dark:border-gray-800">
+                  <input
+                    aria-label="Backlog preset name"
+                    value={presetName}
+                    onChange={(e) => setPresetName(e.target.value)}
+                    placeholder="Save current as…"
+                    className="min-w-0 flex-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700 placeholder:text-gray-400 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-300"
+                  />
+                  <button
+                    type="button"
+                    aria-label="Save backlog preset"
+                    disabled={!presetName.trim() || presetsSaving}
+                    onClick={savePreset}
+                    className="shrink-0 rounded border border-brand-200 bg-brand-50 px-2 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100 disabled:opacity-50 dark:border-brand-800 dark:bg-brand-900/40 dark:text-brand-300"
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -606,11 +633,13 @@ export function BacklogView({
 
       </div>
 
-      <div className="max-h-64 overflow-y-auto border-b border-black/[0.07] px-4 py-3 dark:border-white/10">
+      <div className="shrink-0 border-b border-black/[0.07] px-4 py-3 dark:border-white/10">
         <DependencyWavePanel
           plan={wavePlan}
           loading={waveLoading}
           starting={startingWave}
+          collapsed={!showWaves}
+          onToggleCollapsed={() => setShowWaves((v) => !v)}
           onRefresh={loadWavePlan}
           onStartNextWave={startNextWave}
         />
@@ -705,12 +734,16 @@ function DependencyWavePanel({
   plan,
   loading,
   starting,
+  collapsed,
+  onToggleCollapsed,
   onRefresh,
   onStartNextWave,
 }: {
   plan: DependencyWavePlan | null;
   loading: boolean;
   starting: boolean;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
   onRefresh: () => void;
   onStartNextWave: () => void;
 }) {
@@ -718,14 +751,25 @@ function DependencyWavePanel({
   const startLimit = plan ? Math.min(startableCount, plan.wip.available) : 0;
 
   return (
-    <div className="mt-3 rounded-md border border-gray-200 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900">
+    <div className="rounded-md border border-gray-200 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <div className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Dependency Waves</div>
-          <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-            {plan ? `${plan.wip.current}/${plan.wip.limit} WIP, ${plan.wip.available} slot${plan.wip.available === 1 ? "" : "s"} open` : loading ? "Loading wave plan" : "Wave plan unavailable"}
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          aria-expanded={!collapsed}
+          className="flex min-w-0 items-center gap-1.5 text-left"
+          title={collapsed ? "Show dependency waves" : "Hide dependency waves"}
+        >
+          <svg className={`h-3 w-3 shrink-0 text-gray-400 transition-transform ${collapsed ? "" : "rotate-90"}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 6l6 6-6 6" />
+          </svg>
+          <div className="min-w-0">
+            <div className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Dependency Waves</div>
+            <div className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
+              {plan ? `${plan.wip.current}/${plan.wip.limit} WIP, ${plan.wip.available} slot${plan.wip.available === 1 ? "" : "s"} open` : loading ? "Loading wave plan" : "Wave plan unavailable"}
+            </div>
           </div>
-        </div>
+        </button>
         <div className="flex items-center gap-1.5">
           <button
             type="button"
@@ -746,8 +790,8 @@ function DependencyWavePanel({
         </div>
       </div>
 
-      {plan && (
-        <div className="mt-2 grid grid-cols-1 gap-2 lg:grid-cols-3">
+      {!collapsed && plan && (
+        <div className="mt-2 grid max-h-72 grid-cols-1 gap-2 overflow-y-auto lg:grid-cols-3">
           <WaveColumn title="Ready Now" issues={plan.readyNow} emptyText="No ready open issues" tone="ready" />
           <WaveColumn title="Blocked" issues={plan.blocked} emptyText="No blocked issues" tone="blocked" />
           <WaveColumn title="Cyclic/Invalid" issues={plan.cyclicInvalid} emptyText="No invalid dependency chains" tone="invalid" />
