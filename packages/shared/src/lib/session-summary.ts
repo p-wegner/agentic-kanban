@@ -44,6 +44,8 @@ export function formatDurationStr(diffMs: number): string {
   return `${hr}h ${remMin}m`;
 }
 
+// ── Copilot event-type constants ──────────────────────────────────────
+
 const COPILOT_SESSION_START_TYPES = new Set([
   "session_start",
   "session_started",
@@ -86,6 +88,8 @@ const COPILOT_RESULT_TYPES = new Set([
   "stats",
 ]);
 
+// ── Low-level JSON/value helpers ──────────────────────────────────────
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -123,6 +127,9 @@ function contentToText(value: unknown): string {
     .join("\n");
 }
 
+// ── Copilot-specific extraction helpers ───────────────────────────────
+
+/** Extract assistant text from Copilot's varied message shapes (CLI nested, REST flat, etc.). */
 function extractCopilotAssistantText(obj: Record<string, unknown>): string {
   const type = normalizedType(obj);
   const role = String(obj.role || "").toLowerCase();
@@ -148,6 +155,7 @@ function extractCopilotAssistantText(obj: Record<string, unknown>): string {
   return "";
 }
 
+/** Extract tool-use invocation details from Copilot's varied tool-call shapes. */
 function extractCopilotToolUse(obj: Record<string, unknown>): {
   id: string;
   name: string;
@@ -172,6 +180,7 @@ function extractCopilotToolUse(obj: Record<string, unknown>): {
   };
 }
 
+/** Extract tool-result details from Copilot's varied tool-result shapes. */
 function extractCopilotToolResult(
   obj: Record<string, unknown>,
   toolNameMap: Map<string, string>,
@@ -204,25 +213,523 @@ function getCommandLike(input: Record<string, unknown>, rawInput: unknown): stri
     || (typeof rawInput === "string" ? rawInput : "");
 }
 
+// ── Parse context ─────────────────────────────────────────────────────
+
+/** Mutable accumulator state shared across all handler functions. */
+interface ParseContext {
+  /** Maps tool-use IDs to tool names for cross-referencing results. */
+  toolNameMap: Map<string, string>;
+  /** Per-tool invocation and failure counts. */
+  toolUseCounts: Map<string, { count: number; failedCount: number }>;
+  /** Normalized command → repetition count. */
+  commandCounts: Map<string, number>;
+  /** File paths read (via Read/view/grep/glob tools). */
+  filesRead: Set<string>;
+  /** File paths edited (via Edit/apply_patch tools). */
+  filesEdited: Set<string>;
+  /** File paths written (via Write/create tools). */
+  filesWritten: Set<string>;
+  /** All shell commands executed, in order. */
+  commandsRun: string[];
+  /** Up to 10 representative assistant text excerpts (≤300 chars each). */
+  keyExcerpts: string[];
+  /** Error messages from failed tool calls (≤10). */
+  errors: string[];
+  /** Most recently observed model name. */
+  model: string;
+  /** Whether an init/session-start event was seen. */
+  initFound: boolean;
+  /** All assistant text for the agent summary (joined with separators). */
+  agentSummaryParts: string[];
+  /** Auto-incrementing counter for task IDs. */
+  taskCounter: number;
+  /** Task items tracked via TaskCreate/TaskUpdate tool calls. */
+  tasksMap: Map<string, TaskSummaryItem>;
+  /** Rate-limit events observed during the session. */
+  rateLimits: SessionSummary["rateLimits"];
+}
+
+// ── Shared accumulator helpers ────────────────────────────────────────
+
+/** Add a text excerpt, truncating to 300 chars and capping at 10 entries. */
+function addExcerpt(ctx: ParseContext, text: string): void {
+  if (ctx.keyExcerpts.length < 10) {
+    ctx.keyExcerpts.push(text.length > 300 ? text.slice(0, 300) + "..." : text);
+  }
+}
+
+/** Record a shell command, tracking repetition counts. */
+function recordCommand(ctx: ParseContext, command: string): void {
+  const cmd = command.slice(0, 200);
+  ctx.commandsRun.push(cmd);
+  const normCmd = cmd.replace(/\s+/g, " ").trim().slice(0, 80);
+  ctx.commandCounts.set(normCmd, (ctx.commandCounts.get(normCmd) ?? 0) + 1);
+}
+
+/** Increment the tool-use count for a given tool name. */
+function incrementToolCount(ctx: ParseContext, toolName: string): void {
+  const existing = ctx.toolUseCounts.get(toolName) ?? { count: 0, failedCount: 0 };
+  existing.count++;
+  ctx.toolUseCounts.set(toolName, existing);
+}
+
+// ── Session initialization handlers ───────────────────────────────────
+
+/**
+ * Claude streaming: `type: "system", subtype: "init"`.
+ * Captures the model name and marks session as initialized.
+ */
+function tryHandleClaudeInit(ctx: ParseContext, obj: Record<string, unknown>): boolean {
+  if (obj.type !== "system" || obj.subtype !== "init") return false;
+  ctx.initFound = true;
+  ctx.model = (obj.model as string) || "unknown";
+  return true;
+}
+
+/**
+ * Copilot: session start events (session.started, session_created, etc.).
+ * Captures model from the start event; falls back to "copilot" if no model found.
+ */
+function tryHandleCopilotSessionStart(ctx: ParseContext, obj: Record<string, unknown>): boolean {
+  if (!COPILOT_SESSION_START_TYPES.has(normalizedType(obj))) return false;
+  ctx.initFound = true;
+  ctx.model = getString(obj, ["model", "modelId", "model_id"]) || ctx.model || "copilot";
+  return true;
+}
+
+/**
+ * Copilot CLI: `session.model_change`.
+ * Updates the tracked model when the user switches mid-session.
+ */
+function tryHandleCopilotModelChange(ctx: ParseContext, obj: Record<string, unknown>): boolean {
+  if (normalizedType(obj) !== "session.model_change") return false;
+  const data = asRecord(obj.data);
+  if (data) {
+    const newModel = getString(data, ["newModel", "model", "modelId", "model_id"]);
+    if (newModel) ctx.model = newModel;
+  }
+  return true;
+}
+
+/**
+ * Copilot CLI: `session.shutdown`.
+ * Updates model from shutdown event, but ignores "copilot" placeholder.
+ */
+function tryHandleCopilotShutdown(ctx: ParseContext, obj: Record<string, unknown>): boolean {
+  if (normalizedType(obj) !== "session.shutdown") return false;
+  const data = asRecord(obj.data);
+  if (data) {
+    const newModel = getString(data, ["model", "modelId", "model_id"]) || ctx.model;
+    if (newModel && newModel !== "copilot") ctx.model = newModel;
+  }
+  return true;
+}
+
+// ── Copilot tool activity handlers ────────────────────────────────────
+
+/**
+ * Copilot: tool invocation events (tool_call, tool_call.started, tool.execution_start, etc.).
+ * Records the tool call, maps IDs to names, and classifies file/command activity
+ * by tool name (view/read/grep/glob → read, edit/write/create → edit/write,
+ * bash/powershell/shell → command).
+ */
+function tryHandleCopilotToolUse(ctx: ParseContext, obj: Record<string, unknown>): boolean {
+  const copilotToolUse = extractCopilotToolUse(obj);
+  if (!copilotToolUse) return false;
+
+  if (copilotToolUse.id) ctx.toolNameMap.set(copilotToolUse.id, copilotToolUse.name);
+  incrementToolCount(ctx, copilotToolUse.name);
+
+  const toolName = copilotToolUse.name.toLowerCase();
+  const pathLike = getPathLike(copilotToolUse.input, copilotToolUse.rawInput);
+  const commandLike = getCommandLike(copilotToolUse.input, copilotToolUse.rawInput);
+  if (["view", "read", "grep", "glob"].includes(toolName) && pathLike) {
+    ctx.filesRead.add(pathLike);
+  } else if (["edit", "write", "create", "apply_patch"].includes(toolName) && pathLike) {
+    if (toolName === "create" || toolName === "write") ctx.filesWritten.add(pathLike);
+    else ctx.filesEdited.add(pathLike);
+  } else if (["bash", "powershell", "shell", "shell_command"].includes(toolName) && commandLike) {
+    recordCommand(ctx, commandLike);
+  }
+  return true;
+}
+
+/**
+ * Copilot: tool result events (tool.completed, tool.execution_complete, etc.).
+ * Records errors from failed tool calls and increments failure counts.
+ */
+function tryHandleCopilotToolResult(ctx: ParseContext, obj: Record<string, unknown>): boolean {
+  const copilotToolResult = extractCopilotToolResult(obj, ctx.toolNameMap);
+  if (!copilotToolResult) return false;
+
+  if (copilotToolResult.isError) {
+    if (ctx.errors.length < 10) {
+      ctx.errors.push(`${copilotToolResult.name}: ${copilotToolResult.output.length > 200 ? copilotToolResult.output.slice(0, 200) + "..." : copilotToolResult.output}`);
+    }
+    const entry = ctx.toolUseCounts.get(copilotToolResult.name);
+    if (entry) entry.failedCount++;
+  }
+  return true;
+}
+
+// ── Copilot completion handlers ───────────────────────────────────────
+
+/**
+ * Copilot: turn/session completion events (done, stats, turn.completed, etc.).
+ * Excludes bare `type: "result"` (handled separately for Claude).
+ * Updates model and captures result text as agent summary.
+ */
+function tryHandleCopilotResultTypes(ctx: ParseContext, obj: Record<string, unknown>): boolean {
+  const copilotType = normalizedType(obj);
+  if (copilotType === "result" || !COPILOT_RESULT_TYPES.has(copilotType)) return false;
+
+  const usage = asRecord(obj.usage) || asRecord(obj.stats) || obj;
+  ctx.model = getString(obj, ["model", "modelId", "model_id"]) || getString(usage, ["model", "modelId", "model_id"]) || ctx.model;
+  const resultText = getString(obj, ["result", "message", "summary"]);
+  if (resultText) ctx.agentSummaryParts.push(resultText);
+  return true;
+}
+
+/**
+ * Copilot: generic assistant text fallback.
+ * Catches Copilot assistant messages that weren't matched by more specific handlers.
+ * Extracts text via `extractCopilotAssistantText`, records excerpts, and updates model.
+ */
+function tryHandleCopilotAssistantFallback(ctx: ParseContext, obj: Record<string, unknown>): boolean {
+  const copilotAssistantText = extractCopilotAssistantText(obj);
+  if (!copilotAssistantText) return false;
+
+  const data = asRecord(obj.data);
+  ctx.model = getString(data || obj, ["model", "modelId", "model_id"]) || ctx.model;
+  addExcerpt(ctx, copilotAssistantText);
+  ctx.agentSummaryParts.push(copilotAssistantText);
+  return true;
+}
+
+// ── Claude streaming format handlers ──────────────────────────────────
+
+/**
+ * Claude streaming: `type: "assistant"` messages with content blocks.
+ * Iterates `message.content[]` array, dispatching text blocks to
+ * `handleClaudeTextBlock` and tool_use blocks to `handleClaudeToolUseBlock`.
+ * Falls back to `extractCopilotAssistantText` when content is empty
+ * (Copilot CLI nested format sends assistant text without content blocks).
+ */
+function tryHandleClaudeAssistant(ctx: ParseContext, obj: Record<string, unknown>): boolean {
+  if (obj.type !== "assistant") return false;
+
+  const message = obj.message as Record<string, unknown> | undefined;
+  const content = Array.isArray(message?.content)
+    ? message.content as Array<Record<string, unknown>>
+    : [];
+  const msgModel = (message?.model as string) || "";
+  if (msgModel) ctx.model = msgModel;
+
+  for (const block of content) {
+    if (block.type === "text") {
+      handleClaudeTextBlock(ctx, block);
+    } else if (block.type === "tool_use") {
+      handleClaudeToolUseBlock(ctx, block);
+    }
+  }
+
+  // Fallback: Copilot CLI nested format sends assistant text without content blocks
+  if (content.length === 0) {
+    const text = extractCopilotAssistantText(obj);
+    if (text) {
+      addExcerpt(ctx, text);
+      ctx.agentSummaryParts.push(text);
+      ctx.model = getString(obj, ["model", "modelId", "model_id"]) || ctx.model;
+    }
+  }
+  return true;
+}
+
+/** Claude streaming: text content block within an assistant message. Records excerpt and summary. */
+function handleClaudeTextBlock(ctx: ParseContext, block: Record<string, unknown>): void {
+  const text = (block.text as string) || "";
+  if (!text) return;
+  addExcerpt(ctx, text);
+  ctx.agentSummaryParts.push(text);
+}
+
+/**
+ * Claude streaming: tool_use content block within an assistant message.
+ * Dispatches by tool name:
+ * - Read/Edit/Write → file tracking
+ * - Bash → command tracking
+ * - TaskCreate/TaskUpdate → in-session task tracking
+ */
+function handleClaudeToolUseBlock(ctx: ParseContext, block: Record<string, unknown>): void {
+  const toolUseId = (block.id as string) || "";
+  const toolName = (block.name as string) || "unknown";
+  if (toolUseId) ctx.toolNameMap.set(toolUseId, toolName);
+  incrementToolCount(ctx, toolName);
+
+  const input = block.input as Record<string, unknown> | undefined;
+
+  if (toolName === "Read" && input?.file_path) {
+    ctx.filesRead.add(input.file_path as string);
+  } else if (toolName === "Edit" && input?.file_path) {
+    ctx.filesEdited.add(input.file_path as string);
+  } else if (toolName === "Write" && input?.file_path) {
+    ctx.filesWritten.add(input.file_path as string);
+  } else if (toolName === "Bash" && input?.command) {
+    recordCommand(ctx, input.command as string);
+  } else if (toolName === "TaskCreate" && input?.subject) {
+    ctx.taskCounter++;
+    const id = String(ctx.taskCounter);
+    ctx.tasksMap.set(id, {
+      id,
+      subject: input.subject as string,
+      description: input.description as string | undefined,
+      status: "pending",
+    });
+  } else if (toolName === "TaskUpdate" && input?.taskId) {
+    const id = String(input.taskId);
+    const existing = ctx.tasksMap.get(id);
+    if (existing) {
+      if (input.status) existing.status = input.status as TaskSummaryItem["status"];
+      if (input.subject) existing.subject = input.subject as string;
+      if (input.description) existing.description = input.description as string;
+    }
+  }
+}
+
+/**
+ * Claude streaming: `type: "user"` messages with tool_result content blocks.
+ * Records errors from failed tool calls and captures Agent sub-agent output.
+ */
+function tryHandleClaudeUser(ctx: ParseContext, obj: Record<string, unknown>): boolean {
+  if (obj.type !== "user") return false;
+
+  const message = obj.message as Record<string, unknown> | undefined;
+  const content = (message?.content as Array<Record<string, unknown>>) || [];
+
+  for (const block of content) {
+    if (block.type === "tool_result") {
+      const toolUseId = (block.tool_use_id as string) || "";
+      const toolName = toolUseId ? (ctx.toolNameMap.get(toolUseId) || "unknown") : "unknown";
+      const rawContent = block.content;
+      const output = typeof rawContent === "string"
+        ? rawContent
+        : JSON.stringify(rawContent);
+      if (block.is_error as boolean) {
+        if (ctx.errors.length < 10) {
+          ctx.errors.push(`${toolName}: ${output.length > 200 ? output.slice(0, 200) + "..." : output}`);
+        }
+        const entry = ctx.toolUseCounts.get(toolName);
+        if (entry) entry.failedCount++;
+      } else if (toolName === "Agent" && output) {
+        ctx.agentSummaryParts.push(output);
+      }
+    }
+  }
+  return true;
+}
+
+/**
+ * Claude streaming: `type: "result"` — turn completion.
+ * Captures the result text as agent summary and updates model from usage stats.
+ */
+function tryHandleClaudeResult(ctx: ParseContext, obj: Record<string, unknown>): boolean {
+  if (obj.type !== "result") return false;
+
+  const resultText = (obj.result as string) || "";
+  if (resultText) ctx.agentSummaryParts.push(resultText);
+  const usage = asRecord(obj.usage) || asRecord(obj.stats) || obj;
+  ctx.model = getString(obj, ["model", "modelId", "model_id"]) || getString(usage, ["model", "modelId", "model_id"]) || ctx.model;
+  return true;
+}
+
+// ── Rate limit handler ────────────────────────────────────────────────
+
+/**
+ * Claude streaming: `type: "rate_limit_event"`.
+ * Records rate-limit info (type, status, reset time, overage) from the event payload.
+ */
+function tryHandleRateLimitEvent(ctx: ParseContext, obj: Record<string, unknown>): boolean {
+  if (obj.type !== "rate_limit_event") return false;
+
+  const rli = obj.rate_limit_info as Record<string, unknown> | undefined;
+  if (rli) {
+    ctx.rateLimits.push({
+      rateLimitType: (rli.rateLimitType as string) || "unknown",
+      status: (rli.status as string) || "unknown",
+      resetsAt: rli.resetsAt as number | undefined,
+      overageStatus: rli.overageStatus as string | undefined,
+    });
+  }
+  return true;
+}
+
+// ── Codex exec --json streaming format handlers ───────────────────────
+
+/** Codex: `thread.started` — session initialized (no model info in this event). */
+function tryHandleCodexThreadStarted(ctx: ParseContext, obj: Record<string, unknown>): boolean {
+  if (obj.type !== "thread.started") return false;
+  ctx.initFound = true;
+  return true;
+}
+
+/** Codex: `turn.completed` — aggregate stats turn end (no summary/model emitted). */
+function tryHandleCodexTurnCompleted(_ctx: ParseContext, obj: Record<string, unknown>): boolean {
+  if (obj.type !== "turn.completed") return false;
+  return true;
+}
+
+/** Codex: `turn.failed` — records the failure reason as an error. */
+function tryHandleCodexTurnFailed(ctx: ParseContext, obj: Record<string, unknown>): boolean {
+  if (obj.type !== "turn.failed") return false;
+  const error = asRecord(obj.error);
+  const msg = getString(error ?? {}, ["message"]) || "Turn failed";
+  if (ctx.errors.length < 10) ctx.errors.push(`codex: ${msg}`);
+  return true;
+}
+
+/**
+ * Codex: `item.started`, `item.completed`, `item.updated` — tool/activity events.
+ * Dispatches to sub-handlers based on `item.type`:
+ * - `agent_message` → text output from the agent
+ * - `command_execution` → shell commands with exit codes
+ * - `mcp_tool_call` → MCP tool invocations
+ */
+function tryHandleCodexItemEvent(ctx: ParseContext, obj: Record<string, unknown>): boolean {
+  const type = obj.type as string;
+  if (type !== "item.started" && type !== "item.completed" && type !== "item.updated") return false;
+
+  const item = asRecord(obj.item);
+  if (!item) return true; // handled but no-op
+
+  const itemType = String(item.type || "");
+  const itemId = getString(item, ["id"]);
+
+  if (itemType === "agent_message") {
+    handleCodexAgentMessage(ctx, item, type);
+  } else if (itemType === "command_execution") {
+    handleCodexCommandExecution(ctx, item, type, itemId);
+  } else if (itemType === "mcp_tool_call") {
+    handleCodexMcpToolCall(ctx, item, type, itemId);
+  }
+  return true;
+}
+
+/** Codex: `agent_message` item — captures agent text output on `item.completed`. */
+function handleCodexAgentMessage(ctx: ParseContext, item: Record<string, unknown>, eventType: string): void {
+  if (eventType !== "item.completed") return;
+  const text = getString(item, ["text"]);
+  if (text) {
+    addExcerpt(ctx, text);
+    ctx.agentSummaryParts.push(text);
+  }
+}
+
+/**
+ * Codex: `command_execution` item — tracks shell commands.
+ * On `item.started`: records the command and increments shell tool count.
+ * On `item.completed`: records non-zero exit codes as errors.
+ */
+function handleCodexCommandExecution(
+  ctx: ParseContext,
+  item: Record<string, unknown>,
+  eventType: string,
+  itemId: string,
+): void {
+  if (eventType === "item.started") {
+    const command = getString(item, ["command"]);
+    if (command) {
+      recordCommand(ctx, command);
+      incrementToolCount(ctx, "shell");
+      if (itemId) ctx.toolNameMap.set(itemId, "shell");
+    }
+  } else if (eventType === "item.completed") {
+    const exitCode = item.exit_code as number | null | undefined;
+    if (exitCode !== null && exitCode !== undefined && exitCode !== 0) {
+      const output = getString(item, ["aggregated_output"]);
+      const entry = ctx.toolUseCounts.get("shell");
+      if (entry) entry.failedCount++;
+      if (ctx.errors.length < 10) {
+        ctx.errors.push(`shell: ${output ? output.slice(0, 200) : `exit code ${exitCode}`}`);
+      }
+    }
+  }
+}
+
+/**
+ * Codex: `mcp_tool_call` item — tracks MCP tool invocations.
+ * On `item.started`/`in_progress`: records the call, classifies file activity by tool name.
+ * On `item.completed`: records failures when status is "failed"/"error".
+ */
+function handleCodexMcpToolCall(
+  ctx: ParseContext,
+  item: Record<string, unknown>,
+  eventType: string,
+  itemId: string,
+): void {
+  const toolName = getString(item, ["name"]) || "mcp_tool";
+  const itemStatus = String(item.status || "");
+
+  if (eventType === "item.started" || itemStatus === "in_progress") {
+    if (itemId) ctx.toolNameMap.set(itemId, toolName);
+    incrementToolCount(ctx, toolName);
+
+    const args = asRecord(item.args) ?? {};
+    const pathLike = getPathLike(args, undefined);
+    const toolLower = toolName.toLowerCase();
+    if (["view", "read", "grep", "glob"].includes(toolLower) && pathLike) {
+      ctx.filesRead.add(pathLike);
+    } else if (["edit", "write", "create"].includes(toolLower) && pathLike) {
+      if (toolLower === "create" || toolLower === "write") ctx.filesWritten.add(pathLike);
+      else ctx.filesEdited.add(pathLike);
+    }
+  } else if (eventType === "item.completed") {
+    const itemStatus2 = String(item.status || "");
+    if (itemStatus2 === "failed" || itemStatus2 === "error") {
+      const entry = ctx.toolUseCounts.get(toolName);
+      if (entry) entry.failedCount++;
+      const result = getString(item, ["result"]);
+      if (ctx.errors.length < 10) {
+        ctx.errors.push(`${toolName}: ${result ? result.slice(0, 200) : "failed"}`);
+      }
+    }
+  }
+}
+
+// ── Main parser function ──────────────────────────────────────────────
+
+/**
+ * Parse JSONL session output rows into a structured `SessionSummary`.
+ *
+ * Handles three agent provider formats:
+ * - **Claude** streaming JSON (`type: "system"`, `"assistant"`, `"user"`, `"result"`)
+ * - **Copilot** JSONL (`session.started`, `tool_call.*`, `assistant_message`, etc.)
+ * - **Codex** exec --json (`thread.started`, `item.started/completed`, `turn.*`)
+ *
+ * Each provider's events are handled by dedicated `tryHandle*` functions that
+ * check the event type, update the shared `ParseContext`, and return `true`
+ * if the event was handled. The dispatch chain is ordered by specificity:
+ * init events → tool activity → completions → fallbacks → Codex events.
+ */
 export function parseSessionSummary(
   rows: Array<{ type: string; data: string | null }>,
 ): SessionSummary {
-  const toolNameMap = new Map<string, string>();
-  const toolUseCounts = new Map<string, { count: number; failedCount: number }>();
-  const commandCounts = new Map<string, number>();
-
-  const filesRead = new Set<string>();
-  const filesEdited = new Set<string>();
-  const filesWritten = new Set<string>();
-  const commandsRun: string[] = [];
-  const keyExcerpts: string[] = [];
-  const errors: string[] = [];
-  let model = "";
-  let initFound = false;
-  const agentSummaryParts: string[] = [];
-  let taskCounter = 0;
-  const tasksMap = new Map<string, TaskSummaryItem>();
-  const rateLimits: SessionSummary["rateLimits"] = [];
+  const ctx: ParseContext = {
+    toolNameMap: new Map(),
+    toolUseCounts: new Map(),
+    commandCounts: new Map(),
+    filesRead: new Set(),
+    filesEdited: new Set(),
+    filesWritten: new Set(),
+    commandsRun: [],
+    keyExcerpts: [],
+    errors: [],
+    model: "",
+    initFound: false,
+    agentSummaryParts: [],
+    taskCounter: 0,
+    tasksMap: new Map(),
+    rateLimits: [],
+  };
 
   for (const row of rows) {
     if (row.type !== "stdout" || !row.data) continue;
@@ -239,339 +746,61 @@ export function parseSessionSummary(
         continue;
       }
 
-      const type = obj.type as string;
-      const copilotType = normalizedType(obj);
+      // Session initialization (Claude + Copilot)
+      if (tryHandleClaudeInit(ctx, obj)) continue;
+      if (tryHandleCopilotSessionStart(ctx, obj)) continue;
+      if (tryHandleCopilotModelChange(ctx, obj)) continue;
+      if (tryHandleCopilotShutdown(ctx, obj)) continue;
 
-      if (type === "system" && obj.subtype === "init") {
-        initFound = true;
-        model = (obj.model as string) || "unknown";
-        continue;
-      }
+      // Tool activity (Copilot)
+      if (tryHandleCopilotToolUse(ctx, obj)) continue;
+      if (tryHandleCopilotToolResult(ctx, obj)) continue;
 
-      if (COPILOT_SESSION_START_TYPES.has(copilotType)) {
-        initFound = true;
-        model = getString(obj, ["model", "modelId", "model_id"]) || model || "copilot";
-        continue;
-      }
+      // Turn/session completion (Copilot non-"result" result types)
+      if (tryHandleCopilotResultTypes(ctx, obj)) continue;
 
-      if (copilotType === "session.model_change") {
-        const data = asRecord(obj.data);
-        if (data) {
-          const newModel = getString(data, ["newModel", "model", "modelId", "model_id"]);
-          if (newModel) model = newModel;
-        }
-        continue;
-      }
+      // Claude streaming format
+      if (tryHandleClaudeAssistant(ctx, obj)) continue;
+      if (tryHandleClaudeUser(ctx, obj)) continue;
+      if (tryHandleClaudeResult(ctx, obj)) continue;
 
-      if (copilotType === "session.shutdown") {
-        const data = asRecord(obj.data);
-        if (data) {
-          const newModel = getString(data, ["model", "modelId", "model_id"]) || model;
-          if (newModel && newModel !== "copilot") model = newModel;
-        }
-        continue;
-      }
+      // Copilot assistant text fallback (catches remaining Copilot messages)
+      if (tryHandleCopilotAssistantFallback(ctx, obj)) continue;
 
-      const copilotToolUse = extractCopilotToolUse(obj);
-      if (copilotToolUse) {
-        if (copilotToolUse.id) toolNameMap.set(copilotToolUse.id, copilotToolUse.name);
-        const existing = toolUseCounts.get(copilotToolUse.name) ?? { count: 0, failedCount: 0 };
-        existing.count++;
-        toolUseCounts.set(copilotToolUse.name, existing);
+      // Rate limiting
+      if (tryHandleRateLimitEvent(ctx, obj)) continue;
 
-        const toolName = copilotToolUse.name.toLowerCase();
-        const pathLike = getPathLike(copilotToolUse.input, copilotToolUse.rawInput);
-        const commandLike = getCommandLike(copilotToolUse.input, copilotToolUse.rawInput);
-        if (["view", "read", "grep", "glob"].includes(toolName) && pathLike) {
-          filesRead.add(pathLike);
-        } else if (["edit", "write", "create", "apply_patch"].includes(toolName) && pathLike) {
-          if (toolName === "create" || toolName === "write") filesWritten.add(pathLike);
-          else filesEdited.add(pathLike);
-        } else if (["bash", "powershell", "shell", "shell_command"].includes(toolName) && commandLike) {
-          const cmd = commandLike.slice(0, 200);
-          commandsRun.push(cmd);
-          const normCmd = cmd.replace(/\s+/g, " ").trim().slice(0, 80);
-          commandCounts.set(normCmd, (commandCounts.get(normCmd) ?? 0) + 1);
-        }
-        continue;
-      }
-
-      const copilotToolResult = extractCopilotToolResult(obj, toolNameMap);
-      if (copilotToolResult) {
-        if (copilotToolResult.isError) {
-          if (errors.length < 10) {
-            errors.push(`${copilotToolResult.name}: ${copilotToolResult.output.length > 200 ? copilotToolResult.output.slice(0, 200) + "..." : copilotToolResult.output}`);
-          }
-          const entry = toolUseCounts.get(copilotToolResult.name);
-          if (entry) entry.failedCount++;
-        }
-        continue;
-      }
-
-      if (copilotType !== "result" && COPILOT_RESULT_TYPES.has(copilotType)) {
-        const usage = asRecord(obj.usage) || asRecord(obj.stats) || obj;
-        model = getString(obj, ["model", "modelId", "model_id"]) || getString(usage, ["model", "modelId", "model_id"]) || model;
-        const resultText = getString(obj, ["result", "message", "summary"]);
-        if (resultText) agentSummaryParts.push(resultText);
-        continue;
-      }
-
-      if (type === "assistant") {
-        const message = obj.message as Record<string, unknown> | undefined;
-        const content = Array.isArray(message?.content)
-          ? message.content as Array<Record<string, unknown>>
-          : [];
-        const msgModel = (message?.model as string) || "";
-        if (msgModel) model = msgModel;
-
-        for (const block of content) {
-          if (block.type === "text") {
-            const text = (block.text as string) || "";
-            if (text) {
-              if (keyExcerpts.length < 10) {
-                keyExcerpts.push(text.length > 300 ? text.slice(0, 300) + "..." : text);
-              }
-              agentSummaryParts.push(text);
-            }
-          } else if (block.type === "tool_use") {
-            const toolUseId = (block.id as string) || "";
-            const toolName = (block.name as string) || "unknown";
-            if (toolUseId) toolNameMap.set(toolUseId, toolName);
-            const existing = toolUseCounts.get(toolName) ?? { count: 0, failedCount: 0 };
-            existing.count++;
-            toolUseCounts.set(toolName, existing);
-            const input = block.input as Record<string, unknown> | undefined;
-
-            if (toolName === "Read" && input?.file_path) {
-              filesRead.add(input.file_path as string);
-            } else if (toolName === "Edit" && input?.file_path) {
-              filesEdited.add(input.file_path as string);
-            } else if (toolName === "Write" && input?.file_path) {
-              filesWritten.add(input.file_path as string);
-            } else if (toolName === "Bash" && input?.command) {
-              const cmd = (input.command as string).slice(0, 200);
-              commandsRun.push(cmd);
-              const normCmd = cmd.replace(/\s+/g, " ").trim().slice(0, 80);
-              commandCounts.set(normCmd, (commandCounts.get(normCmd) ?? 0) + 1);
-            } else if (toolName === "TaskCreate" && input?.subject) {
-              taskCounter++;
-              const id = String(taskCounter);
-              tasksMap.set(id, {
-                id,
-                subject: input.subject as string,
-                description: input.description as string | undefined,
-                status: "pending",
-              });
-            } else if (toolName === "TaskUpdate" && input?.taskId) {
-              const id = String(input.taskId);
-              const existing = tasksMap.get(id);
-              if (existing) {
-                if (input.status) existing.status = input.status as TaskSummaryItem["status"];
-                if (input.subject) existing.subject = input.subject as string;
-                if (input.description) existing.description = input.description as string;
-              }
-            }
-          }
-        }
-        if (content.length === 0) {
-          const text = extractCopilotAssistantText(obj);
-          if (text) {
-            if (keyExcerpts.length < 10) {
-              keyExcerpts.push(text.length > 300 ? text.slice(0, 300) + "..." : text);
-            }
-            agentSummaryParts.push(text);
-            model = getString(obj, ["model", "modelId", "model_id"]) || model;
-          }
-        }
-        continue;
-      }
-
-      if (type === "user") {
-        const message = obj.message as Record<string, unknown> | undefined;
-        const content = (message?.content as Array<Record<string, unknown>>) || [];
-
-        for (const block of content) {
-          if (block.type === "tool_result") {
-            const toolUseId = (block.tool_use_id as string) || "";
-            const toolName = toolUseId ? (toolNameMap.get(toolUseId) || "unknown") : "unknown";
-            const rawContent = block.content;
-            const output = typeof rawContent === "string"
-              ? rawContent
-              : JSON.stringify(rawContent);
-            if (block.is_error as boolean) {
-              if (errors.length < 10) {
-                errors.push(`${toolName}: ${output.length > 200 ? output.slice(0, 200) + "..." : output}`);
-              }
-              const entry = toolUseCounts.get(toolName);
-              if (entry) entry.failedCount++;
-            } else if (toolName === "Agent" && output) {
-              agentSummaryParts.push(output);
-            }
-          }
-        }
-        continue;
-      }
-
-      if (type === "result") {
-        const resultText = (obj.result as string) || "";
-        if (resultText) agentSummaryParts.push(resultText);
-        const usage = asRecord(obj.usage) || asRecord(obj.stats) || obj;
-        model = getString(obj, ["model", "modelId", "model_id"]) || getString(usage, ["model", "modelId", "model_id"]) || model;
-        continue;
-      }
-
-      const copilotAssistantText = extractCopilotAssistantText(obj);
-      if (copilotAssistantText) {
-        const data = asRecord(obj.data);
-        model = getString(data || obj, ["model", "modelId", "model_id"]) || model;
-        if (keyExcerpts.length < 10) {
-          keyExcerpts.push(copilotAssistantText.length > 300 ? copilotAssistantText.slice(0, 300) + "..." : copilotAssistantText);
-        }
-        agentSummaryParts.push(copilotAssistantText);
-        continue;
-      }
-
-      if (type === "rate_limit_event") {
-        const rli = obj.rate_limit_info as Record<string, unknown> | undefined;
-        if (rli) {
-          rateLimits.push({
-            rateLimitType: (rli.rateLimitType as string) || "unknown",
-            status: (rli.status as string) || "unknown",
-            resetsAt: rli.resetsAt as number | undefined,
-            overageStatus: rli.overageStatus as string | undefined,
-          });
-        }
-        continue;
-      }
-
-      // ---- Codex exec --json streaming format ----
-
-      // thread.started: session initialized (no model info in this event)
-      if (type === "thread.started") {
-        initFound = true;
-        continue;
-      }
-
-      // turn.completed: aggregate stats; Codex doesn't emit model here
-      if (type === "turn.completed") {
-        // No agentSummary or model from turn.completed in Codex streaming format
-        continue;
-      }
-
-      // turn.failed: record the failure reason
-      if (type === "turn.failed") {
-        const error = asRecord(obj.error);
-        const msg = getString(error ?? {}, ["message"]) || "Turn failed";
-        if (errors.length < 10) errors.push(`codex: ${msg}`);
-        continue;
-      }
-
-      // item.started / item.completed: tool activity
-      if (type === "item.started" || type === "item.completed" || type === "item.updated") {
-        const item = asRecord(obj.item);
-        if (!item) continue;
-
-        const itemType = String(item.type || "");
-        const itemId = getString(item, ["id"]);
-
-        if (itemType === "agent_message" && type === "item.completed") {
-          const text = getString(item, ["text"]);
-          if (text) {
-            if (keyExcerpts.length < 10) {
-              keyExcerpts.push(text.length > 300 ? text.slice(0, 300) + "..." : text);
-            }
-            agentSummaryParts.push(text);
-          }
-          continue;
-        }
-
-        if (itemType === "command_execution") {
-          if (type === "item.started") {
-            const command = getString(item, ["command"]);
-            if (command) {
-              const cmd = command.slice(0, 200);
-              commandsRun.push(cmd);
-              const normCmd = cmd.replace(/\s+/g, " ").trim().slice(0, 80);
-              commandCounts.set(normCmd, (commandCounts.get(normCmd) ?? 0) + 1);
-              const existing = toolUseCounts.get("shell") ?? { count: 0, failedCount: 0 };
-              existing.count++;
-              toolUseCounts.set("shell", existing);
-              if (itemId) toolNameMap.set(itemId, "shell");
-            }
-          } else if (type === "item.completed") {
-            const exitCode = item.exit_code as number | null | undefined;
-            if (exitCode !== null && exitCode !== undefined && exitCode !== 0) {
-              const output = getString(item, ["aggregated_output"]);
-              const entry = toolUseCounts.get("shell");
-              if (entry) entry.failedCount++;
-              if (errors.length < 10) {
-                errors.push(`shell: ${output ? output.slice(0, 200) : `exit code ${exitCode}`}`);
-              }
-            }
-          }
-          continue;
-        }
-
-        if (itemType === "mcp_tool_call") {
-          const toolName = getString(item, ["name"]) || "mcp_tool";
-          const itemStatus = String(item.status || "");
-
-          if (type === "item.started" || itemStatus === "in_progress") {
-            if (itemId) toolNameMap.set(itemId, toolName);
-            const existing = toolUseCounts.get(toolName) ?? { count: 0, failedCount: 0 };
-            existing.count++;
-            toolUseCounts.set(toolName, existing);
-
-            const args = asRecord(item.args) ?? {};
-            const pathLike = getPathLike(args, undefined);
-            const toolLower = toolName.toLowerCase();
-            if (["view", "read", "grep", "glob"].includes(toolLower) && pathLike) {
-              filesRead.add(pathLike);
-            } else if (["edit", "write", "create"].includes(toolLower) && pathLike) {
-              if (toolLower === "create" || toolLower === "write") filesWritten.add(pathLike);
-              else filesEdited.add(pathLike);
-            }
-          } else if (type === "item.completed") {
-            // Check for failure via status
-            const itemStatus2 = String(item.status || "");
-            if (itemStatus2 === "failed" || itemStatus2 === "error") {
-              const entry = toolUseCounts.get(toolName);
-              if (entry) entry.failedCount++;
-              const result = getString(item, ["result"]);
-              if (errors.length < 10) {
-                errors.push(`${toolName}: ${result ? result.slice(0, 200) : "failed"}`);
-              }
-            }
-          }
-          continue;
-        }
-
-        continue;
-      }
+      // Codex exec --json streaming format
+      if (tryHandleCodexThreadStarted(ctx, obj)) continue;
+      if (tryHandleCodexTurnCompleted(ctx, obj)) continue;
+      if (tryHandleCodexTurnFailed(ctx, obj)) continue;
+      if (tryHandleCodexItemEvent(ctx, obj)) continue;
     }
   }
 
+  // ── Build result ──────────────────────────────────────────────────
+
   const actions: Array<{ type: string; files?: string[]; commands?: string[] }> = [];
-  if (filesRead.size > 0) actions.push({ type: "read", files: [...filesRead] });
-  if (filesEdited.size > 0) actions.push({ type: "edit", files: [...filesEdited] });
-  if (filesWritten.size > 0) actions.push({ type: "write", files: [...filesWritten] });
-  if (commandsRun.length > 0) actions.push({ type: "command", commands: commandsRun });
+  if (ctx.filesRead.size > 0) actions.push({ type: "read", files: [...ctx.filesRead] });
+  if (ctx.filesEdited.size > 0) actions.push({ type: "edit", files: [...ctx.filesEdited] });
+  if (ctx.filesWritten.size > 0) actions.push({ type: "write", files: [...ctx.filesWritten] });
+  if (ctx.commandsRun.length > 0) actions.push({ type: "command", commands: ctx.commandsRun });
 
   const parts: string[] = [];
-  if (initFound) parts.push(`Agent session using ${model}`);
-  if (filesRead.size > 0) parts.push(`read ${filesRead.size} file${filesRead.size !== 1 ? "s" : ""}`);
-  if (filesEdited.size > 0) parts.push(`edited ${filesEdited.size} file${filesEdited.size !== 1 ? "s" : ""}`);
-  if (filesWritten.size > 0) parts.push(`wrote ${filesWritten.size} file${filesWritten.size !== 1 ? "s" : ""}`);
-  if (commandsRun.length > 0) parts.push(`ran ${commandsRun.length} command${commandsRun.length !== 1 ? "s" : ""}`);
+  if (ctx.initFound) parts.push(`Agent session using ${ctx.model}`);
+  if (ctx.filesRead.size > 0) parts.push(`read ${ctx.filesRead.size} file${ctx.filesRead.size !== 1 ? "s" : ""}`);
+  if (ctx.filesEdited.size > 0) parts.push(`edited ${ctx.filesEdited.size} file${ctx.filesEdited.size !== 1 ? "s" : ""}`);
+  if (ctx.filesWritten.size > 0) parts.push(`wrote ${ctx.filesWritten.size} file${ctx.filesWritten.size !== 1 ? "s" : ""}`);
+  if (ctx.commandsRun.length > 0) parts.push(`ran ${ctx.commandsRun.length} command${ctx.commandsRun.length !== 1 ? "s" : ""}`);
   const overview = parts.length > 0 ? parts.join(", ") : "No activity recorded";
 
-  const agentSummary = agentSummaryParts.length > 0 ? agentSummaryParts.join("\n\n---\n\n") : null;
+  const agentSummary = ctx.agentSummaryParts.length > 0 ? ctx.agentSummaryParts.join("\n\n---\n\n") : null;
 
-  const toolUsePatterns: ToolUsePattern[] = [...toolUseCounts.entries()]
+  const toolUsePatterns: ToolUsePattern[] = [...ctx.toolUseCounts.entries()]
     .map(([tool, { count, failedCount }]) => ({ tool, count, failedCount }))
     .sort((a, b) => b.count - a.count);
 
-  const repeatedCommands: RepeatedCommand[] = [...commandCounts.entries()]
+  const repeatedCommands: RepeatedCommand[] = [...ctx.commandCounts.entries()]
     .filter(([, count]) => count >= 2)
     .map(([command, count]) => ({ command, count }))
     .sort((a, b) => b.count - a.count);
@@ -580,19 +809,21 @@ export function parseSessionSummary(
     overview,
     agentSummary,
     actions,
-    keyExcerpts,
-    errors,
-    filesRead: [...filesRead],
-    filesEdited: [...filesEdited],
-    filesWritten: [...filesWritten],
-    commandsRun,
-    model,
-    tasks: [...tasksMap.values()],
-    rateLimits,
+    keyExcerpts: ctx.keyExcerpts,
+    errors: ctx.errors,
+    filesRead: [...ctx.filesRead],
+    filesEdited: [...ctx.filesEdited],
+    filesWritten: [...ctx.filesWritten],
+    commandsRun: ctx.commandsRun,
+    model: ctx.model,
+    tasks: [...ctx.tasksMap.values()],
+    rateLimits: ctx.rateLimits,
     toolUsePatterns,
     repeatedCommands,
   };
 }
+
+// ── Friction stats ────────────────────────────────────────────────────
 
 /**
  * Compact, fleet-aggregatable friction metrics derived from a parsed session
