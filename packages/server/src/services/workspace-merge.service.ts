@@ -1,7 +1,6 @@
 import { count, desc, eq } from "drizzle-orm";
-import { preferences, projects, sessions, sessionMessages, workspaces } from "@agentic-kanban/shared/schema";
+import { projects, sessions, sessionMessages, workspaces } from "@agentic-kanban/shared/schema";
 import { isFailedLaunchSession } from "@agentic-kanban/shared/lib/workspace-activity-state.js";
-import { applyOpenSpecDeltas, OPENSPEC_CHANGES_DIR, OPENSPEC_SPECS_DIR, validateOpenSpecChange } from "@agentic-kanban/shared/lib/openspec";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
@@ -16,21 +15,13 @@ import {
   updateWorkspaceStatus,
 } from "../repositories/workspace.repository.js";
 import { killProcessesInDir } from "./process-cleanup.js";
-import { runScript } from "./script-runner.js";
-import { teardownWorktree } from "./workspace-teardown.service.js";
 import {
   getConflictingFiles,
   buildConflictResolutionPrompt,
   buildFixAndMergePrompt,
-  runLearningStep,
-  rebuildSharedIfChanged,
 } from "./merge-helpers.service.js";
-import { PREF_AUTO_START_FOLLOWUP } from "../constants/preference-keys.js";
-import { autoStartFollowups } from "./followup-workspace.service.js";
-import { autoStartUnblockedDependencyIssue } from "./dependency-auto-chain.service.js";
 import { loadAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
-import { generateAndPersistGithubHandoffDraft } from "./github-handoff-draft.service.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 import {
   WorkspaceError,
@@ -42,6 +33,14 @@ import {
   type GitService,
 } from "./workspace-internals.js";
 import { buildReconcilerPrompt } from "./reconciler.service.js";
+import {
+  handleWorkspaceMergeResolution,
+  loadMergePreferences,
+  runWorkspacePreMergeValidation,
+  type MergeWarning,
+} from "./workspace-merge-prevalidation.service.js";
+import { executeWorkspaceMerge } from "./workspace-merge-execution.service.js";
+import { runWorkspacePostMergeCleanup } from "./workspace-merge-cleanup.service.js";
 
 export function createWorkspaceMergeService(deps: {
   database: Database;
@@ -56,8 +55,6 @@ export function createWorkspaceMergeService(deps: {
   const gitService = deps.gitService ?? realGitService;
   const createBackup = deps.createBackup ?? realCreateBackup;
   const killProcesses = deps.processKiller ?? killProcessesInDir;
-
-  type MergeWarning = { step: string; message: string; recoverable: true };
 
   function warningMessage(err: unknown): string {
     return err instanceof Error ? err.message : String(err);
@@ -89,20 +86,6 @@ export function createWorkspaceMergeService(deps: {
     } catch (err) {
       console.warn("[workspace-merge] failed to record merge timeline event:", err instanceof Error ? err.message : String(err));
     }
-  }
-
-  async function getChangedFilesBetweenSafe(repoPath: string, fromRef: string, toRef: string): Promise<string[]> {
-    if (typeof gitService.getChangedFilesBetween !== "function") return [];
-    return gitService.getChangedFilesBetween(repoPath, fromRef, toRef);
-  }
-
-  async function commitOpenSpecPaths(repoPath: string, branch: string): Promise<boolean> {
-    if (typeof gitService.commitPaths !== "function") return false;
-    return gitService.commitPaths(
-      repoPath,
-      [OPENSPEC_SPECS_DIR, OPENSPEC_CHANGES_DIR],
-      `Update living OpenSpec specs for ${branch}`,
-    );
   }
 
   /** Best-effort kill of processes in the worktree dir using the injected killer. */
@@ -234,7 +217,7 @@ export function createWorkspaceMergeService(deps: {
       startedAtMs: Date.now(),
     };
     activeMerges.set(repoPath, lock);
-    // Always clear the lock — both on success and on rejection — so a crashed
+    // Always clear the lock - both on success and on rejection - so a crashed
     // merge never strands the repo behind a stale in-memory lock.
     mergePromise.finally(() => {
       if (activeMerges.get(repoPath) === lock) {
@@ -253,546 +236,59 @@ export function createWorkspaceMergeService(deps: {
     defaultBranch: string | null,
   ) {
     const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
-
     const resolution = await resolveMergeState(workspace, repoPath, baseBranch, { gitService });
+    const preflight = await handleWorkspaceMergeResolution({
+      id,
+      workspace,
+      project,
+      repoPath,
+      baseBranch,
+      resolution,
+      database,
+      boardEvents,
+      gitService,
+      killProcesses,
+      killWorktreeProcesses,
+      addRecoverableWarning,
+      recordMergeAttempt,
+    });
+    if (preflight.kind === "completed") return preflight.result;
 
-    if (resolution.kind === "already-closed") {
-      throw new WorkspaceError("Workspace is already closed.", "CONFLICT", { mergeReason: "already_closed", status: resolution.status });
-    }
-
-    if (resolution.kind === "not-approved") {
-      throw new WorkspaceError(
-        "Workspace is not approved for merge. Mark it as ready-for-merge before merging.",
-        "CONFLICT",
-        { mergeReason: "not_approved", status: resolution.status },
-      );
-    }
-
-    if (resolution.kind === "already-merged") {
-      const warnings: MergeWarning[] = [];
-      if (workspace.workingDir && !workspace.isDirect) {
-        await teardownWorktree(
-          {
-            workingDir: workspace.workingDir,
-            branch: workspace.branch,
-            isDirect: workspace.isDirect,
-            teardownScript: project?.teardownScript,
-            setupEnabled: project?.setupEnabled,
-            label: "merge:already-merged",
-          },
-          { killDir: killProcesses },
-        );
-        await killWorktreeProcesses(workspace.workingDir, "merge:already-merged");
-        try {
-          await gitService.removeWorktree(repoPath, workspace.workingDir);
-        } catch (err) {
-          addRecoverableWarning(warnings, "remove-worktree", err);
-        }
-      }
-
-      try {
-        await gitService.deleteBranch(repoPath, workspace.branch);
-        console.log(`[workspace-service] deleted branch ${workspace.branch}`);
-      } catch (err) {
-        addRecoverableWarning(warnings, "delete-branch", err);
-      }
-
-      const now = new Date().toISOString();
-      await updateWorkspaceStatus(id, "closed", {
-        workingDir: null,
-        closedAt: workspace.closedAt ?? now,
-        mergedAt: workspace.mergedAt,
-        readyForMerge: false,
-      }, database);
-      await moveIssueToDone(id, workspace.issueId, now, database);
-
-      const projectId = await resolveProjectId(id, database);
-      if (projectId) boardEvents?.broadcast(projectId, "workspace_merged");
-      await recordMergeAttempt(
-        workspace,
-        "already-merged",
-        `Merge already recorded for workspace ${id} at ${workspace.mergedAt}. Reconciled cleanup and issue status.`,
-        { mergedAt: workspace.mergedAt, warnings },
-        now,
-      );
-
-      return {
-        id,
-        mergeOutput: `Workspace was already marked as merged at ${workspace.mergedAt}; reconciled without requiring branch ref.`,
-        ...(warnings.length > 0 ? { warnings } : {}),
-      };
-    }
-
-    if (resolution.kind === "direct-close") {
-      const now = new Date().toISOString();
-      await computeWorkspaceCodeMetrics(id, database).catch(() => null);
-      await updateWorkspaceStatus(id, "closed", { closedAt: now, readyForMerge: false }, database);
-      await moveIssueToDone(id, workspace.issueId, now, database, true);
-
-      const projectId = await resolveProjectId(id, database);
-      if (projectId) boardEvents?.broadcast(projectId, "workspace_merged");
-      await recordMergeAttempt(
-        workspace,
-        "direct-closed",
-        `Direct workspace ${id} was closed without a branch merge.`,
-        { closedAt: now },
-        now,
-      );
-
-      return { id, mergeOutput: "Direct workspace closed (no merge needed)" };
-    }
-
-    if (resolution.kind === "reconcile") {
-      const { branchSha, baseSha, uniqueCommits } = resolution;
-      const now = new Date().toISOString();
-      console.log(
-        `[workspace-merge] auto-Done audit: ws=${id} baseSha=${baseSha} branchSha=${branchSha} uniqueCommits=${uniqueCommits} reconciledAt=${now}`,
-      );
-      await updateWorkspaceStatus(id, "closed", { workingDir: null, closedAt: now, mergedAt: now, readyForMerge: false }, database);
-      await moveIssueToDone(id, workspace.issueId, now, database);
-      await recordMergeAttempt(
-        workspace,
-        "merged",
-        `Branch '${workspace.branch}' tip (${branchSha}) is already an ancestor of ${baseBranch} — reconciled as already-merged no-op.`,
-        { targetBranch: baseBranch, commitSha: branchSha, mergedAt: now, uniqueCommitCount: uniqueCommits },
-        now,
-      );
-      const projectId = await resolveProjectId(id, database);
-      if (projectId) boardEvents?.broadcast(projectId, "workspace_merged");
-      return {
-        id,
-        merged: false,
-        reconciled: true,
-        baseBranch,
-        baseHeadShaBefore: baseSha,
-        baseHeadShaAfter: baseSha,
-        mergeOutput: `Branch '${workspace.branch}' was already fully merged into ${baseBranch} (tip ${branchSha} is an ancestor). Reconciled as successful no-op.`,
-      };
-    }
-
-    if (resolution.kind === "clean-ancestor") {
-      const { branchSha, baseSha, uniqueCommits } = resolution;
-      const now = new Date().toISOString();
-      console.log(
-        `[workspace-merge] 0-commit ancestor guard: ws=${id} branchSha=${branchSha} baseSha=${baseSha} uniqueCommits=${uniqueCommits} ` +
-          `refrain from merge, keep workspace in review.`,
-      );
-      await database.update(workspaces).set({ readyForMerge: false, updatedAt: now }).where(eq(workspaces.id, id));
-      return {
-        id,
-        merged: false,
-        reconciled: false,
-        baseBranch,
-        baseHeadShaBefore: baseSha,
-        baseHeadShaAfter: baseSha,
-        mergeOutput: `Branch '${workspace.branch}' has no unique commits relative to ${baseBranch}. Merge skipped as a false-positive guard.`,
-      };
-    }
-
-    if (resolution.kind === "error-skip") {
-      throw resolution.error;
-    }
-
-    if (resolution.kind === "conflict-ready") {
-      // Downgrade the stale readyForMerge flag so the monitor stops churning.
-      try {
-        await database.update(workspaces).set({ readyForMerge: false, updatedAt: new Date().toISOString() }).where(eq(workspaces.id, id));
-      } catch (dbErr) {
-        console.warn("[workspace-merge] failed to clear stale readyForMerge flag:", dbErr instanceof Error ? dbErr.message : String(dbErr));
-      }
-      const { conflictFiles, behindCount } = resolution;
-      if (behindCount) {
-        await recordMergeAttempt(
-          workspace,
-          "conflict",
-          `Merge blocked: branch ${workspace.branch} was ${behindCount} commit(s) behind ${baseBranch} and rebase found conflicts in ${conflictFiles.length} file(s): ${conflictFiles.join(", ")}. readyForMerge cleared.`,
-          { targetBranch: baseBranch, conflictingFiles: conflictFiles, behindCount },
-        );
-      } else {
-        await recordMergeAttempt(
-          workspace,
-          "conflict",
-          `Merge attempt blocked by conflicts in ${conflictFiles.length} file${conflictFiles.length === 1 ? "" : "s"}: ${conflictFiles.join(", ")}`,
-          { targetBranch: baseBranch, conflictingFiles: conflictFiles },
-        );
-      }
-      throw resolution.error;
-    }
-
-    // resolution.kind === "proceed" — run the actual git merge.
-
-    const prefMap = new Map<string, string>(
-      (await database.select().from(preferences)).map((r) => [r.key, r.value]),
-    );
-
-    if (workspace.workingDir) {
-      // Auto-renumber any Drizzle migration the feature branch added that collides
-      // with one already on the base branch (parallel branches all pick the same
-      // "next" number). This rewrites the incoming branch in place so the merge
-      // below stays conflict-free. No-op when there's no migration collision.
-      try {
-        const renumber = await gitService.autoRenumberMigrations(workspace.workingDir, repoPath, baseBranch);
-        if (renumber.renumbered) {
-          console.log(
-            `[workspace-merge] auto-renumbered migrations on ${workspace.branch}: ` +
-              renumber.renames.map((r) => `${r.from}→${r.to}`).join(", "),
-          );
-        }
-      } catch (err) {
-        console.warn(
-          "[workspace-merge] migration auto-renumber failed (continuing to conflict check):",
-          err instanceof Error ? err.message : String(err),
-        );
-      }
-
-      const specValidation = await validateOpenSpecChange(workspace.workingDir);
-      if (specValidation.deltas.length > 0) {
-        const currentBranch = await gitService.getCurrentBranch(repoPath);
-        if (currentBranch !== baseBranch) {
-          throw new WorkspaceError(
-            `Cannot apply OpenSpec deltas: main checkout HEAD is on '${currentBranch}' but this workspace targets '${baseBranch}'. ` +
-              `Check out '${baseBranch}' in the main checkout before merging OpenSpec changes.`,
-            "CONFLICT",
-            { currentBranch, targetBranch: baseBranch },
-          );
-        }
-        for (const warning of specValidation.warnings) {
-          console.warn(`[workspace-merge] OpenSpec warning: ${warning}`);
-        }
-        if (workspace.baseCommitSha) {
-          const domains = new Set(specValidation.deltas.map((delta) => delta.domain));
-          const baseSpecChanges = await getChangedFilesBetweenSafe(repoPath, workspace.baseCommitSha, baseBranch);
-          for (const domain of domains) {
-            if (baseSpecChanges.includes(`openspec/specs/${domain}/spec.md`)) {
-              console.warn(
-                `[workspace-merge] OpenSpec warning: '${domain}' changed on ${baseBranch} since this workspace branched; review the living spec merge carefully.`,
-              );
-            }
-          }
-        }
-        if (!specValidation.valid) {
-          throw new WorkspaceError(
-            `OpenSpec change is invalid: ${specValidation.errors.join("; ")}`,
-            "BAD_REQUEST",
-            { errors: specValidation.errors, warnings: specValidation.warnings },
-          );
-        }
-      }
-    }
+    const prefMap = await loadMergePreferences(database);
+    await runWorkspacePreMergeValidation({ workspace, repoPath, baseBranch, gitService });
 
     const targetBranch = baseBranch;
-
-    console.log(`[workspace-service] merge: workspaceId=${id} branch=${workspace.branch} targetBranch=${targetBranch} repoPath=${repoPath}`);
-
-    if (workspace.workingDir) {
-      const synced = await gitService.syncBranchToHead(workspace.workingDir, workspace.branch);
-      if (synced) {
-        console.log(`[workspace-service] synced branch ${workspace.branch} to worktree HEAD`);
-      }
-    }
-
-    try {
-      await createBackup("pre-merge");
-    } catch (err) {
-      console.warn("[backup] pre-merge backup failed (non-fatal):", err instanceof Error ? err.message : String(err));
-    }
-
-    // Capture pre-merge HEAD so we can diff afterwards to know what landed.
-    let preMergeHead = "";
-    try { preMergeHead = await gitService.revParse(repoPath, "HEAD"); } catch { /* tolerate */ }
-
-    // Plumbing-based merge: working tree and index are never modified.
-    let result: string;
-    try {
-      result = await gitService.mergeBranch(repoPath, workspace.branch, targetBranch);
-    } catch (err) {
-      await recordMergeAttempt(
-        workspace,
-        "conflict",
-        `Merge failed while merging ${workspace.branch} into ${targetBranch}: ${err instanceof Error ? err.message : String(err)}`,
-        { step: "git-merge", targetBranch },
-      );
-      throw new WorkspaceError(
-        `Merge failed (git-merge step): ${err instanceof Error ? err.message : String(err)}`,
-        "CONFLICT",
-        { mergeReason: "conflict", step: "git-merge", branch: workspace.branch, targetBranch },
-      );
-    }
-    let mergeCommitSha = "";
-    try { mergeCommitSha = await gitService.revParse(repoPath, "HEAD"); } catch { /* tolerate */ }
-
-    // Post-merge invariant: verify the branch tip is now reachable from targetBranch.
-    // If not, the git merge did not actually land the work — refuse to set Done.
-    // This guards against plumbing anomalies or interrupted ref updates that leave
-    // the branch ahead-but-not-ancestor (the #585/#588 silent-merge-loss scenario).
-    const postMergeAncestry = await gitService.checkBranchTipIsAncestor(repoPath, workspace.branch, targetBranch);
-    if (!postMergeAncestry.isAncestor) {
-      throw new WorkspaceError(
-        `Post-merge invariant violated: branch '${workspace.branch}' is still not an ancestor of '${targetBranch}' after merge — refusing to move issue to Done`,
-        "CONFLICT",
-        { mergeReason: "post_merge_ancestry_check_failed", branch: workspace.branch, targetBranch },
-      );
-    }
-
-    // Stamp mergedAt immediately so the startup reconciler can detect this workspace
-    // and move it to Done even if the server dies before the full status write below.
-    // This write is intentionally separate and early — it must happen before any step
-    // that could be interrupted by a client disconnect or server crash.
-    const now = new Date().toISOString();
-    try {
-      await database.update(workspaces).set({ mergedAt: now, updatedAt: now }).where(eq(workspaces.id, id));
-    } catch (err) {
-      // Non-fatal — the full status write below will set mergedAt anyway. Log it so
-      // we know the pre-stamp failed if the reconciler later needs to fire.
-      console.warn("[workspace-merge] early mergedAt stamp failed (non-fatal):", err instanceof Error ? err.message : String(err));
-    }
-
-    await updateWorkspaceStatus(id, "closed", { workingDir: null, closedAt: now, mergedAt: now, readyForMerge: false }, database);
-    await moveIssueToDone(id, workspace.issueId, now, database);
-    await recordMergeAttempt(
+    const { response, postMergeContext } = await executeWorkspaceMerge({
+      id,
       workspace,
-      "merged",
-      `Merged ${workspace.branch} into ${targetBranch}${mergeCommitSha ? ` at ${mergeCommitSha}` : ""}.`,
-      { targetBranch, commitSha: mergeCommitSha || null, mergedAt: now, mergeOutput: result },
-      now,
-    );
+      repoPath,
+      targetBranch,
+      database,
+      boardEvents,
+      gitService,
+      createBackup,
+      recordMergeAttempt,
+    });
 
-    const projectId = await resolveProjectId(id, database);
-    if (projectId) boardEvents?.broadcast(projectId, "workspace_merged");
-
-    // Return the response immediately after the merge lands and the board is notified.
-    // All post-merge work (OpenSpec, worktree cleanup, branch deletion, learning step,
-    // followup auto-start) runs in the background so the HTTP connection is never
-    // held open by slow filesystem or git operations.
-    //
-    // setImmediate defers the first tick of runPostMergeTasks past the current call
-    // stack so the Hono response write (including the JSON body flush) happens first.
-    // Without this deferral, the async function's synchronous preamble (entering
-    // teardownWorktree → invoking processKiller) runs before the Promise resolves to
-    // the caller, which is the exact keep-alive drop we are fixing (#563).
     const postMergeArgs = {
       workspaceId: id,
       issueId: workspace.issueId,
       repoPath,
-      preMergeHead,
+      preMergeHead: postMergeContext.preMergeHead,
       prefMap,
-      projectId,
+      projectId: postMergeContext.projectId,
       workingDir: workspace.workingDir,
       branch: workspace.branch,
-      mergeResult: result,
+      mergeResult: postMergeContext.mergeResult,
       teardownScript: project?.teardownScript ?? null,
       setupEnabled: project?.setupEnabled ?? true,
       isDirect: workspace.isDirect,
     };
-    setImmediate(() => { void runPostMergeTasks(postMergeArgs); });
+    setImmediate(() => {
+      void runWorkspacePostMergeCleanup(postMergeArgs, { database, gitService, killProcesses, getSessionManager, boardEvents });
+    });
 
-    return {
-      id,
-      merged: true,
-      baseBranch: targetBranch,
-      mergeCommitSha: mergeCommitSha || undefined,
-      baseHeadShaBefore: preMergeHead || undefined,
-      baseHeadShaAfter: mergeCommitSha || undefined,
-      mergeOutput: result,
-    };
-  }
-
-  async function runPostMergeTasks(args: {
-    workspaceId: string;
-    issueId: string;
-    repoPath: string;
-    preMergeHead: string;
-    prefMap: Map<string, string>;
-    projectId: string | null;
-    workingDir: string | null | undefined;
-    branch: string;
-    mergeResult: string;
-    teardownScript: string | null;
-    setupEnabled: boolean;
-    isDirect: boolean;
-  }) {
-    const { workspaceId, issueId, repoPath, preMergeHead, prefMap, projectId, workingDir, branch } = args;
-    let mergeResult = args.mergeResult;
-    const warnings: MergeWarning[] = [];
-
-    // Worktree teardown deferred off the hot request path: kill dir procs, free
-    // dev ports, and run the project teardownScript. The plumbing-based merge
-    // (`mergeBranch`) only manipulates git refs — it never touches the worktree
-    // directory — so teardown is safe to run here rather than before the merge.
-    if (workingDir && !args.isDirect) {
-      try {
-        await teardownWorktree(
-          {
-            workingDir,
-            branch,
-            isDirect: false,
-            teardownScript: args.teardownScript ?? undefined,
-            setupEnabled: args.setupEnabled,
-            label: "merge",
-          },
-          { killDir: killProcesses },
-        );
-      } catch (err) {
-        addRecoverableWarning(warnings, "teardown-worktree", err);
-      }
-    }
-
-    // Code metrics — run before worktree directory is removed (teardown only kills procs).
-    if (workingDir) {
-      await computeWorkspaceCodeMetrics(workspaceId, database).catch((err) => {
-        addRecoverableWarning(warnings, "code-metrics", err);
-      });
-    }
-
-    // OpenSpec delta application — must run before worktree directory is removed.
-    try {
-      const changedFiles = preMergeHead
-        ? await getChangedFilesBetweenSafe(repoPath, preMergeHead, "HEAD")
-        : [];
-      const specChangeIds = [...new Set(changedFiles
-        .map((file) => file.match(/^openspec\/changes\/([^/]+)\/specs\/[^/]+\/spec\.md$/)?.[1])
-        .filter((sid): sid is string => !!sid))];
-      let appliedCount = 0;
-      for (const changeId of specChangeIds) {
-        const specResult = await applyOpenSpecDeltas(repoPath, changeId, { removeAppliedDeltas: true });
-        if (!specResult.valid) {
-          throw new Error(`OpenSpec change '${changeId}' is invalid: ${specResult.errors.join("; ")}`);
-        }
-        appliedCount += specResult.applied.length;
-        for (const warning of specResult.warnings) {
-          console.warn(`[workspace-merge] OpenSpec warning: ${warning}`);
-        }
-      }
-      if (appliedCount > 0) {
-        const committed = await commitOpenSpecPaths(repoPath, branch);
-        const openSpecNote = `OpenSpec: applied ${appliedCount} domain delta(s)${committed ? " and committed living specs" : ""}.`;
-        mergeResult += `\n${openSpecNote}`;
-        // Persist the OpenSpec note as a follow-up comment since the "merged" comment
-        // was already written synchronously (before this background task ran).
-        try {
-          await insertIssueComment({
-            issueId,
-            workspaceId,
-            kind: "merge-attempt",
-            author: "system",
-            body: openSpecNote,
-            payload: { eventType: "openspec-applied", workspaceId, branch, appliedCount, committed },
-            createdAt: new Date().toISOString(),
-          }, database);
-        } catch (dbErr) {
-          console.warn("[workspace-merge] failed to record openspec note:", dbErr instanceof Error ? dbErr.message : String(dbErr));
-        }
-      }
-    } catch (err) {
-      addRecoverableWarning(warnings, "openspec-post-merge", err);
-    }
-
-    if (workingDir) {
-      try {
-        await gitService.removeWorktree(repoPath, workingDir);
-      } catch (err) {
-        addRecoverableWarning(warnings, "remove-worktree", err);
-        // Persist the cleanup warning so the UI can surface it for retry.
-        const warningMsg = err instanceof Error ? err.message : String(err);
-        try {
-          await database.update(workspaces)
-            .set({ cleanupWarning: warningMsg, workingDir, updatedAt: new Date().toISOString() })
-            .where(eq(workspaces.id, workspaceId));
-        } catch (dbErr) {
-          console.warn("[workspace-merge] failed to persist cleanup warning:", dbErr instanceof Error ? dbErr.message : String(dbErr));
-        }
-      }
-    }
-
-    try {
-      await gitService.deleteBranch(repoPath, branch);
-      console.log(`[workspace-service] deleted branch ${branch}`);
-    } catch (err) { addRecoverableWarning(warnings, "delete-branch", err); }
-
-    if (warnings.length > 0) {
-      try {
-        const workspace = await database.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1).then((r) => r[0]);
-        if (workspace) {
-          await insertIssueComment({
-            issueId: workspace.issueId,
-            workspaceId,
-            kind: "merge-attempt",
-            author: "system",
-            body: `Merge completed, but ${warnings.length} post-merge cleanup step${warnings.length === 1 ? "" : "s"} reported a recoverable warning. The branch was already merged before this response returned.`,
-            payload: { eventType: "warning", workspaceId, branch, warnings },
-            createdAt: new Date().toISOString(),
-          }, database);
-        }
-      } catch (err) {
-        console.warn("[workspace-merge] failed to record post-merge cleanup warnings:", err instanceof Error ? err.message : String(err));
-      }
-    }
-
-    let postMergeChangedFiles: string[] = [];
-    if (preMergeHead) {
-      try {
-        postMergeChangedFiles = await gitService.getChangedFilesBetween(repoPath, preMergeHead, "HEAD");
-      } catch (err) {
-        console.warn("[workspace-merge] getChangedFilesBetween failed (non-fatal):", err instanceof Error ? err.message : String(err));
-      }
-    }
-
-    try {
-      if (preMergeHead) {
-        const commits = typeof gitService.getCommitSummariesBetween === "function"
-          ? await gitService.getCommitSummariesBetween(repoPath, preMergeHead, "HEAD")
-          : [];
-        await generateAndPersistGithubHandoffDraft({
-          workspaceId,
-          issueId,
-          database,
-          repoPath,
-          fromRef: preMergeHead,
-          toRef: "HEAD",
-          changedFiles: postMergeChangedFiles,
-          commits,
-          gitService,
-        });
-      }
-    } catch (err) {
-      console.warn("[workspace-merge] post-merge handoff draft failed:", err instanceof Error ? err.message : String(err));
-    }
-
-    try {
-      await rebuildSharedIfChanged(repoPath, postMergeChangedFiles);
-    } catch (err) {
-      console.warn("[workspace-merge] shared dist rebuild failed (non-fatal):", err instanceof Error ? err.message : String(err));
-    }
-
-    try {
-      if (getSessionManager) {
-        await runLearningStep(workspaceId, prefMap, database, getSessionManager);
-      }
-    } catch (err) {
-      console.warn("[workspace-merge] post-merge learning step failed:", err);
-    }
-
-    try {
-      if (prefMap.get(PREF_AUTO_START_FOLLOWUP) === "true" && projectId && getSessionManager) {
-        await autoStartFollowups(issueId, projectId, database, getSessionManager, prefMap, { boardEvents });
-      }
-    } catch (err) {
-      console.warn("[workspace-merge] auto_start_followup check failed:", err);
-    }
-
-    try {
-      await autoStartUnblockedDependencyIssue({
-        database,
-        projectId,
-        completedIssueId: issueId,
-        prefMap,
-        getSessionManager,
-        boardEvents,
-        gitService,
-      });
-    } catch (err) {
-      console.warn("[workspace-merge] dependency auto-chain check failed:", err);
-    }
+    return response;
   }
 
   async function updateBase(id: string, mode: "rebase" | "merge") {
@@ -829,7 +325,7 @@ export function createWorkspaceMergeService(deps: {
       result = await gitService.rebaseOntoBase(workspace.workingDir, baseBranch, workspace.branch, { preferLocalBase: true });
     }
 
-    // And again after — rebase/merge can spawn helpers (hook scripts, editors) that linger.
+    // And again after - rebase/merge can spawn helpers (hook scripts, editors) that linger.
     await killWorktreeProcesses(workspace.workingDir, `update-base:post`);
 
     console.log(`[workspace-service] update-base: workspaceId=${id} mode=${mode} success=${result.success} conflicts=${result.conflictingFiles?.length ?? 0}`);
@@ -909,45 +405,7 @@ export function createWorkspaceMergeService(deps: {
     const { repoPath, defaultBranch } = await resolveProjectRepo(id, database);
     const baseBranch = requireBaseBranch(refreshedWorkspace.baseBranch || defaultBranch);
 
-    // Refuse if main checkout HEAD has drifted off the target branch (consistent with /merge guard).
-    const currentHeadBranch = await gitService.getCurrentBranch(repoPath);
-    if (currentHeadBranch !== baseBranch) {
-      throw new WorkspaceError(
-        `Cannot fix-and-merge: main checkout HEAD is on '${currentHeadBranch}' but this workspace targets '${baseBranch}'. ` +
-          `Check out '${baseBranch}' in the main checkout before proceeding.`,
-        "CONFLICT",
-        { currentBranch: currentHeadBranch, targetBranch: baseBranch },
-      );
-    }
-
-    // Kill leftover worktree processes (e.g. dev.mjs from the prior agent) before rewriting or spawning.
-    await killWorktreeProcesses(refreshedWorkspace.workingDir, "fix-and-merge");
-
-    let rebuildNote = "";
-    try {
-      const synced = await gitService.syncBranchToHead(refreshedWorkspace.workingDir, refreshedWorkspace.branch);
-      if (synced) {
-        console.log(`[workspace-merge] fix-and-merge synced branch ${refreshedWorkspace.branch} to worktree HEAD`);
-      }
-      const rebaseResult = await gitService.rebaseOntoBase(refreshedWorkspace.workingDir, baseBranch, refreshedWorkspace.branch, {
-        preferLocalBase: true,
-      });
-      if (rebaseResult.success) {
-        rebuildNote = `Before launching this fix-and-merge agent, the app rebased the workspace branch onto '${baseBranch}' successfully.`;
-        await computeWorkspaceCodeMetrics(id, database).catch(() => null);
-      } else {
-        const conflictingFiles = rebaseResult.conflictingFiles ?? [];
-        rebuildNote =
-          `Before launching this fix-and-merge agent, the app tried to rebase the workspace branch onto '${baseBranch}' ` +
-          `and left the rebase in progress for you to resolve.` +
-          (conflictingFiles.length > 0 ? ` Conflicting files: ${conflictingFiles.join(", ")}.` : "") +
-          (rebaseResult.error ? ` Rebase error: ${rebaseResult.error}` : "");
-      }
-    } catch (err) {
-      rebuildNote =
-        `Before launching this fix-and-merge agent, the app tried to rebuild the workspace branch on '${baseBranch}' ` +
-        `but the rebuild preflight failed: ${err instanceof Error ? err.message : String(err)}`;
-    }
+    const rebuildNote = await prepareFixAndMergeRebuildNote(id, refreshedWorkspace, repoPath, baseBranch);
 
     const prompt = buildFixAndMergePrompt(`${errorMessage}\n\n${rebuildNote}`, baseBranch);
 
@@ -975,11 +433,61 @@ export function createWorkspaceMergeService(deps: {
     return { sessionId };
   }
 
+  async function prepareFixAndMergeRebuildNote(
+    id: string,
+    workspace: typeof workspaces.$inferSelect,
+    repoPath: string,
+    baseBranch: string,
+  ): Promise<string> {
+    const currentHeadBranch = await gitService.getCurrentBranch(repoPath);
+    if (currentHeadBranch !== baseBranch) {
+      throw new WorkspaceError(
+        `Cannot fix-and-merge: main checkout HEAD is on '${currentHeadBranch}' but this workspace targets '${baseBranch}'. ` +
+          `Check out '${baseBranch}' in the main checkout before proceeding.`,
+        "CONFLICT",
+        { currentBranch: currentHeadBranch, targetBranch: baseBranch },
+      );
+    }
+
+    await killWorktreeProcesses(workspace.workingDir, "fix-and-merge");
+    try {
+      return await rebaseWorkspaceForFixAndMerge(id, workspace, baseBranch);
+    } catch (err) {
+      return `Before launching this fix-and-merge agent, the app tried to rebuild the workspace branch on '${baseBranch}' ` +
+        `but the rebuild preflight failed: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
+  async function rebaseWorkspaceForFixAndMerge(
+    id: string,
+    workspace: typeof workspaces.$inferSelect,
+    baseBranch: string,
+  ): Promise<string> {
+    if (!workspace.workingDir) throw new WorkspaceError("Workspace not set up", "BAD_REQUEST");
+    const synced = await gitService.syncBranchToHead(workspace.workingDir, workspace.branch);
+    if (synced) {
+      console.log(`[workspace-merge] fix-and-merge synced branch ${workspace.branch} to worktree HEAD`);
+    }
+    const rebaseResult = await gitService.rebaseOntoBase(workspace.workingDir, baseBranch, workspace.branch, {
+      preferLocalBase: true,
+    });
+    if (rebaseResult.success) {
+      await computeWorkspaceCodeMetrics(id, database).catch(() => null);
+      return `Before launching this fix-and-merge agent, the app rebased the workspace branch onto '${baseBranch}' successfully.`;
+    }
+
+    const conflictingFiles = rebaseResult.conflictingFiles ?? [];
+    return `Before launching this fix-and-merge agent, the app tried to rebase the workspace branch onto '${baseBranch}' ` +
+      "and left the rebase in progress for you to resolve." +
+      (conflictingFiles.length > 0 ? ` Conflicting files: ${conflictingFiles.join(", ")}.` : "") +
+      (rebaseResult.error ? ` Rebase error: ${rebaseResult.error}` : "");
+  }
+
   /**
    * Launch ONE batch merge-reconciler agent over a set of stranded/conflicting workspaces.
    * Sibling of {@link fixAndMerge}: same preflight (kill worktree procs + rebase the integration
    * worktree onto the current base) and same agent-selection/launch plumbing, but the prompt is
-   * the merge-reconciler playbook with the whole stranded batch injected — the agent decides the
+   * the merge-reconciler playbook with the whole stranded batch injected - the agent decides the
    * efficient landing strategy (land clean ones first, resolve each overlapping cluster's union
    * once, sequence migration collisions) and lands them via the board's safe primitives.
    * `integrationWorkspaceId` is the least-overlap batch member; the agent runs IN its worktree.
@@ -1088,7 +596,7 @@ export function createWorkspaceMergeService(deps: {
         diffOutput = await gitService.getDiff(workspace.workingDir, baseBranch);
         diffFromWorktree = true;
       } catch {
-        // worktree gone — fall through to repo-level diff
+        // worktree gone - fall through to repo-level diff
       }
     }
     if (!diffFromWorktree) {
