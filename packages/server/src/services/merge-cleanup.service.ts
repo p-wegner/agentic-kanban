@@ -54,7 +54,12 @@ export async function finalizeMergeCleanup(
   }
 
   const [issue] = await input.database
-    .select({ statusId: issues.statusId, projectId: issues.projectId, statusChangedAt: issues.statusChangedAt })
+    .select({
+      statusId: issues.statusId,
+      projectId: issues.projectId,
+      statusChangedAt: issues.statusChangedAt,
+      updatedAt: issues.updatedAt,
+    })
     .from(issues)
     .where(eq(issues.id, input.issueId))
     .limit(1);
@@ -100,22 +105,42 @@ export async function finalizeMergeCleanup(
     }
   }
 
-  await input.database.transaction(async (tx) => {
-    if (targetStatus && issue.statusId !== targetStatus.id) {
-      await tx
-        .update(issues)
-        .set({ statusId: targetStatus.id, updatedAt: now, statusChangedAt: now })
-        .where(eq(issues.id, input.issueId));
-      issueTransitioned = true;
-    }
+  if (targetStatus && issue.statusId !== targetStatus.id) {
+    await input.database
+      .update(issues)
+      .set({ statusId: targetStatus.id, updatedAt: now, statusChangedAt: now })
+      .where(eq(issues.id, input.issueId));
+    issueTransitioned = true;
+  }
 
-    if (workspaceUpdated) {
-      await tx
+  if (workspaceUpdated) {
+    try {
+      await input.database
         .update(workspaces)
         .set(workspacePatch)
         .where(eq(workspaces.id, input.workspaceId));
+    } catch (err) {
+      if (issueTransitioned) {
+        try {
+          await input.database
+            .update(issues)
+            .set({
+              statusId: issue.statusId,
+              updatedAt: issue.updatedAt,
+              statusChangedAt: issue.statusChangedAt,
+            })
+            .where(eq(issues.id, input.issueId));
+          issueTransitioned = false;
+        } catch (rollbackErr) {
+          console.warn(
+            "[merge-cleanup] failed to roll back issue transition after workspace close failed:",
+            rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr),
+          );
+        }
+      }
+      throw err;
     }
-  });
+  }
 
   const broadcasted = Boolean(input.boardEvents && projectId && (workspaceUpdated || issueTransitioned));
   if (broadcasted) {
