@@ -8,7 +8,7 @@ import { checkSharedPackage, isTsxMissing, repairSharedIfNeeded } from "../../..
 import { checkBinShims, repairBinShims } from "../../../../scripts/bin-shims-preflight.mjs";
 import { buildDevPortEnv } from "../../../../scripts/dev-env.mjs";
 import { resolveDevPorts } from "../../../../scripts/dev-port-plan.mjs";
-import { buildBackendEnv, createStableDevProxy, listen, preferredInternalPort } from "../../../../scripts/server-dev-proxy.mjs";
+import { buildBackendEnv, createStableDevProxy, listen, preferredInternalPort, resolvePublicServerPort } from "../../../../scripts/server-dev-proxy.mjs";
 import {
   classifyProcessExit,
   createDependencyRecoveryState,
@@ -164,6 +164,27 @@ describe("server dev proxy", () => {
     expect(env.KANBAN_INTERNAL_SERVER_PORT).toBe(String(internalPort));
     expect(env.KANBAN_SERVER_PORT).toBe(String(publicPort));
     expect(env.PORT).toBe(String(publicPort));
+  });
+
+  it("preserves worktree server port precedence for direct package dev launches", () => {
+    const publicPort = resolvePublicServerPort({
+      KANBAN_WORKTREE_SERVER_PORT: "3222",
+      KANBAN_SERVER_PORT: "3001",
+      SERVER_PORT: "3001",
+      PORT: "3001",
+    });
+    const env = buildBackendEnv({
+      KANBAN_WORKTREE_SERVER_PORT: "3222",
+      KANBAN_SERVER_PORT: "3001",
+      SERVER_PORT: "3001",
+      PORT: "3001",
+    }, publicPort, preferredInternalPort(publicPort));
+
+    expect(publicPort).toBe(3222);
+    expect(env.KANBAN_WORKTREE_SERVER_PORT).toBe("3222");
+    expect(env.KANBAN_SERVER_PORT).toBe("3222");
+    expect(env.SERVER_PORT).toBe("3222");
+    expect(env.PORT).toBe("3222");
   });
 });
 

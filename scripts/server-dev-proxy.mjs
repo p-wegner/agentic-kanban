@@ -17,6 +17,7 @@ function parsePort(value) {
 
 export function resolvePublicServerPort(env = process.env) {
   return (
+    parsePort(env.KANBAN_WORKTREE_SERVER_PORT) ??
     parsePort(env.KANBAN_SERVER_PORT) ??
     parsePort(env.SERVER_PORT) ??
     parsePort(env.PORT) ??
@@ -35,9 +36,10 @@ export function buildBackendEnv(env, publicPort, internalPort) {
   const backendEnv = {
     ...env,
     KANBAN_INTERNAL_SERVER_PORT: String(internalPort),
-    KANBAN_SERVER_PORT: env.KANBAN_SERVER_PORT || publicPortString,
-    SERVER_PORT: env.SERVER_PORT || publicPortString,
-    PORT: env.PORT || publicPortString,
+    KANBAN_WORKTREE_SERVER_PORT: publicPortString,
+    KANBAN_SERVER_PORT: publicPortString,
+    SERVER_PORT: publicPortString,
+    PORT: publicPortString,
   };
   if (!backendEnv.KANBAN_BOARD_SERVER_PORT) {
     backendEnv.KANBAN_BOARD_SERVER_PORT = backendEnv.KANBAN_SERVER_PORT;
