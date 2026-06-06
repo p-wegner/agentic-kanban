@@ -47,6 +47,11 @@ const ROOT = resolve(__dirname, "..");
 /** @type {{ dir: string, label: string, exclude: string[] }[]} */
 const PACKAGES = [
   {
+    dir: "packages/shared",
+    label: "shared",
+    exclude: [],
+  },
+  {
     dir: "packages/server",
     label: "server",
     exclude: ["**/cli.test.ts", "**/cli-butler.test.ts", "**/git.service.test.ts"],
