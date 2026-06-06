@@ -57,7 +57,7 @@ function makeGit(overrides: Partial<Record<string, (...a: unknown[]) => unknown>
 
 async function seedWorkspace(
   db: ReturnType<typeof createTestDb>["db"],
-  opts: { readyForMerge?: boolean; mergedAt?: string; status?: string } = {},
+  opts: { readyForMerge?: boolean; mergedAt?: string; status?: string; baseCommitSha?: string | null } = {},
 ) {
   const now = new Date().toISOString();
   const projectId = randomUUID();
@@ -100,6 +100,7 @@ async function seedWorkspace(
     status: opts.status ?? (opts.mergedAt ? "closed" : "idle"),
     readyForMerge: opts.readyForMerge ?? true,
     mergedAt: opts.mergedAt ?? null,
+    baseCommitSha: opts.baseCommitSha ?? null,
     provider: "claude",
     createdAt: now,
     updatedAt: now,
@@ -305,6 +306,44 @@ describe("MergeService — idempotency: retry after dropped response", () => {
 
     await expect(svc.mergeWorkspace(workspaceId)).resolves.toBeDefined();
     expect(mergeBranch).not.toHaveBeenCalled();
+  });
+
+  it("reconciles when a retry sees the landed branch as an ancestor with no current-base unique commits", async () => {
+    const { workspaceId, issueId } = await seedWorkspace(db, {
+      status: "idle",
+      readyForMerge: true,
+      baseCommitSha: "base-sha",
+    });
+    const mergeBranch = vi.fn(async () => "Merge made by the 'ort' strategy.");
+    const git = makeGit({
+      checkBranchTipIsAncestor: vi.fn(async () => ({
+        isAncestor: true as const,
+        branchSha: "feature-sha",
+        baseSha: "merge-commit-sha",
+      })),
+      countUniqueCommits: vi.fn(async (_repo: string, baseSha: string) => baseSha === "base-sha" ? 1 : 0),
+      mergeBranch,
+    });
+
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+    const result = await svc.mergeWorkspace(workspaceId);
+
+    expect(mergeBranch).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ merged: false, reconciled: true });
+    expect(result.mergeOutput).toMatch(/already fully merged|no-op/i);
+
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+    expect(status.name).toBe("Done");
+
+    const [ws] = await db.select({ status: workspaces.status, mergedAt: workspaces.mergedAt }).from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.status).toBe("closed");
+    expect(ws.mergedAt).toBeTruthy();
   });
 });
 
@@ -674,28 +713,43 @@ describe("resolveMergeState — reconcile (branch already ancestor)", () => {
     }
   });
 
-  it("returns clean-ancestor when branch is trivially an ancestor (0 unique commits)", async () => {
-    const ws = makeWorkspace();
+  it("returns reconcile when a landed branch is an ancestor with 0 current-base unique commits", async () => {
+    const ws = makeWorkspace({ baseCommitSha: "base-sha" });
     const git = makeGitForStateMachine({
       checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: true, branchSha: "sha-branch", baseSha: "sha-base" })),
-      countUniqueCommits: vi.fn(async () => 0),
+      countUniqueCommits: vi.fn(async (_repo: string, baseSha: string) => baseSha === "base-sha" ? 1 : 0),
     });
     const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
-    expect(result.kind).toBe("clean-ancestor");
-    if (result.kind === "clean-ancestor") {
+    expect(result.kind).toBe("reconcile");
+    if (result.kind === "reconcile") {
       expect(result.branchSha).toBe("sha-branch");
       expect(result.baseSha).toBe("sha-base");
       expect(result.uniqueCommits).toBe(0);
     }
   });
 
-  it("returns clean-ancestor when workingDir is missing and branch has 0 unique commits", async () => {
-    const ws = makeWorkspace({ workingDir: null });
-    const checkBranchTipIsAncestor = vi.fn(async () => ({ isAncestor: true, branchSha: "sha-branch", baseSha: "sha-base" }));
-    const countUniqueCommits = vi.fn(async () => 0);
-    const git = makeGitForStateMachine({ checkBranchTipIsAncestor, countUniqueCommits });
+  it("returns clean-ancestor when branch equals the base head and has 0 unique commits", async () => {
+    const ws = makeWorkspace();
+    const git = makeGitForStateMachine({
+      checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: true, branchSha: "same-sha", baseSha: "same-sha" })),
+      countUniqueCommits: vi.fn(async () => 0),
+    });
     const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
     expect(result.kind).toBe("clean-ancestor");
+    if (result.kind === "clean-ancestor") {
+      expect(result.branchSha).toBe("same-sha");
+      expect(result.baseSha).toBe("same-sha");
+      expect(result.uniqueCommits).toBe(0);
+    }
+  });
+
+  it("returns reconcile when workingDir is missing and landed branch has 0 current-base unique commits", async () => {
+    const ws = makeWorkspace({ workingDir: null, baseCommitSha: "base-sha" });
+    const checkBranchTipIsAncestor = vi.fn(async () => ({ isAncestor: true, branchSha: "sha-branch", baseSha: "sha-base" }));
+    const countUniqueCommits = vi.fn(async (_repo: string, baseSha: string) => baseSha === "base-sha" ? 1 : 0);
+    const git = makeGitForStateMachine({ checkBranchTipIsAncestor, countUniqueCommits });
+    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    expect(result.kind).toBe("reconcile");
     expect(checkBranchTipIsAncestor).toHaveBeenCalled();
     expect(countUniqueCommits).toHaveBeenCalled();
   });
