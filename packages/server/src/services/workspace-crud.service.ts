@@ -67,6 +67,7 @@ import { fetchLiveQuotaUsage } from "./quota-usage.service.js";
 import type { QuotaUsageResult } from "./quota-usage.service.js";
 import { preflightAgentProfile } from "./agent-profile-health.service.js";
 import { emitButlerSystemEvent } from "./butler-event-feed.js";
+import { DEFAULT_BUILDER_GUARDRAILS, PREF_BUILDER_GUARDRAILS } from "../constants/preference-keys.js";
 import {
   moveIssueToInProgress,
   resolveProjectRepo,
@@ -452,6 +453,7 @@ export function createWorkspaceCrudService(deps: {
     resolvedProfileSelection: { provider: ProviderName; name: string } | undefined;
     permissionPromptTool: string | undefined;
     model: string | undefined;
+    systemInstructions: string;
   }> {
     const prefRows = await database.select().from(preferences);
     const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
@@ -529,6 +531,7 @@ export function createWorkspaceCrudService(deps: {
       resolvedProfileSelection,
       permissionPromptTool,
       model,
+      systemInstructions: prefMap.get(PREF_BUILDER_GUARDRAILS) ?? DEFAULT_BUILDER_GUARDRAILS,
     };
   }
 
@@ -609,6 +612,7 @@ export function createWorkspaceCrudService(deps: {
     resolvedProvider: ProviderName;
     resolvedProfileSelection: { provider: ProviderName; name: string } | undefined;
     model: string | undefined;
+    systemInstructions: string;
     contextFiles?: string[];
     skillName: string | null;
   }): Promise<string | undefined> {
@@ -628,6 +632,7 @@ export function createWorkspaceCrudService(deps: {
       triggerType: params.skillName ? `skill:${params.skillName}` : "agent",
       profile: params.resolvedProfileSelection,
       model: params.model,
+      systemInstructions: params.systemInstructions,
       contextFiles: params.contextFiles,
     });
   }
@@ -906,6 +911,7 @@ exit 1
         planMode, resolvedProvider,
         resolvedProfileSelection: agentConfig.resolvedProfileSelection,
         model: agentConfig.model,
+        systemInstructions: agentConfig.systemInstructions,
         contextFiles: ticketContextPath ? [ticketContextPath] : undefined,
         skillName,
       };

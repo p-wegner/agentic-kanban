@@ -8,6 +8,7 @@ import { allHarnessSettingKeys } from "./harness-settings.js";
 import { commitObjectiveFile, isBoardStrategyKey, projectIdFromBoardStrategyKey, writeStrategyObjective } from "./strategy-objective.service.js";
 import { projects } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
+import { PREF_BUILDER_GUARDRAILS } from "../constants/preference-keys.js";
 
 export const SETTINGS_KEYS = [
   "agent_command", "agent_args", "output_parser", "skip_permissions", "claude_profile",
@@ -19,6 +20,7 @@ export const SETTINGS_KEYS = [
   "learning_step_after_review", "learning_step_before_merge", "auto_monitor",
   "auto_monitor_interval", "nudge_auto_start", "nudge_wip_limit", "projects_base_path", "plan_auto_continue",
   "visual_verification_mode", "after_merge_verify_agent",
+  PREF_BUILDER_GUARDRAILS,
   "backup_interval_min", "backup_keep_last",
   "butler_event_feed", "butler_event_feed_min_interval_ms",
   "butler_auto_answer", "butler_auto_answer_min_confidence",

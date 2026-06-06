@@ -7,6 +7,7 @@ import * as gitService from "./git.service.js";
 import { resolveAgentSettings } from "./agent-settings.service.js";
 import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
+import { DEFAULT_BUILDER_GUARDRAILS, PREF_BUILDER_GUARDRAILS } from "../constants/preference-keys.js";
 
 /**
  * After an issue is merged, find issues that depended on it and are now unblocked.
@@ -109,7 +110,17 @@ export async function autoStartFollowups(
       const { agentCommand, agentArgs, claudeProfile, profile, provider } = resolveAgentSettings(prefMap);
       const prompt = `${followupIssue[0].title}\n\n${followupIssue[0].description ?? ""}`.trim();
 
-      await getSessionManager().startSession({ workspaceId: wsId, prompt, agentCommand, agentArgs, claudeProfile, profile, provider: provider === "codex" ? "codex" : "claude-code", triggerType: "auto-start" });
+      await getSessionManager().startSession({
+        workspaceId: wsId,
+        prompt,
+        agentCommand,
+        agentArgs,
+        claudeProfile,
+        profile,
+        provider: provider === "codex" ? "codex" : "claude-code",
+        triggerType: "auto-start",
+        systemInstructions: prefMap.get(PREF_BUILDER_GUARDRAILS) ?? DEFAULT_BUILDER_GUARDRAILS,
+      });
       await database.update(workspaces).set({ status: "active", updatedAt: now }).where(eq(workspaces.id, wsId));
 
       console.log(`[followup-workspace] auto-started follow-up workspace for issue ${followupIssue[0].issueNumber ?? dep.issueId}`);
