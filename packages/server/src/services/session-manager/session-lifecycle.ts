@@ -14,7 +14,7 @@ import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import type { SessionManagerOptions, SessionState, StartSessionOptions } from "./types.js";
 import { workspaceLaunchPreflight } from "../preflight-check.js";
 import { WorkspaceError } from "../workspace-internals.js";
-import { DEFAULT_BUILDER_GUARDRAILS, PREF_BUILDER_GUARDRAILS } from "../constants/preference-keys.js";
+import { DEFAULT_BUILDER_GUARDRAILS, PREF_BUILDER_GUARDRAILS } from "../../constants/preference-keys.js";
 
 /** Subset of agent.service that the lifecycle depends on. Injectable for tests. */
 export type AgentService = typeof realAgentService;
