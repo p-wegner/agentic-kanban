@@ -48,8 +48,8 @@ export function createPreferencesRoute(database: Database = db) {
   });
 
   // GET /api/preferences/codex-profiles — list available codex profiles
-  router.get("/codex-profiles", (c) => {
-    return c.json({ profiles: preferenceService.listCodexProfiles() });
+  router.get("/codex-profiles", async (c) => {
+    return c.json({ profiles: await preferenceService.listCodexProfiles() });
   });
 
   // GET /api/preferences/copilot-profiles
@@ -61,7 +61,7 @@ export function createPreferencesRoute(database: Database = db) {
     return c.json({
       profiles: await listAgentProfileHealth(database, {
         claudeProfiles: preferenceService.listClaudeProfiles(),
-        codexProfiles: preferenceService.listCodexProfiles(),
+        codexProfiles: await preferenceService.listCodexProfiles(),
         copilotProfiles: preferenceService.listCopilotProfiles(),
       }),
     });

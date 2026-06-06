@@ -219,7 +219,7 @@ export function createButlerRoute(
     const perProject = await getPreference(butlerProfilePrefKey(projectId), database);
     const globalProvider: "claude" | "codex" = settings.provider === "codex" ? "codex" : "claude";
     const provider = butlerProvider ?? globalProvider;
-    const availableProfiles = provider === "codex" ? preferenceService.listCodexProfiles() : preferenceService.listClaudeProfiles();
+    const availableProfiles = provider === "codex" ? await preferenceService.listCodexProfiles() : preferenceService.listClaudeProfiles();
     const profileOverride = perProject && availableProfiles.includes(perProject) ? perProject : undefined;
     const globalProfile = settings.profile?.provider === provider ? settings.profile.name : "";
     const selectedProfile = profileOverride || globalProfile || undefined;
@@ -363,7 +363,7 @@ export function createButlerRoute(
     const butlerId = resolveButlerId(c);
     const def = await getButlerDefinition(database, butlerId);
     const backend = await resolveButlerBackend(projectId, def?.provider);
-    const profiles = backend.provider === "codex" ? preferenceService.listCodexProfiles() : preferenceService.listClaudeProfiles();
+    const profiles = backend.provider === "codex" ? await preferenceService.listCodexProfiles() : preferenceService.listClaudeProfiles();
     return c.json({ provider: backend.provider, profiles, selected: backend.selectedProfile ?? "", globalDefault: backend.globalProfile });
   });
 

@@ -8,7 +8,8 @@ import { allHarnessSettingKeys } from "./harness-settings.js";
 import { commitObjectiveFile, isBoardStrategyKey, projectIdFromBoardStrategyKey, writeStrategyObjective } from "./strategy-objective.service.js";
 import { projects } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
-import { PREF_BUILDER_GUARDRAILS, PREF_MERGE_STRATEGY } from "../constants/preference-keys.js";
+import { PREF_BUILDER_GUARDRAILS, PREF_MERGE_STRATEGY, PREF_CODEX_LICENSE_RING, PREF_CODEX_LICENSE_ROTATION } from "../constants/preference-keys.js";
+import { parseCodexLicenseRing, ringProfileNames } from "./codex-license-ring.js";
 
 export const SETTINGS_KEYS = [
   "agent_command", "agent_args", "output_parser", "skip_permissions", "claude_profile",
@@ -35,6 +36,8 @@ export const SETTINGS_KEYS = [
   PREF_MERGE_STRATEGY,
   "issue_templates",
   "export_skills_on_registration",
+  PREF_CODEX_LICENSE_RING,
+  PREF_CODEX_LICENSE_ROTATION,
   ...allHarnessSettingKeys(),
 ];
 
@@ -54,6 +57,7 @@ function isAllowedDynamicKey(key: string): boolean {
     /^board_autodrive_[0-9a-f-]+$/.test(key) ||
     /^verify_script_[0-9a-f-]+$/.test(key) ||
     /^auto_merge_disabled_[0-9a-f-]+$/.test(key) ||
+    /^codex_cooldown_.+$/.test(key) ||
     isBoardStrategyKey(key);
 }
 
@@ -119,7 +123,7 @@ export function createPreferenceService({ database }: { database: Database }) {
     return profiles.sort();
   }
 
-  function listCodexProfiles(): string[] {
+  async function listCodexProfiles(): Promise<string[]> {
     const codexDir = join(homedir(), ".codex");
     const profiles: string[] = ["default"];
     try {
@@ -130,6 +134,12 @@ export function createPreferenceService({ database }: { database: Database }) {
         const legacyMatch = file.match(/^config_(.+)\.toml$/);
         if (legacyMatch && legacyMatch[1] !== "default") profiles.push(legacyMatch[1]);
       }
+    } catch {}
+    // OAuth licenses live as separate CODEX_HOME dirs, not config files in ~/.codex,
+    // so they only become selectable by merging the rotation ring's profile names.
+    try {
+      const ring = parseCodexLicenseRing(await getPreference(PREF_CODEX_LICENSE_RING, database));
+      profiles.push(...ringProfileNames(ring));
     } catch {}
     return [...new Set(profiles)].sort();
   }
