@@ -11,6 +11,10 @@ vi.mock("../services/butler-event-feed.js", () => ({
   emitButlerSystemEvent: vi.fn(),
 }));
 
+vi.mock("@agentic-kanban/shared/lib/workflow-engine", () => ({
+  syncCurrentNodeToStatus: vi.fn(),
+}));
+
 import { db } from "../db/index.js";
 import {
   MAX_MONITOR_MERGES_PER_CYCLE,
@@ -44,11 +48,12 @@ function makeUpdateChain() {
 
 function makeDeps(): ProcessWorkspaceDeps {
   return {
-    sessionManager: { isProcessAlive: vi.fn(() => true) } as unknown as ProcessWorkspaceDeps["sessionManager"],
+    sessionManager: { isProcessAlive: vi.fn(() => true), stopSession: vi.fn() } as unknown as ProcessWorkspaceDeps["sessionManager"],
     boardEvents: { broadcast: vi.fn() } as unknown as ProcessWorkspaceDeps["boardEvents"],
     serverPort: 3001,
     autoMergeEnabled: true,
     autoMergeInReview: false,
+    reviewSessionIds: new Set<string>(),
     monitorRecentActions: [],
     logMonitorAction: vi.fn(),
     buildMonitorNudgePrompt: vi.fn().mockResolvedValue("nudge"),
@@ -132,6 +137,66 @@ describe("processWorkspaceCandidates — idle + readyForMerge", () => {
     const calls = vi.mocked(fetch).mock.calls;
     expect(calls.some(([url]) => String(url).includes("/fix-and-merge"))).toBe(true);
     expect(calls.every(([url]) => !String(url).includes("/launch"))).toBe(true);
+  });
+});
+
+describe("processWorkspaceCandidates — stuck builder recovery", () => {
+  it("stops a long-running builder with zero commits and dirty worktree, commits leftovers, and launches review", async () => {
+    vi.mocked(db.select).mockReset();
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{
+        id: "sess-1",
+        status: "running",
+        startedAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+        triggerType: "agent",
+        stats: null,
+      }]) as ReturnType<typeof db.select>)
+      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]) as ReturnType<typeof db.select>)
+      .mockReturnValueOnce(makeSelectChain([{ id: "status-in-review" }]) as ReturnType<typeof db.select>);
+
+    const reviewSessionIds = new Set<string>();
+    const deps = {
+      ...makeDeps(),
+      reviewSessionIds,
+      stuckBuilderTimeoutMs: 8 * 60 * 1000,
+      getCommitCountAhead: vi.fn().mockResolvedValue(0),
+      getWorkingTreeDiff: vi.fn().mockResolvedValue(`diff --git a/src/app.ts b/src/app.ts
+index 1111111..2222222 100644
+--- a/src/app.ts
++++ b/src/app.ts
+@@ -1 +1,4 @@
+-old
++new
++more
++complete work
+`),
+      commitLeftoverChanges: vi.fn().mockResolvedValue(2),
+      startReview: vi.fn().mockResolvedValue({ sessionId: "review-1" }),
+    } satisfies ProcessWorkspaceDeps;
+    const candidate: WorkspaceCandidate = {
+      ...baseCandidate,
+      wsStatus: "active",
+      readyForMerge: false,
+      issueStatusName: "In Progress",
+    };
+
+    const stats = await processWorkspaceCandidates([candidate], deps);
+
+    expect(stats).toEqual({ relaunched: 0, merged: 0, nudged: 0 });
+    expect(deps.sessionManager.stopSession).toHaveBeenCalledWith("sess-1");
+    expect(deps.getCommitCountAhead).toHaveBeenCalledWith("/path/to/dir", "main");
+    expect(deps.commitLeftoverChanges).toHaveBeenCalledWith("/path/to/dir");
+    expect(deps.startReview).toHaveBeenCalledWith(db, expect.any(Function), deps.boardEvents, reviewSessionIds, "ws-1", false);
+    expect(deps.buildMonitorNudgePrompt).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+    expect(vi.mocked(deps.boardEvents.broadcast)).toHaveBeenCalledWith("proj-1", "board_changed");
+    const logCalls = vi.mocked(deps.logMonitorAction).mock.calls;
+    expect(logCalls.some(([, action, wsId, issueId, extra]) =>
+      action === "mark_idle"
+      && wsId === "ws-1"
+      && issueId === "issue-1"
+      && extra?.verificationResult === "ok",
+    )).toBe(true);
   });
 });
 
