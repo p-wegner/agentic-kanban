@@ -79,7 +79,7 @@ describe("workspace-summary.service", () => {
       id: workspaceId,
       issueId,
       branch: "feature/metrics",
-      status: "closed",
+      status: "idle",
       codeMetricsJson: JSON.stringify(metrics),
       codeMetricsComputedAt: now,
       createdAt: now,
@@ -443,5 +443,180 @@ describe("workspace-summary.service", () => {
       "/tmp/head-changed/.worktrees/head-changed",
       "main",
     ));
+  });
+
+  it("omits closed workspaces from main for non-archived issues (backlog/todo)", async () => {
+    // Regression test for #663: a backlog issue with only closed workspaces
+    // should have workspaceSummary.main = null, not point at the closed workspace.
+    const { db } = createTestDb();
+    const now = new Date().toISOString();
+    const projectId = randomUUID();
+    const backlogStatusId = randomUUID();
+    const issueId = randomUUID();
+    const closedWorkspaceId = randomUUID();
+
+    await db.insert(projects).values({
+      id: projectId,
+      name: "Closed WS Project",
+      repoPath: "/tmp/closed-ws-project",
+      repoName: "closed-ws-project",
+      defaultBranch: "main",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(projectStatuses).values({
+      id: backlogStatusId,
+      projectId,
+      name: "Backlog",
+      sortOrder: 0,
+      isDefault: true,
+      createdAt: now,
+    });
+    await db.insert(issues).values({
+      id: issueId,
+      issueNumber: 20,
+      title: "Closed workspace on backlog",
+      statusId: backlogStatusId,
+      projectId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(workspaces).values({
+      id: closedWorkspaceId,
+      issueId,
+      branch: "feature/closed-then-reset",
+      status: "closed",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    // No archivedIssueIds — issue is in Backlog, not Done/Cancelled
+    const summaryMap = await buildWorkspaceSummaryMap([issueId], "main", db);
+
+    const summary = summaryMap.get(issueId);
+    expect(summary).toBeDefined();
+    // total/closed counts should still reflect the closed workspace
+    expect(summary!.total).toBe(1);
+    expect(summary!.closed).toBe(1);
+    // But main should NOT point at the closed workspace for a backlog issue
+    expect(summary!.main).toBeUndefined();
+  });
+
+  it("keeps closed workspace as main for archived issues (Done/Cancelled)", async () => {
+    // Archived issues should still show their closed/merged workspace as main.
+    const { db } = createTestDb();
+    const now = new Date().toISOString();
+    const projectId = randomUUID();
+    const doneStatusId = randomUUID();
+    const issueId = randomUUID();
+    const closedWorkspaceId = randomUUID();
+
+    await db.insert(projects).values({
+      id: projectId,
+      name: "Archived Project",
+      repoPath: "/tmp/archived-project",
+      repoName: "archived-project",
+      defaultBranch: "main",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(projectStatuses).values({
+      id: doneStatusId,
+      projectId,
+      name: "Done",
+      sortOrder: 0,
+      isDefault: true,
+      createdAt: now,
+    });
+    await db.insert(issues).values({
+      id: issueId,
+      issueNumber: 21,
+      title: "Done issue with closed workspace",
+      statusId: doneStatusId,
+      projectId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(workspaces).values({
+      id: closedWorkspaceId,
+      issueId,
+      branch: "feature/done-feature",
+      status: "closed",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    // Issue is archived (Done)
+    const archivedIssueIds = new Set([issueId]);
+    const summaryMap = await buildWorkspaceSummaryMap([issueId], "main", db, archivedIssueIds);
+
+    const summary = summaryMap.get(issueId);
+    expect(summary).toBeDefined();
+    expect(summary!.main).not.toBeNull();
+    expect(summary!.main!.status).toBe("closed");
+  });
+
+  it("prefers active workspace over closed for backlog issues", async () => {
+    // A backlog issue with both active and closed workspaces should pick the active one.
+    const { db } = createTestDb();
+    const now = new Date().toISOString();
+    const projectId = randomUUID();
+    const backlogStatusId = randomUUID();
+    const issueId = randomUUID();
+    const closedWorkspaceId = randomUUID();
+    const activeWorkspaceId = randomUUID();
+
+    await db.insert(projects).values({
+      id: projectId,
+      name: "Mixed WS Project",
+      repoPath: "/tmp/mixed-ws-project",
+      repoName: "mixed-ws-project",
+      defaultBranch: "main",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(projectStatuses).values({
+      id: backlogStatusId,
+      projectId,
+      name: "Backlog",
+      sortOrder: 0,
+      isDefault: true,
+      createdAt: now,
+    });
+    await db.insert(issues).values({
+      id: issueId,
+      issueNumber: 22,
+      title: "Backlog with active and closed workspaces",
+      statusId: backlogStatusId,
+      projectId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(workspaces).values([
+      {
+        id: closedWorkspaceId,
+        issueId,
+        branch: "feature/old-attempt",
+        status: "closed",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: activeWorkspaceId,
+        issueId,
+        branch: "feature/new-attempt",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+
+    const summaryMap = await buildWorkspaceSummaryMap([issueId], "main", db);
+
+    const summary = summaryMap.get(issueId);
+    expect(summary).toBeDefined();
+    expect(summary!.main).not.toBeNull();
+    expect(summary!.main!.id).toBe(activeWorkspaceId);
+    expect(summary!.main!.status).toBe("active");
   });
 });
