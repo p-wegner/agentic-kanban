@@ -110,13 +110,10 @@ body {
   color: inherit;
 }
 
-/* App-wide scrollbar treatment. Previously only board columns
-   (`.column-scroll-container`) were styled, so every other scrollable panel
-   (detail panels, modals, the Butler chat, settings) fell back to the default
-   chunky OS scrollbar in cold gray. Give them all a thin, warm, unobtrusive
-   bar that matches the paper theme. The dedicated board-column rules below
-   still override this for that surface. The `.scrollbar-hide` utility wins
-   because `display: none` removes the bar entirely. */
+/* App-wide scrollbar treatment. Give scrollable panels a thin, warm,
+   unobtrusive bar that matches the paper theme. Components may override this
+   locally for their own surfaces. The `.scrollbar-hide` utility wins because
+   `display: none` removes the bar entirely. */
 * {
   scrollbar-width: thin;
   scrollbar-color: rgba(90, 84, 76, 0.28) transparent; /* ink-soft tint */
@@ -189,41 +186,6 @@ body {
 
 .animate-slide-in-left {
   animation: slide-in-left 0.2s ease-out;
-}
-
-/* Board column scroll fade */
-.column-scroll-container {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(0, 0, 0, 0.12) transparent;
-}
-
-.column-scroll-container::-webkit-scrollbar {
-  width: 4px;
-}
-
-.column-scroll-container::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.column-scroll-container::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.12);
-  border-radius: 2px;
-}
-
-.column-scroll-container::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.25);
-}
-
-.dark .column-scroll-container {
-  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
-}
-
-.dark .column-scroll-container::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
-}
-
-.dark .column-scroll-container::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.25);
 }
 
 /* Scrollbar hide utility */
