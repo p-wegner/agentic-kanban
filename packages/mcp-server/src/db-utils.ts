@@ -12,6 +12,32 @@ export function mcpError(message: string): McpResponse {
   return { content: [{ type: "text" as const, text: message }] };
 }
 
+/** Machine-readable MCP error response for tools that agents branch on. */
+export function mcpStructuredError(
+  code: string,
+  message: string,
+  details: Record<string, unknown> = {},
+): McpResponse {
+  return {
+    content: [{
+      type: "text" as const,
+      text: JSON.stringify({ error: { code, message, ...details } }, null, 2),
+    }],
+  };
+}
+
+export function workspaceNotFoundError(workspaceId: string): McpResponse {
+  return mcpStructuredError("WORKSPACE_NOT_FOUND", "Workspace not found", { workspaceId });
+}
+
+export function workspaceClosedError(workspaceId: string): McpResponse {
+  return mcpStructuredError("WORKSPACE_CLOSED", "Workspace is closed", { workspaceId });
+}
+
+export function workspaceMissingWorkingDirError(workspaceId: string): McpResponse {
+  return mcpStructuredError("WORKSPACE_WORKING_DIR_MISSING", "Workspace has no working directory", { workspaceId });
+}
+
 /**
  * Read stdout content from the per-session .out file, or null when absent.
  * Mirrors the server-side readSessionStdoutFile — kept in sync manually.

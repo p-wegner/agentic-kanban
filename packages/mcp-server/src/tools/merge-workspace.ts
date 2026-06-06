@@ -1,14 +1,14 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
 import * as gitService from "../git-service.js";
-import { notifyBoard } from "../notify.js";
-import { requireEntity } from "../db-utils.js";
+import { requireEntity, workspaceClosedError, workspaceMissingWorkingDirError, workspaceNotFoundError } from "../db-utils.js";
 import { applyOpenSpecDeltas, OPENSPEC_CHANGES_DIR, OPENSPEC_SPECS_DIR, validateOpenSpecChange } from "@agentic-kanban/shared/lib/openspec";
 import { randomUUID } from "node:crypto";
+import { prodDeps, type ToolDeps } from "./deps.js";
 
 async function recordMergeAttempt(args: {
+  deps: Pick<ToolDeps, "db" | "schema">;
   issueId: string;
   workspaceId: string;
   branch: string;
@@ -16,6 +16,7 @@ async function recordMergeAttempt(args: {
   body: string;
   payload?: Record<string, unknown>;
 }) {
+  const { db, schema } = args.deps;
   const now = new Date().toISOString();
   await db.insert(schema.issueComments).values({
     id: randomUUID(),
@@ -36,7 +37,8 @@ async function recordMergeAttempt(args: {
   });
 }
 
-export function registerMergeWorkspace(server: McpServer) {
+export function registerMergeWorkspace(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema, notifyBoard } = deps;
   server.tool(
     "merge_workspace",
     "Merge a workspace branch into the project's default branch, close the workspace, and auto-transition the issue to Done",
@@ -47,10 +49,13 @@ export function registerMergeWorkspace(server: McpServer) {
       const wsRows = await db.select().from(schema.workspaces)
         .where(eq(schema.workspaces.id, workspaceId))
         .limit(1);
-      const r0 = requireEntity(wsRows, workspaceId, "Workspace");
-      if (!r0.ok) return r0.error;
+      if (wsRows.length === 0) return workspaceNotFoundError(workspaceId);
 
-      const workspace = r0.value;
+      const workspace = wsRows[0];
+      if (workspace.status === "closed") return workspaceClosedError(workspaceId);
+      if (!workspace.isDirect && !workspace.workingDir?.trim()) {
+        return workspaceMissingWorkingDirError(workspaceId);
+      }
 
       // Resolve project info
       const issueRows = await db.select({ projectId: schema.issues.projectId })
@@ -81,8 +86,9 @@ export function registerMergeWorkspace(server: McpServer) {
             .set({ status: "closed", updatedAt: now })
             .where(eq(schema.workspaces.id, workspaceId));
 
-          await autoTransitionDone(projectId, workspace.issueId, now);
+          await autoTransitionDone(deps, projectId, workspace.issueId, now);
           await recordMergeAttempt({
+            deps,
             issueId: workspace.issueId,
             workspaceId,
             branch: workspace.branch,
@@ -182,8 +188,9 @@ export function registerMergeWorkspace(server: McpServer) {
           .set({ status: "closed", workingDir: null, updatedAt: now, closedAt: now, mergedAt: now })
           .where(eq(schema.workspaces.id, workspaceId));
 
-        await autoTransitionDone(projectId, workspace.issueId, now);
+        await autoTransitionDone(deps, projectId, workspace.issueId, now);
         await recordMergeAttempt({
+          deps,
           issueId: workspace.issueId,
           workspaceId,
           branch: workspace.branch,
@@ -198,6 +205,7 @@ export function registerMergeWorkspace(server: McpServer) {
         };
       } catch (err) {
         await recordMergeAttempt({
+          deps,
           issueId: workspace.issueId,
           workspaceId,
           branch: workspace.branch,
@@ -213,7 +221,8 @@ export function registerMergeWorkspace(server: McpServer) {
   );
 }
 
-async function autoTransitionDone(projectId: string, issueId: string, now: string) {
+async function autoTransitionDone(deps: Pick<ToolDeps, "db" | "schema">, projectId: string, issueId: string, now: string) {
+  const { db, schema } = deps;
   try {
     const statuses = await db.select().from(schema.projectStatuses)
       .where(eq(schema.projectStatuses.projectId, projectId));
