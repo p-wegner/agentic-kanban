@@ -9,7 +9,6 @@ import { PRIMARY_VIEWS, SECONDARY_VIEWS, VIEW_REGISTRY } from "../lib/viewRegist
 import type { StatusWithIssues } from "@agentic-kanban/shared";
 import type { ProjectTag } from "./IssueCard.js";
 import type { CardDensity } from "../hooks/useBoardPreferences.js";
-import type { MilestoneResponse } from "@agentic-kanban/shared";
 import { PRIORITY_META } from "../lib/chartColors.js";
 
 // Re-exported from the canonical view registry (#116). Kept here for back-compat
@@ -130,11 +129,6 @@ interface BoardToolbarProps {
   visibilityColumns?: StatusWithIssues[];
   hiddenColumns?: Set<string>;
   onHiddenColumnsChange?: (statusName: string, hidden: boolean) => void;
-  milestones?: MilestoneResponse[];
-  activeMilestoneId?: string | null;
-  onMilestoneFilterChange?: (milestoneId: string | null) => void;
-  issueTypeFilter?: string | null;
-  onIssueTypeFilterChange?: (type: string | null) => void;
   showPriorityLegend?: boolean;
   onShowPriorityLegendChange?: (v: boolean) => void;
   showCardAgingHeatmap?: boolean;
@@ -186,11 +180,6 @@ export function BoardToolbar({
   visibilityColumns,
   hiddenColumns,
   onHiddenColumnsChange,
-  milestones = [],
-  activeMilestoneId = null,
-  onMilestoneFilterChange,
-  issueTypeFilter = null,
-  onIssueTypeFilterChange,
   showPriorityLegend = false,
   onShowPriorityLegendChange,
   showCardAgingHeatmap = false,
@@ -450,51 +439,8 @@ export function BoardToolbar({
           </div>
         );
       })()}
-      {onMilestoneFilterChange && milestones.length > 0 && (
-        <div className="relative shrink-0">
-          <select
-            value={activeMilestoneId ?? ""}
-            onChange={(e) => onMilestoneFilterChange(e.target.value || null)}
-            title="Filter by milestone"
-            className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors appearance-none pr-6 cursor-pointer ${
-              activeMilestoneId
-                ? "bg-brand-600 text-white border-brand-600 hover:bg-brand-700"
-                : "bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
-            }`}
-          >
-            <option value="">Milestone</option>
-            {milestones.map((m) => (
-              <option key={m.id} value={m.id}>{m.name}</option>
-            ))}
-          </select>
-          <svg className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
-          </svg>
-        </div>
-      )}
-      {onIssueTypeFilterChange && (
-        <div className="flex items-center gap-0 border border-black/[0.07] dark:border-white/10 rounded-md p-0.5 bg-surface-raised dark:bg-surface-raised-dark shrink-0">
-          {(["All", "feature", "bug", "chore"] as const).map((type) => {
-            const label = type === "All" ? "All" : type === "chore" ? "Quality" : type.charAt(0).toUpperCase() + type.slice(1);
-            const isActive = type === "All" ? issueTypeFilter === null : issueTypeFilter === type;
-            return (
-              <button
-                key={type}
-                onClick={() => onIssueTypeFilterChange(type === "All" ? null : type)}
-                className={`px-2 py-0.5 text-xs rounded transition-colors ${
-                  isActive
-                    ? "bg-brand-600 text-white"
-                    : "text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-700"
-                }`}
-                title={`Show ${label} issues only`}
-                aria-pressed={isActive}
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
-      )}
+      {/* Status / type / milestone / blocked / stale filters now live in the
+          unified BoardFilterMenu (rendered by BoardPage), not on this toolbar. */}
       <button
         onClick={() => setShowMoreActions((v) => !v)}
         aria-expanded={showMoreActions}
