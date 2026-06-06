@@ -7,6 +7,7 @@ import type { Database } from "../db/index.js";
 import { setPreference } from "../repositories/preferences.repository.js";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { buildAgentLaunchConfig, type ProviderName } from "./agent-provider.js";
+import { parseCodexLicenseRing, findRingEntry, codexHomeHasAuth } from "./codex-license-ring.js";
 
 export type ProfileHealthStatus = "ok" | "warning" | "error" | "unknown";
 
@@ -141,10 +142,21 @@ export function preflightAgentProfile(
   const warnings: string[] = [];
   const effectivePrefs = applyProfileSelection(prefMap, provider, profileName);
   const settings = resolveAgentSettings(effectivePrefs);
-  const configPath = profileConfigPath(provider, profileName);
 
-  if (configPath && !existsSync(configPath)) {
-    errors.push(`Profile config not found: ${configPath}`);
+  // Codex OAuth license (a CODEX_HOME directory, not a config toml): validate the
+  // login by checking for auth.json, and skip the config-file existence check.
+  const ringEntry = provider === "codex"
+    ? findRingEntry(parseCodexLicenseRing(prefMap.get("codex_license_ring")), profileName)
+    : undefined;
+  if (ringEntry?.codexHome) {
+    if (!codexHomeHasAuth(ringEntry.codexHome)) {
+      errors.push(`Codex license '${profileName}' not logged in: no auth.json in ${ringEntry.codexHome} (run: $env:CODEX_HOME='${ringEntry.codexHome}'; codex login)`);
+    }
+  } else {
+    const configPath = profileConfigPath(provider, profileName);
+    if (configPath && !existsSync(configPath)) {
+      errors.push(`Profile config not found: ${configPath}`);
+    }
   }
   if (!settings.agentCommand && provider === "claude") {
     warnings.push("Using default Claude command from PATH.");

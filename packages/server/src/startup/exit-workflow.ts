@@ -14,6 +14,7 @@ import type { MergeWorkspace } from "./merge-workflow.js";
 import { isAutomaticMergeEnabled } from "./merge-strategy.js";
 import type { Database } from "../db/index.js";
 import { isCodexUsageLimitStats } from "../services/codex-rate-limit.js";
+import { rotateCodexLicense } from "../services/codex-license-ring.js";
 
 type WorkspaceRow = typeof workspaces.$inferSelect;
 
@@ -74,6 +75,36 @@ async function hasCommittedChanges(workspace: WorkspaceRow, defaultBranch: strin
   } catch { return false; }
 }
 
+/** Extract the codex "try again at X" hint persisted on the rate-limited session's stats. */
+function parseCodexRetryAfter(stats: string | null | undefined): string | null {
+  if (!stats) return null;
+  try {
+    const parsed = JSON.parse(stats) as Record<string, unknown>;
+    return typeof parsed.retryAfter === "string" ? parsed.retryAfter : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Build a continuation prompt so the rotated-to license picks the ticket back up in the same worktree. */
+async function buildCodexContinuationPrompt(database: Database, issueId: string): Promise<string> {
+  const rows = await database
+    .select({ issueNumber: issues.issueNumber, title: issues.title, description: issues.description })
+    .from(issues)
+    .where(eq(issues.id, issueId))
+    .limit(1);
+  const issue = rows[0];
+  const heading = issue ? `ticket #${issue.issueNumber}: ${issue.title}` : "your current ticket";
+  return [
+    `You are resuming work on ${heading}.`,
+    "A previous Codex session was interrupted by an account usage limit and has now resumed on a different Codex account.",
+    "Your partial work is already in THIS worktree. First run `git status` and `git diff` to see what exists, then continue implementing the ticket to completion and COMMIT when done.",
+    "",
+    "Ticket description:",
+    issue?.description || "(no description)",
+  ].join("\n");
+}
+
 async function isSpecPlanningNode(database: Database, currentNodeId: string | null): Promise<boolean> {
   if (!currentNodeId) return false;
   const rows = await database
@@ -124,12 +155,49 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       }
       const sessionRows = await db.select({ stats: sessions.stats }).from(sessions).where(eq(sessions.id, sessionId)).limit(1);
       if (isCodexUsageLimitStats(sessionRows[0]?.stats)) {
+        // Codex license rotation: this account hit its quota. Stamp a cooldown on it
+        // and switch `codex_profile` to the next available license, then relaunch the
+        // workspace on the fresh account (a builder session continues its worktree;
+        // review/fix sessions just get the switched pref and their own reconciler).
+        const retryAfter = parseCodexRetryAfter(sessionRows[0]?.stats);
+        const rotationPrefMap = new Map((await db.select().from(preferences)).map((r) => [r.key, r.value]));
+        const currentLicense = rotationPrefMap.get("codex_profile") || "default";
+        const rotation = await rotateCodexLicense(db, rotationPrefMap, currentLicense, retryAfter, new Date(now));
+        const isBuilderSession = !reviewSessionIds.has(sessionId) && !fixAndMergeSessionIds.has(sessionId) && !learningSessionIds.has(sessionId);
+
+        if (rotation.rotated && rotation.toProfile && isBuilderSession) {
+          try {
+            const continuation = await buildCodexContinuationPrompt(db, issueId);
+            await db.update(workspaces).set({ status: "active", updatedAt: now }).where(eq(workspaces.id, workspaceId));
+            const relaunchSessionId = await sessionManager.startSession({
+              workspaceId,
+              prompt: continuation,
+              agentCommand: rotationPrefMap.get("agent_command") || undefined,
+              agentArgs: rotationPrefMap.get("agent_args") || undefined,
+              provider: "codex",
+              triggerType: "agent",
+              profile: { provider: "codex", name: rotation.toProfile },
+            });
+            boardEvents.broadcastActivity(projectId, { issueId, sessionId, activity: "" });
+            boardEvents.broadcast(projectId, "issue_updated");
+            emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Codex usage limit on '${rotation.fromProfile}' — rotated to '${rotation.toProfile}' and relaunched workspace ${workspaceId}.` });
+            console.log(`[workflow] codex license rotated ${rotation.fromProfile} -> ${rotation.toProfile}; relaunched workspace ${workspaceId} session ${relaunchSessionId}`);
+            return;
+          } catch (err) {
+            console.error("[workflow] codex license rotation relaunch failed:", err);
+            // fall through to blocked
+          }
+        }
+
         await db.update(workspaces).set({ status: "blocked", updatedAt: now }).where(eq(workspaces.id, workspaceId));
         boardEvents.broadcastActivity(projectId, { issueId, sessionId, activity: "" });
         boardEvents.broadcast(projectId, "session_completed");
         boardEvents.broadcast(projectId, "workflow_error");
-        emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Codex usage limit reached for workspace ${workspaceId}; monitor will not relaunch it automatically.` });
-        console.warn(`[workflow] codex-rate-limited workspace ${workspaceId} from session ${sessionId} left blocked`);
+        const blockedReason = rotation.rotated
+          ? `Codex usage limit reached for workspace ${workspaceId}; rotated codex_profile to '${rotation.toProfile}' (relaunch a builder manually).`
+          : `Codex usage limit reached for workspace ${workspaceId}; ${rotation.reason}. Monitor will not relaunch it automatically.`;
+        emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: blockedReason });
+        console.warn(`[workflow] codex-rate-limited workspace ${workspaceId} from session ${sessionId} left blocked (${rotation.reason})`);
         return;
       }
       await db.update(workspaces).set({ status: "idle", updatedAt: now }).where(eq(workspaces.id, workspaceId));
