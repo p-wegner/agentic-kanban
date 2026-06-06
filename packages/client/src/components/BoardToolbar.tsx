@@ -392,7 +392,11 @@ export function BoardToolbar({
 
   return (
     <>
-    <div className="flex items-start gap-2 flex-wrap">
+    {/* flex-1 min-w-0 so this row fills the width its parent gives it (next to
+        the board-summary chips). Without it the row stays content-sized and the
+        responsive view-tab strip below gets almost no room, collapsing every
+        tab into "More". */}
+    <div className="flex flex-1 min-w-0 items-start gap-2 flex-wrap">
       {/* < sm : toggle to reveal the action cluster (collapsed by default for room) */}
       <button
         onClick={() => setShowActions((v) => !v)}
@@ -584,7 +588,12 @@ export function BoardToolbar({
           whatever doesn't fit folds into the "More" dropdown along with the
           analytics/secondary views. `visibleViewCount` is computed from the
           hidden measurement row below. */}
-      <div ref={viewTabsWrapRef} className="relative hidden sm:block flex-1 min-w-0 overflow-hidden">
+      {/* No overflow-hidden here: it would clip the "More" views dropdown
+          (absolute, below the strip) and make it invisible — the popup opened
+          in the DOM but nothing showed. The strip only ever renders the tabs
+          that fit (visiblePrimaryViews) plus More, and useLayoutEffect flushes
+          the measured count before paint, so there's no overflow to clip. */}
+      <div ref={viewTabsWrapRef} className="relative hidden sm:block flex-1 min-w-0">
         <div className="flex w-fit items-center gap-1 border border-black/[0.07] dark:border-white/10 rounded-md p-0.5 bg-surface-raised dark:bg-surface-raised-dark">
           {visiblePrimaryViews.map((view) => renderViewTab(view))}
           {moreViews.length > 0 && (
