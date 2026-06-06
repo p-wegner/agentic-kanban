@@ -2233,25 +2233,27 @@ export function BoardPage() {
         </BoardErrorBoundary>
       )}
       {workspaceIssue && (
-        <Suspense fallback={null}>
-        <WorkspacePanel
-          key={`${workspaceIssue.id}:${workspaceInitial?.workspaceId ?? "new"}:${workspaceOpenCreate ? "create" : "view"}`}
-          issue={workspaceIssue}
-          project={activeProject ?? null}
-          onClose={() => { setWorkspaceIssue(null); setWorkspaceInitial(null); setWorkspaceOpenCreate(false); setWorkspaceInitialDiff(false); }}
-          onWorkspaceChange={() => refetchBoard()}
-          onWorkspaceCreating={(issueId) => setPendingWorkspaceIssueIds((prev) => new Set([...prev, issueId]))}
-          onWorkspaceCreateSettled={(issueId) => setPendingWorkspaceIssueIds((prev) => {
-            const next = new Set(prev);
-            next.delete(issueId);
-            return next;
-          })}
-          initialWorkspaceId={workspaceInitial?.workspaceId}
-          initialSessionId={workspaceInitial?.sessionId}
-          initialShowCreate={workspaceOpenCreate}
-          initialShowDiff={workspaceInitialDiff}
-        />
-        </Suspense>
+        <BoardErrorBoundary key={workspaceIssue.id} columnName="Workspace">
+          <Suspense fallback={null}>
+            <WorkspacePanel
+              key={`${workspaceIssue.id}:${workspaceInitial?.workspaceId ?? "new"}:${workspaceOpenCreate ? "create" : "view"}`}
+              issue={workspaceIssue}
+              project={activeProject ?? null}
+              onClose={() => { setWorkspaceIssue(null); setWorkspaceInitial(null); setWorkspaceOpenCreate(false); setWorkspaceInitialDiff(false); }}
+              onWorkspaceChange={() => refetchBoard()}
+              onWorkspaceCreating={(issueId) => setPendingWorkspaceIssueIds((prev) => new Set([...prev, issueId]))}
+              onWorkspaceCreateSettled={(issueId) => setPendingWorkspaceIssueIds((prev) => {
+                const next = new Set(prev);
+                next.delete(issueId);
+                return next;
+              })}
+              initialWorkspaceId={workspaceInitial?.workspaceId}
+              initialSessionId={workspaceInitial?.sessionId}
+              initialShowCreate={workspaceOpenCreate}
+              initialShowDiff={workspaceInitialDiff}
+            />
+          </Suspense>
+        </BoardErrorBoundary>
       )}
       <ToastContainer />
       {panels.showLiveActivityTicker && (
@@ -2313,6 +2315,10 @@ export function BoardPage() {
         nudgeWipLimit={prefs.nudgeWipLimit}
         viewMode={viewMode}
         columnsRef={columnsRef}
+        workspaceIssue={workspaceIssue}
+        workspaceInitial={workspaceInitial}
+        workspaceOpenCreate={workspaceOpenCreate}
+        selectedIssue={selectedIssue}
         dryRunIssue={panels.dryRunIssue}
         setDryRunIssue={panels.setDryRunIssue}
         handleStartWorkspace={handleStartWorkspace}

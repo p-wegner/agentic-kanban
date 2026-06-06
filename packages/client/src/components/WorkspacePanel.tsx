@@ -215,11 +215,25 @@ function formatTokenCount(n: number): string {
 
 function parseStats(statsStr: string | null | undefined): SessionStats | null {
   if (!statsStr) return null;
+  let parsed: unknown;
   try {
-    return JSON.parse(statsStr);
+    parsed = JSON.parse(statsStr);
   } catch {
     return null;
   }
+  // The stats column also holds non-token shapes (e.g. `{ friction: {...} }`
+  // written by some providers). Only treat it as SessionStats when the numeric
+  // fields the badges read are actually present; otherwise `s.inputTokens
+  // .toLocaleString()` throws and, with no error boundary, blanks the whole app.
+  if (!parsed || typeof parsed !== "object") return null;
+  const s = parsed as Record<string, unknown>;
+  const hasTokenStats =
+    typeof s.durationMs === "number" &&
+    typeof s.totalCostUsd === "number" &&
+    typeof s.inputTokens === "number" &&
+    typeof s.outputTokens === "number" &&
+    typeof s.numTurns === "number";
+  return hasTokenStats ? (parsed as SessionStats) : null;
 }
 
 function SessionStatsBadge({ stats }: { stats: string | null | undefined }) {
