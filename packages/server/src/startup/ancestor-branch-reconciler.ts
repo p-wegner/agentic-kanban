@@ -7,16 +7,8 @@ import { logBoardHealthEvent } from "../repositories/board-health-events.reposit
 import { PREF_RECONCILER_ANCESTOR_BRANCH_ENABLED } from "../constants/preference-keys.js";
 import { finalizeMergeCleanup } from "../services/merge-cleanup.service.js";
 
-/** Issue status names that are already terminal — skip these workspaces. */
+/** Issue status names that are already terminal; skip these workspaces. */
 const TERMINAL_STATUS_NAMES = ["Done", "AI Reviewed", "Closed", "Cancelled"];
-
-/**
- * Issue status names that indicate work is actively in progress.
- * An interrupted merge always leaves the issue In Review, never In Progress,
- * so we must never reconcile In-Progress issues — they are freshly launched
- * or actively running workspaces.
- */
-const ACTIVE_PROGRESS_STATUS_NAMES = ["In Progress"];
 
 export interface AncestorBranchReconcilerDeps {
   database?: Database;
@@ -76,6 +68,8 @@ export async function reconcileAncestorBranchWorkspaces(
 
   // Find non-closed, non-direct workspaces whose issue is NOT in a terminal status
   // and whose mergedAt is null (mergedAt set = already handled by reconcileSilentlyMergedWorkspaces).
+  // In Progress is only eligible when readyForMerge=true: that flag comes from the
+  // review flow, and a dropped merge response can leave reviewed work in that column.
   const candidates = await database
     .select({
       wsId: workspaces.id,
@@ -83,6 +77,7 @@ export async function reconcileAncestorBranchWorkspaces(
       baseBranch: workspaces.baseBranch,
       workingDir: workspaces.workingDir,
       wsStatus: workspaces.status,
+      readyForMerge: workspaces.readyForMerge,
       issueId: issues.id,
       issueNumber: issues.issueNumber,
       projectId: issues.projectId,
@@ -99,7 +94,6 @@ export async function reconcileAncestorBranchWorkspaces(
         eq(workspaces.isDirect, false),
         isNull(workspaces.mergedAt),
         notInArray(projectStatuses.name, TERMINAL_STATUS_NAMES),
-        notInArray(projectStatuses.name, ACTIVE_PROGRESS_STATUS_NAMES),
       ),
     );
 
@@ -110,6 +104,7 @@ export async function reconcileAncestorBranchWorkspaces(
 
   for (const c of candidates) {
     if (!c.branch || !c.baseBranch || !c.repoPath) continue;
+    if (c.statusName === "In Progress" && !c.readyForMerge) continue;
 
     let result: Awaited<ReturnType<typeof checkBranchTipIsAncestor>>;
     try {
