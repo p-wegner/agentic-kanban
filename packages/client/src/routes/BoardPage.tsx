@@ -1777,6 +1777,10 @@ export function BoardPage() {
             onToggleBlocked={() => setShowBlocked((v) => !v)}
             showStaleOnly={showStaleOnly}
             onToggleStaleOnly={() => setShowStaleOnly((v) => !v)}
+            tags={allTags}
+            activeTagIds={activeTagIds}
+            onTagFilterToggle={handleTagFilterToggle}
+            onClearTagFilter={handleClearTagFilter}
           />
         )}
         {viewMode !== "butler" && (
@@ -1831,10 +1835,6 @@ export function BoardPage() {
           visibilityColumns={visibilityColumns}
           hiddenColumns={prefs.hiddenColumns}
           onHiddenColumnsChange={prefs.handleHiddenColumnsChange}
-          tags={allTags}
-          activeTagIds={activeTagIds}
-          onTagFilterToggle={handleTagFilterToggle}
-          onClearTagFilter={handleClearTagFilter}
           showPriorityLegend={prefs.showPriorityLegend}
           onShowPriorityLegendChange={prefs.handleShowPriorityLegendChange}
           showCardAgingHeatmap={prefs.showCardAgingHeatmap}

@@ -14,14 +14,18 @@ interface BoardFilterMenuProps {
   onToggleBlocked: () => void;
   showStaleOnly: boolean;
   onToggleStaleOnly: () => void;
+  tags: { id: string; name: string; color?: string | null }[];
+  activeTagIds: Set<string>;
+  onTagFilterToggle: (tagId: string) => void;
+  onClearTagFilter: () => void;
 }
 
 /**
- * Single entry point for board filtering. Status, issue type, milestone, and the
- * Blocked / Stale quick filters used to be four separate clusters spread across
- * BoardStats, SavedBoardViews, and BoardToolbar. Collapsing them here keeps the
- * header to one row and makes the active-filter count obvious at a glance.
- * (Tag filtering stays in the dedicated TAGS legend below the toolbar.)
+ * Single entry point for board filtering. Status, issue type, milestone, tags,
+ * and the Blocked / Stale quick filters used to be separate clusters spread
+ * across BoardStats, SavedBoardViews, and BoardToolbar (the tag legend ate its
+ * own full row). Collapsing them here keeps the header to one row and makes the
+ * active-filter count obvious at a glance.
  */
 export function BoardFilterMenu({
   statuses,
@@ -36,6 +40,10 @@ export function BoardFilterMenu({
   onToggleBlocked,
   showStaleOnly,
   onToggleStaleOnly,
+  tags,
+  activeTagIds,
+  onTagFilterToggle,
+  onClearTagFilter,
 }: BoardFilterMenuProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -61,7 +69,8 @@ export function BoardFilterMenu({
     (issueTypeFilter ? 1 : 0) +
     (milestoneFilterId ? 1 : 0) +
     (showBlocked ? 1 : 0) +
-    (showStaleOnly ? 1 : 0);
+    (showStaleOnly ? 1 : 0) +
+    activeTagIds.size;
 
   function clearAll() {
     if (statusFilterId) onStatusFilterChange(null);
@@ -69,6 +78,7 @@ export function BoardFilterMenu({
     if (milestoneFilterId) onMilestoneFilterChange(null);
     if (showBlocked) onToggleBlocked();
     if (showStaleOnly) onToggleStaleOnly();
+    if (activeTagIds.size > 0) onClearTagFilter();
   }
 
   return (
@@ -150,6 +160,35 @@ export function BoardFilterMenu({
                   <option key={m.id} value={m.id}>{m.name}</option>
                 ))}
               </select>
+            </div>
+          )}
+
+          {tags.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-semibold uppercase tracking-wide text-ink-faint dark:text-gray-500">Tags</label>
+              <div className="flex items-center gap-1 flex-wrap">
+                {tags.map((tag) => {
+                  const isActive = activeTagIds.has(tag.id);
+                  return (
+                    <button
+                      key={tag.id}
+                      onClick={() => onTagFilterToggle(tag.id)}
+                      aria-pressed={isActive}
+                      title={`Filter by tag: ${tag.name}`}
+                      className={`shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border transition-colors ${
+                        isActive
+                          ? "border-brand-600 bg-brand-600 text-white hover:bg-brand-700"
+                          : "border-black/[0.07] dark:border-white/10 bg-surface-raised dark:bg-surface-raised-dark text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-700"
+                      }`}
+                    >
+                      {tag.color && (
+                        <span aria-hidden="true" className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: tag.color }} />
+                      )}
+                      {tag.name}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
 
