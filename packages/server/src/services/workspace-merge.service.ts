@@ -659,7 +659,10 @@ export function createWorkspaceMergeService(deps: {
     } catch {
       uniqueCommits = 0;
     }
-    if (uniqueCommits === 0) {
+    const originalUniqueCommits = uniqueCommits === 0 && branchSha !== baseSha && workspace.baseCommitSha
+      ? await gitService.countUniqueCommits(repoPath, workspace.baseCommitSha, branchSha).catch(() => 0)
+      : 0;
+    if (uniqueCommits === 0 && originalUniqueCommits === 0) {
       return {
         isAlreadyMerged: false,
         branch: workspace.branch,
