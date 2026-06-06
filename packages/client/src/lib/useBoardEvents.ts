@@ -8,6 +8,12 @@ interface BoardChangedEvent {
   reason: string;
 }
 
+interface ProjectsChangedEvent {
+  type: "projects_changed";
+  projectId: string;
+  reason: "project_created" | "project_updated" | "project_deleted";
+}
+
 interface SessionActivityEvent {
   type: "session_activity";
   projectId: string;
@@ -58,7 +64,7 @@ interface ApprovalRequestedEvent {
   workspaceId?: string;
 }
 
-type BoardWsEvent = BoardChangedEvent | SessionActivityEvent | SessionStatsEvent | SessionTodosEvent | ApprovalRequestedEvent;
+type BoardWsEvent = BoardChangedEvent | ProjectsChangedEvent | SessionActivityEvent | SessionStatsEvent | SessionTodosEvent | ApprovalRequestedEvent;
 
 export interface LiveSessionStats {
   model: string;
@@ -94,7 +100,7 @@ export function useBoardEvents(
   const connectRef = useRef<() => void>(() => {});
 
   const connect = useCallback(() => {
-    if (!projectId || unmountedRef.current) return;
+    if (unmountedRef.current) return;
 
     if (wsRef.current) {
       wsRef.current.onclose = null;
@@ -103,7 +109,8 @@ export function useBoardEvents(
     }
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const url = `${protocol}//${window.location.host}/ws/board/${projectId}`;
+    const subscriptionProjectId = projectId ?? "__projects";
+    const url = `${protocol}//${window.location.host}/ws/board/${subscriptionProjectId}`;
 
     const ws = new WebSocket(url);
     wsRef.current = ws;
@@ -118,6 +125,8 @@ export function useBoardEvents(
       try {
         const msg: BoardWsEvent = JSON.parse(event.data);
         if (msg.type === "board_changed") {
+          onBoardChangeRef.current(msg.reason);
+        } else if (msg.type === "projects_changed") {
           onBoardChangeRef.current(msg.reason);
         } else if (msg.type === "session_activity") {
           onSessionActivityRef.current?.(msg.issueId, msg.sessionId, msg.activity);
