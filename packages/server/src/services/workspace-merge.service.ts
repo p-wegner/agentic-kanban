@@ -121,12 +121,20 @@ export function createWorkspaceMergeService(deps: {
     });
     if (!isFailed) return;
 
-    try {
-      await getSessionManager().stopSession(latestSession.id);
-    } catch (err) {
-      console.warn(`[workspace-merge] failed to force-stop stale session ${latestSession.id}:`, err instanceof Error ? err.message : String(err));
-    }
+    await forceStopSession(latestSession.id, "stale session");
     await updateWorkspaceStatus(workspace.id, "idle", {}, database);
+  }
+
+  async function forceStopSession(sessionId: string, label: string): Promise<void> {
+    try {
+      await getSessionManager?.().stopSession(sessionId);
+    } catch (err) {
+      console.warn(`[workspace-merge] failed to force-stop ${label} ${sessionId}:`, err instanceof Error ? err.message : String(err));
+    }
+    await database
+      .update(sessions)
+      .set({ status: "stopped", endedAt: new Date().toISOString() })
+      .where(eq(sessions.id, sessionId));
   }
 
   async function recoverZeroOutputRunningFixAndMergeSession(workspace: typeof workspaces.$inferSelect) {
@@ -155,7 +163,7 @@ export function createWorkspaceMergeService(deps: {
         `[workspace-merge] stopping stale zero-output fix-and-merge session ${latestSession.id} for workspace ${workspace.id} ` +
           `after ${Math.round(ageMs / 1000)}s with no messages`,
       );
-      await getSessionManager().stopSession(latestSession.id);
+      await forceStopSession(latestSession.id, "stale zero-output session");
     } catch (err) {
       console.warn(
         `[workspace-merge] failed to force-stop stale zero-output session ${latestSession.id}:`,
@@ -166,7 +174,11 @@ export function createWorkspaceMergeService(deps: {
   }
 
   async function mergeWorkspace(id: string) {
-    const workspace = await getWorkspaceById(id, database);
+    let workspace = await getWorkspaceById(id, database);
+    if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
+    await recoverFailedFixAndMergeSessionIfNeeded(workspace);
+    await recoverZeroOutputRunningFixAndMergeSession(workspace);
+    workspace = await getWorkspaceById(id, database);
     if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
 
     const { project, repoPath, defaultBranch } = await resolveProjectFull(id, database);
@@ -362,6 +374,7 @@ export function createWorkspaceMergeService(deps: {
     await recoverFailedFixAndMergeSessionIfNeeded(workspace);
     const refreshedWorkspace = await getWorkspaceById(id, database);
     if (!refreshedWorkspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
+    if (!refreshedWorkspace.workingDir) throw new WorkspaceError("Workspace not set up", "BAD_REQUEST");
     if (refreshedWorkspace.status === "fixing") throw new WorkspaceError("Conflict resolution already in progress", "CONFLICT");
     if (!getSessionManager) throw new WorkspaceError("Session manager not available", "BAD_REQUEST");
 
@@ -628,6 +641,7 @@ export function createWorkspaceMergeService(deps: {
       };
     }
     const branchSha = ancestryResult.branchSha;
+    const baseSha = ancestryResult.baseSha;
     if (!ancestryResult.isAncestor) {
       return {
         isAlreadyMerged: false,
