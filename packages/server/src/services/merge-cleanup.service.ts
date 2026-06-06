@@ -1,5 +1,5 @@
-import { issues, projectStatuses, workspaces } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
+import { issues, projectStatuses, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { and, eq } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "./board-events.js";
 
@@ -23,6 +23,7 @@ export interface FinalizeMergeCleanupResult {
   mergedAt: string | null;
   workspaceUpdated: boolean;
   issueTransitioned: boolean;
+  sessionsStopped: boolean;
   broadcasted: boolean;
 }
 
@@ -134,7 +135,15 @@ export async function finalizeMergeCleanup(
     }
   }
 
-  const broadcasted = Boolean(input.boardEvents && projectId && (workspaceUpdated || issueTransitioned));
+  const sessionsStopped = await stopRunningWorkspaceSessions(input.database, input.workspaceId, now).catch((err) => {
+    console.warn(
+      `[merge-cleanup] failed to stop running sessions after merge finalization (workspaceId=${input.workspaceId}).`,
+      err instanceof Error ? err.message : String(err),
+    );
+    return false;
+  });
+
+  const broadcasted = Boolean(input.boardEvents && projectId && (workspaceUpdated || issueTransitioned || sessionsStopped));
   if (broadcasted) {
     input.boardEvents?.broadcast(projectId!, "workspace_merged");
   }
@@ -145,6 +154,25 @@ export async function finalizeMergeCleanup(
     mergedAt: shouldMarkMerged ? mergedAt : null,
     workspaceUpdated,
     issueTransitioned,
+    sessionsStopped,
     broadcasted,
   };
+}
+
+async function stopRunningWorkspaceSessions(
+  database: Database,
+  workspaceId: string,
+  endedAt: string,
+): Promise<boolean> {
+  const runningRows = await database
+    .select({ id: sessions.id })
+    .from(sessions)
+    .where(and(eq(sessions.workspaceId, workspaceId), eq(sessions.status, "running")));
+  if (runningRows.length === 0) return false;
+
+  await database
+    .update(sessions)
+    .set({ status: "stopped", endedAt })
+    .where(and(eq(sessions.workspaceId, workspaceId), eq(sessions.status, "running")));
+  return true;
 }
