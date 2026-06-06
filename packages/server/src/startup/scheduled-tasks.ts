@@ -11,12 +11,16 @@ export interface ScheduledTaskTimers {
 
 let activeScheduledTaskTimers: ScheduledTaskTimers | null = null;
 
-export function setupScheduledTasks(serverPort: number): ScheduledTaskTimers {
+export function stopScheduledTasks(): void {
   if (activeScheduledTaskTimers) {
     clearTimeout(activeScheduledTaskTimers.timer);
     clearInterval(activeScheduledTaskTimers.interval);
     activeScheduledTaskTimers = null;
   }
+}
+
+export function setupScheduledTasks(serverPort: number): ScheduledTaskTimers {
+  stopScheduledTasks();
 
   async function runScheduledRunsCycle() {
     try {

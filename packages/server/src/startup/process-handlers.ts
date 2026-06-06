@@ -36,7 +36,11 @@ export async function waitForActiveMergesToSettle(timeoutMs = 60_000): Promise<n
   ]);
 }
 
-export function setupProcessHandlers(server: { close: (cb: () => void) => void; closeIdleConnections?: () => void }, agentServiceModule: typeof agentService) {
+export function setupProcessHandlers(
+  server: { close: (cb: () => void) => void; closeIdleConnections?: () => void },
+  agentServiceModule: typeof agentService,
+  opts: { cleanupStartupTimers?: () => void } = {},
+) {
   process.on("uncaughtException", (err: NodeJS.ErrnoException) => {
     if (err.code === "EADDRINUSE") {
       console.error("[fatal] Port already in use — exiting:", err.message);
@@ -63,6 +67,7 @@ export function setupProcessHandlers(server: { close: (cb: () => void) => void; 
   });
 
   async function shutdown(signal: string) {
+    opts.cleanupStartupTimers?.();
     // Agent processes are spawned detached+unref'd — they survive hot-reload without being killed.
     // Only kill them on explicit SIGINT (user Ctrl+C) to avoid orphaning on intentional shutdown.
     const activeCount = signal === "SIGINT" ? agentServiceModule.killAll() : 0;

@@ -100,14 +100,7 @@ export async function capSessionMessages(database: Database): Promise<number> {
  * short delay) and then every PRUNE_INTERVAL_MS.
  */
 export function startSessionMessagePruner(database: Database): void {
-  if (activePruneTimeout !== null) {
-    clearTimeout(activePruneTimeout);
-    activePruneTimeout = null;
-  }
-  if (activePruneInterval !== null) {
-    clearInterval(activePruneInterval);
-    activePruneInterval = null;
-  }
+  stopSessionMessagePruner();
 
   async function runPruneCycle() {
     try {
@@ -127,4 +120,15 @@ export function startSessionMessagePruner(database: Database): void {
   // First run after 30s (let server fully start)
   activePruneTimeout = setTimeout(() => { runPruneCycle().catch(() => {}); }, 30_000);
   activePruneInterval = setInterval(() => { runPruneCycle().catch(() => {}); }, PRUNE_INTERVAL_MS);
+}
+
+export function stopSessionMessagePruner(): void {
+  if (activePruneTimeout !== null) {
+    clearTimeout(activePruneTimeout);
+    activePruneTimeout = null;
+  }
+  if (activePruneInterval !== null) {
+    clearInterval(activePruneInterval);
+    activePruneInterval = null;
+  }
 }
