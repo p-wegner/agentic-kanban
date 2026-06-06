@@ -117,6 +117,12 @@ type ProfileOption = {
   name: string;
 };
 
+type AvailableSkill = {
+  id: string;
+  name: string;
+  description: string;
+};
+
 function profileOptionValue(option: ProfileOption): string {
   return `${option.provider}:${option.name}`;
 }
@@ -294,6 +300,145 @@ function RetryDecisionBadge({ decision }: { decision: RetryDecision }) {
   );
 }
 
+interface WorkspaceQuickActionsProps {
+  workspace: WorkspaceResponse;
+  completedSessions: SessionInfo[];
+  availableSkills: AvailableSkill[];
+  expandedQuickActions: Record<string, boolean>;
+  setExpandedQuickActions: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+  actionLoading: boolean;
+  onReview: (workspaceId: string) => void;
+  onMerge: (workspaceId: string) => void;
+  onAutoBisect: (workspaceId: string, mode?: "related" | "full") => void;
+  onExportHandoffBundle: (workspaceId: string) => Promise<void>;
+  onSkillQuickLaunch: (skillId: string) => void;
+}
+
+function WorkspaceQuickActions({
+  workspace,
+  completedSessions,
+  availableSkills,
+  expandedQuickActions,
+  setExpandedQuickActions,
+  actionLoading,
+  onReview,
+  onMerge,
+  onAutoBisect,
+  onExportHandoffBundle,
+  onSkillQuickLaunch,
+}: WorkspaceQuickActionsProps) {
+  if (workspace.status === "closed" || !workspace.workingDir) return null;
+
+  const lastReview = completedSessions.filter(s => s.triggerType === "review").at(-1);
+  const lastMerge = completedSessions.filter(s => s.triggerType === "merge").at(-1);
+  const lastBisect = completedSessions.filter(s => s.triggerType === "bisect").at(-1);
+  const quickActionsKey = `qa-${workspace.id}`;
+  const qaExpanded = expandedQuickActions[quickActionsKey];
+
+  return (
+    <div className="pt-1">
+      <button
+        onClick={() => setExpandedQuickActions((prev) => ({ ...prev, [quickActionsKey]: !prev[quickActionsKey] }))}
+        className="flex items-center gap-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide hover:text-gray-600 dark:hover:text-gray-300 w-full text-left"
+      >
+        <svg className={`w-3 h-3 transition-transform ${qaExpanded ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+        Quick Actions
+      </button>
+      {qaExpanded && (
+        <div className="flex flex-wrap gap-x-3 gap-y-1.5 mt-1">
+          <div className="flex flex-col gap-0.5">
+            <button
+              onClick={(e) => { e.stopPropagation(); onReview(workspace.id); }}
+              disabled={actionLoading}
+              className="text-[10px] font-medium px-2 py-0.5 rounded bg-accent-50 text-accent-700 hover:bg-accent-100 dark:bg-accent-900/40 dark:text-accent-300 disabled:opacity-50"
+              title="Trigger AI code review"
+            >
+              AI Review
+            </button>
+            {lastReview && (
+              <span className={`text-[9px] px-1 ${lastReview.status === "completed" ? "text-green-600" : "text-yellow-600"}`}>
+                {lastReview.status === "completed" ? "✓" : "✗"} {formatRelativeTime(lastReview.endedAt ?? lastReview.startedAt)}
+              </span>
+            )}
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <button
+              onClick={(e) => { e.stopPropagation(); onMerge(workspace.id); }}
+              disabled={actionLoading}
+              className="text-[10px] font-medium px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200 disabled:opacity-50"
+              title="Merge this workspace"
+            >
+              {workspace.isDirect ? "Close" : "AI Merge"}
+            </button>
+            {lastMerge && (
+              <span className={`text-[9px] px-1 ${lastMerge.status === "completed" ? "text-green-600" : "text-yellow-600"}`}>
+                {lastMerge.status === "completed" ? "✓" : "✗"} {formatRelativeTime(lastMerge.endedAt ?? lastMerge.startedAt)}
+              </span>
+            )}
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <div className="flex">
+              <button
+                onClick={(e) => { e.stopPropagation(); onAutoBisect(workspace.id, "related"); }}
+                disabled={actionLoading}
+                className="text-[10px] font-medium px-2 py-0.5 rounded-l bg-rose-100 text-rose-700 hover:bg-rose-200 disabled:opacity-50"
+                title="Run git bisect using tests related to changed files"
+              >
+                Auto-bisect
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); onAutoBisect(workspace.id, "full"); }}
+                disabled={actionLoading}
+                className="text-[10px] font-medium px-1.5 py-0.5 rounded-r bg-rose-200 text-rose-800 hover:bg-rose-300 disabled:opacity-50 border-l border-rose-300"
+                title="Run git bisect using the full test suite"
+              >
+                Full
+              </button>
+            </div>
+            {lastBisect && (
+              <span className={`text-[9px] px-1 ${lastBisect.status === "completed" && lastBisect.exitCode === "0" ? "text-green-600" : "text-yellow-600"}`}>
+                {lastBisect.status === "completed" && lastBisect.exitCode === "0" ? "ok" : "fail"} {formatRelativeTime(lastBisect.endedAt ?? lastBisect.startedAt)}
+              </span>
+            )}
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <button
+              onClick={(e) => { e.stopPropagation(); void onExportHandoffBundle(workspace.id); }}
+              disabled={actionLoading}
+              className="text-[10px] font-medium px-2 py-0.5 rounded bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-300 disabled:opacity-50"
+              title="Download a Markdown handoff bundle for this workspace"
+            >
+              Export Handoff
+            </button>
+          </div>
+          {availableSkills.map((skill) => {
+            const lastSkill = completedSessions.filter(s => s.triggerType === `skill:${skill.name}`).at(-1);
+            return (
+              <div key={skill.id} className="flex flex-col gap-0.5">
+                <button
+                  onClick={(e) => { e.stopPropagation(); onSkillQuickLaunch(skill.id); }}
+                  disabled={actionLoading}
+                  className="text-[10px] font-medium px-2 py-0.5 rounded bg-brand-50 text-brand-700 hover:bg-brand-100 dark:bg-brand-900/40 dark:text-brand-300 disabled:opacity-50"
+                  title={skill.description}
+                >
+                  ✨ {humanizeSkillName(skill.name)}
+                </button>
+                {lastSkill && (
+                  <span className={`text-[9px] px-1 ${lastSkill.status === "completed" ? "text-green-600" : "text-yellow-600"}`}>
+                    {lastSkill.status === "completed" ? "✓" : "✗"} {formatRelativeTime(lastSkill.endedAt ?? lastSkill.startedAt)}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onWorkspaceCreating, onWorkspaceCreateSettled, initialWorkspaceId, initialSessionId, autoSelectId, initialShowCreate, initialShowDiff }: WorkspacePanelProps) {
   const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
   const [loading, setLoading] = useState(true);
@@ -353,7 +498,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
   ]);
   const [selectedProfile, setSelectedProfile] = useState<string>("");
   const [selectedModel, setSelectedModel] = useState<string>("");
-  const [availableSkills, setAvailableSkills] = useState<{ id: string; name: string; description: string }[]>([]);
+  const [availableSkills, setAvailableSkills] = useState<AvailableSkill[]>([]);
   const [lastPrompt, setLastPrompt] = useState<string>(
     initialSessionId ? `${issue.title}${issue.description ? `\n\n${issue.description}` : ""}` : ""
   );
@@ -1534,7 +1679,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
             />
           )}
 
-          {workspaces.map((ws) => {
+          {workspaces.map(function renderWorkspaceCard(ws) {
             const isSelected = selectedWorkspace === ws.id;
             const isThisRunning = isSelected && isRunning;
             const isLaunching = isSelected && ws.status === "active" && activeSession && messages.length === 0;
@@ -1983,115 +2128,21 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                       );
                     })()}
 
-                    {ws.status !== "closed" && !isRunning && ws.workingDir && (() => {
-                      const lastReview = completedSessions.filter(s => s.triggerType === "review").at(-1);
-                      const lastMerge = completedSessions.filter(s => s.triggerType === "merge").at(-1);
-                      const lastBisect = completedSessions.filter(s => s.triggerType === "bisect").at(-1);
-                      const quickActionsKey = `qa-${ws.id}`;
-                      const qaExpanded = expandedQuickActions[quickActionsKey];
-                      return (
-                      <div className="pt-1">
-                        <button
-                          onClick={() => setExpandedQuickActions((prev) => ({ ...prev, [quickActionsKey]: !prev[quickActionsKey] }))}
-                          className="flex items-center gap-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide hover:text-gray-600 dark:hover:text-gray-300 w-full text-left"
-                        >
-                          <svg className={`w-3 h-3 transition-transform ${qaExpanded ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                          </svg>
-                          Quick Actions
-                        </button>
-                        {qaExpanded && (
-                        <div className="flex flex-wrap gap-x-3 gap-y-1.5 mt-1">
-                          <div className="flex flex-col gap-0.5">
-                            <button
-                              onClick={(e) => { e.stopPropagation(); handleReview(ws.id); }}
-                              disabled={actionLoading}
-                              className="text-[10px] font-medium px-2 py-0.5 rounded bg-accent-50 text-accent-700 hover:bg-accent-100 dark:bg-accent-900/40 dark:text-accent-300 disabled:opacity-50"
-                              title="Trigger AI code review"
-                            >
-                              AI Review
-                            </button>
-                            {lastReview && (
-                              <span className={`text-[9px] px-1 ${lastReview.status === "completed" ? "text-green-600" : "text-yellow-600"}`}>
-                                {lastReview.status === "completed" ? "✓" : "✗"} {formatRelativeTime(lastReview.endedAt ?? lastReview.startedAt)}
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex flex-col gap-0.5">
-                            <button
-                              onClick={(e) => { e.stopPropagation(); handleMerge(ws.id); }}
-                              disabled={actionLoading}
-                              className="text-[10px] font-medium px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200 disabled:opacity-50"
-                              title="Merge this workspace"
-                            >
-                              {ws.isDirect ? "Close" : "AI Merge"}
-                            </button>
-                            {lastMerge && (
-                              <span className={`text-[9px] px-1 ${lastMerge.status === "completed" ? "text-green-600" : "text-yellow-600"}`}>
-                                {lastMerge.status === "completed" ? "✓" : "✗"} {formatRelativeTime(lastMerge.endedAt ?? lastMerge.startedAt)}
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex flex-col gap-0.5">
-                            <div className="flex">
-                              <button
-                                onClick={(e) => { e.stopPropagation(); handleAutoBisect(ws.id, "related"); }}
-                                disabled={actionLoading}
-                                className="text-[10px] font-medium px-2 py-0.5 rounded-l bg-rose-100 text-rose-700 hover:bg-rose-200 disabled:opacity-50"
-                                title="Run git bisect using tests related to changed files"
-                              >
-                                Auto-bisect
-                              </button>
-                              <button
-                                onClick={(e) => { e.stopPropagation(); handleAutoBisect(ws.id, "full"); }}
-                                disabled={actionLoading}
-                                className="text-[10px] font-medium px-1.5 py-0.5 rounded-r bg-rose-200 text-rose-800 hover:bg-rose-300 disabled:opacity-50 border-l border-rose-300"
-                                title="Run git bisect using the full test suite"
-                              >
-                                Full
-                              </button>
-                            </div>
-                            {lastBisect && (
-                              <span className={`text-[9px] px-1 ${lastBisect.status === "completed" && lastBisect.exitCode === "0" ? "text-green-600" : "text-yellow-600"}`}>
-                                {lastBisect.status === "completed" && lastBisect.exitCode === "0" ? "ok" : "fail"} {formatRelativeTime(lastBisect.endedAt ?? lastBisect.startedAt)}
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex flex-col gap-0.5">
-                            <button
-                              onClick={(e) => { e.stopPropagation(); void handleExportHandoffBundle(ws.id); }}
-                              disabled={actionLoading}
-                              className="text-[10px] font-medium px-2 py-0.5 rounded bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-300 disabled:opacity-50"
-                              title="Download a Markdown handoff bundle for this workspace"
-                            >
-                              Export Handoff
-                            </button>
-                          </div>
-                          {availableSkills.map((skill) => {
-                            const lastSkill = completedSessions.filter(s => s.triggerType === `skill:${skill.name}`).at(-1);
-                            return (
-                              <div key={skill.id} className="flex flex-col gap-0.5">
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); handleSkillQuickLaunch(skill.id); }}
-                                  disabled={actionLoading}
-                                  className="text-[10px] font-medium px-2 py-0.5 rounded bg-brand-50 text-brand-700 hover:bg-brand-100 dark:bg-brand-900/40 dark:text-brand-300 disabled:opacity-50"
-                                  title={skill.description}
-                                >
-                                  ✨ {humanizeSkillName(skill.name)}
-                                </button>
-                                {lastSkill && (
-                                  <span className={`text-[9px] px-1 ${lastSkill.status === "completed" ? "text-green-600" : "text-yellow-600"}`}>
-                                    {lastSkill.status === "completed" ? "✓" : "✗"} {formatRelativeTime(lastSkill.endedAt ?? lastSkill.startedAt)}
-                                  </span>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                        )}
-                      </div>
-                      );
-                    })()}
+                    {!isRunning && (
+                      <WorkspaceQuickActions
+                        workspace={ws}
+                        completedSessions={completedSessions}
+                        availableSkills={availableSkills}
+                        expandedQuickActions={expandedQuickActions}
+                        setExpandedQuickActions={setExpandedQuickActions}
+                        actionLoading={actionLoading}
+                        onReview={handleReview}
+                        onMerge={handleMerge}
+                        onAutoBisect={handleAutoBisect}
+                        onExportHandoffBundle={handleExportHandoffBundle}
+                        onSkillQuickLaunch={handleSkillQuickLaunch}
+                      />
+                    )}
 
                     {((selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) || ws.workingDir || true /* always show tab bar for Timeline */) && (
                       <div className="flex border-b border-gray-200 dark:border-gray-700">
