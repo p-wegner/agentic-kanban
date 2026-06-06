@@ -659,7 +659,7 @@ export function createWorkspaceMergeService(deps: {
     } catch {
       uniqueCommits = 0;
     }
-    if (uniqueCommits === 0) {
+    if (uniqueCommits === 0 && branchSha === baseSha) {
       return {
         isAlreadyMerged: false,
         branch: workspace.branch,
