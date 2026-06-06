@@ -31,6 +31,7 @@ import type { WSContext } from "hono/ws";
  * | workflow_template_deleted | workflows route                             |
  * | workflow_transition       | workflows route                             |
  * | internal_notify           | routes/index internal endpoint              |
+ * | projects_changed          | projects route emits a separate WS message  |
  */
 export type BoardEventType =
   | "board_changed"
@@ -56,10 +57,21 @@ export type BoardEventType =
   | "workflow_transition"
   | "internal_notify";
 
+export type ProjectEventType =
+  | "project_created"
+  | "project_updated"
+  | "project_deleted";
+
 interface BoardEventMessage {
   type: "board_changed";
   projectId: string;
   reason: BoardEventType;
+}
+
+interface ProjectsChangedMessage {
+  type: "projects_changed";
+  projectId: string;
+  reason: ProjectEventType;
 }
 
 export interface SessionActivityMessage {
@@ -104,7 +116,7 @@ export interface ApprovalRequestMessage {
   workspaceId?: string;
 }
 
-type BoardWsMessage = BoardEventMessage | SessionActivityMessage | SessionStatsMessage | SessionTodosMessage | ApprovalRequestMessage;
+type BoardWsMessage = BoardEventMessage | ProjectsChangedMessage | SessionActivityMessage | SessionStatsMessage | SessionTodosMessage | ApprovalRequestMessage;
 
 interface BoardEventSubscriber {
   ws: WSContext;
@@ -191,6 +203,22 @@ function createBoardEvents() {
     }
   }
 
+  function broadcastProjectsChanged(projectId: string, reason: ProjectEventType) {
+    const message: ProjectsChangedMessage = { type: "projects_changed", projectId, reason };
+    const payload = JSON.stringify(message);
+    const sent = new Set<WSContext>();
+
+    for (const subs of subscribers.values()) {
+      for (const sub of subs.values()) {
+        if (sent.has(sub.ws)) continue;
+        sent.add(sub.ws);
+        if (sub.ws.readyState === 1) {
+          sub.ws.send(payload);
+        }
+      }
+    }
+  }
+
   function broadcastActivity(projectId: string, data: Omit<SessionActivityMessage, "type" | "projectId">) {
     const subs = subscribers.get(projectId);
     if (!subs) return;
@@ -243,6 +271,7 @@ function createBoardEvents() {
     subscribe,
     unsubscribe,
     broadcast,
+    broadcastProjectsChanged,
     broadcastActivity,
     broadcastLiveStats,
     broadcastTodos,
