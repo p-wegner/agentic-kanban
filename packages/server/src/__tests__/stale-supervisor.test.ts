@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-// @ts-ignore — scripts/ is .mjs, not in tsconfig
-import { reapStaleSupervisors } from "../../../../scripts/stale-supervisor.mjs";
+// @ts-ignore - scripts/ is .mjs, not in tsconfig
+import { planStaleSupervisorReap, reapStaleSupervisors } from "../../../../scripts/stale-supervisor.mjs";
 
 const CHECKOUT = "C:/andrena/agentic-kanban";
 const SERVER_PORT = 3001;
 
-function makeProc(pid: number, commandLine: string) {
-  return { pid, commandLine };
+function makeProc(pid: number, commandLine: string, ppid = 0) {
+  return { pid, ppid, commandLine };
 }
 
 describe("reapStaleSupervisors", () => {
@@ -34,12 +34,30 @@ describe("reapStaleSupervisors", () => {
       listProcs: () => [
         makeProc(1001, `node ${CHECKOUT}/scripts/dev.mjs`),
       ],
-      checkPort: () => true,
+      listeningPids: new Set([1001]),
       kill,
       exitProcess,
     });
     expect(exitProcess).toHaveBeenCalledWith(0);
     expect(kill).not.toHaveBeenCalled();
+  });
+
+  it("treats a supervisor as healthy when its descendant serves the expected port", () => {
+    const kill = vi.fn(() => true);
+    const exitProcess = vi.fn();
+    reapStaleSupervisors({
+      checkoutRoot: CHECKOUT,
+      serverPort: SERVER_PORT,
+      listProcs: () => [
+        makeProc(1101, `node ${CHECKOUT}/scripts/dev.mjs`),
+        makeProc(1102, `node ${CHECKOUT}/packages/server/node_modules/tsx/dist/cli.mjs watch src/index.ts`, 1101),
+      ],
+      listeningPids: new Set([1102]),
+      kill,
+      exitProcess,
+    });
+    expect(kill).not.toHaveBeenCalled();
+    expect(exitProcess).toHaveBeenCalledWith(0);
   });
 
   it("reaps a stale supervisor that belongs to this checkout but is not serving the port", () => {
@@ -138,14 +156,12 @@ describe("reapStaleSupervisors", () => {
   });
 
   it("ignores a worktree supervisor even though it shares the same repo root", () => {
-    // Worktree path does NOT match the main checkout root as a boundary.
     const kill = vi.fn(() => true);
     const exitProcess = vi.fn();
     reapStaleSupervisors({
       checkoutRoot: CHECKOUT,
       serverPort: SERVER_PORT,
       listProcs: () => [
-        // Different worktree — path starts with a different prefix, not checkoutRoot
         makeProc(5001, "node C:/andrena/.worktrees/feature_ak-200-foo/scripts/dev.mjs"),
       ],
       checkPort: () => false,
@@ -156,10 +172,27 @@ describe("reapStaleSupervisors", () => {
     expect(exitProcess).not.toHaveBeenCalled();
   });
 
+  it("does not include a different worktree supervisor even when that worktree has a listener", () => {
+    const plan = planStaleSupervisorReap({
+      checkoutRoot: CHECKOUT,
+      serverPort: SERVER_PORT,
+      processes: [
+        makeProc(5101, "node C:/andrena/.worktrees/feature_ak-200-foo/scripts/dev.mjs"),
+        makeProc(5102, "node C:/andrena/.worktrees/feature_ak-200-foo/packages/server/src/index.ts", 5101),
+      ],
+      servingPids: new Set([5102]),
+      portListening: true,
+    });
+
+    expect(plan.candidates).toHaveLength(0);
+    expect(plan.stale).toHaveLength(0);
+    expect(plan.serving).toBeNull();
+    expect(plan.portBlocked).toBe(false);
+  });
+
   it("does not reap the current process's own PID", () => {
     const kill = vi.fn(() => true);
     const exitProcess = vi.fn();
-    // listProcs includes current PID — stale-supervisor.mjs filters it out
     reapStaleSupervisors({
       checkoutRoot: CHECKOUT,
       serverPort: SERVER_PORT,
@@ -208,8 +241,44 @@ describe("reapStaleSupervisors", () => {
       kill,
       exitProcess,
     });
-    // commandLineBelongsToCheckout normalises slashes so this should be reaped
     expect(kill).toHaveBeenCalledWith(7001);
     expect(exitProcess).not.toHaveBeenCalled();
+  });
+
+  it("does not kill unrelated same-checkout node processes", () => {
+    const kill = vi.fn(() => true);
+    const exitProcess = vi.fn();
+    reapStaleSupervisors({
+      checkoutRoot: CHECKOUT,
+      serverPort: SERVER_PORT,
+      listProcs: () => [
+        makeProc(8001, `node ${CHECKOUT}/scripts/other-tool.mjs`),
+      ],
+      listeningPids: new Set([8001]),
+      kill,
+      exitProcess,
+    });
+    expect(kill).not.toHaveBeenCalled();
+    expect(exitProcess).not.toHaveBeenCalled();
+  });
+
+  it("does not treat an unrelated listener as proof that a same-checkout supervisor is healthy", () => {
+    const kill = vi.fn(() => true);
+    const exitProcess = vi.fn();
+    reapStaleSupervisors({
+      checkoutRoot: CHECKOUT,
+      serverPort: SERVER_PORT,
+      listProcs: () => [
+        makeProc(8101, `node ${CHECKOUT}/scripts/dev.mjs`),
+        makeProc(8102, `node ${CHECKOUT}/scripts/other-tool.mjs`),
+      ],
+      listeningPids: new Set([8102]),
+      kill,
+      exitProcess,
+    });
+    expect(kill).toHaveBeenCalledTimes(1);
+    expect(kill).toHaveBeenCalledWith(8101);
+    expect(kill).not.toHaveBeenCalledWith(8102);
+    expect(exitProcess).toHaveBeenCalledWith(0);
   });
 });
