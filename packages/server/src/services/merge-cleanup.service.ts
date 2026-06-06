@@ -54,7 +54,7 @@ export async function finalizeMergeCleanup(
   }
 
   const [issue] = await input.database
-    .select({ statusId: issues.statusId, projectId: issues.projectId })
+    .select({ statusId: issues.statusId, projectId: issues.projectId, statusChangedAt: issues.statusChangedAt })
     .from(issues)
     .where(eq(issues.id, input.issueId))
     .limit(1);
@@ -85,30 +85,52 @@ export async function finalizeMergeCleanup(
     (shouldMarkMerged && workspace.mergedAt !== mergedAt) ||
     (input.workingDir !== undefined && workspace.workingDir !== input.workingDir);
 
-  if (workspaceUpdated) {
-    await input.database
-      .update(workspaces)
-      .set(workspacePatch)
-      .where(eq(workspaces.id, input.workspaceId));
-  }
-
   let issueTransitioned = false;
+  let targetStatus: { id: string; name: string } | undefined;
   if (projectId) {
     const statuses = await input.database
       .select({ id: projectStatuses.id, name: projectStatuses.name })
       .from(projectStatuses)
       .where(eq(projectStatuses.projectId, projectId));
-    const targetStatus = statuses.find((status) => status.name === "Done")
+    targetStatus = statuses.find((status) => status.name === "Done")
       ?? (input.fallbackToAiReviewed ? statuses.find((status) => status.name === "AI Reviewed") : undefined);
 
-    if (targetStatus && issue.statusId !== targetStatus.id) {
-      await input.database
-        .update(issues)
-        .set({ statusId: targetStatus.id, updatedAt: now, statusChangedAt: now })
-        .where(eq(issues.id, input.issueId));
-      issueTransitioned = true;
-    } else if (!targetStatus) {
+    if (!targetStatus) {
       console.warn(`[merge-cleanup] no Done status found for project ${projectId}`);
+    }
+  }
+
+  const shouldTransitionIssue = Boolean(targetStatus && issue.statusId !== targetStatus.id);
+  if (targetStatus && issue.statusId !== targetStatus.id) {
+    await input.database
+      .update(issues)
+      .set({ statusId: targetStatus.id, updatedAt: now, statusChangedAt: now })
+      .where(eq(issues.id, input.issueId));
+    issueTransitioned = true;
+  }
+
+  if (workspaceUpdated) {
+    try {
+      await input.database
+        .update(workspaces)
+        .set(workspacePatch)
+        .where(eq(workspaces.id, input.workspaceId));
+    } catch (err) {
+      if (issueTransitioned) {
+        try {
+          await input.database
+            .update(issues)
+            .set({ statusId: issue.statusId, updatedAt: now, statusChangedAt: issue.statusChangedAt })
+            .where(eq(issues.id, input.issueId));
+        } catch (rollbackErr) {
+          console.warn(
+            "[merge-cleanup] failed to roll issue status back after workspace cleanup failed:",
+            rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr),
+          );
+        }
+        issueTransitioned = false;
+      }
+      throw err;
     }
   }
 

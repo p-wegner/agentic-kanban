@@ -53,7 +53,7 @@ async function seedMergeCleanupRows(db: ReturnType<typeof createTestDb>["db"]) {
     updatedAt: now,
   });
 
-  return { projectId, issueId, workspaceId, doneStatusId };
+  return { projectId, issueId, workspaceId, inReviewStatusId, doneStatusId };
 }
 
 describe("finalizeMergeCleanup", () => {
@@ -123,5 +123,51 @@ describe("finalizeMergeCleanup", () => {
     });
     expect(issue.statusId).toBe(doneStatusId);
     expect(issue.statusChangedAt).toBe("2026-06-06T10:05:00.000Z");
+  });
+
+  it("rolls back the issue transition when the workspace close fails", async () => {
+    const { db } = createTestDb();
+    const { issueId, workspaceId, inReviewStatusId } = await seedMergeCleanupRows(db);
+    const originalUpdate = db.update.bind(db);
+    const updateSpy = vi.spyOn(db, "update").mockImplementation(((table: Parameters<typeof db.update>[0]) => {
+      if (table === workspaces) throw new Error("workspace update failed");
+      return originalUpdate(table);
+    }) as typeof db.update);
+
+    await expect(finalizeMergeCleanup({
+      database: db,
+      workspaceId,
+      issueId,
+      now: "2026-06-06T10:05:00.000Z",
+      mergedAt: "2026-06-06T10:05:00.000Z",
+      workingDir: null,
+    })).rejects.toThrow("workspace update failed");
+
+    updateSpy.mockRestore();
+
+    const [workspace] = await db
+      .select({
+        status: workspaces.status,
+        readyForMerge: workspaces.readyForMerge,
+        workingDir: workspaces.workingDir,
+        closedAt: workspaces.closedAt,
+        mergedAt: workspaces.mergedAt,
+      })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId));
+    const [issue] = await db
+      .select({ statusId: issues.statusId, statusChangedAt: issues.statusChangedAt })
+      .from(issues)
+      .where(eq(issues.id, issueId));
+
+    expect(workspace).toMatchObject({
+      status: "idle",
+      readyForMerge: true,
+      workingDir: "/repo/.worktrees/feature_ak-640-test",
+      closedAt: null,
+      mergedAt: null,
+    });
+    expect(issue.statusId).toBe(inReviewStatusId);
+    expect(issue.statusChangedAt).toBeNull();
   });
 });
