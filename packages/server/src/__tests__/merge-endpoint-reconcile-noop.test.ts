@@ -13,7 +13,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
 
@@ -236,6 +236,68 @@ describe("merge endpoint — already-merged-ancestor reconcile no-op path", () =
     await svc.mergeWorkspace(workspaceId);
 
     expect(mergeBranch).not.toHaveBeenCalled();
+  });
+
+  it("closes stale reviewing workspace and running review session on first ancestor no-op reconciliation", async () => {
+    const { projectId, workspaceId, issueId, doneStatusId, todoStatusId } = await seedScenario(db);
+    const sessionId = randomUUID();
+    const now = new Date().toISOString();
+    await db.update(workspaces)
+      .set({ status: "reviewing", updatedAt: now })
+      .where(eq(workspaces.id, workspaceId));
+    await db.insert(sessions).values({
+      id: sessionId,
+      workspaceId,
+      status: "running",
+      triggerType: "review",
+      executor: "claude-code",
+      startedAt: now,
+    });
+
+    const boardEvents = { broadcast: vi.fn() };
+    const git = makeGitService({
+      revParse: async (_repo, ref) => ref === "feature/ak-492-test" ? "ancestor-sha" : "master-sha",
+      isAncestor: async () => true,
+    });
+
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      boardEvents: boardEvents as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+    const result = await svc.mergeWorkspace(workspaceId);
+
+    expect(result).toMatchObject({ merged: false, reconciled: true });
+    expect(git.mergeBranch).not.toHaveBeenCalled();
+
+    const [workspace] = await db.select({
+      status: workspaces.status,
+      mergedAt: workspaces.mergedAt,
+      closedAt: workspaces.closedAt,
+    }).from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(workspace.status).toBe("closed");
+    expect(workspace.mergedAt).toBeTruthy();
+    expect(workspace.closedAt).toBeTruthy();
+
+    const [session] = await db.select({
+      status: sessions.status,
+      endedAt: sessions.endedAt,
+    }).from(sessions).where(eq(sessions.id, sessionId));
+    expect(session.status).toBe("stopped");
+    expect(session.endedAt).toBeTruthy();
+
+    const [issue] = await db.select({ statusId: issues.statusId })
+      .from(issues)
+      .where(eq(issues.id, issueId));
+    expect(issue.statusId).toBe(doneStatusId);
+
+    const inReviewCount = (await db.select({ id: issues.id }).from(issues).where(eq(issues.statusId, todoStatusId))).length;
+    const doneCount = (await db.select({ id: issues.id }).from(issues).where(eq(issues.statusId, doneStatusId))).length;
+    expect(inReviewCount).toBe(0);
+    expect(doneCount).toBe(1);
+    expect(boardEvents.broadcast).toHaveBeenCalledWith(projectId, "workspace_merged");
   });
 
   it("contrast: branch with real un-merged commits still invokes mergeBranch", async () => {
