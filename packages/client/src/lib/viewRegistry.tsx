@@ -368,7 +368,6 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteDescription: "Map strategic directions onto a target board",
     shortcut: "z",
     activeClass: "bg-brand-600 text-white",
-    group: "secondary",
   },
   {
     id: "focus",
@@ -425,7 +424,6 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteDescription: "Show agent cost, token, success, and duration trends",
     shortcut: "n",
     activeClass: "bg-blue-600 text-white",
-    group: "secondary",
   },
   {
     id: "swimlane",
@@ -460,7 +458,6 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteIcon: "⏱",
     paletteDescription: "Show recent monitor cycle events with action drill-downs",
     activeClass: "bg-indigo-500 text-white",
-    group: "secondary",
   },
   {
     id: "health-events",
