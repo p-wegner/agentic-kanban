@@ -22,6 +22,7 @@ export class ClaudeProvider implements AgentProvider {
       model,
       keepAlive,
       permissionPromptTool,
+      systemInstructions,
       planMode,
     } = options;
 
@@ -76,6 +77,9 @@ export class ClaudeProvider implements AgentProvider {
       }
       if (permissionPromptTool) {
         args.push("--permission-prompt-tool", permissionPromptTool);
+      }
+      if (systemInstructions) {
+        args.push("--append-system-prompt", systemInstructions);
       }
       if (planMode) {
         args.push("--permission-mode", "plan");

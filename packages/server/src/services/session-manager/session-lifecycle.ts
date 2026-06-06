@@ -14,6 +14,7 @@ import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import type { SessionManagerOptions, SessionState, StartSessionOptions } from "./types.js";
 import { workspaceLaunchPreflight } from "../preflight-check.js";
 import { WorkspaceError } from "../workspace-internals.js";
+import { DEFAULT_BUILDER_GUARDRAILS, PREF_BUILDER_GUARDRAILS } from "../constants/preference-keys.js";
 
 /** Subset of agent.service that the lifecycle depends on. Injectable for tests. */
 export type AgentService = typeof realAgentService;
@@ -83,6 +84,7 @@ export function createSessionLifecycle(
       workingDirOverride,
       skipLaunchPreflight,
       skipPermissions: skipPermissionsOpt,
+      systemInstructions,
     } = opts;
 
     // Look up workspace to get workingDir
@@ -209,6 +211,16 @@ export function createSessionLifecycle(
     const skipPermRows = await db.select().from(preferences).where(eq(preferences.key, "skip_permissions")).limit(1);
     const dbSkipPerms = skipPermRows.length === 0 || skipPermRows[0].value !== "false";
     const skipPermissions = skipPermissionsOpt !== undefined ? skipPermissionsOpt : dbSkipPerms;
+
+    const guardrailRows = await db
+      .select({ value: preferences.value })
+      .from(preferences)
+      .where(eq(preferences.key, PREF_BUILDER_GUARDRAILS))
+      .limit(1);
+    const effectiveSystemInstructions =
+      systemInstructions === undefined
+        ? (guardrailRows.length === 0 ? DEFAULT_BUILDER_GUARDRAILS : guardrailRows[0].value)
+        : systemInstructions;
 
     // For Claude only: skip-permissions is conveyed via --dangerously-skip-permissions in agentArgs.
     let effectiveAgentArgs = agentArgs;
@@ -394,7 +406,7 @@ export function createSessionLifecycle(
 
         }
       // When resumeWithNewModel is true, omit --resume so the new profile/provider is used instead
-      }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider, profile, extraEnv, skipPermissions, effectiveModel, contextFiles);
+      }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider, profile, extraEnv, skipPermissions, effectiveModel, contextFiles, (effectiveSystemInstructions ?? "").trim() || undefined);
 
       // Persist PID so hot-reload can detect surviving processes
       if (proc.pid) {
