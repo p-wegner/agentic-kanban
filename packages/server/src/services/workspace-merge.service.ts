@@ -10,7 +10,6 @@ import {
   resolveProjectFull,
   resolveProjectId,
   resolveProjectRepo,
-  moveIssueToDone,
   getWorkspaceById,
   updateWorkspaceStatus,
 } from "../repositories/workspace.repository.js";
@@ -41,6 +40,7 @@ import {
 } from "./workspace-merge-prevalidation.service.js";
 import { executeWorkspaceMerge } from "./workspace-merge-execution.service.js";
 import { runWorkspacePostMergeCleanup } from "./workspace-merge-cleanup.service.js";
+import { finalizeMergeCleanup } from "./merge-cleanup.service.js";
 
 export function createWorkspaceMergeService(deps: {
   database: Database;
@@ -706,13 +706,16 @@ export function createWorkspaceMergeService(deps: {
     const { repoPath } = await resolveProjectRepo(id, database);
     const now = new Date().toISOString();
 
-    await updateWorkspaceStatus(id, "closed", {
+    await finalizeMergeCleanup({
+      database,
+      boardEvents,
+      workspaceId: id,
+      issueId: workspace.issueId,
+      now,
       closedAt: workspace.closedAt ?? now,
       mergedAt: workspace.mergedAt ?? now,
-      readyForMerge: false,
       workingDir: null,
-    }, database);
-    await moveIssueToDone(id, workspace.issueId, now, database);
+    });
 
     // Best-effort worktree cleanup
     if (workspace.workingDir && !workspace.isDirect) {
@@ -728,9 +731,6 @@ export function createWorkspaceMergeService(deps: {
         now,
       );
     } catch { /* non-fatal */ }
-
-    const projectId = await resolveProjectId(id, database);
-    if (projectId) boardEvents?.broadcast(projectId, "workspace_merged");
 
     return {
       id,
