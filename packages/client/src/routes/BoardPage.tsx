@@ -40,7 +40,6 @@ import { BoardKanbanView } from "../components/BoardKanbanView.js";
 import { RecentlyMergedStrip } from "../components/RecentlyMergedStrip.js";
 import { BoardStats } from "../components/BoardStats.js";
 import { BoardToolbar } from "../components/BoardToolbar.js";
-import { VIEW_REGISTRY } from "../lib/viewRegistry.js";
 import { BoardFilterMenu } from "../components/BoardFilterMenu.js";
 import { ExportImportMenu } from "../components/ExportImportMenu.js";
 import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
@@ -55,7 +54,6 @@ import { MentionProvider } from "../lib/MentionContext.js";
 import { apiFetch } from "../lib/api.js";
 import { useBoardEvents, type LiveSessionStats, type TodoItem, type ApprovalRequest } from "../lib/useBoardEvents.js";
 import { sendDesktopNotification } from "../lib/desktop.js";
-import { registerAction } from "../lib/actions.js";
 import { useActivityNotifications, type NotificationEvent } from "../hooks/useActivityNotifications.js";
 import { buildRunQueueForecast } from "../components/RunQueueForecastPanel.js";
 import { useBoardPageRoute } from "./useBoardPageRoute.js";
@@ -63,7 +61,7 @@ import { useBoardPreferences } from "../hooks/useBoardPreferences.js";
 import { useBoardPanels } from "../hooks/useBoardPanels.js";
 import { useBoardNavigation } from "../hooks/useBoardNavigation.js";
 import { useBoardBulkSelection } from "../hooks/useBoardBulkSelection.js";
-import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts.js";
+import { useBoardKeyboardShortcuts } from "../hooks/useBoardKeyboardShortcuts.js";
 import { BoardBulkActionBar } from "../components/BoardBulkActionBar.js";
 // Lazy: aggregates ~20 user-action panels (Settings, Codemod, MergeQueue,
 // TranscriptSearch, CommandPalette, …). Rendered unconditionally though, and it hosts
@@ -296,7 +294,6 @@ export function BoardPage() {
   const boardEtagRef = useRef<Record<string, string>>({});
   const loadProjectsRef = useRef<() => Promise<string | undefined>>(async () => undefined);
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
-  const [showStartWorkspacePicker, setShowStartWorkspacePicker] = useState(false);
   const [keyboardCursorIssueId, setKeyboardCursorIssueId] = useState<string | null>(null);
   const keyboardCursorIssueIdRef = useRef<string | null>(null);
   keyboardCursorIssueIdRef.current = keyboardCursorIssueId;
@@ -1571,7 +1568,7 @@ export function BoardPage() {
   }, [handleViewModeChange]);
 
   // Keyboard shortcuts
-  useKeyboardShortcuts(
+  useBoardKeyboardShortcuts(
     {
       columnsRef,
       columns,
@@ -1584,10 +1581,13 @@ export function BoardPage() {
       keyboardCursorIssueIdRef,
       searchQuery,
       selectedIssue,
+      projects,
+      activeProjectId,
     },
     {
       handleIssueClick,
       handleViewModeChange,
+      handleProjectChange,
       setSearchQuery,
       setKeyboardCursorIssueId,
       setSelectedIssue,
@@ -1598,146 +1598,6 @@ export function BoardPage() {
     },
   );
 
-  // Register command palette actions
-  useEffect(() => {
-    const unregisters: (() => void)[] = [];
-
-    unregisters.push(registerAction({
-      id: "create-issue",
-      label: "Create Issue",
-      description: "Add a new issue to the board",
-      icon: "+",
-      shortcut: "c",
-      category: "issue",
-      handler: () => {
-        const col = activeColumns[0] ?? filteredColumns[0] ?? columns[0];
-        if (col) setExpandedCreatePanel({ statusId: col.id, statusName: col.name, state: {} });
-      },
-    }));
-
-    unregisters.push(registerAction({
-      id: "create-issue-with-workspace",
-      label: "New Issue + Start Workspace",
-      shortcut: "w",
-      category: "issue",
-      handler: () => {
-        const col = activeColumns[0] ?? filteredColumns[0] ?? columns[0];
-        if (col) setExpandedCreatePanel({ statusId: col.id, statusName: col.name, state: { startWorkspace: true } });
-      },
-    }));
-
-    unregisters.push(registerAction({
-      id: "start-workspace-for-issue",
-      label: "Start Workspace for Issue…",
-      description: "Fuzzy-pick an issue and start a workspace for it",
-      icon: "▷",
-      category: "issue",
-      handler: () => {
-        setShowStartWorkspacePicker(true);
-      },
-    }));
-
-    for (const project of projects) {
-      const isActive = project.id === activeProjectId;
-      unregisters.push(registerAction({
-        id: `switch-project-${project.id}`,
-        label: `Switch project: ${project.name}${isActive ? " (current)" : ""}`,
-        description: isActive ? "Current active project" : "Switch to this project",
-        icon: isActive ? "✓" : "⇄",
-        category: "navigation",
-        handler: () => {
-          if (isActive) {
-            showToast(`"${project.name}" is already active`, "success");
-            return;
-          }
-          handleProjectChange(project.id);
-        },
-      }));
-    }
-
-    unregisters.push(registerAction({ id: "open-settings", label: "Open Settings", description: "Configure agent, preferences, and project settings", icon: "⚙", category: "settings", handler: () => panels.setShowSettings(true) }));
-    unregisters.push(registerAction({ id: "view-all-workspaces", label: "All Workspaces", description: "View all workspaces with status, diff stats, and session activity", icon: "⊞", category: "navigation", handler: () => panels.setShowAllWorkspaces(true) }));
-    unregisters.push(registerAction({ id: "view-cleanup-queue", label: "Cleanup Queue", description: "View closed workspaces with failed worktree cleanup warnings", icon: "🧹", category: "navigation", handler: () => panels.setShowCleanupQueue(true) }));
-    unregisters.push(registerAction({ id: "view-file-contention", label: "File Contention Heatmap", description: "Show which active workspaces touch the same files (merge-risk clusters)", icon: "⚡", category: "navigation", handler: () => panels.setShowFileContention(true) }));
-    unregisters.push(registerAction({ id: "search-transcripts", label: "Search Transcripts", description: "Search agent session transcripts across all workspaces", icon: "⏎", category: "navigation", handler: () => panels.setShowTranscriptSearch(true) }));
-    unregisters.push(registerAction({ id: "view-worktrees", label: "View Worktrees", description: "Inspect git worktrees and their diff stats", icon: "⎇", category: "navigation", handler: () => panels.setShowWorktreeOverview(true) }));
-    unregisters.push(registerAction({ id: "view-project-health", label: "Project Health Overview", description: "See all registered projects with issue counts and warning states", icon: "◎", shortcut: "p", category: "navigation", handler: () => panels.setShowProjectHealth(true) }));
-    unregisters.push(registerAction({ id: "search-issues", label: "Search Issues", description: "Filter issues by text or keyword", icon: "⌕", shortcut: "/", category: "board", handler: () => document.getElementById("search-input")?.focus() }));
-    unregisters.push(registerAction({ id: "show-shortcuts", label: "Keyboard Shortcuts", description: "View all available keyboard shortcuts", icon: "?", shortcut: "?", category: "settings", handler: () => panels.setShowShortcutHelp(true) }));
-    unregisters.push(registerAction({ id: "open-quick-tasks", label: "Open Quick Tasks", description: "View installed skills and run custom agent tasks", icon: "⚡", shortcut: "q", category: "board", handler: () => panels.setShowQuickTasks(true) }));
-    unregisters.push(registerAction({ id: "run-queue-forecast", label: "Run Queue Forecast", description: "View active-agent capacity and the next likely starts", icon: "▥", category: "board", handler: () => panels.setShowRunQueueForecast(true) }));
-    unregisters.push(registerAction({ id: "open-codemod-factory", label: "Codemod Factory", description: "Describe a refactor in plain English — AI generates a ts-morph codemod", icon: "⚙", shortcut: "x", category: "board", handler: () => panels.setShowCodemod(true) }));
-    unregisters.push(registerAction({ id: "toggle-live-activity", label: "Live Activity Ticker", description: "Toggle compact stream of running agent output (l)", icon: "▶", shortcut: "l", category: "board", handler: () => panels.setShowLiveActivityTicker((prev) => !prev) }));
-
-    for (const view of VIEW_REGISTRY) {
-      unregisters.push(registerAction({
-        id: `view-${view.id}`,
-        label: `Switch to ${view.label} View`,
-        description: view.paletteDescription,
-        icon: view.paletteIcon,
-        shortcut: view.shortcut,
-        category: "navigation",
-        handler: () => handleViewModeChange(view.id),
-      }));
-    }
-
-    for (const col of columns) {
-      unregisters.push(registerAction({
-        id: `goto-${col.id}`,
-        label: `Go to: ${col.name}`,
-        description: `Scroll to the ${col.name} column`,
-        category: "navigation",
-        handler: () => {
-          const el = document.getElementById(`column-${col.id}`);
-          el?.scrollIntoView({ behavior: "smooth", inline: "center" });
-        },
-      }));
-    }
-
-    const allIssues = columns.flatMap((col) => col.issues);
-    for (const issue of allIssues) {
-      const ws = issue.workspaceSummary?.main;
-      if (!ws) continue;
-
-      if (ws.status === "active" || ws.status === "idle" || ws.status === "reviewing") {
-        unregisters.push(registerAction({
-          id: `review-workspace-${ws.id}`,
-          label: `Review: #${issue.issueNumber} ${issue.title}`,
-          description: "Trigger AI code review for this workspace",
-          icon: "⑃",
-          category: "issue",
-          handler: async () => {
-            try {
-              await apiFetch(`/api/workspaces/${ws.id}/review`, { method: "POST" });
-              showToast("Review started", "success");
-            } catch {
-              showToast("Failed to start review", "error");
-            }
-          },
-        }));
-      }
-
-      if (ws.status === "reviewing" || ws.status === "idle") {
-        unregisters.push(registerAction({
-          id: `merge-workspace-${ws.id}`,
-          label: `Merge: #${issue.issueNumber} ${issue.title}`,
-          description: "Merge this workspace branch into the base branch",
-          icon: "⤵",
-          category: "issue",
-          handler: async () => {
-            try {
-              await apiFetch(`/api/workspaces/${ws.id}/merge`, { method: "POST" });
-              showToast("Merge started", "success");
-            } catch {
-              showToast("Failed to merge", "error");
-            }
-          },
-        }));
-      }
-    }
-
-    return () => unregisters.forEach((fn) => fn());
-  }, [columns, filteredColumns, projects, activeProjectId, handleProjectChange, panels, handleViewModeChange, activeColumns]);
 
   if (loading) {
     return (
@@ -2336,45 +2196,14 @@ export function BoardPage() {
       )}
       <Suspense fallback={null}>
       <BoardOverlayPanels
-        showSettings={panels.showSettings}
-        showQuickTasks={panels.showQuickTasks}
-        showCodemod={panels.showCodemod}
-        showAllWorkspaces={panels.showAllWorkspaces}
-        showLaunchFailures={panels.showLaunchFailures}
-        showCleanupQueue={panels.showCleanupQueue}
-        showFileContention={panels.showFileContention}
-        showTranscriptSearch={panels.showTranscriptSearch}
-        showMergeQueue={panels.showMergeQueue}
-        showRunQueueForecast={panels.showRunQueueForecast}
-        showWorktreeOverview={panels.showWorktreeOverview}
-        showProjectHealth={panels.showProjectHealth}
-        showTimeReport={panels.showTimeReport}
-        showCommandPalette={panels.showCommandPalette}
-        showStartWorkspacePicker={showStartWorkspacePicker}
-        showShortcutHelp={panels.showShortcutHelp}
-        onCloseSettings={() => panels.setShowSettings(false)}
-        onCloseQuickTasks={() => panels.setShowQuickTasks(false)}
-        onCloseCodemod={() => panels.setShowCodemod(false)}
-        onCloseAllWorkspaces={() => panels.setShowAllWorkspaces(false)}
-        onCloseLaunchFailures={() => panels.setShowLaunchFailures(false)}
-        onCloseCleanupQueue={() => panels.setShowCleanupQueue(false)}
-        onCloseFileContention={() => panels.setShowFileContention(false)}
-        onCloseTranscriptSearch={() => panels.setShowTranscriptSearch(false)}
-        onCloseMergeQueue={() => panels.setShowMergeQueue(false)}
-        onCloseRunQueueForecast={() => panels.setShowRunQueueForecast(false)}
-        onCloseWorktreeOverview={() => panels.setShowWorktreeOverview(false)}
-        onCloseProjectHealth={() => panels.setShowProjectHealth(false)}
-        onCloseTimeReport={() => panels.setShowTimeReport(false)}
-        onCloseCommandPalette={() => panels.setShowCommandPalette(false)}
-        onCloseStartWorkspacePicker={() => setShowStartWorkspacePicker(false)}
+        {...panels.overlayPanelProps}
         onWorkspaceStarted={(workspaceId, issue) => {
-          setShowStartWorkspacePicker(false);
+          panels.closeStartWorkspacePicker();
           setWorkspaceIssue(issue);
           setWorkspaceInitial({ workspaceId, sessionId: "" });
           setWorkspaceOpenCreate(false);
           refetchBoard();
         }}
-        onCloseShortcutHelp={() => panels.setShowShortcutHelp(false)}
         activeProjectId={activeProjectId}
         columns={columns}
         nudgeWipLimit={prefs.nudgeWipLimit}
@@ -2384,8 +2213,6 @@ export function BoardPage() {
         workspaceInitial={workspaceInitial}
         workspaceOpenCreate={workspaceOpenCreate}
         selectedIssue={selectedIssue}
-        dryRunIssue={panels.dryRunIssue}
-        setDryRunIssue={panels.setDryRunIssue}
         handleStartWorkspace={handleStartWorkspace}
         approvalRequests={approvalRequests}
         setApprovalRequests={setApprovalRequests}
