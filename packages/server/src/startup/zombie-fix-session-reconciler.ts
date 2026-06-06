@@ -169,11 +169,7 @@ const DEFAULT_INTERVAL_MS = 60_000;
 let activeZombieFixTimeout: ReturnType<typeof setTimeout> | null = null;
 let activeZombieFixInterval: ReturnType<typeof setInterval> | null = null;
 
-/** Run the zombie reconciler shortly after boot and then on an interval. */
-export function startZombieFixSessionReconciler(
-  deps: ZombieFixSessionReconcilerDeps,
-  intervalMs = DEFAULT_INTERVAL_MS,
-): ReturnType<typeof setInterval> {
+export function stopZombieFixSessionReconciler(): void {
   if (activeZombieFixTimeout !== null) {
     clearTimeout(activeZombieFixTimeout);
     activeZombieFixTimeout = null;
@@ -182,6 +178,14 @@ export function startZombieFixSessionReconciler(
     clearInterval(activeZombieFixInterval);
     activeZombieFixInterval = null;
   }
+}
+
+/** Run the zombie reconciler shortly after boot and then on an interval. */
+export function startZombieFixSessionReconciler(
+  deps: ZombieFixSessionReconcilerDeps,
+  intervalMs = DEFAULT_INTERVAL_MS,
+): ReturnType<typeof setInterval> {
+  stopZombieFixSessionReconciler();
 
   const tick = () => {
     reconcileZombieFixSessions(deps).catch((err) =>

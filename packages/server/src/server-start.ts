@@ -8,26 +8,47 @@ import { createBoardEvents } from "./services/board-events.js";
 import { createSessionManager } from "./services/session.manager.js";
 import { createWorkflowEngine } from "./startup/exit-workflow.js";
 import { createAutoMerge } from "./startup/merge-workflow.js";
-import { startAutoMergeOrchestrator } from "./startup/auto-merge-orchestrator.js";
-import { startStrandedReviewReconciler } from "./startup/stranded-review-reconciler.js";
-import { startZombieFixSessionReconciler } from "./startup/zombie-fix-session-reconciler.js";
-import { startAncestorBranchReconciler } from "./startup/ancestor-branch-reconciler.js";
-import { startDoneUnmergedScanner } from "./startup/done-unmerged-invariant-scanner.js";
+import { startAutoMergeOrchestrator, stopAutoMergeOrchestrator } from "./startup/auto-merge-orchestrator.js";
+import { startStrandedReviewReconciler, stopStrandedReviewReconciler } from "./startup/stranded-review-reconciler.js";
+import { startZombieFixSessionReconciler, stopZombieFixSessionReconciler } from "./startup/zombie-fix-session-reconciler.js";
+import { startAncestorBranchReconciler, stopAncestorBranchReconciler } from "./startup/ancestor-branch-reconciler.js";
+import { startDoneUnmergedScanner, stopDoneUnmergedScanner } from "./startup/done-unmerged-invariant-scanner.js";
 import { createMonitorSetup } from "./startup/monitor-setup.js";
 import { setupProcessHandlers } from "./startup/process-handlers.js";
 import { setupRoutes } from "./startup/route-setup.js";
-import { setupScheduledTasks } from "./startup/scheduled-tasks.js";
-import { startMonitorButler } from "./services/monitor-butler.js";
+import { setupScheduledTasks, stopScheduledTasks } from "./startup/scheduled-tasks.js";
+import { startMonitorButler, stopMonitorButler } from "./services/monitor-butler.js";
 import { runStartupTasks } from "./startup/startup-tasks.js";
 import { runSessionRestore } from "./startup/session-restore.js";
-import { startBackupScheduler } from "./startup/backup-scheduler.js";
-import { startSessionMessagePruner } from "./services/session-message-pruner.service.js";
+import { startBackupScheduler, stopBackupScheduler } from "./startup/backup-scheduler.js";
+import { startSessionMessagePruner, stopSessionMessagePruner } from "./services/session-message-pruner.service.js";
 import { getPreference } from "./repositories/preferences.repository.js";
 import { domainErrorHandler } from "./middleware/error-handler.js";
 import { slowRequestLogger } from "./middleware/slow-request-logger.js";
 import { assertNoCommittedConflictMarkers } from "./startup/conflict-marker-scanner.js";
 
+let activeStartupTimerCleanup: (() => void) | null = null;
+
+export function cleanupStartupTimers(): void {
+  if (!activeStartupTimerCleanup) return;
+  const cleanup = activeStartupTimerCleanup;
+  activeStartupTimerCleanup = null;
+  cleanup();
+}
+
+export function replaceStartupTimerCleanup(cleanupCallbacks: Array<() => void>): void {
+  cleanupStartupTimers();
+  activeStartupTimerCleanup = () => {
+    for (const cleanup of cleanupCallbacks.splice(0).reverse()) {
+      cleanup();
+    }
+  };
+}
+
 export async function startServer(port?: number, hostname?: string) {
+  const cleanupCallbacks: Array<() => void> = [];
+  replaceStartupTimerCleanup(cleanupCallbacks);
+
   const app = new Hono();
   app.use("/api/*", cors());
   app.use("/api/*", slowRequestLogger);
@@ -37,6 +58,7 @@ export async function startServer(port?: number, hostname?: string) {
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
   const boardEvents = createBoardEvents();
   boardEvents.startCleanup();
+  cleanupCallbacks.push(() => boardEvents.stopCleanup());
   let runWorkflowOnExit: ReturnType<typeof createWorkflowEngine>["runWorkflowOnExit"] = async () => {};
   let autoMerge: ReturnType<typeof createAutoMerge> = async () => {};
   const sessionManager = createSessionManager(upgradeWebSocket, {
@@ -69,8 +91,9 @@ export async function startServer(port?: number, hostname?: string) {
 
   const serverPort = port || Number(process.env.PORT) || 3001;
   const serverHost = hostname || process.env.KANBAN_HOST || "127.0.0.1";
-  const { setupMonitorRoutes } = createMonitorSetup({ sessionManager, boardEvents, serverPort, reviewSessionIds: workflow.reviewSessionIds });
-  setupMonitorRoutes(app);
+  const monitorSetup = createMonitorSetup({ sessionManager, boardEvents, serverPort, reviewSessionIds: workflow.reviewSessionIds });
+  cleanupCallbacks.push(() => monitorSetup.stop());
+  monitorSetup.setupMonitorRoutes(app);
 
   console.log(`Server starting on port ${serverPort}...`);
   const server = serve({ fetch: app.fetch, port: serverPort, hostname: serverHost }, (info) => {
@@ -86,11 +109,13 @@ export async function startServer(port?: number, hostname?: string) {
   injectWebSocket(server);
 
   setupScheduledTasks(serverPort);
+  cleanupCallbacks.push(stopScheduledTasks);
   startAutoMergeOrchestrator({
     database: db,
     boardEvents,
     getSessionManager: () => sessionManager,
   });
+  cleanupCallbacks.push(stopAutoMergeOrchestrator);
   // Crash-safe recovery for work stranded in "In Review" because the auto-review
   // handshake never fired (#529): re-launches the review so the chain can complete.
   startStrandedReviewReconciler({
@@ -98,30 +123,37 @@ export async function startServer(port?: number, hostname?: string) {
     boardEvents,
     reviewSessionIds: workflow.reviewSessionIds,
   });
+  cleanupCallbacks.push(stopStrandedReviewReconciler);
   // Crash-safe recovery for zombie fix-and-merge/review sessions: sessions that are
   // marked 'running' but have zero output messages and no live process (#596).
   startZombieFixSessionReconciler({ boardEvents });
+  cleanupCallbacks.push(stopZombieFixSessionReconciler);
   startAncestorBranchReconciler();
+  cleanupCallbacks.push(stopAncestorBranchReconciler);
   // Safe forward-only auto-recovery: merges clean ahead-only Done-but-unmerged branches
   // directly into base (forward-merging can't lose work). Conflicted / too-far-behind /
   // 0-ahead candidates remain log-only. Never reopens an issue.
   startDoneUnmergedScanner();
+  cleanupCallbacks.push(stopDoneUnmergedScanner);
   // Autonomous Monitor Butler — cron-driven board-health agent (gated by the
   // monitor_butler_enabled preference; off by default). See services/monitor-butler.ts.
   startMonitorButler();
-  setupProcessHandlers(server, agentService);
+  cleanupCallbacks.push(stopMonitorButler);
+  setupProcessHandlers(server, agentService, { cleanupStartupTimers });
 
   // Periodic database backups (interval from the backup_interval_min preference).
   try {
     const raw = await getPreference("backup_interval_min");
     const intervalMin = raw == null || raw === "" ? 30 : Number(raw);
     startBackupScheduler(Number.isFinite(intervalMin) ? intervalMin : 30);
+    cleanupCallbacks.push(stopBackupScheduler);
   } catch (err) {
     console.warn("[backup] failed to start scheduler (non-fatal):", err instanceof Error ? err.message : err);
   }
 
   // Periodic session_messages pruning — keeps DB size bounded as workspace history grows.
   startSessionMessagePruner(db);
+  cleanupCallbacks.push(stopSessionMessagePruner);
 
   return { app, sessionManager, boardEvents };
 }

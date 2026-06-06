@@ -301,12 +301,26 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
   // driven and is idempotent, so events for non-driven projects cost at most one no-op pass.
   boardEvents.addInvalidationListener(() => triggerMonitorSoon());
 
-  setInterval(syncMonitorState, 30_000);
+  const syncMonitorInterval = setInterval(syncMonitorState, 30_000);
+  syncMonitorInterval.unref?.();
   syncMonitorState().catch(() => {});
-  setInterval(() => void runStandaloneResourceSweep(), 5 * 60_000);
+  const resourceSweepInterval = setInterval(() => void runStandaloneResourceSweep(), 5 * 60_000);
+  resourceSweepInterval.unref?.();
   runStandaloneResourceSweep().catch(() => {});
   return {
     setupMonitorRoutes: (app: Hono) => setupMonitorRoutes(app, monitorState, runMonitorCycle, syncMonitorState, runStandaloneResourceSweep),
     monitorState,
+    stop: () => {
+      if (triggerTimer) {
+        clearTimeout(triggerTimer);
+        triggerTimer = null;
+      }
+      if (monitorState.timer) {
+        clearTimeout(monitorState.timer);
+        monitorState.timer = null;
+      }
+      clearInterval(syncMonitorInterval);
+      clearInterval(resourceSweepInterval);
+    },
   };
 }

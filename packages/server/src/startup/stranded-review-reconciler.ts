@@ -122,8 +122,7 @@ const DEFAULT_INTERVAL_MS = 60_000;
 let activeStrandedReviewTimeout: ReturnType<typeof setTimeout> | null = null;
 let activeStrandedReviewInterval: ReturnType<typeof setInterval> | null = null;
 
-/** Run the reconciler shortly after boot (crash recovery) and then on an interval. */
-export function startStrandedReviewReconciler(deps: StrandedReviewReconcilerDeps, intervalMs = DEFAULT_INTERVAL_MS): ReturnType<typeof setInterval> {
+export function stopStrandedReviewReconciler(): void {
   if (activeStrandedReviewTimeout !== null) {
     clearTimeout(activeStrandedReviewTimeout);
     activeStrandedReviewTimeout = null;
@@ -132,6 +131,11 @@ export function startStrandedReviewReconciler(deps: StrandedReviewReconcilerDeps
     clearInterval(activeStrandedReviewInterval);
     activeStrandedReviewInterval = null;
   }
+}
+
+/** Run the reconciler shortly after boot (crash recovery) and then on an interval. */
+export function startStrandedReviewReconciler(deps: StrandedReviewReconcilerDeps, intervalMs = DEFAULT_INTERVAL_MS): ReturnType<typeof setInterval> {
+  stopStrandedReviewReconciler();
 
   const tick = () => {
     reconcileStrandedReviews(deps).catch((err) => console.warn("[reconcile] cycle error:", err instanceof Error ? err.message : err));

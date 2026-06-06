@@ -327,6 +327,17 @@ const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
 let _activeTimer: NodeJS.Timeout | null = null;
 let _activeInterval: NodeJS.Timeout | null = null;
 
+export function stopDoneUnmergedScanner(): void {
+  if (_activeTimer !== null) {
+    clearTimeout(_activeTimer);
+    _activeTimer = null;
+  }
+  if (_activeInterval !== null) {
+    clearInterval(_activeInterval);
+    _activeInterval = null;
+  }
+}
+
 /**
  * Schedule the done-unmerged invariant scanner to run shortly after boot and then periodically.
  *
@@ -339,8 +350,7 @@ export function startDoneUnmergedScanner(
   intervalMs = DEFAULT_INTERVAL_MS,
 ): { timer: NodeJS.Timeout; interval: NodeJS.Timeout } {
   // Clear any prior handles from a previous hot-reload cycle.
-  if (_activeTimer !== null) { clearTimeout(_activeTimer); _activeTimer = null; }
-  if (_activeInterval !== null) { clearInterval(_activeInterval); _activeInterval = null; }
+  stopDoneUnmergedScanner();
 
   const tick = () => {
     scanDoneUnmergedWorkspaces(deps).catch((err) =>

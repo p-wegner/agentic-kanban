@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setupScheduledTasks } from "../startup/scheduled-tasks.js";
 import { startAutoMergeOrchestrator } from "../startup/auto-merge-orchestrator.js";
-import { startAncestorBranchReconciler } from "../startup/ancestor-branch-reconciler.js";
-import { startDoneUnmergedScanner } from "../startup/done-unmerged-invariant-scanner.js";
+import { startAncestorBranchReconciler, stopAncestorBranchReconciler } from "../startup/ancestor-branch-reconciler.js";
+import { startDoneUnmergedScanner, stopDoneUnmergedScanner } from "../startup/done-unmerged-invariant-scanner.js";
 import { startStrandedReviewReconciler } from "../startup/stranded-review-reconciler.js";
 import { startZombieFixSessionReconciler } from "../startup/zombie-fix-session-reconciler.js";
 import { startBackupScheduler } from "../startup/backup-scheduler.js";
 import { startSessionMessagePruner } from "../services/session-message-pruner.service.js";
+import { cleanupStartupTimers, replaceStartupTimerCleanup } from "../server-start.js";
 
 interface TimerTestState {
   clearInterval: ReturnType<typeof vi.spyOn>;
@@ -24,6 +25,7 @@ describe("startup timers are restart-safe for HMR-style reloads", () => {
   });
 
   afterEach(() => {
+    cleanupStartupTimers();
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
@@ -56,6 +58,39 @@ describe("startup timers are restart-safe for HMR-style reloads", () => {
     expect(clearIntervalSpy).toHaveBeenCalledOnce();
     expect(first.timer).not.toBe(second.timer);
     expect(first.interval).not.toBe(second.interval);
+  });
+
+  it("clears ancestor-branch reconciler interval handles on stop", () => {
+    const { timer, interval } = startAncestorBranchReconciler({}, 10_000);
+
+    stopAncestorBranchReconciler();
+
+    expect(clearTimeoutSpy).toHaveBeenCalledWith(timer);
+    expect(clearIntervalSpy).toHaveBeenCalledWith(interval);
+  });
+
+  it("clears done-unmerged scanner interval handles on stop", () => {
+    const { timer, interval } = startDoneUnmergedScanner({}, 10_000);
+
+    stopDoneUnmergedScanner();
+
+    expect(clearTimeoutSpy).toHaveBeenCalledWith(timer);
+    expect(clearIntervalSpy).toHaveBeenCalledWith(interval);
+  });
+
+  it("replaces server-start registered timer cleanup instead of accumulating boot handles", () => {
+    const firstInterval = setInterval(() => {}, 10_000);
+    const secondInterval = setInterval(() => {}, 10_000);
+
+    replaceStartupTimerCleanup([() => clearInterval(firstInterval)]);
+    replaceStartupTimerCleanup([() => clearInterval(secondInterval)]);
+
+    expect(clearIntervalSpy).toHaveBeenCalledWith(firstInterval);
+    expect(clearIntervalSpy).not.toHaveBeenCalledWith(secondInterval);
+
+    cleanupStartupTimers();
+
+    expect(clearIntervalSpy).toHaveBeenCalledWith(secondInterval);
   });
 
   it("recreates auto-merge orchestrator timer instead of accumulating handles", () => {

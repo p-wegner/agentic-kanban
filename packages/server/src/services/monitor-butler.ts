@@ -61,6 +61,7 @@ export const DEFAULT_MONITOR_STRATEGY = [
 
 interface MonitorButlerState {
   timer: ReturnType<typeof setTimeout> | null;
+  syncTimer: ReturnType<typeof setInterval> | null;
   running: boolean;
   currentIntervalMin: number | null;
   lastRunAt: string | null;
@@ -69,6 +70,7 @@ interface MonitorButlerState {
 
 const state: MonitorButlerState = {
   timer: null,
+  syncTimer: null,
   running: false,
   currentIntervalMin: null,
   lastRunAt: null,
@@ -277,6 +279,8 @@ async function runAgentTurn(opts: {
  * Mirrors the board-monitor sync pattern (`monitor-setup.ts`).
  */
 export function startMonitorButler(): void {
+  stopMonitorButler();
+
   async function scheduleNext() {
     const enabled = (await getPreference("monitor_butler_enabled").catch(() => null)) === "true";
     if (!enabled) {
@@ -313,6 +317,19 @@ export function startMonitorButler(): void {
     state.timer = setTimeout(tick, 5_000);
   }
 
-  setInterval(() => { scheduleNext().catch(() => {}); }, 30_000);
+  state.syncTimer = setInterval(() => { scheduleNext().catch(() => {}); }, 30_000);
+  state.syncTimer.unref?.();
   scheduleNext().catch(() => {});
+}
+
+export function stopMonitorButler(): void {
+  if (state.timer) {
+    clearTimeout(state.timer);
+    state.timer = null;
+  }
+  if (state.syncTimer) {
+    clearInterval(state.syncTimer);
+    state.syncTimer = null;
+  }
+  state.currentIntervalMin = null;
 }
