@@ -4,7 +4,7 @@ import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
-import { projects, projectStatuses, issues, workspaces, preferences, issueComments } from "@agentic-kanban/shared/schema";
+import { projects, projectStatuses, issues, workspaces, preferences, sessions, issueComments } from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createMockSessionManager } from "./helpers/mocks.js";
 import { createWorkspaceService, WorkspaceError, type GitService } from "../services/workspace.service.js";
@@ -1121,6 +1121,56 @@ describe("workspace.service", () => {
       expect(startArgs.prompt).toContain("left the rebase in progress");
       expect(startArgs.prompt).toContain("src/foo.ts");
       expect(startArgs.skipLaunchPreflight).toBe(true);
+    });
+  });
+
+  describe("stopWorkspace with blocked fix-and-merge session", () => {
+    it("stops the running session and clears readyForMerge so relaunch does not re-trigger merge", async () => {
+      const { issueId } = await seedProjectAndIssue(db);
+      const now = new Date().toISOString();
+      const wsId = randomUUID();
+      const sessionId = randomUUID();
+
+      await db.insert(workspaces).values({
+        id: wsId,
+        issueId,
+        branch: "feature/ak-1-test",
+        workingDir: "/tmp/test-repo/.worktrees/feature-1",
+        baseBranch: "main",
+        isDirect: false,
+        status: "fixing",
+        readyForMerge: true,
+        provider: "claude",
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      await db.insert(sessions).values({
+        id: sessionId,
+        workspaceId: wsId,
+        status: "running",
+        triggerType: "fix-and-merge",
+        startedAt: now,
+        executor: "claude-code",
+      });
+
+      const sessionManager = createMockSessionManager();
+      const service = createWorkspaceService({ database: db, getSessionManager: () => sessionManager });
+
+      const result = await service.stopWorkspace(wsId);
+      expect(result).toEqual({ stopped: true });
+
+      expect(sessionManager.stopSession).toHaveBeenCalledOnce();
+      expect(sessionManager.stopSession).toHaveBeenCalledWith(sessionId);
+
+      const [updated] = await db.select({
+        status: workspaces.status,
+        readyForMerge: workspaces.readyForMerge,
+      }).from(workspaces).where(eq(workspaces.id, wsId));
+      expect(updated).toEqual({
+        status: "idle",
+        readyForMerge: false,
+      });
     });
   });
 
