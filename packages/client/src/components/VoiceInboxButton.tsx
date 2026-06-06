@@ -4,8 +4,6 @@ import {
   getVoiceLanguageLabel,
   loadVoiceLanguage,
   resolveVoiceLanguage,
-  saveVoiceLanguage,
-  VOICE_LANGUAGE_OPTIONS,
 } from "../lib/voice-language.js";
 import { showToast } from "./Toast.js";
 
@@ -269,7 +267,6 @@ export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButton
   const isReviewing = state === "review";
   const isProcessing = state === "processing";
   const isDisabled = !projectId || isProcessing || isReviewing;
-  const isLanguageDisabled = isDisabled || isRecording;
 
   const title = isRecording
     ? "Recording… click to stop and review before submitting"
@@ -321,19 +318,6 @@ export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButton
         )}
         <span className="hidden sm:inline">{isProcessing ? "Processing…" : isRecording ? "Stop" : "Voice"}</span>
       </button>
-
-      <select
-        value={voiceLanguage}
-        onChange={(e) => setVoiceLanguage(saveVoiceLanguage(e.target.value))}
-        disabled={isLanguageDisabled}
-        aria-label="Voice input language"
-        title="Voice input language"
-        className="hidden sm:inline-block h-7 max-w-[116px] rounded-md border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark px-1.5 text-xs text-gray-600 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-40 disabled:cursor-not-allowed"
-      >
-        {VOICE_LANGUAGE_OPTIONS.map((option) => (
-          <option key={option.label} value={option.value}>{option.label}</option>
-        ))}
-      </select>
 
       {/* Cancel (abort) button — only while recording. Discards the capture
           without creating an issue, returning straight to the ready state. */}
