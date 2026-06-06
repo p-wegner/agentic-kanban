@@ -108,11 +108,14 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
   let cycleRunning = false;
   let rerunRequested = false;
   let triggerTimer: ReturnType<typeof setTimeout> | null = null;
+  let stopped = false;
   const EVENT_TRIGGER_DEBOUNCE_MS = 1500;
   function triggerMonitorSoon() {
+    if (stopped) return;
     if (triggerTimer) return; // a trigger is already pending — coalesce this burst into it
     triggerTimer = setTimeout(() => {
       triggerTimer = null;
+      if (stopped) return;
       runMonitorCycle().catch(() => {});
     }, EVENT_TRIGGER_DEBOUNCE_MS);
     (triggerTimer as NodeJS.Timeout).unref?.();
@@ -141,6 +144,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
   }
 
   async function runMonitorCycle(force = false) {
+    if (stopped) return;
     // Re-entrancy guard: an event-triggered cycle must never overlap a scheduled one —
     // two concurrent cycles could both see the same unblocked issue (no open workspace yet)
     // and each POST a workspace, double-starting it. If a trigger arrives mid-cycle, note it
@@ -241,7 +245,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       }
       // A board mutation arrived while this cycle was running — run one more pass promptly
       // so we don't strand freshly-unblocked work until the next poll.
-      if (rerunRequested) { rerunRequested = false; triggerMonitorSoon(); }
+      if (!stopped && rerunRequested) { rerunRequested = false; triggerMonitorSoon(); }
     }
   }
 
@@ -249,6 +253,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
     await refreshDirtyMainCheckoutWarnings().catch((err) => console.warn("[monitor] Dirty main-checkout health check failed:", err));
     const prefRows = await db.select().from(preferences).catch(() => []);
     const prefMap = new Map(prefRows.map((r: { key: string; value: string }) => [r.key, r.value]));
+    if (stopped) return;
     const enabled = monitorShouldRun(prefMap);
     const intervalMin = parseInt(prefMap.get("auto_monitor_interval") || "4", 10);
     if (enabled && (!monitorState.timer || intervalMin !== monitorState.currentIntervalMin)) {
@@ -299,14 +304,31 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
   // merged ticket triggers the next unblocked one within EVENT_TRIGGER_DEBOUNCE_MS instead of
   // up to a full poll interval later. The cycle itself early-returns when nothing is auto-
   // driven and is idempotent, so events for non-driven projects cost at most one no-op pass.
-  boardEvents.addInvalidationListener(() => triggerMonitorSoon());
+  const invalidationListener = () => triggerMonitorSoon();
+  boardEvents.addInvalidationListener(invalidationListener);
 
-  setInterval(syncMonitorState, 30_000);
+  const syncMonitorInterval = setInterval(syncMonitorState, 30_000);
+  syncMonitorInterval.unref?.();
   syncMonitorState().catch(() => {});
-  setInterval(() => void runStandaloneResourceSweep(), 5 * 60_000);
+  const resourceSweepInterval = setInterval(() => void runStandaloneResourceSweep(), 5 * 60_000);
+  resourceSweepInterval.unref?.();
   runStandaloneResourceSweep().catch(() => {});
   return {
     setupMonitorRoutes: (app: Hono) => setupMonitorRoutes(app, monitorState, runMonitorCycle, syncMonitorState, runStandaloneResourceSweep),
     monitorState,
+    stop: () => {
+      stopped = true;
+      boardEvents.removeInvalidationListener(invalidationListener);
+      if (triggerTimer) {
+        clearTimeout(triggerTimer);
+        triggerTimer = null;
+      }
+      if (monitorState.timer) {
+        clearTimeout(monitorState.timer);
+        monitorState.timer = null;
+      }
+      clearInterval(syncMonitorInterval);
+      clearInterval(resourceSweepInterval);
+    },
   };
 }

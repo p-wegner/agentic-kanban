@@ -291,14 +291,7 @@ export function startAutoMergeOrchestrator(deps: {
   getSessionManager?: () => SessionManager;
   intervalMs?: number;
 }): AutoMergeOrchestratorState {
-  if (activeAutoMergeTimeout !== null) {
-    clearTimeout(activeAutoMergeTimeout);
-    activeAutoMergeTimeout = null;
-  }
-  if (activeAutoMergeInterval !== null) {
-    clearInterval(activeAutoMergeInterval);
-    activeAutoMergeInterval = null;
-  }
+  stopAutoMergeOrchestrator();
 
   const orchestrator = createAutoMergeOrchestrator(deps);
   const intervalMs = deps.intervalMs ?? DEFAULT_INTERVAL_MS;
@@ -313,4 +306,15 @@ export function startAutoMergeOrchestrator(deps: {
   activeAutoMergeInterval = setInterval(tick, intervalMs);
   orchestrator.state.timer = activeAutoMergeInterval;
   return orchestrator.state;
+}
+
+export function stopAutoMergeOrchestrator(): void {
+  if (activeAutoMergeTimeout !== null) {
+    clearTimeout(activeAutoMergeTimeout);
+    activeAutoMergeTimeout = null;
+  }
+  if (activeAutoMergeInterval !== null) {
+    clearInterval(activeAutoMergeInterval);
+    activeAutoMergeInterval = null;
+  }
 }

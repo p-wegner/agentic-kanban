@@ -186,6 +186,17 @@ const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
 let activeAncestorTimeout: ReturnType<typeof setTimeout> | null = null;
 let activeAncestorInterval: ReturnType<typeof setInterval> | null = null;
 
+export function stopAncestorBranchReconciler(): void {
+  if (activeAncestorTimeout !== null) {
+    clearTimeout(activeAncestorTimeout);
+    activeAncestorTimeout = null;
+  }
+  if (activeAncestorInterval !== null) {
+    clearInterval(activeAncestorInterval);
+    activeAncestorInterval = null;
+  }
+}
+
 /**
  * Schedule the ancestor-branch reconciler to run shortly after boot and then periodically.
  *
@@ -200,14 +211,7 @@ export function startAncestorBranchReconciler(
   deps: Omit<AncestorBranchReconcilerDeps, "enabled"> = {},
   intervalMs = DEFAULT_INTERVAL_MS,
 ): { timer: NodeJS.Timeout; interval: NodeJS.Timeout } {
-  if (activeAncestorTimeout !== null) {
-    clearTimeout(activeAncestorTimeout);
-    activeAncestorTimeout = null;
-  }
-  if (activeAncestorInterval !== null) {
-    clearInterval(activeAncestorInterval);
-    activeAncestorInterval = null;
-  }
+  stopAncestorBranchReconciler();
 
   const tick = () => {
     reconcileAncestorBranchWorkspaces(deps).catch((err) =>
