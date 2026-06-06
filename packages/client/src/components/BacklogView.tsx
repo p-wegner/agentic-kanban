@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { CreateIssueRequest, DependencyWaveIssue, DependencyWavePlan, DependencyWaveStartResult, IssueWithStatus, ProfileSelection, StatusWithIssues } from "@agentic-kanban/shared";
 import type { CreateIssueFormState } from "./CreateIssueForm.js";
 import { CreateIssueForm } from "./CreateIssueForm.js";
+import { CollapsibleSection } from "./CollapsibleSection.js";
 import { IssueCard } from "./IssueCard.js";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { apiFetch } from "../lib/api.js";
@@ -46,6 +47,15 @@ const FILTERS = [
   { id: "ready", label: "Ready" },
   { id: "workspace", label: "Has Workspace" },
 ] as const;
+
+const SORT_LABELS: Record<SortMode, string> = {
+  rank: "Manual order",
+  newest: "Newest",
+  oldest: "Oldest",
+  priority: "Priority",
+  type: "Type",
+  due: "Due date",
+};
 
 type FilterMode = (typeof FILTERS)[number]["id"];
 type BacklogPreset = {
@@ -165,10 +175,10 @@ export function BacklogView({
   const [wavePlan, setWavePlan] = useState<DependencyWavePlan | null>(null);
   const [waveLoading, setWaveLoading] = useState(false);
   const [startingWave, setStartingWave] = useState(false);
-  // Secondary controls collapsed by default so the issue list — the point of the
-  // view — gets the vertical space, especially on small screens.
+  // Presets tucked behind a toggle; the Filters/Sort and Dependency Waves
+  // sections are expansion panels (CollapsibleSection) so the issue list gets
+  // the vertical space, especially on small screens.
   const [showPresets, setShowPresets] = useState(false);
-  const [showWaves, setShowWaves] = useState(false);
 
   const backlogIssues = backlogColumn?.issues ?? [];
   const q = searchQuery.toLowerCase();
@@ -269,6 +279,7 @@ export function BacklogView({
   const blockedCount = backlogIssues.filter((issue) => issue.isBlocked).length;
   const workspaceCount = backlogIssues.filter((issue) => issue.workspaceSummary?.main).length;
   const readyCount = backlogIssues.filter((issue) => !issue.isBlocked && !issue.workspaceSummary?.main).length;
+  const filterSummary = `${FILTERS.find((f) => f.id === filterMode)?.label ?? "All"} · ${SORT_LABELS[sortMode]}${groupMode === "none" ? "" : ` · grouped by ${groupMode === "priority" ? "Priority" : "Type"}`}`;
 
   function toggleSelected(issueId: string) {
     setSelectedIds((prev) => {
@@ -476,7 +487,8 @@ export function BacklogView({
           </div>
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+        <CollapsibleSection title="Filters & Sort" summary={filterSummary} defaultOpen className="mt-3">
+          <div className="flex flex-wrap items-center gap-2">
           <div className="flex rounded-md border border-gray-200 bg-white p-0.5 dark:border-gray-700 dark:bg-gray-900">
             {FILTERS.map((filter) => (
               <button
@@ -588,7 +600,8 @@ export function BacklogView({
               </div>
             )}
           </div>
-        </div>
+          </div>
+        </CollapsibleSection>
 
         {selectedVisibleIds.length > 0 && (
           <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-brand-200 bg-brand-50 px-3 py-2 dark:border-brand-800 dark:bg-brand-900/30">
@@ -638,8 +651,6 @@ export function BacklogView({
           plan={wavePlan}
           loading={waveLoading}
           starting={startingWave}
-          collapsed={!showWaves}
-          onToggleCollapsed={() => setShowWaves((v) => !v)}
           onRefresh={loadWavePlan}
           onStartNextWave={startNextWave}
         />
@@ -734,43 +745,28 @@ function DependencyWavePanel({
   plan,
   loading,
   starting,
-  collapsed,
-  onToggleCollapsed,
   onRefresh,
   onStartNextWave,
 }: {
   plan: DependencyWavePlan | null;
   loading: boolean;
   starting: boolean;
-  collapsed: boolean;
-  onToggleCollapsed: () => void;
   onRefresh: () => void;
   onStartNextWave: () => void;
 }) {
   const startableCount = plan?.readyNow.filter((issue) => issue.startEligible).length ?? 0;
   const startLimit = plan ? Math.min(startableCount, plan.wip.available) : 0;
+  const summary = plan
+    ? `${plan.wip.current}/${plan.wip.limit} WIP, ${plan.wip.available} slot${plan.wip.available === 1 ? "" : "s"} open`
+    : loading ? "Loading wave plan" : "Wave plan unavailable";
 
   return (
-    <div className="rounded-md border border-gray-200 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <button
-          type="button"
-          onClick={onToggleCollapsed}
-          aria-expanded={!collapsed}
-          className="flex min-w-0 items-center gap-1.5 text-left"
-          title={collapsed ? "Show dependency waves" : "Hide dependency waves"}
-        >
-          <svg className={`h-3 w-3 shrink-0 text-gray-400 transition-transform ${collapsed ? "" : "rotate-90"}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 6l6 6-6 6" />
-          </svg>
-          <div className="min-w-0">
-            <div className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Dependency Waves</div>
-            <div className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
-              {plan ? `${plan.wip.current}/${plan.wip.limit} WIP, ${plan.wip.available} slot${plan.wip.available === 1 ? "" : "s"} open` : loading ? "Loading wave plan" : "Wave plan unavailable"}
-            </div>
-          </div>
-        </button>
-        <div className="flex items-center gap-1.5">
+    <CollapsibleSection
+      title="Dependency Waves"
+      summary={summary}
+      bodyClassName="px-3 pb-2"
+      actions={
+        <>
           <button
             type="button"
             onClick={onRefresh}
@@ -787,17 +783,19 @@ function DependencyWavePanel({
           >
             {starting ? "Starting..." : `Start Next Wave${startLimit > 0 ? ` (${startLimit})` : ""}`}
           </button>
-        </div>
-      </div>
-
-      {!collapsed && plan && (
-        <div className="mt-2 grid max-h-72 grid-cols-1 gap-2 overflow-y-auto lg:grid-cols-3">
+        </>
+      }
+    >
+      {plan ? (
+        <div className="grid max-h-72 grid-cols-1 gap-2 overflow-y-auto lg:grid-cols-3">
           <WaveColumn title="Ready Now" issues={plan.readyNow} emptyText="No ready open issues" tone="ready" />
           <WaveColumn title="Blocked" issues={plan.blocked} emptyText="No blocked issues" tone="blocked" />
           <WaveColumn title="Cyclic/Invalid" issues={plan.cyclicInvalid} emptyText="No invalid dependency chains" tone="invalid" />
         </div>
+      ) : (
+        <div className="text-xs text-gray-400 dark:text-gray-500">{loading ? "Loading wave plan…" : "Wave plan unavailable"}</div>
       )}
-    </div>
+    </CollapsibleSection>
   );
 }
 
