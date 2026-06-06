@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
+import { CollapsibleSection } from "./CollapsibleSection.js";
 
 interface SearchResult {
   messageId: number;
@@ -175,6 +176,11 @@ export function TranscriptSearchPanel({ projectId, onClose, onNavigateToWorkspac
           </div>
 
           {/* Filters */}
+          <CollapsibleSection
+            title="Filters"
+            defaultOpen
+            summary={`${STATUS_FILTERS.find((f) => f.value === statusFilter)?.label ?? "All"} · ${PROVIDER_FILTERS.find((f) => f.value === providerFilter)?.label ?? "All"}`}
+          >
           <div className="flex gap-3 flex-wrap">
             <div className="flex items-center gap-1.5">
               <span className="text-xs text-gray-500 dark:text-gray-400">Status:</span>
@@ -209,6 +215,7 @@ export function TranscriptSearchPanel({ projectId, onClose, onNavigateToWorkspac
               ))}
             </div>
           </div>
+          </CollapsibleSection>
         </div>
 
         {/* Results */}
