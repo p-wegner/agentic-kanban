@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
+import { CollapsibleSection } from "./CollapsibleSection.js";
 
 type RiskLevel = "high" | "medium" | "low" | "none";
 
@@ -140,7 +141,13 @@ export function WorkspaceRiskHeatmap({ projectId, onIssueClick }: WorkspaceRiskH
   return (
     <div className="flex flex-col flex-1 min-h-0">
       {/* Filters */}
-      <div className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 space-y-2 flex-shrink-0">
+      <div className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 flex-shrink-0">
+        <CollapsibleSection
+          title="Filters"
+          defaultOpen
+          summary={`${riskFilter === "all" ? "All risk" : `${riskFilter.charAt(0).toUpperCase()}${riskFilter.slice(1)} risk`}${statusFilter !== "all" ? ` · ${statusFilter}` : ""}`}
+        >
+        <div className="space-y-2">
         {/* Risk level filter chips */}
         <div className="flex gap-1.5 flex-wrap">
           {(["all", "high", "medium", "low"] as const).map((level) => (
@@ -182,6 +189,8 @@ export function WorkspaceRiskHeatmap({ projectId, onIssueClick }: WorkspaceRiskH
             ))}
           </select>
         )}
+        </div>
+        </CollapsibleSection>
       </div>
 
       {/* Results */}

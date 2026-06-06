@@ -3,6 +3,7 @@ import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { apiFetch } from "../lib/api.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { WorkspaceRiskHeatmap } from "./WorkspaceRiskHeatmap.js";
+import { CollapsibleSection } from "./CollapsibleSection.js";
 
 interface Project {
   id: string;
@@ -337,49 +338,57 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
         </div>
 
         {/* Filters */}
-        <div className={`px-4 py-2 border-b border-gray-100 dark:border-gray-800 space-y-2 ${viewMode === "risk" ? "hidden" : ""}`}>
-          {/* Project filter */}
-          <select
-            value={projectFilter}
-            onChange={(e) => setProjectFilter(e.target.value)}
-            className="w-full text-sm px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white dark:bg-gray-900 dark:text-gray-200"
+        <div className={`px-4 py-2 border-b border-gray-100 dark:border-gray-800 ${viewMode === "risk" ? "hidden" : ""}`}>
+          <CollapsibleSection
+            title="Filters"
+            defaultOpen
+            summary={`${FILTER_CHIPS.find((c) => c.value === statusFilter)?.label ?? "All"}${projectFilter !== "all" ? " · project" : ""}${searchQuery ? " · search" : ""}`}
           >
-            <option value="all">All projects</option>
-            {allProjects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-
-          {/* Text search */}
-          <input
-            type="text"
-            placeholder={showingStale ? "Search by title, branch, or issue #…" : showingCrossProject ? "Search by title, branch, or project…" : "Search by title or branch…"}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full text-sm px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-400 dark:bg-gray-900 dark:text-gray-200"
-          />
-          {/* Status chips */}
-          <div className="flex gap-1.5 flex-wrap">
-            {FILTER_CHIPS.map((chip) => (
-              <button
-                key={chip.value}
-                onClick={() => setStatusFilter(chip.value)}
-                className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors ${
-                  statusFilter === chip.value
-                    ? chip.value === "stale"
-                      ? "bg-red-600 text-white"
-                      : "bg-brand-600 text-white"
-                    : chip.value === "stale"
-                      ? "bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50"
-                      : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
-                }`}
+            <div className="space-y-2">
+              {/* Project filter */}
+              <select
+                value={projectFilter}
+                onChange={(e) => setProjectFilter(e.target.value)}
+                className="w-full text-sm px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white dark:bg-gray-900 dark:text-gray-200"
               >
-                {chip.label}
-              </button>
-            ))}
-          </div>
+                <option value="all">All projects</option>
+                {allProjects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+
+              {/* Text search */}
+              <input
+                type="text"
+                placeholder={showingStale ? "Search by title, branch, or issue #…" : showingCrossProject ? "Search by title, branch, or project…" : "Search by title or branch…"}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full text-sm px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-400 dark:bg-gray-900 dark:text-gray-200"
+              />
+              {/* Status chips */}
+              <div className="flex gap-1.5 flex-wrap">
+                {FILTER_CHIPS.map((chip) => (
+                  <button
+                    key={chip.value}
+                    onClick={() => setStatusFilter(chip.value)}
+                    className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors ${
+                      statusFilter === chip.value
+                        ? chip.value === "stale"
+                          ? "bg-red-600 text-white"
+                          : "bg-brand-600 text-white"
+                        : chip.value === "stale"
+                          ? "bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50"
+                          : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
+                    }`}
+                  >
+                    {chip.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </CollapsibleSection>
         </div>
 
         {/* Content */}
