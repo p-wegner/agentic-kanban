@@ -193,6 +193,7 @@ export class ReviewError extends Error {
   constructor(
     message: string,
     public readonly code: "NOT_FOUND" | "CONFLICT" | "BAD_REQUEST",
+    public readonly details?: { conflictFiles?: string[]; uncommittedChanges?: string[] },
   ) {
     super(message);
   }
@@ -252,17 +253,24 @@ export async function startManualReview(
     const projectRows = await database.select({ defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.id, projectId)).limit(1);
     const defaultBranch = projectRows.length > 0 ? projectRows[0].defaultBranch : null;
     let diffRef = workspace.baseBranch || defaultBranch;
-    let manualConflictingFiles: string[] | undefined;
-    let manualUncommittedChanges: string[] | undefined;
 
     if (!workspace.isDirect && workspace.workingDir) {
       const baseBranch = workspace.baseBranch || defaultBranch;
       if (!baseBranch) throw new ReviewError("No default branch configured for this project. Set a default branch in project settings before reviewing.", "BAD_REQUEST");
       const prep = await gitService.prepareForReview(workspace.workingDir, baseBranch);
       if (!prep.success) {
-        manualConflictingFiles = prep.conflictingFiles;
-        manualUncommittedChanges = prep.uncommittedChanges;
         console.warn(`[review-service] rebase failed for manual review ${workspaceId}: ${prep.error}`);
+        // Return a structured 409 so the caller (UI/monitor) can route to fix-and-merge
+        // instead of launching a review session that can't proceed.
+        const files = prep.conflictingFiles ?? [];
+        const uncommitted = prep.uncommittedChanges ?? [];
+        const summary = files.length > 0
+          ? `Rebase conflict during review preflight: ${files.length} file(s) conflict. Route to fix-and-merge to resolve.`
+          : `Rebase failed during review preflight: ${prep.error ?? "unknown error"}`;
+        throw new ReviewError(summary, "CONFLICT", {
+          conflictFiles: files,
+          uncommittedChanges: uncommitted,
+        });
       }
       diffRef = prep.diffRef;
     }
@@ -271,7 +279,7 @@ export async function startManualReview(
     const verifyAgent = prefMap.get("after_merge_verify_agent") || "none";
     const { prompt: reviewPromptText, model: reviewModel } = await buildReviewPrompt(
       database, workspace.branch, diffRef, issueId, autoFix, projectId,
-      manualConflictingFiles, manualUncommittedChanges, workspaceId, manualSkillName, verifyAgent,
+      undefined, undefined, workspaceId, manualSkillName, verifyAgent,
     );
     const reviewArgsWithModel = reviewModel && provider === "claude" ? `${reviewArgs ?? ""} --model ${reviewModel}`.trim() : reviewArgs;
 

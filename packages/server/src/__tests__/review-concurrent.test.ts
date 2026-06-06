@@ -4,8 +4,9 @@ import { issues, preferences, projectStatuses, projects, workspaces } from "@age
 import { createTestDb } from "./helpers/test-db.js";
 import { ReviewError, startManualReview } from "../services/review.service.js";
 
+const mockPrepareForReview = vi.fn(async () => ({ success: true, diffRef: "main", conflictingFiles: [], uncommittedChanges: [] }));
 vi.mock("../services/git.service.js", () => ({
-  prepareForReview: vi.fn(async () => ({ success: true, diffRef: "main", conflictingFiles: [], uncommittedChanges: [] })),
+  prepareForReview: (...args: unknown[]) => mockPrepareForReview(...args),
 }));
 
 const mockBoardEvents = { broadcast: vi.fn() };
@@ -57,6 +58,8 @@ describe("startManualReview — concurrent trigger hardening (AK-520)", () => {
   beforeEach(() => {
     ({ db } = createTestDb());
     mockBoardEvents.broadcast.mockClear();
+    mockPrepareForReview.mockReset();
+    mockPrepareForReview.mockResolvedValue({ success: true, diffRef: "main", conflictingFiles: [], uncommittedChanges: [] });
   });
 
   it("succeeds and returns a sessionId for a single idle workspace", async () => {
@@ -138,5 +141,163 @@ describe("startManualReview — concurrent trigger hardening (AK-520)", () => {
     const retryManager = makeSessionManager(() => "session-retry");
     const retryResult = await startManualReview(db, () => retryManager as never, mockBoardEvents as never, reviewSessionIds, workspaceId, false);
     expect(retryResult.sessionId).toBe("session-retry");
+  });
+});
+
+/** Seed a non-direct (worktree) workspace with a workingDir so prepareForReview is called. */
+async function seedWorktreeWorkspace(db: ReturnType<typeof createTestDb>["db"], overrides: { status?: string } = {}) {
+  const now = new Date().toISOString();
+  const projectId = randomUUID();
+  const statusId = randomUUID();
+  const issueId = randomUUID();
+  const workspaceId = randomUUID();
+
+  await db.insert(projects).values({
+    id: projectId, name: "Test", repoPath: "/tmp/repo", repoName: "repo",
+    defaultBranch: "main", createdAt: now, updatedAt: now,
+  });
+  await db.insert(projectStatuses).values({
+    id: statusId, projectId, name: "In Progress", sortOrder: 0, isDefault: true, createdAt: now,
+  });
+  await db.insert(issues).values({
+    id: issueId, issueNumber: 1, title: "Test issue", priority: "medium",
+    sortOrder: 0, statusId, projectId, createdAt: now, updatedAt: now,
+  });
+  await db.insert(workspaces).values({
+    id: workspaceId, issueId,
+    branch: "feature/ak-1-test",
+    workingDir: "/tmp/worktree",
+    isDirect: false,
+    baseBranch: "main",
+    status: overrides.status ?? "idle",
+    createdAt: now, updatedAt: now,
+  });
+  await db.insert(preferences).values({ key: "claude_profile", value: "mock" });
+
+  return { workspaceId, projectId, issueId };
+}
+
+describe("startManualReview — preflight rebase conflict returns structured 409 (#662)", () => {
+  let db: ReturnType<typeof createTestDb>["db"];
+
+  beforeEach(() => {
+    ({ db } = createTestDb());
+    mockBoardEvents.broadcast.mockClear();
+    mockPrepareForReview.mockReset();
+    mockPrepareForReview.mockResolvedValue({ success: true, diffRef: "main", conflictingFiles: [], uncommittedChanges: [] });
+  });
+
+  it("throws ReviewError CONFLICT with conflictFiles when prepareForReview fails with conflicts", async () => {
+    const { workspaceId } = await seedWorktreeWorkspace(db);
+    mockPrepareForReview.mockResolvedValue({
+      success: false,
+      diffRef: "main",
+      conflictingFiles: ["src/foo.ts", "src/bar.ts"],
+      error: "CONFLICT (content): Merge conflict in src/foo.ts",
+    });
+
+    const sessionManager = makeSessionManager();
+    const reviewSessionIds = new Set<string>();
+
+    await expect(
+      startManualReview(db, () => sessionManager as never, mockBoardEvents as never, reviewSessionIds, workspaceId, false),
+    ).rejects.toSatisfy((err: unknown) => {
+      if (!(err instanceof ReviewError)) return false;
+      if (err.code !== "CONFLICT") return false;
+      if (!err.details?.conflictFiles) return false;
+      if (err.details.conflictFiles.length !== 2) return false;
+      if (!err.message.includes("2 file(s) conflict")) return false;
+      return true;
+    });
+
+    // No session should have been launched
+    expect(sessionManager.startSession).not.toHaveBeenCalled();
+    // In-flight guard must be cleared — a retry is possible
+    expect(reviewSessionIds.size).toBe(0);
+  });
+
+  it("throws ReviewError CONFLICT when prepareForReview fails without explicit conflict files", async () => {
+    const { workspaceId } = await seedWorktreeWorkspace(db);
+    mockPrepareForReview.mockResolvedValue({
+      success: false,
+      diffRef: "main",
+      conflictingFiles: [],
+      error: "some unexpected rebase failure",
+    });
+
+    const sessionManager = makeSessionManager();
+    const reviewSessionIds = new Set<string>();
+
+    await expect(
+      startManualReview(db, () => sessionManager as never, mockBoardEvents as never, reviewSessionIds, workspaceId, false),
+    ).rejects.toSatisfy((err: unknown) => {
+      if (!(err instanceof ReviewError)) return false;
+      if (err.code !== "CONFLICT") return false;
+      if (!err.message.includes("unexpected rebase failure")) return false;
+      return true;
+    });
+
+    expect(sessionManager.startSession).not.toHaveBeenCalled();
+  });
+
+  it("workspace stays idle after preflight conflict (not stuck at reviewing)", async () => {
+    const { workspaceId } = await seedWorktreeWorkspace(db);
+    mockPrepareForReview.mockResolvedValue({
+      success: false,
+      diffRef: "main",
+      conflictingFiles: ["src/conflict.ts"],
+      error: "CONFLICT",
+    });
+
+    const sessionManager = makeSessionManager();
+    const reviewSessionIds = new Set<string>();
+
+    try {
+      await startManualReview(db, () => sessionManager as never, mockBoardEvents as never, reviewSessionIds, workspaceId, false);
+    } catch { /* expected */ }
+
+    // Workspace must NOT have been moved to "reviewing"
+    const { eq } = await import("drizzle-orm");
+    const rows = await db.select({ status: workspaces.status }).from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
+    expect(rows[0].status).toBe("idle");
+  });
+
+  it("retry succeeds after preflight conflict is resolved", async () => {
+    const { workspaceId } = await seedWorktreeWorkspace(db);
+    const sessionManager = makeSessionManager(() => "session-retry");
+    const reviewSessionIds = new Set<string>();
+
+    // First call: preflight fails
+    mockPrepareForReview.mockResolvedValueOnce({
+      success: false,
+      diffRef: "main",
+      conflictingFiles: ["src/conflict.ts"],
+      error: "CONFLICT",
+    });
+
+    await expect(
+      startManualReview(db, () => sessionManager as never, mockBoardEvents as never, reviewSessionIds, workspaceId, false),
+    ).rejects.toThrow();
+
+    // Second call: preflight succeeds
+    mockPrepareForReview.mockResolvedValueOnce({
+      success: true,
+      diffRef: "main",
+      conflictingFiles: [],
+      uncommittedChanges: [],
+    });
+
+    const result = await startManualReview(db, () => sessionManager as never, mockBoardEvents as never, reviewSessionIds, workspaceId, false);
+    expect(result.sessionId).toBe("session-retry");
+  });
+
+  it("direct workspace (no workingDir) skips prepareForReview entirely", async () => {
+    const { workspaceId } = await seedWorkspace(db);
+    const sessionManager = makeSessionManager(() => "session-direct");
+    const reviewSessionIds = new Set<string>();
+
+    const result = await startManualReview(db, () => sessionManager as never, mockBoardEvents as never, reviewSessionIds, workspaceId, false);
+    expect(result.sessionId).toBe("session-direct");
+    expect(mockPrepareForReview).not.toHaveBeenCalled();
   });
 });
