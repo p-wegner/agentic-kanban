@@ -11,6 +11,8 @@ export interface AgentLaunchConfig {
   useShell: boolean;
   isMockAgent: boolean;
   env: Record<string, string>;
+  /** Optional system-facing guidance passed directly as a provider-specific instruction. */
+  systemInstructions?: string;
   /** If true, write prompt to stdin and keep it open for follow-up writes. */
   keepStdinOpen?: boolean;
   /** If true, do not write the prompt to stdin because the provider receives it via argv. */
@@ -29,6 +31,8 @@ export interface ProviderLaunchOptions {
   profile?: { provider: ProviderName; name: string };
   /** Model override passed via the provider launch flags (e.g. Claude/Codex/other harness-specific values). */
   model?: string;
+  /** Optional system-facing guidance that all providers should enforce. */
+  systemInstructions?: string;
   keepAlive?: boolean;
   permissionPromptTool?: string;
   planMode?: boolean;
