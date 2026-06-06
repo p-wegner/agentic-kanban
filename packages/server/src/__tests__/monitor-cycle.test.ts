@@ -227,6 +227,33 @@ describe("processWorkspaceCandidates — idle + readyForMerge=false", () => {
     expect(calls.every(([url]) => String(url).startsWith("http://127.0.0.1:3001/"))).toBe(true);
   });
 
+  it("does not relaunch an idle workspace whose latest session hit a Codex usage limit", async () => {
+    vi.mocked(db.select).mockReset();
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{
+        id: "sess-rate-limited",
+        status: "stopped",
+        startedAt: new Date().toISOString(),
+        triggerType: "agent",
+        stats: JSON.stringify({
+          rateLimited: true,
+          rateLimitKind: "codex-usage-limit",
+          retryAfter: "Jun 6th, 2026 12:30 AM",
+        }),
+      }]) as ReturnType<typeof db.select>)
+      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]) as ReturnType<typeof db.select>);
+    vi.mocked(fetch).mockResolvedValue({ ok: true } as Response);
+
+    const deps = makeDeps();
+    const candidate: WorkspaceCandidate = { ...baseCandidate, readyForMerge: false, issueStatusName: "In Progress" };
+    const stats = await processWorkspaceCandidates([candidate], deps);
+
+    expect(stats.relaunched).toBe(0);
+    expect(stats.merged).toBe(0);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+    expect(vi.mocked(deps.boardEvents.broadcast)).toHaveBeenCalledWith("proj-1", "board_changed");
+  });
+
   it("restarts an idle workspace that likely came from a stalled fix-and-merge session", async () => {
     vi.mocked(fetch).mockResolvedValue({ ok: true } as Response);
 

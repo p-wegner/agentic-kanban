@@ -8,6 +8,7 @@ import type { AgentOutputMessage, SessionFrictionStats } from "@agentic-kanban/s
 import type { SessionManagerOptions, SessionState } from "./types.js";
 import { formatToolActivity, tasksToTodoItems } from "./utils.js";
 import type { TodoItem } from "../board-events.js";
+import { detectCodexUsageLimitMessages } from "../codex-rate-limit.js";
 
 /**
  * Compute compact friction metrics (tool failures, repeated commands, errors)
@@ -33,15 +34,27 @@ function frictionFromBuffer(messages: AgentOutputMessage[]): SessionFrictionStat
 async function persistFrictionFallback(sessionId: string, messages: AgentOutputMessage[]) {
   try {
     const friction = frictionFromBuffer(messages);
-    if (!friction) return;
+    const usageLimit = detectCodexUsageLimitMessages(messages);
+    if (!friction && !usageLimit) return;
     const rows = await writeDb.select({ stats: sessions.stats }).from(sessions).where(eq(sessions.id, sessionId)).limit(1);
     if (rows.length === 0) return;
     let stats: Record<string, unknown> = {};
     if (rows[0].stats) {
       try { stats = JSON.parse(rows[0].stats) as Record<string, unknown>; } catch { stats = {}; }
     }
-    if (stats.friction) return; // already persisted on the result-event write
-    stats.friction = friction;
+    if (usageLimit) {
+      stats.rateLimited = true;
+      stats.rateLimitKind = "codex-usage-limit";
+      stats.retryAfter = usageLimit.retryAfter;
+      stats.failureReason = usageLimit.message;
+      stats.agentSummary = usageLimit.message;
+      stats.launchFailure = true;
+      stats.success = false;
+    }
+    if (friction) {
+      if (stats.friction && !usageLimit) return; // already persisted on the result-event write
+      stats.friction = friction;
+    }
     await writeDb.update(sessions).set({ stats: JSON.stringify(stats) }).where(eq(sessions.id, sessionId));
   } catch (err) {
     console.error("Failed to persist session friction (fallback):", err);
@@ -243,7 +256,8 @@ export function createBroadcaster(
 
         // Rate limit event: log for observability
         if (evt.rateLimitInfo) {
-          console.warn(`[agent] rate_limit_event: sessionId=${sessionId} status=${evt.rateLimitInfo.status} type=${evt.rateLimitInfo.rateLimitType}`);
+          const retryAfter = evt.rateLimitInfo.retryAfter ? ` retryAfter=${evt.rateLimitInfo.retryAfter}` : "";
+          console.warn(`[agent] rate_limit_event: sessionId=${sessionId} status=${evt.rateLimitInfo.status} type=${evt.rateLimitInfo.rateLimitType}${retryAfter}`);
         }
 
         // Tool result: decrement subagent count for tracked Agent tool_use IDs

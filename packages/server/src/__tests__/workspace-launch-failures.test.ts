@@ -221,6 +221,44 @@ describe("getWorkspaceLaunchFailures", () => {
     expect(result.failures[0].failureCategory).toBe("session-error");
   });
 
+  it("detects rate-limited Codex sessions before generic zero-output failures", async () => {
+    const { db } = createTestDb();
+    const now = new Date().toISOString();
+    const start = new Date(Date.now() - 60 * 60 * 1000);
+    const end = new Date(start.getTime() + 500);
+
+    const projectId = randomUUID();
+    const statusId = randomUUID();
+    const issueId = randomUUID();
+    const wsId = randomUUID();
+    const sessionId = randomUUID();
+    const message = "You've hit your usage limit for GPT-5.3-Codex-Spark. Switch to another model now, or try again at Jun 6th, 2026 12:30 AM.";
+
+    await db.insert(projects).values(baseProject(projectId, now));
+    await db.insert(projectStatuses).values(baseStatus(statusId, projectId, "In Progress", now));
+    await db.insert(issues).values(baseIssue(issueId, projectId, statusId, now));
+    await db.insert(workspaces).values(baseWorkspace(wsId, issueId, now, { status: "blocked", provider: "codex" }));
+    await db.insert(sessions).values(baseSession(sessionId, wsId, now, {
+      executor: "codex",
+      startedAt: start.toISOString(),
+      endedAt: end.toISOString(),
+      exitCode: "1",
+      stats: JSON.stringify({
+        rateLimited: true,
+        rateLimitKind: "codex-usage-limit",
+        retryAfter: "Jun 6th, 2026 12:30 AM",
+        failureReason: message,
+        launchFailure: true,
+      }),
+    }));
+
+    const result = await getWorkspaceLaunchFailures(projectId, db);
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0].failureCategory).toBe("rate-limited");
+    expect(result.failures[0].workspaceStatus).toBe("blocked");
+    expect(result.failures[0].lastMessage).toBe(message);
+  });
+
   it("excludes closed workspaces", async () => {
     const { db } = createTestDb();
     const now = new Date().toISOString();

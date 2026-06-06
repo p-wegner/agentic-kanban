@@ -2,9 +2,11 @@ import { projects, projectStatuses, issues, workspaces, sessions } from "@agenti
 import { eq, inArray, desc, and, ne } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { isAnalyticsNoise } from "./session-filter.js";
+import { isCodexUsageLimitStats } from "./codex-rate-limit.js";
 
 export type LaunchFailureCategory =
   | "zero-output"   // session exited in <=1s or had zero tokens
+  | "rate-limited"  // provider quota/usage limit blocked launch
   | "setup-failed"  // workspace setup script failed (non-zero exit)
   | "missing-worktree" // workingDir is null or missing
   | "session-error"; // session exited with non-zero exit code
@@ -54,6 +56,10 @@ function isZeroOutputSession(session: { startedAt: string; endedAt: string | nul
     } catch { /* ignore bad JSON */ }
   }
   return false;
+}
+
+function isRateLimitedSession(session: { stats: string | null }): boolean {
+  return isCodexUsageLimitStats(session.stats);
 }
 
 function extractFailureMessage(session: { stats: string | null } | null, setupStderr: string | null | undefined): string | null {
@@ -140,6 +146,7 @@ export async function getWorkspaceLaunchFailures(
   function countRecentFailures(wsId: string): number {
     const wsessions = allSessionsByWs.get(wsId) ?? [];
     return wsessions.filter(s =>
+      isRateLimitedSession(s) ||
       (s.endedAt && isZeroOutputSession(s)) ||
       (s.status === "stopped" && s.exitCode !== null && s.exitCode !== "0"),
     ).length;
@@ -205,6 +212,30 @@ export async function getWorkspaceLaunchFailures(
     }
 
     if (!latestSession) continue;
+
+    if (isRateLimitedSession(latestSession)) {
+      failures.push({
+        workspaceId: ws.id,
+        workspaceBranch: ws.branch,
+        workspaceStatus: ws.status,
+        workingDir: ws.workingDir,
+        issueId: issue.id,
+        issueNumber: issue.issueNumber,
+        issueTitle: issue.title,
+        issueStatusName,
+        provider: ws.provider ?? null,
+        profile: ws.claudeProfile ?? null,
+        sessionId: latestSession.id,
+        sessionStatus: latestSession.status,
+        sessionStartedAt: latestSession.startedAt,
+        sessionEndedAt: latestSession.endedAt,
+        failureCategory: "rate-limited",
+        lastMessage: extractFailureMessage(latestSession, null),
+        failedAt: latestSession.endedAt ?? latestSession.startedAt,
+        recentFailureCount: countRecentFailures(ws.id),
+      });
+      continue;
+    }
 
     // Check: zero-output session (1-second or zero-token provider failure)
     if (isZeroOutputSession(latestSession)) {

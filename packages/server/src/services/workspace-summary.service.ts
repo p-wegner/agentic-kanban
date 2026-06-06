@@ -247,7 +247,7 @@ export async function buildWorkspaceSummaryMap(
       id: mainWs.id,
       branch: mainWs.branch,
       workingDir: mainWs.workingDir,
-      status: mainWs.status as "active" | "reviewing" | "fixing" | "idle" | "awaiting-plan-approval" | "error" | "closed",
+      status: mainWs.status as "active" | "reviewing" | "fixing" | "idle" | "blocked" | "awaiting-plan-approval" | "error" | "closed",
       claudeProfile: mainWs.claudeProfile,
       profile: mainWs.claudeProfile ? { provider: (mainWs.provider as ProviderName) ?? "claude", name: mainWs.claudeProfile } : null,
       model: mainWs.model,
