@@ -319,7 +319,7 @@ export function BoardToolbar({
       <button
         onClick={() => setShowMoreActions((v) => !v)}
         aria-expanded={showMoreActions}
-        title="More actions — quick tasks, scripts, export/import, voice capture"
+        title="More actions — quick tasks, scripts"
         className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors ${
           showMoreActions
             ? "bg-surface-sunken dark:bg-gray-800 border-black/[0.07] dark:border-white/10 text-ink dark:text-gray-200"
@@ -344,9 +344,11 @@ export function BoardToolbar({
             <span className="hidden sm:inline">Tasks</span>
           </button>
           <ProjectScriptsMenu projectId={projectId} />
-          <VoiceInboxButton projectId={projectId} onIssueCreated={onVoiceIssueCreated} />
         </>
       )}
+      {/* Voice capture stays on the bar at all times — quick idea/command entry
+          shouldn't hide behind the More cluster. */}
+      <VoiceInboxButton projectId={projectId} onIssueCreated={onVoiceIssueCreated} />
       <div className="relative shrink-0 flex items-center gap-0.5">
         <button
           onClick={() => setShowMonitorPopover(v => !v)}
