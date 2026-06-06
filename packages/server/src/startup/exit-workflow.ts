@@ -254,6 +254,15 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
           }
           console.log(`[workflow] verify_script passed for workspace ${workspaceId}`);
         }
+        // #629 Guard: re-verify the branch still has committed changes ahead of base.
+        // A race (e.g. branch reset/rebased to equal base between review start and exit)
+        // can leave a 0-commit branch incorrectly marked ready-for-merge.
+        const stillHasChanges = await hasCommittedChanges(workspace, defaultBranch, workspaceId);
+        if (!stillHasChanges) {
+          console.log(`[workflow] review session ${sessionId} completed but branch has no committed changes — withholding readyForMerge (issue #629)`);
+          boardEvents.broadcast(projectId, "issue_updated");
+          return;
+        }
         await db.update(workspaces).set({ readyForMerge: true, updatedAt: now }).where(eq(workspaces.id, workspaceId));
         boardEvents.broadcast(projectId, "workspace_ready_for_merge");
         const learningAfterReview = prefMap.get("learning_step_after_review") === "true" && workspace.workingDir ? launchLearningStep(db, sessionManager, learningSessionIds, workspace.id, prefMap, "after review", true) : Promise.resolve();
