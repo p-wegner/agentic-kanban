@@ -86,6 +86,12 @@ describe("deriveWorkspaceActivityState", () => {
     expect(result.countsAsActiveCapacity).toBe(true);
   });
 
+  it("blocked workspace => blocked, does not count as capacity", () => {
+    const result = deriveWorkspaceActivityState(makeWs("blocked"), null);
+    expect(result.state).toBe("blocked");
+    expect(result.countsAsActiveCapacity).toBe(false);
+  });
+
   it("idle workspace with normal session => idle, does not count as capacity", () => {
     const session = makeSession({ stats: JSON.stringify({ inputTokens: 5000, outputTokens: 1200 }) });
     const result = deriveWorkspaceActivityState(makeWs("idle"), session);
@@ -154,6 +160,7 @@ describe("workspaceStatusPriority", () => {
     expect(workspaceStatusPriority("fixing")).toBeLessThan(workspaceStatusPriority("reviewing"));
     expect(workspaceStatusPriority("reviewing")).toBeLessThan(workspaceStatusPriority("awaiting-plan-approval"));
     expect(workspaceStatusPriority("awaiting-plan-approval")).toBeLessThan(workspaceStatusPriority("idle"));
+    expect(workspaceStatusPriority("blocked")).toBe(workspaceStatusPriority("idle"));
     expect(workspaceStatusPriority("idle")).toBeLessThan(workspaceStatusPriority("closed"));
   });
 });
@@ -168,8 +175,9 @@ describe("ACTIVE_WORKSPACE_STATUSES", () => {
     expect(ACTIVE_WORKSPACE_STATUSES.has("awaiting-plan-approval")).toBe(true);
   });
 
-  it("excludes idle, closed, error", () => {
+  it("excludes idle, blocked, closed, error", () => {
     expect(ACTIVE_WORKSPACE_STATUSES.has("idle")).toBe(false);
+    expect(ACTIVE_WORKSPACE_STATUSES.has("blocked")).toBe(false);
     expect(ACTIVE_WORKSPACE_STATUSES.has("closed")).toBe(false);
     expect(ACTIVE_WORKSPACE_STATUSES.has("error")).toBe(false);
   });
@@ -200,6 +208,10 @@ describe("isIssueInFlight", () => {
 
   it("returns false for idle main workspace", () => {
     expect(isIssueInFlight({ main: { status: "idle" } })).toBe(false);
+  });
+
+  it("returns false for blocked main workspace", () => {
+    expect(isIssueInFlight({ main: { status: "blocked" } })).toBe(false);
   });
 
   it("returns false for closed main workspace", () => {

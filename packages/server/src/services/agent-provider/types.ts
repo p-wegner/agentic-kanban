@@ -95,6 +95,8 @@ export interface ParsedStreamEvent {
     status: string;
     rateLimitType: string;
     resetsAt?: number;
+    retryAfter?: string;
+    message?: string;
     overageStatus?: string;
     overageDisabledReason?: string;
     isUsingOverage?: boolean;

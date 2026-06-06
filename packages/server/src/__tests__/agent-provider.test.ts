@@ -671,6 +671,22 @@ describe("CodexProvider", () => {
 
     expect(evt?.liveStats?.contextTokens).toBe(10);
   });
+
+  it("parses Codex usage-limit errors as rate-limit events", () => {
+    const evt = provider.parseStreamEvent(JSON.stringify({
+      type: "turn.failed",
+      error: {
+        message: "You've hit your usage limit for GPT-5.3-Codex-Spark. Switch to another model now, or try again at Jun 6th, 2026 12:30 AM.",
+      },
+    }));
+
+    expect(evt?.rateLimitInfo).toEqual({
+      status: "limited",
+      rateLimitType: "usage_limit",
+      retryAfter: "Jun 6th, 2026 12:30 AM",
+      message: "You've hit your usage limit for GPT-5.3-Codex-Spark. Switch to another model now, or try again at Jun 6th, 2026 12:30 AM.",
+    });
+  });
 });
 
 describe("CopilotProvider", () => {

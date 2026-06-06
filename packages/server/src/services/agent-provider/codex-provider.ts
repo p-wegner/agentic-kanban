@@ -1,6 +1,7 @@
 import type { AgentLaunchConfig, AgentProvider, FileSystem, ParsedStreamEvent, ProviderLaunchOptions } from "./types.js";
 import { PLAN_BEGIN_MARKER, PLAN_END_MARKER } from "./types.js";
 import { resolveCodexDirect, splitArgs, nodeFileSystem } from "./helpers.js";
+import { detectCodexUsageLimitText } from "../codex-rate-limit.js";
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -115,6 +116,22 @@ export class CodexProvider implements AgentProvider {
       result.providerSessionId = obj.thread_id as string;
     }
 
+    const error = asRecord(obj.error);
+    const message = typeof obj.message === "string"
+      ? obj.message
+      : typeof error?.message === "string"
+        ? error.message
+        : undefined;
+    const usageLimit = detectCodexUsageLimitText(message);
+    if (usageLimit) {
+      result.rateLimitInfo = {
+        status: "limited",
+        rateLimitType: "usage_limit",
+        retryAfter: usageLimit.retryAfter ?? undefined,
+        message: usageLimit.message,
+      };
+    }
+
     if (obj.type === "turn.completed") {
       const usage = asRecord(obj.usage);
       const totalUsage = asRecord(usage?.total_token_usage) ?? usage;
@@ -179,7 +196,8 @@ export class CodexProvider implements AgentProvider {
       result.assistantText === undefined &&
       result.toolActivity === undefined &&
       result.toolResult === undefined &&
-      result.todos === undefined
+      result.todos === undefined &&
+      result.rateLimitInfo === undefined
     ) {
       return undefined;
     }

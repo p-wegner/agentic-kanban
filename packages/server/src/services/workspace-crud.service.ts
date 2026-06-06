@@ -1223,9 +1223,9 @@ exit 1
   }
 
   async function updateWorkspace(id: string, body: Record<string, unknown>): Promise<{ id: string }> {
-    const validStatuses = ["active", "reviewing", "idle", "closed"];
+    const validStatuses = ["active", "reviewing", "idle", "blocked", "closed"];
     if (body.status && !validStatuses.includes(body.status as string)) {
-      throw new WorkspaceError("Invalid status. Must be active, reviewing, idle, or closed", "BAD_REQUEST");
+      throw new WorkspaceError("Invalid status. Must be active, reviewing, idle, blocked, or closed", "BAD_REQUEST");
     }
 
     const now = new Date().toISOString();
