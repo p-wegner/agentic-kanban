@@ -449,6 +449,8 @@ export interface CreateWorkspaceRequest {
 export interface UpdateWorkspaceRequest {
   status?: "active" | "reviewing" | "fixing" | "idle" | "error" | "closed";
   workingDir?: string;
+  claudeProfile?: string | null;
+  provider?: string | null;
 }
 
 export interface WorkspaceResponse {
