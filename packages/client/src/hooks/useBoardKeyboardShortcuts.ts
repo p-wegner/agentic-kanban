@@ -1,10 +1,18 @@
 import { useEffect, type Dispatch, type RefObject, type SetStateAction } from "react";
 import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
-import { SHORTCUT_TO_VIEW, type ViewMode } from "../lib/viewRegistry.js";
+import { apiFetch } from "../lib/api.js";
+import { registerAction } from "../lib/actions.js";
+import { SHORTCUT_TO_VIEW, VIEW_REGISTRY, type ViewMode } from "../lib/viewRegistry.js";
+import { showToast } from "../components/Toast.js";
 import type { BoardPanelState } from "./useBoardPanels.js";
 
-export interface KeyboardShortcutState {
+export interface BoardKeyboardShortcutProject {
+  id: string;
+  name: string;
+}
+
+export interface BoardKeyboardShortcutState {
   columnsRef: RefObject<StatusWithIssues[]>;
   columns: StatusWithIssues[];
   filteredColumns: StatusWithIssues[];
@@ -16,11 +24,14 @@ export interface KeyboardShortcutState {
   keyboardCursorIssueIdRef: RefObject<string | null>;
   searchQuery: string;
   selectedIssue: IssueWithStatus | null;
+  projects: BoardKeyboardShortcutProject[];
+  activeProjectId: string | null;
 }
 
-export interface KeyboardShortcutActions {
+export interface BoardKeyboardShortcutActions {
   handleIssueClick: (issue: IssueWithStatus) => void;
   handleViewModeChange: (mode: ViewMode) => void;
+  handleProjectChange: (id: string) => Promise<void>;
   setSearchQuery: Dispatch<SetStateAction<string>>;
   setKeyboardCursorIssueId: Dispatch<SetStateAction<string | null>>;
   setSelectedIssue: Dispatch<SetStateAction<IssueWithStatus | null>>;
@@ -30,9 +41,9 @@ export interface KeyboardShortcutActions {
   panels: BoardPanelState;
 }
 
-export function useKeyboardShortcuts(
-  state: KeyboardShortcutState,
-  actions: KeyboardShortcutActions,
+export function useBoardKeyboardShortcuts(
+  state: BoardKeyboardShortcutState,
+  actions: BoardKeyboardShortcutActions,
 ) {
   useEffect(() => {
     function isTextEntryTarget(target: EventTarget | null) {
@@ -69,19 +80,7 @@ export function useKeyboardShortcuts(
         }
       }
       if (e.key === "Escape") {
-        if (actions.panels.showCommandPalette) { actions.panels.setShowCommandPalette(false); return; }
-        if (actions.panels.showAllWorkspaces) { actions.panels.setShowAllWorkspaces(false); return; }
-        if (actions.panels.showLiveActivityTicker) { actions.panels.setShowLiveActivityTicker(false); return; }
-        if (actions.panels.showLaunchFailures) { actions.panels.setShowLaunchFailures(false); return; }
-        if (actions.panels.showCleanupQueue) { actions.panels.setShowCleanupQueue(false); return; }
-        if (actions.panels.showFileContention) { actions.panels.setShowFileContention(false); return; }
-        if (actions.panels.showWorktreeOverview) { actions.panels.setShowWorktreeOverview(false); return; }
-        if (actions.panels.showShortcutHelp) { actions.panels.setShowShortcutHelp(false); return; }
-        if (actions.panels.showQuickTasks) { actions.panels.setShowQuickTasks(false); return; }
-        if (actions.panels.showRunQueueForecast) { actions.panels.setShowRunQueueForecast(false); return; }
-        if (actions.panels.showCodemod) { actions.panels.setShowCodemod(false); return; }
-        if (actions.panels.showProjectHealth) { actions.panels.setShowProjectHealth(false); return; }
-        if (actions.panels.showTimeReport) { actions.panels.setShowTimeReport(false); return; }
+        if (actions.panels.closeTopPanel()) return;
         if (state.selectedIssue) { actions.setSelectedIssue(null); return; }
         if (state.keyboardCursorIssueIdRef.current) { actions.setKeyboardCursorIssueId(null); return; }
         if (state.searchQuery) {
@@ -294,5 +293,150 @@ export function useKeyboardShortcuts(
     state.selectedIssue,
     state.searchQuery,
     state.viewMode,
+  ]);
+
+  useEffect(() => {
+    const unregisters: (() => void)[] = [];
+
+    unregisters.push(registerAction({
+      id: "create-issue",
+      label: "Create Issue",
+      description: "Add a new issue to the board",
+      icon: "+",
+      shortcut: "c",
+      category: "issue",
+      handler: () => {
+        const col = state.activeColumns[0] ?? state.filteredColumns[0] ?? state.columns[0];
+        if (col) actions.setExpandedCreatePanel({ statusId: col.id, statusName: col.name, state: {} });
+      },
+    }));
+
+    unregisters.push(registerAction({
+      id: "create-issue-with-workspace",
+      label: "New Issue + Start Workspace",
+      shortcut: "w",
+      category: "issue",
+      handler: () => {
+        const col = state.activeColumns[0] ?? state.filteredColumns[0] ?? state.columns[0];
+        if (col) actions.setExpandedCreatePanel({ statusId: col.id, statusName: col.name, state: { startWorkspace: true } });
+      },
+    }));
+
+    unregisters.push(registerAction({
+      id: "start-workspace-for-issue",
+      label: "Start Workspace for Issue…",
+      description: "Fuzzy-pick an issue and start a workspace for it",
+      icon: "▷",
+      category: "issue",
+      handler: actions.panels.openStartWorkspacePicker,
+    }));
+
+    for (const project of state.projects) {
+      const isActive = project.id === state.activeProjectId;
+      unregisters.push(registerAction({
+        id: `switch-project-${project.id}`,
+        label: `Switch project: ${project.name}${isActive ? " (current)" : ""}`,
+        description: isActive ? "Current active project" : "Switch to this project",
+        icon: isActive ? "✓" : "⇄",
+        category: "navigation",
+        handler: () => {
+          if (isActive) {
+            showToast(`"${project.name}" is already active`, "success");
+            return;
+          }
+          actions.handleProjectChange(project.id);
+        },
+      }));
+    }
+
+    unregisters.push(registerAction({ id: "open-settings", label: "Open Settings", description: "Configure agent, preferences, and project settings", icon: "⚙", category: "settings", handler: () => actions.panels.setShowSettings(true) }));
+    unregisters.push(registerAction({ id: "view-all-workspaces", label: "All Workspaces", description: "View all workspaces with status, diff stats, and session activity", icon: "⊞", category: "navigation", handler: () => actions.panels.setShowAllWorkspaces(true) }));
+    unregisters.push(registerAction({ id: "view-cleanup-queue", label: "Cleanup Queue", description: "View closed workspaces with failed worktree cleanup warnings", icon: "🧹", category: "navigation", handler: () => actions.panels.setShowCleanupQueue(true) }));
+    unregisters.push(registerAction({ id: "view-file-contention", label: "File Contention Heatmap", description: "Show which active workspaces touch the same files (merge-risk clusters)", icon: "⚡", category: "navigation", handler: () => actions.panels.setShowFileContention(true) }));
+    unregisters.push(registerAction({ id: "search-transcripts", label: "Search Transcripts", description: "Search agent session transcripts across all workspaces", icon: "⏎", category: "navigation", handler: () => actions.panels.setShowTranscriptSearch(true) }));
+    unregisters.push(registerAction({ id: "view-worktrees", label: "View Worktrees", description: "Inspect git worktrees and their diff stats", icon: "⎇", category: "navigation", handler: () => actions.panels.setShowWorktreeOverview(true) }));
+    unregisters.push(registerAction({ id: "view-project-health", label: "Project Health Overview", description: "See all registered projects with issue counts and warning states", icon: "◎", shortcut: "p", category: "navigation", handler: () => actions.panels.setShowProjectHealth(true) }));
+    unregisters.push(registerAction({ id: "search-issues", label: "Search Issues", description: "Filter issues by text or keyword", icon: "⌕", shortcut: "/", category: "board", handler: () => document.getElementById("search-input")?.focus() }));
+    unregisters.push(registerAction({ id: "show-shortcuts", label: "Keyboard Shortcuts", description: "View all available keyboard shortcuts", icon: "?", shortcut: "?", category: "settings", handler: () => actions.panels.setShowShortcutHelp(true) }));
+    unregisters.push(registerAction({ id: "open-quick-tasks", label: "Open Quick Tasks", description: "View installed skills and run custom agent tasks", icon: "⚡", shortcut: "q", category: "board", handler: () => actions.panels.setShowQuickTasks(true) }));
+    unregisters.push(registerAction({ id: "run-queue-forecast", label: "Run Queue Forecast", description: "View active-agent capacity and the next likely starts", icon: "▥", category: "board", handler: () => actions.panels.setShowRunQueueForecast(true) }));
+    unregisters.push(registerAction({ id: "open-codemod-factory", label: "Codemod Factory", description: "Describe a refactor in plain English — AI generates a ts-morph codemod", icon: "⚙", shortcut: "x", category: "board", handler: () => actions.panels.setShowCodemod(true) }));
+    unregisters.push(registerAction({ id: "toggle-live-activity", label: "Live Activity Ticker", description: "Toggle compact stream of running agent output (l)", icon: "▶", shortcut: "l", category: "board", handler: () => actions.panels.setShowLiveActivityTicker((prev) => !prev) }));
+
+    for (const view of VIEW_REGISTRY) {
+      unregisters.push(registerAction({
+        id: `view-${view.id}`,
+        label: `Switch to ${view.label} View`,
+        description: view.paletteDescription,
+        icon: view.paletteIcon,
+        shortcut: view.shortcut,
+        category: "navigation",
+        handler: () => actions.handleViewModeChange(view.id),
+      }));
+    }
+
+    for (const col of state.columns) {
+      unregisters.push(registerAction({
+        id: `goto-${col.id}`,
+        label: `Go to: ${col.name}`,
+        description: `Scroll to the ${col.name} column`,
+        category: "navigation",
+        handler: () => {
+          const el = document.getElementById(`column-${col.id}`);
+          el?.scrollIntoView({ behavior: "smooth", inline: "center" });
+        },
+      }));
+    }
+
+    const allIssues = state.columns.flatMap((col) => col.issues);
+    for (const issue of allIssues) {
+      const ws = issue.workspaceSummary?.main;
+      if (!ws) continue;
+
+      if (ws.status === "active" || ws.status === "idle" || ws.status === "reviewing") {
+        unregisters.push(registerAction({
+          id: `review-workspace-${ws.id}`,
+          label: `Review: #${issue.issueNumber} ${issue.title}`,
+          description: "Trigger AI code review for this workspace",
+          icon: "③",
+          category: "issue",
+          handler: async () => {
+            try {
+              await apiFetch(`/api/workspaces/${ws.id}/review`, { method: "POST" });
+              showToast("Review started", "success");
+            } catch {
+              showToast("Failed to start review", "error");
+            }
+          },
+        }));
+      }
+
+      if (ws.status === "reviewing" || ws.status === "idle") {
+        unregisters.push(registerAction({
+          id: `merge-workspace-${ws.id}`,
+          label: `Merge: #${issue.issueNumber} ${issue.title}`,
+          description: "Merge this workspace branch into the base branch",
+          icon: "⤵",
+          category: "issue",
+          handler: async () => {
+            try {
+              await apiFetch(`/api/workspaces/${ws.id}/merge`, { method: "POST" });
+              showToast("Merge started", "success");
+            } catch {
+              showToast("Failed to merge", "error");
+            }
+          },
+        }));
+      }
+    }
+
+    return () => unregisters.forEach((fn) => fn());
+  }, [
+    actions,
+    state.activeColumns,
+    state.activeProjectId,
+    state.columns,
+    state.filteredColumns,
+    state.projects,
   ]);
 }
