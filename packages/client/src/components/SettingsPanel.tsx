@@ -3,7 +3,7 @@ import { apiFetch } from "../lib/api.js";
 import { ProjectScriptsSettingsSection } from "./ProjectScriptsSettingsSection.js";
 import { showToast } from "./Toast.js";
 import { MCP_TOOL_DEFINITIONS, MCP_TOOL_CATEGORIES } from "@agentic-kanban/shared/lib";
-import { CLAUDE_MODEL_OPTIONS } from "@agentic-kanban/shared";
+import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
 import type { IssueTemplate } from "../hooks/useIssueTemplates.js";
 import { SlowRequestsPanel } from "./SlowRequestsPanel.js";
@@ -1804,13 +1804,13 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
                       </optgroup>
                     </select>
                   </Field>
-                  <Field label="Default Model" hint="Default Claude model for new workspaces (passed via --model). Per-workspace selection overrides this. Ignored for profiles with a custom endpoint (e.g. z.ai) and for Codex/Copilot.">
+                  <Field label="Default Model" hint="Default model for new workspaces (passed via --model). Options follow the selected provider (Claude or Codex). Per-workspace selection overrides this. Ignored for Claude profiles with a custom endpoint (e.g. z.ai) and for Copilot.">
                     <select
                       value={settings.default_model || ""}
                       onChange={(e) => set("default_model")(e.target.value)}
                       className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500"
                     >
-                      {CLAUDE_MODEL_OPTIONS.map((m) => (
+                      {(settings.provider === "codex" ? CODEX_MODEL_OPTIONS : CLAUDE_MODEL_OPTIONS).map((m) => (
                         <option key={m.value} value={m.value}>{m.label}</option>
                       ))}
                     </select>

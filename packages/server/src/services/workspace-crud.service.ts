@@ -516,11 +516,12 @@ export function createWorkspaceCrudService(deps: {
       : resolvedProfileSelection?.name;
 
     const requestedModel = typeof input.model === "string" ? input.model.trim() : "";
-    const model = provider === "claude"
+    // Both Claude and Codex honor the `default_model` preference (overridable per
+    // workspace via input.model). Codex passes it through as `--model`. Copilot has
+    // no model flag, so it stays undefined.
+    const model = (provider === "claude" || provider === "codex")
       ? ((requestedModel || prefMap.get("default_model")) || undefined)
-      : provider === "codex"
-        ? (requestedModel || undefined)
-        : undefined;
+      : undefined;
 
     return {
       agentCommand,
