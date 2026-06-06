@@ -21,11 +21,23 @@ vi.mock("../services/agent.service.js", () => ({}));
 
 const mockUpdateWorkspaceStatus = vi.fn(async () => {});
 const mockMoveIssueToDone = vi.fn(async () => {});
+const mockFinalizeMergeCleanup = vi.fn(async () => ({
+  projectId: "project-id",
+  closedAt: new Date().toISOString(),
+  mergedAt: new Date().toISOString(),
+  workspaceUpdated: true,
+  issueTransitioned: true,
+  broadcasted: false,
+}));
 const mockLogBoardHealthEvent = vi.fn(async () => "event-id");
 
 vi.mock("../repositories/workspace.repository.js", () => ({
   updateWorkspaceStatus: (...args: unknown[]) => mockUpdateWorkspaceStatus(...args),
   moveIssueToDone: (...args: unknown[]) => mockMoveIssueToDone(...args),
+}));
+
+vi.mock("../services/merge-cleanup.service.js", () => ({
+  finalizeMergeCleanup: (...args: unknown[]) => mockFinalizeMergeCleanup(...args),
 }));
 
 vi.mock("../repositories/board-health-events.repository.js", () => ({
@@ -36,8 +48,9 @@ import { reconcileSilentlyMergedWorkspaces } from "../startup/startup-tasks.js";
 
 function makeDb(rows: unknown[]) {
   const whereFn = vi.fn(() => Promise.resolve(rows));
-  const innerJoinFn = vi.fn(() => ({ where: whereFn }));
-  const fromFn = vi.fn(() => ({ innerJoin: innerJoinFn }));
+  const secondInnerJoinFn = vi.fn(() => ({ where: whereFn }));
+  const firstInnerJoinFn = vi.fn(() => ({ innerJoin: secondInnerJoinFn }));
+  const fromFn = vi.fn(() => ({ innerJoin: firstInnerJoinFn }));
   const selectFn = vi.fn(() => ({ from: fromFn }));
   return { select: selectFn } as unknown as Parameters<typeof reconcileSilentlyMergedWorkspaces>[0];
 }
@@ -50,8 +63,7 @@ describe("reconcileSilentlyMergedWorkspaces", () => {
   it("does nothing when no stale merged workspaces exist", async () => {
     const database = makeDb([]);
     await reconcileSilentlyMergedWorkspaces(database);
-    expect(mockUpdateWorkspaceStatus).not.toHaveBeenCalled();
-    expect(mockMoveIssueToDone).not.toHaveBeenCalled();
+    expect(mockFinalizeMergeCleanup).not.toHaveBeenCalled();
   });
 
   it("closes a workspace that has mergedAt set but status=idle (dropped HTTP response scenario)", async () => {
@@ -72,17 +84,16 @@ describe("reconcileSilentlyMergedWorkspaces", () => {
 
     await reconcileSilentlyMergedWorkspaces(database);
 
-    expect(mockUpdateWorkspaceStatus).toHaveBeenCalledTimes(1);
-    const [wsId, status, extra] = mockUpdateWorkspaceStatus.mock.calls[0];
-    expect(wsId).toBe("ws-1");
-    expect(status).toBe("closed");
-    expect(extra).toMatchObject({ mergedAt, readyForMerge: false, workingDir: null });
-    expect(extra.closedAt).toBeTruthy();
-
-    expect(mockMoveIssueToDone).toHaveBeenCalledTimes(1);
-    const [movedWsId, movedIssueId] = mockMoveIssueToDone.mock.calls[0];
-    expect(movedWsId).toBe("ws-1");
-    expect(movedIssueId).toBe("issue-1");
+    expect(mockFinalizeMergeCleanup).toHaveBeenCalledTimes(1);
+    const [input] = mockFinalizeMergeCleanup.mock.calls[0];
+    expect(input).toMatchObject({
+      workspaceId: "ws-1",
+      issueId: "issue-1",
+      mergedAt,
+      workingDir: null,
+      projectId: "proj-1",
+    });
+    expect(input.closedAt).toBeTruthy();
   });
 
   it("emits a board health action event for each reconciled workspace", async () => {
@@ -142,8 +153,7 @@ describe("reconcileSilentlyMergedWorkspaces", () => {
 
     await reconcileSilentlyMergedWorkspaces(database);
 
-    expect(mockUpdateWorkspaceStatus).toHaveBeenCalledTimes(2);
-    expect(mockMoveIssueToDone).toHaveBeenCalledTimes(2);
+    expect(mockFinalizeMergeCleanup).toHaveBeenCalledTimes(2);
   });
 
   it("preserves existing closedAt when workspace already has it", async () => {
@@ -165,8 +175,8 @@ describe("reconcileSilentlyMergedWorkspaces", () => {
 
     await reconcileSilentlyMergedWorkspaces(database);
 
-    const [, , extra] = mockUpdateWorkspaceStatus.mock.calls[0];
-    expect(extra.closedAt).toBe(existingClosedAt);
+    const [input] = mockFinalizeMergeCleanup.mock.calls[0];
+    expect(input.closedAt).toBe(existingClosedAt);
   });
 
   it("is non-fatal when the db query throws", async () => {
@@ -175,7 +185,7 @@ describe("reconcileSilentlyMergedWorkspaces", () => {
     } as unknown as Parameters<typeof reconcileSilentlyMergedWorkspaces>[0];
 
     await expect(reconcileSilentlyMergedWorkspaces(brokenDb)).resolves.toBeUndefined();
-    expect(mockUpdateWorkspaceStatus).not.toHaveBeenCalled();
+    expect(mockFinalizeMergeCleanup).not.toHaveBeenCalled();
   });
 
   it("continues to next workspace when one fails, not throwing", async () => {
@@ -205,16 +215,22 @@ describe("reconcileSilentlyMergedWorkspaces", () => {
       },
     ]);
 
-    mockUpdateWorkspaceStatus
+    mockFinalizeMergeCleanup
       .mockRejectedValueOnce(new Error("DB lock"))
-      .mockResolvedValueOnce(undefined);
+      .mockResolvedValueOnce({
+        projectId: "project-id",
+        closedAt: new Date().toISOString(),
+        mergedAt,
+        workspaceUpdated: true,
+        issueTransitioned: true,
+        broadcasted: false,
+      });
 
     await expect(reconcileSilentlyMergedWorkspaces(database)).resolves.toBeUndefined();
 
     // Second workspace should still be processed
-    expect(mockUpdateWorkspaceStatus).toHaveBeenCalledTimes(2);
-    expect(mockMoveIssueToDone).toHaveBeenCalledTimes(1);
-    expect(mockMoveIssueToDone.mock.calls[0][0]).toBe("ws-ok");
+    expect(mockFinalizeMergeCleanup).toHaveBeenCalledTimes(2);
+    expect(mockFinalizeMergeCleanup.mock.calls[1][0].workspaceId).toBe("ws-ok");
   });
 
   it("deletes feature branches for non-direct reconciled workspaces", async () => {
