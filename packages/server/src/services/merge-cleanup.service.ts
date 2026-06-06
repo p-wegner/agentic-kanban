@@ -100,39 +100,22 @@ export async function finalizeMergeCleanup(
     }
   }
 
-  const shouldTransitionIssue = Boolean(targetStatus && issue.statusId !== targetStatus.id);
-  if (targetStatus && issue.statusId !== targetStatus.id) {
-    await input.database
-      .update(issues)
-      .set({ statusId: targetStatus.id, updatedAt: now, statusChangedAt: now })
-      .where(eq(issues.id, input.issueId));
-    issueTransitioned = true;
-  }
+  await input.database.transaction(async (tx) => {
+    if (targetStatus && issue.statusId !== targetStatus.id) {
+      await tx
+        .update(issues)
+        .set({ statusId: targetStatus.id, updatedAt: now, statusChangedAt: now })
+        .where(eq(issues.id, input.issueId));
+      issueTransitioned = true;
+    }
 
-  if (workspaceUpdated) {
-    try {
-      await input.database
+    if (workspaceUpdated) {
+      await tx
         .update(workspaces)
         .set(workspacePatch)
         .where(eq(workspaces.id, input.workspaceId));
-    } catch (err) {
-      if (issueTransitioned) {
-        try {
-          await input.database
-            .update(issues)
-            .set({ statusId: issue.statusId, updatedAt: now, statusChangedAt: issue.statusChangedAt })
-            .where(eq(issues.id, input.issueId));
-        } catch (rollbackErr) {
-          console.warn(
-            "[merge-cleanup] failed to roll issue status back after workspace cleanup failed:",
-            rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr),
-          );
-        }
-        issueTransitioned = false;
-      }
-      throw err;
     }
-  }
+  });
 
   const broadcasted = Boolean(input.boardEvents && projectId && (workspaceUpdated || issueTransitioned));
   if (broadcasted) {

@@ -1,12 +1,45 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { createClient } from "@libsql/client";
+import { drizzle } from "drizzle-orm/libsql";
 import { eq } from "drizzle-orm";
+import * as schema from "@agentic-kanban/shared/schema";
 import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
-import { createTestDb } from "./helpers/test-db.js";
+import { MIGRATION_FILES, MIGRATIONS_DIR } from "./helpers/migrations.js";
+import type { TestDb } from "./helpers/test-db.js";
 import { finalizeMergeCleanup } from "../services/merge-cleanup.service.js";
 import type { BoardEvents } from "../services/board-events.js";
 
-async function seedMergeCleanupRows(db: ReturnType<typeof createTestDb>["db"]) {
+const tempClients: ReturnType<typeof createClient>[] = [];
+
+afterEach(async () => {
+  for (const client of tempClients.splice(0)) {
+    await client.close();
+  }
+});
+
+async function createMergeCleanupTestDb() {
+  const dir = mkdtempSync(join(tmpdir(), "ak-merge-cleanup-"));
+  const client = createClient({ url: `file:${join(dir, "test.db")}` });
+  tempClients.push(client);
+  for (const file of MIGRATION_FILES) {
+    const sql = readFileSync(resolve(MIGRATIONS_DIR, file), "utf-8");
+    const statements = sql
+      .split("--> statement-breakpoint")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    for (const stmt of statements) {
+      await client.execute(stmt);
+    }
+  }
+  const db = drizzle(client, { schema });
+  return { client, db };
+}
+
+async function seedMergeCleanupRows(db: TestDb) {
   const now = "2026-06-06T10:00:00.000Z";
   const projectId = randomUUID();
   const inReviewStatusId = randomUUID();
@@ -58,7 +91,7 @@ async function seedMergeCleanupRows(db: ReturnType<typeof createTestDb>["db"]) {
 
 describe("finalizeMergeCleanup", () => {
   it("closes the workspace, moves the issue to Done, and broadcasts once for repeated cleanup", async () => {
-    const { db } = createTestDb();
+    const { db } = await createMergeCleanupTestDb();
     const { projectId, issueId, workspaceId, doneStatusId } = await seedMergeCleanupRows(db);
     const boardEvents = { broadcast: vi.fn() } as unknown as BoardEvents;
 
@@ -126,13 +159,15 @@ describe("finalizeMergeCleanup", () => {
   });
 
   it("rolls back the issue transition when the workspace close fails", async () => {
-    const { db } = createTestDb();
+    const { client, db } = await createMergeCleanupTestDb();
     const { issueId, workspaceId, inReviewStatusId } = await seedMergeCleanupRows(db);
-    const originalUpdate = db.update.bind(db);
-    const updateSpy = vi.spyOn(db, "update").mockImplementation(((table: Parameters<typeof db.update>[0]) => {
-      if (table === workspaces) throw new Error("workspace update failed");
-      return originalUpdate(table);
-    }) as typeof db.update);
+    await client.execute(`
+      CREATE TRIGGER fail_workspace_update
+      BEFORE UPDATE ON workspaces
+      BEGIN
+        SELECT RAISE(ABORT, 'workspace update failed');
+      END
+    `);
 
     await expect(finalizeMergeCleanup({
       database: db,
@@ -141,9 +176,7 @@ describe("finalizeMergeCleanup", () => {
       now: "2026-06-06T10:05:00.000Z",
       mergedAt: "2026-06-06T10:05:00.000Z",
       workingDir: null,
-    })).rejects.toThrow("workspace update failed");
-
-    updateSpy.mockRestore();
+    })).rejects.toThrow("Failed query: update \"workspaces\"");
 
     const [workspace] = await db
       .select({
