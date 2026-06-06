@@ -70,9 +70,13 @@ for (( i=1; i<=MAX; i++ )); do
     codex)
       # codex needs explicit cwd (-C) and the hook-trust bypass so the repo's
       # Claude-style hooks fire through codex's bridge.
+      # gpt-5.3-codex-spark (the global config default) has near-zero quota
+      # (exhausted until ~Jun 12); pin the monitor to gpt-5.5 so the loop
+      # doesn't immediately exit=1 on a usage-limit error every cycle.
       timeout "$ITER_TIMEOUT" codex exec \
         --dangerously-bypass-approvals-and-sandbox \
         --dangerously-bypass-hook-trust \
+        -m "${MONITOR_CODEX_MODEL:-gpt-5.5}" \
         -C "$REPO" \
         "$OBJ" >> "$LOG" 2>&1
       ;;
