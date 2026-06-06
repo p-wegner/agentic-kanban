@@ -199,7 +199,7 @@ export async function resolveMergeState(
   if (ancestryResult.isAncestor) {
     const { branchSha, baseSha } = ancestryResult;
     const uniqueCommits = await gitService.countUniqueCommits(repoPath, baseSha, branchSha).catch(() => 0);
-    if (uniqueCommits > 0) {
+    if (uniqueCommits > 0 || branchSha !== baseSha) {
       return { kind: "reconcile", branchSha, baseSha, uniqueCommits };
     }
     if (uniqueCommits === 0) {
