@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { requireEntity } from "../db-utils.js";
+import { workspaceClosedError, workspaceMissingWorkingDirError, workspaceNotFoundError } from "../db-utils.js";
 import { prodDeps, type ToolDeps } from "./deps.js";
 
 function extractChangedFiles(diff: string): string[] {
@@ -28,13 +28,11 @@ export function registerGetWorkspaceDiff(server: McpServer, deps: ToolDeps = pro
         .where(eq(schema.workspaces.id, workspaceId))
         .limit(1);
 
-      const r = requireEntity(workspaces, workspaceId, "Workspace");
-      if (!r.ok) return r.error;
+      if (workspaces.length === 0) return workspaceNotFoundError(workspaceId);
 
-      const ws = r.value;
-      if (!ws.workingDir) {
-        return { content: [{ type: "text" as const, text: "Workspace has no working directory" }] };
-      }
+      const ws = workspaces[0];
+      if (ws.status === "closed") return workspaceClosedError(workspaceId);
+      if (!ws.workingDir?.trim()) return workspaceMissingWorkingDirError(workspaceId);
 
       try {
         let resolvedBaseBranch = baseBranch || ws.baseBranch;
