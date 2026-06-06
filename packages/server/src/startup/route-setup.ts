@@ -34,7 +34,12 @@ export function setupRoutes(app: Hono, { sessionManager, boardEvents, reviewSess
     } catch (err) {
       if (err instanceof ReviewError) {
         if (err.code === "NOT_FOUND") return c.json({ error: err.message, code: err.code }, 404);
-        if (err.code === "CONFLICT") return c.json({ error: err.message, code: err.code }, 409);
+        if (err.code === "CONFLICT") {
+          const body: Record<string, unknown> = { error: err.message, code: err.code };
+          if (err.details?.conflictFiles?.length) body.conflictFiles = err.details.conflictFiles;
+          if (err.details?.uncommittedChanges?.length) body.uncommittedChanges = err.details.uncommittedChanges;
+          return c.json(body, 409);
+        }
         if (err.code === "BAD_REQUEST") return c.json({ error: err.message, code: err.code }, 400);
       }
       console.error("[workflow] manual review trigger failed:", err);
