@@ -7,10 +7,10 @@ import type * as agentServiceType from "../services/agent.service.js";
 import * as agentService from "../services/agent.service.js";import * as gitService from "../services/git.service.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { Database } from "../db/index.js";
-import { moveIssueToDone, updateWorkspaceStatus } from "../repositories/workspace.repository.js";
 import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
 import { reconcileAncestorBranchWorkspaces } from "./ancestor-branch-reconciler.js";
 import { scanDoneUnmergedWorkspaces } from "./done-unmerged-invariant-scanner.js";
+import { finalizeMergeCleanup } from "../services/merge-cleanup.service.js";
 
 /** Kill orphaned tsx server processes from previous hot-reload cycles (Windows only). */
 export function shouldKillOrphanedServerProcess(input: {
@@ -357,13 +357,16 @@ export async function reconcileSilentlyMergedWorkspaces(database: Database = db)
             );
           }
         }
-        await updateWorkspaceStatus(ws.id, "closed", {
+        await finalizeMergeCleanup({
+          database,
+          workspaceId: ws.id,
+          issueId: ws.issueId,
+          now,
           closedAt: ws.closedAt ?? now,
           mergedAt: ws.mergedAt!,
-          readyForMerge: false,
           workingDir: null,
-        }, database);
-        await moveIssueToDone(ws.id, ws.issueId, now, database);
+          projectId: ws.projectId,
+        });
 
         console.log(
           `[startup] auto-Done audit: issue=${ws.issueNumber ?? "?"} ws=${ws.id} mergedAt=${ws.mergedAt} reconciledAt=${now}`,

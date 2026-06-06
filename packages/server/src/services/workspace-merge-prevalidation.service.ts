@@ -5,8 +5,9 @@ import type { Database } from "../db/index.js";
 import type { BoardEvents } from "./board-events.js";
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import { teardownWorktree } from "./workspace-teardown.service.js";
-import { moveIssueToDone, resolveProjectId, updateWorkspaceStatus } from "../repositories/workspace.repository.js";
+import { updateWorkspaceStatus } from "../repositories/workspace.repository.js";
 import { WorkspaceError, type GitService, type MergeResolutionState } from "./workspace-internals.js";
+import { finalizeMergeCleanup } from "./merge-cleanup.service.js";
 
 export type MergeWarning = { step: string; message: string; recoverable: true };
 
@@ -154,16 +155,17 @@ async function reconcileAlreadyMergedRetry(args: {
   }
 
   const now = new Date().toISOString();
-  await updateWorkspaceStatus(id, "closed", {
+  await finalizeMergeCleanup({
+    database,
+    boardEvents,
+    workspaceId: id,
+    issueId: workspace.issueId,
+    now,
     workingDir: null,
     closedAt: workspace.closedAt ?? now,
     mergedAt: workspace.mergedAt,
-    readyForMerge: false,
-  }, database);
-  await moveIssueToDone(id, workspace.issueId, now, database);
+  });
 
-  const projectId = await resolveProjectId(id, database);
-  if (projectId) boardEvents?.broadcast(projectId, "workspace_merged");
   await args.recordMergeAttempt(
     workspace,
     "already-merged",
@@ -189,11 +191,17 @@ async function closeDirectWorkspace(args: {
   const { id, workspace, database, boardEvents } = args;
   const now = new Date().toISOString();
   await computeWorkspaceCodeMetrics(id, database).catch(() => null);
-  await updateWorkspaceStatus(id, "closed", { closedAt: now, readyForMerge: false }, database);
-  await moveIssueToDone(id, workspace.issueId, now, database, true);
+  await finalizeMergeCleanup({
+    database,
+    boardEvents,
+    workspaceId: id,
+    issueId: workspace.issueId,
+    now,
+    closedAt: now,
+    markMerged: false,
+    fallbackToAiReviewed: true,
+  });
 
-  const projectId = await resolveProjectId(id, database);
-  if (projectId) boardEvents?.broadcast(projectId, "workspace_merged");
   await args.recordMergeAttempt(
     workspace,
     "direct-closed",
@@ -222,8 +230,16 @@ async function reconcileAncestorWorkspace(
   console.log(
     `[workspace-merge] auto-Done audit: ws=${id} baseSha=${baseSha} branchSha=${branchSha} uniqueCommits=${uniqueCommits} reconciledAt=${now}`,
   );
-  await updateWorkspaceStatus(id, "closed", { workingDir: null, closedAt: now, mergedAt: now, readyForMerge: false }, database);
-  await moveIssueToDone(id, workspace.issueId, now, database);
+  await finalizeMergeCleanup({
+    database,
+    boardEvents,
+    workspaceId: id,
+    issueId: workspace.issueId,
+    now,
+    closedAt: now,
+    mergedAt: now,
+    workingDir: null,
+  });
   await args.recordMergeAttempt(
     workspace,
     "merged",
@@ -231,8 +247,6 @@ async function reconcileAncestorWorkspace(
     { targetBranch: baseBranch, commitSha: branchSha, mergedAt: now, uniqueCommitCount: uniqueCommits },
     now,
   );
-  const projectId = await resolveProjectId(id, database);
-  if (projectId) boardEvents?.broadcast(projectId, "workspace_merged");
   return {
     id,
     merged: false,
