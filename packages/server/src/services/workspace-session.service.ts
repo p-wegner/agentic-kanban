@@ -228,6 +228,7 @@ export function createWorkspaceSessionService(deps: {
   }
 
   async function stopWorkspace(id: string): Promise<{ stopped: boolean }> {
+    const ws0 = await getWorkspaceById(id, database);
     const runningSessions = await database
       .select()
       .from(sessions)
@@ -247,7 +248,8 @@ export function createWorkspaceSessionService(deps: {
       }
     }
 
-    await updateWorkspaceStatus(id, "idle", {}, database);
+    const updates = ws0?.status === "fixing" ? { readyForMerge: false } : {};
+    await updateWorkspaceStatus(id, "idle", updates, database);
 
     const projectId = await resolveProjectId(id, database);
     if (projectId) boardEvents?.broadcast(projectId, "session_stopped");
