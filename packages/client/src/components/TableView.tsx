@@ -3,6 +3,7 @@ import type { IssueWithStatus, StatusWithIssues, UpdateIssueRequest } from "@age
 import { apiFetch } from "../lib/api.js";
 import { formatDateKeyLong, getLocalDateKey } from "../lib/dateKey.js";
 import { showToast } from "./Toast.js";
+import { CollapsibleSection } from "./CollapsibleSection.js";
 
 interface TableViewProps {
   columns: StatusWithIssues[];
@@ -357,17 +358,28 @@ export function TableView({
 
       {/* Bulk action bar */}
       {someChecked && (
-        <div className="flex items-center gap-2 px-3 py-2 mb-2 rounded-lg bg-brand-50 dark:bg-brand-900/30 border border-brand-200 dark:border-brand-700 flex-wrap">
-          <span className="text-xs font-medium text-brand-700 dark:text-brand-300">
-            {activeSelectedIds.length} selected
-          </span>
-          <button
-            onClick={() => setSelectedIds(new Set())}
-            className="text-xs text-brand-500 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-200 underline"
-          >
-            Clear
-          </button>
-          <div className="flex-1" />
+        <CollapsibleSection
+          tone="brand"
+          defaultOpen
+          className="mb-2"
+          bodyClassName="border-t border-brand-200 px-3 py-2 dark:border-brand-800"
+          title={<span className="normal-case text-brand-700 dark:text-brand-300">Selection</span>}
+          badge={
+            <span className="inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-brand-600 px-1 text-[10px] font-semibold leading-none text-white">
+              {activeSelectedIds.length}
+            </span>
+          }
+          summary="selected"
+          actions={
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="text-xs text-brand-500 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-200 underline"
+            >
+              Clear
+            </button>
+          }
+        >
+          <div className="flex flex-wrap items-center gap-2">
 
           {/* Move to status */}
           <div className="relative" ref={statusDropdownRef}>
@@ -593,7 +605,8 @@ export function TableView({
           >
             Delete
           </button>
-        </div>
+          </div>
+        </CollapsibleSection>
       )}
 
       <div className="flex-1 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark">
