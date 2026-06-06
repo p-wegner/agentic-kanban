@@ -16,6 +16,7 @@ import { workspaceLaunchPreflight } from "../preflight-check.js";
 import { WorkspaceError } from "../workspace-internals.js";
 import { DEFAULT_BUILDER_GUARDRAILS, PREF_BUILDER_GUARDRAILS } from "../../constants/preference-keys.js";
 import { detectCodexUsageLimitMessages } from "../codex-rate-limit.js";
+import { findRingEntry, loadCodexLicenseRing } from "../codex-license-ring.js";
 
 /** Subset of agent.service that the lifecycle depends on. Injectable for tests. */
 export type AgentService = typeof realAgentService;
@@ -270,6 +271,27 @@ export function createSessionLifecycle(
       } catch { /* handoff not available — proceed without it */ }
     }
 
+    // Codex license rotation: an OAuth (ChatGPT-plan) license is a separate
+    // CODEX_HOME directory with its own auth.json. Point CODEX_HOME at it and DROP
+    // the profile name from the launch (a separate home has no `[profiles.<name>]`,
+    // so `--profile` would make codex exit code 2). API-key ring entries (configToml)
+    // keep `--profile` and get no CODEX_HOME override.
+    let effectiveExtraEnv = extraEnv;
+    let launchProfile = profile;
+    if (profile?.provider === "codex" && profile.name && profile.name !== "default") {
+      try {
+        const ring = await loadCodexLicenseRing(db);
+        const entry = findRingEntry(ring, profile.name);
+        if (entry?.codexHome) {
+          effectiveExtraEnv = { ...effectiveExtraEnv, CODEX_HOME: entry.codexHome };
+          launchProfile = { provider: "codex", name: "default" };
+          console.log(`[session] codex license '${profile.name}' -> CODEX_HOME=${entry.codexHome} (--profile suppressed)`);
+        }
+      } catch (err) {
+        console.warn("[session] codex license ring resolution failed (non-fatal):", err instanceof Error ? err.message : String(err));
+      }
+    }
+
     try {
       const proc = agentService.launch(effectiveWorkingDir, sessionId, effectivePrompt, effectiveAgentArgs, (event) => {
         if (event.type === "exit") {
@@ -463,7 +485,7 @@ export function createSessionLifecycle(
 
         }
       // When resumeWithNewModel is true, omit --resume so the new profile/provider is used instead
-      }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider, profile, extraEnv, skipPermissions, effectiveModel, contextFiles, (effectiveSystemInstructions ?? "").trim() || undefined);
+      }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider, launchProfile, effectiveExtraEnv, skipPermissions, effectiveModel, contextFiles, (effectiveSystemInstructions ?? "").trim() || undefined);
 
       // Persist PID so hot-reload can detect surviving processes
       if (proc.pid) {
