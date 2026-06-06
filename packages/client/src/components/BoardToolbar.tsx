@@ -208,6 +208,8 @@ export function BoardToolbar({
   const [showMonitorPopover, setShowMonitorPopover] = useState(false);
   const [showViewMenu, setShowViewMenu] = useState(false);
   const viewMenuRef = useRef<HTMLDivElement>(null);
+  const [showActivityMenu, setShowActivityMenu] = useState(false);
+  const activityMenuRef = useRef<HTMLDivElement>(null);
   const [showMoreViews, setShowMoreViews] = useState(false);
   const moreViewsRef = useRef<HTMLDivElement>(null);
   // Below sm the action cluster (Tasks/Scripts/Queue/Capacity/Voice/Monitor) is
@@ -290,6 +292,24 @@ export function BoardToolbar({
       document.removeEventListener("keydown", handleKey);
     };
   }, [showViewMenu]);
+
+  useEffect(() => {
+    if (!showActivityMenu) return;
+    function handleClick(e: MouseEvent) {
+      if (activityMenuRef.current && !activityMenuRef.current.contains(e.target as Node)) {
+        setShowActivityMenu(false);
+      }
+    }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setShowActivityMenu(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [showActivityMenu]);
 
   const activeSecondaryView = SECONDARY_VIEWS.find((v) => v.id === viewMode);
 
@@ -483,72 +503,68 @@ export function BoardToolbar({
       </button>
       <ProjectScriptsMenu projectId={projectId} />
       <ExportImportMenu projectId={projectId} />
-      {onShowTimeReport && (
-        <button
-          onClick={onShowTimeReport}
-          title="Time Report — aggregate logged time by issue and day"
-          className="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
-        >
-          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-            <circle cx="12" cy="12" r="9" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 7v5l3 3" />
-          </svg>
-          <span className="hidden sm:inline">Time</span>
-        </button>
-      )}
-      {onShowMergeQueue && (
-        <button
-          onClick={onShowMergeQueue}
-          title="Merge Queue - review In Review workspaces ordered by conflict risk"
-          className="relative shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
-        >
-          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3 7h18M3 12h12M3 17h6" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l3 3-3 3" />
-          </svg>
-          <span className="hidden sm:inline">Queue</span>
-          {mergeQueueCount > 0 && (
-            <span className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-brand-500 text-white text-[10px] font-semibold leading-none">
-              {mergeQueueCount > 99 ? "99+" : mergeQueueCount}
-            </span>
-          )}
-        </button>
-      )}
-      {onShowRunQueueForecast && (
-        <button
-          onClick={onShowRunQueueForecast}
-          title="Run Queue Forecast - view active-agent capacity and next likely starts"
-          className="relative shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
-        >
-          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4 18V6m4 12V9m4 9v-5m4 5V4m4 14v-7" />
-          </svg>
-          <span className="hidden sm:inline">Capacity</span>
-          {runQueueOpenSlots > 0 && (
-            <span className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-sky-500 text-white text-[10px] font-semibold leading-none">
-              {runQueueOpenSlots > 99 ? "99+" : runQueueOpenSlots}
-            </span>
-          )}
-        </button>
-      )}
-      {onShowLiveActivityTicker && (
-        <button
-          onClick={onShowLiveActivityTicker}
-          title="Live Activity — compact stream of running agent output (l)"
-          className="relative shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
-        >
-          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 17l6-6-6-6" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 17l6-6" strokeOpacity={0.4} />
-          </svg>
-          <span className="hidden sm:inline">Pulse</span>
-          {liveActivityCount > 0 && (
-            <span className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-emerald-500 text-white text-[10px] font-semibold leading-none">
-              {liveActivityCount > 99 ? "99+" : liveActivityCount}
-            </span>
-          )}
-        </button>
-      )}
+      {/* Activity — observability panels (live pulse, merge queue, capacity
+          forecast, time report) collapsed into one menu. Live counts surface as
+          a single badge on the trigger so the signal isn't lost. */}
+      {(onShowLiveActivityTicker || onShowMergeQueue || onShowRunQueueForecast || onShowTimeReport) && (() => {
+        const activityBadge = liveActivityCount + mergeQueueCount;
+        return (
+          <div className="relative shrink-0" ref={activityMenuRef}>
+            <button
+              onClick={() => setShowActivityMenu((v) => !v)}
+              aria-haspopup="menu"
+              aria-expanded={showActivityMenu}
+              title="Activity — live pulse, merge queue, capacity, time report"
+              className="relative shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
+            >
+              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h4l3 8 4-16 3 8h4" />
+              </svg>
+              <span className="hidden sm:inline">Activity</span>
+              {activityBadge > 0 && (
+                <span className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-emerald-500 text-white text-[10px] font-semibold leading-none">
+                  {activityBadge > 99 ? "99+" : activityBadge}
+                </span>
+              )}
+              <svg className={`w-2.5 h-2.5 transition-transform ${showActivityMenu ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+            {showActivityMenu && (
+              <div role="menu" className="absolute left-0 top-full z-30 mt-1 w-52 rounded-md border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900 flex flex-col gap-0.5">
+                {onShowLiveActivityTicker && (
+                  <button role="menuitem" onClick={() => { setShowActivityMenu(false); onShowLiveActivityTicker(); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-ink dark:text-gray-200 hover:bg-surface-sunken dark:hover:bg-gray-800" title="Compact stream of running agent output (l)">
+                    <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 17l6-6-6-6" /></svg>
+                    <span className="flex-1">Pulse — live activity</span>
+                    {liveActivityCount > 0 && <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-emerald-500 text-white text-[10px] font-semibold leading-none">{liveActivityCount > 99 ? "99+" : liveActivityCount}</span>}
+                    <kbd className="font-mono text-[10px] opacity-60">l</kbd>
+                  </button>
+                )}
+                {onShowMergeQueue && (
+                  <button role="menuitem" onClick={() => { setShowActivityMenu(false); onShowMergeQueue(); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-ink dark:text-gray-200 hover:bg-surface-sunken dark:hover:bg-gray-800" title="Review In Review workspaces ordered by conflict risk">
+                    <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 7h18M3 12h12M3 17h6" /><path strokeLinecap="round" strokeLinejoin="round" d="M17 14l3 3-3 3" /></svg>
+                    <span className="flex-1">Merge queue</span>
+                    {mergeQueueCount > 0 && <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-brand-500 text-white text-[10px] font-semibold leading-none">{mergeQueueCount > 99 ? "99+" : mergeQueueCount}</span>}
+                  </button>
+                )}
+                {onShowRunQueueForecast && (
+                  <button role="menuitem" onClick={() => { setShowActivityMenu(false); onShowRunQueueForecast(); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-ink dark:text-gray-200 hover:bg-surface-sunken dark:hover:bg-gray-800" title="Active-agent capacity and next likely starts">
+                    <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 18V6m4 12V9m4 9v-5m4 5V4m4 14v-7" /></svg>
+                    <span className="flex-1">Capacity forecast</span>
+                    {runQueueOpenSlots > 0 && <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-sky-500 text-white text-[10px] font-semibold leading-none">{runQueueOpenSlots > 99 ? "99+" : runQueueOpenSlots}</span>}
+                  </button>
+                )}
+                {onShowTimeReport && (
+                  <button role="menuitem" onClick={() => { setShowActivityMenu(false); onShowTimeReport(); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-ink dark:text-gray-200 hover:bg-surface-sunken dark:hover:bg-gray-800" title="Aggregate logged time by issue and day">
+                    <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="9" /><path strokeLinecap="round" strokeLinejoin="round" d="M12 7v5l3 3" /></svg>
+                    <span className="flex-1">Time report</span>
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })()}
       <VoiceInboxButton projectId={projectId} onIssueCreated={onVoiceIssueCreated} />
       <div className="relative shrink-0 flex items-center gap-0.5">
         <button
