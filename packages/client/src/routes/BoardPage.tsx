@@ -2205,6 +2205,12 @@ export function BoardPage() {
         )}
       </div>
       {selectedIssue && (
+        // Error boundary so a render throw inside the panel can't unmount the
+        // whole app (blank-screen "frontend crash"). It contains the error to
+        // the panel and surfaces the message instead, the same way every board
+        // view is guarded. `key` resets the boundary when switching issues so a
+        // crash on one ticket doesn't stick when opening another.
+        <BoardErrorBoundary key={selectedIssue.id} columnName="Issue Details">
         <Suspense fallback={null}>
         <IssueDetailPanel
           issue={selectedIssue}
@@ -2224,6 +2230,7 @@ export function BoardPage() {
           trail={trailControls}
         />
         </Suspense>
+        </BoardErrorBoundary>
       )}
       {workspaceIssue && (
         <Suspense fallback={null}>
