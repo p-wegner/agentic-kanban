@@ -7,10 +7,6 @@ interface BoardStatsProps {
   archiveColumns: StatusWithIssues[];
   searchQuery: string;
   projectId?: string;
-  showBlocked?: boolean;
-  onToggleBlocked?: () => void;
-  showStaleOnly?: boolean;
-  onToggleStaleOnly?: () => void;
 }
 
 const STATUS_CONFIG: Record<string, { bar: string; dot: string; text: string; bg: string }> = {
@@ -33,10 +29,6 @@ export function BoardStats({
   archiveColumns,
   searchQuery,
   projectId,
-  showBlocked,
-  onToggleBlocked,
-  showStaleOnly,
-  onToggleStaleOnly,
 }: BoardStatsProps) {
   const isFiltered = !!searchQuery;
   const allColumns = [...activeColumns, ...archiveColumns];
@@ -258,41 +250,6 @@ export function BoardStats({
         </div>
       ))}
 
-      {/* Blocked filter */}
-      {onToggleBlocked && (
-        <button
-          onClick={onToggleBlocked}
-          title="Show only blocked issues"
-          className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ${
-            showBlocked
-              ? "bg-amber-100 text-amber-700 border-amber-300"
-              : "bg-gray-50 dark:bg-gray-950 text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-700 hover:text-gray-600 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600"
-          }`}
-        >
-          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 16 16">
-            <path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0 2 2v2.5a.5.5 0 0 0 1 0V9a2 2 0 0 0 2-2z"/>
-          </svg>
-          <span className="hidden sm:inline">Blocked</span>
-        </button>
-      )}
-
-      {/* Stale filter */}
-      {onToggleStaleOnly && (
-        <button
-          onClick={onToggleStaleOnly}
-          title="Show only stale backlog issues"
-          className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ${
-            showStaleOnly
-              ? "bg-gray-200 text-gray-700 border-gray-400 dark:bg-gray-700 dark:text-gray-200 dark:border-gray-500"
-              : "bg-gray-50 dark:bg-gray-950 text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-700 hover:text-gray-600 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600"
-          }`}
-        >
-          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <span className="hidden sm:inline">Stale</span>
-        </button>
-      )}
     </div>
   );
 }

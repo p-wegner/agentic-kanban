@@ -42,6 +42,7 @@ import { BoardStats } from "../components/BoardStats.js";
 import { BoardToolbar } from "../components/BoardToolbar.js";
 import { VIEW_REGISTRY } from "../lib/viewRegistry.js";
 import { SavedBoardViews } from "../components/SavedBoardViews.js";
+import { BoardFilterMenu } from "../components/BoardFilterMenu.js";
 import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
 // Lazy: opened on user action (issue click / workspace open), and they pull in
 // react-markdown — no need to ship them on the initial board paint.
@@ -1760,6 +1761,18 @@ export function BoardPage() {
             archiveColumns={archiveColumns}
             searchQuery={searchQuery}
             projectId={activeProjectId}
+          />
+        )}
+        {viewMode !== "butler" && (
+          <BoardFilterMenu
+            statuses={boardStatusOptions}
+            statusFilterId={statusFilterId}
+            onStatusFilterChange={setStatusFilterId}
+            issueTypeFilter={issueTypeFilter}
+            onIssueTypeFilterChange={handleIssueTypeFilterChange}
+            milestones={milestones}
+            milestoneFilterId={milestoneFilterId}
+            onMilestoneFilterChange={setMilestoneFilterId}
             showBlocked={showBlocked}
             onToggleBlocked={() => setShowBlocked((v) => !v)}
             showStaleOnly={showStaleOnly}
@@ -1818,11 +1831,6 @@ export function BoardPage() {
           visibilityColumns={visibilityColumns}
           hiddenColumns={prefs.hiddenColumns}
           onHiddenColumnsChange={prefs.handleHiddenColumnsChange}
-          milestones={milestones}
-          activeMilestoneId={milestoneFilterId}
-          onMilestoneFilterChange={setMilestoneFilterId}
-          issueTypeFilter={issueTypeFilter}
-          onIssueTypeFilterChange={handleIssueTypeFilterChange}
           tags={allTags}
           activeTagIds={activeTagIds}
           onTagFilterToggle={handleTagFilterToggle}
