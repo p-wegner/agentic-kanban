@@ -112,12 +112,18 @@ export type GitService = typeof realGitService;
  * `reconcile`       — branch is already an ancestor (previously merged); caller
  *                     should mark Done without a git merge.
  * `already-merged`  — mergedAt already stamped (dropped-response retry); caller
- *                     should 409.
+ *                     should return merged-as-noop.
+ * `already-closed`  — workspace is already closed without mergedAt; caller should
+ *                     409 (`already_closed`).
+ * `not-approved`    — non-direct workspace not readyForMerge; caller should
+ *                     409 (`not_approved`).
  * `direct-close`    — isDirect workspace; no git op, just close.
  */
 export type MergeResolutionState =
   | { kind: "already-merged" }
   | { kind: "direct-close" }
+  | { kind: "already-closed"; status: string }
+  | { kind: "not-approved"; status: string }
   | { kind: "reconcile"; branchSha: string; baseSha: string; uniqueCommits: number }
   | { kind: "clean-ancestor"; branchSha: string; baseSha: string; uniqueCommits: number }
   | { kind: "conflict-ready"; conflictFiles: string[]; behindCount?: number; error: WorkspaceError }
@@ -148,6 +154,14 @@ export async function resolveMergeState(
   // another git merge, regardless of workspace.status.
   if (workspace.mergedAt) {
     return { kind: "already-merged" };
+  }
+
+  if (workspace.status === "closed") {
+    return { kind: "already-closed", status: workspace.status };
+  }
+
+  if (!workspace.isDirect && !workspace.readyForMerge) {
+    return { kind: "not-approved", status: workspace.status };
   }
 
   if (workspace.isDirect) {
