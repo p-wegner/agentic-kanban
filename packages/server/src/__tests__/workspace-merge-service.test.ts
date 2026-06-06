@@ -390,6 +390,49 @@ describe("MergeService — merge from fixing status moves issue to Done", () => 
     const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
     expect(status.name).toBe("Done");
   });
+
+  it("force-stops a stale zero-output fix-and-merge session before retrying merge", async () => {
+    const { workspaceId } = await seedWorkspace(db, { status: "fixing", readyForMerge: true });
+    const sessionId = await insertSession(db, {
+      workspaceId,
+      status: "running",
+      startedAt: new Date(Date.now() - 120_000).toISOString(),
+      triggerType: "fix-and-merge",
+    });
+
+    const calls: string[] = [];
+    const git = makeGit({
+      mergeBranch: vi.fn(async () => {
+        calls.push("merge");
+        return "Merge made by the 'ort' strategy.";
+      }),
+    });
+    const sessionManager = createMockSessionManager();
+    (sessionManager.stopSession as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      calls.push("stop");
+      return true;
+    });
+
+    const svc = createWorkspaceMergeService({
+      database: db,
+      getSessionManager: () => sessionManager,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+
+    await svc.mergeWorkspace(workspaceId);
+
+    expect(sessionManager.stopSession).toHaveBeenCalledWith(sessionId);
+    expect(calls).toEqual(["stop", "merge"]);
+
+    const [session] = await db
+      .select({ status: sessions.status, endedAt: sessions.endedAt })
+      .from(sessions)
+      .where(eq(sessions.id, sessionId));
+    expect(session.status).toBe("stopped");
+    expect(session.endedAt).toBeTruthy();
+  });
 });
 
 // ─── resolveMergeState unit tests (#610) ─────────────────────────────────────
