@@ -86,6 +86,7 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
   router.post("/", async (c) => {
     const body = await parseJsonBody(c);
     const result = await projectService.registerProject(body);
+    options?.boardEvents?.broadcastProjectsChanged(result.id, "project_created");
     return c.json(result, 201);
   });
 
@@ -93,6 +94,7 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
   router.post("/create", async (c) => {
     const body = await parseJsonBody(c);
     const result = await projectService.createProject(body);
+    options?.boardEvents?.broadcastProjectsChanged(result.id, "project_created");
     return c.json(result, 201);
   });
 
@@ -101,6 +103,7 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
     const id = c.req.param("id");
     const body = await parseJsonBody(c);
     const result = await projectService.updateProject(id, body);
+    options?.boardEvents?.broadcastProjectsChanged(id, "project_updated");
     return c.json(result);
   });
 
@@ -108,6 +111,7 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
   router.delete("/:id", async (c) => {
     const projectId = c.req.param("id");
     await projectService.deleteProject(projectId);
+    options?.boardEvents?.broadcastProjectsChanged(projectId, "project_deleted");
     return c.json({ success: true });
   });
 
