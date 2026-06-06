@@ -272,6 +272,14 @@ export function createSessionLifecycle(
 
     try {
       const proc = agentService.launch(effectiveWorkingDir, sessionId, effectivePrompt, effectiveAgentArgs, (event) => {
+        if (event.type === "exit") {
+          if (state.sessionExitHandled.has(sessionId)) {
+            console.warn(`[session] duplicate exit ignored: sessionId=${sessionId}`);
+            return;
+          }
+          state.sessionExitHandled.add(sessionId);
+        }
+
         const message: AgentOutputMessage = event;
         broadcast(sessionId, message);
 
@@ -478,6 +486,7 @@ export function createSessionLifecycle(
       state.turnStates.delete(sessionId);
       state.sessionProviders.delete(sessionId);
       state.sessionSubstantiveOutput.delete(sessionId);
+      state.sessionExitHandled.delete(sessionId);
       await db.update(sessions)
         .set({ status: "stopped", endedAt: new Date().toISOString() })
         .where(eq(sessions.id, sessionId))
@@ -622,6 +631,12 @@ export function createSessionLifecycle(
    * Mirrors the exit handling in startSession's onOutput callback.
    */
   async function notifyExternalExit(sessionId: string, exitCode: number | null): Promise<void> {
+    if (state.sessionExitHandled.has(sessionId)) {
+      console.warn(`[session] duplicate external exit ignored: sessionId=${sessionId}`);
+      return;
+    }
+    state.sessionExitHandled.add(sessionId);
+
     const ctx = state.sessionContexts.get(sessionId);
     // Clear in-memory state
     state.sessionContexts.delete(sessionId);
@@ -645,6 +660,16 @@ export function createSessionLifecycle(
       state.dbWriteTimers.delete(sessionId);
     }
     state.dbWriteBuffer.delete(sessionId);
+
+    const existingRows = await db
+      .select({ status: sessions.status })
+      .from(sessions)
+      .where(eq(sessions.id, sessionId))
+      .limit(1);
+    if (existingRows.length === 0 || existingRows[0].status !== "running") {
+      console.warn(`[session] external exit ignored for non-running session: sessionId=${sessionId}`);
+      return;
+    }
 
     // Clear activity and todos for this session
     if (ctx) {
