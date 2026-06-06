@@ -14,6 +14,7 @@ export type WorkspaceActivityState =
   | "in-review-idle"  // idle workspace in In-Review lane with committed diff (auto-merge-eligible)
   | "idle"            // workspace stopped, no notable diff or not in-review
   | "failed"          // zero-output / <=1s / launchFailure session exit
+  | "blocked"         // automation paused; human/provider recovery required
   | "merged"          // workspace.mergedAt is set (closed + merged)
   | "closed";         // closed without merge
 
@@ -109,6 +110,10 @@ export function deriveWorkspaceActivityState(
     return { state: "fixing", countsAsActiveCapacity: true };
   }
 
+  if (wsStatus === "blocked") {
+    return { state: "blocked", countsAsActiveCapacity: false };
+  }
+
   // Review or awaiting-plan-approval — session is running
   if (wsStatus === "reviewing" || wsStatus === "awaiting-plan-approval") {
     return { state: "active", countsAsActiveCapacity: true };
@@ -147,6 +152,7 @@ export function workspaceStatusPriority(status: string): number {
     case "fixing": return 1;
     case "reviewing": return 2;
     case "awaiting-plan-approval": return 3;
+    case "blocked": return 4;
     case "idle": return 4;
     default: return 5; // closed, error, unknown
   }

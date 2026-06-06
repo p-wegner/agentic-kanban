@@ -259,7 +259,7 @@ export interface MainWorkspaceInfo {
   id: string;
   branch: string;
   workingDir: string | null;
-  status: "active" | "reviewing" | "fixing" | "idle" | "awaiting-plan-approval" | "error" | "closed";
+  status: "active" | "reviewing" | "fixing" | "idle" | "blocked" | "awaiting-plan-approval" | "error" | "closed";
   readyForMerge?: boolean;
   planMode?: boolean;
   /** @deprecated Use profile instead */
@@ -738,7 +738,7 @@ export interface BoardStatusResponse {
   issues: BoardStatusIssue[];
 }
 
-export type LaunchFailureCategory = "zero-output" | "setup-failed" | "missing-worktree" | "session-error";
+export type LaunchFailureCategory = "zero-output" | "rate-limited" | "setup-failed" | "missing-worktree" | "session-error";
 
 export interface WorkspaceLaunchFailure {
   workspaceId: string;

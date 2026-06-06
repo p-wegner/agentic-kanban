@@ -9,6 +9,7 @@ import { createSessionLifecycle, type AgentService } from "../services/session-m
 import type { AgentOutputCallback } from "../services/agent.service.js";
 import type { workspaceLaunchPreflight } from "../services/preflight-check.js";
 import { WorkspaceError } from "../services/workspace-internals.js";
+import type { AgentOutputMessage } from "@agentic-kanban/shared";
 
 /**
  * Unit tests for the session lifecycle using an in-memory SQLite DB plus an
@@ -202,6 +203,57 @@ describe("session-lifecycle", () => {
 
     const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
     expect(wsRows[0].status).toBe("idle");
+    expect(onSessionExit).toHaveBeenCalledWith(workspaceId, sessionId, 1, undefined);
+  });
+
+  it("marks Codex usage-limit exits as blocked instead of idle", async () => {
+    const workspaceId = await seedWorkspace(db);
+    const { service: agentService, getOnOutput } = createFakeAgentService();
+    const onSessionExit = vi.fn();
+    const state = createSessionState();
+    const broadcast = vi.fn((sessionId: string, message: AgentOutputMessage) => {
+      if (!state.messageBuffer.has(sessionId)) state.messageBuffer.set(sessionId, []);
+      state.messageBuffer.get(sessionId)!.push(message);
+    });
+
+    const lifecycle = createSessionLifecycle(
+      state,
+      { onSessionExit },
+      broadcast,
+      { db, agentService, preflight: okPreflight() },
+    );
+
+    const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it", provider: "codex" });
+
+    const onOutput = getOnOutput();
+    expect(onOutput).toBeDefined();
+    onOutput!({
+      type: "stdout",
+      data: [
+        JSON.stringify({ type: "turn.started" }),
+        JSON.stringify({
+          type: "turn.failed",
+          error: {
+            message: "You've hit your usage limit for GPT-5.3-Codex-Spark. Switch to another model now, or try again at Jun 6th, 2026 12:30 AM.",
+          },
+        }),
+      ].join("\n"),
+    } as never);
+    onOutput!({ type: "exit", exitCode: 1 } as never);
+
+    await flush(() => onSessionExit.mock.calls.length > 0);
+
+    const rows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
+    expect(rows[0].status).toBe("stopped");
+    expect(rows[0].exitCode).toBe("1");
+    const stats = JSON.parse(rows[0].stats!);
+    expect(stats.rateLimited).toBe(true);
+    expect(stats.rateLimitKind).toBe("codex-usage-limit");
+    expect(stats.retryAfter).toBe("Jun 6th, 2026 12:30 AM");
+    expect(stats.failureReason).toContain("usage limit");
+
+    const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(wsRows[0].status).toBe("blocked");
     expect(onSessionExit).toHaveBeenCalledWith(workspaceId, sessionId, 1, undefined);
   });
 

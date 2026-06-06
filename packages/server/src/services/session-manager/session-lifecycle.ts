@@ -15,6 +15,7 @@ import type { SessionManagerOptions, SessionState, StartSessionOptions } from ".
 import { workspaceLaunchPreflight } from "../preflight-check.js";
 import { WorkspaceError } from "../workspace-internals.js";
 import { DEFAULT_BUILDER_GUARDRAILS, PREF_BUILDER_GUARDRAILS } from "../../constants/preference-keys.js";
+import { detectCodexUsageLimitMessages } from "../codex-rate-limit.js";
 
 /** Subset of agent.service that the lifecycle depends on. Injectable for tests. */
 export type AgentService = typeof realAgentService;
@@ -44,6 +45,25 @@ function buildZeroOutputLaunchFailureStats(executor: string, durationMs: number,
     failureReason: reason,
     providerExitCode: exitCode,
     agentSummary: reason,
+  };
+}
+
+function buildCodexUsageLimitStats(executor: string, durationMs: number, exitCode: number | null, message: string, retryAfter: string | null) {
+  return {
+    durationMs,
+    totalCostUsd: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    numTurns: 0,
+    model: executor,
+    success: false,
+    launchFailure: true,
+    rateLimited: true,
+    rateLimitKind: "codex-usage-limit",
+    retryAfter,
+    failureReason: message,
+    providerExitCode: exitCode,
+    agentSummary: message,
   };
 }
 
@@ -280,6 +300,35 @@ export function createSessionLifecycle(
           const endNow = new Date().toISOString();
           const exitCode = event.exitCode ?? null;
           const durationMs = Math.max(0, new Date(endNow).getTime() - new Date(now).getTime());
+          const usageLimit = executor === "codex" ? detectCodexUsageLimitMessages(state.messageBuffer.get(sessionId) ?? []) : null;
+          if (usageLimit) {
+            const stats = buildCodexUsageLimitStats(executor, durationMs, exitCode, usageLimit.message, usageLimit.retryAfter);
+            const effectiveExitCode = exitCode && exitCode !== 0 ? exitCode : 1;
+            void (async () => {
+              await recordAgentProfileLaunchFailure(db, {
+                provider: lifecycleProviderName(provider, profile),
+                profileName: profile?.name,
+                summary: stats.failureReason,
+                exitCode: effectiveExitCode,
+                sessionId,
+                workspaceId,
+                at: endNow,
+              });
+              await db.update(sessions)
+                .set({ status: "stopped", endedAt: endNow, exitCode: String(effectiveExitCode), stats: JSON.stringify(stats) })
+                .where(eq(sessions.id, sessionId));
+              await db.update(workspaces)
+                .set({ status: "blocked", updatedAt: endNow })
+                .where(eq(workspaces.id, workspaceId));
+              console.warn(
+                `[agent] codex-rate-limited: sessionId=${sessionId} workspace=${workspaceId}` +
+                `${usageLimit.retryAfter ? ` retryAfter=${usageLimit.retryAfter}` : ""}`,
+              );
+            })()
+              .catch((err) => console.error("Failed to record codex usage-limit launch failure:", err))
+              .finally(() => options?.onSessionExit?.(workspaceId, sessionId, effectiveExitCode, planMode));
+            return;
+          }
           if (!hadSubstantiveOutput && durationMs <= ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS) {
             const stats = buildZeroOutputLaunchFailureStats(executor, durationMs, exitCode);
             const effectiveExitCode = 1;

@@ -10,6 +10,7 @@ import type { MonitorAction } from "./monitor-helpers.js";
 import { NOISE_TRIGGER_TYPES } from "../services/session-filter.js";
 import { commitLeftoverChanges, getCommitCountAhead, getWorkingTreeDiff } from "../services/git.service.js";
 import { startManualReview } from "../services/review.service.js";
+import { isCodexUsageLimitStats } from "../services/codex-rate-limit.js";
 
 const MAX_SESSIONS = 10;
 export const MAX_MONITOR_RELAUNCHES_PER_CYCLE = 2;
@@ -214,6 +215,12 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
       const sessionCount = Number(sessionCountRows[0]?.count ?? 0);
 
       if (ws.wsStatus === "idle") {
+        if (isCodexUsageLimitStats(sess?.stats)) {
+          await db.update(workspaces).set({ status: "blocked", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
+          console.log(`[monitor] Needs attention: workspace ${ws.wsId} for issue #${ws.issueNumber ?? "?"} hit a Codex usage limit; skipping relaunch`);
+          deps.boardEvents.broadcast(ws.projectId, "board_changed");
+          continue;
+        }
         if (isZeroDiffInReviewAwaiting(ws)) {
           console.log(`[monitor] Needs attention: idle-awaiting workspace ${ws.wsId} for issue #${ws.issueNumber ?? "?"} is In Review with no file changes and is not ready for merge`);
           continue;
@@ -360,7 +367,16 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
           console.log(`[monitor] Triggered merge for reviewing workspace ${ws.wsId}`);
           deps.boardEvents.broadcast(ws.projectId, "board_changed");
         }
+      } else if (ws.wsStatus === "blocked") {
+        console.log(`[monitor] Needs attention: blocked workspace ${ws.wsId} for issue #${ws.issueNumber ?? "?"}; skipping automation`);
+        continue;
       } else if (ws.wsStatus === "active" && sess?.status === "stopped") {
+        if (isCodexUsageLimitStats(sess.stats)) {
+          await db.update(workspaces).set({ status: "blocked", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
+          console.log(`[monitor] Needs attention: active workspace ${ws.wsId} stopped after Codex usage limit; marking blocked`);
+          deps.boardEvents.broadcast(ws.projectId, "board_changed");
+          continue;
+        }
         if (ws.isDirect) {
           const now = new Date().toISOString();
           await db.update(workspaces).set({ status: "closed", workingDir: null, updatedAt: now }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
