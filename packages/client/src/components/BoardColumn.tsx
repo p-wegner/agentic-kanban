@@ -5,6 +5,7 @@ import { IssueCard, type ProjectTag, type QuickUpdateCallbacks } from "./IssueCa
 import { evaluateWipLimit } from "../lib/wipLimits.js";
 import { computeDropSortOrder } from "../lib/reorderIssues.js";
 import type { CardDensity } from "../hooks/useBoardPreferences.js";
+import "./BoardColumn.css";
 
 export type SwimlaneDimension = "none" | "priority" | "tag";
 
