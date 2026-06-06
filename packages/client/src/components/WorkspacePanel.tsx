@@ -29,7 +29,7 @@ import type {
   SessionSummaryResponse,
   ProfileSelection,
 } from "@agentic-kanban/shared";
-import { CLAUDE_MODEL_OPTIONS } from "@agentic-kanban/shared";
+import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
 
 interface Project {
   id: string;
@@ -157,6 +157,19 @@ function defaultSelectedProfile(settings: Record<string, string>): string {
   if (settings.provider === "copilot") return `copilot:${settings.copilot_profile || COPILOT_DEFAULT_PROFILE}`;
   if (settings.claude_profile) return `claude:${settings.claude_profile}`;
   return "";
+}
+
+/**
+ * Resolve the "Default" quick-launch profile to an explicit {provider, name}
+ * so the server doesn't fall through to Strategy Bullseye — keeping the
+ * displayed profile in sync with what actually runs.
+ * Returns undefined when no specific default exists (pure Claude, no profile).
+ */
+function resolveQuickLaunchDefault(prefs: Record<string, string>): { provider: AgentProvider; name: string } | undefined {
+  if (prefs.provider === "codex") return { provider: "codex", name: prefs.codex_profile || CODEX_DEFAULT_PROFILE };
+  if (prefs.provider === "copilot") return { provider: "copilot", name: prefs.copilot_profile || COPILOT_DEFAULT_PROFILE };
+  if (prefs.claude_profile) return { provider: "claude", name: prefs.claude_profile };
+  return undefined;
 }
 
 const SESSION_STATUS_COLORS: Record<string, string> = {
@@ -575,6 +588,9 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
   const isClaudeQuickLaunch = selectedProfile === ""
     ? (prefs.provider !== "codex" && prefs.provider !== "copilot")
     : selectedProfile.startsWith("claude:");
+  const isCodexQuickLaunch = selectedProfile === ""
+    ? prefs.provider === "codex"
+    : selectedProfile.startsWith("codex:");
   const canResume = (ws: WorkspaceResponse, sessions: SessionInfo[]) =>
     (ws.status === "active" || ws.status === "idle") && !isRunning && !activeSession &&
     !!lastSessionPerWorkspace[ws.id] &&
@@ -796,8 +812,15 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
         branch: suggestion,
       };
       const profile = profileSelectionFromValue(selectedProfile);
-      if (profile) body.profile = profile;
-      if (isClaudeQuickLaunch && selectedModel) body.model = selectedModel;
+      if (profile) {
+        body.profile = profile;
+      } else {
+        // "Default" selected — resolve to explicit global default so the label
+        // the user saw matches what actually runs.
+        const resolved = resolveQuickLaunchDefault(prefs);
+        if (resolved) body.profile = resolved;
+      }
+      if ((isClaudeQuickLaunch || isCodexQuickLaunch) && selectedModel) body.model = selectedModel;
       const result = await apiFetch<WorkspaceResponse & { sessionId?: string }>("/api/workspaces", {
         method: "POST",
         body: JSON.stringify(body),
@@ -834,8 +857,13 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
         skillId,
       };
       const profile = profileSelectionFromValue(selectedProfile);
-      if (profile) body.profile = profile;
-      if (isClaudeQuickLaunch && selectedModel) body.model = selectedModel;
+      if (profile) {
+        body.profile = profile;
+      } else {
+        const resolved = resolveQuickLaunchDefault(prefs);
+        if (resolved) body.profile = resolved;
+      }
+      if ((isClaudeQuickLaunch || isCodexQuickLaunch) && selectedModel) body.model = selectedModel;
       const result = await apiFetch<WorkspaceResponse & { sessionId?: string }>("/api/workspaces", {
         method: "POST",
         body: JSON.stringify(body),
@@ -1606,7 +1634,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                         <div className="border-t border-gray-100 dark:border-gray-800" />
                       </>
                     )}
-                    {isClaudeQuickLaunch && (
+                    {(isClaudeQuickLaunch || isCodexQuickLaunch) && (
                       <>
                         <div className="px-3 py-1.5">
                           <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Model</label>
@@ -1616,7 +1644,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                             className="w-full text-sm border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            {CLAUDE_MODEL_OPTIONS.map((m) => (
+                            {(isCodexQuickLaunch ? CODEX_MODEL_OPTIONS : CLAUDE_MODEL_OPTIONS).map((m) => (
                               <option key={m.value} value={m.value}>{m.label}</option>
                             ))}
                           </select>
