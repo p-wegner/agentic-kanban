@@ -63,6 +63,7 @@ interface MonitorButlerState {
   timer: ReturnType<typeof setTimeout> | null;
   syncTimer: ReturnType<typeof setInterval> | null;
   running: boolean;
+  generation: number;
   currentIntervalMin: number | null;
   lastRunAt: string | null;
   lastCycleId: string | null;
@@ -72,6 +73,7 @@ const state: MonitorButlerState = {
   timer: null,
   syncTimer: null,
   running: false,
+  generation: 0,
   currentIntervalMin: null,
   lastRunAt: null,
   lastCycleId: null,
@@ -280,9 +282,11 @@ async function runAgentTurn(opts: {
  */
 export function startMonitorButler(): void {
   stopMonitorButler();
+  const generation = ++state.generation;
 
   async function scheduleNext() {
     const enabled = (await getPreference("monitor_butler_enabled").catch(() => null)) === "true";
+    if (state.generation !== generation) return;
     if (!enabled) {
       if (state.timer) {
         console.log("[monitor-butler] disabled — stopping scheduler");
@@ -293,6 +297,7 @@ export function startMonitorButler(): void {
       return;
     }
     const raw = await getPreference("monitor_butler_interval_min").catch(() => null);
+    if (state.generation !== generation) return;
     const intervalMin = (() => {
       const n = parseInt(raw || "", 10);
       return Number.isFinite(n) && n > 0 ? n : DEFAULT_INTERVAL_MIN;
@@ -308,7 +313,7 @@ export function startMonitorButler(): void {
       runMonitorButlerCycle()
         .catch((err) => console.error("[monitor-butler] unhandled cycle error:", err))
         .finally(() => {
-          if (state.currentIntervalMin) {
+          if (state.generation === generation && state.currentIntervalMin) {
             state.timer = setTimeout(tick, state.currentIntervalMin * 60 * 1000);
           }
         });
@@ -323,6 +328,7 @@ export function startMonitorButler(): void {
 }
 
 export function stopMonitorButler(): void {
+  state.generation++;
   if (state.timer) {
     clearTimeout(state.timer);
     state.timer = null;
