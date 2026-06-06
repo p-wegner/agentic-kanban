@@ -120,25 +120,17 @@ export async function finalizeMergeCleanup(
         .set(workspacePatch)
         .where(eq(workspaces.id, input.workspaceId));
     } catch (err) {
-      if (issueTransitioned) {
-        try {
-          await input.database
-            .update(issues)
-            .set({
-              statusId: issue.statusId,
-              updatedAt: issue.updatedAt,
-              statusChangedAt: issue.statusChangedAt,
-            })
-            .where(eq(issues.id, input.issueId));
-          issueTransitioned = false;
-        } catch (rollbackErr) {
-          console.warn(
-            "[merge-cleanup] failed to roll back issue transition after workspace close failed:",
-            rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr),
-          );
-        }
-      }
-      throw err;
+      // #668: The git merge has already been verified (ancestry check passed)
+      // before we reach this point. Rolling back the issue → Done transition here
+      // would strand the issue In Review with the branch already on master.
+      // Instead, log the workspace close failure — the startup reconciler
+      // (reconcileSilentlyMergedWorkspaces, via mergedAt) will clean up the
+      // workspace on next boot if needed.
+      console.warn(
+        `[merge-cleanup] workspace close failed after issue transitioned to Done (workspaceId=${input.workspaceId}). ` +
+          "Issue will remain Done — the workspace can be reconciled on next startup.",
+        err instanceof Error ? err.message : String(err),
+      );
     }
   }
 

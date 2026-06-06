@@ -158,9 +158,14 @@ describe("finalizeMergeCleanup", () => {
     expect(issue.statusChangedAt).toBe("2026-06-06T10:05:00.000Z");
   });
 
-  it("rolls back the issue transition when the workspace close fails", async () => {
+  it("keeps issue Done when workspace close fails (#668: no rollback)", async () => {
+    // #668 regression: previously, a workspace DB update failure would roll back
+    // the issue → Done transition, stranding the issue In Review even though the
+    // git merge had already landed. The fix: don't roll back — the issue stays
+    // Done, the workspace failure is logged, and the startup reconciler can close
+    // the workspace on next boot.
     const { client, db } = await createMergeCleanupTestDb();
-    const { issueId, workspaceId, inReviewStatusId } = await seedMergeCleanupRows(db);
+    const { issueId, workspaceId, doneStatusId } = await seedMergeCleanupRows(db);
     await client.execute(`
       CREATE TRIGGER fail_workspace_update
       BEFORE UPDATE ON workspaces
@@ -169,14 +174,19 @@ describe("finalizeMergeCleanup", () => {
       END
     `);
 
-    await expect(finalizeMergeCleanup({
+    // #668 fix: finalizeMergeCleanup no longer throws when workspace close fails.
+    // The issue transition to Done is preserved.
+    const result = await finalizeMergeCleanup({
       database: db,
       workspaceId,
       issueId,
       now: "2026-06-06T10:05:00.000Z",
       mergedAt: "2026-06-06T10:05:00.000Z",
       workingDir: null,
-    })).rejects.toThrow("Failed query: update \"workspaces\"");
+    });
+
+    // Issue was transitioned (not rolled back)
+    expect(result.issueTransitioned).toBe(true);
 
     const [workspace] = await db
       .select({
@@ -193,6 +203,7 @@ describe("finalizeMergeCleanup", () => {
       .from(issues)
       .where(eq(issues.id, issueId));
 
+    // Workspace stays not-closed (DB update failed) — reconciler will fix this
     expect(workspace).toMatchObject({
       status: "idle",
       readyForMerge: true,
@@ -200,7 +211,8 @@ describe("finalizeMergeCleanup", () => {
       closedAt: null,
       mergedAt: null,
     });
-    expect(issue.statusId).toBe(inReviewStatusId);
-    expect(issue.statusChangedAt).toBeNull();
+    // Issue is Done — NOT rolled back to In Review
+    expect(issue.statusId).toBe(doneStatusId);
+    expect(issue.statusChangedAt).toBe("2026-06-06T10:05:00.000Z");
   });
 });
