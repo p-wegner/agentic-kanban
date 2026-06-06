@@ -1,10 +1,10 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { MonitorPopover, type MonitorStatus } from "./MonitorPopover.js";
 import { useOrchestrator } from "../hooks/useOrchestrator.js";
 import { apiFetch } from "../lib/api.js";
 import { VoiceInboxButton } from "./VoiceInboxButton.js";
 import { ProjectScriptsMenu } from "./ProjectScriptsMenu.js";
-import { PRIMARY_VIEWS, SECONDARY_VIEWS, VIEW_REGISTRY } from "../lib/viewRegistry.js";
+import { PRIMARY_VIEWS, SECONDARY_VIEWS, VIEW_REGISTRY, type ViewDescriptor } from "../lib/viewRegistry.js";
 import type { StatusWithIssues } from "@agentic-kanban/shared";
 import type { CardDensity } from "../hooks/useBoardPreferences.js";
 import { PRIORITY_META } from "../lib/chartColors.js";
@@ -195,6 +195,13 @@ export function BoardToolbar({
   const [showMoreActions, setShowMoreActions] = useState(false);
   const [showMoreViews, setShowMoreViews] = useState(false);
   const moreViewsRef = useRef<HTMLDivElement>(null);
+  // sm+ : the primary view tabs overflow into the "More" dropdown responsively.
+  // A hidden measurement row mirrors the real tabs; we compare their intrinsic
+  // widths against the available row width and show as many tabs as fit, folding
+  // the rest (plus the analytics/secondary views) into "More".
+  const [visibleViewCount, setVisibleViewCount] = useState(PRIMARY_VIEWS.length);
+  const viewTabsWrapRef = useRef<HTMLDivElement>(null);
+  const viewTabsMeasureRef = useRef<HTMLDivElement>(null);
   // Below sm the action cluster (Tasks/Scripts/Queue/Capacity/Voice/Monitor) is
   // hidden behind a ⋯ toggle so the default phone view is just pulse + view + filter.
   const [showActions, setShowActions] = useState(false);
@@ -294,7 +301,94 @@ export function BoardToolbar({
     };
   }, [showActivityMenu]);
 
-  const activeSecondaryView = SECONDARY_VIEWS.find((v) => v.id === viewMode);
+  // Measure intrinsic tab widths vs. available row width and recompute how many
+  // primary tabs fit. Driven by a ResizeObserver on the wrapper plus the inputs
+  // that change a tab's width (badge counts, the kanban activity summary).
+  useLayoutEffect(() => {
+    const wrap = viewTabsWrapRef.current;
+    const measure = viewTabsMeasureRef.current;
+    if (!wrap || !measure) return;
+
+    function recompute() {
+      const avail = wrap.clientWidth;
+      if (avail <= 0) return;
+      const children = Array.from(measure.children) as HTMLElement[];
+      if (children.length === 0) return;
+      // Last measured child is the "More" trigger; the rest are primary tabs.
+      const moreWidth = children[children.length - 1].offsetWidth;
+      const tabWidths = children.slice(0, -1).map((el) => el.offsetWidth);
+      const GAP = 4; // gap-1
+      const OVERHEAD = 8; // border + p-0.5 + small safety margin
+
+      // Everything fits without a "More" button?
+      const totalAll = tabWidths.reduce((sum, w) => sum + w + GAP, 0);
+      if (totalAll + OVERHEAD <= avail) {
+        setVisibleViewCount(tabWidths.length);
+        return;
+      }
+      // Otherwise reserve room for "More" and greedily fit tabs.
+      let budget = avail - OVERHEAD - (moreWidth + GAP);
+      let count = 0;
+      for (const w of tabWidths) {
+        if (budget - (w + GAP) < 0) break;
+        budget -= w + GAP;
+        count++;
+      }
+      setVisibleViewCount(count);
+    }
+
+    recompute();
+    const ro = new ResizeObserver(recompute);
+    ro.observe(wrap);
+    return () => ro.disconnect();
+  }, [butlerBadgeCount, boardActivitySummary]);
+
+  const visiblePrimaryViews = PRIMARY_VIEWS.slice(0, visibleViewCount);
+  const overflowPrimaryViews = PRIMARY_VIEWS.slice(visibleViewCount);
+  const moreViews = [...overflowPrimaryViews, ...SECONDARY_VIEWS];
+  const activeMoreView = moreViews.find((v) => v.id === viewMode);
+
+  function renderViewTab(view: ViewDescriptor, measuring = false) {
+    const isActive = viewMode === view.id;
+    const activeClass = view.activeClass ?? ACTIVE_DEFAULT;
+    const showBadge = view.badge === "butler" && butlerBadgeCount > 0;
+    const shortcutHint = view.shortcut ? ` (${view.shortcut})` : "";
+    const title = showBadge
+      ? `${view.tooltip}${shortcutHint} — ${butlerBadgeCount} pending agent question${butlerBadgeCount === 1 ? "" : "s"}`
+      : `${view.tooltip}${shortcutHint}`;
+    return (
+      <button
+        key={view.id}
+        onClick={measuring ? undefined : () => onViewModeChange(view.id)}
+        tabIndex={measuring ? -1 : undefined}
+        className={`relative px-2.5 py-1 text-xs rounded flex items-center gap-1.5 whitespace-nowrap transition-colors ${isActive ? activeClass : INACTIVE}`}
+        title={measuring ? undefined : title}
+      >
+        {view.icon}
+        {view.toolbarLabel}
+        {view.id === "kanban" && boardActivitySummary && (
+          <span
+            className={`hidden md:inline max-w-[260px] truncate rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${
+              isActive
+                ? "bg-white/20 text-white"
+                : "bg-surface-sunken dark:bg-gray-800 text-ink-soft dark:text-gray-400"
+            }`}
+            title={boardActivitySummary}
+          >
+            {boardActivitySummary}
+          </span>
+        )}
+        {showBadge && (
+          <span
+            className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-amber-500 text-white text-[10px] font-semibold leading-none"
+            aria-label={`${butlerBadgeCount} pending agent questions`}
+          >
+            {butlerBadgeCount > 99 ? "99+" : butlerBadgeCount}
+          </span>
+        )}
+      </button>
+    );
+  }
 
   return (
     <>
@@ -486,104 +580,87 @@ export function BoardToolbar({
           </div>
         )}
       </div>
-      <div className="hidden sm:flex items-center gap-1 border border-black/[0.07] dark:border-white/10 rounded-md p-0.5 bg-surface-raised dark:bg-surface-raised-dark shrink-0">
-        {PRIMARY_VIEWS.map((view) => {
-          const isActive = viewMode === view.id;
-          const activeClass = view.activeClass ?? ACTIVE_DEFAULT;
-          const showBadge = view.badge === "butler" && butlerBadgeCount > 0;
-          const shortcutHint = view.shortcut ? ` (${view.shortcut})` : "";
-          const title = showBadge
-            ? `${view.tooltip}${shortcutHint} — ${butlerBadgeCount} pending agent question${butlerBadgeCount === 1 ? "" : "s"}`
-            : `${view.tooltip}${shortcutHint}`;
-          return (
-            <button
-              key={view.id}
-              onClick={() => onViewModeChange(view.id)}
-              className={`relative px-2.5 py-1 text-xs rounded flex items-center gap-1.5 transition-colors ${isActive ? activeClass : INACTIVE}`}
-              title={title}
-            >
-              {view.icon}
-              {view.toolbarLabel}
-              {view.id === "kanban" && boardActivitySummary && (
-                <span
-                  className={`hidden md:inline max-w-[260px] truncate rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${
-                    isActive
-                      ? "bg-white/20 text-white"
-                      : "bg-surface-sunken dark:bg-gray-800 text-ink-soft dark:text-gray-400"
-                  }`}
-                  title={boardActivitySummary}
-                >
-                  {boardActivitySummary}
-                </span>
-              )}
-              {showBadge && (
-                <span
-                  className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-amber-500 text-white text-[10px] font-semibold leading-none"
-                  aria-label={`${butlerBadgeCount} pending agent questions`}
-                >
-                  {butlerBadgeCount > 99 ? "99+" : butlerBadgeCount}
-                </span>
-              )}
-            </button>
-          );
-        })}
-        {SECONDARY_VIEWS.length > 0 && (
-          <div className="relative" ref={moreViewsRef}>
-            <button
-              onClick={() => setShowMoreViews((v) => !v)}
-              aria-haspopup="menu"
-              aria-expanded={showMoreViews}
-              className={`relative px-2.5 py-1 text-xs rounded flex items-center gap-1.5 transition-colors ${activeSecondaryView ? (activeSecondaryView.activeClass ?? ACTIVE_DEFAULT) : INACTIVE}`}
-              title={
-                activeSecondaryView
-                  ? `${activeSecondaryView.tooltip} — more analytics views`
-                  : "More views — metrics, insights, swimlane and more"
-              }
-            >
-              {activeSecondaryView ? (
-                <>
-                  {activeSecondaryView.icon}
-                  {activeSecondaryView.toolbarLabel}
-                </>
-              ) : (
-                "More"
-              )}
-              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
-              </svg>
-            </button>
-            {showMoreViews && (
-              <div
-                role="menu"
-                className="absolute top-full right-0 mt-1 w-48 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg z-20 p-1"
+      {/* sm+ : responsive tab strip. Primary tabs fill the available row width;
+          whatever doesn't fit folds into the "More" dropdown along with the
+          analytics/secondary views. `visibleViewCount` is computed from the
+          hidden measurement row below. */}
+      <div ref={viewTabsWrapRef} className="relative hidden sm:block flex-1 min-w-0 overflow-hidden">
+        <div className="flex w-fit items-center gap-1 border border-black/[0.07] dark:border-white/10 rounded-md p-0.5 bg-surface-raised dark:bg-surface-raised-dark">
+          {visiblePrimaryViews.map((view) => renderViewTab(view))}
+          {moreViews.length > 0 && (
+            <div className="relative" ref={moreViewsRef}>
+              <button
+                onClick={() => setShowMoreViews((v) => !v)}
+                aria-haspopup="menu"
+                aria-expanded={showMoreViews}
+                className={`relative px-2.5 py-1 text-xs rounded flex items-center gap-1.5 whitespace-nowrap transition-colors ${activeMoreView ? (activeMoreView.activeClass ?? ACTIVE_DEFAULT) : INACTIVE}`}
+                title={
+                  activeMoreView
+                    ? `${activeMoreView.tooltip} — more views`
+                    : "More views"
+                }
               >
-                {SECONDARY_VIEWS.map((view) => {
-                  const isActive = viewMode === view.id;
-                  const activeClass = view.activeClass ?? ACTIVE_DEFAULT;
-                  const shortcutHint = view.shortcut ? ` (${view.shortcut})` : "";
-                  return (
-                    <button
-                      key={view.id}
-                      role="menuitem"
-                      onClick={() => {
-                        onViewModeChange(view.id);
-                        setShowMoreViews(false);
-                      }}
-                      className={`w-full text-left px-2.5 py-1.5 text-xs rounded flex items-center gap-2 transition-colors ${isActive ? activeClass : INACTIVE}`}
-                      title={`${view.tooltip}${shortcutHint}`}
-                    >
-                      {view.icon}
-                      <span className="flex-1">{view.label}</span>
-                      {view.shortcut && (
-                        <kbd className="text-[10px] font-mono opacity-60">{view.shortcut}</kbd>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
+                {activeMoreView ? (
+                  <>
+                    {activeMoreView.icon}
+                    {activeMoreView.toolbarLabel}
+                  </>
+                ) : (
+                  "More"
+                )}
+                <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
+                </svg>
+              </button>
+              {showMoreViews && (
+                <div
+                  role="menu"
+                  className="absolute top-full right-0 mt-1 max-h-[70vh] w-48 overflow-y-auto bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg z-20 p-1"
+                >
+                  {moreViews.map((view) => {
+                    const isActive = viewMode === view.id;
+                    const activeClass = view.activeClass ?? ACTIVE_DEFAULT;
+                    const shortcutHint = view.shortcut ? ` (${view.shortcut})` : "";
+                    return (
+                      <button
+                        key={view.id}
+                        role="menuitem"
+                        onClick={() => {
+                          onViewModeChange(view.id);
+                          setShowMoreViews(false);
+                        }}
+                        className={`w-full text-left px-2.5 py-1.5 text-xs rounded flex items-center gap-2 transition-colors ${isActive ? activeClass : INACTIVE}`}
+                        title={`${view.tooltip}${shortcutHint}`}
+                      >
+                        {view.icon}
+                        <span className="flex-1">{view.label}</span>
+                        {view.shortcut && (
+                          <kbd className="text-[10px] font-mono opacity-60">{view.shortcut}</kbd>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        {/* Hidden measurement row — mirrors every primary tab plus a plain "More"
+            trigger so the effect can measure intrinsic widths. Absolutely
+            positioned + invisible so it never affects layout. */}
+        <div
+          ref={viewTabsMeasureRef}
+          aria-hidden="true"
+          className="pointer-events-none invisible absolute left-0 top-0 flex items-center gap-1 p-0.5"
+        >
+          {PRIMARY_VIEWS.map((view) => renderViewTab(view, true))}
+          <button tabIndex={-1} className="px-2.5 py-1 text-xs rounded flex items-center gap-1.5 whitespace-nowrap">
+            More
+            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
+            </svg>
+          </button>
+        </div>
       </div>
     </div>
     {showPriorityLegend && (
