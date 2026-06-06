@@ -156,23 +156,9 @@ export function SavedBoardViews({
           <option key={status.id} value={status.id}>{status.name}</option>
         ))}
       </select>
-      <select
-        value={currentState.tagId ?? ""}
-        onFocus={() => void onLoadTags()}
-        onChange={(event) => {
-          const tag = tags.find((candidate) => candidate.id === event.target.value);
-          onApply({ ...currentState, tagId: tag?.id ?? null, tagName: tag?.name ?? null });
-          setSelectedViewId("");
-        }}
-        className="max-w-[150px] rounded border border-gray-300 bg-white px-2 py-1 text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
-        aria-label="Filter by tag"
-        title="Filter by tag"
-      >
-        <option value="">All tags</option>
-        {tags.map((tag) => (
-          <option key={tag.id} value={tag.id}>{tag.name}</option>
-        ))}
-      </select>
+      {/* Tag filtering lives in the multi-select TAGS legend below the toolbar
+          (drives the same activeTagIds); a second single-select dropdown here was
+          redundant. Saved views still persist/apply a single tag via tagId. */}
       <button
         type="button"
         onClick={() => setShowSaving((v) => !v)}
