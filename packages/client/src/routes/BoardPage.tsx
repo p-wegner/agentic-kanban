@@ -151,6 +151,91 @@ function stringifyForIssueCard(issue: IssueWithStatus): string {
   return JSON.stringify(normalized);
 }
 
+/** Filter predicate: true when the issue matches all active board filters. */
+function matchesBoardFilters(
+  issue: IssueWithStatus,
+  options: {
+    focusMode: boolean;
+    statusFilterId: string | null;
+    activeTagIds: Set<string>;
+    milestoneFilterId: string | null;
+    issueTypeFilter: string | null;
+    showBlocked: boolean;
+    showStaleOnly: boolean;
+    searchQuery: string;
+  },
+): boolean {
+  const { focusMode, statusFilterId, activeTagIds, milestoneFilterId, issueTypeFilter, showBlocked, showStaleOnly, searchQuery } = options;
+  if (focusMode && !isIssueInFlight(issue.workspaceSummary)) return false;
+  if (statusFilterId && issue.statusId !== statusFilterId) return false;
+  if (activeTagIds.size > 0 && !issue.tags?.some((tag) => activeTagIds.has(tag.id))) return false;
+  if (milestoneFilterId && issue.milestoneId !== milestoneFilterId) return false;
+  if (issueTypeFilter && issue.issueType !== issueTypeFilter) return false;
+  if (showBlocked && !(issue as IssueWithStatus & { isBlocked?: boolean }).isBlocked) return false;
+  if (showStaleOnly && !issue.isStale) return false;
+  if (searchQuery) {
+    const q = searchQuery.toLowerCase();
+    return (
+      issue.title.toLowerCase().includes(q) ||
+      (issue.description?.toLowerCase().includes(q) ?? false) ||
+      (issue.tags?.some((tag) => tag.name.toLowerCase().includes(q)) ?? false)
+    );
+  }
+  return true;
+}
+
+/** Milestone progress banner shown above the kanban board when a milestone filter is active. */
+function MilestoneFilterBanner({
+  milestoneId,
+  milestones,
+  columns,
+  onClear,
+}: {
+  milestoneId: string;
+  milestones: MilestoneResponse[];
+  columns: StatusWithIssues[];
+  onClear: () => void;
+}) {
+  const activeMilestone = milestones.find(m => m.id === milestoneId);
+  if (!activeMilestone) return null;
+  const allMilestoneIssues = columns.flatMap(c => c.issues).filter(i => i.milestoneId === milestoneId);
+  const doneCount = allMilestoneIssues.filter(i => i.statusName === "Done").length;
+  const total = allMilestoneIssues.length;
+  return (
+    <div className="mx-4 mb-2 flex items-center gap-3 px-3 py-2 rounded-md bg-violet-50 dark:bg-violet-950/40 border border-violet-200 dark:border-violet-800 text-sm">
+      <svg className="w-4 h-4 text-violet-600 dark:text-violet-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3 21V3l18 9-18 9z" />
+      </svg>
+      <span className="font-medium text-violet-800 dark:text-violet-200">{activeMilestone.name}</span>
+      {activeMilestone.dueDate && (
+        <span className="text-xs text-violet-600 dark:text-violet-400">
+          due {new Date(activeMilestone.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+        </span>
+      )}
+      <span className="ml-auto text-violet-700 dark:text-violet-300 font-medium">
+        {doneCount}/{total} done
+      </span>
+      {total > 0 && (
+        <div className="w-24 h-1.5 rounded-full bg-violet-200 dark:bg-violet-800 overflow-hidden">
+          <div
+            className="h-full bg-violet-600 dark:bg-violet-400 rounded-full transition-all"
+            style={{ width: `${Math.round((doneCount / total) * 100)}%` }}
+          />
+        </div>
+      )}
+      <button
+        onClick={onClear}
+        title="Clear milestone filter"
+        className="text-violet-500 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-200 ml-1"
+      >
+        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
 export function BoardPage() {
   const { theme: _theme, setTheme, isDark } = useTheme();
   // Warm the overlay-panels chunk shortly after the board paints. It is lazy (keeps it
@@ -351,7 +436,7 @@ export function BoardPage() {
   }, [columns, selectedIssue]);
 
   // Real-time board updates via WebSocket
-  useBoardEvents(activeProjectId, useCallback((reason: string) => {
+  const handleBoardChange = useCallback((reason: string) => {
     if (reason.startsWith("project_")) {
       void (async () => {
         try {
@@ -403,7 +488,9 @@ export function BoardPage() {
       return;
     }
     refetchBoard();
-  }, [refetchBoard, creatingInColumnId, addNotificationBoardEvent]), useCallback((issueId: string, sessionId: string, activity: string) => {
+  }, [refetchBoard, creatingInColumnId, addNotificationBoardEvent]);
+
+  const handleSessionActivity = useCallback((issueId: string, sessionId: string, activity: string) => {
     const isActive = columnsRef.current.some(col =>
       col.issues.some(iss => iss.id === issueId && (iss.workspaceSummary?.main?.status === "active" || iss.workspaceSummary?.main?.status === "fixing"))
     );
@@ -443,7 +530,9 @@ export function BoardPage() {
       }
       return { ...prev, [issueId]: sessions };
     });
-  }, []), useCallback((issueId: string, stats: LiveSessionStats) => {
+  }, []);
+
+  const handleSessionStats = useCallback((issueId: string, stats: LiveSessionStats) => {
     const isActive = columnsRef.current.some(col =>
       col.issues.some(iss => iss.id === issueId && (iss.workspaceSummary?.main?.status === "active" || iss.workspaceSummary?.main?.status === "fixing"))
     );
@@ -452,9 +541,13 @@ export function BoardPage() {
       if (prev[issueId]?.model === stats.model && prev[issueId]?.contextTokens === stats.contextTokens && prev[issueId]?.toolUses === stats.toolUses && prev[issueId]?.subagentCount === stats.subagentCount) return prev;
       return { ...prev, [issueId]: stats };
     });
-  }, []), useCallback((issueId: string, todos: TodoItem[]) => {
+  }, []);
+
+  const handleSessionTodos = useCallback((issueId: string, todos: TodoItem[]) => {
     setSessionTodos((prev) => ({ ...prev, [issueId]: todos }));
-  }, []), useCallback((req: ApprovalRequest) => {
+  }, []);
+
+  const handleApprovalRequested = useCallback((req: ApprovalRequest) => {
     setApprovalRequests((prev) => [...prev, req]);
     // Find the issue corresponding to this workspace for the notification
     let approvalIssue: { id: string; issueNumber?: number; title?: string } | undefined;
@@ -468,7 +561,9 @@ export function BoardPage() {
       }
     }
     addNotificationApprovalEvent(req.workspaceId ?? req.sessionId, approvalIssue);
-  }, [addNotificationApprovalEvent]));
+  }, [addNotificationApprovalEvent]);
+
+  useBoardEvents(activeProjectId, handleBoardChange, handleSessionActivity, handleSessionStats, handleSessionTodos, handleApprovalRequested);
 
   // Process pending board refresh when create form closes
   useEffect(() => {
@@ -1329,44 +1424,24 @@ export function BoardPage() {
     handleViewModeChange(state.viewMode);
   }, [handleViewModeChange]);
 
+  const filterOptions = useMemo(() => ({
+    focusMode,
+    statusFilterId,
+    activeTagIds,
+    milestoneFilterId,
+    issueTypeFilter,
+    showBlocked,
+    showStaleOnly,
+    searchQuery,
+  }), [focusMode, statusFilterId, activeTagIds, milestoneFilterId, issueTypeFilter, showBlocked, showStaleOnly, searchQuery]);
+
   const filteredColumns = useMemo(
     () =>
       columns.map((col) => ({
         ...col,
-        issues: col.issues.filter((issue) => {
-          if (focusMode && !isIssueInFlight(issue.workspaceSummary)) {
-            return false;
-          }
-          if (statusFilterId && issue.statusId !== statusFilterId) {
-            return false;
-          }
-          if (activeTagIds.size > 0 && !issue.tags?.some((tag) => activeTagIds.has(tag.id))) {
-            return false;
-          }
-          if (milestoneFilterId && issue.milestoneId !== milestoneFilterId) {
-            return false;
-          }
-          if (issueTypeFilter && issue.issueType !== issueTypeFilter) {
-            return false;
-          }
-          if (showBlocked && !(issue as IssueWithStatus & { isBlocked?: boolean }).isBlocked) {
-            return false;
-          }
-          if (showStaleOnly && !issue.isStale) {
-            return false;
-          }
-          if (searchQuery) {
-            const q = searchQuery.toLowerCase();
-            return (
-              issue.title.toLowerCase().includes(q) ||
-              (issue.description?.toLowerCase().includes(q) ?? false) ||
-              (issue.tags?.some((tag) => tag.name.toLowerCase().includes(q)) ?? false)
-            );
-          }
-          return true;
-        }),
+        issues: col.issues.filter((issue) => matchesBoardFilters(issue, filterOptions)),
       })),
-    [activeTagIds, columns, focusMode, issueTypeFilter, milestoneFilterId, searchQuery, showBlocked, showStaleOnly, statusFilterId],
+    [columns, filterOptions],
   );
 
   const showAiReviewedColumn = useMemo(
@@ -2117,46 +2192,14 @@ export function BoardPage() {
           </BoardErrorBoundary>
         )}
         </Suspense>
-        {viewMode === "kanban" && milestoneFilterId && (() => {
-          const activeMilestone = milestones.find(m => m.id === milestoneFilterId);
-          if (!activeMilestone) return null;
-          const allMilestoneIssues = columns.flatMap(c => c.issues).filter(i => i.milestoneId === milestoneFilterId);
-          const doneCount = allMilestoneIssues.filter(i => i.statusName === "Done").length;
-          const total = allMilestoneIssues.length;
-          return (
-            <div className="mx-4 mb-2 flex items-center gap-3 px-3 py-2 rounded-md bg-violet-50 dark:bg-violet-950/40 border border-violet-200 dark:border-violet-800 text-sm">
-              <svg className="w-4 h-4 text-violet-600 dark:text-violet-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 21V3l18 9-18 9z" />
-              </svg>
-              <span className="font-medium text-violet-800 dark:text-violet-200">{activeMilestone.name}</span>
-              {activeMilestone.dueDate && (
-                <span className="text-xs text-violet-600 dark:text-violet-400">
-                  due {new Date(activeMilestone.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                </span>
-              )}
-              <span className="ml-auto text-violet-700 dark:text-violet-300 font-medium">
-                {doneCount}/{total} done
-              </span>
-              {total > 0 && (
-                <div className="w-24 h-1.5 rounded-full bg-violet-200 dark:bg-violet-800 overflow-hidden">
-                  <div
-                    className="h-full bg-violet-600 dark:bg-violet-400 rounded-full transition-all"
-                    style={{ width: `${Math.round((doneCount / total) * 100)}%` }}
-                  />
-                </div>
-              )}
-              <button
-                onClick={() => setMilestoneFilterId(null)}
-                title="Clear milestone filter"
-                className="text-violet-500 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-200 ml-1"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-          );
-        })()}
+        {viewMode === "kanban" && milestoneFilterId && (
+          <MilestoneFilterBanner
+            milestoneId={milestoneFilterId}
+            milestones={milestones}
+            columns={columns}
+            onClear={() => setMilestoneFilterId(null)}
+          />
+        )}
         {viewMode === "kanban" && (
           <RecentlyMergedStrip
             columns={columns}
