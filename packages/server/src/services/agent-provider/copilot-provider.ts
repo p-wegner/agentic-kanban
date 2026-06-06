@@ -24,7 +24,7 @@ export class CopilotProvider implements AgentProvider {
   }
 
   buildLaunchConfig(options: ProviderLaunchOptions): AgentLaunchConfig {
-    const { agentArgs, providerSessionId, agentCommand, keepAlive, profile, planMode, prompt, contextFiles, skipPermissions } = options;
+    const { agentArgs, providerSessionId, agentCommand, keepAlive, profile, planMode, prompt, contextFiles, skipPermissions, systemInstructions } = options;
     const isWindows = process.platform === "win32";
 
     const isMockAgent = !!process.env.AGENT_COMMAND || (agentCommand?.includes("mock-agent") ?? false);
@@ -51,7 +51,11 @@ export class CopilotProvider implements AgentProvider {
         useShell = false;
       }
 
-      const effectivePrompt = planMode ? `${COPILOT_PLAN_PROMPT_PREFIX}\n\n${prompt ?? ""}` : (prompt ?? "");
+      const effectivePrompt = [
+        systemInstructions,
+        planMode ? COPILOT_PLAN_PROMPT_PREFIX : undefined,
+        prompt,
+      ].filter(Boolean).join("\n\n");
       args.push("-p", effectivePrompt);
       suppressStdinPrompt = true;
       args.push("--output-format", "json", "--stream", "on", "--no-ask-user", "--no-color");

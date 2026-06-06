@@ -21,7 +21,7 @@ export class CodexProvider implements AgentProvider {
   }
 
   buildLaunchConfig(options: ProviderLaunchOptions): AgentLaunchConfig {
-    const { agentArgs, providerSessionId, agentCommand, keepAlive, profile, model, planMode } = options;
+    const { agentArgs, providerSessionId, agentCommand, keepAlive, profile, model, planMode, systemInstructions } = options;
     const isWindows = process.platform === "win32";
 
     const isMockAgent = !!process.env.AGENT_COMMAND || (agentCommand?.includes("mock-agent") ?? false);
@@ -81,6 +81,11 @@ export class CodexProvider implements AgentProvider {
           PLAN_END_MARKER,
           "Then stop.",
         ].join("\n");
+      } else if (systemInstructions) {
+        promptPrefix = systemInstructions;
+      }
+      if (planMode && systemInstructions) {
+        promptPrefix = `${systemInstructions}\n\n${promptPrefix}`;
       }
       args.push("-");
     }

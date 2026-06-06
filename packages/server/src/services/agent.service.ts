@@ -182,6 +182,7 @@ export function launch(
   extraEnv?: Record<string, string>,
   skipPermissions?: boolean,
   model?: string,
+  systemInstructions?: string,
   contextFiles?: string[],
 ): ChildProcess {
   const effectivePrompt = provider === "codex"
@@ -194,6 +195,7 @@ export function launch(
     claudeProfile,
     profile,
     model,
+    systemInstructions,
     keepAlive,
     permissionPromptTool,
     planMode,
