@@ -198,6 +198,10 @@ export function createWorkspaceMergeService(deps: {
         );
         activeMerges.delete(repoPath);
       } else {
+        if (existingLock.workspaceId === id) {
+          console.log(`[workspace-merge] reusing in-flight merge result for workspace ${id} on repo ${repoPath}`);
+          return await existingLock.promise;
+        }
         throw new WorkspaceError(
           `A merge is already in progress for this repository ` +
             `(workspace ${diagnostic.activeWorkspaceId}, age ${Math.round(diagnostic.ageMs / 1000)}s). ` +
