@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { suggestBranchName, sanitizeBranchName } from "../lib/branch.js";
 import type { IssueWithStatus, ProfileSelection, WorkspaceResponse } from "@agentic-kanban/shared";
-import { CLAUDE_MODEL_OPTIONS } from "@agentic-kanban/shared";
+import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import { PreflightModal } from "./PreflightModal.js";
 import type { PreflightResult, PreflightClarification } from "./PreflightModal.js";
 import {
@@ -51,6 +51,19 @@ function defaultProfileLabel(prefs: Record<string, string>): string {
   if (prefs.provider === "codex") return `codex:${prefs.codex_profile || CODEX_DEFAULT_PROFILE}`;
   if (prefs.provider === "copilot") return `copilot:${prefs.copilot_profile || COPILOT_DEFAULT_PROFILE}`;
   return `claude:${prefs.claude_profile || "default"}`;
+}
+
+/**
+ * Resolve the "Default" profile selection to an explicit {provider, name}
+ * so the server doesn't fall through to Strategy Bullseye — keeping the
+ * displayed label ("Will use: claude:anth") in sync with what actually runs.
+ * Returns undefined when no specific default exists (pure Claude, no profile).
+ */
+function resolveDefaultProfile(prefs: Record<string, string>): { provider: AgentProvider; name: string } | undefined {
+  if (prefs.provider === "codex") return { provider: "codex", name: prefs.codex_profile || CODEX_DEFAULT_PROFILE };
+  if (prefs.provider === "copilot") return { provider: "copilot", name: prefs.copilot_profile || COPILOT_DEFAULT_PROFILE };
+  if (prefs.claude_profile) return { provider: "claude", name: prefs.claude_profile };
+  return undefined; // No explicit default — let server/strategy decide
 }
 
 function profileOptionLabel(provider: AgentProvider, name: string): string {
@@ -182,8 +195,15 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
         const name = selectedProfile.slice(colonIdx + 1);
         if ((provider === "claude" || provider === "codex" || provider === "copilot") && name) body.profile = { provider, name };
       }
+    } else {
+      // "Default" selected — resolve to the explicit global default so the
+      // displayed label ("Will use: claude:anth") matches what actually runs.
+      // Without this, the server's Strategy Bullseye may pick a different
+      // provider/profile, making the label misleading.
+      const resolved = resolveDefaultProfile(prefs);
+      if (resolved) body.profile = resolved;
     }
-    if (isClaudeSelected && selectedModel) body.model = selectedModel;
+    if ((isClaudeSelected || isCodexSelected) && selectedModel) body.model = selectedModel;
     if (!isDirect) {
       body.branch = branchName.trim();
       if (baseBranch.trim()) {
@@ -309,6 +329,9 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
   const isClaudeSelected = selectedProfile === ""
     ? (prefs.provider !== "codex" && prefs.provider !== "copilot")
     : selectedProfile.startsWith("claude:");
+  const isCodexSelected = selectedProfile === ""
+    ? prefs.provider === "codex"
+    : selectedProfile.startsWith("codex:");
   const defaultBranchLabel = project?.defaultBranch || "unset";
   const cannotCreateWorktree = !isDirect && !baseBranch.trim() && !project?.defaultBranch;
 
@@ -566,7 +589,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
           </p>
         </div>
       )}
-      {isClaudeSelected && (
+      {(isClaudeSelected || isCodexSelected) && (
         <div>
           <label className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1 block">Model</label>
           <select
@@ -574,7 +597,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
             onChange={(e) => setSelectedModel(e.target.value)}
             className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
           >
-            {CLAUDE_MODEL_OPTIONS.map((m) => (
+            {(isCodexSelected ? CODEX_MODEL_OPTIONS : CLAUDE_MODEL_OPTIONS).map((m) => (
               <option key={m.value} value={m.value}>{m.label}</option>
             ))}
           </select>

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { CreateIssueRequest, IssueEstimate, ProfileSelection } from "@agentic-kanban/shared";
-import { CLAUDE_MODEL_OPTIONS } from "@agentic-kanban/shared";
+import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import type { CreateIssueFormState } from "./CreateIssueForm.js";
 import { apiFetch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
@@ -140,18 +140,28 @@ export function CreateIssuePanel({
   }, [startWorkspace, projectId]);
 
   function profileSelection(): ProfileSelection | undefined {
-    if (!selectedProfile) return undefined;
-    const colonIdx = selectedProfile.indexOf(":");
-    if (colonIdx === -1) return undefined;
-    const provider = selectedProfile.slice(0, colonIdx) as AgentProvider;
-    const name = selectedProfile.slice(colonIdx + 1);
-    if ((provider !== "claude" && provider !== "codex" && provider !== "copilot") || !name) return undefined;
-    return { provider, name };
+    if (selectedProfile) {
+      const colonIdx = selectedProfile.indexOf(":");
+      if (colonIdx === -1) return undefined;
+      const provider = selectedProfile.slice(0, colonIdx) as AgentProvider;
+      const name = selectedProfile.slice(colonIdx + 1);
+      if ((provider !== "claude" && provider !== "codex" && provider !== "copilot") || !name) return undefined;
+      return { provider, name };
+    }
+    // "Default" selected — resolve to explicit global default so the displayed
+    // label matches what actually runs (avoids Strategy Bullseye mismatch).
+    if (settings.provider === "codex") return { provider: "codex", name: settings.codex_profile || CODEX_DEFAULT_PROFILE };
+    if (settings.provider === "copilot") return { provider: "copilot", name: settings.copilot_profile || COPILOT_DEFAULT_PROFILE };
+    if (settings.claude_profile) return { provider: "claude", name: settings.claude_profile };
+    return undefined;
   }
 
   const isClaudeSelected = selectedProfile === ""
     ? (settings.provider !== "codex" && settings.provider !== "copilot")
     : selectedProfile.startsWith("claude:");
+  const isCodexSelected = selectedProfile === ""
+    ? settings.provider === "codex"
+    : selectedProfile.startsWith("codex:");
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -177,7 +187,7 @@ export function CreateIssuePanel({
         planMode: (startWorkspace && planMode) || undefined,
         skipAutoReview: (startWorkspace && skipAutoReview) || undefined,
         profile: startWorkspace ? profileSelection() : undefined,
-        model: (startWorkspace && isClaudeSelected && selectedModel) || undefined,
+        model: (startWorkspace && (isClaudeSelected || isCodexSelected) && selectedModel) || undefined,
         isDirect: (startWorkspace && isDirect) || undefined,
         skillId: (startWorkspace && skillId) || undefined,
       });
@@ -391,7 +401,7 @@ export function CreateIssuePanel({
                       </select>
                     </div>
                   )}
-                  {isClaudeSelected && (
+                  {(isClaudeSelected || isCodexSelected) && (
                     <div className="flex items-center gap-2">
                       <label className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">Model</label>
                       <select
@@ -399,7 +409,7 @@ export function CreateIssuePanel({
                         onChange={(e) => setSelectedModel(e.target.value)}
                         className="flex-1 text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
                       >
-                        {CLAUDE_MODEL_OPTIONS.map((m) => (
+                        {(isCodexSelected ? CODEX_MODEL_OPTIONS : CLAUDE_MODEL_OPTIONS).map((m) => (
                           <option key={m.value} value={m.value}>{m.label}</option>
                         ))}
                       </select>
