@@ -16,9 +16,9 @@ This is a FRESH session every run — you have NO memory of previous runs. The k
 - **REFILL_FOCUS = bugfix-only** - derived from work-type marker weights; `bugfix-only` emphasizes reproducible bugs, `balanced` allows feature/quality mix.
 
 ## STRATEGY WEIGHTS (generated - do not hand-edit)
-- Architecture & Code Health: weight 5/5, area, provider codex
-- Quality: weight 5/5, work-type, provider codex
-- Bugfix: weight 5/5, work-type, provider codex
+- Architecture & Code Health: weight 5/5, area, provider claude:zai
+- Quality: weight 5/5, work-type, provider claude:zai
+- Bugfix: weight 5/5, work-type, provider claude:zai
 - Feature: weight 1/5, work-type
 
 ## PROVIDER POLICY (generated - do not hand-edit)
@@ -26,7 +26,7 @@ When selecting a provider for a new workspace, apply these rules in priority ord
 1. **FILL** profiles should always have capacity — start work on them first.
 2. **THROTTLE** profiles are preferred for main work. Respect their headroom percentage.
 3. **FALLBACK-ONLY** profiles are last resort — only use if all others are exhausted or the user explicitly selects them.
-- **Codex (andrena-azure)** [codex:andrena-azure]: FILL — use aggressively, keep busy at all times (Primary harness - all new workspaces launch on Codex profile andrena-azure. Keep 3 agents busy.)
+- **Claude (zai)** [claude:zai]: FILL — use aggressively, keep busy at all times (Primary harness — operator directive 2026-06-06: all new workspaces launch on the Claude provider with profile `zai` (GLM-5.1 via z.ai). Codex is RATE-LIMITED across all profiles and not to be used for new builders. Keep ACTIVE_AGENTS_TARGET agents busy.)
 <!-- STRATEGY_BULLSEYE_GENERATED_END -->
 
 ## FOCUS POLICY (operator directive 2026-06-05 rev2 — authoritative; overrides the REFILL_FOCUS wording above)
