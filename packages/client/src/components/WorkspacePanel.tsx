@@ -346,6 +346,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
   const [visualProofLoading, setVisualProofLoading] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [prefs, setPrefs] = useState<Record<string, string>>({});
+  const [editingProfileWsId, setEditingProfileWsId] = useState<string | null>(null);
   const [availableProfileOptions, setAvailableProfileOptions] = useState<ProfileOption[]>([
     { provider: "codex", name: CODEX_DEFAULT_PROFILE },
     { provider: "copilot", name: COPILOT_DEFAULT_PROFILE },
@@ -723,6 +724,22 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
       setError(err instanceof Error ? err.message : "Launch failed");
     } finally {
       setActionLoading(false);
+    }
+  }
+
+  async function handleChangeProfile(wsId: string, profileValue: string) {
+    const colonIdx = profileValue.indexOf(":");
+    const provider = colonIdx >= 0 ? profileValue.slice(0, colonIdx) : null;
+    const name = colonIdx >= 0 ? profileValue.slice(colonIdx + 1) : null;
+    try {
+      await apiFetch(`/api/workspaces/${wsId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ provider: provider || null, claudeProfile: name || null }),
+      });
+      setEditingProfileWsId(null);
+      await fetchWorkspaces();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Profile update failed");
     }
   }
 
@@ -1556,10 +1573,39 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                     {ws.planMode && (
                       <span className="ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">plan</span>
                     )}
-                    {workspaceProvider && (
-                      <span className="ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300">
-                        {providerLabel(workspaceProvider)}{workspaceProfile ? `:${workspaceProfile}` : ""}
-                      </span>
+                    {editingProfileWsId === ws.id ? (
+                      <select
+                        className="ml-1.5 text-[10px] border border-gray-300 dark:border-gray-600 rounded px-1 py-0.5 bg-white dark:bg-gray-900 dark:text-gray-100"
+                        defaultValue={workspaceProvider ? `${workspaceProvider}:${workspaceProfile || (workspaceProvider === "codex" ? CODEX_DEFAULT_PROFILE : workspaceProvider === "copilot" ? COPILOT_DEFAULT_PROFILE : "")}` : ""}
+                        autoFocus
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => { e.stopPropagation(); handleChangeProfile(ws.id, e.target.value); }}
+                        onBlur={() => setEditingProfileWsId(null)}
+                      >
+                        <option value="">Default</option>
+                        {availableProfileOptions.map((option) => (
+                          <option key={profileOptionValue(option)} value={profileOptionValue(option)}>
+                            {providerLabel(option.provider)}: {(option.provider === "copilot" && option.name === COPILOT_DEFAULT_PROFILE) || (option.provider === "codex" && option.name === CODEX_DEFAULT_PROFILE) ? "Default" : option.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <>
+                        {workspaceProvider && (
+                          <span className="ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300">
+                            {providerLabel(workspaceProvider)}{workspaceProfile ? `:${workspaceProfile}` : ""}
+                          </span>
+                        )}
+                        {(ws.status === "idle" || ws.status === "error") && availableProfileOptions.length > 0 && (
+                          <button
+                            title="Change agent profile"
+                            onClick={(e) => { e.stopPropagation(); setEditingProfileWsId(ws.id); }}
+                            className="ml-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 leading-none"
+                          >
+                            ✎
+                          </button>
+                        )}
+                      </>
                     )}
                     {ws.model && (
                       <span className="ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 capitalize">
