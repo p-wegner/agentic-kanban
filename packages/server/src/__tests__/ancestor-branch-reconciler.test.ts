@@ -10,6 +10,7 @@ import { eq } from "drizzle-orm";
 import { issues, preferences, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { reconcileAncestorBranchWorkspaces } from "../startup/ancestor-branch-reconciler.js";
+import { buildWorkspaceSummaryMap } from "../services/workspace-summary.service.js";
 import type { BranchTipAncestryResult } from "@agentic-kanban/shared/lib/git-service";
 
 type CheckAncestor = (repoPath: string, branch: string, baseBranch: string, worktreeDir?: string) => Promise<BranchTipAncestryResult>;
@@ -35,6 +36,8 @@ async function seedWorkspace(
     wsStatus?: string;
     isDirect?: boolean;
     mergedAt?: string | null;
+    readyForMerge?: boolean;
+    staleCachedDiff?: boolean;
   } = {},
 ) {
   const now = new Date().toISOString();
@@ -90,8 +93,13 @@ async function seedWorkspace(
     baseBranch: "master",
     isDirect: opts.isDirect ?? false,
     status: opts.wsStatus ?? "idle",
-    readyForMerge: false,
+    readyForMerge: opts.readyForMerge ?? false,
     mergedAt: opts.mergedAt !== undefined ? opts.mergedAt : null,
+    diffStatCacheCheckedAt: opts.staleCachedDiff ? now : null,
+    diffStatCacheHeadSha: opts.staleCachedDiff ? "pre-merge-head" : null,
+    diffStatCacheFilesChanged: opts.staleCachedDiff ? 2 : null,
+    diffStatCacheInsertions: opts.staleCachedDiff ? 10 : null,
+    diffStatCacheDeletions: opts.staleCachedDiff ? 1 : null,
     provider: "claude",
     createdAt: now,
     updatedAt: now,
@@ -136,6 +144,74 @@ describe("reconcileAncestorBranchWorkspaces", () => {
     const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
     const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
     expect(status.name).toBe("In Progress");
+  });
+
+  it("reconciles ready In Progress work after a dropped merge response and clears stale board diff", async () => {
+    const { issueId, workspaceId } = await seedWorkspace(db, {
+      statusName: "In Progress",
+      wsStatus: "idle",
+      readyForMerge: true,
+      staleCachedDiff: true,
+    });
+    const checkAncestor = makeCheckAncestor(true);
+    const countCommits = makeCountCommits(2);
+
+    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor, countCommits });
+
+    expect(count).toBe(1);
+    expect(checkAncestor).toHaveBeenCalled();
+
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+    expect(status.name).toBe("Done");
+
+    const [ws] = await db
+      .select({
+        status: workspaces.status,
+        readyForMerge: workspaces.readyForMerge,
+        mergedAt: workspaces.mergedAt,
+        workingDir: workspaces.workingDir,
+      })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId));
+    expect(ws.status).toBe("closed");
+    expect(ws.readyForMerge).toBe(false);
+    expect(ws.mergedAt).toBeTruthy();
+    expect(ws.workingDir).toBeNull();
+
+    const summaryMap = await buildWorkspaceSummaryMap([issueId], "master", db, new Set([issueId]));
+    const main = summaryMap.get(issueId)?.main;
+    expect(main?.status).toBe("closed");
+    expect(main?.mergedAt).toBeTruthy();
+    expect(main?.diffStats).toBeUndefined();
+    expect(main?.commitCount).toBeNull();
+  });
+
+  it("does not reconcile ready In Progress work while the workspace is active", async () => {
+    const { issueId, workspaceId } = await seedWorkspace(db, {
+      statusName: "In Progress",
+      wsStatus: "active",
+      readyForMerge: true,
+    });
+    const checkAncestor = makeCheckAncestor(true);
+    const countCommits = makeCountCommits(2);
+
+    const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor, countCommits });
+
+    expect(count).toBe(0);
+    expect(checkAncestor).not.toHaveBeenCalled();
+
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+    expect(status.name).toBe("In Progress");
+
+    const [ws] = await db
+      .select({ status: workspaces.status, readyForMerge: workspaces.readyForMerge, mergedAt: workspaces.mergedAt })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId));
+    expect(ws.status).toBe("active");
+    expect(ws.readyForMerge).toBe(true);
+    expect(ws.mergedAt).toBeNull();
   });
 
   it("is a no-op when branch tip is NOT an ancestor", async () => {
@@ -254,7 +330,7 @@ describe("reconcileAncestorBranchWorkspaces", () => {
   });
 
   it("regression #581: 0-commit In-Progress workspace is left untouched (status guard)", async () => {
-    // Belt-and-suspenders: In-Progress is filtered at DB level before any git call.
+    // Belt-and-suspenders: In-Progress without readyForMerge is filtered before any git call.
     const { issueId, workspaceId } = await seedWorkspace(db, { statusName: "In Progress", wsStatus: "idle" });
     const checkAncestor = makeCheckAncestor(true);
     const countCommits = makeCountCommits(0);
@@ -275,7 +351,7 @@ describe("reconcileAncestorBranchWorkspaces", () => {
     // wsStatus="active" and 0 unique commits (branch tip == base HEAD).
     // The ancestor-branch reconciler auto-Doned it, flipping its issue to Done
     // while master never advanced = mass silent-merge-loss.
-    // This test pins BOTH guards: the In-Progress DB-level filter AND the
+    // This test pins BOTH guards: the In-Progress readiness/status filter AND the
     // uniqueCommitCount guard (#581), so a regression in either fails CI.
     const { issueId, workspaceId } = await seedWorkspace(db, { statusName: "In Progress", wsStatus: "active" });
     const checkAncestor = makeCheckAncestor(true);
@@ -284,7 +360,7 @@ describe("reconcileAncestorBranchWorkspaces", () => {
     const count = await reconcileAncestorBranchWorkspaces({ database: db, checkAncestor, countCommits });
 
     expect(count).toBe(0);
-    // The In-Progress status guard filters at DB level — git is never consulted.
+    // The In-Progress status guard filters before git is consulted.
     expect(checkAncestor).not.toHaveBeenCalled();
     const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
     const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
