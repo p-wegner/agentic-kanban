@@ -131,14 +131,21 @@ describe("workflow.service — template CRUD", () => {
     const created = await service.createTemplate({
       projectId,
       name: "Before",
-      nodes: [{ id: "s", name: "Start", nodeType: "start" }],
-      edges: [],
+      nodes: [
+        { id: "s", name: "Start", nodeType: "start" },
+        { id: "e", name: "End", nodeType: "end" },
+      ],
+      edges: [{ fromNodeId: "s", toNodeId: "e" }],
     });
+    expect("data" in created).toBe(true);
     const id = ("data" in created) ? created.data.id : "";
 
     const result = await service.updateTemplate(id, { name: "After" });
+    expect("data" in result).toBe(true);
     if ("data" in result) {
       expect(result.data.name).toBe("After");
+      expect(result.data.nodes).toHaveLength(2);
+      expect(result.data.edges).toHaveLength(1);
     }
   });
 

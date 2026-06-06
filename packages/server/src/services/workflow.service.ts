@@ -245,7 +245,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps) {
   async function createTemplate(opts: {
     projectId: string;
     name?: string;
-    description?: string;
+    description?: string | null;
     ticketType?: string | null;
     isDefault?: boolean;
     nodes?: any[];
@@ -257,7 +257,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps) {
     let srcNodes = opts.nodes ?? [];
     let srcEdges = opts.edges ?? [];
     let tplName = opts.name;
-    let tplDesc = opts.description;
+    let tplDesc: string | null | undefined = opts.description;
     let tplType = opts.ticketType ?? null;
 
     if (opts.cloneFrom) {
@@ -322,8 +322,8 @@ export function createWorkflowService(deps: WorkflowServiceDeps) {
 
   async function updateTemplate(id: string, opts: {
     name?: string;
-    description?: string;
-    ticketType?: string;
+    description?: string | null;
+    ticketType?: string | null;
     isDefault?: boolean;
     nodes?: any[];
     edges?: any[];
@@ -334,25 +334,31 @@ export function createWorkflowService(deps: WorkflowServiceDeps) {
       return { error: "Built-in workflows cannot be edited. Duplicate it first (POST with cloneFrom)." as const };
     }
 
+    const shouldWriteGraph = opts.nodes !== undefined || opts.edges !== undefined;
     const nodes = opts.nodes ?? [];
     const edges = opts.edges ?? [];
-    const errors = validateGraph(
-      nodes.map((n: any) => ({ id: String(n.id), name: n.name, nodeType: n.nodeType })),
-      edges.map((e: any) => ({ fromNodeId: String(e.fromNodeId), toNodeId: String(e.toNodeId), isLoop: !!e.isLoop })),
-    );
-    if (errors.length > 0) return { error: "Invalid workflow graph" as const, errors };
+    if (shouldWriteGraph) {
+      const errors = validateGraph(
+        nodes.map((n: any) => ({ id: String(n.id), name: n.name, nodeType: n.nodeType })),
+        edges.map((e: any) => ({ fromNodeId: String(e.fromNodeId), toNodeId: String(e.toNodeId), isLoop: !!e.isLoop })),
+      );
+      if (errors.length > 0) return { error: "Invalid workflow graph" as const, errors };
+    }
 
     const now = new Date().toISOString();
     await database.update(workflowTemplates).set({
       name: opts.name ?? rows[0].name,
-      description: opts.description ?? rows[0].description,
+      description: opts.description !== undefined ? opts.description : rows[0].description,
       ticketType: opts.ticketType !== undefined ? opts.ticketType : rows[0].ticketType,
       isDefault: opts.isDefault !== undefined ? !!opts.isDefault : rows[0].isDefault,
       updatedAt: now,
     }).where(eq(workflowTemplates.id, id));
-    await writeTemplateGraph(database, id, nodes, edges);
+    if (shouldWriteGraph) {
+      await writeTemplateGraph(database, id, nodes, edges);
+    }
     if (rows[0].projectId) boardEvents?.broadcast(rows[0].projectId, "workflow_template_saved");
-    return { data: { id, ...(await loadGraph(database, id)) } };
+    const updatedRows = await database.select().from(workflowTemplates).where(eq(workflowTemplates.id, id)).limit(1);
+    return { data: { ...updatedRows[0], ...(await loadGraph(database, id)) } };
   }
 
   async function deleteTemplate(id: string) {
