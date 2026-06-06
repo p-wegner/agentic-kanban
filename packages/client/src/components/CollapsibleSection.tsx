@@ -13,6 +13,8 @@ interface CollapsibleSectionProps {
   className?: string;
   /** Body wrapper className override (defaults to padded). */
   bodyClassName?: string;
+  /** Surface tint. "brand" for contextual/action panels (e.g. selection). */
+  tone?: "default" | "brand";
 }
 
 /**
@@ -30,11 +32,15 @@ export function CollapsibleSection({
   children,
   className = "",
   bodyClassName = "border-t border-gray-100 px-3 py-2 dark:border-gray-800",
+  tone = "default",
 }: CollapsibleSectionProps) {
   const [open, setOpen] = useState(defaultOpen);
+  const toneClass = tone === "brand"
+    ? "border-brand-200 bg-brand-50 dark:border-brand-800 dark:bg-brand-900/30"
+    : "border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900";
 
   return (
-    <div className={`rounded-md border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900 ${className}`}>
+    <div className={`rounded-md border ${toneClass} ${className}`}>
       <div className="flex items-center justify-between gap-2 px-3 py-2">
         <button
           type="button"

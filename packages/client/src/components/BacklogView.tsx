@@ -604,28 +604,40 @@ export function BacklogView({
         </CollapsibleSection>
 
         {selectedVisibleIds.length > 0 && (
-          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-brand-200 bg-brand-50 px-3 py-2 dark:border-brand-800 dark:bg-brand-900/30">
-            <span className="text-xs font-medium text-brand-700 dark:text-brand-300">
-              {selectedVisibleIds.length} selected
-            </span>
-            <button
-              onClick={() => setSelectedIds(new Set())}
-              className="text-xs text-brand-600 underline dark:text-brand-300"
-            >
-              Clear
-            </button>
-            <div className="h-4 w-px bg-brand-200 dark:bg-brand-800" />
-            {moveTargetColumns.map((status) => (
+          <CollapsibleSection
+            tone="brand"
+            defaultOpen
+            className="mt-3"
+            bodyClassName="border-t border-brand-200 px-3 py-2 dark:border-brand-800"
+            title={<span className="normal-case text-brand-700 dark:text-brand-300">Selection</span>}
+            badge={
+              <span className="inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-brand-600 px-1 text-[10px] font-semibold leading-none text-white">
+                {selectedVisibleIds.length}
+              </span>
+            }
+            summary="selected"
+            actions={
               <button
-                key={status.id}
-                disabled={bulkMoving}
-                onClick={() => bulkMove(status)}
-                className="rounded border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+                onClick={() => setSelectedIds(new Set())}
+                className="text-xs text-brand-600 underline dark:text-brand-300"
               >
-                Move to {status.name}
+                Clear
               </button>
-            ))}
-          </div>
+            }
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              {moveTargetColumns.map((status) => (
+                <button
+                  key={status.id}
+                  disabled={bulkMoving}
+                  onClick={() => bulkMove(status)}
+                  className="rounded border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+                >
+                  Move to {status.name}
+                </button>
+              ))}
+            </div>
+          </CollapsibleSection>
         )}
 
         {showCreate && (
