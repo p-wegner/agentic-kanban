@@ -32,6 +32,7 @@ export const SETTINGS_KEYS = [
   "inprogress_stale_days",
   "stale_column_threshold_days",
   "auto_commit_strategy_objective",
+  PREF_MERGE_STRATEGY,
   "issue_templates",
   "export_skills_on_registration",
   ...allHarnessSettingKeys(),
