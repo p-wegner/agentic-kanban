@@ -57,7 +57,7 @@ function makeGit(overrides: Partial<Record<string, (...a: unknown[]) => unknown>
 
 async function seedWorkspace(
   db: ReturnType<typeof createTestDb>["db"],
-  opts: { readyForMerge?: boolean; mergedAt?: string; status?: string } = {},
+  opts: { readyForMerge?: boolean; mergedAt?: string; status?: string; baseCommitSha?: string | null } = {},
 ) {
   const now = new Date().toISOString();
   const projectId = randomUUID();
@@ -100,6 +100,7 @@ async function seedWorkspace(
     status: opts.status ?? (opts.mergedAt ? "closed" : "idle"),
     readyForMerge: opts.readyForMerge ?? true,
     mergedAt: opts.mergedAt ?? null,
+    baseCommitSha: opts.baseCommitSha ?? null,
     provider: "claude",
     createdAt: now,
     updatedAt: now,
@@ -311,6 +312,7 @@ describe("MergeService — idempotency: retry after dropped response", () => {
     const { workspaceId, issueId } = await seedWorkspace(db, {
       status: "idle",
       readyForMerge: true,
+      baseCommitSha: "base-sha",
     });
     const mergeBranch = vi.fn(async () => "Merge made by the 'ort' strategy.");
     const git = makeGit({
@@ -319,7 +321,7 @@ describe("MergeService — idempotency: retry after dropped response", () => {
         branchSha: "feature-sha",
         baseSha: "merge-commit-sha",
       })),
-      countUniqueCommits: vi.fn(async () => 0),
+      countUniqueCommits: vi.fn(async (_repo: string, baseSha: string) => baseSha === "base-sha" ? 1 : 0),
       mergeBranch,
     });
 
@@ -712,10 +714,10 @@ describe("resolveMergeState — reconcile (branch already ancestor)", () => {
   });
 
   it("returns reconcile when a landed branch is an ancestor with 0 current-base unique commits", async () => {
-    const ws = makeWorkspace();
+    const ws = makeWorkspace({ baseCommitSha: "base-sha" });
     const git = makeGitForStateMachine({
       checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: true, branchSha: "sha-branch", baseSha: "sha-base" })),
-      countUniqueCommits: vi.fn(async () => 0),
+      countUniqueCommits: vi.fn(async (_repo: string, baseSha: string) => baseSha === "base-sha" ? 1 : 0),
     });
     const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
     expect(result.kind).toBe("reconcile");
@@ -742,9 +744,9 @@ describe("resolveMergeState — reconcile (branch already ancestor)", () => {
   });
 
   it("returns reconcile when workingDir is missing and landed branch has 0 current-base unique commits", async () => {
-    const ws = makeWorkspace({ workingDir: null });
+    const ws = makeWorkspace({ workingDir: null, baseCommitSha: "base-sha" });
     const checkBranchTipIsAncestor = vi.fn(async () => ({ isAncestor: true, branchSha: "sha-branch", baseSha: "sha-base" }));
-    const countUniqueCommits = vi.fn(async () => 0);
+    const countUniqueCommits = vi.fn(async (_repo: string, baseSha: string) => baseSha === "base-sha" ? 1 : 0);
     const git = makeGitForStateMachine({ checkBranchTipIsAncestor, countUniqueCommits });
     const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
     expect(result.kind).toBe("reconcile");
