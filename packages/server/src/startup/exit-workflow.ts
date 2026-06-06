@@ -13,6 +13,7 @@ import { buildReviewArgs, buildReviewPrompt, getEffectiveProfile, parseProviderP
 import type { MergeWorkspace } from "./merge-workflow.js";
 import { isAutomaticMergeEnabled } from "./merge-strategy.js";
 import type { Database } from "../db/index.js";
+import { isCodexUsageLimitStats } from "../services/codex-rate-limit.js";
 
 type WorkspaceRow = typeof workspaces.$inferSelect;
 
@@ -119,6 +120,16 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
         fixAndMergeSessionIds.delete(sessionId);
         reviewSessionIds.delete(sessionId);
         learningSessionIds.delete(sessionId);
+        return;
+      }
+      const sessionRows = await db.select({ stats: sessions.stats }).from(sessions).where(eq(sessions.id, sessionId)).limit(1);
+      if (isCodexUsageLimitStats(sessionRows[0]?.stats)) {
+        await db.update(workspaces).set({ status: "blocked", updatedAt: now }).where(eq(workspaces.id, workspaceId));
+        boardEvents.broadcastActivity(projectId, { issueId, sessionId, activity: "" });
+        boardEvents.broadcast(projectId, "session_completed");
+        boardEvents.broadcast(projectId, "workflow_error");
+        emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Codex usage limit reached for workspace ${workspaceId}; monitor will not relaunch it automatically.` });
+        console.warn(`[workflow] codex-rate-limited workspace ${workspaceId} from session ${sessionId} left blocked`);
         return;
       }
       await db.update(workspaces).set({ status: "idle", updatedAt: now }).where(eq(workspaces.id, workspaceId));
