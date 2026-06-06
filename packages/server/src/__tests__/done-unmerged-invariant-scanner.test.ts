@@ -1023,6 +1023,389 @@ describe("scanDoneUnmergedWorkspaces", () => {
     expect(ws.mergedAt).toBeNull();
   });
 
+  // --- Regression: branch cleanup scenarios (#639) ---
+  // When stale worktree branches are explicitly deleted (cleaned up) after workspace
+  // closure, the scanner must not produce false-positive findings or reopen valid Done
+  // issues. These tests cover 0-commit, n-commit, and stale reachability with deleted branches.
+
+  it("#639 regression: branch deleted after cleanup — checkAncestor returns no branchSha → no finding, issue stays Done", async () => {
+    // Scenario: stale branch was cleaned up (deleted from git). checkAncestor returns
+    // isAncestor=false but branchSha is empty (branch no longer exists in the repo).
+    // The scanner must skip at the `if (!result.branchSha) continue` guard.
+    const { issueId, workspaceId } = await seedWorkspace(db);
+    const checkAncestor = vi.fn(async () => ({
+      isAncestor: false as const,
+      branchSha: "", // branch deleted — no SHA available
+      baseSha: "sha-master",
+    }));
+    const countCommits = makeCountCommits(2);
+    const mergeGitBranch = makeMergeGitBranch();
+
+    const result = await scanDoneUnmergedWorkspaces({
+      database: db, checkAncestor, countCommits,
+      detectConflicts: makeDetectConflicts(false),
+      countBehind: makeCountBehind(0),
+      mergeGitBranch,
+    });
+
+    expect(result.findings).toHaveLength(0);
+    expect(result.autoMerged).toBe(0);
+    expect(countCommits).not.toHaveBeenCalled();
+    expect(mergeGitBranch).not.toHaveBeenCalled();
+
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+    expect(status.name).toBe("Done");
+
+    const [ws] = await db.select({ mergedAt: workspaces.mergedAt }).from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.mergedAt).toBeNull();
+  });
+
+  it("#639 regression: branch deleted after cleanup — checkAncestor throws (git error) → no finding, issue stays Done", async () => {
+    // Scenario: branch was deleted. Git operations on the non-existent branch throw.
+    // Scanner catches the error and skips → no false positive, no reopen.
+    const { issueId, workspaceId } = await seedWorkspace(db);
+    const checkAncestor = vi.fn(async () => {
+      throw new Error("fatal: not a valid object name: feature/ak-584-test");
+    });
+    const countCommits = makeCountCommits(3);
+    const mergeGitBranch = makeMergeGitBranch();
+
+    const result = await scanDoneUnmergedWorkspaces({
+      database: db, checkAncestor, countCommits,
+      detectConflicts: makeDetectConflicts(false),
+      countBehind: makeCountBehind(0),
+      mergeGitBranch,
+    });
+
+    expect(result.findings).toHaveLength(0);
+    expect(result.autoMerged).toBe(0);
+    expect(countCommits).not.toHaveBeenCalled();
+    expect(mergeGitBranch).not.toHaveBeenCalled();
+
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+    expect(status.name).toBe("Done");
+
+    const [ws] = await db.select({ mergedAt: workspaces.mergedAt }).from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.mergedAt).toBeNull();
+  });
+
+  it("#639 regression: 0-commit branch + branch deleted — double-safe, no finding", async () => {
+    // Scenario: workspace has 0 commits (false-positive class) AND the branch was cleaned up.
+    // Both guards prevent any action — even if git calls somehow succeed, 0-commit blocks.
+    const { issueId, workspaceId } = await seedWorkspace(db, { wsStatus: "closed" });
+    const checkAncestor = makeCheckAncestor(false);
+    const countCommits = makeCountCommits(0);
+    const mergeGitBranch = makeMergeGitBranch();
+
+    const result = await scanDoneUnmergedWorkspaces({
+      database: db, checkAncestor, countCommits,
+      detectConflicts: makeDetectConflicts(false),
+      countBehind: makeCountBehind(0),
+      mergeGitBranch,
+    });
+
+    expect(result.findings).toHaveLength(0);
+    expect(result.autoMerged).toBe(0);
+    expect(mergeGitBranch).not.toHaveBeenCalled();
+
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+    expect(status.name).toBe("Done");
+
+    const [ws] = await db.select({ mergedAt: workspaces.mergedAt }).from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.mergedAt).toBeNull();
+  });
+
+  it("#639 regression: n-commit branch deleted mid-scan — merge fails, workspace not stamped, issue stays Done", async () => {
+    // Scenario: branch exists during ancestry check (finding produced), but is deleted
+    // before merge completes. mergeGitBranch throws. Scanner catches, logs warning,
+    // does NOT stamp workspace. Issue stays Done regardless.
+    const { issueId, workspaceId } = await seedWorkspace(db);
+    const checkAncestor = makeCheckAncestor(false);
+    let callCount = 0;
+    const countCommits: CountCommits = vi.fn(async () => {
+      callCount++;
+      return callCount === 1 ? 2 : 3; // behind=2, ahead=3
+    });
+    const mergeGitBranch = vi.fn(async () => {
+      throw new Error("fatal: The branch 'feature/ak-584-test' is not found.");
+    });
+
+    const result = await scanDoneUnmergedWorkspaces({
+      database: db, checkAncestor, countCommits,
+      detectConflicts: makeDetectConflicts(false),
+      countBehind: makeCountBehind(2),
+      mergeGitBranch,
+      maxCommitsBehindBase: 20,
+    });
+
+    // Finding was produced (branch existed at check time)
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0].uniqueCommitCount).toBe(3);
+    // Merge was attempted but failed
+    expect(result.autoMerged).toBe(0);
+    expect(mergeGitBranch).toHaveBeenCalledOnce();
+
+    // Workspace NOT stamped (merge failed)
+    const [ws] = await db.select({ mergedAt: workspaces.mergedAt }).from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.mergedAt).toBeNull();
+
+    // Issue stays Done — scanner NEVER reopens
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+    expect(status.name).toBe("Done");
+  });
+
+  it("#639 regression: mixed — one branch deleted, one 0-commit, one real finding — scanner handles all correctly", async () => {
+    // Scenario: 3 Done issues with different branch states after cleanup:
+    //  - Issue A: branch deleted (checkAncestor throws) → skip
+    //  - Issue B: 0-commit branch → skip (no real work)
+    //  - Issue C: real finding, 2 commits ahead, clean → flagged and auto-merged
+    const now = new Date().toISOString();
+    const projectId = randomUUID();
+    const doneStatusId = randomUUID();
+    await db.insert(projects).values({ id: projectId, name: "P", repoPath: "/repo", repoName: "repo", defaultBranch: "master", createdAt: now, updatedAt: now });
+    await db.insert(projectStatuses).values([
+      { id: doneStatusId, projectId, name: "Done", sortOrder: 3, isDefault: false, createdAt: now },
+    ]);
+
+    const issueA = randomUUID(); const wsA = randomUUID();
+    const issueB = randomUUID(); const wsB = randomUUID();
+    const issueC = randomUUID(); const wsC = randomUUID();
+
+    await db.insert(issues).values([
+      { id: issueA, issueNumber: 1, title: "A: deleted branch", priority: "medium", sortOrder: 0, statusId: doneStatusId, projectId, createdAt: now, updatedAt: now },
+      { id: issueB, issueNumber: 2, title: "B: 0-commit branch", priority: "medium", sortOrder: 1, statusId: doneStatusId, projectId, createdAt: now, updatedAt: now },
+      { id: issueC, issueNumber: 3, title: "C: real finding", priority: "medium", sortOrder: 2, statusId: doneStatusId, projectId, createdAt: now, updatedAt: now },
+    ]);
+    await db.insert(workspaces).values([
+      { id: wsA, issueId: issueA, branch: "feature/a", workingDir: "/repo/.w/a", baseBranch: "master", isDirect: false, status: "closed", readyForMerge: false, mergedAt: null, provider: "claude", createdAt: now, updatedAt: now },
+      { id: wsB, issueId: issueB, branch: "feature/b", workingDir: "/repo/.w/b", baseBranch: "master", isDirect: false, status: "closed", readyForMerge: false, mergedAt: null, provider: "claude", createdAt: now, updatedAt: now },
+      { id: wsC, issueId: issueC, branch: "feature/c", workingDir: "/repo/.w/c", baseBranch: "master", isDirect: false, status: "closed", readyForMerge: false, mergedAt: null, provider: "claude", createdAt: now, updatedAt: now },
+    ]);
+
+    let callIdx = 0;
+    const checkAncestor: CheckAncestor = vi.fn(async (_repo, branch) => {
+      callIdx++;
+      if (branch === "feature/a") throw new Error("branch deleted");
+      if (branch === "feature/b") return { isAncestor: false as const, branchSha: `sha-b`, baseSha: "sha-master" };
+      return { isAncestor: false as const, branchSha: `sha-c`, baseSha: "sha-master" };
+    });
+
+    const countCommits: CountCommits = vi.fn(async (_repo, from, to) => {
+      // feature/b: behind=0, ahead=0 (0-commit)
+      // feature/c: behind=1, ahead=2
+      if (to === "sha-b") return 0; // behind for b
+      if (from === "sha-master" && to === "sha-b") return 0;
+      if (to === "sha-c") {
+        // This is called as: countCommits(repoPath, branchSha, baseSha) for behind
+        // then countCommits(repoPath, baseSha, branchSha) for ahead
+        // But we need to distinguish. Let's use a counter.
+        return 0; // Will be overridden by closure below
+      }
+      return 0;
+    });
+
+    // Use a more precise counter that tracks call order per branch
+    let behindCallCount = 0;
+    let aheadCallCount = 0;
+    const preciseCountCommits: CountCommits = vi.fn(async (_repo, from, to) => {
+      // Behind check: countCommits(repoPath, branchSha, baseSha)
+      // Ahead check: countCommits(repoPath, baseSha, branchSha)
+      if (to === "sha-master") {
+        // This is the behind check (counting baseSha→branchSha means behind)
+        // Actually, looking at the code: countCommits(repoPath, result.branchSha, result.baseSha) for behind
+        // and countCommits(repoPath, result.baseSha, result.branchSha) for ahead
+        behindCallCount++;
+        if (from === "sha-b") return 0; // b: 0 behind
+        if (from === "sha-c") return 1; // c: 1 behind
+        return 0;
+      } else {
+        // Ahead check: countCommits(repoPath, result.baseSha, result.branchSha)
+        aheadCallCount++;
+        if (to === "sha-b") return 0; // b: 0 ahead (0-commit)
+        if (to === "sha-c") return 2; // c: 2 ahead (real work)
+        return 0;
+      }
+    });
+
+    const mergeGitBranch = makeMergeGitBranch();
+
+    const result = await scanDoneUnmergedWorkspaces({
+      database: db,
+      checkAncestor: checkAncestor,
+      countCommits: preciseCountCommits,
+      detectConflicts: makeDetectConflicts(false),
+      countBehind: makeCountBehind(1),
+      mergeGitBranch,
+      maxCommitsBehindBase: 20,
+    });
+
+    // Only issue C has a real finding (2 commits ahead)
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0].issueId).toBe(issueC);
+    expect(result.findings[0].uniqueCommitCount).toBe(2);
+    expect(result.autoMerged).toBe(1);
+
+    // All three issues stay Done
+    for (const iid of [issueA, issueB, issueC]) {
+      const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, iid));
+      const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+      expect(status.name).toBe("Done");
+    }
+
+    // Only wsC was stamped
+    const [wsARow] = await db.select({ mergedAt: workspaces.mergedAt }).from(workspaces).where(eq(workspaces.id, wsA));
+    const [wsBRow] = await db.select({ mergedAt: workspaces.mergedAt }).from(workspaces).where(eq(workspaces.id, wsB));
+    const [wsCRow] = await db.select({ mergedAt: workspaces.mergedAt }).from(workspaces).where(eq(workspaces.id, wsC));
+    expect(wsARow.mergedAt).toBeNull();
+    expect(wsBRow.mergedAt).toBeNull();
+    expect(wsCRow.mergedAt).not.toBeNull();
+  });
+
+  it("#639 regression: stale far-behind branch deleted after cleanup — no finding, no reopen", async () => {
+    // Scenario: ancient abandoned branch (way behind base) was cleaned up (deleted).
+    // Even if git somehow resolves, the staleness guard (>maxCommitsBehindBase) skips it.
+    const { issueId, workspaceId } = await seedWorkspace(db);
+    const checkAncestor = makeCheckAncestor(false);
+    let callCount = 0;
+    const countCommits: CountCommits = vi.fn(async () => {
+      callCount++;
+      return callCount === 1 ? 658 : 3; // 658 behind (ancient #590 incident), 3 ahead
+    });
+    const mergeGitBranch = makeMergeGitBranch();
+
+    const result = await scanDoneUnmergedWorkspaces({
+      database: db, checkAncestor, countCommits,
+      detectConflicts: makeDetectConflicts(false),
+      countBehind: makeCountBehind(658),
+      mergeGitBranch,
+      maxCommitsBehindBase: 20,
+    });
+
+    expect(result.findings).toHaveLength(0);
+    expect(result.autoMerged).toBe(0);
+    // Only the behind-count call was made; uniqueCommits check skipped by staleness guard
+    expect(callCount).toBe(1);
+    expect(mergeGitBranch).not.toHaveBeenCalled();
+
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+    expect(status.name).toBe("Done");
+
+    const [ws] = await db.select({ mergedAt: workspaces.mergedAt }).from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.mergedAt).toBeNull();
+  });
+
+  it("#639 acceptance: comprehensive — no valid Done issue is reopened after branch cleanup scan", async () => {
+    // Mega-scenario: multiple Done issues in various post-cleanup states.
+    // Scanner runs once — NONE of them must be reopened.
+    const now = new Date().toISOString();
+    const projectId = randomUUID();
+    const doneStatusId = randomUUID();
+    await db.insert(projects).values({ id: projectId, name: "P", repoPath: "/repo", repoName: "repo", defaultBranch: "master", createdAt: now, updatedAt: now });
+    await db.insert(projectStatuses).values([
+      { id: doneStatusId, projectId, name: "Done", sortOrder: 3, isDefault: false, createdAt: now },
+    ]);
+
+    const ids: Array<{ issueId: string; wsId: string; scenario: string }> = [];
+    const scenarios = [
+      "branch-deleted-throw",
+      "branch-deleted-no-sha",
+      "0-commit",
+      "ancestor-reachable",
+      "stale-far-behind",
+      "has-merged-workspace",
+      "conflicting",
+      "real-finding-clean",
+    ];
+
+    for (let i = 0; i < scenarios.length; i++) {
+      const issueId = randomUUID();
+      const wsId = randomUUID();
+      // Scenario "has-merged-workspace" needs a second workspace with mergedAt set
+      await db.insert(issues).values({
+        id: issueId, issueNumber: i + 100, title: `Issue ${scenarios[i]}`,
+        priority: "medium", sortOrder: i, statusId: doneStatusId, projectId, createdAt: now, updatedAt: now,
+      });
+      await db.insert(workspaces).values({
+        id: wsId, issueId, branch: `feature/${scenarios[i]}`,
+        workingDir: `/repo/.w/${i}`, baseBranch: "master",
+        isDirect: false, status: "closed", readyForMerge: false, mergedAt: null,
+        provider: "claude", createdAt: now, updatedAt: now,
+      });
+      ids.push({ issueId, wsId, scenario: scenarios[i] });
+    }
+
+    // Add a merged workspace for the "has-merged-workspace" scenario
+    const mergedWsScenario = ids.find(s => s.scenario === "has-merged-workspace")!;
+    await db.insert(workspaces).values({
+      id: randomUUID(), issueId: mergedWsScenario.issueId,
+      branch: "feature/merged-ws", workingDir: "/repo/.w/merged",
+      baseBranch: "master", isDirect: false, status: "closed",
+      readyForMerge: false, mergedAt: now, provider: "claude",
+      createdAt: now, updatedAt: now,
+    });
+
+    let callIdx = 0;
+    const checkAncestor: CheckAncestor = vi.fn(async (_repo, branch) => {
+      if (branch === "feature/branch-deleted-throw") throw new Error("branch not found");
+      if (branch === "feature/branch-deleted-no-sha") return { isAncestor: false as const, branchSha: "", baseSha: "sha-master" };
+      if (branch === "feature/0-commit") return { isAncestor: false as const, branchSha: "sha-0c", baseSha: "sha-master" };
+      if (branch === "feature/ancestor-reachable") return { isAncestor: true as const, branchSha: "sha-ar", baseSha: "sha-master" };
+      if (branch === "feature/stale-far-behind") return { isAncestor: false as const, branchSha: "sha-sfb", baseSha: "sha-master" };
+      if (branch === "feature/conflicting") return { isAncestor: false as const, branchSha: "sha-cf", baseSha: "sha-master" };
+      if (branch === "feature/real-finding-clean") return { isAncestor: false as const, branchSha: "sha-rfc", baseSha: "sha-master" };
+      return { isAncestor: true as const, branchSha: "sha-unknown", baseSha: "sha-master" };
+    });
+
+    const countCommits: CountCommits = vi.fn(async (_repo, from, to) => {
+      // Behind check: countCommits(repoPath, branchSha, baseSha) — to is baseSha
+      if (to === "sha-master") {
+        if (from === "sha-0c") return 0;
+        if (from === "sha-sfb") return 658; // ancient abandoned
+        if (from === "sha-cf") return 1;
+        if (from === "sha-rfc") return 2;
+        return 0;
+      }
+      // Ahead check: countCommits(repoPath, baseSha, branchSha) — to is branchSha
+      if (to === "sha-0c") return 0; // 0-commit
+      if (to === "sha-cf") return 3; // conflicting but has commits
+      if (to === "sha-rfc") return 4; // real work
+      return 0;
+    });
+
+    const detectConflicts: DetectConflicts = vi.fn(async (_repo, branch) => {
+      if (branch === "feature/conflicting") return { hasConflicts: true, conflictingFiles: ["src/main.ts"] };
+      return { hasConflicts: false, conflictingFiles: [] };
+    });
+
+    const mergeGitBranch = makeMergeGitBranch();
+
+    const result = await scanDoneUnmergedWorkspaces({
+      database: db,
+      checkAncestor,
+      countCommits,
+      detectConflicts,
+      countBehind: makeCountBehind(2),
+      mergeGitBranch,
+      maxCommitsBehindBase: 20,
+    });
+
+    // Only "real-finding-clean" produces a finding and gets auto-merged
+    expect(result.findings).toHaveLength(2); // conflicting is a finding (log-only) + real-finding-clean
+    expect(result.autoMerged).toBe(1);
+
+    // ACCEPTANCE: every issue stays Done — none were reopened
+    for (const { issueId, scenario } of ids) {
+      const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+      const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+      expect(status.name).toBe("Done");
+    }
+  });
+
   it("#630 integration: staleness boundary — exactly maxCommitsBehindBase commits behind is still processed and auto-merged", async () => {
     // Boundary condition: a branch exactly AT the staleness threshold (not over it) must
     // still be evaluated and, if clean, auto-merged.
