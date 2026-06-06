@@ -217,6 +217,15 @@ export async function buildWorkspaceSummaryMap(
     }
   }
 
+  // #663: Omit closed workspaces from main for non-archived issues (Backlog/Todo/etc).
+  // Archived issues (Done/Cancelled) keep their closed/merged main workspace for display.
+  // Closed workspaces remain in the counts (total/closed) and in issue detail/history APIs.
+  for (const [issueId, ws] of mainWorkspaceMap) {
+    if (ws.status === "closed" && !archivedIssueIds?.has(issueId)) {
+      mainWorkspaceMap.delete(issueId);
+    }
+  }
+
   // Pre-fetch commit counts and latest commit for all non-direct, non-closed main workspaces in parallel
   // to avoid an N+1 pattern (one sequential git call per issue).
   const commitCountByIssue = new Map<string, number | null>();
