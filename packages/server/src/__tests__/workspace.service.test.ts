@@ -715,6 +715,41 @@ describe("workspace.service", () => {
       expect(gitService.mergeBranch).not.toHaveBeenCalled();
     });
 
+    it("reuses in-flight result when the same workspace retries while merge is still fresh", async () => {
+      const { projectId, issueId } = await seedProjectAndIssue(db);
+      const wsId = await seedWorkspaceForMerge(projectId, issueId);
+      const gitService = createFakeGitService({
+        getCurrentBranch: vi.fn(async () => "main"),
+      });
+      let resolveMerge: (result: { id: string; mergeOutput: string }) => void;
+      const inFlight = new Promise<{ id: string; mergeOutput: string }>((resolve) => {
+        resolveMerge = resolve;
+      });
+      activeMerges.set("/tmp/test-repo", {
+        promise: inFlight,
+        workspaceId: wsId,
+        repoPath: "/tmp/test-repo",
+        startedAt: new Date(Date.now() - 250).toISOString(),
+        startedAtMs: Date.now() - 250,
+      });
+
+      const service = createWorkspaceService({
+        database: db,
+        gitService,
+        processKiller: vi.fn(async () => 0),
+      });
+
+      const mergePromise = service.mergeWorkspace(wsId);
+      resolveMerge({
+        id: wsId,
+        mergeOutput: "already merged",
+      });
+      const result = await mergePromise;
+
+      expect(result).toEqual(expect.objectContaining({ id: wsId, mergeOutput: "already merged" }));
+      expect(gitService.mergeBranch).not.toHaveBeenCalled();
+    });
+
     it("recovers a stale merge lock and proceeds with the merge", async () => {
       const { projectId, issueId } = await seedProjectAndIssue(db);
       const wsId = await seedWorkspaceForMerge(projectId, issueId);
