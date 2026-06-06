@@ -600,6 +600,34 @@ export function createWorkspaceCrudService(deps: {
     });
   }
 
+  async function assertNoOpenDirectWorkspaceForIssue(issueId: string): Promise<void> {
+    const openDirectRows = await database
+      .select({
+        id: workspaces.id,
+        branch: workspaces.branch,
+        status: workspaces.status,
+        updatedAt: workspaces.updatedAt,
+      })
+      .from(workspaces)
+      .where(and(
+        eq(workspaces.issueId, issueId),
+        eq(workspaces.isDirect, true),
+        ne(workspaces.status, "closed"),
+      ))
+      .limit(3);
+
+    if (openDirectRows.length === 0) return;
+
+    const first = openDirectRows[0];
+    const extraCount = Math.max(0, openDirectRows.length - 1);
+    const suffix = extraCount > 0 ? ` and ${extraCount} other open direct workspace(s)` : "";
+    throw new WorkspaceError(
+      `Issue already has an open direct workspace (${first.id}, branch ${first.branch}, status ${first.status}${first.updatedAt ? `, updated ${first.updatedAt}` : ""})${suffix}. Close or delete the existing direct workspace before creating another workspace; direct workspaces share the main checkout.`,
+      "CONFLICT",
+      { code: "OPEN_DIRECT_WORKSPACE", workspaceId: first.id, status: first.status, branch: first.branch },
+    );
+  }
+
   async function launchAgent(params: {
     workspaceId: string;
     branch: string;
@@ -786,6 +814,8 @@ exit 1
       const { issue, project, setupConfig, symlinkConfig } = await resolveIssueAndProject(input.issueId);
       timing("resolve-issue", t);
       repoPath = project.repoPath;
+
+      await assertNoOpenDirectWorkspaceForIssue(input.issueId);
 
       // Default plan mode on for high/critical priority when not explicitly set.
       // This ensures expensive misunderstandings are caught before implementation begins.
