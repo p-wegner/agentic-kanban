@@ -1449,6 +1449,64 @@ describe("Workspaces API", () => {
     issueId = (await issueRes.json()).id;
   });
 
+  it("POST /api/workspaces merge succeeds after registering a clean temporary repo", async () => {
+    const repoPath = mkdtempSync(join(tmpdir(), "kanban-clean-main-"));
+    try {
+      execFileSync("git", ["init", "-b", "main"], { cwd: repoPath });
+      execFileSync("git", ["config", "user.email", "test@test.com"], { cwd: repoPath });
+      execFileSync("git", ["config", "user.name", "Test"], { cwd: repoPath });
+      writeFileSync(join(repoPath, "README.md"), "initial\n", "utf8");
+      execFileSync("git", ["add", "README.md"], { cwd: repoPath });
+      execFileSync("git", ["commit", "-m", "initial commit"], { cwd: repoPath });
+
+      const projectRes = await app.request("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repoPath }),
+      });
+      expect(projectRes.status).toBe(201);
+      const registeredProject = await projectRes.json() as any;
+
+      const repoStatus = execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], {
+        cwd: repoPath,
+        encoding: "utf8",
+      });
+      expect(repoStatus).toBe("");
+
+      const mergeStatusId = await createStatusDirectly(database, registeredProject.id, "Todo", 0);
+      const issueRes = await app.request("/api/issues", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "Merge guard regression", statusId: mergeStatusId, projectId: registeredProject.id }),
+      });
+      const workspaceIssue = await issueRes.json() as any;
+
+      const createRes = await app.request("/api/workspaces", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ issueId: workspaceIssue.id, branch: "feature/clean-main-regression" }),
+      });
+      expect(createRes.status).toBe(201);
+      const workspace = await createRes.json() as any;
+
+      execFileSync("git", ["config", "user.email", "test@test.com"], { cwd: workspace.workingDir });
+      execFileSync("git", ["config", "user.name", "Test"], { cwd: workspace.workingDir });
+      writeFileSync(join(workspace.workingDir, "ticket.txt"), "done\n", "utf8");
+      execFileSync("git", ["add", "ticket.txt"], { cwd: workspace.workingDir });
+      execFileSync("git", ["commit", "-m", "feat: add workspace change"], { cwd: workspace.workingDir });
+
+      const readyRes = await app.request(`/api/workspaces/${workspace.id}/ready-for-merge`, { method: "POST" });
+      expect(readyRes.status).toBe(200);
+
+      const mergeRes = await app.request(`/api/workspaces/${workspace.id}/merge`, { method: "POST" });
+      expect(mergeRes.status).toBe(200);
+      const mergeBody = await mergeRes.json() as any;
+      expect(mergeBody.id).toBe(workspace.id);
+    } finally {
+      rmSync(repoPath, { recursive: true, force: true });
+    }
+  });
+
   it("POST /api/workspaces creates a workspace", async () => {
     const res = await app.request("/api/workspaces", {
       method: "POST",
