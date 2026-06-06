@@ -59,6 +59,7 @@ interface MonitorSetupDeps {
   sessionManager: ReturnType<typeof createSessionManager>;
   boardEvents: ReturnType<typeof createBoardEvents>;
   serverPort: number;
+  reviewSessionIds: Set<string>;
 }
 
 export function setupMonitorRoutes(app: Hono, monitorState: MonitorState, runMonitorCycle: (force?: boolean) => Promise<void>, _syncMonitorState: () => Promise<void>, runResourceSweep?: (force?: boolean) => Promise<BoardMonitorResourceSnapshot | null>) {
@@ -93,7 +94,7 @@ export function setupMonitorRoutes(app: Hono, monitorState: MonitorState, runMon
   });
 }
 
-export function createMonitorSetup({ sessionManager, boardEvents, serverPort }: MonitorSetupDeps) {
+export function createMonitorSetup({ sessionManager, boardEvents, serverPort, reviewSessionIds }: MonitorSetupDeps) {
   const monitorState: MonitorState = { timer: null, nextRunAt: null, lastRun: null, currentIntervalMin: null, recentActions: [], lastResourceSnapshot: null, warnings: [], lastHealthCheckAt: null };
   let lastWarningFingerprint = "";
 
@@ -207,11 +208,16 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort }: 
         autoMergeEnabled: prefMap.get("auto_merge") === "true" && mergeStrategy === "monitor",
         autoMergeInReview: prefMap.get("auto_merge_in_review") === "true",
         autoMergeDisabledProjectIds,
+        reviewSessionIds,
         monitorRecentActions: monitorState.recentActions,
         logMonitorAction,
         buildMonitorNudgePrompt,
         getRecentAgentExcerpts,
         shouldSkipNudge,
+        stuckBuilderTimeoutMs: (() => {
+          const minutes = Number(prefMap.get("monitor_stuck_builder_timeout_min"));
+          return Number.isFinite(minutes) && minutes > 0 ? minutes * 60 * 1000 : undefined;
+        })(),
       }));
       await runAutoStart(prefMap, { serverPort, boardEvents, allowProject: shouldAutoStartProject, isAutoDrivenProject: (projectId) => driveIds.has(projectId), logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
       await runBacklogEmptyStrategy(prefMap, { serverPort, boardEvents, allowProject, logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
