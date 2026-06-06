@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
-import { issues, projectStatuses, projects } from "@agentic-kanban/shared/schema";
+import { eq } from "drizzle-orm";
+import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceCrudService } from "../services/workspace-crud.service.js";
 
@@ -211,6 +212,61 @@ describe("workspace creation hardening (AK-501 / AK-587)", () => {
     expect(result.error).toMatch(/git worktree add failed/);
     // Agent was never launched (worktree failed before insert)
     expect(sessionManager.startSession).not.toHaveBeenCalled();
+  });
+
+  it("blocks creation when the issue has an open direct workspace leftover", async () => {
+    const { issueId } = await seedIssue(db);
+    const now = new Date().toISOString();
+
+    await db.insert(workspaces).values({
+      id: "direct-leftover",
+      issueId,
+      branch: "main",
+      workingDir: "/tmp/repo",
+      baseBranch: null,
+      isDirect: true,
+      status: "idle",
+      provider: "claude",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const git = makeGitService();
+    const sessionManager = {
+      startSession: vi.fn(async () => "session-id"),
+      stopSession: vi.fn(),
+      subscribe: vi.fn(),
+      unsubscribe: vi.fn(),
+    };
+
+    const svc = createWorkspaceCrudService({
+      database: db,
+      getSessionManager: () => sessionManager as never,
+      gitService: git as never,
+    });
+
+    await expect(svc.createWorkspace({
+      issueId,
+      branch: "feature/ak-1-test",
+      isDirect: false,
+      requiresReview: false,
+      thoroughReview: false,
+      planMode: false,
+      tddMode: false,
+      includeVisualProof: false,
+      skipSetup: true,
+      skipContextPacker: true,
+    })).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: expect.stringContaining("open direct workspace"),
+      data: expect.objectContaining({ code: "OPEN_DIRECT_WORKSPACE", workspaceId: "direct-leftover" }),
+    });
+
+    expect(git.createWorktree).not.toHaveBeenCalled();
+    expect(sessionManager.startSession).not.toHaveBeenCalled();
+    const wsRows = await db.select().from(workspaces).where(eq(workspaces.issueId, issueId));
+    expect(wsRows).toHaveLength(1);
+    expect(wsRows[0].id).toBe("direct-leftover");
   });
 
   it("returns 201-compatible result for successful creation", async () => {

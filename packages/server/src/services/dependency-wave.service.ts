@@ -263,12 +263,17 @@ export async function startNextDependencyWave(
     });
 
   for (const issue of candidates) {
-    const result = deps.createWorkspace
-      ? await deps.createWorkspace(issue)
-      : await workspaceService!.createWorkspace({
-        issueId: issue.id,
-        branch: `feature/ak-${issue.issueNumber ?? "next"}-${slugifyTitle(issue.title)}`,
-      });
+    let result: { id?: string; error?: string };
+    try {
+      result = deps.createWorkspace
+        ? await deps.createWorkspace(issue)
+        : await workspaceService!.createWorkspace({
+          issueId: issue.id,
+          branch: `feature/ak-${issue.issueNumber ?? "next"}-${slugifyTitle(issue.title)}`,
+        });
+    } catch (err) {
+      result = { error: err instanceof Error ? err.message : String(err) };
+    }
 
     if (result.error) {
       failed.push({ issueId: issue.id, issueNumber: issue.issueNumber, error: result.error });
