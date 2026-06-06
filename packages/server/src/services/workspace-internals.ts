@@ -3,6 +3,7 @@ import type { WorkspaceSetupRun, WorkspaceSymlinkRun } from "@agentic-kanban/sha
 import type { ProviderName } from "./agent-provider.js";
 import type { AgentSettings } from "./agent-settings.service.js";
 import * as realGitService from "./git.service.js";
+import { detectWorkspaceMergeConflicts } from "./workspace-merge-conflict.service.js";
 
 export class WorkspaceError extends Error {
   constructor(
@@ -67,7 +68,7 @@ export interface CreateWorkspaceInput {
    *  initial context so it starts with the resolved Q&A. */
   clarifications?: string;
   skillId?: string;
-  /** Name of a disk-only skill (no DB entry) — used when id starts with "disk:" */
+  /** Name of a disk-only skill (no DB entry) - used when id starts with "disk:" */
   skillName?: string;
   profile?: { provider?: string; name?: string };
   claudeProfile?: string;
@@ -99,25 +100,25 @@ export interface CreateWorkspaceResult {
 /** Subset of the git service that workspace services depend on. Injectable for tests. */
 export type GitService = typeof realGitService;
 
-// ─── Merge-resolution state machine ─────────────────────────────────────────
+// Merge-resolution state machine
 
 /**
  * Explicit outcomes from the merge pre-flight checks.
  *
- * `conflict-ready`  — conflicts exist; caller should invoke fix-and-merge.
- * `error-skip`      — a non-conflict error blocked the merge (dirty main, bad
+ * `conflict-ready`  - conflicts exist; caller should invoke fix-and-merge.
+ * `error-skip`      - a non-conflict error blocked the merge (dirty main, bad
  *                     branch state, stale build); caller should surface the
  *                     WorkspaceError and stop without launching fix-and-merge.
- * `proceed`         — all checks passed; caller should execute the git merge.
- * `reconcile`       — branch is already an ancestor (previously merged); caller
+ * `proceed`         - all checks passed; caller should execute the git merge.
+ * `reconcile`       - branch is already an ancestor (previously merged); caller
  *                     should mark Done without a git merge.
- * `already-merged`  — mergedAt already stamped (dropped-response retry); caller
+ * `already-merged`  - mergedAt already stamped (dropped-response retry); caller
  *                     should return merged-as-noop.
- * `already-closed`  — workspace is already closed without mergedAt; caller should
+ * `already-closed`  - workspace is already closed without mergedAt; caller should
  *                     409 (`already_closed`).
- * `not-approved`    — non-direct workspace not readyForMerge; caller should
+ * `not-approved`    - non-direct workspace not readyForMerge; caller should
  *                     409 (`not_approved`).
- * `direct-close`    — isDirect workspace; no git op, just close.
+ * `direct-close`    - isDirect workspace; no git op, just close.
  */
 export type MergeResolutionState =
   | { kind: "already-merged" }
@@ -205,57 +206,27 @@ export async function resolveMergeState(
       return { kind: "clean-ancestor", branchSha, baseSha, uniqueCommits };
     }
   }
-
-  if (workspace.workingDir) {
-    // Behind-count: auto-rebase if the branch has fallen behind the base.
-    let behindCount = 0;
-    try {
-      if (typeof gitService.countBehindCommits === "function") {
-        behindCount = await gitService.countBehindCommits(repoPath, workspace.branch, baseBranch);
-      }
-    } catch {
-      // Non-fatal — behind-count is advisory; proceed to conflict detection.
-    }
-
-    if (behindCount > 0) {
-      const rebaseResult = await gitService.rebaseOntoBase(
-        workspace.workingDir, baseBranch, workspace.branch, { preferLocalBase: true },
-      );
-      if (!rebaseResult.success) {
-        const conflictFiles = rebaseResult.conflictingFiles ?? [];
-        // Best-effort abort so the worktree is usable for fix-and-merge.
-        try { await gitService.abortRebase(workspace.workingDir); } catch { /* best-effort */ }
-        return {
-          kind: "conflict-ready",
-          conflictFiles,
-          behindCount,
-          error: new WorkspaceError(
-            `Merge conflicts detected after auto-rebase (branch was ${behindCount} commit(s) behind ${baseBranch})`,
-            "CONFLICT",
-            { mergeReason: "conflict", conflictFiles, behindCount },
-          ),
-        };
-      }
-    }
-
-    // Conflict detection: use read-only merge-tree against the (now up-to-date) branch.
-    const conflicts = await gitService.detectConflicts(workspace.workingDir, baseBranch);
-    if (conflicts.hasConflicts) {
-      return {
-        kind: "conflict-ready",
-        conflictFiles: conflicts.conflictingFiles,
-        error: new WorkspaceError(
-          "Merge conflicts detected",
-          "CONFLICT",
-          { mergeReason: "conflict", conflictFiles: conflicts.conflictingFiles },
-        ),
-      };
-    }
+  const conflictResult = await detectWorkspaceMergeConflicts({ workspace, repoPath, baseBranch, gitService });
+  if (conflictResult.kind === "conflict") {
+    const data = conflictResult.behindCount
+      ? { mergeReason: "conflict", conflictFiles: conflictResult.conflictFiles, behindCount: conflictResult.behindCount }
+      : { mergeReason: "conflict", conflictFiles: conflictResult.conflictFiles };
+    return {
+      kind: "conflict-ready",
+      conflictFiles: conflictResult.conflictFiles,
+      behindCount: conflictResult.behindCount,
+      error: new WorkspaceError(
+        conflictResult.behindCount
+          ? `Merge conflicts detected after auto-rebase (branch was ${conflictResult.behindCount} commit(s) behind ${baseBranch})`
+          : "Merge conflicts detected",
+        "CONFLICT",
+        data,
+      ),
+    };
   }
 
   return { kind: "proceed" };
 }
-
 export const MERGE_LOCK_STALE_MS = 15 * 60 * 1000;
 
 export interface ActiveMergeLock {
