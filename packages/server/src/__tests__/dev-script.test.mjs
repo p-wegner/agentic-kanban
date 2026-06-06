@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer as createHttpServer, request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkDrizzleFiles, findDrizzlePnpmDirs } from "../../../../scripts/drizzle-preflight.mjs";
@@ -7,6 +8,7 @@ import { checkSharedPackage, isTsxMissing, repairSharedIfNeeded } from "../../..
 import { checkBinShims, repairBinShims } from "../../../../scripts/bin-shims-preflight.mjs";
 import { buildDevPortEnv } from "../../../../scripts/dev-env.mjs";
 import { resolveDevPorts } from "../../../../scripts/dev-port-plan.mjs";
+import { buildBackendEnv, createStableDevProxy, listen, preferredInternalPort } from "../../../../scripts/server-dev-proxy.mjs";
 import {
   classifyProcessExit,
   createDependencyRecoveryState,
@@ -18,6 +20,38 @@ import {
   snapshotDependencyManifests,
 } from "../../../../scripts/dev-supervisor.mjs";
 import { commandLineBelongsToCheckout, planPortOwnerKill } from "../../../../scripts/dev-port-guard.mjs";
+
+function closeServer(server) {
+  return new Promise((resolveClose) => server.close(resolveClose));
+}
+
+function serverPort(server) {
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("server did not bind a TCP port");
+  return address.port;
+}
+
+function requestText(port, path = "/health") {
+  return new Promise((resolveRequest, rejectRequest) => {
+    const req = httpRequest({ hostname: "127.0.0.1", port, path, timeout: 5000 }, (res) => {
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+      res.on("end", () => resolveRequest({ status: res.statusCode, body: Buffer.concat(chunks).toString("utf8") }));
+    });
+    req.on("error", rejectRequest);
+    req.on("timeout", () => {
+      req.destroy(new Error("request timed out"));
+    });
+    req.end();
+  });
+}
+
+function createBackend(label) {
+  return createHttpServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/plain" });
+    res.end(label);
+  });
+}
 
 describe("dev launcher exit classification", () => {
   it("treats intentional exits and termination signals as clean", () => {
@@ -70,6 +104,66 @@ describe("dev launcher exit classification", () => {
     expect(recovery.markRecovered(recoveredSnapshot)).toBe(1);
     expect(recovery.snapshot).toBe(recoveredSnapshot);
     expect(recovery.generation).toBe(1);
+  });
+});
+
+describe("server dev proxy", () => {
+  it("keeps the public API port reachable while the watched backend restarts", async () => {
+    let backend = createBackend("before-restart");
+    let restartedBackend = null;
+    let proxy = null;
+
+    try {
+      await listen(backend, 0);
+      const backendPort = serverPort(backend);
+      proxy = createStableDevProxy({
+        publicPort: 0,
+        backendPort,
+        retryTimeoutMs: 2000,
+        retryDelayMs: 25,
+      });
+      await listen(proxy, 0);
+      const publicPort = serverPort(proxy);
+
+      await expect(requestText(publicPort)).resolves.toMatchObject({
+        status: 200,
+        body: "before-restart",
+      });
+
+      await closeServer(backend);
+      const duringRestart = requestText(publicPort);
+      await new Promise((resolveRestart) => {
+        setTimeout(async () => {
+          restartedBackend = createBackend("after-restart");
+          await listen(restartedBackend, backendPort);
+          resolveRestart();
+        }, 100);
+      });
+
+      await expect(duringRestart).resolves.toMatchObject({
+        status: 200,
+        body: "after-restart",
+      });
+    } finally {
+      if (proxy) await closeServer(proxy).catch(() => {});
+      if (backend.listening) await closeServer(backend).catch(() => {});
+      if (restartedBackend?.listening) await closeServer(restartedBackend).catch(() => {});
+    }
+  });
+
+  it("runs the watched server behind the stable proxy in package dev mode", () => {
+    const serverPackageJson = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
+    expect(serverPackageJson.scripts.dev).toBe("node ../../scripts/server-dev-proxy.mjs");
+  });
+
+  it("keeps public board URLs separate from the watched backend listen port", () => {
+    const publicPort = 3001;
+    const internalPort = preferredInternalPort(publicPort);
+    const env = buildBackendEnv({ PORT: String(publicPort) }, publicPort, internalPort);
+
+    expect(env.KANBAN_INTERNAL_SERVER_PORT).toBe(String(internalPort));
+    expect(env.KANBAN_SERVER_PORT).toBe(String(publicPort));
+    expect(env.PORT).toBe(String(publicPort));
   });
 });
 
@@ -511,10 +605,8 @@ describe("bin shims preflight", () => {
   function makeHealthyShimsRoot({ platform = "linux" } = {}) {
     const root = mkdtempSync(join(tmpdir(), "ak-bin-shims-"));
     const ext = platform === "win32" ? ".cmd" : "";
-    mkdirSync(join(root, "node_modules", ".bin"), { recursive: true });
     mkdirSync(join(root, "packages", "server", "node_modules", ".bin"), { recursive: true });
     mkdirSync(join(root, "packages", "client", "node_modules", ".bin"), { recursive: true });
-    writeFileSync(join(root, "node_modules", ".bin", `tsx${ext}`), "");
     writeFileSync(join(root, "packages", "server", "node_modules", ".bin", `tsx${ext}`), "");
     writeFileSync(join(root, "packages", "client", "node_modules", ".bin", `vite${ext}`), "");
     return root;
@@ -533,18 +625,6 @@ describe("bin shims preflight", () => {
     const root = makeHealthyShimsRoot({ platform: "win32" });
     try {
       expect(checkBinShims(root, { platform: "win32" })).toHaveLength(0);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  it("detects missing root tsx shim", () => {
-    const root = makeHealthyShimsRoot({ platform: "linux" });
-    try {
-      rmSync(join(root, "node_modules", ".bin", "tsx"));
-      const missing = checkBinShims(root, { platform: "linux" });
-      expect(missing.length).toBeGreaterThan(0);
-      expect(missing.some((s) => s.label.includes("node_modules/.bin/tsx"))).toBe(true);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -572,10 +652,10 @@ describe("bin shims preflight", () => {
     }
   });
 
-  it("detects all three shims missing simultaneously", () => {
+  it("detects both package-local shims missing simultaneously", () => {
     const root = mkdtempSync(join(tmpdir(), "ak-bin-shims-empty-"));
     try {
-      expect(checkBinShims(root, { platform: "linux" })).toHaveLength(3);
+      expect(checkBinShims(root, { platform: "linux" })).toHaveLength(2);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
