@@ -71,6 +71,7 @@ export interface SessionState {
   sessionTasks: Map<string, Map<string, { subject: string; status: string }>>;
   sessionHasTodoWrite: Set<string>;
   sessionExitPlanModeDenied: Set<string>;
+  sessionExitHandled: Set<string>;
   workspaceAutoResumeCount: Map<string, number>;
   sessionProviders: Map<string, string>;
   dbWriteBuffer: Map<string, DbWriteBufferEntry[]>;
@@ -96,6 +97,7 @@ export function createSessionState(): SessionState {
     sessionTasks: new Map(),
     sessionHasTodoWrite: new Set(),
     sessionExitPlanModeDenied: new Set(),
+    sessionExitHandled: new Set(),
     workspaceAutoResumeCount: new Map(),
     sessionProviders: new Map(),
     dbWriteBuffer: new Map(),
