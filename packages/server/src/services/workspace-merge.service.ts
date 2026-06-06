@@ -186,18 +186,6 @@ export function createWorkspaceMergeService(deps: {
     const workspace = await getWorkspaceById(id, database);
     if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
 
-    if (workspace.status === "closed" && !workspace.mergedAt) {
-      throw new WorkspaceError("Workspace is already closed.", "CONFLICT", { mergeReason: "already_closed" });
-    }
-
-    if (!workspace.isDirect && !workspace.readyForMerge && !workspace.mergedAt) {
-      throw new WorkspaceError(
-        "Workspace is not approved for merge. Mark it as ready-for-merge before merging.",
-        "CONFLICT",
-        { mergeReason: "not_approved", status: workspace.status },
-      );
-    }
-
     const { project, repoPath, defaultBranch } = await resolveProjectFull(id, database);
 
     const existingLock = activeMerges.get(repoPath);
@@ -263,6 +251,18 @@ export function createWorkspaceMergeService(deps: {
     const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
 
     const resolution = await resolveMergeState(workspace, repoPath, baseBranch, { gitService });
+
+    if (resolution.kind === "already-closed") {
+      throw new WorkspaceError("Workspace is already closed.", "CONFLICT", { mergeReason: "already_closed", status: resolution.status });
+    }
+
+    if (resolution.kind === "not-approved") {
+      throw new WorkspaceError(
+        "Workspace is not approved for merge. Mark it as ready-for-merge before merging.",
+        "CONFLICT",
+        { mergeReason: "not_approved", status: resolution.status },
+      );
+    }
 
     if (resolution.kind === "already-merged") {
       const warnings: MergeWarning[] = [];
