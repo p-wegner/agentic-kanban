@@ -293,9 +293,14 @@ export async function autoStartUnblockedDependencyIssue(args: {
 
   const candidate = decision.candidate;
   const branch = `feature/ak-${candidate.issueNumber ?? "next"}-${slugifyTitle(candidate.title)}`;
-  const workspace = args.createWorkspace
-    ? await args.createWorkspace(candidate, branch)
-    : await createWorkspaceCrudService({ database, getSessionManager, boardEvents, gitService }).createWorkspace({ issueId: candidate.id, branch });
+  let workspace: { id?: string; error?: string };
+  try {
+    workspace = args.createWorkspace
+      ? await args.createWorkspace(candidate, branch)
+      : await createWorkspaceCrudService({ database, getSessionManager, boardEvents, gitService }).createWorkspace({ issueId: candidate.id, branch });
+  } catch (err) {
+    workspace = { error: err instanceof Error ? err.message : String(err) };
+  }
   if (workspace.error) {
     await addAutoChainAuditComment({
       database,
