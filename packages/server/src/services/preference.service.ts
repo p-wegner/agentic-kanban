@@ -8,7 +8,7 @@ import { allHarnessSettingKeys } from "./harness-settings.js";
 import { commitObjectiveFile, isBoardStrategyKey, projectIdFromBoardStrategyKey, writeStrategyObjective } from "./strategy-objective.service.js";
 import { projects } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
-import { PREF_BUILDER_GUARDRAILS } from "../constants/preference-keys.js";
+import { PREF_BUILDER_GUARDRAILS, PREF_MERGE_STRATEGY } from "../constants/preference-keys.js";
 
 export const SETTINGS_KEYS = [
   "agent_command", "agent_args", "output_parser", "skip_permissions", "claude_profile",
