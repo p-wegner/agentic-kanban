@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { apiFetch } from "../lib/api.js";
 import { ProjectScriptsSettingsSection } from "./ProjectScriptsSettingsSection.js";
 import { showToast } from "./Toast.js";
@@ -11,6 +11,13 @@ import { SlowRequestsPanel } from "./SlowRequestsPanel.js";
 interface SettingsPanelProps {
   onClose: () => void;
   activeProjectId?: string | null;
+  /**
+   * Board-level tools (filters + export/import) lifted off the main toolbar and
+   * surfaced here. Built and wired by BoardPage (which owns the live filter
+   * state), passed through as a ready-to-render node so SettingsPanel doesn't
+   * have to thread ~16 filter props.
+   */
+  boardToolsSlot?: ReactNode;
 }
 
 interface Settings {
@@ -1309,7 +1316,7 @@ function WorkflowBoardMonitorSection({
   );
 }
 
-export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) {
+export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: SettingsPanelProps) {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [profiles, setProfiles] = useState<string[]>([]);
   const [codexProfiles, setCodexProfiles] = useState<string[]>([CODEX_DEFAULT_PROFILE]);
@@ -2129,6 +2136,17 @@ export function SettingsPanel({ onClose, activeProjectId }: SettingsPanelProps) 
               {/* UI tab */}
               {tab === "ui" && (
                 <>
+                {boardToolsSlot && (
+                  <div className="mb-4">
+                    <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1">Board filters &amp; export</h3>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                      Filter the board and export / import issues. Moved off the main toolbar to keep the board uncluttered.
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {boardToolsSlot}
+                    </div>
+                  </div>
+                )}
                 <Field label="Output Parsing" hint='Parses structured agent output into a compact activity timeline. Disable for debugging to see raw JSONL output.'>
                   <select
                     value={settings.output_parser || "minimal"}

@@ -1,4 +1,4 @@
-import type { Dispatch, RefObject, SetStateAction } from "react";
+import type { Dispatch, ReactNode, RefObject, SetStateAction } from "react";
 import { apiFetch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 import { SettingsPanel } from "./SettingsPanel.js";
@@ -137,6 +137,8 @@ interface Props {
   refetchBoard: () => Promise<unknown>;
   handleProjectChange: (id: string) => Promise<void>;
   onSettingsReloaded: (s: Record<string, string>, monitorStatus: MonitorStatus | null) => void;
+  /** Board filters + export/import, lifted off the toolbar into the Settings UI tab. */
+  settingsBoardTools?: ReactNode;
 }
 
 export function BoardOverlayPanels({
@@ -196,6 +198,7 @@ export function BoardOverlayPanels({
   refetchBoard,
   handleProjectChange,
   onSettingsReloaded,
+  settingsBoardTools,
   setWorkspaceIssue,
   setWorkspaceInitial,
   setWorkspaceOpenCreate,
@@ -239,6 +242,7 @@ export function BoardOverlayPanels({
               .catch(() => {});
           }}
           activeProjectId={activeProjectId}
+          boardToolsSlot={settingsBoardTools}
         />
       )}
       {showQuickTasks && activeProjectId && (
