@@ -47,6 +47,32 @@ export function getEffectiveProfile(prefMap: Map<string, string>, provider: Prov
   return claudeProfile;
 }
 
+/**
+ * Return a copy of `prefMap` with the provider + matching profile key overridden
+ * from the workspace's recorded selection, so a review/continuation runs on the
+ * SAME provider+profile the workspace was built with instead of silently falling
+ * back to the global default. This is what keeps a per-workspace Codex OAuth license
+ * (or any chosen profile) sticky across review — without it, getEffectiveProfile
+ * reads the global `codex_profile`, which may differ (or have rotated). Leaves the
+ * global default in place when the workspace recorded no provider/profile.
+ */
+export function applyWorkspaceProfileToPrefs(
+  prefMap: Map<string, string>,
+  workspace: { provider: string | null; claudeProfile: string | null },
+): Map<string, string> {
+  const provider = workspace.provider;
+  if (provider !== "claude" && provider !== "codex" && provider !== "copilot") return prefMap;
+  const next = new Map(prefMap);
+  next.set("provider", provider);
+  const name = workspace.claudeProfile || undefined;
+  if (name) {
+    if (provider === "codex") next.set(PREF_CODEX_PROFILE, name);
+    else if (provider === "copilot") next.set(PREF_COPILOT_PROFILE, name);
+    else next.set("claude_profile", name);
+  }
+  return next;
+}
+
 export async function buildReviewPrompt(
   database: Database,
   branch: string,
@@ -240,7 +266,9 @@ export async function startManualReview(
     const { projectId, id: issueId } = issueRows[0];
 
     const prefRows = await database.select().from(preferences);
-    const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
+    // Review on the same provider/profile the workspace was built with (e.g. its
+    // Codex OAuth license), not the global default which may have rotated since.
+    const prefMap = applyWorkspaceProfileToPrefs(new Map(prefRows.map((r) => [r.key, r.value])), workspace);
     const manualProfile = prefMap.get("claude_profile") || undefined;
     const agentCommand = isMockProfile(manualProfile) ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
     const claudeProfile = isMockProfile(manualProfile) ? undefined : manualProfile;
