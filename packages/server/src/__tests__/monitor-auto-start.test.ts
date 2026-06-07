@@ -132,6 +132,33 @@ describe("runAutoStart Backlog promotion for auto-driven projects", () => {
     expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces", expect.any(Object));
   });
 
+  it("skips feature and enhancement candidates and starts the next eligible non-feature issue", async () => {
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]) as ReturnType<typeof db.select>) // inProgressStatuses
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop1 activeWip
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // loop1 inProgressIssues (none)
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop2 inProgressCount
+      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]) as ReturnType<typeof db.select>) // todoStatus
+      .mockReturnValueOnce(makeSelectChain([
+        { id: "feature-1", title: "Feature: command center", description: "", issueType: "feature", projectId: "proj-1", issueNumber: 8 },
+        { id: "enhancement-1", title: "Enhancement: card polish", description: "", issueType: "task", projectId: "proj-1", issueNumber: 9 },
+        { id: "bug-1", title: "bug: restore monitor capacity", description: "", issueType: "bug", projectId: "proj-1", issueNumber: 10 },
+      ]) as ReturnType<typeof db.select>) // todoIssues
+      .mockReturnValueOnce(makeSelectChain([{ id: "done-1" }]) as ReturnType<typeof db.select>) // doneStatuses
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // feature existingWs
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // enhancement existingWs
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // bug existingWs
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // bug no-auto-start tag
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>); // bug deps
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ id: "ws-bug" }) } as Response);
+
+    await runAutoStart(new Map([["nudge_wip_limit", "5"]]), makeDeps());
+
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+    const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
+    expect(body.issueId).toBe("bug-1");
+  });
+
   it("does NOT start a Backlog issue for a non-auto-driven project (Backlog stays triage)", async () => {
     vi.mocked(db.select)
       .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]) as ReturnType<typeof db.select>) // inProgressStatuses
