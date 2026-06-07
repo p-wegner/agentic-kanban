@@ -10,6 +10,7 @@ import {
   cooldownUntilIso,
   defaultCodexHome,
   resolveCodexHome,
+  resolveCodexHomeForProfile,
 } from "../services/codex-license-ring.js";
 
 const RING = JSON.stringify([
@@ -68,6 +69,28 @@ describe("defaultCodexHome / resolveCodexHome", () => {
 
   it("returns undefined for an API-key (config toml) license", () => {
     expect(resolveCodexHome({ profile: "apikey1", configToml: "config_apikey1" })).toBeUndefined();
+  });
+});
+
+describe("resolveCodexHomeForProfile", () => {
+  const ring = parseCodexLicenseRing(RING);
+
+  it("resolves an explicit ring entry's codexHome", () => {
+    expect(resolveCodexHomeForProfile("ki15", ring)).toBe("C:\\Users\\x\\.codex-ki15");
+  });
+
+  it("returns undefined for an API-key ring entry (uses --profile, no home)", () => {
+    expect(resolveCodexHomeForProfile("apikey1", ring)).toBeUndefined();
+  });
+
+  it("returns undefined for default / empty", () => {
+    expect(resolveCodexHomeForProfile("default", ring)).toBeUndefined();
+    expect(resolveCodexHomeForProfile(undefined, ring)).toBeUndefined();
+  });
+
+  it("returns undefined for a profile with neither a ring entry nor a ~/.codex-<name> dir", () => {
+    // 'nope' has no ring entry; ~/.codex-nope almost certainly does not exist on this host.
+    expect(resolveCodexHomeForProfile("nope-no-such-license", [])).toBeUndefined();
   });
 });
 

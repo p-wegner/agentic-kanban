@@ -132,7 +132,7 @@ export function CodexLicenseRingEditor({ settings, set }: { settings: Settings; 
   return (
     <Field
       label="Codex Licenses (rotation ring)"
-      hint="Each row is a Codex account the board rotates through when one hits its usage limit. OAuth = a ChatGPT login; just give it a profile name and the CODEX_HOME dir is inferred (~/.codex-<profile>) — click Login to authenticate. API key = a config_<name>.toml in ~/.codex. The profile name also appears in the Agent Profile dropdown above."
+      hint="The rotation order: the board falls over to the next account when one hits its usage limit. OAuth = a ChatGPT login; give it a profile name and the CODEX_HOME dir is inferred (~/.codex-<profile>) — click Login to authenticate. Any logged-in ~/.codex-<name> is auto-discovered as a selectable Codex profile (Agent Profile dropdown above + New Workspace), exactly like a toml profile, even without a row here — rows here just set the rotation order. API key = a config_<name>.toml in ~/.codex."
     >
       <div className="space-y-2">
         <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">

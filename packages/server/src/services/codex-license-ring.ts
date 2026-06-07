@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, type Dirent } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "../db/index.js";
@@ -28,9 +28,11 @@ export interface CodexLicenseEntry {
   configToml?: string;
 }
 
+const CODEX_HOME_PREFIX = ".codex-";
+
 /** Inferred CODEX_HOME for an OAuth license with no explicit override: `~/.codex-<profile>`. */
 export function defaultCodexHome(profile: string): string {
-  return join(homedir(), `.codex-${profile}`);
+  return join(homedir(), `${CODEX_HOME_PREFIX}${profile}`);
 }
 
 /**
@@ -41,6 +43,46 @@ export function defaultCodexHome(profile: string): string {
 export function resolveCodexHome(entry: CodexLicenseEntry): string | undefined {
   if (entry.configToml) return undefined;
   return entry.codexHome?.trim() || defaultCodexHome(entry.profile);
+}
+
+/**
+ * Auto-discover OAuth licenses sitting next to the default `~/.codex`: any
+ * `~/.codex-<name>` directory that holds a `config.toml` or `auth.json` is a
+ * first-class codex profile, exactly like a `~/.codex/<name>.config.toml`. Returns
+ * the `<name>` suffixes. This is what lets a dropped-in login be selected / set as
+ * default without ever touching the rotation ring (the ring is only for rotation
+ * order + cooldowns).
+ */
+export function discoverCodexHomeProfiles(): string[] {
+  try {
+    return readdirSync(homedir(), { withFileTypes: true })
+      .filter((d: Dirent) => d.isDirectory() && d.name.startsWith(CODEX_HOME_PREFIX) && d.name.length > CODEX_HOME_PREFIX.length)
+      .map((d: Dirent) => d.name.slice(CODEX_HOME_PREFIX.length))
+      .filter((name: string) => {
+        const dir = join(homedir(), `${CODEX_HOME_PREFIX}${name}`);
+        return existsSync(join(dir, "config.toml")) || existsSync(join(dir, "auth.json"));
+      });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The CODEX_HOME a codex profile should launch under, or undefined for a plain toml
+ * (`--profile`) profile. Resolution order:
+ *  1. explicit ring entry — custom `codexHome`, or undefined for an API-key `configToml`,
+ *  2. an auto-discovered `~/.codex-<name>` directory.
+ * Returning a home tells the launcher to set CODEX_HOME and drop `--profile`.
+ */
+export function resolveCodexHomeForProfile(
+  profileName: string | undefined,
+  ring: CodexLicenseEntry[],
+): string | undefined {
+  if (!profileName || profileName === "default") return undefined;
+  const entry = findRingEntry(ring, profileName);
+  if (entry) return resolveCodexHome(entry);
+  const home = defaultCodexHome(profileName);
+  return existsSync(home) ? home : undefined;
 }
 
 const DEFAULT_COOLDOWN_MS = 3 * 60 * 60 * 1000; // 3h fallback when retryAfter is absent/unparseable
