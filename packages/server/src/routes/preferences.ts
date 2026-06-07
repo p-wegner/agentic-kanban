@@ -1,6 +1,9 @@
+import { homedir } from "node:os";
+import { sep } from "node:path";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createPreferenceService } from "../services/preference.service.js";
+import { spawnCodexLogin } from "../services/codex-login.service.js";
 import {
   listAgentProfileHealth,
   preflightAgentProfile,
@@ -55,6 +58,29 @@ export function createPreferencesRoute(database: Database = db) {
   // GET /api/preferences/copilot-profiles
   router.get("/copilot-profiles", (_c) => {
     return _c.json({ profiles: preferenceService.listCopilotProfiles() });
+  });
+
+  // GET /api/preferences/home-dir — so the client can infer a Codex license's
+  // default CODEX_HOME (`<home>/.codex-<profile>`) without re-implementing path joins.
+  router.get("/home-dir", (c) => {
+    return c.json({ homeDir: homedir(), sep: sep });
+  });
+
+  // POST /api/preferences/codex-login — open a real terminal running `codex login`
+  // for a license dir. The OAuth callback needs a foreground window, so this is the
+  // only way to do it from the UI; returns the equivalent manual command too.
+  router.post("/codex-login", async (c) => {
+    const body = await parseJsonBody<{ codexHome?: string }>(c);
+    const codexHome = body.codexHome?.trim();
+    if (!codexHome) {
+      return c.json({ ok: false, error: "codexHome is required" }, 400);
+    }
+    try {
+      const { command } = spawnCodexLogin(codexHome);
+      return c.json({ ok: true, codexHome, command });
+    } catch (err) {
+      return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 500);
+    }
   });
 
   router.get("/agent-profiles/health", async (c) => {

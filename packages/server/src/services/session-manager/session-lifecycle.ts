@@ -16,7 +16,7 @@ import { workspaceLaunchPreflight } from "../preflight-check.js";
 import { WorkspaceError } from "../workspace-internals.js";
 import { DEFAULT_BUILDER_GUARDRAILS, PREF_BUILDER_GUARDRAILS } from "../../constants/preference-keys.js";
 import { detectCodexUsageLimitMessages } from "../codex-rate-limit.js";
-import { findRingEntry, loadCodexLicenseRing } from "../codex-license-ring.js";
+import { findRingEntry, loadCodexLicenseRing, resolveCodexHome } from "../codex-license-ring.js";
 
 /** Subset of agent.service that the lifecycle depends on. Injectable for tests. */
 export type AgentService = typeof realAgentService;
@@ -282,10 +282,11 @@ export function createSessionLifecycle(
       try {
         const ring = await loadCodexLicenseRing(db);
         const entry = findRingEntry(ring, profile.name);
-        if (entry?.codexHome) {
-          effectiveExtraEnv = { ...effectiveExtraEnv, CODEX_HOME: entry.codexHome };
+        const codexHome = entry ? resolveCodexHome(entry) : undefined;
+        if (codexHome) {
+          effectiveExtraEnv = { ...effectiveExtraEnv, CODEX_HOME: codexHome };
           launchProfile = { provider: "codex", name: "default" };
-          console.log(`[session] codex license '${profile.name}' -> CODEX_HOME=${entry.codexHome} (--profile suppressed)`);
+          console.log(`[session] codex license '${profile.name}' -> CODEX_HOME=${codexHome} (--profile suppressed)`);
         }
       } catch (err) {
         console.warn("[session] codex license ring resolution failed (non-fatal):", err instanceof Error ? err.message : String(err));

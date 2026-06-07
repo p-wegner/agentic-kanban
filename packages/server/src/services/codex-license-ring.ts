@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "../db/index.js";
 import { getPreference, setPreference } from "../repositories/preferences.repository.js";
@@ -13,9 +14,10 @@ import { PREF_CODEX_LICENSE_RING } from "../constants/preference-keys.js";
  * which login is live is the `CODEX_HOME` env var. A "license" is therefore a
  * directory, not a profile.
  *
- * - `codexHome` set  → ChatGPT-plan OAuth license. We point `CODEX_HOME` at that
- *   dir and DO NOT pass `--profile` (the dir authenticates via its own default
- *   config; a named profile would not exist there and codex would exit code 2).
+ * - no `configToml` → ChatGPT-plan OAuth license. We point `CODEX_HOME` at its dir
+ *   (explicit `codexHome`, else the inferred default `~/.codex-<profile>`) and DO NOT
+ *   pass `--profile` (the dir authenticates via its own default config; a named
+ *   profile would not exist there and codex would exit code 2).
  * - `configToml` set → API-key license living as a `config_<name>.toml` /
  *   `<name>.config.toml` in the shared `~/.codex`. Selected via `--profile` exactly
  *   as before; no `CODEX_HOME` override.
@@ -24,6 +26,21 @@ export interface CodexLicenseEntry {
   profile: string;
   codexHome?: string;
   configToml?: string;
+}
+
+/** Inferred CODEX_HOME for an OAuth license with no explicit override: `~/.codex-<profile>`. */
+export function defaultCodexHome(profile: string): string {
+  return join(homedir(), `.codex-${profile}`);
+}
+
+/**
+ * The CODEX_HOME this license should launch under, or undefined for an API-key
+ * (config-toml) license that needs no home override. OAuth licenses fall back to
+ * the inferred default when no explicit `codexHome` was set.
+ */
+export function resolveCodexHome(entry: CodexLicenseEntry): string | undefined {
+  if (entry.configToml) return undefined;
+  return entry.codexHome?.trim() || defaultCodexHome(entry.profile);
 }
 
 const DEFAULT_COOLDOWN_MS = 3 * 60 * 60 * 1000; // 3h fallback when retryAfter is absent/unparseable
