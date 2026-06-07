@@ -7,7 +7,7 @@ import type { Database } from "../db/index.js";
 import { setPreference } from "../repositories/preferences.repository.js";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { buildAgentLaunchConfig, type ProviderName } from "./agent-provider.js";
-import { parseCodexLicenseRing, findRingEntry, codexHomeHasAuth } from "./codex-license-ring.js";
+import { parseCodexLicenseRing, findRingEntry, codexHomeHasAuth, resolveCodexHome } from "./codex-license-ring.js";
 
 export type ProfileHealthStatus = "ok" | "warning" | "error" | "unknown";
 
@@ -148,9 +148,10 @@ export function preflightAgentProfile(
   const ringEntry = provider === "codex"
     ? findRingEntry(parseCodexLicenseRing(prefMap.get("codex_license_ring")), profileName)
     : undefined;
-  if (ringEntry?.codexHome) {
-    if (!codexHomeHasAuth(ringEntry.codexHome)) {
-      errors.push(`Codex license '${profileName}' not logged in: no auth.json in ${ringEntry.codexHome} (run: $env:CODEX_HOME='${ringEntry.codexHome}'; codex login)`);
+  const ringHome = ringEntry ? resolveCodexHome(ringEntry) : undefined;
+  if (ringHome) {
+    if (!codexHomeHasAuth(ringHome)) {
+      errors.push(`Codex license '${profileName}' not logged in: no auth.json in ${ringHome} (run: $env:CODEX_HOME='${ringHome}'; codex login)`);
     }
   } else {
     const configPath = profileConfigPath(provider, profileName);

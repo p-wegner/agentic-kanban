@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import {
   parseCodexLicenseRing,
   findRingEntry,
@@ -6,6 +8,8 @@ import {
   pickNextLicense,
   cooldownKey,
   cooldownUntilIso,
+  defaultCodexHome,
+  resolveCodexHome,
 } from "../services/codex-license-ring.js";
 
 const RING = JSON.stringify([
@@ -46,6 +50,24 @@ describe("findRingEntry / ringProfileNames", () => {
   });
   it("lists profile names for the dropdown", () => {
     expect(ringProfileNames(ring)).toEqual(["ki14", "ki15", "apikey1"]);
+  });
+});
+
+describe("defaultCodexHome / resolveCodexHome", () => {
+  it("infers ~/.codex-<profile> for the default home", () => {
+    expect(defaultCodexHome("ki14")).toBe(join(homedir(), ".codex-ki14"));
+  });
+
+  it("resolves an explicit codexHome override", () => {
+    expect(resolveCodexHome({ profile: "ki14", codexHome: "C:\\custom\\dir" })).toBe("C:\\custom\\dir");
+  });
+
+  it("falls back to the inferred default when codexHome is absent (OAuth license)", () => {
+    expect(resolveCodexHome({ profile: "ki15" })).toBe(join(homedir(), ".codex-ki15"));
+  });
+
+  it("returns undefined for an API-key (config toml) license", () => {
+    expect(resolveCodexHome({ profile: "apikey1", configToml: "config_apikey1" })).toBeUndefined();
   });
 });
 
