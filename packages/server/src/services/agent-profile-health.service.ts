@@ -7,7 +7,7 @@ import type { Database } from "../db/index.js";
 import { setPreference } from "../repositories/preferences.repository.js";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { buildAgentLaunchConfig, type ProviderName } from "./agent-provider.js";
-import { parseCodexLicenseRing, findRingEntry, codexHomeHasAuth, resolveCodexHome } from "./codex-license-ring.js";
+import { parseCodexLicenseRing, codexHomeHasAuth, resolveCodexHomeForProfile } from "./codex-license-ring.js";
 
 export type ProfileHealthStatus = "ok" | "warning" | "error" | "unknown";
 
@@ -145,13 +145,12 @@ export function preflightAgentProfile(
 
   // Codex OAuth license (a CODEX_HOME directory, not a config toml): validate the
   // login by checking for auth.json, and skip the config-file existence check.
-  const ringEntry = provider === "codex"
-    ? findRingEntry(parseCodexLicenseRing(prefMap.get("codex_license_ring")), profileName)
+  const codexHome = provider === "codex"
+    ? resolveCodexHomeForProfile(profileName, parseCodexLicenseRing(prefMap.get("codex_license_ring")))
     : undefined;
-  const ringHome = ringEntry ? resolveCodexHome(ringEntry) : undefined;
-  if (ringHome) {
-    if (!codexHomeHasAuth(ringHome)) {
-      errors.push(`Codex license '${profileName}' not logged in: no auth.json in ${ringHome} (run: $env:CODEX_HOME='${ringHome}'; codex login)`);
+  if (codexHome) {
+    if (!codexHomeHasAuth(codexHome)) {
+      errors.push(`Codex license '${profileName}' not logged in: no auth.json in ${codexHome} (run: $env:CODEX_HOME='${codexHome}'; codex login)`);
     }
   } else {
     const configPath = profileConfigPath(provider, profileName);

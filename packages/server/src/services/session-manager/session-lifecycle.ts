@@ -16,7 +16,7 @@ import { workspaceLaunchPreflight } from "../preflight-check.js";
 import { WorkspaceError } from "../workspace-internals.js";
 import { DEFAULT_BUILDER_GUARDRAILS, PREF_BUILDER_GUARDRAILS } from "../../constants/preference-keys.js";
 import { detectCodexUsageLimitMessages } from "../codex-rate-limit.js";
-import { findRingEntry, loadCodexLicenseRing, resolveCodexHome } from "../codex-license-ring.js";
+import { loadCodexLicenseRing, resolveCodexHomeForProfile } from "../codex-license-ring.js";
 
 /** Subset of agent.service that the lifecycle depends on. Injectable for tests. */
 export type AgentService = typeof realAgentService;
@@ -271,18 +271,18 @@ export function createSessionLifecycle(
       } catch { /* handoff not available — proceed without it */ }
     }
 
-    // Codex license rotation: an OAuth (ChatGPT-plan) license is a separate
-    // CODEX_HOME directory with its own auth.json. Point CODEX_HOME at it and DROP
-    // the profile name from the launch (a separate home has no `[profiles.<name>]`,
-    // so `--profile` would make codex exit code 2). API-key ring entries (configToml)
-    // keep `--profile` and get no CODEX_HOME override.
+    // Codex OAuth licenses: a ChatGPT-plan license is a separate CODEX_HOME directory
+    // with its own auth.json — selected by an auto-discovered `~/.codex-<name>` dir or
+    // a rotation-ring entry. Point CODEX_HOME at it and DROP the profile name from the
+    // launch (a separate home has no `[profiles.<name>]`, so `--profile` would make
+    // codex exit code 2). Plain toml / API-key (configToml) profiles resolve to no
+    // home and keep `--profile`.
     let effectiveExtraEnv = extraEnv;
     let launchProfile = profile;
     if (profile?.provider === "codex" && profile.name && profile.name !== "default") {
       try {
         const ring = await loadCodexLicenseRing(db);
-        const entry = findRingEntry(ring, profile.name);
-        const codexHome = entry ? resolveCodexHome(entry) : undefined;
+        const codexHome = resolveCodexHomeForProfile(profile.name, ring);
         if (codexHome) {
           effectiveExtraEnv = { ...effectiveExtraEnv, CODEX_HOME: codexHome };
           launchProfile = { provider: "codex", name: "default" };

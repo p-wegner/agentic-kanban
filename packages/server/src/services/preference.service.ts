@@ -9,7 +9,7 @@ import { commitObjectiveFile, isBoardStrategyKey, projectIdFromBoardStrategyKey,
 import { projects } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { PREF_BUILDER_GUARDRAILS, PREF_MERGE_STRATEGY, PREF_CODEX_LICENSE_RING, PREF_CODEX_LICENSE_ROTATION } from "../constants/preference-keys.js";
-import { parseCodexLicenseRing, ringProfileNames } from "./codex-license-ring.js";
+import { parseCodexLicenseRing, ringProfileNames, discoverCodexHomeProfiles } from "./codex-license-ring.js";
 
 export const SETTINGS_KEYS = [
   "agent_command", "agent_args", "output_parser", "skip_permissions", "claude_profile",
@@ -135,9 +135,12 @@ export function createPreferenceService({ database }: { database: Database }) {
         if (legacyMatch && legacyMatch[1] !== "default") profiles.push(legacyMatch[1]);
       }
     } catch {}
-    // OAuth licenses live as separate CODEX_HOME dirs, not config files in ~/.codex,
-    // so they only become selectable by merging the rotation ring's profile names.
+    // OAuth licenses live as separate `~/.codex-<name>` dirs (config.toml + auth.json),
+    // not config files in ~/.codex. Auto-discover them so they are selectable exactly
+    // like toml profiles; also merge any rotation-ring names (covers custom-path /
+    // API-key ring entries that aren't a `~/.codex-<name>` dir).
     try {
+      profiles.push(...discoverCodexHomeProfiles());
       const ring = parseCodexLicenseRing(await getPreference(PREF_CODEX_LICENSE_RING, database));
       profiles.push(...ringProfileNames(ring));
     } catch {}
