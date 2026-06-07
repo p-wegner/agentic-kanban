@@ -39,14 +39,18 @@ async function waitForLearningSession(database: Database, learnSessId: string, l
   });
 }
 
-async function launchLearningStep(database: Database, sessionManager: ReturnType<typeof createSessionManager>, learningSessionIds: Set<string>, workspaceId: string, prefMap: Map<string, string>, label: "after review" | "after agent", wait = false) {
+async function launchLearningStep(database: Database, sessionManager: ReturnType<typeof createSessionManager>, learningSessionIds: Set<string>, workspace: { id: string; provider: string | null; claudeProfile: string | null }, prefMap: Map<string, string>, label: "after review" | "after agent", wait = false) {
+  const workspaceId = workspace.id;
   try {
-    const provider = parseProviderPref(prefMap);
-    const profile = prefMap.get("claude_profile") || undefined;
-    const agentCommand = isMockProfile(profile) ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
-    const agentArgs = prefMap.get("agent_args") || undefined;
+    // Run the learning step on the same provider/profile the workspace was built
+    // with (e.g. its Codex OAuth license), not the global default which may have rotated.
+    const learnPrefs = applyWorkspaceProfileToPrefs(prefMap, workspace);
+    const provider = parseProviderPref(learnPrefs);
+    const profile = learnPrefs.get("claude_profile") || undefined;
+    const agentCommand = isMockProfile(profile) ? MOCK_AGENT_COMMAND : (learnPrefs.get("agent_command") || undefined);
+    const agentArgs = learnPrefs.get("agent_args") || undefined;
     const claudeProfile = isMockProfile(profile) ? undefined : profile;
-    const effectiveProfile = getEffectiveProfile(prefMap, provider, claudeProfile);
+    const effectiveProfile = getEffectiveProfile(learnPrefs, provider, claudeProfile);
     const profileSelection = effectiveProfile ? { provider, name: effectiveProfile } : undefined;
     const prompt = `/learning-step\n\nRun the learning step skill to extract insights from recent session transcripts and update docs/hooks.`;
     const learnSessId = await sessionManager.startSession({ workspaceId, prompt, agentCommand, agentArgs, claudeProfile: effectiveProfile, provider: toExecutorProvider(provider), triggerType: "learning", profile: profileSelection });
@@ -333,7 +337,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
         }
         await db.update(workspaces).set({ readyForMerge: true, updatedAt: now }).where(eq(workspaces.id, workspaceId));
         boardEvents.broadcast(projectId, "workspace_ready_for_merge");
-        const learningAfterReview = prefMap.get("learning_step_after_review") === "true" && workspace.workingDir ? launchLearningStep(db, sessionManager, learningSessionIds, workspace.id, prefMap, "after review", true) : Promise.resolve();
+        const learningAfterReview = prefMap.get("learning_step_after_review") === "true" && workspace.workingDir ? launchLearningStep(db, sessionManager, learningSessionIds, workspace, prefMap, "after review", true) : Promise.resolve();
         if (autoMergeEnabled) {
           console.log(`[workflow] review session ${sessionId} completed  queued for scheduled auto-merge`);
           await learningAfterReview;
@@ -392,7 +396,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
         await syncCurrentNodeToStatus(db, issueId);
       }
       boardEvents.broadcast(projectId, "issue_updated");
-      if (prefMap.get("learning_step_after_agent") === "true" && workspace.workingDir) await launchLearningStep(db, sessionManager, learningSessionIds, workspace.id, prefMap, "after agent");
+      if (prefMap.get("learning_step_after_agent") === "true" && workspace.workingDir) await launchLearningStep(db, sessionManager, learningSessionIds, workspace, prefMap, "after agent");
       const autoReview = !skipAutoReview && (workspace.requiresReview || prefMap.get("auto_review") !== "false");
       if (!autoReview) return;
 
