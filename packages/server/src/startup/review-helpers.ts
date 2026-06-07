@@ -11,6 +11,7 @@ export {
   buildReviewArgs,
   parseProviderPref,
   getEffectiveProfile,
+  applyWorkspaceProfileToPrefs,
 } from "../services/review.service.js";
 
 // Backward-compat wrappers that inject `db` so existing callers (exit-workflow, monitor-setup)

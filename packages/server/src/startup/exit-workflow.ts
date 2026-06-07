@@ -9,7 +9,7 @@ import { createBoardEvents } from "../services/board-events.js";
 import { emitButlerSystemEvent } from "../services/butler-event-feed.js";
 import * as gitService from "../services/git.service.js";
 import { createSessionManager } from "../services/session.manager.js";
-import { buildReviewArgs, buildReviewPrompt, getEffectiveProfile, parseProviderPref } from "./review-helpers.js";
+import { applyWorkspaceProfileToPrefs, buildReviewArgs, buildReviewPrompt, getEffectiveProfile, parseProviderPref } from "./review-helpers.js";
 import type { MergeWorkspace } from "./merge-workflow.js";
 import { isAutomaticMergeEnabled } from "./merge-strategy.js";
 import type { Database } from "../db/index.js";
@@ -396,12 +396,15 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       const autoReview = !skipAutoReview && (workspace.requiresReview || prefMap.get("auto_review") !== "false");
       if (!autoReview) return;
 
-      const reviewProvider = parseProviderPref(prefMap), reviewProfile = prefMap.get("claude_profile") || undefined;
-      const agentCommand = isMockProfile(reviewProfile) ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
+      // Review on the same provider/profile the workspace was built with (e.g. its
+      // Codex OAuth license), not the global default which may have rotated since.
+      const reviewPrefs = applyWorkspaceProfileToPrefs(prefMap, workspace);
+      const reviewProvider = parseProviderPref(reviewPrefs), reviewProfile = reviewPrefs.get("claude_profile") || undefined;
+      const agentCommand = isMockProfile(reviewProfile) ? MOCK_AGENT_COMMAND : (reviewPrefs.get("agent_command") || undefined);
       const claudeProfile = isMockProfile(reviewProfile) ? undefined : reviewProfile;
-      const effectiveReviewProfile = getEffectiveProfile(prefMap, reviewProvider, claudeProfile);
+      const effectiveReviewProfile = getEffectiveProfile(reviewPrefs, reviewProvider, claudeProfile);
       const profileSelection = effectiveReviewProfile ? { provider: reviewProvider, name: effectiveReviewProfile } : undefined;
-      const reviewArgs = buildReviewArgs(prefMap, reviewProvider), autoFix = workspace.isDirect ? false : prefMap.get("review_auto_fix") !== "false";
+      const reviewArgs = buildReviewArgs(reviewPrefs, reviewProvider), autoFix = workspace.isDirect ? false : reviewPrefs.get("review_auto_fix") !== "false";
       let diffRef = workspace.baseBranch || defaultBranch, conflictingFiles: string[] | undefined, uncommittedChanges: string[] | undefined;
       if (workspace.isDirect) diffRef = workspace.baseCommitSha || defaultBranch;
       else if (workspace.workingDir) {
