@@ -10,9 +10,9 @@ This is a FRESH session every run — you have NO memory of previous runs. The k
 ## TUNABLE TARGETS - generated from Strategy Bullseye
 <!-- STRATEGY_BULLSEYE_GENERATED_START -->
 > The loop re-reads this file at the START of every iteration, so changes here take effect on the next cycle with **NO restart**. This block is generated from the Strategy Bullseye preference; edit the bullseye in the board UI instead of hand-editing these values.
-- **ACTIVE_AGENTS_TARGET = 4** - keep this many workspaces actively In Progress at all times.
+- **ACTIVE_AGENTS_TARGET = 3** - keep this many workspaces actively In Progress at all times.
 - **BACKLOG_FLOOR = 12** - never let the backlog drop below this; refill before it does.
-- **MAX_NEW_STARTS_PER_CYCLE = 4** - cap on how many NEW workspaces to launch in a single cycle.
+- **MAX_NEW_STARTS_PER_CYCLE = 3** - cap on how many NEW workspaces to launch in a single cycle.
 - **REFILL_FOCUS = bugfix-only** - derived from work-type marker weights; `bugfix-only` emphasizes reproducible bugs, `balanced` allows feature/quality mix.
 
 ## STRATEGY WEIGHTS (generated - do not hand-edit)
@@ -26,7 +26,7 @@ When selecting a provider for a new workspace, apply these rules in priority ord
 1. **FILL** profiles should always have capacity — start work on them first.
 2. **THROTTLE** profiles are preferred for main work. Respect their headroom percentage.
 3. **FALLBACK-ONLY** profiles are last resort — only use if all others are exhausted or the user explicitly selects them.
-- **Codex (default profile)** [codex]: FILL — use aggressively, keep busy at all times (Primary harness — operator directive 2026-06-06 rev2: all new workspaces launch on the **codex** provider with the **default** profile (global `~/.codex/config.toml`, model gpt-5.5, ChatGPT-codex account). The earlier "codex RATE-LIMITED" episode was a mis-diagnosis — it was the gpt-5.3-codex-spark model's near-zero quota; the default model is now gpt-5.5 and codex works. **NEVER use the `andrena-azure` codex profile** unless the operator explicitly says so. Keep ACTIVE_AGENTS_TARGET agents busy.)
+- **Codex (default)** [codex:]: FILL — use aggressively, keep busy at all times (Primary harness - all new workspaces launch on Codex profile the default profile. Keep 3 agents busy.)
 <!-- STRATEGY_BULLSEYE_GENERATED_END -->
 
 ## FOCUS POLICY (operator directive 2026-06-05 rev2 — authoritative; overrides the REFILL_FOCUS wording above)
