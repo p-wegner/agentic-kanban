@@ -214,3 +214,49 @@ export async function rotateCodexLicense(
 export function codexHomeHasAuth(codexHome: string): boolean {
   return existsSync(join(codexHome, "auth.json"));
 }
+
+export interface CodexLicenseInfo {
+  profile: string;
+  mode: "oauth" | "apikey";
+  /** Resolved CODEX_HOME for an OAuth license; null for an API-key (config-toml) one. */
+  codexHome: string | null;
+  configToml: string | null;
+  /** OAuth: auth.json present. API-key: always true (login is via the key, not a browser). */
+  loggedIn: boolean;
+  /** Currently part of the rotation ring. */
+  inRing: boolean;
+  /** Found on disk as a `~/.codex-<name>` dir (vs. only declared in the ring). */
+  autoDiscovered: boolean;
+}
+
+/**
+ * The unified view of selectable Codex licenses: every auto-discovered
+ * `~/.codex-<name>` dir merged with the rotation-ring entries. The editor renders
+ * this so a logged-in license shows up even when it isn't (yet) in the ring.
+ */
+export function listCodexLicenses(ring: CodexLicenseEntry[]): CodexLicenseInfo[] {
+  const byProfile = new Map<string, CodexLicenseInfo>();
+  for (const name of discoverCodexHomeProfiles()) {
+    const home = defaultCodexHome(name);
+    byProfile.set(name, {
+      profile: name, mode: "oauth", codexHome: home, configToml: null,
+      loggedIn: codexHomeHasAuth(home), inRing: false, autoDiscovered: true,
+    });
+  }
+  for (const entry of ring) {
+    const autoDiscovered = byProfile.get(entry.profile)?.autoDiscovered ?? false;
+    if (entry.configToml) {
+      byProfile.set(entry.profile, {
+        profile: entry.profile, mode: "apikey", codexHome: null, configToml: entry.configToml,
+        loggedIn: true, inRing: true, autoDiscovered,
+      });
+    } else {
+      const home = resolveCodexHome(entry) ?? null;
+      byProfile.set(entry.profile, {
+        profile: entry.profile, mode: "oauth", codexHome: home, configToml: null,
+        loggedIn: home ? codexHomeHasAuth(home) : false, inRing: true, autoDiscovered,
+      });
+    }
+  }
+  return [...byProfile.values()].sort((a, b) => a.profile.localeCompare(b.profile));
+}

@@ -4,6 +4,9 @@ import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createPreferenceService } from "../services/preference.service.js";
 import { spawnCodexLogin } from "../services/codex-login.service.js";
+import { listCodexLicenses, parseCodexLicenseRing } from "../services/codex-license-ring.js";
+import { getPreference } from "../repositories/preferences.repository.js";
+import { PREF_CODEX_LICENSE_RING } from "../constants/preference-keys.js";
 import {
   listAgentProfileHealth,
   preflightAgentProfile,
@@ -64,6 +67,13 @@ export function createPreferencesRoute(database: Database = db) {
   // default CODEX_HOME (`<home>/.codex-<profile>`) without re-implementing path joins.
   router.get("/home-dir", (c) => {
     return c.json({ homeDir: homedir(), sep: sep });
+  });
+
+  // GET /api/preferences/codex-licenses — unified view of selectable Codex licenses
+  // (auto-discovered ~/.codex-<name> dirs merged with the rotation ring) + login status.
+  router.get("/codex-licenses", async (c) => {
+    const ringRaw = await getPreference(PREF_CODEX_LICENSE_RING, database);
+    return c.json({ licenses: listCodexLicenses(parseCodexLicenseRing(ringRaw)) });
   });
 
   // POST /api/preferences/codex-login — open a real terminal running `codex login`
