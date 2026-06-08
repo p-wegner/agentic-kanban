@@ -36,6 +36,7 @@ export type ViewMode =
   | "capacity"
   | "constellation"
   | "momentum"
+  | "fireworks"
   | "activity"
   | "stale-work"
   | "throughput"
@@ -218,6 +219,16 @@ const ICON = {
       <circle cx="9" cy="6" r="1.5" fill="currentColor" stroke="none" />
       <circle cx="13" cy="12" r="1.5" fill="currentColor" stroke="none" />
       <circle cx="19" cy="18" r="1.5" fill="currentColor" stroke="none" />
+    </svg>
+  ),
+  fireworks: (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 21V9" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v2M12 4l-2 2M12 4l2 2" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 8l1.5 1.5M5 8h2M5 8v2M19 8l-1.5 1.5M19 8h-2M19 8v2" />
+      <circle cx="12" cy="9" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="6.5" cy="10.5" r="1" fill="currentColor" stroke="none" />
+      <circle cx="17.5" cy="10.5" r="1" fill="currentColor" stroke="none" />
     </svg>
   ),
   activity: (
@@ -513,6 +524,17 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteDescription: "Immersive radial starfield: issues as glowing nodes orbiting status clusters",
     shortcut: "e",
     activeClass: "bg-indigo-700 text-white",
+    group: "secondary",
+  },
+  {
+    id: "fireworks",
+    toolbarLabel: "Fireworks",
+    label: "Fireworks",
+    tooltip: "Fireworks - celebratory launch-sky view of your board",
+    icon: ICON.fireworks,
+    paletteIcon: "FW",
+    paletteDescription: "Fancy launch-sky view: issues as animated fireworks across status rails",
+    activeClass: "bg-rose-600 text-white",
     group: "secondary",
   },
   {
