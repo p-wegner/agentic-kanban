@@ -3,6 +3,7 @@ import {
   classifyStaleDevProcessTrees,
   cleanStaleDevProcessSnapshot,
   resolveWorktreeDevPorts,
+  safeParseProcessJson,
   type ActiveWorkspaceResource,
   type PortListener,
   type ProcessRecord,
@@ -193,5 +194,42 @@ describe("classifyStaleDevProcessTrees", () => {
     expect(killTree).toHaveBeenCalledWith(400);
     expect(killTree).not.toHaveBeenCalledWith(401);
     expect(killTree).not.toHaveBeenCalledWith(402);
+  });
+});
+
+describe("safeParseProcessJson", () => {
+  it("parses clean ConvertTo-Json array output", () => {
+    const json = JSON.stringify([
+      { ProcessId: 1, ParentProcessId: 0, Name: "node.exe", CommandLine: "node app.js" },
+    ]);
+    const parsed = safeParseProcessJson(json) as Array<Record<string, unknown>>;
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed[0].ProcessId).toBe(1);
+  });
+
+  it("recovers when a CommandLine contains a raw control character (the monitor-crash bug)", () => {
+    // PowerShell ConvertTo-Json can emit a literal control char inside a string literal,
+    // which strict JSON.parse rejects with "Bad control character in string literal".
+    const ctrl = String.fromCharCode(0x08) + String.fromCharCode(0x0a) + String.fromCharCode(0x1f);
+    const badJson =
+      '[{"ProcessId":1234,"ParentProcessId":1,"Name":"node.exe","CommandLine":"node app' +
+      ctrl +
+      'arg"}]';
+    expect(() => JSON.parse(badJson)).toThrow();
+    const parsed = safeParseProcessJson(badJson) as Array<Record<string, unknown>>;
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed[0].ProcessId).toBe(1234);
+    // eslint-disable-next-line no-control-regex
+    expect(/\u0000-\u001f/.test(String(parsed[0].CommandLine))).toBe(false);
+  });
+
+  it("returns a single object as-is (ConvertTo-Json collapses one row)", () => {
+    const parsed = safeParseProcessJson('{"ProcessId":7}') as Record<string, unknown>;
+    expect(parsed.ProcessId).toBe(7);
+  });
+
+  it("falls back to an empty array on unrecoverable input instead of throwing", () => {
+    expect(safeParseProcessJson("not json at all")).toEqual([]);
+    expect(safeParseProcessJson("")).toEqual([]);
   });
 });
