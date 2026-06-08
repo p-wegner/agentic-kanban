@@ -397,6 +397,7 @@ export async function mergeBranch(
   // merge commit. Still repair a desynced checked-out worktree when needed.
   if (await isAncestor(repoPath, featureSha, targetSha)) {
     const needsIdempotentSync = options?.syncWorkingTree || targetIsCheckedOut;
+    let idempotentResetDeferred = false;
     if (needsIdempotentSync) {
       const currentHead = (await execGit(["rev-parse", "HEAD"], repoPath)).trim();
       const dirty = targetIsCheckedOut ? await getUncommittedTrackedChanges(repoPath) : [];
@@ -418,6 +419,9 @@ export async function mergeBranch(
         }
         if (!options?.deferWorkingTreeSync) {
           await syncWorkingTreeHard(repoPath, targetSha);
+        } else {
+          // Reset was skipped — caller must apply it post-response via applyDeferredWorkingTreeSync.
+          idempotentResetDeferred = true;
         }
       } else {
         // No full reset is warranted (HEAD already matches the target), but a prior
@@ -429,7 +433,10 @@ export async function mergeBranch(
       }
     }
 
-    const idempotentDeferTag = needsIdempotentSync && options?.deferWorkingTreeSync
+    // Only tag as deferred when a reset was actually skipped — when HEAD already matches
+    // targetSha we ran restoreDeletedTrackedFiles synchronously, so no deferred sync is
+    // needed and no tag should trigger a redundant git reset --hard in post-merge cleanup.
+    const idempotentDeferTag = idempotentResetDeferred
       ? ` [pending-wt-sync:${targetSha}]`
       : "";
     return `Branch '${featureBranch}' is already merged into ${targetBranch} (plumbing-merge: ${targetSha})${idempotentDeferTag}`;
