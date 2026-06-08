@@ -291,11 +291,43 @@ async function defaultKillTree(pid: number): Promise<void> {
   }
 }
 
+/**
+ * Parse the JSON emitted by `ConvertTo-Json` for the process list, tolerating raw control
+ * characters that PowerShell can leave unescaped inside string literals (a real process whose
+ * CommandLine contains e.g. a literal newline breaks a strict JSON.parse). The `-Compress` output
+ * is single-line, so it carries no structural whitespace to preserve; on a parse failure it strips
+ * all control chars U+0000..U+001F and retries, returning `[]` if it still cannot parse, so process
+ * enumeration never throws and never aborts the monitor cycle.
+ */
+export function safeParseProcessJson(
+  stdout: string,
+): Array<Record<string, unknown>> | Record<string, unknown> {
+  const raw = stdout || "[]";
+  const tryParse = (s: string) => JSON.parse(s) as Array<Record<string, unknown>> | Record<string, unknown>;
+  try {
+    return tryParse(raw);
+  } catch {
+    try {
+      // Remove control chars that are illegal inside JSON string literals.
+      // eslint-disable-next-line no-control-regex
+      const sanitized = raw.replace(/[\u0000-\u001f]/g, " ");
+      return tryParse(sanitized);
+    } catch {
+      return [];
+    }
+  }
+}
+
 export async function listProcesses(): Promise<ProcessRecord[]> {
   if (process.platform === "win32") {
     const script = "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress";
     const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-Command", script], { timeout: 10000, windowsHide: true });
-    const parsed = JSON.parse(stdout || "[]") as Array<Record<string, unknown>> | Record<string, unknown>;
+    // ConvertTo-Json can emit raw control characters (e.g. a literal newline/backspace inside a
+    // process CommandLine) that are invalid inside a JSON string literal, making JSON.parse throw
+    // "Bad control character in string literal". A single such process must NOT abort the entire
+    // monitor cycle (it runs snapshotAndCleanStaleDevProcesses before auto-start/merge), so strip
+    // unescaped control chars and fall back to an empty process list on any remaining parse error.
+    const parsed = safeParseProcessJson(stdout);
     const rows = Array.isArray(parsed) ? parsed : [parsed];
     return rows.map((row) => ({
       pid: Number(row.ProcessId),
