@@ -14,6 +14,7 @@ import { autoStartFollowups } from "./followup-workspace.service.js";
 import { autoStartUnblockedDependencyIssue } from "./dependency-auto-chain.service.js";
 import { rebuildSharedIfChanged, runLearningStep } from "./merge-helpers.service.js";
 import type { MergeWarning } from "./workspace-merge-prevalidation.service.js";
+import { applyDeferredWorkingTreeSync } from "@agentic-kanban/shared/lib/git-service.js";
 
 export type WorkspacePostMergeCleanupArgs = {
   workspaceId: string;
@@ -28,6 +29,8 @@ export type WorkspacePostMergeCleanupArgs = {
   teardownScript: string | null;
   setupEnabled: boolean;
   isDirect: boolean;
+  /** SHA returned by mergeBranch({ deferWorkingTreeSync: true }) — apply before any other cleanup. */
+  pendingWorkingTreeSyncSha?: string | null;
 };
 
 export async function runWorkspacePostMergeCleanup(
@@ -42,6 +45,17 @@ export async function runWorkspacePostMergeCleanup(
 ): Promise<void> {
   const warnings: MergeWarning[] = [];
   let mergeResult = args.mergeResult;
+
+  // Apply the deferred working-tree sync FIRST — before teardown frees the worktree —
+  // so git reset --hard runs after the HTTP response is already flushed and tsx
+  // hot-reload can no longer drop the in-flight connection.
+  if (args.pendingWorkingTreeSyncSha) {
+    try {
+      await applyDeferredWorkingTreeSync(args.repoPath, args.pendingWorkingTreeSyncSha);
+    } catch (err) {
+      console.warn("[workspace-merge] deferred working-tree sync failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    }
+  }
 
   await teardownMergedWorktree(args, deps, warnings);
   await collectCodeMetrics(args, deps.database, warnings);
