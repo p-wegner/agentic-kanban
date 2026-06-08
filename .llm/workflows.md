@@ -167,8 +167,12 @@ node --experimental-sqlite "$env:TEMP\check_migrations.mjs"
 Replace `<port>` with the server port from the dev banner (default: 3001, worktree: 3001+N).
 
 ```powershell
-# Server health
-curl http://localhost:<port>/health               # {"status":"ok"}
+# Server health (dependency-aware: 200 {"status":"ok"} when healthy,
+# 503 {"status":"degraded", checks:[...]} when a critical dep is missing)
+curl http://localhost:<port>/health
+
+# Detailed dependency-integrity report (same checks, always returns the list)
+curl http://localhost:<port>/api/health/deps
 
 # List projects
 curl http://localhost:<port>/api/projects
@@ -195,6 +199,34 @@ curl -X POST http://localhost:<port>/api/workspaces `
 ### `no such column` errors
 
 See "Diagnosing migration issues" above.
+
+### `ERR_MODULE_NOT_FOUND` for `@agentic-kanban/shared/dist/*` (missing shared dist)
+
+Symptom: the server process is up and `/health` *used* to look green, but
+CLI/API calls fail with `ERR_MODULE_NOT_FOUND` for
+`@agentic-kanban/shared/dist/schema/index.js`, and the client renders blank with
+a 404 for `packages/shared/dist/index.js`. The compiled output of the shared
+package was lost or never built (production/bundled mode resolves `dist/`, not
+`src/`).
+
+Detect it — `/health` is now dependency-aware and reports the failing check:
+
+```powershell
+curl http://localhost:<port>/health        # 503 {"status":"degraded", checks:[... shared-dist ok:false ...]}
+curl http://localhost:<port>/api/health/deps   # detailed per-dependency report
+```
+
+Recover by rebuilding the shared package, then restart the server cleanly
+(stale `tsx watch` won't pick up the rebuilt module graph):
+
+```powershell
+pnpm --filter @agentic-kanban/shared build
+# then stop the server on its port and relaunch with `pnpm dev`
+```
+
+If `node_modules/drizzle-orm` or `hono` are also reported missing, run
+`pnpm install` first (the `/api/health/deps` detail field prints the exact
+remediation command for each failed check).
 
 ### `EBUSY: resource busy or locked`
 
