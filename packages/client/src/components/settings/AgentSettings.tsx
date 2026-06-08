@@ -3,6 +3,7 @@ import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/share
 import { CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, CapabilityMatrixTable, Field, defaultHarnessLabel, formatHealthTime, profileOptionLabel, providerDisplayName, settingsProfileValue, statusClasses, type AgentProfileHealth, type Settings, type SettingsTextSetter } from "../SettingsPanel.shared.js";
 import { CodexLicenseRingEditor } from "./CodexLicenseRingEditor.js";
 import { ClaudeSubscriptionRingEditor } from "./ClaudeSubscriptionRingEditor.js";
+import { AgentPresetsEditor } from "./AgentPresetsEditor.js";
 
 type AgentSettingsProps = {
   settings: Settings;
@@ -14,9 +15,10 @@ type AgentSettingsProps = {
   profileHealth: AgentProfileHealth[];
   preflightingProfileId: string | null;
   onProfilePreflight: (profile: AgentProfileHealth) => void;
+  activeProjectId?: string | null;
 };
 
-export function AgentSettings({ settings, set, setSettings, profiles, codexProfiles, copilotProfiles, profileHealth, preflightingProfileId, onProfilePreflight: handleProfilePreflight }: AgentSettingsProps) {
+export function AgentSettings({ settings, set, setSettings, profiles, codexProfiles, copilotProfiles, profileHealth, preflightingProfileId, onProfilePreflight: handleProfilePreflight, activeProjectId }: AgentSettingsProps) {
   return (
 <>
                   <Field label="Agent Command" hint="Binary name or path. Leave empty for default (claude). Examples: claude, claude-glm, /usr/local/bin/claude">
@@ -68,6 +70,12 @@ export function AgentSettings({ settings, set, setSettings, profiles, codexProfi
                   </Field>
                   <ClaudeSubscriptionRingEditor settings={settings} set={set} />
                   <CodexLicenseRingEditor settings={settings} set={set} />
+                  <AgentPresetsEditor
+                    activeProjectId={activeProjectId}
+                    profiles={profiles}
+                    codexProfiles={codexProfiles}
+                    copilotProfiles={copilotProfiles}
+                  />
                   <Field label="Default Model" hint="Default model for new workspaces (passed via --model). Options follow the selected provider (Claude or Codex). Per-workspace selection overrides this. Ignored for Claude profiles with a custom endpoint (e.g. z.ai) and for Copilot.">
                     <select
                       value={settings.default_model || ""}

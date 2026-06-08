@@ -464,6 +464,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
                   profileHealth={profileHealth}
                   preflightingProfileId={preflightingProfileId}
                   onProfilePreflight={handleProfilePreflight}
+                  activeProjectId={activeProjectId}
                 />
               )}
 
