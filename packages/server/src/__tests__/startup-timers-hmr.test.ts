@@ -109,6 +109,26 @@ describe("startup timers are restart-safe for HMR-style reloads", () => {
     expect(clearIntervalSpy).toHaveBeenCalledWith(interval);
   });
 
+  it("ancestor-branch reconciler stops firing ticks after cleanup", () => {
+    const tick = vi.fn();
+    startAncestorBranchReconciler({ onTick: tick }, 5_000);
+    stopAncestorBranchReconciler();
+
+    vi.advanceTimersByTime(60_000);
+
+    expect(tick).not.toHaveBeenCalled();
+  });
+
+  it("done-unmerged scanner stops firing ticks after cleanup", () => {
+    const tick = vi.fn();
+    startDoneUnmergedScanner({ onTick: tick }, 5_000);
+    stopDoneUnmergedScanner();
+
+    vi.advanceTimersByTime(60_000);
+
+    expect(tick).not.toHaveBeenCalled();
+  });
+
   it("replaces server-start registered timer cleanup instead of accumulating boot handles", () => {
     const firstInterval = setInterval(() => {}, 10_000);
     const secondInterval = setInterval(() => {}, 10_000);
