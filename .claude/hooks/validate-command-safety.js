@@ -182,6 +182,62 @@ function installsThroughJunction(command) {
   return nodeModulesJunctionTarget(getProjectDir());
 }
 
+// An install that DECLARES intent to change deps (add/remove a package, or
+// install/update a specific one) — distinct from a bare lockfile reinstall.
+function isExplicitDepChange(command) {
+  return (
+    /(?:^|[;&|]\s*)(?:pnpm|npm|yarn)(?:\.cmd)?\s+(?:add|remove|rm|uninstall)\b/i.test(command) ||
+    // `pnpm install <pkg>` / `pnpm update <pkg>` — a non-flag token after the verb
+    /(?:^|[;&|]\s*)(?:pnpm|npm|yarn)(?:\.cmd)?\s+(?:install|i|update|up|add)\s+(?!-)[^\s;&|]+/i.test(command)
+  );
+}
+
+function getMainCheckout() {
+  return process.env.KANBAN_MAIN_CHECKOUT || "C:\\andrena\\agentic-kanban";
+}
+
+// Has this worktree's dependency manifest diverged from the main checkout the
+// junction points at? If so, the shared deps are wrong for this branch and it
+// genuinely needs its own install. Compares the pnpm lockfile + every
+// package.json (root + workspace packages) by content.
+function manifestsDrifted(worktreeRoot, mainCheckout) {
+  const readOrNull = (p) => { try { return fs.readFileSync(p, "utf8"); } catch { return null; } };
+  const differs = (rel) => {
+    const a = readOrNull(path.join(worktreeRoot, rel));
+    const b = readOrNull(path.join(mainCheckout, rel));
+    return a !== b; // includes "exists in one but not the other"
+  };
+  if (differs("pnpm-lock.yaml")) return true;
+  if (differs("package.json")) return true;
+  try {
+    for (const d of fs.readdirSync(path.join(worktreeRoot, "packages"), { withFileTypes: true })) {
+      if (d.isDirectory() && differs(path.join("packages", d.name, "package.json"))) return true;
+    }
+  } catch { /* no packages dir */ }
+  return false;
+}
+
+// Remove a junction/symlink WITHOUT touching its target. Returns true if removed.
+function removeJunction(p) {
+  try { if (!fs.lstatSync(p).isSymbolicLink()) return false; } catch { return false; }
+  try { fs.unlinkSync(p); return true; } catch {}
+  try { fs.rmdirSync(p); return true; } catch {}
+  return false;
+}
+
+// Remove every node_modules junction in the worktree (root + per-package) so a
+// subsequent install creates real, isolated deps and can't write through to main.
+function isolateWorktreeDeps(worktreeRoot) {
+  let removed = 0;
+  if (removeJunction(path.join(worktreeRoot, "node_modules"))) removed++;
+  try {
+    for (const d of fs.readdirSync(path.join(worktreeRoot, "packages"), { withFileTypes: true })) {
+      if (d.isDirectory() && removeJunction(path.join(worktreeRoot, "packages", d.name, "node_modules"))) removed++;
+    }
+  } catch { /* no packages dir */ }
+  return removed;
+}
+
 function isBroadNodeKill(command) {
   const normalized = command.replace(/\r\n/g, "\n");
 
@@ -235,27 +291,6 @@ function isMainBoardPortKill(command) {
 }
 
 function getBlockedNonDbReason(command) {
-  const junctionTarget = installsThroughJunction(command);
-  if (junctionTarget) {
-    return (
-      "⛔ This worktree's `node_modules` is a junction into the main checkout, and this is a\n" +
-      "dependency install/update. It would write THROUGH the junction into:\n" +
-      `  ${junctionTarget}\n` +
-      "corrupting the main board's install and every other worktree linked to it — the classic\n" +
-      "'a change in one worktree changes main' failure.\n\n" +
-      "Pick the right path:\n" +
-      "  • Just running tests/build? You don't need to install — the junction already shares\n" +
-      "    main's deps. Run the command as-is (without installing).\n" +
-      "  • This branch changed package.json / pnpm-lock.yaml and needs its OWN deps? Isolate\n" +
-      "    first, then install — removing the junction does NOT delete main's node_modules:\n" +
-      "      cmd /c rmdir \"%CD%\\node_modules\"   (PowerShell: (Get-Item node_modules).Delete())\n" +
-      "      pnpm install\n" +
-      "  • Only need to install for the main checkout? cd there first:\n" +
-      "      cd C:\\andrena\\agentic-kanban; pnpm install\n\n" +
-      "Do NOT bypass by editing the hook or installing through the live junction."
-    );
-  }
-
   const roVar = usesReadOnlyPsVar(command);
   if (roVar) {
     const suggestion = roVar === "pid"
@@ -373,6 +408,43 @@ async function main() {
     hookInput.tool_input?.command ||
     hookInput.tool_input?.Command ||
     "";
+  // Worktree node_modules junction + a dependency install: an install would write
+  // THROUGH the junction into the main checkout, corrupting it and every other
+  // junctioned worktree. Auto-isolate when the branch genuinely needs its own deps
+  // (explicit add/remove, or its manifests have drifted from main); otherwise the
+  // install is unnecessary (deps already shared from main) — block it.
+  const junctionTarget = installsThroughJunction(command);
+  if (junctionTarget) {
+    const worktreeRoot = getProjectDir();
+    const needsOwnDeps = isExplicitDepChange(command) || manifestsDrifted(worktreeRoot, getMainCheckout());
+    if (needsOwnDeps) {
+      const removed = isolateWorktreeDeps(worktreeRoot);
+      console.error(
+        `[safety] Auto-isolated worktree dependencies: removed ${removed} node_modules junction(s) ` +
+        `into the main checkout. This install now creates worktree-local deps and cannot corrupt main.`
+      );
+      process.exit(0); // allow — the junction is gone, the write stays local
+    }
+    console.error("[safety] Dependency install blocked (would write through a node_modules junction).");
+    console.log(
+      JSON.stringify({
+        decision: "block",
+        reason:
+          "⛔ This worktree's node_modules is a junction sharing the main checkout's deps, and this\n" +
+          "command installs/reinstalls dependencies — it would write THROUGH the junction into:\n" +
+          `  ${junctionTarget}\n` +
+          "corrupting the main board's install and every other junctioned worktree.\n\n" +
+          "Your manifests match main, so you almost certainly DON'T need to install — the deps are\n" +
+          "already shared. Just run your test/build command directly.\n\n" +
+          "If you really intend to change this branch's dependencies, use an explicit command\n" +
+          "(e.g. `pnpm add <pkg>` / `pnpm remove <pkg>`) — that auto-isolates this worktree first,\n" +
+          "or edit package.json so your manifests differ from main, then re-run. Do NOT bypass by\n" +
+          "editing the hook or installing through the live junction.",
+      })
+    );
+    process.exit(1);
+  }
+
   const nonDbReason = getBlockedNonDbReason(command);
   if (nonDbReason) {
     console.error("[safety] Command blocked.");
