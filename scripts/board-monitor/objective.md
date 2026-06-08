@@ -15,14 +15,18 @@ This is a FRESH session every run — you have NO memory of previous runs. The k
 - **MAX_NEW_STARTS_PER_CYCLE = 4** - cap on how many NEW workspaces to launch in a single cycle.
 - **REFILL_FOCUS = bugfix-only** - derived from work-type marker weights; `bugfix-only` emphasizes reproducible bugs, `balanced` allows feature/quality mix.
 
-## STRATEGY WEIGHTS (operator directive 2026-06-08)
-- Quality & Test Coverage: weight 5/5, work-type, provider claude:anth
-- Architecture & Code Health: weight 5/5, area, provider claude:anth
-- Bugfix: weight 4/5, work-type, provider claude:anth
-- Feature: weight 0/5, work-type (never start)
+## STRATEGY WEIGHTS (generated - do not hand-edit)
+- Architecture & Code Health: weight 5/5, area, provider claude
+- Quality: weight 5/5, work-type, provider claude
+- Bugfix: weight 5/5, work-type, provider claude
+- Feature: weight 1/5, work-type
 
-## PROVIDER POLICY (operator directive 2026-06-08 — authoritative)
-Launch ALL new workspaces on **Claude Code, profile `anth`** (the board's `provider=claude` / `claude_profile=anth` default). **Never use codex** — the codex account is credit-exhausted (multi-day stall, see state.md 2026-06-06) and is the reason the board was blocked. Keep ACTIVE_AGENTS_TARGET (4) Claude/anth agents busy at all times.
+## PROVIDER POLICY (generated - do not hand-edit)
+When selecting a provider for a new workspace, apply these rules in priority order:
+1. **FILL** profiles should always have capacity — start work on them first.
+2. **THROTTLE** profiles are preferred for main work. Respect their headroom percentage.
+3. **FALLBACK-ONLY** profiles are last resort — only use if all others are exhausted or the user explicitly selects them.
+- **policy-claude-anth** [claude:anth]: FILL — use aggressively, keep busy at all times (Primary harness - all new workspaces launch on claude:anth. Single source of truth (set-provider-default skill).)
 <!-- STRATEGY_BULLSEYE_GENERATED_END -->
 
 ## FOCUS POLICY (operator directive 2026-06-08 — authoritative; overrides the REFILL_FOCUS wording above)
