@@ -263,6 +263,23 @@ describe("Preferences API - settings", () => {
     expect(body[key]).toBe(value);
   });
 
+  it("PUT /api/preferences/settings stores project-scoped agent presets", async () => {
+    const { app: freshApp } = createTestApp();
+    const projectId = randomUUID();
+    const key = `agent_presets_${projectId}`;
+    const value = JSON.stringify([{ id: "ap-1", name: "Claude Opus", provider: "claude", model: "opus", createdAt: "", updatedAt: "" }]);
+
+    await freshApp.request("/api/preferences/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ [key]: value }),
+    });
+
+    const res = await freshApp.request("/api/preferences/settings");
+    const body = await res.json() as any;
+    expect(body[key]).toBe(value);
+  });
+
   it("PUT /api/preferences/settings handles agent/profile allowed keys", async () => {
     const { app: freshApp } = createTestApp();
 
