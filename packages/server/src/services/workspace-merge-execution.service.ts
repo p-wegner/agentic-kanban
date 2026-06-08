@@ -5,6 +5,7 @@ import type { BoardEvents } from "./board-events.js";
 import { WorkspaceError, type GitService } from "./workspace-internals.js";
 import type { RecordMergeAttempt } from "./workspace-merge-prevalidation.service.js";
 import { finalizeMergeCleanup } from "./merge-cleanup.service.js";
+import { extractPendingWorkingTreeSync } from "@agentic-kanban/shared/lib/git-service.js";
 
 export type WorkspaceMergeExecutionResult = {
   response: {
@@ -21,6 +22,8 @@ export type WorkspaceMergeExecutionResult = {
     mergeResult: string;
     mergeCommitSha: string;
     projectId: string | null;
+    /** SHA to pass to applyDeferredWorkingTreeSync after the HTTP response is flushed. */
+    pendingWorkingTreeSyncSha: string | null;
   };
 };
 
@@ -48,6 +51,9 @@ export async function executeWorkspaceMerge(args: {
   await createPreMergeBackup(args.createBackup);
   const preMergeHead = await revParseSafe(repoPath, "HEAD", gitService);
   const mergeResult = await mergeBranchOrThrow(args);
+  // mergeBranch with deferWorkingTreeSync skips git reset --hard during the request.
+  // Extract the pending SHA so post-merge cleanup can apply it after the response is sent.
+  const pendingWorkingTreeSyncSha = extractPendingWorkingTreeSync(mergeResult);
   const mergeCommitSha = await revParseSafe(repoPath, "HEAD", gitService);
   await verifyPostMergeAncestry(repoPath, workspace.branch, targetBranch, gitService);
 
@@ -86,6 +92,7 @@ export async function executeWorkspaceMerge(args: {
       mergeResult,
       mergeCommitSha,
       projectId: finalized.projectId,
+      pendingWorkingTreeSyncSha,
     },
   };
 }
@@ -115,7 +122,7 @@ async function mergeBranchOrThrow(args: {
 }): Promise<string> {
   const { workspace, repoPath, targetBranch, gitService } = args;
   try {
-    return await gitService.mergeBranch(repoPath, workspace.branch, targetBranch);
+    return await gitService.mergeBranch(repoPath, workspace.branch, targetBranch, { deferWorkingTreeSync: true });
   } catch (err) {
     await args.recordMergeAttempt(
       workspace,

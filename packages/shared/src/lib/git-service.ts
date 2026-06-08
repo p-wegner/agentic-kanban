@@ -378,7 +378,7 @@ export async function mergeBranch(
   repoPath: string,
   featureBranch: string,
   targetBranch: string,
-  options?: { syncWorkingTree?: boolean },
+  options?: { syncWorkingTree?: boolean; deferWorkingTreeSync?: boolean },
 ): Promise<string> {
   const targetSha = (await execGit(["rev-parse", targetBranch], repoPath)).trim();
   const featureSha = (await execGit(["rev-parse", featureBranch], repoPath)).trim();
@@ -396,7 +396,8 @@ export async function mergeBranch(
   // If the feature is already reachable from the target, do not create another
   // merge commit. Still repair a desynced checked-out worktree when needed.
   if (await isAncestor(repoPath, featureSha, targetSha)) {
-    if (options?.syncWorkingTree || targetIsCheckedOut) {
+    const needsIdempotentSync = options?.syncWorkingTree || targetIsCheckedOut;
+    if (needsIdempotentSync) {
       const currentHead = (await execGit(["rev-parse", "HEAD"], repoPath)).trim();
       const dirty = targetIsCheckedOut ? await getUncommittedTrackedChanges(repoPath) : [];
       const canResetDesyncedCheckout =
@@ -415,7 +416,9 @@ export async function mergeBranch(
             `Cannot sync already-merged '${targetBranch}' in ${repoPath}: it has ${dirty.length} uncommitted tracked change(s): ${preview}${more}. Commit or stash them first.`,
           );
         }
-        await syncWorkingTreeHard(repoPath, targetSha);
+        if (!options?.deferWorkingTreeSync) {
+          await syncWorkingTreeHard(repoPath, targetSha);
+        }
       } else {
         // No full reset is warranted (HEAD already matches the target), but a prior
         // interrupted merge may still have left tracked files DELETED in the working
@@ -426,7 +429,10 @@ export async function mergeBranch(
       }
     }
 
-    return `Branch '${featureBranch}' is already merged into ${targetBranch} (plumbing-merge: ${targetSha})`;
+    const idempotentDeferTag = needsIdempotentSync && options?.deferWorkingTreeSync
+      ? ` [pending-wt-sync:${targetSha}]`
+      : "";
+    return `Branch '${featureBranch}' is already merged into ${targetBranch} (plumbing-merge: ${targetSha})${idempotentDeferTag}`;
   }
 
   if (targetIsCheckedOut) {
@@ -521,11 +527,40 @@ export async function mergeBranch(
   // checked out here (otherwise repoPath silently desyncs), or when a caller
   // explicitly requests it (a worktree the agent keeps using). When the target
   // branch is not checked out, the working tree is correctly left untouched.
-  if (options?.syncWorkingTree || targetIsCheckedOut) {
+  //
+  // deferWorkingTreeSync lets the caller skip this synchronous file-system write
+  // during an HTTP request and perform it later (e.g. in a setImmediate callback)
+  // so that tsx hot-reload triggered by the new files doesn't kill the connection
+  // before the response is sent.
+  const needsWorkingTreeSync = options?.syncWorkingTree || targetIsCheckedOut;
+  if (needsWorkingTreeSync && !options?.deferWorkingTreeSync) {
     await syncWorkingTreeHard(repoPath, newCommitSha);
   }
 
-  return `Merge branch '${featureBranch}' into ${targetBranch} (plumbing-merge: ${newCommitSha})`;
+  const deferTag = needsWorkingTreeSync && options?.deferWorkingTreeSync
+    ? ` [pending-wt-sync:${newCommitSha}]`
+    : "";
+  return `Merge branch '${featureBranch}' into ${targetBranch} (plumbing-merge: ${newCommitSha})${deferTag}`;
+}
+
+/**
+ * Extract the deferred working-tree sync SHA embedded in a `mergeBranch` result
+ * string by `deferWorkingTreeSync: true`. Returns null when no sync is pending.
+ *
+ * Format: "... [pending-wt-sync:<sha>]"
+ */
+export function extractPendingWorkingTreeSync(mergeOutput: string): string | null {
+  const m = mergeOutput.match(/\[pending-wt-sync:([0-9a-f]{7,40})\]/);
+  return m ? m[1] : null;
+}
+
+/**
+ * Perform the working-tree sync that was deferred by `mergeBranch({ deferWorkingTreeSync: true })`.
+ * Safe to call from a `setImmediate` after the HTTP response is flushed — by then
+ * tsx hot-reload triggered by the new files won't kill the in-flight connection.
+ */
+export async function applyDeferredWorkingTreeSync(repoPath: string, commitSha: string): Promise<void> {
+  await syncWorkingTreeHard(repoPath, commitSha);
 }
 
 /**
