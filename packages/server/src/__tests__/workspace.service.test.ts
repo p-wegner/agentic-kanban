@@ -9,6 +9,7 @@ import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createMockSessionManager } from "./helpers/mocks.js";
 import { createWorkspaceService, WorkspaceError, type GitService } from "../services/workspace.service.js";
 import { activeMerges, MERGE_LOCK_STALE_MS } from "../services/workspace-internals.js";
+import { getWorkspaceDetails } from "../repositories/workspace.repository.js";
 
 // Mock process-cleanup so teardown doesn't run real wmic/lsof/netstat in unit tests.
 vi.mock("../services/process-cleanup.js", () => ({
@@ -1310,5 +1311,150 @@ describe("workspace.service", () => {
 
       expect(gitService.rebaseOntoBase).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("getWorkspaceDetails — live session fields", () => {
+  let db: TestDb;
+
+  beforeEach(() => {
+    ({ db } = createTestDb());
+  });
+
+  async function seedWorkspace(testDb: TestDb): Promise<{ wsId: string; issueId: string }> {
+    const now = new Date().toISOString();
+    const projectId = randomUUID();
+    const issueId = randomUUID();
+    const wsId = randomUUID();
+
+    await testDb.insert(projects).values({
+      id: projectId,
+      name: "Test Project",
+      repoPath: "/tmp/repo",
+      repoName: "repo",
+      defaultBranch: "main",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const statusId = randomUUID();
+    await testDb.insert(projectStatuses).values({
+      id: statusId,
+      projectId,
+      name: "Todo",
+      sortOrder: 0,
+      isDefault: true,
+      createdAt: now,
+    });
+
+    await testDb.insert(issues).values({
+      id: issueId,
+      issueNumber: 1,
+      title: "Test issue",
+      description: "",
+      priority: "medium",
+      sortOrder: 0,
+      statusId,
+      projectId,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await testDb.insert(workspaces).values({
+      id: wsId,
+      issueId,
+      branch: "feature/ak-1-test",
+      workingDir: "/tmp/repo/.worktrees/feature-1",
+      baseBranch: "main",
+      isDirect: false,
+      status: "active",
+      provider: "claude",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return { wsId, issueId };
+  }
+
+  it("returns null session fields when no session exists", async () => {
+    const { wsId } = await seedWorkspace(db);
+    const details = await getWorkspaceDetails(wsId, db);
+    expect(details).not.toBeNull();
+    expect(details!.sessionStatus).toBeNull();
+    expect(details!.lastSessionAt).toBeNull();
+    expect(details!.lastSessionTriggerType).toBeNull();
+    expect(details!.contextTokens).toBeNull();
+    expect(details!.lastTool).toBeNull();
+  });
+
+  it("exposes sessionStatus and lastSessionAt from the latest running session", async () => {
+    const { wsId } = await seedWorkspace(db);
+    const startedAt = new Date(Date.now() - 5000).toISOString();
+    await db.insert(sessions).values({
+      id: randomUUID(),
+      workspaceId: wsId,
+      status: "running",
+      triggerType: "initial",
+      startedAt,
+      executor: "claude-code",
+    });
+
+    const details = await getWorkspaceDetails(wsId, db);
+    expect(details!.sessionStatus).toBe("running");
+    expect(details!.lastSessionAt).toBe(startedAt);
+    expect(details!.lastSessionTriggerType).toBe("initial");
+  });
+
+  it("exposes endedAt as lastSessionAt for a completed session", async () => {
+    const { wsId } = await seedWorkspace(db);
+    const endedAt = new Date(Date.now() - 1000).toISOString();
+    await db.insert(sessions).values({
+      id: randomUUID(),
+      workspaceId: wsId,
+      status: "completed",
+      triggerType: "chat",
+      startedAt: new Date(Date.now() - 10000).toISOString(),
+      endedAt,
+      executor: "claude-code",
+    });
+
+    const details = await getWorkspaceDetails(wsId, db);
+    expect(details!.sessionStatus).toBe("completed");
+    expect(details!.lastSessionAt).toBe(endedAt);
+  });
+
+  it("picks the latest session when multiple exist and populates contextTokens/lastTool from stats", async () => {
+    const { wsId } = await seedWorkspace(db);
+    const older = new Date(Date.now() - 20000).toISOString();
+    const newer = new Date(Date.now() - 2000).toISOString();
+    const newerEnd = new Date(Date.now() - 1000).toISOString();
+
+    await db.insert(sessions).values({
+      id: randomUUID(),
+      workspaceId: wsId,
+      status: "completed",
+      triggerType: "initial",
+      startedAt: older,
+      endedAt: older,
+      executor: "claude-code",
+      stats: JSON.stringify({ contextTokens: 100, lastTool: "old-tool" }),
+    });
+
+    await db.insert(sessions).values({
+      id: randomUUID(),
+      workspaceId: wsId,
+      status: "completed",
+      triggerType: "chat",
+      startedAt: newer,
+      endedAt: newerEnd,
+      executor: "claude-code",
+      stats: JSON.stringify({ contextTokens: 42000, lastTool: "Write" }),
+    });
+
+    const details = await getWorkspaceDetails(wsId, db);
+    expect(details!.sessionStatus).toBe("completed");
+    expect(details!.lastSessionTriggerType).toBe("chat");
+    expect(details!.contextTokens).toBe(42000);
+    expect(details!.lastTool).toBe("Write");
   });
 });
