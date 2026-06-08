@@ -22,7 +22,7 @@ import type { TrailEntry } from "../hooks/useTicketTrail.js";
 import { TicketTrailStrip } from "./TicketTrailStrip.js";
 import { IssueCycleTimeBadge } from "./IssueCycleTimeBadge.js";
 import { IssueWorkLogSection } from "./IssueWorkLogSection.js";
-import { useIssueDisplayData } from "./IssueCard.js";
+import { useIssueDisplayData } from "../hooks/useIssueDisplayData.js";
 
 // Some issues were created via MCP/CLI calls whose JSON descriptions ended up
 // with literal `\n` / `\t` sequences rather than real newlines. Unescape when
