@@ -6,9 +6,12 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   detectConflicts,
+  detectConflictsByBranch,
   ensureOnBranch,
   getCurrentBranch,
+  getCommitCountAhead,
   getWorkingTreeDiff,
+  isAncestor,
   mergeBranch,
   revParse,
   syncBranchToHead,
@@ -290,6 +293,116 @@ describe("git-service integration", () => {
     expect(diff).toContain("new file mode 100644");
     expect(diff).toContain("+untracked content");
     expect(diff).toContain("+second line");
+  }, 30000);
+
+  it("detectConflictsByBranch detects conflicts between two named branches without a worktree", async () => {
+    await seedCommittedFile(
+      temp.repo,
+      "branch-conflict.txt",
+      "line 1\nbase content\nline 3\n",
+      "seed branch conflict file",
+    );
+    const branchBase = await revParse(temp.repo, "main");
+
+    await commitFiles(
+      temp.repo,
+      "feature/branch-conflict-a",
+      { "branch-conflict.txt": "line 1\nbranch A\nline 3\n" },
+      "branch A edit",
+      branchBase,
+    );
+    await commitFiles(
+      temp.repo,
+      "feature/branch-conflict-b",
+      { "branch-conflict.txt": "line 1\nbranch B\nline 3\n" },
+      "branch B edit",
+      branchBase,
+    );
+    await git(temp.repo, ["checkout", "main"]);
+
+    const result = await detectConflictsByBranch(
+      temp.repo,
+      "feature/branch-conflict-a",
+      "feature/branch-conflict-b",
+    );
+
+    expect(result.hasConflicts).toBe(true);
+    expect(result.conflictingFiles).toContain("branch-conflict.txt");
+    expect((await git(temp.repo, ["status", "--porcelain"])).trim()).toBe("");
+  }, 30000);
+
+  it("detectConflictsByBranch returns no conflicts for non-overlapping branches", async () => {
+    const branchBase = await revParse(temp.repo, "main");
+
+    await commitFiles(
+      temp.repo,
+      "feature/no-conflict-a",
+      { "file-a.txt": "only file a\n" },
+      "add file-a",
+      branchBase,
+    );
+    await commitFiles(
+      temp.repo,
+      "feature/no-conflict-b",
+      { "file-b.txt": "only file b\n" },
+      "add file-b",
+      branchBase,
+    );
+    await git(temp.repo, ["checkout", "main"]);
+
+    const result = await detectConflictsByBranch(
+      temp.repo,
+      "feature/no-conflict-a",
+      "feature/no-conflict-b",
+    );
+
+    expect(result.hasConflicts).toBe(false);
+    expect(result.conflictingFiles).toHaveLength(0);
+  }, 30000);
+
+  it("getCommitCountAhead returns correct ahead count for feature branch", async () => {
+    const baseCommit = await revParse(temp.repo, "main");
+
+    await commitFiles(
+      temp.repo,
+      "feature/ahead-check",
+      { "ahead1.txt": "first commit\n" },
+      "first feature commit",
+      baseCommit,
+    );
+    await git(temp.repo, ["add", "-A"]);
+    await writeRepoFile(temp.repo, "ahead2.txt", "second commit\n");
+    await git(temp.repo, ["add", "-A"]);
+    await git(temp.repo, ["commit", "-m", "second feature commit"]);
+
+    const count = await getCommitCountAhead(temp.repo, "main");
+
+    expect(count).toBe(2);
+  }, 30000);
+
+  it("getCommitCountAhead returns 0 for a branch at the same commit as base", async () => {
+    await git(temp.repo, ["checkout", "main"]);
+
+    const count = await getCommitCountAhead(temp.repo, "main");
+
+    expect(count).toBe(0);
+  }, 30000);
+
+  it("isAncestor correctly identifies ancestor/non-ancestor relationships", async () => {
+    const mainSha = await revParse(temp.repo, "main");
+
+    await commitFiles(
+      temp.repo,
+      "feature/ancestor-check",
+      { "ancestor.txt": "feature file\n" },
+      "feature commit",
+      "main",
+    );
+    const featureSha = await revParse(temp.repo, "HEAD");
+
+    expect(await isAncestor(temp.repo, mainSha, featureSha)).toBe(true);
+    expect(await isAncestor(temp.repo, featureSha, mainSha)).toBe(false);
+    expect(await isAncestor(temp.repo, mainSha, mainSha)).toBe(true);
   }, 30000);
 
   it("syncBranchToHead and ensureOnBranch recover commits made from detached HEAD", async () => {
