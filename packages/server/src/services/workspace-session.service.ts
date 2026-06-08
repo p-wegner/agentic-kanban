@@ -31,6 +31,7 @@ import {
   type TurnResult,
   type GitService,
 } from "./workspace-internals.js";
+import { modelBelongsToProvider } from "@agentic-kanban/shared";
 import { stopBisectSession } from "./bisect.service.js";
 import * as realGitService from "./git.service.js";
 
@@ -103,7 +104,21 @@ export function createWorkspaceSessionService(deps: {
     const truncatedPrompt = prompt.length > 80 ? prompt.slice(0, 80) + "..." : prompt;
     const skipPermissions = typeof body.skipPermissions === "boolean" ? body.skipPermissions : undefined;
 
-    console.log(`[workspace-service] launch: workspaceId=${id} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"} agentArgs=${agentArgs ?? "none"} profile=${claudeProfile ?? "none"} resumeFromId=${body.resumeFromId ?? "none"} resumeWithNewModel=${resumeWithNewModel} skipPermissions=${skipPermissions ?? "default"}`);
+    // Re-read default_model from current preferences on every relaunch so that clearing
+    // or changing the pref takes effect without having to delete and recreate the workspace.
+    // Body-passed model wins; otherwise current pref; cross-provider model ids are dropped
+    // (a leftover codex model id must not be passed to claude.exe, see #696).
+    const bodyModel = typeof body.model === "string" ? body.model.trim() || undefined : undefined;
+    const prefModel = (await getPreference("default_model", database)) ?? undefined;
+    let resolvedModel = (agentProvider === "claude" || agentProvider === "codex")
+      ? (bodyModel ?? prefModel ?? undefined)
+      : undefined;
+    if (resolvedModel && !modelBelongsToProvider(resolvedModel, agentProvider)) {
+      console.warn(`[workspace-session] ignoring model "${resolvedModel}" — not a ${agentProvider} model; using provider default`);
+      resolvedModel = undefined;
+    }
+
+    console.log(`[workspace-service] launch: workspaceId=${id} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"} agentArgs=${agentArgs ?? "none"} profile=${claudeProfile ?? "none"} resumeFromId=${body.resumeFromId ?? "none"} resumeWithNewModel=${resumeWithNewModel} skipPermissions=${skipPermissions ?? "default"} model=${resolvedModel ?? "workspace-default"}`);
 
     // Auto-rebase onto baseBranch on continue (not first launch, not direct workspaces)
     if (!ws0.isDirect && ws0.workingDir) {
@@ -140,6 +155,7 @@ export function createWorkspaceSessionService(deps: {
       workspaceId: id, prompt, agentCommand, agentArgs, resumeFromId, claudeProfile,
       provider: toExecutorProvider(agentProvider), multiTurn: false, permissionPromptTool,
       planMode, resumeWithNewModel, triggerType: "chat", profile: agentProfile, skipPermissions,
+      model: resolvedModel,
     });
 
     await updateWorkspaceStatus(id, "active", {

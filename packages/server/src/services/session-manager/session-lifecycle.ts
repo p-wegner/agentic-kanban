@@ -11,6 +11,7 @@ import { computeWorkspaceCodeMetrics } from "../workspace-code-metrics.service.j
 import { recordAgentProfileLaunchFailure } from "../agent-profile-health.service.js";
 import type { ProviderName } from "../agent-provider.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
+import { modelBelongsToProvider } from "@agentic-kanban/shared";
 import type { SessionManagerOptions, SessionState, StartSessionOptions } from "./types.js";
 import { workspaceLaunchPreflight } from "../preflight-check.js";
 import { WorkspaceError } from "../workspace-internals.js";
@@ -115,7 +116,13 @@ export function createSessionLifecycle(
     const workspace = wsRows[0];
     // Per-call model wins; otherwise inherit the model stored on the workspace so resume/
     // review/follow-up sessions stay on the same model the workspace was created with.
-    const effectiveModel = model ?? workspace.model ?? undefined;
+    // Guard: if workspace.model is a cross-provider id (e.g. gpt-5.5 baked into a claude
+    // workspace), drop it rather than passing an invalid --model flag (#698/#696).
+    const providerName: ProviderName = provider === "claude-code" ? "claude" : (provider ?? "claude") as ProviderName;
+    const workspaceModelSafe = (workspace.model && modelBelongsToProvider(workspace.model, providerName))
+      ? workspace.model
+      : undefined;
+    const effectiveModel = model ?? workspaceModelSafe ?? undefined;
     const effectiveWorkingDir = workingDirOverride ?? workspace.workingDir;
     if (!effectiveWorkingDir) throw new Error("Workspace has no working directory; run setup first");
 
