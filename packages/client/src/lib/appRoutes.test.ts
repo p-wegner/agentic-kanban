@@ -7,6 +7,7 @@ describe("appRoutes", () => {
     expect(getViewRoutePath("butler")).toBe("/butler");
     expect(getViewRoutePath("workflows")).toBe("/workflows");
     expect(getViewRoutePath("agents")).toBe("/agents");
+    expect(getViewRoutePath("fireworks")).toBe("/fireworks");
   });
 
   it("parses direct links for key views", () => {
@@ -15,6 +16,7 @@ describe("appRoutes", () => {
     expect(getAppRouteView("/workflows")).toBe("workflows");
     expect(getAppRouteView("/butler")).toBe("butler");
     expect(getAppRouteView("/quality-metrics?project=abc")).toBe("quality-metrics");
+    expect(getAppRouteView("/fireworks")).toBe("fireworks");
   });
 
   it("supports friendly aliases for workspace-oriented links", () => {

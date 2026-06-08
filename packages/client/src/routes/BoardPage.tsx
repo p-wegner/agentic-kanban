@@ -28,6 +28,7 @@ const RunbooksView = lazy(() => import("../components/RunbooksView.js").then((m)
 const SprintCapacityPlanner = lazy(() => import("../components/SprintCapacityPlanner.js").then((m) => ({ default: m.SprintCapacityPlanner })));
 const ConstellationView = lazy(() => import("../components/ConstellationView.js").then((m) => ({ default: m.ConstellationView })));
 const MomentumView = lazy(() => import("../components/MomentumView.js").then((m) => ({ default: m.MomentumView })));
+const FireworksView = lazy(() => import("../components/FireworksView.js").then((m) => ({ default: m.FireworksView })));
 const StaleWorkDashboard = lazy(() => import("../components/StaleWorkDashboard.js").then((m) => ({ default: m.StaleWorkDashboard })));
 const ThroughputChart = lazy(() => import("../components/ThroughputChart.js").then((m) => ({ default: m.ThroughputChart })));
 const ProviderMixChart = lazy(() => import("../components/ProviderMixChart.js").then((m) => ({ default: m.ProviderMixChart })));
@@ -2027,6 +2028,15 @@ export function BoardPage() {
         {viewMode === "momentum" && (
           <BoardErrorBoundary columnName="Momentum View">
             <MomentumView
+              columns={columns}
+              onIssueClick={handleIssueClick}
+              searchQuery={searchQuery}
+            />
+          </BoardErrorBoundary>
+        )}
+        {viewMode === "fireworks" && (
+          <BoardErrorBoundary columnName="Fireworks View">
+            <FireworksView
               columns={columns}
               onIssueClick={handleIssueClick}
               searchQuery={searchQuery}
