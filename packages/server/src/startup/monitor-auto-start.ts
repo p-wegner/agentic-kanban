@@ -1,4 +1,4 @@
-import { isTerminalStatusIdView } from "@agentic-kanban/shared";
+import { ACTIVE_WORKSPACE_STATUSES, isTerminalStatusIdView } from "@agentic-kanban/shared";
 import { issueDependencies, issues, issueTags, projectStatuses, tags, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { and, eq, sql, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
@@ -9,6 +9,38 @@ import { isMonitorEligibleIssue, monitorEligibleIssueSql } from "./monitor-eligi
 
 /** Issues carrying this tag are an explicit opt-out of monitor auto-start. */
 const SKIP_AUTO_START_TAG = "no-auto-start";
+
+/**
+ * SQL predicate matching workspaces that occupy ACTIVE agent capacity.
+ *
+ * A workspace counts toward WIP only when it is genuinely running an agent
+ * (the canonical ACTIVE_WORKSPACE_STATUSES set). The old `status != 'closed'`
+ * check over-counted launch failures: a provider usage-limit launch lands the
+ * workspace in `blocked`, and a zero-output launch failure lands it in `idle`
+ * — neither has a live agent, yet both held WIP indefinitely, so the board
+ * looked full while nothing was working (#690). Counting only active statuses
+ * frees that capacity for auto-start. This matches the capacity count used by
+ * the sprint-capacity planner.
+ */
+const activeWipPredicate = sql`${workspaces.status} IN (${sql.join([...ACTIVE_WORKSPACE_STATUSES].map((s) => sql`${s}`), sql`, `)})`;
+
+/**
+ * Count distinct In-Progress issues whose workspace is ACTIVELY running an agent
+ * for a single In-Progress status — the real WIP for auto-start decisions.
+ *
+ * Exported + database-injectable so the #690 regression can prove that a
+ * usage-limit `blocked` workspace and a zero-output `idle` launch failure do
+ * NOT inflate the count (they would have under the old `status != 'closed'`).
+ */
+export async function countActiveWip(
+  database: Pick<typeof db, "select">,
+  inProgressStatusId: string,
+): Promise<number> {
+  const rows = await database.select({ count: sql<number>`count(distinct ${issues.id})` }).from(issues)
+    .innerJoin(workspaces, eq(workspaces.issueId, issues.id))
+    .where(sql`${issues.statusId} = ${inProgressStatusId} AND ${activeWipPredicate}`);
+  return Number(rows[0]?.count ?? 0);
+}
 
 async function hasSkipAutoStartTag(issueId: string): Promise<boolean> {
   const rows = await db.select({ id: tags.id }).from(issueTags)
@@ -62,10 +94,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
 
   for (const inProgressSt of inProgressStatuses) {
     const wipLimit = tunablesFor(inProgressSt.projectId).activeAgentsTarget;
-    const activeWipRows = await db.select({ count: sql<number>`count(distinct ${issues.id})` }).from(issues)
-      .innerJoin(workspaces, eq(workspaces.issueId, issues.id))
-      .where(sql`${issues.statusId} = ${inProgressSt.id} AND ${workspaces.status} != 'closed'`);
-    let currentWip = Number(activeWipRows[0]?.count ?? 0);
+    let currentWip = await countActiveWip(db, inProgressSt.id);
     if (currentWip >= wipLimit) continue;
 
     const inProgressIssues = await db.select({ id: issues.id, title: issues.title, description: issues.description, issueType: issues.issueType, issueNumber: issues.issueNumber }).from(issues)
@@ -92,10 +121,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
 
   for (const inProgressSt of inProgressStatuses) {
     const wipLimit = tunablesFor(inProgressSt.projectId).activeAgentsTarget;
-    const inProgressCount = await db.select({ count: sql<number>`count(distinct ${issues.id})` }).from(issues)
-      .innerJoin(workspaces, eq(workspaces.issueId, issues.id))
-      .where(sql`${issues.statusId} = ${inProgressSt.id} AND ${workspaces.status} != 'closed'`);
-    const currentWip = Number(inProgressCount[0]?.count ?? 0);
+    const currentWip = await countActiveWip(db, inProgressSt.id);
     if (currentWip >= wipLimit) continue;
 
     const todoStatus = await db.select({ id: projectStatuses.id }).from(projectStatuses)
