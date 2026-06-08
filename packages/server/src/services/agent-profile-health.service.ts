@@ -8,6 +8,7 @@ import { setPreference } from "../repositories/preferences.repository.js";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { buildAgentLaunchConfig, type ProviderName } from "./agent-provider.js";
 import { parseCodexLicenseRing, codexHomeHasAuth, resolveCodexHomeForProfile } from "./codex-license-ring.js";
+import { parseClaudeSubscriptionRing, claudeConfigDirHasAuth, resolveClaudeConfigDirForProfile } from "./claude-subscription-ring.js";
 
 export type ProfileHealthStatus = "ok" | "warning" | "error" | "unknown";
 
@@ -148,9 +149,18 @@ export function preflightAgentProfile(
   const codexHome = provider === "codex"
     ? resolveCodexHomeForProfile(profileName, parseCodexLicenseRing(prefMap.get("codex_license_ring")))
     : undefined;
+  // Claude OAuth subscription (a CLAUDE_CONFIG_DIR directory, not a settings_<name>.json):
+  // validate the login by checking for .credentials.json, and skip the settings-file check.
+  const claudeConfigDir = provider === "claude"
+    ? resolveClaudeConfigDirForProfile(profileName, parseClaudeSubscriptionRing(prefMap.get("claude_subscription_ring")))
+    : undefined;
   if (codexHome) {
     if (!codexHomeHasAuth(codexHome)) {
       errors.push(`Codex license '${profileName}' not logged in: no auth.json in ${codexHome} (run: $env:CODEX_HOME='${codexHome}'; codex login)`);
+    }
+  } else if (claudeConfigDir) {
+    if (!claudeConfigDirHasAuth(claudeConfigDir)) {
+      errors.push(`Claude subscription '${profileName}' not logged in: no .credentials.json in ${claudeConfigDir} (run: $env:CLAUDE_CONFIG_DIR='${claudeConfigDir}'; claude /login)`);
     }
   } else {
     const configPath = profileConfigPath(provider, profileName);
