@@ -306,7 +306,10 @@ export function ProjectSettings({ activeProjectId, settings, setSettings, projec
                       >
                         <p className="text-xs text-gray-500">
                           Junction-link dependency directories (e.g. node_modules) from the main checkout into new worktrees.
-                          Eliminates the need for pnpm install in each worktree, enabling fast visual checks.
+                          Eliminates the need for pnpm install in each worktree, so tests and builds run in-worktree.
+                          For a pnpm/yarn workspace, listing <code>node_modules</code> also links each <code>packages/*/node_modules</code>
+                          (deps live per-package under a strict linker). If a branch later changes its dependencies, the worktree
+                          is auto-isolated (junctions removed) before install, so it never corrupts the main checkout.
                         </p>
                         <Toggle
                           checked={projectSettings.symlinkEnabled}
@@ -328,6 +331,7 @@ export function ProjectSettings({ activeProjectId, settings, setSettings, projec
                             />
                             <p className="text-xs text-gray-400">
                               JSON array of directory names relative to the repo root. These must exist in the main checkout.
+                              <code>node_modules</code> auto-expands to per-package node_modules in a workspace.
                             </p>
                           </div>
                         )}
