@@ -50,6 +50,10 @@ export async function executeWorkspaceMerge(args: {
 
   await createPreMergeBackup(args.createBackup);
   const preMergeHead = await revParseSafe(repoPath, "HEAD", gitService);
+  // Capture the feature branch tip BEFORE the merge — post-merge cleanup deletes
+  // the branch ref, but this commit stays reachable from the default branch, so
+  // the merged-commits panel can resolve baseCommitSha..mergedHeadSha afterwards.
+  const mergedHeadSha = await revParseSafe(repoPath, workspace.branch, gitService);
   const mergeResult = await mergeBranchOrThrow(args);
   // mergeBranch with deferWorkingTreeSync skips git reset --hard during the request.
   // Extract the pending SHA so post-merge cleanup can apply it after the response is sent.
@@ -58,7 +62,7 @@ export async function executeWorkspaceMerge(args: {
   await verifyPostMergeAncestry(repoPath, workspace.branch, targetBranch, gitService);
 
   const now = new Date().toISOString();
-  await stampMergedAtEarly(id, now, database);
+  await stampMergedAtEarly(id, now, mergedHeadSha || null, database);
   const finalized = await finalizeMergeCleanup({
     database,
     boardEvents,
@@ -154,9 +158,9 @@ async function verifyPostMergeAncestry(
   }
 }
 
-async function stampMergedAtEarly(id: string, now: string, database: Database): Promise<void> {
+async function stampMergedAtEarly(id: string, now: string, mergedHeadSha: string | null, database: Database): Promise<void> {
   try {
-    await database.update(workspaces).set({ mergedAt: now, updatedAt: now }).where(eq(workspaces.id, id));
+    await database.update(workspaces).set({ mergedAt: now, mergedHeadSha, updatedAt: now }).where(eq(workspaces.id, id));
   } catch (err) {
     console.warn("[workspace-merge] early mergedAt stamp failed (non-fatal):", err instanceof Error ? err.message : String(err));
   }
