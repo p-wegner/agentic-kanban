@@ -625,5 +625,12 @@
       "when": 1780906800007,
       "tag": "0088_drop_redundant_session_messages_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "6",
+      "when": 1780906800008,
+      "tag": "0089_workspace_merged_head_sha",
+      "breakpoints": true
     }]
 }

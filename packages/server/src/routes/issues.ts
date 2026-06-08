@@ -19,6 +19,7 @@ import { wrapAiOperation } from "../middleware/ai-operation.js";
 import { runTicketPreflight, formatClarificationsBlock, type PreflightClarification } from "../services/ticket-preflight.service.js";
 import { WorkspaceError } from "../services/workspace-internals.js";
 import { getIssueActivity } from "../services/issue-activity.service.js";
+import { createIssueMergedCommitsService } from "../services/issue-merged-commits.service.js";
 import { getIssueCycleTime } from "../services/cycle-time.service.js";
 import { createWebhookSender } from "../services/outbound-webhook.service.js";
 
@@ -28,6 +29,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
   const issueService = createIssueService({ database, boardEvents: options?.boardEvents, sendWebhook: createWebhookSender(database) });
   const issueCommentsService = createIssueCommentsService({ database, boardEvents: options?.boardEvents });
   const timeEntriesService = createIssueTimeEntriesService({ database });
+  const mergedCommitsService = createIssueMergedCommitsService({ database });
   const showdownService = createShowdownService({
     database,
     getSessionManager: options?.getSessionManager,
@@ -314,6 +316,14 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
   router.get("/:id/activity", async (c) => {
     const issueId = c.req.param("id");
     const result = await getIssueActivity(issueId, database);
+    if (!result) return c.json({ error: "Issue not found" }, 404);
+    return c.json(result);
+  });
+
+  // GET /api/issues/:id/merged-commits — commits that landed on the default branch for this issue
+  router.get("/:id/merged-commits", async (c) => {
+    const issueId = c.req.param("id");
+    const result = await mergedCommitsService.getMergedCommits(issueId);
     if (!result) return c.json({ error: "Issue not found" }, 404);
     return c.json(result);
   });
