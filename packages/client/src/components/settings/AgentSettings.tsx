@@ -2,6 +2,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import { CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, CapabilityMatrixTable, Field, defaultHarnessLabel, formatHealthTime, profileOptionLabel, providerDisplayName, settingsProfileValue, statusClasses, type AgentProfileHealth, type Settings, type SettingsTextSetter } from "../SettingsPanel.shared.js";
 import { CodexLicenseRingEditor } from "./CodexLicenseRingEditor.js";
+import { ClaudeSubscriptionRingEditor } from "./ClaudeSubscriptionRingEditor.js";
 
 type AgentSettingsProps = {
   settings: Settings;
@@ -65,6 +66,7 @@ export function AgentSettings({ settings, set, setSettings, profiles, codexProfi
                       </optgroup>
                     </select>
                   </Field>
+                  <ClaudeSubscriptionRingEditor settings={settings} set={set} />
                   <CodexLicenseRingEditor settings={settings} set={set} />
                   <Field label="Default Model" hint="Default model for new workspaces (passed via --model). Options follow the selected provider (Claude or Codex). Per-workspace selection overrides this. Ignored for Claude profiles with a custom endpoint (e.g. z.ai) and for Copilot.">
                     <select
