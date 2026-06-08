@@ -108,11 +108,19 @@ export class ClaudeProvider implements AgentProvider {
 
     const result: ParsedStreamEvent = {};
 
+    // Subagent (Task/Agent tool) events carry a non-null `parent_tool_use_id`.
+    // A subagent runs in its OWN, separate context window — usually much smaller
+    // than the main agent's — so its `cache_read + input` token count must NOT
+    // overwrite the main session's context-occupancy reading. Otherwise the card's
+    // "cx" indicator gets stuck at the subagent's (lower) number while the real
+    // usage is higher (#719). We still surface subagent tool activity and text.
+    const isSubagentMessage = obj.parent_tool_use_id != null;
+
     if (obj.type === "system" && obj.subtype === "init" && obj.session_id) {
       result.providerSessionId = obj.session_id as string;
     }
 
-    if (obj.type === "result") {
+    if (obj.type === "result" && !isSubagentMessage) {
       const usage = obj.usage as Record<string, unknown> | undefined;
       const rawCost = obj.total_cost_usd ?? obj.cost_usd;
       const agentSummary = typeof obj.result === "string" ? obj.result : undefined;
@@ -141,7 +149,10 @@ export class ClaudeProvider implements AgentProvider {
       const cacheRead = (usage?.cache_read_input_tokens as number) ?? 0;
       const inputTokens = (usage?.input_tokens as number) ?? 0;
       const contextTokens = cacheRead + inputTokens;
-      if (model || contextTokens > 0) {
+      // Only the main agent's context occupancy drives the card's "cx" indicator.
+      // A subagent's assistant message reports its own (separate, smaller) context
+      // and must not clobber it (#719).
+      if (!isSubagentMessage && (model || contextTokens > 0)) {
         result.liveStats = { model, contextTokens };
       }
 
@@ -163,8 +174,10 @@ export class ClaudeProvider implements AgentProvider {
               );
             }
             if (block.name === "Agent") {
+              // Track the spawn, but don't let a (nested) subagent message's own
+              // context tokens leak in through the fallback (#719).
               result.liveStats = {
-                ...(result.liveStats ?? { model, contextTokens }),
+                ...(result.liveStats ?? { model: "", contextTokens: 0 }),
                 subagentDelta: 1,
               };
             }
@@ -183,7 +196,7 @@ export class ClaudeProvider implements AgentProvider {
       }
     }
 
-    if (obj.type === "result" && obj.usage) {
+    if (obj.type === "result" && obj.usage && !isSubagentMessage) {
       const rUsage = obj.usage as Record<string, unknown>;
       const contextTokens = ((rUsage.cache_read_input_tokens as number) ?? 0) + ((rUsage.input_tokens as number) ?? 0);
       if (contextTokens > 0) {
