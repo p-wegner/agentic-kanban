@@ -111,7 +111,7 @@ describe("startup timers are restart-safe for HMR-style reloads", () => {
 
   it("ancestor-branch reconciler stops firing ticks after cleanup", () => {
     const tick = vi.fn();
-    startAncestorBranchReconciler({ checkAncestor: tick as never }, 5_000);
+    startAncestorBranchReconciler({ onTick: tick }, 5_000);
     stopAncestorBranchReconciler();
 
     vi.advanceTimersByTime(60_000);
@@ -121,7 +121,7 @@ describe("startup timers are restart-safe for HMR-style reloads", () => {
 
   it("done-unmerged scanner stops firing ticks after cleanup", () => {
     const tick = vi.fn();
-    startDoneUnmergedScanner({ checkAncestor: tick as never }, 5_000);
+    startDoneUnmergedScanner({ onTick: tick }, 5_000);
     stopDoneUnmergedScanner();
 
     vi.advanceTimersByTime(60_000);

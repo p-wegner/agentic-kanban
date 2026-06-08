@@ -51,6 +51,12 @@ export interface DoneUnmergedScannerDeps {
    * not recoverable silent-merge-loss.
    */
   maxCommitsBehindBase?: number;
+  /**
+   * Override the timer callback for testing. When provided, replaces the default tick
+   * (which calls scanDoneUnmergedWorkspaces) so tests can verify the interval stops
+   * firing without needing a real DB or git setup.
+   */
+  onTick?: () => void;
 }
 
 export interface DoneUnmergedFinding {
@@ -352,11 +358,11 @@ export function startDoneUnmergedScanner(
   // Clear any prior handles from a previous hot-reload cycle.
   stopDoneUnmergedScanner();
 
-  const tick = () => {
+  const tick = deps.onTick ?? (() => {
     scanDoneUnmergedWorkspaces(deps).catch((err) =>
       console.warn("[done-unmerged-scanner] periodic tick error:", err instanceof Error ? err.message : err),
     );
-  };
+  });
   const timer = setTimeout(tick, 40_000);
   const interval = setInterval(tick, intervalMs);
   (timer as NodeJS.Timeout).unref?.();
