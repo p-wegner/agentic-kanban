@@ -32,6 +32,36 @@ export const CODEX_MODEL_OPTIONS: ReadonlyArray<{ value: string; label: string }
   { value: "gpt-5.2", label: "GPT-5.2" },
 ];
 
+/**
+ * Decide whether a stored `default_model` id belongs to the given provider's model
+ * family. The `default_model` preference is a single, provider-agnostic value, so a
+ * leftover Codex id (e.g. `gpt-5.5`) can survive a switch to Claude and then get passed
+ * as `--model gpt-5.5` to `claude.exe`, which dies in ~5s with an invalid-model error.
+ * Callers use this to drop a mismatched model rather than launch a doomed agent.
+ *
+ * Claude model ids are the short tier names (`opus`/`sonnet`/`haiku`, plus dated/explicit
+ * `claude-*` ids); Codex ids are the `gpt-*` family. Empty/unknown ids return `true` so we
+ * never strip a value we don't recognize (e.g. a custom profile model).
+ */
+export function modelBelongsToProvider(
+  model: string | undefined | null,
+  provider: "claude" | "codex" | "copilot",
+): boolean {
+  const id = (model ?? "").trim().toLowerCase();
+  if (!id) return true;
+  const isCodexModel = id.startsWith("gpt-") || id.startsWith("o1") || id.startsWith("o3") || id.startsWith("o4");
+  const isClaudeModel = id === "opus" || id === "sonnet" || id === "haiku" || id.startsWith("claude-");
+  if (provider === "claude") {
+    // Reject anything that clearly belongs to Codex; otherwise allow (unknown/custom ids pass through).
+    return !isCodexModel;
+  }
+  if (provider === "codex") {
+    return !isClaudeModel;
+  }
+  // copilot has no model flag; nothing to validate.
+  return true;
+}
+
 export interface CreateProjectRequest {
   name?: string;
   repoPath: string;
