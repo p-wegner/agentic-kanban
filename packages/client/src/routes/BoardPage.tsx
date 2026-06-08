@@ -249,6 +249,7 @@ export function BoardPage() {
   const [columns, setColumns] = useState<StatusWithIssues[]>([]);
   const columnsRef = useRef<StatusWithIssues[]>([]);
   const [loading, setLoading] = useState(true);
+  const [switchingProject, setSwitchingProject] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const notifications = useActivityNotifications(activeProjectId);
@@ -699,6 +700,11 @@ export function BoardPage() {
 
   async function handleProjectChange(id: string) {
     setActiveProjectId(id);
+    setColumns([]);
+    columnsRef.current = [];
+    setSelectedIssue(null);
+    setWorkspaceIssue(null);
+    setSwitchingProject(true);
     try {
       await apiFetch("/api/preferences/active-project", {
         method: "PUT",
@@ -707,6 +713,8 @@ export function BoardPage() {
       await refetchBoard(id);
     } catch {
       showToast("Failed to switch project", "error");
+    } finally {
+      setSwitchingProject(false);
     }
   }
 
@@ -1786,6 +1794,7 @@ export function BoardPage() {
             onClearSelection={bulk.clearSelection}
           />
         )}
+        {switchingProject ? <SkeletonBoard /> : <>
         {/* All non-kanban views are lazy-loaded; one Suspense boundary covers the whole
             switch since exactly one view renders at a time. The kanban board itself is
             eager and lives outside this boundary, so it never shows the fallback. */}
@@ -2128,6 +2137,7 @@ export function BoardPage() {
             agingHotDays={prefs.agingHotDays}
           />
         )}
+        </>}
       </div>
       {selectedIssue && (
         // Error boundary so a render throw inside the panel can't unmount the
