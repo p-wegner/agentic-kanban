@@ -302,6 +302,53 @@ describe("ClaudeProvider", () => {
       expect(evt?.liveStats?.contextTokens).toBe(1500);
     });
 
+    it("ignores context tokens from a subagent assistant message (#719)", () => {
+      // A subagent (Task/Agent tool) message carries a non-null parent_tool_use_id
+      // and runs in its own separate context — it must not overwrite the main
+      // agent's context-occupancy reading shown as "cx" on the board card.
+      const evt = provider.parseStreamEvent(
+        JSON.stringify({
+          type: "assistant",
+          parent_tool_use_id: "tu-agent-1",
+          message: {
+            model: "claude-sonnet-4-6",
+            usage: { input_tokens: 100, cache_read_input_tokens: 200 },
+          },
+        })
+      );
+      expect(evt?.liveStats).toBeUndefined();
+    });
+
+    it("ignores context tokens from a subagent result event (#719)", () => {
+      const evt = provider.parseStreamEvent(
+        JSON.stringify({
+          type: "result",
+          subtype: "success",
+          parent_tool_use_id: "tu-agent-1",
+          usage: { input_tokens: 200, cache_read_input_tokens: 300 },
+        })
+      );
+      expect(evt?.liveStats).toBeUndefined();
+      expect(evt?.stats).toBeUndefined();
+    });
+
+    it("still extracts the Agent tool_use without leaking subagent context (#719)", () => {
+      const evt = provider.parseStreamEvent(
+        JSON.stringify({
+          type: "assistant",
+          parent_tool_use_id: "tu-outer",
+          message: {
+            usage: { input_tokens: 100, cache_read_input_tokens: 50 },
+            content: [
+              { type: "tool_use", name: "Agent", id: "tu-nested", input: { prompt: "Do stuff" } },
+            ],
+          },
+        })
+      );
+      expect(evt?.liveStats?.subagentDelta).toBe(1);
+      expect(evt?.liveStats?.contextTokens).toBe(0);
+    });
+
     it("extracts toolActivity from tool_use block", () => {
       const evt = provider.parseStreamEvent(
         JSON.stringify({
