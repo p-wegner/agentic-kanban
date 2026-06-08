@@ -242,7 +242,7 @@ describe("runBacklogEmptyStrategy — generation", () => {
     try {
       const { projectId, statusIds } = await seedMonitorProject(realDb);
       await insertMonitorIssue(realDb, { projectId, statusId: statusIds.Todo, issueNumber: 1, title: "Feature: add dashboard", issueType: "feature" });
-      await insertMonitorIssue(realDb, { projectId, statusId: statusIds.Todo, issueNumber: 2, title: "Enhancement: new board filters" });
+      await insertMonitorIssue(realDb, { projectId, statusId: statusIds.Todo, issueNumber: 2, title: "new board filters", issueType: "enhancement" });
       await insertMonitorIssue(realDb, { projectId, statusId: statusIds.Todo, issueNumber: 3, title: "Feature: workspace presets", issueType: "feature" });
       await insertMonitorIssue(realDb, { projectId, statusId: statusIds.Todo, issueNumber: 4, title: "bug: fix monitor crash", issueType: "bug" });
       await insertMonitorIssue(realDb, { projectId, statusId: statusIds.Todo, issueNumber: 5, title: "quality: cover startup monitor" });

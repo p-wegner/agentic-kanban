@@ -141,7 +141,7 @@ describe("runAutoStart Backlog promotion for auto-driven projects", () => {
       .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]) as ReturnType<typeof db.select>) // todoStatus
       .mockReturnValueOnce(makeSelectChain([
         { id: "feature-1", title: "Feature: command center", description: "", issueType: "feature", projectId: "proj-1", issueNumber: 8 },
-        { id: "enhancement-1", title: "Enhancement: card polish", description: "", issueType: "task", projectId: "proj-1", issueNumber: 9 },
+        { id: "enhancement-1", title: "card polish", description: "", issueType: "enhancement", projectId: "proj-1", issueNumber: 9 },
         { id: "bug-1", title: "bug: restore monitor capacity", description: "", issueType: "bug", projectId: "proj-1", issueNumber: 10 },
       ]) as ReturnType<typeof db.select>) // todoIssues
       .mockReturnValueOnce(makeSelectChain([{ id: "done-1" }]) as ReturnType<typeof db.select>) // doneStatuses
