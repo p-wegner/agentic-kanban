@@ -29,6 +29,11 @@ const mockFinalizeMergeCleanup = vi.fn(async () => ({
   issueTransitioned: true,
   broadcasted: false,
 }));
+const mockReconcileMergedIssue = vi.fn(async () => ({
+  projectId: "project-id",
+  issueTransitioned: true,
+  targetStatusId: "done-status-id",
+}));
 const mockLogBoardHealthEvent = vi.fn(async () => "event-id");
 
 vi.mock("../repositories/workspace.repository.js", () => ({
@@ -38,6 +43,7 @@ vi.mock("../repositories/workspace.repository.js", () => ({
 
 vi.mock("../services/merge-cleanup.service.js", () => ({
   finalizeMergeCleanup: (...args: unknown[]) => mockFinalizeMergeCleanup(...args),
+  reconcileMergedIssue: (...args: unknown[]) => mockReconcileMergedIssue(...args),
 }));
 
 vi.mock("../repositories/board-health-events.repository.js", () => ({
@@ -94,6 +100,29 @@ describe("reconcileSilentlyMergedWorkspaces", () => {
       projectId: "proj-1",
     });
     expect(input.closedAt).toBeTruthy();
+  });
+
+  it("converges the issue to Done via the shared reconcileMergedIssue helper (both-paths contract)", async () => {
+    const mergedAt = new Date(Date.now() - 60_000).toISOString();
+    const database = makeDb([
+      {
+        id: "ws-1",
+        issueId: "issue-1",
+        mergedAt,
+        closedAt: null,
+        branch: "feature/ak-99-test",
+        isDirect: false,
+        repoPath: "/tmp/repo",
+        issueNumber: 99,
+        projectId: "proj-1",
+      },
+    ]);
+
+    await reconcileSilentlyMergedWorkspaces(database);
+
+    expect(mockReconcileMergedIssue).toHaveBeenCalledTimes(1);
+    const [issueInput] = mockReconcileMergedIssue.mock.calls[0];
+    expect(issueInput).toMatchObject({ issueId: "issue-1", projectId: "proj-1" });
   });
 
   it("emits a board health action event for each reconciled workspace", async () => {
