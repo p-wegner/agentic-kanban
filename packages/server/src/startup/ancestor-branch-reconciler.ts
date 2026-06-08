@@ -22,6 +22,12 @@ export interface AncestorBranchReconcilerDeps {
    * so a source-level or pref-level disable takes effect on the next tick with no restart.
    */
   enabled?: boolean;
+  /**
+   * Override the timer callback for testing. When provided, replaces the default tick
+   * (which calls reconcileAncestorBranchWorkspaces) so tests can verify the interval
+   * stops firing without needing a real DB or git setup.
+   */
+  onTick?: () => void;
 }
 
 /**
@@ -210,11 +216,11 @@ export function startAncestorBranchReconciler(
 ): { timer: NodeJS.Timeout; interval: NodeJS.Timeout } {
   stopAncestorBranchReconciler();
 
-  const tick = () => {
+  const tick = deps.onTick ?? (() => {
     reconcileAncestorBranchWorkspaces(deps).catch((err) =>
       console.warn("[ancestor-reconciler] periodic tick error:", err instanceof Error ? err.message : err),
     );
-  };
+  });
   const timer = setTimeout(tick, 35_000);
   const interval = setInterval(tick, intervalMs);
   activeAncestorTimeout = timer;
