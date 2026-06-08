@@ -10,6 +10,7 @@ import {
 } from "@agentic-kanban/shared/schema";
 import { isResolvedDependencyStatusView } from "@agentic-kanban/shared/lib/status-view";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
+import { modelBelongsToProvider } from "@agentic-kanban/shared";
 import { branchHash, BASE_SERVER_PORT, BASE_CLIENT_PORT } from "./worktree-ports.js";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
@@ -519,9 +520,19 @@ export function createWorkspaceCrudService(deps: {
     // Both Claude and Codex honor the `default_model` preference (overridable per
     // workspace via input.model). Codex passes it through as `--model`. Copilot has
     // no model flag, so it stays undefined.
-    const model = (provider === "claude" || provider === "codex")
+    //
+    // `default_model` is a single, provider-agnostic preference, so a leftover model id
+    // from the other provider (e.g. a Codex `gpt-5.5` surviving a switch to Claude) would
+    // otherwise be passed as `--model gpt-5.5` to claude.exe — which exits in ~5s with an
+    // invalid-model error and silently fails every launch (#696). Drop a model id that
+    // doesn't belong to the active provider's family rather than launch a doomed agent.
+    let model = (provider === "claude" || provider === "codex")
       ? ((requestedModel || prefMap.get("default_model")) || undefined)
       : undefined;
+    if (model && !modelBelongsToProvider(model, provider)) {
+      console.warn(`[workspaces] ignoring default_model "${model}" — not a ${provider} model; using provider default`);
+      model = undefined;
+    }
 
     return {
       agentCommand,
