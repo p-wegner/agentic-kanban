@@ -25,6 +25,8 @@ export interface Settings {
   copilot_profile?: string;
   codex_license_ring?: string;
   codex_license_rotation?: string;
+  claude_subscription_ring?: string;
+  claude_subscription_rotation?: string;
   provider?: string;
   default_model?: string;
   permission_prompt_tool?: string;
@@ -80,6 +82,8 @@ export const DEFAULT_SETTINGS: Settings = {
   copilot_profile: "",
   codex_license_ring: "",
   codex_license_rotation: "true",
+  claude_subscription_ring: "",
+  claude_subscription_rotation: "true",
   provider: "claude",
   default_model: "",
   permission_prompt_tool: "false",
