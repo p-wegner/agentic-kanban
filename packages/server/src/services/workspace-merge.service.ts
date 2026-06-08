@@ -295,6 +295,7 @@ export function createWorkspaceMergeService(deps: {
       teardownScript: project?.teardownScript ?? null,
       setupEnabled: project?.setupEnabled ?? true,
       isDirect: workspace.isDirect,
+      pendingWorkingTreeSyncSha: postMergeContext.pendingWorkingTreeSyncSha,
     };
     setImmediate(() => {
       void runWorkspacePostMergeCleanup(postMergeArgs, { database, gitService, killProcesses, getSessionManager, boardEvents });
