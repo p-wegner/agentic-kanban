@@ -7,6 +7,7 @@ import { IssueWorkLogBadge } from "./IssueWorkLogBadge.js";
 import { showToast } from "./Toast.js";
 import { formatRelativeTime, formatAbsoluteTime } from "../lib/formatRelativeTime.js";
 import type { CardDensity } from "../hooks/useBoardPreferences.js";
+import { useIssueDisplayData } from "../hooks/useIssueDisplayData.js";
 import { PRIORITY_META } from "../lib/chartColors.js";
 
 export interface ProjectTag {
@@ -119,29 +120,6 @@ function WorkflowMiniIndicator({ workflow }: { workflow: WorkflowSnapshot }) {
       )}
     </span>
   );
-}
-
-const issueTypeColors: Record<string, string> = {
-  task: "bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-200",
-  bug: "bg-red-100 dark:bg-red-900/50 text-red-800 dark:text-red-200",
-  feature: "bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300",
-  chore: "bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-200",
-};
-
-const DEFAULT_ISSUE_TYPE = "task";
-const DEFAULT_ISSUE_TYPE_CLASS = "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300";
-
-export interface IssueDisplayData {
-  issueType: string;
-  issueTypeClassName: string;
-}
-
-export function useIssueDisplayData(issue: IssueWithStatus): IssueDisplayData {
-  const issueType = issue.issueType ?? DEFAULT_ISSUE_TYPE;
-  return {
-    issueType,
-    issueTypeClassName: issueTypeColors[issueType] ?? DEFAULT_ISSUE_TYPE_CLASS,
-  };
 }
 
 function CodeMetricsBadges({
