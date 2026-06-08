@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import type { IssueArtifact, IssueWithStatus, UpdateIssueRequest, DependencyInfo, MilestoneResponse } from "@agentic-kanban/shared";
+import type { IssueArtifact, IssueWithStatus, UpdateIssueRequest, DependencyInfo, MilestoneResponse, MergedCommit, MergedCommitsResponse } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { isHttpUrl } from "../lib/url.js";
 import { formatRelativeTime, formatAbsoluteTime } from "../lib/formatRelativeTime.js";
@@ -349,6 +349,73 @@ export function IssueArtifactsSection({
   );
 }
 
+interface IssueMergedCommitsSectionProps {
+  loading: boolean;
+  data: MergedCommitsResponse | null;
+  /** Open the workspace panel (where the diff is viewable) for a merged commit. */
+  onOpenDiff: (commit: MergedCommit) => void;
+}
+
+export function IssueMergedCommitsSection({ loading, data, onOpenDiff }: IssueMergedCommitsSectionProps) {
+  // Hide entirely until we know there's something to show or are still loading —
+  // an un-merged issue shouldn't add a noisy empty panel to every detail view.
+  if (!loading && (!data || !data.merged)) return null;
+
+  return (
+    <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
+          Merged commits
+        </label>
+        {!loading && data && data.commits.length > 0 && (
+          <span className="text-[11px] text-gray-400 dark:text-gray-500">
+            {data.commits.length}
+            {data.defaultBranch ? ` on ${data.defaultBranch}` : ""}
+          </span>
+        )}
+      </div>
+      {loading ? (
+        <p className="text-xs text-gray-400 dark:text-gray-500">Loading merged commits...</p>
+      ) : !data || data.commits.length === 0 ? (
+        <p className="text-xs text-gray-400 dark:text-gray-500">
+          Merged, but no distinct commits were found for this issue.
+        </p>
+      ) : (
+        <ul className="space-y-1.5">
+          {data.commits.map((commit) => (
+            <li
+              key={commit.sha}
+              className="border border-gray-200 dark:border-gray-700 rounded px-2.5 py-2 bg-gray-50 dark:bg-gray-800/50"
+            >
+              <div className="flex items-center gap-2 text-[11px]">
+                <code className="font-mono px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                  {commit.shortSha}
+                </code>
+                <span className="text-gray-500 dark:text-gray-400 truncate">{commit.author}</span>
+                <span className="text-gray-400 dark:text-gray-500 ml-auto whitespace-nowrap">
+                  {formatRelativeTime(commit.date)}
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-gray-700 dark:text-gray-300 break-words">
+                {commit.message}
+              </p>
+              <div className="mt-1.5 text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => onOpenDiff(commit)}
+                  className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                >
+                  View diff
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 interface IssueDetailPanelProps {
   issue: IssueWithStatus;
   statuses: StatusOption[];
@@ -538,6 +605,8 @@ export function IssueDetailPanel({
   const [deletingArtifactId, setDeletingArtifactId] = useState<string | null>(null);
   const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
   const [activityLoading, setActivityLoading] = useState(true);
+  const [mergedCommits, setMergedCommits] = useState<MergedCommitsResponse | null>(null);
+  const [mergedCommitsLoading, setMergedCommitsLoading] = useState(true);
   const [checklist, setChecklist] = useState<{ id: string; text: string; completed: boolean }[]>(issue.checklist ?? []);
   const [newChecklistItem, setNewChecklistItem] = useState("");
   const [savingChecklist, setSavingChecklist] = useState(false);
@@ -625,7 +694,19 @@ export function IssueDetailPanel({
       } finally {
         setRelatedIssuesLoading(false);
       }
+      // Load merged commits that landed on the default branch (non-blocking, best-effort)
+      setMergedCommitsLoading(true);
+      try {
+        const mc = await apiFetch<MergedCommitsResponse>(`/api/issues/${issue.id}/merged-commits`);
+        setMergedCommits(mc);
+      } catch {
+        setMergedCommits(null);
+      } finally {
+        setMergedCommitsLoading(false);
+      }
     }
+    setMergedCommits(null);
+    setMergedCommitsLoading(true);
     loadData();
   }, [issue.id]);
 
@@ -2585,6 +2666,15 @@ export function IssueDetailPanel({
           {/* Activity feed */}
           {!editing && (
             <IssueActivitySection events={activityEvents} loading={activityLoading} />
+          )}
+
+          {/* Merged commits that landed on the default branch for this issue */}
+          {!editing && (
+            <IssueMergedCommitsSection
+              loading={mergedCommitsLoading}
+              data={mergedCommits}
+              onOpenDiff={(commit) => onManageWorkspaces(issue, commit.workspaceId)}
+            />
           )}
 
           {/* Workspace Files section — browses the latest workspace's working directory */}
