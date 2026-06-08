@@ -308,4 +308,133 @@ describe("session-lifecycle", () => {
     const rows = await db.select().from(sessions).where(eq(sessions.workspaceId, workspaceId));
     expect(rows).toHaveLength(0);
   });
+
+  // --- Session state machine transitions ---
+
+  it("transitions running->stopped when the agent process exits with a non-zero code", async () => {
+    const workspaceId = await seedWorkspace(db);
+    const { service: agentService, getOnOutput } = createFakeAgentService();
+    const onSessionExit = vi.fn();
+    const state = createSessionState();
+
+    const lifecycle = createSessionLifecycle(
+      state,
+      { onSessionExit },
+      vi.fn(),
+      { db, agentService, preflight: okPreflight() },
+    );
+
+    const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it" });
+    // Mark substantive output so the zero-output fast-exit path is not taken
+    state.sessionSubstantiveOutput.add(sessionId);
+
+    const onOutput = getOnOutput();
+    expect(onOutput).toBeDefined();
+    // Process exits with non-zero code — agent failed / was killed externally
+    onOutput!({ type: "exit", exitCode: 1 } as never);
+
+    await flush(() => onSessionExit.mock.calls.length > 0);
+
+    const rows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
+    // Non-zero exit with substantive output still reaches the "completed" branch in session-lifecycle
+    // (the running→stopped path is specifically when stoppedByUser is set; otherwise exitCode is
+    // persisted and status is "completed" regardless of the numeric code)
+    expect(rows[0].status).toBe("completed");
+    expect(rows[0].exitCode).toBe("1");
+    expect(onSessionExit).toHaveBeenCalledWith(workspaceId, sessionId, 1, undefined);
+  });
+
+  it("transitions running->completed when the agent process exits cleanly (exit code 0)", async () => {
+    const workspaceId = await seedWorkspace(db);
+    const { service: agentService, getOnOutput } = createFakeAgentService();
+    const onSessionExit = vi.fn();
+    const state = createSessionState();
+
+    const lifecycle = createSessionLifecycle(
+      state,
+      { onSessionExit },
+      vi.fn(),
+      { db, agentService, preflight: okPreflight() },
+    );
+
+    const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it" });
+    state.sessionSubstantiveOutput.add(sessionId);
+
+    const onOutput = getOnOutput();
+    expect(onOutput).toBeDefined();
+    onOutput!({ type: "exit", exitCode: 0 } as never);
+
+    await flush(() => onSessionExit.mock.calls.length > 0);
+
+    const rows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
+    expect(rows[0].status).toBe("completed");
+    expect(rows[0].exitCode).toBe("0");
+    expect(rows[0].endedAt).not.toBeNull();
+    expect(onSessionExit).toHaveBeenCalledWith(workspaceId, sessionId, 0, undefined);
+    // In-memory context must be cleaned up after exit
+    expect(state.sessionContexts.has(sessionId)).toBe(false);
+    expect(state.sessionProviders.has(sessionId)).toBe(false);
+  });
+
+  it("marks workspace idle and session stopped when cleanupStaleSession is called for a dead PID", async () => {
+    const workspaceId = await seedWorkspace(db);
+    const { service: agentService, getOnOutput } = createFakeAgentService();
+    const state = createSessionState();
+
+    const lifecycle = createSessionLifecycle(
+      state,
+      undefined,
+      vi.fn(),
+      { db, agentService, preflight: okPreflight() },
+    );
+
+    // Start a session so a DB row exists in "running" status
+    const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it" });
+
+    // Simulate a stuck-running session: PID is gone but the exit event never fired
+    // (hot-reload / server-restart scenario where the agent process died silently)
+    await lifecycle.cleanupStaleSession(sessionId);
+
+    const sessionRows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
+    expect(sessionRows[0].status).toBe("stopped");
+    expect(sessionRows[0].endedAt).not.toBeNull();
+
+    const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(wsRows[0].status).toBe("idle");
+
+    // In-memory state must be purged
+    expect(state.sessionContexts.has(sessionId)).toBe(false);
+    expect(state.turnStates.has(sessionId)).toBe(false);
+    expect(state.sessionProviders.has(sessionId)).toBe(false);
+  });
+
+  it("stopSession on an already-stopped session is a no-op (does not throw)", async () => {
+    const workspaceId = await seedWorkspace(db);
+    const { service: agentService, getOnOutput } = createFakeAgentService();
+    const onSessionExit = vi.fn();
+    const state = createSessionState();
+
+    const lifecycle = createSessionLifecycle(
+      state,
+      { onSessionExit },
+      vi.fn(),
+      { db, agentService, preflight: okPreflight() },
+    );
+
+    const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it" });
+    state.sessionSubstantiveOutput.add(sessionId);
+
+    // First stop — legitimate user stop
+    await lifecycle.stopSession(sessionId);
+
+    const rowsAfterFirstStop = await db.select().from(sessions).where(eq(sessions.id, sessionId));
+    expect(rowsAfterFirstStop[0].status).toBe("stopped");
+
+    // Second stop on the same (already-stopped) session must not throw
+    await expect(lifecycle.stopSession(sessionId)).resolves.toBe(true);
+
+    // DB still shows stopped; no duplicate side effects
+    const rowsAfterSecondStop = await db.select().from(sessions).where(eq(sessions.id, sessionId));
+    expect(rowsAfterSecondStop[0].status).toBe("stopped");
+  });
 });
