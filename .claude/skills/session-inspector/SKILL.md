@@ -33,6 +33,20 @@ node scripts/analyze-codex-session.mjs   --latest
 node scripts/analyze-copilot-session.mjs --latest
 ```
 
+## Token sinks — "what burned the most tokens in the last N days"
+
+For aggregate token/cost questions across MANY sessions, **don't loop the per-session analyzers** and don't hand-roll a `find -mtime` scan (it stalls over the ~4700-file `~/.claude/projects` tree). Use `token-sinks.mjs` — it stat-filters by mtime FIRST, parses only the in-window files, sums per-turn usage, and ranks by estimated USD cost (cache-read priced at ~0.1x, cache-write ~1.25x, so the cost ranking is the *true* sink ranking — raw token counts are ~90% cheap cache-read).
+
+```powershell
+node scripts/token-sinks.mjs                  # last 7d, by session, ranked by cost
+node scripts/token-sinks.mjs --by project     # group by cwd/project  (also: day | model | provider | session)
+node scripts/token-sinks.mjs --days 14 --top 30
+node scripts/token-sinks.mjs --provider claude --sort tokens   # claude | codex | all ; cost | tokens | output
+node scripts/token-sinks.mjs --json           # machine-readable {totals, rows}
+```
+
+Covers Claude (per-assistant-turn `usage`) + Codex (cumulative `token_count`). Caveats: Codex tokens are counted but **not costed** (different provider/pricing → shows $0.00); non-Anthropic models routed through Claude Code (e.g. `glm-5.1`) fall back to **opus pricing**, so their cost is an over-estimate — use `--by model` to spot these. Pricing constants live at the top of the script; refresh from the `claude-api` skill if they drift.
+
 ## Directory naming convention
 
 Each working directory maps to a session dir by replacing path separators with `--`:
