@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { ACTIVE_WORKSPACE_STATUSES } from "@agentic-kanban/shared";
 import { issues, projectStatuses, workspaces } from "@agentic-kanban/shared/schema";
 import { eq, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
@@ -174,9 +175,13 @@ export async function runBacklogEmptyStrategy(
     if (backlogCount >= backlogFloor) continue; // backlog still above the floor for this project
 
     // Respect the WIP limit — don't generate work on an already-busy board.
+    // Count only workspaces actively running an agent (ACTIVE_WORKSPACE_STATUSES);
+    // a `blocked` usage-limit launch or an `idle` zero-output launch failure must
+    // NOT hold WIP, or the board looks busy while nothing is working (#690).
+    const activeStatusList = sql.join([...ACTIVE_WORKSPACE_STATUSES].map((s) => sql`${s}`), sql`, `);
     const wipRows = await database.select({ count: sql<number>`count(distinct ${issues.id})` }).from(issues)
       .innerJoin(workspaces, eq(workspaces.issueId, issues.id))
-      .where(sql`${issues.statusId} = ${inProgressSt.id} AND ${workspaces.status} != 'closed'`);
+      .where(sql`${issues.statusId} = ${inProgressSt.id} AND ${workspaces.status} IN (${activeStatusList})`);
     if (Number(wipRows[0]?.count ?? 0) >= wipLimit) continue;
 
     // Create a synthetic host issue to carry the generation workspace. It is placed
