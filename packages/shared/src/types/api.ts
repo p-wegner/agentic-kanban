@@ -617,6 +617,30 @@ export interface CreateDiffCommentRequest {
   body: string;
 }
 
+/** One commit that landed on the default branch for an issue's merged workspace. */
+export interface MergedCommit {
+  sha: string;
+  shortSha: string;
+  message: string;
+  author: string;
+  /** Author date, ISO-8601. */
+  date: string;
+  /** The workspace branch this commit landed via. */
+  branch: string;
+  /** The merged workspace's id (for the diff link). */
+  workspaceId: string;
+}
+
+/** Response for GET /api/issues/:id/merged-commits. */
+export interface MergedCommitsResponse {
+  /** True once at least one of the issue's workspaces has been merged. */
+  merged: boolean;
+  /** The default (base) branch the commits landed on. */
+  defaultBranch: string | null;
+  /** Commits across all merged workspaces for the issue, newest first. */
+  commits: MergedCommit[];
+}
+
 export interface AgentOutputMessage {
   type: "stdout" | "stderr" | "exit" | "bisect";
   sessionId: string;

@@ -1367,6 +1367,60 @@ export async function getCommitSummariesBetween(
   }
 }
 
+/** A single commit's metadata as surfaced for a merged issue. */
+export interface CommitInfo {
+  /** Full 40-char SHA. */
+  sha: string;
+  /** Abbreviated (short) SHA. */
+  shortSha: string;
+  /** Commit subject line. */
+  message: string;
+  /** Author name. */
+  author: string;
+  /** Author date as an ISO-8601 string. */
+  date: string;
+}
+
+/**
+ * List the commits a branch contributed relative to `baseRef`, newest first.
+ *
+ * Resolves to the commits reachable from `branch` but NOT from `baseRef`
+ * (`git log baseRef..branch`), excluding merge commits — i.e. the actual work
+ * that landed for a merged workspace. `baseRef` is typically the workspace's
+ * recorded `baseCommitSha` (the commit the branch was cut from); using that
+ * exact point gives the precise set of commits this branch introduced, even
+ * after the branch has been merged into the default branch.
+ *
+ * Returns [] when the refs cannot be resolved (deleted branch, unknown SHA) so
+ * callers can treat "no commits" and "branch gone" uniformly.
+ */
+export async function getCommitsForBranch(
+  repoPath: string,
+  baseRef: string,
+  branch: string,
+): Promise<CommitInfo[]> {
+  try {
+    // %H full sha, %h short sha, %an author, %aI author ISO date, %s subject.
+    // Unit-separator (\x1f) between fields, record-separator (\x1e) between commits —
+    // both safe against tabs/newlines in commit messages.
+    const output = await execGit(
+      ["log", "--no-merges", "--format=%H%x1f%h%x1f%an%x1f%aI%x1f%s%x1e", `${baseRef}..${branch}`],
+      repoPath,
+    );
+    return output
+      .split("\x1e")
+      .map((rec) => rec.replace(/^\s+/, ""))
+      .filter(Boolean)
+      .map((rec) => {
+        const [sha = "", shortSha = "", author = "", date = "", message = ""] = rec.split("\x1f");
+        return { sha, shortSha, author, date, message };
+      })
+      .filter((c) => c.sha);
+  } catch {
+    return [];
+  }
+}
+
 /** Stage and commit specific paths in repoPath. Returns true when a commit was created. */
 export async function commitPaths(
   repoPath: string,
