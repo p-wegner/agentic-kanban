@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { isValidDirName, parseSymlinkDirs } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  isValidDirName,
+  parseSymlinkDirs,
+  discoverWorkspaceNodeModules,
+} from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
 
 describe("isValidDirName", () => {
   it("accepts normal directory names", () => {
@@ -57,5 +64,43 @@ describe("parseSymlinkDirs", () => {
     expect(parseSymlinkDirs('"node_modules"')).toEqual([]);
     expect(parseSymlinkDirs("42")).toEqual([]);
     expect(parseSymlinkDirs("{}")).toEqual([]);
+  });
+});
+
+describe("discoverWorkspaceNodeModules", () => {
+  function makeWorkspace(opts: { workspaceYaml?: string; pkgs?: string[]; withNodeModules?: string[] }): string {
+    const root = mkdtempSync(join(tmpdir(), "ws-"));
+    if (opts.workspaceYaml !== undefined) writeFileSync(join(root, "pnpm-workspace.yaml"), opts.workspaceYaml);
+    for (const p of opts.pkgs ?? []) mkdirSync(join(root, p), { recursive: true });
+    for (const p of opts.withNodeModules ?? []) mkdirSync(join(root, p, "node_modules"), { recursive: true });
+    return root;
+  }
+
+  it("returns [] when there is no pnpm-workspace.yaml", () => {
+    const root = makeWorkspace({ pkgs: ["packages/server"], withNodeModules: ["packages/server"] });
+    expect(discoverWorkspaceNodeModules(root)).toEqual([]);
+  });
+
+  it("expands a packages/* glob to each package's node_modules that exists", () => {
+    const root = makeWorkspace({
+      workspaceYaml: 'packages:\n  - "packages/*"\n',
+      pkgs: ["packages/server", "packages/shared", "packages/no-deps"],
+      withNodeModules: ["packages/server", "packages/shared"], // no-deps has none
+    });
+    const got = discoverWorkspaceNodeModules(root).sort();
+    expect(got).toEqual(["packages/server/node_modules", "packages/shared/node_modules"]);
+  });
+
+  it("supports literal (non-glob) package paths", () => {
+    const root = makeWorkspace({
+      workspaceYaml: "packages:\n  - packages/server\n",
+      withNodeModules: ["packages/server"],
+    });
+    expect(discoverWorkspaceNodeModules(root)).toEqual(["packages/server/node_modules"]);
+  });
+
+  it("ignores traversal/absolute patterns", () => {
+    const root = makeWorkspace({ workspaceYaml: 'packages:\n  - "../evil/*"\n  - "/abs/*"\n' });
+    expect(discoverWorkspaceNodeModules(root)).toEqual([]);
   });
 });
