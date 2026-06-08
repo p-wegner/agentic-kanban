@@ -50,6 +50,47 @@ function getLastSessionBadge(triggerType: string | null | undefined): { label: s
   return null;
 }
 
+type ActiveAgentState = {
+  label: string;
+  dot: string;
+  ring: string;
+  badge: string;
+};
+
+/**
+ * At-a-glance indicator for a live agent session on the issue's main workspace.
+ * Returns null when no agent is actively running. `active` = builder working,
+ * `reviewing` = AI review session, `fixing` = AI conflict-resolution session.
+ */
+function getActiveAgentState(issue: IssueWithStatus): ActiveAgentState | null {
+  const status = issue.workspaceSummary?.main?.status;
+  switch (status) {
+    case "active":
+      return {
+        label: "Agent working",
+        dot: "bg-green-500",
+        ring: "ring-2 ring-green-400/70 dark:ring-green-500/60",
+        badge: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
+      };
+    case "reviewing":
+      return {
+        label: "AI reviewing",
+        dot: "bg-accent-500",
+        ring: "ring-2 ring-accent-400/70 dark:ring-accent-500/60",
+        badge: "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300",
+      };
+    case "fixing":
+      return {
+        label: "AI fixing",
+        dot: "bg-orange-500",
+        ring: "ring-2 ring-orange-400/70 dark:ring-orange-500/60",
+        badge: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300",
+      };
+    default:
+      return null;
+  }
+}
+
 function coverageClass(pct: number): string {
   if (pct >= 80) return "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300";
   if (pct >= 60) return "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300";
@@ -316,10 +357,12 @@ function IssueCardHeader({
   issue,
   searchQuery,
   isPendingWorkspace,
+  activeAgent,
 }: {
   issue: IssueWithStatus;
   searchQuery?: string;
   isPendingWorkspace?: boolean;
+  activeAgent?: ActiveAgentState | null;
 }) {
   return (
     <div className="flex min-w-0 items-start justify-between gap-2">
@@ -329,6 +372,15 @@ function IssueCardHeader({
         )}
         <HighlightedText text={issue.title} query={searchQuery ?? ""} />
       </p>
+      {activeAgent && (
+        <span
+          className={`inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold mt-0.5 ${activeAgent.badge}`}
+          title={activeAgent.label}
+        >
+          <span className={`inline-block h-1.5 w-1.5 rounded-full animate-pulse ${activeAgent.dot}`} />
+          {activeAgent.label}
+        </span>
+      )}
       {isPendingWorkspace && (
         <svg className="w-3.5 h-3.5 shrink-0 text-brand-500 animate-spin mt-0.5" fill="none" viewBox="0 0 24 24">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -1188,6 +1240,7 @@ function IssueCardImpl({ issue, onClick, onWorkspaceClick, onOpenDiff, onStartWo
   const priorityAccentColor = issue.priority ? (PRIORITY_META.find((p) => p.key === issue.priority)?.color ?? null) : null;
   const ws = issue.workspaceSummary;
   const hasActiveWorkspace = ws?.main && ws.main.status !== "closed";
+  const activeAgent = getActiveAgentState(issue);
 
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -1248,6 +1301,8 @@ function IssueCardImpl({ issue, onClick, onWorkspaceClick, onOpenDiff, onStartWo
           ? "border-sky-500 ring-2 ring-sky-400/70 shadow-sky-100 dark:shadow-sky-950"
           : isSelected
           ? "border-brand-500 ring-2 ring-brand-400/70 shadow-brand-100 dark:shadow-brand-950"
+          : activeAgent
+          ? `border-transparent ${activeAgent.ring}`
           : depDragOver ? "border-brand-400 bg-brand-50 shadow-brand-200" : isPendingWorkspace ? "border-brand-300 shadow-brand-100 shadow-md" : "border-black/[0.07] dark:border-white/10 hover:border-brand-200 dark:hover:border-gray-600"
       }`}
     >
@@ -1299,7 +1354,7 @@ function IssueCardImpl({ issue, onClick, onWorkspaceClick, onOpenDiff, onStartWo
           onMoveToNext={onMoveToNext}
         />
       )}
-      <IssueCardHeader issue={issue} searchQuery={searchQuery} isPendingWorkspace={isPendingWorkspace} />
+      <IssueCardHeader issue={issue} searchQuery={searchQuery} isPendingWorkspace={isPendingWorkspace} activeAgent={activeAgent} />
       <IssueCardBody
         issue={issue}
         compact={compact}

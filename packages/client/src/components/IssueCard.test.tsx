@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import type { IssueWithStatus } from "@agentic-kanban/shared";
+import type { IssueWithStatus, MainWorkspaceInfo, WorkspaceSummary } from "@agentic-kanban/shared";
 import { IssueCard } from "./IssueCard.js";
 
 function issue(overrides: Partial<IssueWithStatus> = {}): IssueWithStatus {
@@ -51,5 +51,44 @@ describe("IssueCard external tracker link", () => {
   it("renders no tracker link when externalUrl is absent", () => {
     const html = render(issue());
     expect(html).not.toContain("Open in external tracker");
+  });
+});
+
+function workspaceMain(status: MainWorkspaceInfo["status"]): WorkspaceSummary {
+  return {
+    total: 1,
+    active: status === "active" ? 1 : 0,
+    idle: 0,
+    closed: 0,
+    branches: ["feature/ak-7"],
+    main: { id: "ws-1", branch: "feature/ak-7", workingDir: "/tmp/wt", status },
+  };
+}
+
+describe("IssueCard active-agent indicator", () => {
+  it("shows 'Agent working' when the main workspace is active", () => {
+    const html = render(issue({ statusName: "In Progress", workspaceSummary: workspaceMain("active") }));
+    expect(html).toContain("Agent working");
+  });
+
+  it("shows 'AI reviewing' when the main workspace is reviewing", () => {
+    const html = render(issue({ statusName: "In Review", workspaceSummary: workspaceMain("reviewing") }));
+    expect(html).toContain("AI reviewing");
+  });
+
+  it("shows 'AI fixing' when the main workspace is resolving conflicts", () => {
+    const html = render(issue({ statusName: "In Review", workspaceSummary: workspaceMain("fixing") }));
+    expect(html).toContain("AI fixing");
+  });
+
+  it("shows no active-agent badge when the workspace is idle", () => {
+    const html = render(issue({ statusName: "In Progress", workspaceSummary: workspaceMain("idle") }));
+    expect(html).not.toContain("Agent working");
+    expect(html).not.toContain("AI reviewing");
+  });
+
+  it("shows no active-agent badge when there is no workspace", () => {
+    const html = render(issue());
+    expect(html).not.toContain("Agent working");
   });
 });
