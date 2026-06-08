@@ -16,6 +16,12 @@ import {
 } from "../lib/launchTemplates.js";
 import { showToast } from "./Toast.js";
 import { LaunchPreviewPanel } from "./LaunchPreviewPanel.js";
+import {
+  agentPresetsKey,
+  sanitizeAgentPresets,
+  presetProfileToken,
+  type AgentPreset,
+} from "../lib/agentPresets.js";
 
 interface Project {
   id: string;
@@ -113,6 +119,10 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
   const [templateSaving, setTemplateSaving] = useState(false);
   const templateSettingsKey = useMemo(() => project ? launchTemplatesKey(project.id) : "", [project]);
 
+  // Agent presets ({provider, profile, model}) state
+  const [agentPresets, setAgentPresets] = useState<AgentPreset[]>([]);
+  const [selectedPresetId, setSelectedPresetId] = useState<string>("");
+
   useEffect(() => {
     if (project) {
       apiFetch<{ local: string[]; remote: string[] }>(`/api/projects/${project.id}/branches`)
@@ -149,6 +159,8 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
         const key = launchTemplatesKey(project.id);
         const loaded = sanitizeLaunchTemplates(settings[key]);
         setTemplates(loaded);
+        // Load agent presets ({provider, profile, model})
+        setAgentPresets(sanitizeAgentPresets(settings[agentPresetsKey(project.id)]));
       }
     });
     const url = project ? `/api/agent-skills?projectId=${project.id}` : "/api/agent-skills";
@@ -273,6 +285,16 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
     } finally {
       setTemplateSaving(false);
     }
+  }
+
+  function handleApplyPreset(presetId: string) {
+    setSelectedPresetId(presetId);
+    if (!presetId) return;
+    const preset = agentPresets.find((p) => p.id === presetId);
+    if (!preset) return;
+    setSelectedProfile(presetProfileToken(preset));
+    // Model only applies to Claude/Codex; clear otherwise so the field isn't stale.
+    setSelectedModel(preset.provider === "copilot" ? "" : preset.model ?? "");
   }
 
   function handleApplyTemplate(templateId: string) {
@@ -544,6 +566,25 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
           </select>
         </div>
       )}
+      {agentPresets.length > 0 && (
+        <div>
+          <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Agent Preset</label>
+          <select
+            value={selectedPresetId}
+            onChange={(e) => handleApplyPreset(e.target.value)}
+            className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
+            aria-label="Agent preset"
+          >
+            <option value="">No preset</option>
+            {agentPresets.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
+            Fills provider, profile, and model below. Change any field to override.
+          </p>
+        </div>
+      )}
       {(claudeProfiles.length > 0 || codexProfiles.length > 0 || copilotProfiles.length > 0) && (
         <div>
           <div className="flex items-center justify-between mb-1">
@@ -561,7 +602,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
           </div>
           <select
             value={selectedProfile}
-            onChange={(e) => setSelectedProfile(e.target.value)}
+            onChange={(e) => { setSelectedProfile(e.target.value); setSelectedPresetId(""); }}
             className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
             aria-label="Agent profile"
           >
@@ -594,7 +635,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
           <label className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1 block">Model</label>
           <select
             value={selectedModel}
-            onChange={(e) => setSelectedModel(e.target.value)}
+            onChange={(e) => { setSelectedModel(e.target.value); setSelectedPresetId(""); }}
             className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
           >
             {(isCodexSelected ? CODEX_MODEL_OPTIONS : CLAUDE_MODEL_OPTIONS).map((m) => (

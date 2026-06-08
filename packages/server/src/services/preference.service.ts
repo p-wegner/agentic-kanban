@@ -54,6 +54,7 @@ function isAllowedDynamicKey(key: string): boolean {
     /^board_show_priority_legend_[0-9a-f-]+$/.test(key) ||
     /^board_recent_merges_collapsed_[0-9a-f-]+$/.test(key) ||
     /^launch_templates_[0-9a-f-]+$/.test(key) ||
+    /^agent_presets_[0-9a-f-]+$/.test(key) ||
     /^monitor_policy_presets_[0-9a-f-]+$/.test(key) ||
     /^wip_limit_[0-9a-f-]+$/.test(key) ||
     /^outbound_webhook_url_[0-9a-f-]+$/.test(key) ||
