@@ -144,6 +144,44 @@ function usesWorktreeCli(command) {
   return /(?:^|[;&|]\s*)pnpm(?:\.cmd)?\s+cli\s+--(?:\s|$)/i.test(command);
 }
 
+// A dependency install/mutate command for any of the package managers used here.
+// These WRITE into node_modules. If node_modules is a junction into the main
+// checkout (the worktree-symlink-bootstrap feature), the write lands in main's
+// store — corrupting the board server and every other junctioned worktree.
+function isDependencyInstall(command) {
+  return (
+    /(?:^|[;&|]\s*)(?:pnpm|npm|yarn)(?:\.cmd)?\s+(?:install|i|ci|add|update|up|rebuild|dedupe)\b/i.test(command) ||
+    // bare `yarn` / `pnpm` with no subcommand installs from the lockfile
+    /(?:^|[;&|]\s*)(?:pnpm|yarn)(?:\.cmd)?\s*(?:$|[;&|])/i.test(command)
+  );
+}
+
+// If <worktreeRoot>/node_modules is a junction/symlink resolving OUTSIDE the
+// worktree (i.e. into the main checkout), return its real target; else null.
+// This is the exact precondition under which an install would pollute main.
+function nodeModulesJunctionTarget(worktreeRoot) {
+  const nm = path.join(worktreeRoot, "node_modules");
+  try {
+    const st = fs.lstatSync(nm);
+    if (!st.isSymbolicLink()) return null; // real dir (already isolated) or absent
+    const target = fs.realpathSync(nm);
+    const rel = path.relative(worktreeRoot, target);
+    if (rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel))) return null; // points inside — safe
+    return target;
+  } catch {
+    return null; // no node_modules here — a fresh install creates a real dir, safe
+  }
+}
+
+// True (returns the junction target) when an install would write THROUGH a live
+// node_modules junction from a worktree into the main checkout.
+function installsThroughJunction(command) {
+  if (!isWorktreeProjectDir()) return null;
+  if (commandMovesToMainCheckout(command)) return null; // installing in main is intended
+  if (!isDependencyInstall(command)) return null;
+  return nodeModulesJunctionTarget(getProjectDir());
+}
+
 function isBroadNodeKill(command) {
   const normalized = command.replace(/\r\n/g, "\n");
 
@@ -197,6 +235,27 @@ function isMainBoardPortKill(command) {
 }
 
 function getBlockedNonDbReason(command) {
+  const junctionTarget = installsThroughJunction(command);
+  if (junctionTarget) {
+    return (
+      "⛔ This worktree's `node_modules` is a junction into the main checkout, and this is a\n" +
+      "dependency install/update. It would write THROUGH the junction into:\n" +
+      `  ${junctionTarget}\n` +
+      "corrupting the main board's install and every other worktree linked to it — the classic\n" +
+      "'a change in one worktree changes main' failure.\n\n" +
+      "Pick the right path:\n" +
+      "  • Just running tests/build? You don't need to install — the junction already shares\n" +
+      "    main's deps. Run the command as-is (without installing).\n" +
+      "  • This branch changed package.json / pnpm-lock.yaml and needs its OWN deps? Isolate\n" +
+      "    first, then install — removing the junction does NOT delete main's node_modules:\n" +
+      "      cmd /c rmdir \"%CD%\\node_modules\"   (PowerShell: (Get-Item node_modules).Delete())\n" +
+      "      pnpm install\n" +
+      "  • Only need to install for the main checkout? cd there first:\n" +
+      "      cd C:\\andrena\\agentic-kanban; pnpm install\n\n" +
+      "Do NOT bypass by editing the hook or installing through the live junction."
+    );
+  }
+
   const roVar = usesReadOnlyPsVar(command);
   if (roVar) {
     const suggestion = roVar === "pid"
