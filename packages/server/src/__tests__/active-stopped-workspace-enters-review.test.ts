@@ -146,7 +146,7 @@ async function seedActiveStoppedWorkspace(
   await db.insert(sessions).values({
     id: sessionId, workspaceId,
     status: opts.sessionStatus ?? "stopped",
-    createdAt: now, updatedAt: now,
+    startedAt: now,
   });
 
   return {
