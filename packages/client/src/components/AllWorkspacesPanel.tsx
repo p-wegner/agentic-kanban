@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { apiFetch } from "../lib/api.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { WorkspaceRiskHeatmap } from "./WorkspaceRiskHeatmap.js";
 import { CollapsibleSection } from "./CollapsibleSection.js";
+import { useStaleWorkspaceManager } from "../hooks/useStaleWorkspaceManager.js";
 
 interface Project {
   id: string;
@@ -23,22 +24,6 @@ interface CrossProjectGroup {
   projectId: string;
   projectName: string;
   issues: CrossProjectIssue[];
-}
-
-interface StaleWorktreeEntry {
-  id: string;
-  branch: string;
-  workingDir: string;
-  workspaceStatus: string;
-  closedAt: string | null;
-  mergedAt: string | null;
-  updatedAt: string | null;
-  issueId: string;
-  issueNumber: number;
-  issueTitle: string;
-  issueStatusName: string;
-  projectId: string;
-  repoPath: string;
 }
 
 interface AllWorkspacesPanelProps {
@@ -91,11 +76,15 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
   const [crossProjectData, setCrossProjectData] = useState<CrossProjectGroup[] | null>(null);
   const [crossProjectLoading, setCrossProjectLoading] = useState(false);
 
-  // Stale worktrees state
-  const [staleWorktrees, setStaleWorktrees] = useState<StaleWorktreeEntry[]>([]);
-  const [staleLoading, setStaleLoading] = useState(false);
-  const [removingIds, setRemovingIds] = useState<Set<string>>(new Set());
-  const [staleErrors, setStaleErrors] = useState<Record<string, string>>({});
+  // Stale worktree coordination (fetch, removal, error/in-flight state) lives in the hook (#647)
+  const {
+    staleWorktrees,
+    staleLoading,
+    removingIds,
+    staleErrors,
+    removeStale: handleRemoveStale,
+    removeAllStale: handleRemoveAllStale,
+  } = useStaleWorkspaceManager({ enabled: statusFilter === "stale", projectFilter });
 
   // Fetch list of projects for the dropdown
   useEffect(() => {
@@ -116,21 +105,6 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
       .catch(() => setCrossProjectData([]))
       .finally(() => setCrossProjectLoading(false));
   }, [projectFilter]);
-
-  // Fetch stale worktrees when the stale tab is selected
-  const fetchStaleWorktrees = useCallback(() => {
-    if (statusFilter !== "stale") return;
-    setStaleLoading(true);
-    const query = projectFilter !== "all" ? `?projectId=${projectFilter}` : "";
-    apiFetch<StaleWorktreeEntry[]>(`/api/workspaces/stale-worktrees${query}`)
-      .then((data) => { setStaleWorktrees(data); setStaleErrors({}); })
-      .catch(() => setStaleWorktrees([]))
-      .finally(() => setStaleLoading(false));
-  }, [statusFilter, projectFilter]);
-
-  useEffect(() => {
-    fetchStaleWorktrees();
-  }, [fetchStaleWorktrees]);
 
   // Build the issues list depending on project filter
   const issuesWithWorkspaces: (CrossProjectIssue & { projectName?: string })[] =
@@ -166,55 +140,6 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
     }
     onRefresh?.();
     setClosingIdle(false);
-  }
-
-  async function handleRemoveStale(id: string) {
-    const entry = staleWorktrees.find((w) => w.id === id);
-    const label = entry ? `#${entry.issueNumber} ${entry.branch}` : "this worktree";
-    if (!window.confirm(`Remove stale worktree for ${label}?\n\nThis deletes the directory:\n${entry?.workingDir ?? ""}`)) return;
-
-    setRemovingIds((prev) => new Set(prev).add(id));
-    setStaleErrors((prev) => { const next = { ...prev }; delete next[id]; return next; });
-    try {
-      const result = await apiFetch<{ success: boolean; error?: string }>(`/api/workspaces/${id}/stale-worktree`, { method: "DELETE" });
-      if (result.success) {
-        setStaleWorktrees((prev) => prev.filter((w) => w.id !== id));
-      } else {
-        setStaleErrors((prev) => ({ ...prev, [id]: result.error ?? "Unknown error" }));
-      }
-    } catch (err) {
-      setStaleErrors((prev) => ({ ...prev, [id]: err instanceof Error ? err.message : String(err) }));
-    }
-    setRemovingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
-  }
-
-  async function handleRemoveAllStale() {
-    if (staleWorktrees.length === 0) return;
-    const confirmed = window.confirm(
-      `Remove ${staleWorktrees.length} stale worktree${staleWorktrees.length !== 1 ? "s" : ""}?\n\nThis deletes all listed directories.`
-    );
-    if (!confirmed) return;
-
-    const ids = staleWorktrees.map((w) => w.id);
-    for (const id of ids) {
-      await handleRemoveStaleSilent(id);
-    }
-  }
-
-  async function handleRemoveStaleSilent(id: string) {
-    setRemovingIds((prev) => new Set(prev).add(id));
-    setStaleErrors((prev) => { const next = { ...prev }; delete next[id]; return next; });
-    try {
-      const result = await apiFetch<{ success: boolean; error?: string }>(`/api/workspaces/${id}/stale-worktree`, { method: "DELETE" });
-      if (result.success) {
-        setStaleWorktrees((prev) => prev.filter((w) => w.id !== id));
-      } else {
-        setStaleErrors((prev) => ({ ...prev, [id]: result.error ?? "Unknown error" }));
-      }
-    } catch (err) {
-      setStaleErrors((prev) => ({ ...prev, [id]: err instanceof Error ? err.message : String(err) }));
-    }
-    setRemovingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
   }
 
   const filtered = issuesWithWorkspaces.filter((issue) => {
