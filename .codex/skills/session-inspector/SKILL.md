@@ -47,6 +47,21 @@ node scripts/token-sinks.mjs --json           # machine-readable {totals, rows}
 
 Covers Claude (per-assistant-turn `usage`) + Codex (cumulative `token_count`). Caveats: Codex tokens are counted but **not costed** (different provider/pricing → shows $0.00); non-Anthropic models routed through Claude Code (e.g. `glm-5.1`) fall back to **opus pricing**, so their cost is an over-estimate — use `--by model` to spot these. Pricing constants live at the top of the script; refresh from the `claude-api` skill if they drift.
 
+## Failed tool calls — "which tools fail most / what are agents fighting"
+
+`tool-failures.mjs` is the failure-analysis sibling of `token-sinks.mjs` (same stat-filter-then-parse fan-out). It ranks failed tool calls fleet-wide and clusters the actual error messages — no looping per-session analyzers, no friction-backfill dependency.
+
+```powershell
+node scripts/tool-failures.mjs                  # last 7d, by tool, ranked by failure count
+node scripts/tool-failures.mjs --by error       # cluster failures by normalized error signature (best for root-causing)
+node scripts/tool-failures.mjs --by project     # tool (default) | project | error | day
+node scripts/tool-failures.mjs --sort rate --min 15   # highest failure RATE among tools with >=15 calls
+node scripts/tool-failures.mjs --provider codex --days 14
+node scripts/tool-failures.mjs --json
+```
+
+Failure detection: Claude = a `tool_result` block with `is_error:true` (mapped to its tool via `tool_use_id`); Codex = a `function_call_output` whose `output` shows a nonzero `Exit code: N` (mapped via `call_id`). `--by error` normalizes paths/numbers/quotes into a signature so the same failure clusters. Baseline (last 7d, 2026-06-08): ~7% of ~47.6K calls fail; **PowerShell is the worst by far** (~15%, matches the project CLAUDE.md note), then codex `shell_command` (~10%); dominant clusters are vitest "No test files found" / UNRESOLVED_IMPORT in worktrees, `Read`/`Write`/`Grep` ordering+path errors, and PS quoting/`Invoke-RestMethod 404`s.
+
 ## Directory naming convention
 
 Each working directory maps to a session dir by replacing path separators with `--`:
