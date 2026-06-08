@@ -42,6 +42,13 @@ export const workspaces = sqliteTable("workspaces", {
   closedAt: text("closed_at"),
   /** Set when the workspace's branch was actually merged into its base (not on abandoned/direct close). */
   mergedAt: text("merged_at"),
+  /**
+   * The branch-tip commit SHA captured at merge time. Survives the post-merge
+   * branch deletion (the commit stays reachable from the default branch), so the
+   * merged-commits panel can still resolve `baseCommitSha..mergedHeadSha` after
+   * the feature branch ref is gone.
+   */
+  mergedHeadSha: text("merged_head_sha"),
   conflictCacheCheckedAt: text("conflict_cache_checked_at"),
   conflictCacheHasConflicts: integer("conflict_cache_has_conflicts", { mode: "boolean" }),
   conflictCacheFiles: text("conflict_cache_files"),

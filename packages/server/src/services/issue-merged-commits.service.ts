@@ -49,6 +49,7 @@ export function createIssueMergedCommitsService(deps: {
         baseBranch: workspaces.baseBranch,
         baseCommitSha: workspaces.baseCommitSha,
         mergedAt: workspaces.mergedAt,
+        mergedHeadSha: workspaces.mergedHeadSha,
         isDirect: workspaces.isDirect,
       })
       .from(workspaces)
@@ -68,7 +69,12 @@ export function createIssueMergedCommitsService(deps: {
     for (const ws of mergedWorkspaces) {
       const baseRef = ws.baseCommitSha || ws.baseBranch || defaultBranch;
       if (!baseRef) continue;
-      const branchCommits = await gitService.getCommitsForBranch(repoPath, baseRef, ws.branch);
+      // Post-merge cleanup deletes the feature branch, so `ws.branch` usually no
+      // longer resolves as a ref. Prefer the branch-tip SHA captured at merge time
+      // (it stays reachable from the default branch); fall back to the branch name
+      // for not-yet-cleaned-up or older merges that predate `mergedHeadSha`.
+      const tipRef = ws.mergedHeadSha || ws.branch;
+      const branchCommits = await gitService.getCommitsForBranch(repoPath, baseRef, tipRef);
       for (const c of branchCommits) {
         if (seen.has(c.sha)) continue;
         seen.add(c.sha);
