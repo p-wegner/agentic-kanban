@@ -10,35 +10,31 @@ This is a FRESH session every run — you have NO memory of previous runs. The k
 ## TUNABLE TARGETS - generated from Strategy Bullseye
 <!-- STRATEGY_BULLSEYE_GENERATED_START -->
 > The loop re-reads this file at the START of every iteration, so changes here take effect on the next cycle with **NO restart**. This block is generated from the Strategy Bullseye preference; edit the bullseye in the board UI instead of hand-editing these values.
-- **ACTIVE_AGENTS_TARGET = 3** - keep this many workspaces actively In Progress at all times.
+- **ACTIVE_AGENTS_TARGET = 4** - keep this many workspaces actively In Progress at all times.
 - **BACKLOG_FLOOR = 12** - never let the backlog drop below this; refill before it does.
-- **MAX_NEW_STARTS_PER_CYCLE = 3** - cap on how many NEW workspaces to launch in a single cycle.
+- **MAX_NEW_STARTS_PER_CYCLE = 4** - cap on how many NEW workspaces to launch in a single cycle.
 - **REFILL_FOCUS = bugfix-only** - derived from work-type marker weights; `bugfix-only` emphasizes reproducible bugs, `balanced` allows feature/quality mix.
 
-## STRATEGY WEIGHTS (generated - do not hand-edit)
-- Architecture & Code Health: weight 5/5, area, provider codex
-- Quality: weight 5/5, work-type, provider codex
-- Bugfix: weight 5/5, work-type, provider codex
-- Feature: weight 1/5, work-type
+## STRATEGY WEIGHTS (operator directive 2026-06-08)
+- Quality & Test Coverage: weight 5/5, work-type, provider claude:anth
+- Architecture & Code Health: weight 5/5, area, provider claude:anth
+- Bugfix: weight 4/5, work-type, provider claude:anth
+- Feature: weight 0/5, work-type (never start)
 
-## PROVIDER POLICY (generated - do not hand-edit)
-When selecting a provider for a new workspace, apply these rules in priority order:
-1. **FILL** profiles should always have capacity — start work on them first.
-2. **THROTTLE** profiles are preferred for main work. Respect their headroom percentage.
-3. **FALLBACK-ONLY** profiles are last resort — only use if all others are exhausted or the user explicitly selects them.
-- **Codex (default)** [codex:]: FILL — use aggressively, keep busy at all times (Primary harness - all new workspaces launch on Codex profile the default profile. Keep 3 agents busy.)
+## PROVIDER POLICY (operator directive 2026-06-08 — authoritative)
+Launch ALL new workspaces on **Claude Code, profile `anth`** (the board's `provider=claude` / `claude_profile=anth` default). **Never use codex** — the codex account is credit-exhausted (multi-day stall, see state.md 2026-06-06) and is the reason the board was blocked. Keep ACTIVE_AGENTS_TARGET (4) Claude/anth agents busy at all times.
 <!-- STRATEGY_BULLSEYE_GENERATED_END -->
 
-## FOCUS POLICY (operator directive 2026-06-05 rev2 — authoritative; overrides the REFILL_FOCUS wording above)
-**Work on CODE QUALITY, ARCHITECTURE / code-health, and BUGFIX improvements ONLY. NO new features.**
-- **Starting work (priority 3):** pull quality / architecture / bugfix tickets. **SKIP every Feature/enhancement ticket** — leave it in the backlog and pick the next eligible non-feature item instead. Never start a feature.
-- **Refill (priority 4):** create ONLY quality, architecture/code-health, and bugfix tickets. Priority order for new tickets:
-  1. **Code quality / test coverage** — add or improve unit/integration tests for high-churn or untested modules (see REFILL STRATEGY BULLSEYE below)
-  2. **Architecture / refactoring** — decouple, simplify, or harden hotspot files identified in REFILL STRATEGY BULLSEYE
-  3. **Reproducible bugs** — from merged diffs, `docs/learnings/`, server error logs, failing tests
-  4. **Guardrails / hardening** — stability improvements grounded in observed failure patterns
+## FOCUS POLICY (operator directive 2026-06-08 — authoritative; overrides the REFILL_FOCUS wording above)
+**Focus on CODE QUALITY and TEST COVERAGE. NO new features.** Architecture/code-health and reproducible bugfixes are allowed in service of quality, but the headline priority is raising test coverage and code quality.
+- **Starting work (priority 3):** pull test-coverage / code-quality tickets first, then architecture/code-health and bugfix tickets. **SKIP every Feature/enhancement ticket** — leave it in the backlog and pick the next eligible non-feature item instead. Never start a feature.
+- **Refill (priority 4):** create ONLY quality, test-coverage, architecture/code-health, and bugfix tickets. Priority order for new tickets:
+  1. **Test coverage** — add or improve unit/integration tests for high-churn or untested modules (see REFILL STRATEGY BULLSEYE below); raising coverage of the hotspot files is the top goal
+  2. **Code quality** — readability, dead-code removal, type-safety, reducing duplication and complexity in hotspot files
+  3. **Architecture / refactoring** — decouple, simplify, or harden hotspot files identified in REFILL STRATEGY BULLSEYE
+  4. **Reproducible bugs** — from merged diffs, `docs/learnings/`, server error logs, failing tests
   **NEVER create feature or enhancement tickets**, regardless of the REFILL_FOCUS value above.
-- **WIP limit = ACTIVE_AGENTS_TARGET = 3** concurrent agents. **Provider/profile = codex** (use codex for ALL new workspaces — never anth).
+- **WIP limit = ACTIVE_AGENTS_TARGET = 4** concurrent agents. **Provider/profile = Claude Code, `anth`** (use Claude/anth for ALL new workspaces — never codex; the codex account is credit-exhausted).
 
 ## REFILL STRATEGY BULLSEYE (agent-metrics-derived, 2026-06-05)
 Based on state.md recurring failure patterns from recent agent cycles, prioritize tickets in these areas:
