@@ -5,6 +5,7 @@ import { db } from "../db/index.js";
 import { createBoardEvents } from "../services/board-events.js";
 import type { MonitorActionName } from "../services/monitor-nudge.js";
 import { resolveMonitorTunables } from "../services/strategy-objective.service.js";
+import { isMonitorEligibleIssue, monitorEligibleIssueSql } from "./monitor-eligibility.js";
 
 /** Issues carrying this tag are an explicit opt-out of monitor auto-start. */
 const SKIP_AUTO_START_TAG = "no-auto-start";
@@ -67,7 +68,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
     let currentWip = Number(activeWipRows[0]?.count ?? 0);
     if (currentWip >= wipLimit) continue;
 
-    const inProgressIssues = await db.select({ id: issues.id, title: issues.title, description: issues.description, issueNumber: issues.issueNumber }).from(issues)
+    const inProgressIssues = await db.select({ id: issues.id, title: issues.title, description: issues.description, issueType: issues.issueType, issueNumber: issues.issueNumber }).from(issues)
       .where(eq(issues.statusId, inProgressSt.id));
     for (const issue of inProgressIssues) {
       if (currentWip >= wipLimit) break;
@@ -75,6 +76,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       const openWs = await db.select({ id: workspaces.id }).from(workspaces)
         .where(sql`${workspaces.issueId} = ${issue.id} AND ${workspaces.status} != 'closed'`).limit(1);
       if (openWs.length > 0) continue;
+      if (!isMonitorEligibleIssue(issue)) continue;
       if (await hasSkipAutoStartTag(issue.id)) continue;
       const branchSlug = issue.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").substring(0, 40);
       const branch = `feature/ak-${issue.issueNumber}-${branchSlug}`;
@@ -112,8 +114,8 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       if (backlogStatus.length > 0) candidateStatusIds.push(backlogStatus[0].id);
     }
 
-    const todoIssues = await db.select({ id: issues.id, title: issues.title, projectId: issues.projectId, issueNumber: issues.issueNumber }).from(issues)
-      .where(inArray(issues.statusId, candidateStatusIds)).limit(fetchLimit);
+    const todoIssues = await db.select({ id: issues.id, title: issues.title, description: issues.description, issueType: issues.issueType, projectId: issues.projectId, issueNumber: issues.issueNumber }).from(issues)
+      .where(and(inArray(issues.statusId, candidateStatusIds), monitorEligibleIssueSql())).limit(fetchLimit);
     const doneStatuses = await db.select({ id: projectStatuses.id }).from(projectStatuses)
       .where(sql`${projectStatuses.name} IN ('Done', 'Cancelled')`);
     const doneStatusIds = new Set(doneStatuses.map((s) => s.id));
@@ -125,6 +127,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       const existingWs = await db.select({ id: workspaces.id }).from(workspaces)
         .where(sql`${workspaces.issueId} = ${issue.id} AND ${workspaces.status} != 'closed'`).limit(1);
       if (existingWs.length > 0) continue;
+      if (!isMonitorEligibleIssue(issue)) continue;
       if (await hasSkipAutoStartTag(issue.id)) continue;
 
       const deps = await db.select({ dependsOnId: issueDependencies.dependsOnId }).from(issueDependencies)

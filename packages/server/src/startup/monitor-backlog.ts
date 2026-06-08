@@ -6,6 +6,7 @@ import { createBoardEvents } from "../services/board-events.js";
 import { setPreference } from "../repositories/preferences.repository.js";
 import type { MonitorActionName } from "../services/monitor-nudge.js";
 import { resolveMonitorTunables } from "../services/strategy-objective.service.js";
+import { monitorEligibleIssueSql } from "./monitor-eligibility.js";
 
 /** A synthetic host issue created to carry a generation workspace. */
 interface HostIssue {
@@ -95,6 +96,8 @@ export interface BacklogEmptyDeps {
   createHostIssue?: (issue: HostIssue, nowIso: string) => Promise<string | null>;
   /** Injectable host-issue remover (defaults to a real DB delete). */
   deleteHostIssue?: (issueId: string) => Promise<void>;
+  /** Injectable database handle for tests (defaults to the app DB). */
+  database?: typeof db;
 }
 
 /**
@@ -123,6 +126,7 @@ export async function runBacklogEmptyStrategy(
     createHostIssue = defaultCreateHostIssue,
     deleteHostIssue = defaultDeleteHostIssue,
     allowProject = () => true,
+    database = db,
   }: BacklogEmptyDeps,
   now: string = new Date().toISOString(),
 ): Promise<void> {
@@ -142,7 +146,7 @@ export async function runBacklogEmptyStrategy(
   const baseUrl = `http://127.0.0.1:${serverPort}`;
   const skillName = prefMap.get("backlog_empty_skill") || DEFAULT_BACKLOG_SKILL;
 
-  const inProgressStatuses = (await db.select({ id: projectStatuses.id, projectId: projectStatuses.projectId }).from(projectStatuses)
+  const inProgressStatuses = (await database.select({ id: projectStatuses.id, projectId: projectStatuses.projectId }).from(projectStatuses)
     .where(sql`${projectStatuses.name} = 'In Progress'`))
     .filter((s) => allowProject(s.projectId));
 
@@ -157,20 +161,20 @@ export async function runBacklogEmptyStrategy(
     const backlogFloor = tunables.backlogFloor;
 
     // Resolve the project's Todo backlog status.
-    const todoStatus = await db.select({ id: projectStatuses.id }).from(projectStatuses)
+    const todoStatus = await database.select({ id: projectStatuses.id }).from(projectStatuses)
       .where(sql`${projectStatuses.name} = 'Todo' AND ${projectStatuses.projectId} = ${projectId}`).limit(1);
     if (todoStatus.length === 0) continue;
 
     // Count unstarted Todo issues that have no open (non-closed) workspace.
-    const backlogRows = await db.select({ count: sql<number>`count(distinct ${issues.id})` }).from(issues)
+    const backlogRows = await database.select({ count: sql<number>`count(distinct ${issues.id})` }).from(issues)
       .where(sql`${issues.statusId} = ${todoStatus[0].id} AND NOT EXISTS (
         SELECT 1 FROM ${workspaces} WHERE ${workspaces.issueId} = ${issues.id} AND ${workspaces.status} != 'closed'
-      )`);
+      ) AND ${monitorEligibleIssueSql()}`);
     const backlogCount = Number(backlogRows[0]?.count ?? 0);
     if (backlogCount >= backlogFloor) continue; // backlog still above the floor for this project
 
     // Respect the WIP limit — don't generate work on an already-busy board.
-    const wipRows = await db.select({ count: sql<number>`count(distinct ${issues.id})` }).from(issues)
+    const wipRows = await database.select({ count: sql<number>`count(distinct ${issues.id})` }).from(issues)
       .innerJoin(workspaces, eq(workspaces.issueId, issues.id))
       .where(sql`${issues.statusId} = ${inProgressSt.id} AND ${workspaces.status} != 'closed'`);
     if (Number(wipRows[0]?.count ?? 0) >= wipLimit) continue;
@@ -178,7 +182,7 @@ export async function runBacklogEmptyStrategy(
     // Create a synthetic host issue to carry the generation workspace. It is placed
     // directly in "In Progress" (not Todo) so it never counts as backlog itself and
     // cannot re-trigger this strategy on the next cycle.
-    const nextNumberRows = await db.select({ max: sql<number>`COALESCE(MAX(${issues.issueNumber}), 0)` }).from(issues)
+    const nextNumberRows = await database.select({ max: sql<number>`COALESCE(MAX(${issues.issueNumber}), 0)` }).from(issues)
       .where(eq(issues.projectId, projectId));
     const issueNumber = (Number(nextNumberRows[0]?.max ?? 0)) + 1;
     const nowIso = new Date(now).toISOString();
