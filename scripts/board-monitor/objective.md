@@ -13,13 +13,13 @@ This is a FRESH session every run — you have NO memory of previous runs. The k
 - **ACTIVE_AGENTS_TARGET = 5** - keep this many workspaces actively In Progress at all times.
 - **BACKLOG_FLOOR = 12** - never let the backlog drop below this; refill before it does.
 - **MAX_NEW_STARTS_PER_CYCLE = 5** - cap on how many NEW workspaces to launch in a single cycle.
-- **REFILL_FOCUS = bugfix-only** - derived from work-type marker weights; `bugfix-only` emphasizes reproducible bugs, `balanced` allows feature/quality mix.
+- **REFILL_FOCUS = balanced** - derived from work-type marker weights; `bugfix-only` emphasizes reproducible bugs, `balanced` allows feature/quality mix.
 
 ## STRATEGY WEIGHTS (generated - do not hand-edit)
 - Feature: weight 5/5, work-type, provider codex
 - Architecture & Code Health: weight 3/5, area, provider codex
-- Quality: weight 3/5, work-type, provider codex
-- Bugfix: weight 2/5, work-type, provider codex
+- Quality: weight 2/5, work-type, provider codex
+- Bugfix: weight 1/5, work-type, provider codex
 
 ## PROVIDER POLICY (generated - do not hand-edit)
 When selecting a provider for a new workspace, apply these rules in priority order:
