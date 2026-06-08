@@ -415,7 +415,14 @@ export async function mergeBranch(
             `Cannot sync already-merged '${targetBranch}' in ${repoPath}: it has ${dirty.length} uncommitted tracked change(s): ${preview}${more}. Commit or stash them first.`,
           );
         }
-        await execGit(["reset", "--hard", targetSha], repoPath);
+        await syncWorkingTreeHard(repoPath, targetSha);
+      } else {
+        // No full reset is warranted (HEAD already matches the target), but a prior
+        // interrupted merge may still have left tracked files DELETED in the working
+        // tree (#692). Those deletions ARE the "uncommitted tracked change(s)" the
+        // dirty check above counted, so they don't block the idempotent path — heal
+        // them directly so the checkout is never left with HEAD's files missing.
+        await restoreDeletedTrackedFiles(repoPath);
       }
     }
 
@@ -515,10 +522,65 @@ export async function mergeBranch(
   // explicitly requests it (a worktree the agent keeps using). When the target
   // branch is not checked out, the working tree is correctly left untouched.
   if (options?.syncWorkingTree || targetIsCheckedOut) {
-    await execGit(["reset", "--hard", newCommitSha], repoPath);
+    await syncWorkingTreeHard(repoPath, newCommitSha);
   }
 
   return `Merge branch '${featureBranch}' into ${targetBranch} (plumbing-merge: ${newCommitSha})`;
+}
+
+/**
+ * Hard-sync the main checkout's working tree + index to `commitSha`, guaranteeing
+ * the working tree is never left with tracked files DELETED relative to HEAD.
+ *
+ * `git reset --hard` first moves HEAD, then overwrites the working tree from the
+ * new tree. If that second phase is interrupted (a dropped connection that fails
+ * the merge request mid-flight, a transient FS/lock error, a partially-applied
+ * checkout), the checkout can be left with files on disk removed while HEAD still
+ * references them — exactly the failure in #692, where a merge that did not land
+ * cleanly left `packages/shared/drizzle/*` (and friends) showing as deleted in the
+ * main checkout and the monitor had to `git restore` them from HEAD before the
+ * server would start.
+ *
+ * This wrapper self-heals that state: after the reset it asks git for any tracked
+ * paths deleted from the working tree (`diff --diff-filter=D` against HEAD) and
+ * restores just those from the index, leaving any legitimate post-reset state
+ * intact. If the reset itself throws, we still attempt the restore so the caller
+ * never observes a checkout with tracked files missing — then re-raise so the
+ * merge is reported as failed rather than silently half-applied.
+ */
+async function syncWorkingTreeHard(repoPath: string, commitSha: string): Promise<void> {
+  try {
+    await execGit(["reset", "--hard", commitSha], repoPath);
+  } catch (err) {
+    await restoreDeletedTrackedFiles(repoPath);
+    throw err;
+  }
+  await restoreDeletedTrackedFiles(repoPath);
+}
+
+/**
+ * Restore any tracked files that are deleted from the working tree but still
+ * present in HEAD (a desynced checkout). No-op when the working tree is consistent.
+ * Best-effort: a failure here must not mask the caller's own error.
+ */
+async function restoreDeletedTrackedFiles(repoPath: string): Promise<void> {
+  try {
+    const out = await execGit(["diff", "--name-only", "--diff-filter=D", "HEAD"], repoPath);
+    const deleted = splitGitLines(out);
+    if (deleted.length === 0) return;
+    // `checkout -- <paths>` repopulates the working tree from the index/HEAD for
+    // exactly the missing files, without disturbing other working-tree state.
+    await execGit(["checkout", "--", ...deleted], repoPath);
+    console.warn(
+      `[git] restored ${deleted.length} tracked file(s) deleted from the working tree after a hard sync in ${repoPath}: ` +
+        deleted.slice(0, 5).join(", ") + (deleted.length > 5 ? ` (and ${deleted.length - 5} more)` : ""),
+    );
+  } catch (err) {
+    console.warn(
+      `[git] failed to restore deleted tracked files in ${repoPath}:`,
+      err instanceof Error ? err.message : String(err),
+    );
+  }
 }
 
 async function canResetInterruptedMergeCheckout(repoPath: string, targetSha: string, featureSha: string): Promise<boolean> {

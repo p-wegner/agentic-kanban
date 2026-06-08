@@ -186,6 +186,61 @@ describe("git-service integration", () => {
     }
   }, 30000);
 
+  it("mergeBranch self-heals a desynced checkout, never leaving tracked files deleted (#692)", async () => {
+    // Regression for #692: a failed/interrupted merge attempt left the main checkout
+    // with packages/shared/drizzle/* (and friends) showing as DELETED in the working
+    // tree while HEAD still referenced them — the monitor had to `git restore` them
+    // from HEAD before the server would start. mergeBranch's working-tree sync must
+    // never leave tracked files deleted relative to HEAD.
+    const sharedFiles = {
+      "packages/shared/CLAUDE.md": "# shared\n",
+      "packages/shared/drizzle.config.ts": "export default {};\n",
+      "packages/shared/drizzle/0001_init.sql": "CREATE TABLE a(id);\n",
+      "packages/shared/drizzle/meta/_journal.json": "{\"entries\":[]}\n",
+    };
+    for (const [path, content] of Object.entries(sharedFiles)) {
+      await writeRepoFile(temp.repo, path, content);
+    }
+    await git(temp.repo, ["add", "-A"]);
+    await git(temp.repo, ["commit", "-m", "seed packages/shared"]);
+    const branchBase = await revParse(temp.repo, "main");
+
+    // A feature branch that lands cleanly (touches an unrelated file only).
+    await commitFiles(
+      temp.repo,
+      "feature/ak-685-retry",
+      { "feature.ts": "export const x = 1;\n" },
+      "feature work",
+      branchBase,
+    );
+
+    // First attempt lands the branch (advances main + syncs the checkout).
+    await git(temp.repo, ["checkout", "main"]);
+    await mergeBranch(temp.repo, "feature/ak-685-retry", "main");
+    const mainAfterFirst = await revParse(temp.repo, "main");
+
+    // Simulate the failure that #692 describes: a subsequent merge step (the dropped
+    // connection / interrupted hard reset) left the working tree with shared files
+    // removed on disk, even though HEAD still references them.
+    for (const path of Object.keys(sharedFiles)) {
+      await rm(join(temp.repo, ...path.split("/")), { force: true });
+    }
+    const deletedBefore = (await git(temp.repo, ["diff", "--name-only", "--diff-filter=D", "HEAD"])).trim();
+    expect(deletedBefore.split("\n").filter(Boolean).length).toBeGreaterThan(0);
+
+    // Retrying the merge (branch already an ancestor → idempotent sync path) must
+    // bring the checkout back into a clean state rather than leaving deletions.
+    await mergeBranch(temp.repo, "feature/ak-685-retry", "main");
+
+    // The branch did not re-land (already merged), and the working tree is clean:
+    expect(await revParse(temp.repo, "main")).toBe(mainAfterFirst);
+    expect((await git(temp.repo, ["status", "--porcelain"])).trim()).toBe("");
+    for (const [path, content] of Object.entries(sharedFiles)) {
+      expect(existsSync(join(temp.repo, ...path.split("/")))).toBe(true);
+      expect(trimmedContent(await fileContent(temp.repo, path))).toBe(trimmedContent(content));
+    }
+  }, 30000);
+
   it("detectConflicts reports conflicts without touching HEAD, index, or working tree", async () => {
     await seedCommittedFile(
       temp.repo,
