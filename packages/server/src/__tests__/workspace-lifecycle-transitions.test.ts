@@ -461,7 +461,7 @@ describe("lifecycle: mergedAt already set — workspace moved to Done, retry is 
     });
 
     const result = await svc.mergeWorkspace(workspaceId);
-    expect(result.mergeOutput).toContain("already recorded");
+    expect(result.mergeOutput).toContain("Merge already recorded");
 
     expect(await getIssueStatusName(db, issueId)).toBe("Done");
 
