@@ -1,6 +1,6 @@
 import { workspaces, issues, projects, sessions, sessionMessages, diffComments, projectStatuses, agentSkills } from "@agentic-kanban/shared/schema";
 import type { WorkspaceSetupRun, WorkspaceSymlinkRun } from "@agentic-kanban/shared";
-import { eq, inArray } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 
 type Project = typeof projects.$inferSelect;
 import { db } from "../db/index.js";
@@ -305,6 +305,33 @@ export async function getWorkspaceDetails(
   if (result.length === 0) return null;
 
   const row = result[0];
+
+  const sessRows = await database
+    .select({
+      status: sessions.status,
+      startedAt: sessions.startedAt,
+      endedAt: sessions.endedAt,
+      triggerType: sessions.triggerType,
+      stats: sessions.stats,
+    })
+    .from(sessions)
+    .where(eq(sessions.workspaceId, workspaceId))
+    .orderBy(desc(sessions.startedAt))
+    .limit(1);
+  const sess = sessRows[0] ?? null;
+
+  let contextTokens: number | null = null;
+  let lastTool: string | null = null;
+  if (sess?.stats) {
+    try {
+      const p = JSON.parse(sess.stats) as Record<string, unknown>;
+      const explicit = (p.contextTokens as number) ?? 0;
+      const tokens = explicit || ((p.inputTokens as number) ?? 0) + ((p.cacheReadTokens as number) ?? 0);
+      if (tokens) contextTokens = tokens;
+      if (typeof p.lastTool === "string" && p.lastTool) lastTool = p.lastTool;
+    } catch { /* ignore */ }
+  }
+
   return {
     id: row.id,
     issueId: row.issueId,
@@ -335,11 +362,11 @@ export async function getWorkspaceDetails(
       ? { filesChanged: row.diffStatCacheFilesChanged, insertions: row.diffStatCacheInsertions ?? 0, deletions: row.diffStatCacheDeletions ?? 0 }
       : null,
     scorecard: row.scorecardScore !== null && row.scorecardScore !== undefined ? { score: row.scorecardScore } : null,
-    lastSessionAt: null,
-    sessionStatus: null,
-    lastSessionTriggerType: null,
-    contextTokens: null,
-    lastTool: null,
+    lastSessionAt: sess ? (sess.status === "running" ? sess.startedAt : sess.endedAt) : null,
+    sessionStatus: sess?.status ?? null,
+    lastSessionTriggerType: sess?.triggerType ?? null,
+    contextTokens,
+    lastTool,
     latestSetup: row.latestSetupState ? {
       command: row.latestSetupCommand,
       state: row.latestSetupState as WorkspaceSetupRun["state"],
