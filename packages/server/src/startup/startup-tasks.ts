@@ -10,7 +10,7 @@ import type { Database } from "../db/index.js";
 import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
 import { reconcileAncestorBranchWorkspaces } from "./ancestor-branch-reconciler.js";
 import { scanDoneUnmergedWorkspaces } from "./done-unmerged-invariant-scanner.js";
-import { finalizeMergeCleanup } from "../services/merge-cleanup.service.js";
+import { finalizeMergeCleanup, reconcileMergedIssue } from "../services/merge-cleanup.service.js";
 
 /** Kill orphaned tsx server processes from previous hot-reload cycles (Windows only). */
 export function shouldKillOrphanedServerProcess(input: {
@@ -357,6 +357,15 @@ export async function reconcileSilentlyMergedWorkspaces(database: Database = db)
             );
           }
         }
+        // Converge the issue to Done first via the shared idempotent helper, so a
+        // dropped merge response still lands the issue even if the later workspace
+        // close throws (mirrors the #668 no-rollback guarantee).
+        await reconcileMergedIssue({
+          database,
+          issueId: ws.issueId,
+          now,
+          projectId: ws.projectId,
+        });
         await finalizeMergeCleanup({
           database,
           workspaceId: ws.id,
