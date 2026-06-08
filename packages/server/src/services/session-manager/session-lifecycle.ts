@@ -17,7 +17,9 @@ import { workspaceLaunchPreflight } from "../preflight-check.js";
 import { WorkspaceError } from "../workspace-internals.js";
 import { DEFAULT_BUILDER_GUARDRAILS, PREF_BUILDER_GUARDRAILS } from "../../constants/preference-keys.js";
 import { detectCodexUsageLimitMessages } from "../codex-rate-limit.js";
+import { detectClaudeUsageLimitMessages } from "../claude-rate-limit.js";
 import { loadCodexLicenseRing, resolveCodexHomeForProfile } from "../codex-license-ring.js";
+import { loadClaudeSubscriptionRing, resolveClaudeConfigDirForProfile } from "../claude-subscription-ring.js";
 
 /** Subset of agent.service that the lifecycle depends on. Injectable for tests. */
 export type AgentService = typeof realAgentService;
@@ -63,6 +65,26 @@ function buildCodexUsageLimitStats(executor: string, durationMs: number, exitCod
     rateLimited: true,
     rateLimitKind: "codex-usage-limit",
     retryAfter,
+    failureReason: message,
+    providerExitCode: exitCode,
+    agentSummary: message,
+  };
+}
+
+function buildClaudeUsageLimitStats(executor: string, durationMs: number, exitCode: number | null, message: string, resetsAt: string | null) {
+  return {
+    durationMs,
+    totalCostUsd: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    numTurns: 0,
+    model: executor,
+    success: false,
+    launchFailure: true,
+    rateLimited: true,
+    rateLimitKind: "claude-usage-limit",
+    // Persisted so the exit-workflow rotation can stamp the right cooldown window.
+    retryAfter: resetsAt,
     failureReason: message,
     providerExitCode: exitCode,
     agentSummary: message,
@@ -299,6 +321,26 @@ export function createSessionLifecycle(
         console.warn("[session] codex license ring resolution failed (non-fatal):", err instanceof Error ? err.message : String(err));
       }
     }
+    // Claude OAuth subscriptions: a Max/Pro-plan login is a separate CLAUDE_CONFIG_DIR
+    // directory with its own `.credentials.json` — selected by an auto-discovered
+    // `~/.claude-<name>` dir or a rotation-ring entry. Point CLAUDE_CONFIG_DIR at it and
+    // DROP the settings-profile name from the launch (a separate config dir has no
+    // `settings_<name>.json`, and it authenticates via its own login). Plain
+    // settings-file / API-key (settingsProfile) profiles resolve to no dir and keep
+    // `--settings`. Mirrors the codex CODEX_HOME path above.
+    if (profile?.provider === "claude" && profile.name && profile.name !== "default" && profile.name !== "mock") {
+      try {
+        const ring = await loadClaudeSubscriptionRing(db);
+        const configDir = resolveClaudeConfigDirForProfile(profile.name, ring);
+        if (configDir) {
+          effectiveExtraEnv = { ...effectiveExtraEnv, CLAUDE_CONFIG_DIR: configDir };
+          launchProfile = { provider: "claude", name: "default" };
+          console.log(`[session] claude subscription '${profile.name}' -> CLAUDE_CONFIG_DIR=${configDir} (--settings suppressed)`);
+        }
+      } catch (err) {
+        console.warn("[session] claude subscription ring resolution failed (non-fatal):", err instanceof Error ? err.message : String(err));
+      }
+    }
 
     try {
       const proc = agentService.launch(effectiveWorkingDir, sessionId, effectivePrompt, effectiveAgentArgs, (event) => {
@@ -338,9 +380,20 @@ export function createSessionLifecycle(
           const endNow = new Date().toISOString();
           const exitCode = event.exitCode ?? null;
           const durationMs = Math.max(0, new Date(endNow).getTime() - new Date(now).getTime());
-          const usageLimit = executor === "codex" ? detectCodexUsageLimitMessages(state.messageBuffer.get(sessionId) ?? []) : null;
+          const messages = state.messageBuffer.get(sessionId) ?? [];
+          const codexUsageLimit = executor === "codex" ? detectCodexUsageLimitMessages(messages) : null;
+          // Claude OAuth subscriptions hit their own (Max/Pro-plan) quota; detect that
+          // so the workspace can rotate to the next subscription, mirroring Codex.
+          const claudeUsageLimit = executor === "claude-code" ? detectClaudeUsageLimitMessages(messages) : null;
+          const usageLimit = codexUsageLimit
+            ? { message: codexUsageLimit.message, retryAfter: codexUsageLimit.retryAfter, kind: "codex" as const }
+            : claudeUsageLimit
+              ? { message: claudeUsageLimit.message, retryAfter: claudeUsageLimit.resetsAt, kind: "claude" as const }
+              : null;
           if (usageLimit) {
-            const stats = buildCodexUsageLimitStats(executor, durationMs, exitCode, usageLimit.message, usageLimit.retryAfter);
+            const stats = usageLimit.kind === "codex"
+              ? buildCodexUsageLimitStats(executor, durationMs, exitCode, usageLimit.message, usageLimit.retryAfter)
+              : buildClaudeUsageLimitStats(executor, durationMs, exitCode, usageLimit.message, usageLimit.retryAfter);
             const effectiveExitCode = exitCode && exitCode !== 0 ? exitCode : 1;
             void (async () => {
               await recordAgentProfileLaunchFailure(db, {
@@ -359,11 +412,11 @@ export function createSessionLifecycle(
                 .set({ status: "blocked", updatedAt: endNow })
                 .where(eq(workspaces.id, workspaceId));
               console.warn(
-                `[agent] codex-rate-limited: sessionId=${sessionId} workspace=${workspaceId}` +
+                `[agent] ${usageLimit.kind}-rate-limited: sessionId=${sessionId} workspace=${workspaceId}` +
                 `${usageLimit.retryAfter ? ` retryAfter=${usageLimit.retryAfter}` : ""}`,
               );
             })()
-              .catch((err) => console.error("Failed to record codex usage-limit launch failure:", err))
+              .catch((err) => console.error(`Failed to record ${usageLimit.kind} usage-limit launch failure:`, err))
               .finally(() => options?.onSessionExit?.(workspaceId, sessionId, effectiveExitCode, planMode));
             return;
           }

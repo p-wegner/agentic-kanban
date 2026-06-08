@@ -5,8 +5,10 @@ import type { Database } from "../db/index.js";
 import { createPreferenceService } from "../services/preference.service.js";
 import { spawnCodexLogin } from "../services/codex-login.service.js";
 import { listCodexLicenses, parseCodexLicenseRing } from "../services/codex-license-ring.js";
+import { spawnClaudeLogin } from "../services/claude-login.service.js";
+import { listClaudeSubscriptions, parseClaudeSubscriptionRing } from "../services/claude-subscription-ring.js";
 import { getPreference } from "../repositories/preferences.repository.js";
-import { PREF_CODEX_LICENSE_RING } from "../constants/preference-keys.js";
+import { PREF_CODEX_LICENSE_RING, PREF_CLAUDE_SUBSCRIPTION_RING } from "../constants/preference-keys.js";
 import {
   listAgentProfileHealth,
   preflightAgentProfile,
@@ -49,8 +51,8 @@ export function createPreferencesRoute(database: Database = db) {
   });
 
   // GET /api/preferences/claude-profiles — list available claude profiles
-  router.get("/claude-profiles", (c) => {
-    return c.json({ profiles: preferenceService.listClaudeProfiles() });
+  router.get("/claude-profiles", async (c) => {
+    return c.json({ profiles: await preferenceService.listClaudeProfiles() });
   });
 
   // GET /api/preferences/codex-profiles — list available codex profiles
@@ -93,10 +95,35 @@ export function createPreferencesRoute(database: Database = db) {
     }
   });
 
+  // GET /api/preferences/claude-subscriptions — unified view of selectable Claude
+  // subscriptions (auto-discovered ~/.claude-<name> dirs merged with the rotation
+  // ring) + login status. Mirrors /codex-licenses.
+  router.get("/claude-subscriptions", async (c) => {
+    const ringRaw = await getPreference(PREF_CLAUDE_SUBSCRIPTION_RING, database);
+    return c.json({ subscriptions: listClaudeSubscriptions(parseClaudeSubscriptionRing(ringRaw)) });
+  });
+
+  // POST /api/preferences/claude-login — open a real terminal running `claude /login`
+  // for a subscription dir. The OAuth flow needs a foreground window, so this is the
+  // only way to do it from the UI; returns the equivalent manual command too.
+  router.post("/claude-login", async (c) => {
+    const body = await parseJsonBody<{ configDir?: string }>(c);
+    const configDir = body.configDir?.trim();
+    if (!configDir) {
+      return c.json({ ok: false, error: "configDir is required" }, 400);
+    }
+    try {
+      const { command } = spawnClaudeLogin(configDir);
+      return c.json({ ok: true, configDir, command });
+    } catch (err) {
+      return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
   router.get("/agent-profiles/health", async (c) => {
     return c.json({
       profiles: await listAgentProfileHealth(database, {
-        claudeProfiles: preferenceService.listClaudeProfiles(),
+        claudeProfiles: await preferenceService.listClaudeProfiles(),
         codexProfiles: await preferenceService.listCodexProfiles(),
         copilotProfiles: preferenceService.listCopilotProfiles(),
       }),

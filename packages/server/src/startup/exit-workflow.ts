@@ -15,6 +15,8 @@ import { isAutomaticMergeEnabled } from "./merge-strategy.js";
 import type { Database } from "../db/index.js";
 import { isCodexUsageLimitStats } from "../services/codex-rate-limit.js";
 import { rotateCodexLicense } from "../services/codex-license-ring.js";
+import { isClaudeUsageLimitStats } from "../services/claude-rate-limit.js";
+import { rotateClaudeSubscription } from "../services/claude-subscription-ring.js";
 
 type WorkspaceRow = typeof workspaces.$inferSelect;
 
@@ -79,8 +81,8 @@ async function hasCommittedChanges(workspace: WorkspaceRow, defaultBranch: strin
   } catch { return false; }
 }
 
-/** Extract the codex "try again at X" hint persisted on the rate-limited session's stats. */
-function parseCodexRetryAfter(stats: string | null | undefined): string | null {
+/** Extract the "try again / resets at X" hint persisted on the rate-limited session's stats. */
+function parseRateLimitRetryAfter(stats: string | null | undefined): string | null {
   if (!stats) return null;
   try {
     const parsed = JSON.parse(stats) as Record<string, unknown>;
@@ -90,8 +92,8 @@ function parseCodexRetryAfter(stats: string | null | undefined): string | null {
   }
 }
 
-/** Build a continuation prompt so the rotated-to license picks the ticket back up in the same worktree. */
-async function buildCodexContinuationPrompt(database: Database, issueId: string): Promise<string> {
+/** Build a continuation prompt so the rotated-to account picks the ticket back up in the same worktree. */
+async function buildRotationContinuationPrompt(database: Database, issueId: string, providerLabel: string): Promise<string> {
   const rows = await database
     .select({ issueNumber: issues.issueNumber, title: issues.title, description: issues.description })
     .from(issues)
@@ -101,7 +103,7 @@ async function buildCodexContinuationPrompt(database: Database, issueId: string)
   const heading = issue ? `ticket #${issue.issueNumber}: ${issue.title}` : "your current ticket";
   return [
     `You are resuming work on ${heading}.`,
-    "A previous Codex session was interrupted by an account usage limit and has now resumed on a different Codex account.",
+    `A previous ${providerLabel} session was interrupted by an account usage limit and has now resumed on a different ${providerLabel} account.`,
     "Your partial work is already in THIS worktree. First run `git status` and `git diff` to see what exists, then continue implementing the ticket to completion and COMMIT when done.",
     "",
     "Ticket description:",
@@ -163,7 +165,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
         // and switch `codex_profile` to the next available license, then relaunch the
         // workspace on the fresh account (a builder session continues its worktree;
         // review/fix sessions just get the switched pref and their own reconciler).
-        const retryAfter = parseCodexRetryAfter(sessionRows[0]?.stats);
+        const retryAfter = parseRateLimitRetryAfter(sessionRows[0]?.stats);
         const rotationPrefMap = new Map((await db.select().from(preferences)).map((r) => [r.key, r.value]));
         const currentLicense = rotationPrefMap.get("codex_profile") || "default";
         const rotation = await rotateCodexLicense(db, rotationPrefMap, currentLicense, retryAfter, new Date(now));
@@ -171,7 +173,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
 
         if (rotation.rotated && rotation.toProfile && isBuilderSession) {
           try {
-            const continuation = await buildCodexContinuationPrompt(db, issueId);
+            const continuation = await buildRotationContinuationPrompt(db, issueId, "Codex");
             await db.update(workspaces).set({ status: "active", updatedAt: now }).where(eq(workspaces.id, workspaceId));
             const relaunchSessionId = await sessionManager.startSession({
               workspaceId,
@@ -202,6 +204,54 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
           : `Codex usage limit reached for workspace ${workspaceId}; ${rotation.reason}. Monitor will not relaunch it automatically.`;
         emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: blockedReason });
         console.warn(`[workflow] codex-rate-limited workspace ${workspaceId} from session ${sessionId} left blocked (${rotation.reason})`);
+        return;
+      }
+      if (isClaudeUsageLimitStats(sessionRows[0]?.stats)) {
+        // Claude subscription rotation: this Claude Max/Pro account hit its quota. Stamp
+        // a cooldown on it and switch `claude_profile` to the next available subscription,
+        // then relaunch the workspace on the fresh account (a builder session continues
+        // its worktree; review/fix sessions just get the switched pref). Mirrors the
+        // Codex license-rotation branch above.
+        const resetsAt = parseRateLimitRetryAfter(sessionRows[0]?.stats);
+        const rotationPrefMap = new Map((await db.select().from(preferences)).map((r) => [r.key, r.value]));
+        const currentSubscription = rotationPrefMap.get("claude_profile") || "default";
+        const rotation = await rotateClaudeSubscription(db, rotationPrefMap, currentSubscription, resetsAt, new Date(now));
+        const isBuilderSession = !reviewSessionIds.has(sessionId) && !fixAndMergeSessionIds.has(sessionId) && !learningSessionIds.has(sessionId);
+
+        if (rotation.rotated && rotation.toProfile && isBuilderSession) {
+          try {
+            const continuation = await buildRotationContinuationPrompt(db, issueId, "Claude");
+            await db.update(workspaces).set({ status: "active", updatedAt: now }).where(eq(workspaces.id, workspaceId));
+            const relaunchSessionId = await sessionManager.startSession({
+              workspaceId,
+              prompt: continuation,
+              agentCommand: rotationPrefMap.get("agent_command") || undefined,
+              agentArgs: rotationPrefMap.get("agent_args") || undefined,
+              claudeProfile: rotation.toProfile,
+              provider: "claude-code",
+              triggerType: "agent",
+              profile: { provider: "claude", name: rotation.toProfile },
+            });
+            boardEvents.broadcastActivity(projectId, { issueId, sessionId, activity: "" });
+            boardEvents.broadcast(projectId, "issue_updated");
+            emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Claude usage limit on '${rotation.fromProfile}' — rotated to '${rotation.toProfile}' and relaunched workspace ${workspaceId}.` });
+            console.log(`[workflow] claude subscription rotated ${rotation.fromProfile} -> ${rotation.toProfile}; relaunched workspace ${workspaceId} session ${relaunchSessionId}`);
+            return;
+          } catch (err) {
+            console.error("[workflow] claude subscription rotation relaunch failed:", err);
+            // fall through to blocked
+          }
+        }
+
+        await db.update(workspaces).set({ status: "blocked", updatedAt: now }).where(eq(workspaces.id, workspaceId));
+        boardEvents.broadcastActivity(projectId, { issueId, sessionId, activity: "" });
+        boardEvents.broadcast(projectId, "session_completed");
+        boardEvents.broadcast(projectId, "workflow_error");
+        const blockedReason = rotation.rotated
+          ? `Claude usage limit reached for workspace ${workspaceId}; rotated claude_profile to '${rotation.toProfile}' (relaunch a builder manually).`
+          : `Claude usage limit reached for workspace ${workspaceId}; ${rotation.reason}. Monitor will not relaunch it automatically.`;
+        emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: blockedReason });
+        console.warn(`[workflow] claude-rate-limited workspace ${workspaceId} from session ${sessionId} left blocked (${rotation.reason})`);
         return;
       }
       await db.update(workspaces).set({ status: "idle", updatedAt: now }).where(eq(workspaces.id, workspaceId));

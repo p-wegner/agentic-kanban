@@ -8,8 +8,9 @@ import { allHarnessSettingKeys } from "./harness-settings.js";
 import { commitObjectiveFile, isBoardStrategyKey, projectIdFromBoardStrategyKey, writeStrategyObjective } from "./strategy-objective.service.js";
 import { projects } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
-import { PREF_BUILDER_GUARDRAILS, PREF_MERGE_STRATEGY, PREF_CODEX_LICENSE_RING, PREF_CODEX_LICENSE_ROTATION } from "../constants/preference-keys.js";
+import { PREF_BUILDER_GUARDRAILS, PREF_MERGE_STRATEGY, PREF_CODEX_LICENSE_RING, PREF_CODEX_LICENSE_ROTATION, PREF_CLAUDE_SUBSCRIPTION_RING, PREF_CLAUDE_SUBSCRIPTION_ROTATION } from "../constants/preference-keys.js";
 import { parseCodexLicenseRing, ringProfileNames, discoverCodexHomeProfiles } from "./codex-license-ring.js";
+import { parseClaudeSubscriptionRing, ringProfileNames as claudeRingProfileNames, discoverClaudeConfigDirProfiles } from "./claude-subscription-ring.js";
 
 export const SETTINGS_KEYS = [
   "agent_command", "agent_args", "output_parser", "skip_permissions", "claude_profile",
@@ -38,6 +39,8 @@ export const SETTINGS_KEYS = [
   "export_skills_on_registration",
   PREF_CODEX_LICENSE_RING,
   PREF_CODEX_LICENSE_ROTATION,
+  PREF_CLAUDE_SUBSCRIPTION_RING,
+  PREF_CLAUDE_SUBSCRIPTION_ROTATION,
   ...allHarnessSettingKeys(),
 ];
 
@@ -58,6 +61,7 @@ function isAllowedDynamicKey(key: string): boolean {
     /^verify_script_[0-9a-f-]+$/.test(key) ||
     /^auto_merge_disabled_[0-9a-f-]+$/.test(key) ||
     /^codex_cooldown_.+$/.test(key) ||
+    /^claude_cooldown_.+$/.test(key) ||
     isBoardStrategyKey(key);
 }
 
@@ -110,7 +114,7 @@ export function createPreferenceService({ database }: { database: Database }) {
     }
   }
 
-  function listClaudeProfiles(): string[] {
+  async function listClaudeProfiles(): Promise<string[]> {
     const claudeDir = join(homedir(), ".claude");
     const profiles: string[] = ["mock"];
     try {
@@ -120,7 +124,16 @@ export function createPreferenceService({ database }: { database: Database }) {
         if (match && match[1] !== "mock") profiles.push(match[1]);
       }
     } catch {}
-    return profiles.sort();
+    // OAuth (Max/Pro-plan) subscriptions live as separate `~/.claude-<name>` config
+    // dirs (.credentials.json), not settings files in ~/.claude. Auto-discover them so
+    // they are selectable exactly like settings profiles; also merge any rotation-ring
+    // names (covers custom-path / API-key ring entries that aren't a `~/.claude-<name>` dir).
+    try {
+      profiles.push(...discoverClaudeConfigDirProfiles());
+      const ring = parseClaudeSubscriptionRing(await getPreference(PREF_CLAUDE_SUBSCRIPTION_RING, database));
+      profiles.push(...claudeRingProfileNames(ring));
+    } catch {}
+    return [...new Set(profiles)].sort();
   }
 
   async function listCodexProfiles(): Promise<string[]> {
