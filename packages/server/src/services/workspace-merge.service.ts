@@ -248,7 +248,9 @@ export function createWorkspaceMergeService(deps: {
     defaultBranch: string | null,
   ) {
     const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
-    const resolution = await resolveMergeState(workspace, repoPath, baseBranch, { gitService });
+    const prefMap = await loadMergePreferences(database);
+    const autoMergeInReview = prefMap.get("auto_merge_in_review") === "true";
+    const resolution = await resolveMergeState(workspace, repoPath, baseBranch, { gitService, autoMergeInReview });
     const preflight = await handleWorkspaceMergeResolution({
       id,
       workspace,
@@ -265,8 +267,6 @@ export function createWorkspaceMergeService(deps: {
       recordMergeAttempt,
     });
     if (preflight.kind === "completed") return preflight.result;
-
-    const prefMap = await loadMergePreferences(database);
     await runWorkspacePreMergeValidation({ workspace, repoPath, baseBranch, gitService });
 
     const targetBranch = baseBranch;
