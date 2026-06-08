@@ -10,10 +10,12 @@ let db: TestDb;
 let projectId: string;
 let statusId: string;
 
-function makeFakeGit(byBranch: Record<string, CommitInfo[]>): GitService {
+// Keyed by the ref the service actually resolves against (the 3rd arg) — which is
+// `mergedHeadSha` when set, otherwise the branch name.
+function makeFakeGit(byRef: Record<string, CommitInfo[]>): GitService {
   return {
-    async getCommitsForBranch(_repoPath: string, _baseRef: string, branch: string) {
-      return byBranch[branch] ?? [];
+    async getCommitsForBranch(_repoPath: string, _baseRef: string, ref: string) {
+      return byRef[ref] ?? [];
     },
   } as unknown as GitService;
 }
@@ -132,6 +134,34 @@ describe("createIssueMergedCommitsService", () => {
     const result = await service.getMergedCommits(issueId);
     const shas = result!.commits.map((c) => c.sha).sort();
     expect(shas).toEqual(["only-a", "only-b", "shared"]);
+  });
+
+  it("resolves commits against mergedHeadSha when set (branch ref deleted post-merge)", async () => {
+    const issueId = await createIssue();
+    const now = new Date().toISOString();
+    const wsId = randomUUID();
+    await db.insert(schema.workspaces).values({
+      id: wsId,
+      issueId,
+      branch: "feature/ak-9-gone", // deleted after merge — must NOT be used as the ref
+      baseBranch: "master",
+      baseCommitSha: "base999",
+      mergedHeadSha: "tip999",
+      status: "closed",
+      mergedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+    // Only the tip SHA resolves; the (deleted) branch name returns nothing.
+    const fakeGit = makeFakeGit({
+      tip999: [{ sha: "c1", shortSha: "c1", author: "Z", date: "2026-06-05T00:00:00Z", message: "landed" }],
+      "feature/ak-9-gone": [],
+    });
+    const service = createIssueMergedCommitsService({ database: db, gitService: fakeGit });
+    const result = await service.getMergedCommits(issueId);
+    expect(result!.merged).toBe(true);
+    expect(result!.commits.map((c) => c.sha)).toEqual(["c1"]);
+    expect(result!.commits[0]).toMatchObject({ branch: "feature/ak-9-gone", workspaceId: wsId });
   });
 
   it("ignores direct workspaces (no feature branch to diff)", async () => {
