@@ -26,6 +26,11 @@ import { getPreference } from "./repositories/preferences.repository.js";
 import { domainErrorHandler } from "./middleware/error-handler.js";
 import { slowRequestLogger } from "./middleware/slow-request-logger.js";
 import { assertNoCommittedConflictMarkers } from "./startup/conflict-marker-scanner.js";
+import { checkHealthDeps } from "./services/health-deps.service.js";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const serverStartRepoRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../../");
 
 let activeStartupTimerCleanup: (() => void) | null = null;
 
@@ -52,7 +57,18 @@ export async function startServer(port?: number, hostname?: string) {
   const app = new Hono();
   app.use("/api/*", cors());
   app.use("/api/*", slowRequestLogger);
-  app.get("/health", (c) => c.json({ status: "ok" }));
+  // Dependency-aware health probe. A bare "status: ok" stayed green even when
+  // the shared package's dist was missing after a restart (#691), so monitors
+  // polling /health never noticed that every DB-backed API route was broken
+  // with ERR_MODULE_NOT_FOUND. Return 503/"degraded" when a critical dep
+  // (notably shared dist) is absent.
+  app.get("/health", (c) => {
+    const deps = checkHealthDeps(serverStartRepoRoot);
+    return c.json(
+      { status: deps.ok ? "ok" : "degraded", ok: deps.ok, checks: deps.checks },
+      deps.ok ? 200 : 503,
+    );
+  });
   app.onError(domainErrorHandler);
 
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
