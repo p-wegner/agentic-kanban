@@ -133,6 +133,8 @@ export type MergeResolutionState =
 
 export type ResolveMergeStateDeps = {
   gitService: GitService;
+  /** When true, skip the readyForMerge gate so auto_merge_in_review can land committed In Review work. */
+  autoMergeInReview?: boolean;
 };
 
 /**
@@ -148,7 +150,7 @@ export async function resolveMergeState(
   baseBranch: string,
   deps: ResolveMergeStateDeps,
 ): Promise<MergeResolutionState> {
-  const { gitService } = deps;
+  const { gitService, autoMergeInReview } = deps;
 
   // mergedAt is stamped immediately after git merge lands (#575 crash-recovery guard).
   // If it's set, the merge already completed — run cleanup and move to Done without
@@ -161,7 +163,9 @@ export async function resolveMergeState(
     return { kind: "already-closed", status: workspace.status };
   }
 
-  if (!workspace.isDirect && !workspace.readyForMerge) {
+  // Skip the readyForMerge gate when auto_merge_in_review is enabled — committed In Review
+  // work should land without a manual ready marking.
+  if (!workspace.isDirect && !workspace.readyForMerge && !autoMergeInReview) {
     return { kind: "not-approved", status: workspace.status };
   }
 

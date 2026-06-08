@@ -871,6 +871,42 @@ describe("resolveMergeState — proceed (all checks pass)", () => {
   });
 });
 
+// ─── auto_merge_in_review gate (#693) ─────────────────────────────────────────
+
+describe("resolveMergeState — auto_merge_in_review bypasses readyForMerge gate", () => {
+  it("returns not-approved when readyForMerge=false and autoMergeInReview=false (manual gate preserved)", async () => {
+    const ws = makeWorkspace({ readyForMerge: false });
+    const git = makeGitForStateMachine();
+    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never, autoMergeInReview: false });
+    expect(result.kind).toBe("not-approved");
+  });
+
+  it("returns not-approved when readyForMerge=false and autoMergeInReview omitted (default gate preserved)", async () => {
+    const ws = makeWorkspace({ readyForMerge: false });
+    const git = makeGitForStateMachine();
+    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    expect(result.kind).toBe("not-approved");
+  });
+
+  it("proceeds past the readyForMerge gate when autoMergeInReview=true and readyForMerge=false", async () => {
+    const ws = makeWorkspace({ readyForMerge: false });
+    const git = makeGitForStateMachine();
+    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never, autoMergeInReview: true });
+    // Should not be not-approved — the gate is bypassed and the merge can proceed
+    expect(result.kind).not.toBe("not-approved");
+    // With a clean, non-conflicting branch it should reach proceed
+    expect(result.kind).toBe("proceed");
+  });
+
+  it("does not bypass the gate for isDirect workspaces (they skip readyForMerge unconditionally)", async () => {
+    const ws = makeWorkspace({ isDirect: true, readyForMerge: false });
+    const git = makeGitForStateMachine();
+    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never, autoMergeInReview: false });
+    // isDirect always returns direct-close, regardless of readyForMerge / autoMergeInReview
+    expect(result.kind).toBe("direct-close");
+  });
+});
+
 // ─── Integration: conflict-ready through mergeWorkspace (#610) ───────────────
 
 describe("MergeService — conflict-ready clears readyForMerge and throws", () => {
