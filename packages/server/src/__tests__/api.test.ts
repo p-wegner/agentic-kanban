@@ -10,10 +10,18 @@ import { execFileSync } from "node:child_process";
 import { createTestApp as _createTestApp } from "./helpers/test-app.js";
 import { createMockSessionManager } from "./helpers/mocks.js";
 import type { TestDb } from "./helpers/test-db.js";
+import { createBoardEvents } from "../services/board-events.js";
 
 function createTestApp() {
   return _createTestApp((app, db) => {
     app.route("/api", createRoutes(db, () => createMockSessionManager()));
+  });
+}
+
+function createTestAppWithBoardEvents() {
+  return _createTestApp((app, db) => {
+    const boardEvents = createBoardEvents();
+    app.route("/api", createRoutes(db, () => createMockSessionManager(), { boardEvents }));
   });
 }
 
@@ -1502,6 +1510,101 @@ describe("Workspaces API", () => {
       expect(mergeRes.status).toBe(200);
       const mergeBody = await mergeRes.json() as any;
       expect(mergeBody.id).toBe(workspace.id);
+    } finally {
+      rmSync(repoPath, { recursive: true, force: true });
+    }
+  });
+
+  it("GET /api/projects/:id/board reflects Done counts immediately after workspace merge", { timeout: 30000 }, async () => {
+    const { app, db } = createTestAppWithBoardEvents();
+    const repoPath = mkdtempSync(join(tmpdir(), "kanban-board-merge-"));
+    try {
+      execFileSync("git", ["init", "-b", "main"], { cwd: repoPath });
+      execFileSync("git", ["config", "user.email", "test@test.com"], { cwd: repoPath });
+      execFileSync("git", ["config", "user.name", "Test"], { cwd: repoPath });
+      writeFileSync(join(repoPath, "README.md"), "initial\n", "utf8");
+      execFileSync("git", ["add", "README.md"], { cwd: repoPath });
+      execFileSync("git", ["commit", "-m", "initial commit"], { cwd: repoPath });
+
+      const projectRes = await app.request("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repoPath }),
+      });
+      expect(projectRes.status).toBe(201);
+      const registeredProject = await projectRes.json() as any;
+
+      const statuses = await db
+        .select({ id: schema.projectStatuses.id, name: schema.projectStatuses.name })
+        .from(schema.projectStatuses)
+        .where(eq(schema.projectStatuses.projectId, registeredProject.id));
+      const todoStatus = statuses.find((status) => status.name === "Todo");
+      const inReviewStatus = statuses.find((status) => status.name === "In Review");
+      const doneStatus = statuses.find((status) => status.name === "Done");
+      expect(todoStatus).toBeDefined();
+      expect(inReviewStatus).toBeDefined();
+      expect(doneStatus).toBeDefined();
+
+      const issueRes = await app.request("/api/issues", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "Board merge count regression",
+          statusId: todoStatus!.id,
+          projectId: registeredProject.id,
+        }),
+      });
+      expect(issueRes.status).toBe(201);
+      const workspaceIssue = await issueRes.json() as any;
+
+      const createRes = await app.request("/api/workspaces", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ issueId: workspaceIssue.id, branch: "feature/board-merge-count-regression" }),
+      });
+      expect(createRes.status).toBe(201);
+      const workspace = await createRes.json() as any;
+
+      execFileSync("git", ["config", "user.email", "test@test.com"], { cwd: workspace.workingDir });
+      execFileSync("git", ["config", "user.name", "Test"], { cwd: workspace.workingDir });
+      writeFileSync(join(workspace.workingDir, "ticket.txt"), "done\n", "utf8");
+      execFileSync("git", ["add", "ticket.txt"], { cwd: workspace.workingDir });
+      execFileSync("git", ["commit", "-m", "feat: add workspace change"], { cwd: workspace.workingDir });
+
+      const inReviewRes = await app.request(`/api/issues/${workspaceIssue.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ statusId: inReviewStatus!.id }),
+      });
+      expect(inReviewRes.status).toBe(200);
+
+      const warmRes = await app.request(`/api/projects/${registeredProject.id}/board`);
+      expect(warmRes.status).toBe(200);
+      const warmEtag = warmRes.headers.get("ETag");
+      expect(warmEtag).toBeTruthy();
+      const warmBoard = await warmRes.json() as any[];
+      expect(warmBoard.find((column) => column.name === "In Review")?.issues.some((issue: any) => issue.id === workspaceIssue.id)).toBe(true);
+      expect(warmBoard.find((column) => column.name === "Done")?.count).toBe(0);
+
+      const readyRes = await app.request(`/api/workspaces/${workspace.id}/ready-for-merge`, { method: "POST" });
+      expect(readyRes.status).toBe(200);
+
+      const mergeRes = await app.request(`/api/workspaces/${workspace.id}/merge`, { method: "POST" });
+      expect(mergeRes.status).toBe(200);
+
+      const freshRes = await app.request(`/api/projects/${registeredProject.id}/board`, {
+        headers: { "If-None-Match": warmEtag! },
+      });
+      expect(freshRes.status).toBe(200);
+      const freshBoard = await freshRes.json() as any[];
+      const freshInReview = freshBoard.find((column) => column.name === "In Review");
+      const freshDone = freshBoard.find((column) => column.name === "Done");
+
+      expect(freshInReview?.issues.some((issue: any) => issue.id === workspaceIssue.id)).toBe(false);
+      expect(freshInReview?.count).toBe(0);
+      expect(freshDone?.issues.some((issue: any) => issue.id === workspaceIssue.id)).toBe(true);
+      expect(freshDone?.count).toBe(1);
+      expect(freshDone?.issues).toHaveLength(1);
     } finally {
       rmSync(repoPath, { recursive: true, force: true });
     }
