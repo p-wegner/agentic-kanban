@@ -4,6 +4,12 @@ A kanban board for managing AI-driven coding tasks. Built as a focused, local-fi
 
 Each task card on the board is backed by a git worktree and a live Claude Code session. The core loop is: **plan → execute (Claude Code) → review (diff) → ship (merge)**.
 
+## Showcase
+
+| Board | Strategy Bullseye | Insights |
+|-------|-------------------|---------|
+| ![Board view](docs/screenshots/board.png) | ![Strategy view](docs/screenshots/strategy.png) | ![Insights view](docs/screenshots/insights.png) |
+
 ## Features
 
 - **Kanban board** — drag-and-drop between columns (Todo, In Progress, In Review, Done, Cancelled), collapsible archive group
