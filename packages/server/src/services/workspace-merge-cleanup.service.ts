@@ -14,7 +14,7 @@ import { autoStartFollowups } from "./followup-workspace.service.js";
 import { autoStartUnblockedDependencyIssue } from "./dependency-auto-chain.service.js";
 import { rebuildSharedIfChanged, runLearningStep } from "./merge-helpers.service.js";
 import type { MergeWarning } from "./workspace-merge-prevalidation.service.js";
-import { applyDeferredWorkingTreeSync } from "@agentic-kanban/shared/lib/git-service.js";
+import { applyDeferredWorkingTreeSync } from "@agentic-kanban/shared/lib/git-service";
 
 export type WorkspacePostMergeCleanupArgs = {
   workspaceId: string;

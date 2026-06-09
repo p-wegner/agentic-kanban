@@ -5,7 +5,7 @@ import type { BoardEvents } from "./board-events.js";
 import { WorkspaceError, type GitService } from "./workspace-internals.js";
 import type { RecordMergeAttempt } from "./workspace-merge-prevalidation.service.js";
 import { finalizeMergeCleanup } from "./merge-cleanup.service.js";
-import { extractPendingWorkingTreeSync } from "@agentic-kanban/shared/lib/git-service.js";
+import { extractPendingWorkingTreeSync } from "@agentic-kanban/shared/lib/git-service";
 
 export type WorkspaceMergeExecutionResult = {
   response: {
