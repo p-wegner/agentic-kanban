@@ -746,5 +746,34 @@ export function createWorkspaceMergeService(deps: {
     };
   }
 
-  return { mergeWorkspace, updateBase, abortRebase, resolveConflicts, fixAndMerge, reconcileBatch, checkAlreadyMerged, reconcileAlreadyMerged };
+  /**
+   * Deduplicating entry point for HTTP merge requests: if a merge for this workspace is
+   * already in-flight (e.g. a double-click or a monitor retry while the first request is
+   * still pending), the caller receives the same promise instead of starting a second
+   * merge. The lock lives at the service level so tests can verify deduplication without
+   * spinning up an HTTP server.
+   */
+  const activeRequests = new Map<string, Promise<Awaited<ReturnType<typeof mergeWorkspace>>>>();
+
+  function mergeWorkspaceDeduped(id: string): Promise<Awaited<ReturnType<typeof mergeWorkspace>>> {
+    const existing = activeRequests.get(id);
+    if (existing) return existing;
+
+    const promise = mergeWorkspace(id);
+    const tracked = promise.finally(() => {
+      if (activeRequests.get(id) === tracked) {
+        activeRequests.delete(id);
+      }
+    });
+    activeRequests.set(id, tracked);
+    tracked.catch((err) => {
+      console.warn(
+        `[workspace-merge] deduped merge failed for workspace ${id}:`,
+        err instanceof Error ? err.message : String(err),
+      );
+    });
+    return tracked;
+  }
+
+  return { mergeWorkspace, mergeWorkspaceDeduped, updateBase, abortRebase, resolveConflicts, fixAndMerge, reconcileBatch, checkAlreadyMerged, reconcileAlreadyMerged };
 }
