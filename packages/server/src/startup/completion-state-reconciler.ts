@@ -39,6 +39,11 @@ async function workspaceHasCommittedChanges(
  * session whose agent has already finished (PID dead or workspace in a post-implementation
  * issue state for >30 minutes).
  *
+ * Also handles blocked workspaces whose most-recent session completed with committed
+ * changes — these should auto-recover to idle so the normal review/merge flow can
+ * proceed (the propose_transition MCP call may have failed silently leaving the
+ * workspace blocked despite the work being done).
+ *
  * This is the runtime complement to the startup-time fixOrphanedWorkspaces() and
  * cleanupStaleSessions() — it runs periodically so a session that exits without
  * triggering its exit callback (e.g. claude.exe hung after committing) is eventually
@@ -65,6 +70,7 @@ export async function reconcileCompletionStates(
     .select({
       sessionId: sessions.id,
       sessionPid: sessions.pid,
+      sessionStatus: sessions.status,
       sessionStartedAt: sessions.startedAt,
       workspaceId: workspaces.id,
       workspaceStatus: workspaces.status,
@@ -80,8 +86,8 @@ export async function reconcileCompletionStates(
     .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
     .where(
       and(
-        eq(sessions.status, "running"),
-        inArray(workspaces.status, ["active", "reviewing", "fixing"]),
+        inArray(sessions.status, ["running", "completed", "stopped"]),
+        inArray(workspaces.status, ["active", "reviewing", "fixing", "blocked"]),
       ),
     );
 
@@ -92,6 +98,31 @@ export async function reconcileCompletionStates(
 
   for (const c of candidates) {
     const pid = c.sessionPid;
+
+    // Auto-recover blocked workspaces whose most-recent session completed with
+    // committed changes. The propose_transition MCP call can fail silently, leaving
+    // a workspace blocked even though work was done (#712).
+    if (c.workspaceStatus === "blocked" && (c.sessionStatus === "completed" || c.sessionStatus === "stopped")) {
+      if (!c.workingDir || !c.baseBranch) continue;
+      const hasCommits = await checkCommits(c.workingDir, c.baseBranch).catch(() => false);
+      if (!hasCommits) continue;
+
+      console.log(
+        `[reconciler] blocked workspace with committed changes: workspaceId=${c.workspaceId} sessionId=${c.sessionId} sessionStatus=${c.sessionStatus} — auto-recovering to idle`,
+      );
+      await database
+        .update(workspaces)
+        .set({ status: "idle", updatedAt: now })
+        .where(eq(workspaces.id, c.workspaceId));
+      console.log(
+        `[reconciler] recovered blocked workspace: workspaceId=${c.workspaceId} -> idle`,
+      );
+      reconciled++;
+      continue;
+    }
+
+    // For non-blocked workspaces: only process running sessions.
+    if (c.sessionStatus !== "running") continue;
 
     let shouldReconcile = false;
     let reason = "";
