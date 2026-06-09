@@ -10,10 +10,10 @@ This is a FRESH session every run — you have NO memory of previous runs. The k
 ## TUNABLE TARGETS - generated from Strategy Bullseye
 <!-- STRATEGY_BULLSEYE_GENERATED_START -->
 > The loop re-reads this file at the START of every iteration, so changes here take effect on the next cycle with **NO restart**. This block is generated from the Strategy Bullseye preference; edit the bullseye in the board UI instead of hand-editing these values.
-- **ACTIVE_AGENTS_TARGET = 2** - keep this many workspaces actively In Progress at all times.
+- **ACTIVE_AGENTS_TARGET = 3** - keep this many workspaces actively In Progress at all times. Hard WIP limit = 3.
 - **BACKLOG_FLOOR = 12** - never let the backlog drop below this; refill before it does.
 - **MAX_NEW_STARTS_PER_CYCLE = 2** - cap on how many NEW workspaces to launch in a single cycle.
-- **REFILL_FOCUS = balanced** - derived from work-type marker weights; `bugfix-only` emphasizes reproducible bugs, `balanced` allows feature/quality mix.
+- **REFILL_FOCUS = bugfix-heavy** - bugs and performance first; `balanced` allows quality/arch in support.
 
 ## STRATEGY WEIGHTS (generated - do not hand-edit)
 - No bullseye markers configured yet.
@@ -26,16 +26,18 @@ When selecting a provider for a new workspace, apply these rules in priority ord
 - **policy-claude-zai** [claude:zai]: FILL — use aggressively, keep busy at all times (Primary harness - all new workspaces launch on claude:zai. Single source of truth.)
 <!-- STRATEGY_BULLSEYE_GENERATED_END -->
 
-## FOCUS POLICY (operator directive 2026-06-08 — authoritative; overrides the REFILL_FOCUS wording above)
-**Focus on CODE QUALITY and TEST COVERAGE. NO new features.** Architecture/code-health and reproducible bugfixes are allowed in service of quality, but the headline priority is raising test coverage and code quality.
-- **Starting work (priority 3):** pull test-coverage / code-quality tickets first, then architecture/code-health and bugfix tickets. **SKIP every Feature/enhancement ticket** — leave it in the backlog and pick the next eligible non-feature item instead. Never start a feature.
-- **Refill (priority 4):** create ONLY quality, test-coverage, architecture/code-health, and bugfix tickets. Priority order for new tickets:
-  1. **Test coverage** — add or improve unit/integration tests for high-churn or untested modules (see REFILL STRATEGY BULLSEYE below); raising coverage of the hotspot files is the top goal
-  2. **Code quality** — readability, dead-code removal, type-safety, reducing duplication and complexity in hotspot files
-  3. **Architecture / refactoring** — decouple, simplify, or harden hotspot files identified in REFILL STRATEGY BULLSEYE
-  4. **Reproducible bugs** — from merged diffs, `docs/learnings/`, server error logs, failing tests
+## FOCUS POLICY (operator directive 2026-06-09 — authoritative; overrides the REFILL_FOCUS wording above)
+**Focus on BUG IDENTIFICATION/FIXING and PERFORMANCE. NO new features.**
+1. **Bug identification and fixing** — find, reproduce, and fix bugs. Priority: server crashes, merge pipeline failures, data-corruption bugs, then UX breakage.
+2. **Performance — no UI interaction without feedback within 500ms.** Every user-facing action (click, drag, submit, tab switch) MUST produce visible feedback within 500ms. Solve the **root cause** (slow endpoint, missing index, redundant render, N+1 query, large payload). UX workarounds (spinners, loading bars, skeletons) are a LAST RESORT — only when the root cause is genuinely async by nature (e.g. waiting on an agent subprocess). NEVER paper over a slow API with a spinner; fix the API.
+- **Starting work (priority 3):** pull bugfix tickets first, then performance tickets, then quality/architecture in service of those two goals. **SKIP every Feature/enhancement ticket** — leave it in the backlog. Never start a feature.
+- **Refill (priority 4):** create ONLY bugfix, performance, and supporting quality tickets. Priority order for new tickets:
+  1. **Bugs** — from merged diffs, server logs, failing tests, user-reported symptoms
+  2. **Performance** — slow API endpoints, large payloads, missing indexes, unnecessary re-renders, N+1 queries
+  3. **Quality** — tests that lock in bug fixes and perf improvements so they don't regress
+  4. **Architecture** — only when it directly enables the above (e.g. extracting a slow service for targeted optimization)
   **NEVER create feature or enhancement tickets**, regardless of the REFILL_FOCUS value above.
-- **WIP limit = ACTIVE_AGENTS_TARGET = 4** concurrent agents. **Provider/profile = Claude Code, `anth`** (use Claude/anth for ALL new workspaces — never codex; the codex account is credit-exhausted).
+- **WIP limit = 3** concurrent agents. **Provider/profile = Claude Code, `zai`** (use claude/zai for ALL new workspaces — never codex; the codex account is credit-exhausted).
 
 ## REFILL STRATEGY BULLSEYE (agent-metrics-derived, 2026-06-05)
 Based on state.md recurring failure patterns from recent agent cycles, prioritize tickets in these areas:
