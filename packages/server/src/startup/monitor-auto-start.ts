@@ -110,7 +110,10 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       const branchSlug = issue.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").substring(0, 40);
       const branch = `feature/ak-${issue.issueNumber}-${branchSlug}`;
       const prompt = issue.description ? `${issue.title}\n\n${issue.description}` : issue.title;
-      await fetch(`${baseUrl}/api/workspaces`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ issueId: issue.id, branch, customPrompt: prompt }) }).catch(() => {});
+      const launchBody: Record<string, unknown> = { issueId: issue.id, branch, customPrompt: prompt };
+      // Auto-driven projects must not stall in plan-only mode (#666).
+      if (isAutoDrivenProject(inProgressSt.projectId)) launchBody.planMode = false;
+      await fetch(`${baseUrl}/api/workspaces`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(launchBody) }).catch(() => {});
       currentWip++;
       noteStart(inProgressSt.projectId);
       logMonitorAction("auto_start", "", issue.id);
@@ -191,7 +194,10 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
 
       const slug = issue.title.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, "-").slice(0, 40).replace(/-+$/, "");
       const branch = `feature/ak-${issue.issueNumber}-${slug}`;
-      const resp = await fetch(`${baseUrl}/api/workspaces`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ issueId: issue.id, branch }) }).catch(() => null);
+      const launchBody: Record<string, unknown> = { issueId: issue.id, branch };
+      // Auto-driven projects must not stall in plan-only mode (#666).
+      if (isAutoDrivenProject(issue.projectId)) launchBody.planMode = false;
+      const resp = await fetch(`${baseUrl}/api/workspaces`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(launchBody) }).catch(() => null);
       if (resp?.ok) {
         const wsData = await resp.json().catch(() => null) as { id?: string } | null;
         logMonitorAction("auto_start", wsData?.id ?? "unknown", issue.id);
