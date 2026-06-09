@@ -163,7 +163,7 @@ describe("MergeService — clean merge advances base", () => {
     });
     const result = await svc.mergeWorkspace(workspaceId);
 
-    expect(git.mergeBranch).toHaveBeenCalledWith("/repo", "feature/ak-548-test", "master");
+    expect(git.mergeBranch).toHaveBeenCalledWith("/repo", "feature/ak-548-test", "master", { deferWorkingTreeSync: true });
     expect(result.merged).toBe(true);
     expect(result.baseBranch).toBe("master");
     expect(result.mergeOutput).toContain("ort");
