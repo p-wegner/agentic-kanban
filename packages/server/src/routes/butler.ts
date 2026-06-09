@@ -32,6 +32,8 @@ import {
 import { listButlerSessions, getButlerSessionMessages } from "../services/butler-transcripts.service.js";
 import { loadAgentSettings } from "../services/agent-settings.service.js";
 import type { ProviderName } from "../services/agent-provider.js";
+import { parseStrategyBullseyeConfig, selectProviderFromStrategy } from "../services/strategy-objective.service.js";
+import { getAllPreferences } from "../repositories/preferences.repository.js";
 
 /** Suffix per-butler pref keys for named butlers; the "default" butler keeps the
  *  legacy unsuffixed keys so existing resume ids / history carry over unchanged. */
@@ -204,8 +206,19 @@ export function createButlerRoute(
       .replace(/\{\{boardGuidePath}}/g, boardGuidePath);
   }
 
-  /** Resolve the Butler's backend/profile from the global agent provider, with a per-project profile override.
-   *  If `butlerProvider` is set (from the butler definition), it overrides the global provider. */
+  /** Resolve the Butler's backend/profile.
+   *
+   * Priority order (highest first):
+   *  1. Per-butler provider override from the butler definition (`butlerProvider`).
+   *  2. Project's Strategy Bullseye (`board_strategy_<projectId>`) — same source that
+   *     workspace creation uses, so the butler always matches the builder's provider.
+   *  3. Global settings prefs (`provider` / `claude_profile` / `codex_profile`) — the
+   *     legacy fallback when no Bullseye is configured.
+   *
+   * The per-project butler profile override (`butler_profile_<projectId>`) always wins
+   * over the profile derived from the Bullseye / global prefs (it's an explicit user
+   * override for the butler's auth endpoint, independent of which provider is primary).
+   */
   async function resolveButlerBackend(projectId: string, butlerProvider?: "claude" | "codex"): Promise<{
     provider: Extract<ProviderName, "claude" | "codex">;
     selectedProfile: string | undefined;
@@ -215,14 +228,48 @@ export function createButlerRoute(
     agentCommand?: string;
     agentArgs?: string;
   }> {
+    const prefRows = await getAllPreferences(database);
+    const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
+
     const settings = await loadAgentSettings(database);
     const perProject = await getPreference(butlerProfilePrefKey(projectId), database);
+
+    // Derive provider from Strategy Bullseye when no explicit butler-def override exists.
+    // This mirrors buildAgentConfig() so the butler always runs on the same provider as
+    // the workspace builder (the only authoritative source is the Bullseye).
+    let bullseyeProvider: "claude" | "codex" | null = null;
+    let bullseyeProfile: string | null = null;
+    if (!butlerProvider) {
+      const strategyRaw = prefMap.get(`board_strategy_${projectId}`);
+      if (strategyRaw) {
+        try {
+          const strategyConfig = parseStrategyBullseyeConfig(strategyRaw);
+          const selected = selectProviderFromStrategy(strategyConfig);
+          if (selected && (selected.provider === "claude" || selected.provider === "codex")) {
+            bullseyeProvider = selected.provider;
+            bullseyeProfile = selected.profileName || null;
+          }
+        } catch {
+          // non-fatal: fall through to global default
+        }
+      }
+    }
+
     const globalProvider: "claude" | "codex" = settings.provider === "codex" ? "codex" : "claude";
-    const provider = butlerProvider ?? globalProvider;
+    // butlerProvider (def override) > bullseyeProvider > globalProvider
+    const provider: "claude" | "codex" = butlerProvider ?? bullseyeProvider ?? globalProvider;
+
     const availableProfiles = provider === "codex" ? await preferenceService.listCodexProfiles() : await preferenceService.listClaudeProfiles();
     const profileOverride = perProject && availableProfiles.includes(perProject) ? perProject : undefined;
+
+    // Profile derived from Bullseye (only used when Bullseye set the provider)
+    const bullseyeProfileResolved = (bullseyeProvider === provider && bullseyeProfile && availableProfiles.includes(bullseyeProfile))
+      ? bullseyeProfile : null;
+
     const globalProfile = settings.profile?.provider === provider ? settings.profile.name : "";
-    const selectedProfile = profileOverride || globalProfile || undefined;
+    // Per-project butler override > Bullseye profile > global profile
+    const selectedProfile = profileOverride || bullseyeProfileResolved || globalProfile || undefined;
+
     // `settings.agentCommand`/`agentArgs` are derived under the GLOBAL provider
     // (e.g. Claude's `--dangerously-skip-permissions`). Forwarding them to a butler
     // whose per-butler provider differs from the global one injects the wrong
