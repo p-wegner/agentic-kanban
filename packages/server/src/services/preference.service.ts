@@ -5,7 +5,7 @@ import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getPreference, setPreference, getAllPreferences, setPreferences } from "../repositories/preferences.repository.js";
 import { allHarnessSettingKeys } from "./harness-settings.js";
-import { commitObjectiveFile, isBoardStrategyKey, projectIdFromBoardStrategyKey, writeStrategyObjective } from "./strategy-objective.service.js";
+import { commitObjectiveFile, isBoardStrategyKey, parseStrategyBullseyeConfig, projectIdFromBoardStrategyKey, selectProviderFromStrategy, writeStrategyObjective } from "./strategy-objective.service.js";
 import { projects } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { PREF_BUILDER_GUARDRAILS, PREF_MERGE_STRATEGY, PREF_CODEX_LICENSE_RING, PREF_CODEX_LICENSE_ROTATION, PREF_CLAUDE_SUBSCRIPTION_RING, PREF_CLAUDE_SUBSCRIPTION_ROTATION } from "../constants/preference-keys.js";
@@ -165,7 +165,65 @@ export function createPreferenceService({ database }: { database: Database }) {
     return ["default"];
   }
 
-  return { getActiveProjectId, setActiveProjectId, getSettings, updateSettings, listClaudeProfiles, listCodexProfiles, listCopilotProfiles };
+  /**
+   * Detect drift between the global provider/profile settings prefs and the
+   * project's Strategy Bullseye (the single authoritative source).
+   *
+   * When the Bullseye is set it fans out to workspace creation and (now) the butler.
+   * The global prefs are a legacy write path — if they differ from what the Bullseye
+   * would select, the Settings UI will silently show a stale value that doesn't match
+   * actual workspace/butler behaviour.
+   *
+   * Returns null when no Bullseye is configured for the project (no divergence possible).
+   */
+  async function getProviderDivergence(projectId: string): Promise<{
+    hasBullseye: boolean;
+    bullseyeProvider: string | null;
+    bullseyeProfile: string | null;
+    settingsProvider: string | null;
+    settingsProfile: string | null;
+    diverged: boolean;
+  }> {
+    const rows = await getAllPreferences(database);
+    const prefMap = new Map(rows.map(r => [r.key, r.value]));
+
+    const strategyRaw = prefMap.get(`board_strategy_${projectId}`);
+    if (!strategyRaw) {
+      return { hasBullseye: false, bullseyeProvider: null, bullseyeProfile: null, settingsProvider: null, settingsProfile: null, diverged: false };
+    }
+
+    let bullseyeProvider: string | null = null;
+    let bullseyeProfile: string | null = null;
+    try {
+      const config = parseStrategyBullseyeConfig(strategyRaw);
+      const selected = selectProviderFromStrategy(config);
+      if (selected) {
+        bullseyeProvider = selected.provider;
+        bullseyeProfile = selected.profileName || null;
+      }
+    } catch {
+      return { hasBullseye: true, bullseyeProvider: null, bullseyeProfile: null, settingsProvider: null, settingsProfile: null, diverged: false };
+    }
+
+    const settingsProvider = prefMap.get("provider") || "claude";
+    const settingsProfile = settingsProvider === "codex"
+      ? (prefMap.get("codex_profile") || null)
+      : settingsProvider === "copilot"
+        ? (prefMap.get("copilot_profile") || null)
+        : (prefMap.get("claude_profile") || null);
+
+    const providerDiverged = bullseyeProvider !== null && bullseyeProvider !== settingsProvider;
+    const profileDiverged = bullseyeProfile !== null && bullseyeProfile !== "" && bullseyeProfile !== settingsProfile;
+    const diverged = providerDiverged || profileDiverged;
+
+    if (diverged) {
+      console.warn(`[preferences] provider divergence for project ${projectId}: Bullseye=${bullseyeProvider}:${bullseyeProfile} vs settings=${settingsProvider}:${settingsProfile}`);
+    }
+
+    return { hasBullseye: true, bullseyeProvider, bullseyeProfile, settingsProvider, settingsProfile, diverged };
+  }
+
+  return { getActiveProjectId, setActiveProjectId, getSettings, updateSettings, getProviderDivergence, listClaudeProfiles, listCodexProfiles, listCopilotProfiles };
 }
 
 export const preferenceService = createPreferenceService({ database: db });
