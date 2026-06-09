@@ -102,6 +102,16 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
   const [monitorTunables, setMonitorTunables] = useState<{ tunables: MonitorTunables; source: "strategy" | "prefs" } | null>(null);
   const [migratingToStrategy, setMigratingToStrategy] = useState(false);
 
+  // Provider divergence: global settings prefs vs the project's Strategy Bullseye
+  const [providerDivergence, setProviderDivergence] = useState<{
+    hasBullseye: boolean;
+    bullseyeProvider: string | null;
+    bullseyeProfile: string | null;
+    settingsProvider: string | null;
+    settingsProfile: string | null;
+    diverged: boolean;
+  } | null>(null);
+
   // Config export/import state
   const [configExporting, setConfigExporting] = useState(false);
   const [configImporting, setConfigImporting] = useState(false);
@@ -225,6 +235,16 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
           try {
             const runs = await apiFetch<ScheduledRun[]>(`/api/scheduled-runs?projectId=${activeProjectId}`);
             setScheduledRunsList(runs);
+          } catch { /* non-fatal */ }
+        }
+
+        // Check for provider/profile divergence between global settings and the Bullseye
+        if (activeProjectId) {
+          try {
+            const div = await apiFetch<{ hasBullseye: boolean; bullseyeProvider: string | null; bullseyeProfile: string | null; settingsProvider: string | null; settingsProfile: string | null; diverged: boolean }>(
+              `/api/preferences/provider-divergence?projectId=${activeProjectId}`
+            );
+            setProviderDivergence(div);
           } catch { /* non-fatal */ }
         }
 
@@ -465,6 +485,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
                   preflightingProfileId={preflightingProfileId}
                   onProfilePreflight={handleProfilePreflight}
                   activeProjectId={activeProjectId}
+                  providerDivergence={providerDivergence}
                 />
               )}
 
