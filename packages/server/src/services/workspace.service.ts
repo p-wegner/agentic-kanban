@@ -57,6 +57,7 @@ export function createWorkspaceService(deps: {
     getLatestCommit: diff.getLatestCommit,
     // merge
     mergeWorkspace: merge.mergeWorkspace,
+    mergeWorkspaceDeduped: merge.mergeWorkspaceDeduped,
     updateBase: merge.updateBase,
     abortRebase: merge.abortRebase,
     resolveConflicts: merge.resolveConflicts,
