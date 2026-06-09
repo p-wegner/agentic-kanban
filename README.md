@@ -6,9 +6,13 @@ Each task card on the board is backed by a git worktree and a live Claude Code s
 
 ## Showcase
 
-| Board | Strategy Bullseye | Insights |
-|-------|-------------------|---------|
-| ![Board view](docs/screenshots/board.png) | ![Strategy view](docs/screenshots/strategy.png) | ![Insights view](docs/screenshots/insights.png) |
+| Board | Strategy Bullseye |
+|-------|-------------------|
+| ![Board view](docs/screenshots/board.png) | ![Strategy view](docs/screenshots/strategy.png) |
+
+| Insights (quota + summary) | Insights (cost breakdown) | Metrics |
+|---------------------------|--------------------------|---------|
+| ![Insights view](docs/screenshots/insights.png) | ![Insights lower](docs/screenshots/insights-lower.png) | ![Metrics view](docs/screenshots/metrics.png) |
 
 ## Features
 
