@@ -5,6 +5,15 @@ import { CodexLicenseRingEditor } from "./CodexLicenseRingEditor.js";
 import { ClaudeSubscriptionRingEditor } from "./ClaudeSubscriptionRingEditor.js";
 import { AgentPresetsEditor } from "./AgentPresetsEditor.js";
 
+type ProviderDivergence = {
+  hasBullseye: boolean;
+  bullseyeProvider: string | null;
+  bullseyeProfile: string | null;
+  settingsProvider: string | null;
+  settingsProfile: string | null;
+  diverged: boolean;
+};
+
 type AgentSettingsProps = {
   settings: Settings;
   set: SettingsTextSetter;
@@ -16,9 +25,10 @@ type AgentSettingsProps = {
   preflightingProfileId: string | null;
   onProfilePreflight: (profile: AgentProfileHealth) => void;
   activeProjectId?: string | null;
+  providerDivergence?: ProviderDivergence | null;
 };
 
-export function AgentSettings({ settings, set, setSettings, profiles, codexProfiles, copilotProfiles, profileHealth, preflightingProfileId, onProfilePreflight: handleProfilePreflight, activeProjectId }: AgentSettingsProps) {
+export function AgentSettings({ settings, set, setSettings, profiles, codexProfiles, copilotProfiles, profileHealth, preflightingProfileId, onProfilePreflight: handleProfilePreflight, activeProjectId, providerDivergence }: AgentSettingsProps) {
   return (
 <>
                   <Field label="Agent Command" hint="Binary name or path. Leave empty for default (claude). Examples: claude, claude-glm, /usr/local/bin/claude">
@@ -30,6 +40,14 @@ export function AgentSettings({ settings, set, setSettings, profiles, codexProfi
                       className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500"
                     />
                   </Field>
+                  {providerDivergence?.diverged && (
+                    <div className="px-3 py-2.5 rounded-md bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 text-xs text-amber-800 dark:text-amber-300">
+                      <span className="font-semibold">Provider divergence detected.</span>{" "}
+                      The Strategy Bullseye controls workspace and butler launches ({providerDivergence.bullseyeProvider}:{providerDivergence.bullseyeProfile || "default"}), but the global Agent Profile here is set to{" "}
+                      {providerDivergence.settingsProvider}:{providerDivergence.settingsProfile || "default"}.
+                      {" "}Use <span className="font-mono">set-provider-default</span> to sync all sources, or update the Strategy Bullseye in the Workflow tab.
+                    </div>
+                  )}
                   <Field label="Agent Profile" hint="Selects agent provider and profile. Claude uses ~/.claude/settings_*.json, Codex uses ~/.codex/<name>.config.toml, Copilot uses the CLI default or configured model profile.">
                     <select
                       value={settingsProfileValue(settings)}

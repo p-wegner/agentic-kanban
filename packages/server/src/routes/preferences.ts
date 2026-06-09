@@ -151,6 +151,18 @@ export function createPreferencesRoute(database: Database = db) {
     return c.json(await probeMcpHealth());
   });
 
+  // GET /api/preferences/provider-divergence?projectId=<id>
+  // Returns whether the global provider/profile prefs diverge from the project's
+  // Strategy Bullseye. The Bullseye is the single source of truth for workspace
+  // creation and the butler; divergence means the Settings UI shows a stale value.
+  router.get("/provider-divergence", async (c) => {
+    const projectId = c.req.query("projectId")?.trim();
+    if (!projectId) {
+      return c.json({ hasBullseye: false, bullseyeProvider: null, bullseyeProfile: null, settingsProvider: null, settingsProfile: null, diverged: false });
+    }
+    return c.json(await preferenceService.getProviderDivergence(projectId));
+  });
+
   // GET /api/preferences/quota-usage — live quota from tampermonkey-direct
   router.get("/quota-usage", async (c) => {
     try {
