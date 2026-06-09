@@ -9,6 +9,7 @@ import { getHarnessBoolSetting } from "../harness-settings.js";
 import { computeScorecard } from "../workspace-scorecard.service.js";
 import { computeWorkspaceCodeMetrics } from "../workspace-code-metrics.service.js";
 import { recordAgentProfileLaunchFailure } from "../agent-profile-health.service.js";
+import { emitButlerSystemEvent } from "../butler-event-feed.js";
 import type { ProviderName } from "../agent-provider.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import { modelBelongsToProvider } from "@agentic-kanban/shared";
@@ -49,6 +50,27 @@ function buildZeroOutputLaunchFailureStats(executor: string, durationMs: number,
     failureReason: reason,
     providerExitCode: exitCode,
     agentSummary: reason,
+  };
+}
+
+/** Build launch failure stats when the agent produced an error message but is still a failed launch (e.g. model/auth error). */
+function buildModelErrorLaunchFailureStats(executor: string, durationMs: number, exitCode: number | null, errorText: string) {
+  const truncated = errorText.length > 500 ? errorText.slice(0, 500) + "…" : errorText;
+  const reason =
+    `Agent launch failed: provider process exited within ${Math.round(ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS / 1000)}s ` +
+    `with non-zero exit code ${exitCode ?? "unknown"} and error output:\n${truncated}`;
+  return {
+    durationMs,
+    totalCostUsd: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    numTurns: 0,
+    model: executor,
+    success: false,
+    launchFailure: true,
+    failureReason: reason,
+    providerExitCode: exitCode,
+    agentSummary: truncated,
   };
 }
 
@@ -420,9 +442,21 @@ export function createSessionLifecycle(
               .finally(() => options?.onSessionExit?.(workspaceId, sessionId, effectiveExitCode, planMode));
             return;
           }
-          if (!hadSubstantiveOutput && durationMs <= ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS) {
-            const stats = buildZeroOutputLaunchFailureStats(executor, durationMs, exitCode);
-            const effectiveExitCode = 1;
+          // Launch failure detection: sessions that exit within the window are failed launches.
+          // Case 1: zero-output (no text, no tool use, no stats) — classic crash.
+          // Case 2: non-zero exit with error text (e.g. "issue with the selected model") — the
+          //   error message counts as "substantive output" but is NOT real agent work. Without
+          //   this branch the workspace silently goes idle, indistinguishable from a healthy
+          //   completion. Grounded in the 2026-06-08 default_model outage (#699).
+          const withinWindow = durationMs <= ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS;
+          const isZeroOutput = !hadSubstantiveOutput;
+          const isNonZeroExit = exitCode !== 0 && exitCode !== null;
+          if (withinWindow && (isZeroOutput || isNonZeroExit)) {
+            const errorText = planText?.trim() || "";
+            const stats = isZeroOutput
+              ? buildZeroOutputLaunchFailureStats(executor, durationMs, exitCode)
+              : buildModelErrorLaunchFailureStats(executor, durationMs, exitCode, errorText);
+            const effectiveExitCode = isNonZeroExit ? exitCode! : 1;
             void (async () => {
               await recordAgentProfileLaunchFailure(db, {
                 provider: lifecycleProviderName(provider, profile),
@@ -445,8 +479,18 @@ export function createSessionLifecycle(
               await db.update(workspaces)
                 .set({ status: "idle", updatedAt: endNow })
                 .where(eq(workspaces.id, workspaceId));
+              if (projectId) {
+                emitButlerSystemEvent({
+                  projectId,
+                  kind: "session_failed",
+                  workspaceId,
+                  text: isNonZeroExit
+                    ? `Agent launch failed for workspace ${workspaceId}: exited with code ${effectiveExitCode} in ${Math.round(durationMs / 1000)}s${errorText ? ` — ${errorText.slice(0, 200)}` : ""}.`
+                    : `Agent launch failed for workspace ${workspaceId}: zero output within ${Math.round(durationMs / 1000)}s.`,
+                });
+              }
             })()
-              .catch((err) => console.error("Failed to record zero-output launch failure:", err))
+              .catch((err) => console.error("Failed to record launch failure:", err))
               .finally(() => options?.onSessionExit?.(workspaceId, sessionId, effectiveExitCode, planMode));
             return;
           }
