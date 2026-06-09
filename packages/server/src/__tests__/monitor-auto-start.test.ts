@@ -246,3 +246,83 @@ describe("runAutoStart opt-out + scoping", () => {
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
   });
 });
+
+describe("runAutoStart planMode override for auto-driven projects (#666)", () => {
+  /**
+   * Regression: an auto-driven project with a high-priority ticket was stalling
+   * because the workspace launched in plan-only mode and no human was there to
+   * approve the plan. The monitor must pass `planMode: false` for auto-driven
+   * projects so the agent goes straight to implementation.
+   */
+
+  it("passes planMode:false for a Todo issue in an auto-driven project", async () => {
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]) as ReturnType<typeof db.select>) // inProgressStatuses
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop1 activeWip
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // loop1 inProgressIssues (none)
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop2 inProgressCount
+      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]) as ReturnType<typeof db.select>) // todoStatus
+      .mockReturnValueOnce(makeSelectChain([{ id: "backlog-1" }]) as ReturnType<typeof db.select>) // backlogStatus (auto-driven)
+      .mockReturnValueOnce(makeSelectChain([{ id: "issue-1", title: "High prio feature", projectId: "proj-1", issueNumber: 2 }]) as ReturnType<typeof db.select>) // todoIssues
+      .mockReturnValueOnce(makeSelectChain([{ id: "done-1" }]) as ReturnType<typeof db.select>) // doneStatuses
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // existingWs (none)
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // no-auto-start tag (none)
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>); // deps (none)
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ id: "ws-new" }) } as Response);
+
+    await runAutoStart(
+      new Map([["nudge_wip_limit", "5"]]),
+      makeDeps({ isAutoDrivenProject: () => true }),
+    );
+
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+    const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
+    expect(body.planMode).toBe(false);
+  });
+
+  it("passes planMode:false for an In-Progress issue in an auto-driven project", async () => {
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]) as ReturnType<typeof db.select>) // inProgressStatuses
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // activeWip
+      .mockReturnValueOnce(makeSelectChain([{ id: "issue-1", title: "Stuck", description: "Fix it", issueNumber: 3 }]) as ReturnType<typeof db.select>) // inProgressIssues
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // openWs (none)
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // no-auto-start tag (none)
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // Todo loop inProgressCount
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>); // todoStatus (none) → loop ends
+    vi.mocked(fetch).mockResolvedValue({ ok: true } as Response);
+
+    await runAutoStart(
+      new Map([["nudge_wip_limit", "5"]]),
+      makeDeps({ isAutoDrivenProject: () => true }),
+    );
+
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+    const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
+    expect(body.planMode).toBe(false);
+  });
+
+  it("does NOT pass planMode for a non-auto-driven project (priority default preserved)", async () => {
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]) as ReturnType<typeof db.select>) // inProgressStatuses
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop1 activeWip
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // loop1 inProgressIssues (none)
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop2 inProgressCount
+      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]) as ReturnType<typeof db.select>) // todoStatus
+      .mockReturnValueOnce(makeSelectChain([{ id: "issue-1", title: "Regular issue", projectId: "proj-1", issueNumber: 4 }]) as ReturnType<typeof db.select>) // todoIssues
+      .mockReturnValueOnce(makeSelectChain([{ id: "done-1" }]) as ReturnType<typeof db.select>) // doneStatuses
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // existingWs (none)
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // no-auto-start tag (none)
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>); // deps (none)
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ id: "ws-new" }) } as Response);
+
+    await runAutoStart(
+      new Map([["nudge_wip_limit", "5"]]),
+      makeDeps({ isAutoDrivenProject: () => false }),
+    );
+
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+    const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
+    // planMode must NOT be in the body — the route-level default should apply
+    expect(body).not.toHaveProperty("planMode");
+  });
+});
