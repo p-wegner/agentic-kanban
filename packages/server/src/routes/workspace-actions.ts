@@ -23,29 +23,6 @@ export function createWorkspaceActionsRoute(
     getSessionManager,
     boardEvents: options?.boardEvents,
   });
-  type MergeResult = Awaited<ReturnType<typeof workspaceService.mergeWorkspace>>;
-  const activeMergeResponses = new Map<string, Promise<MergeResult>>();
-
-  function runMergeDetached(id: string): Promise<MergeResult> {
-    const existing = activeMergeResponses.get(id);
-    if (existing) return existing;
-
-    const mergePromise = workspaceService.mergeWorkspace(id);
-    const trackedPromise = mergePromise.finally(() => {
-      if (activeMergeResponses.get(id) === trackedPromise) {
-        activeMergeResponses.delete(id);
-      }
-    });
-    activeMergeResponses.set(id, trackedPromise);
-    trackedPromise.catch((err) => {
-      console.warn(
-        `[workspace-actions] detached merge failed for workspace ${id}:`,
-        err instanceof Error ? err.message : String(err),
-      );
-    });
-    return trackedPromise;
-  }
-
   const bisectService = createBisectService({
     database,
     getSessionManager,
@@ -150,7 +127,7 @@ export function createWorkspaceActionsRoute(
   // POST /api/workspaces/:id/merge
   router.post("/:id/merge", async (c) => {
     const id = c.req.param("id");
-    return c.json(await runMergeDetached(id));
+    return c.json(await workspaceService.mergeWorkspaceDeduped(id));
   });
 
   // GET /api/workspaces/:id/already-merged-status — check if branch is already merged without modifying state
