@@ -24,18 +24,19 @@ function buildApp() {
   return app;
 }
 
+function mockMerge(rejectWith: unknown) {
+  const fn = vi.fn().mockRejectedValue(rejectWith);
+  mockedFactory.mockReturnValue({ mergeWorkspace: fn, mergeWorkspaceDeduped: fn } as never);
+}
+
 describe("merge 409 structured body", () => {
   it("reason=conflict with conflictFiles when detectConflicts finds conflicts", async () => {
     const { WorkspaceError } = await import("../services/workspace.service.js");
-    const workspaceError = new WorkspaceError(
+    mockMerge(new WorkspaceError(
       "Merge conflicts detected",
       "CONFLICT",
       { mergeReason: "conflict", conflictFiles: ["src/foo.ts", "src/bar.ts"] },
-    );
-
-    mockedFactory.mockReturnValue({
-      mergeWorkspace: vi.fn().mockRejectedValue(workspaceError),
-    } as never);
+    ));
 
     const app = buildApp();
     const res = await app.request("/api/workspaces/ws-1/merge", { method: "POST" });
@@ -49,15 +50,11 @@ describe("merge 409 structured body", () => {
 
   it("reason=not_approved when workspace is not ready for merge", async () => {
     const { WorkspaceError } = await import("../services/workspace.service.js");
-    const workspaceError = new WorkspaceError(
+    mockMerge(new WorkspaceError(
       "Workspace is not approved for merge. Mark it as ready-for-merge before merging.",
       "CONFLICT",
       { mergeReason: "not_approved", status: "idle" },
-    );
-
-    mockedFactory.mockReturnValue({
-      mergeWorkspace: vi.fn().mockRejectedValue(workspaceError),
-    } as never);
+    ));
 
     const app = buildApp();
     const res = await app.request("/api/workspaces/ws-2/merge", { method: "POST" });
@@ -71,15 +68,11 @@ describe("merge 409 structured body", () => {
 
   it("reason=already_merged when workspace is already merged", async () => {
     const { WorkspaceError } = await import("../services/workspace.service.js");
-    const workspaceError = new WorkspaceError(
+    mockMerge(new WorkspaceError(
       "Workspace has already been merged.",
       "CONFLICT",
       { mergeReason: "already_merged" },
-    );
-
-    mockedFactory.mockReturnValue({
-      mergeWorkspace: vi.fn().mockRejectedValue(workspaceError),
-    } as never);
+    ));
 
     const app = buildApp();
     const res = await app.request("/api/workspaces/ws-3/merge", { method: "POST" });
@@ -93,15 +86,11 @@ describe("merge 409 structured body", () => {
 
   it("reason=dirty_main when main checkout has uncommitted changes", async () => {
     const { WorkspaceError } = await import("../services/workspace.service.js");
-    const workspaceError = new WorkspaceError(
+    mockMerge(new WorkspaceError(
       "Main checkout has 2 uncommitted tracked change(s) — commit or stash those changes first.",
       "CONFLICT",
       { mergeReason: "dirty_main", uncommittedFiles: ["src/a.ts", "src/b.ts"] },
-    );
-
-    mockedFactory.mockReturnValue({
-      mergeWorkspace: vi.fn().mockRejectedValue(workspaceError),
-    } as never);
+    ));
 
     const app = buildApp();
     const res = await app.request("/api/workspaces/ws-4/merge", { method: "POST" });
@@ -116,15 +105,11 @@ describe("merge 409 structured body", () => {
 
   it("returns 503 with reason=server_build_stale when mergeWorkspace throws a WorkspaceError for stale build", async () => {
     const { WorkspaceError } = await import("../services/workspace.service.js");
-    const staleError = new WorkspaceError(
+    mockMerge(new WorkspaceError(
       "Merge helper unavailable — the server build may be stale. Rebuild shared/dist and restart. (gitService.checkBranchTipIsAncestor is not a function)",
       "CONFLICT",
       { mergeReason: "server_build_stale", originalMessage: "gitService.checkBranchTipIsAncestor is not a function" },
-    );
-
-    mockedFactory.mockReturnValue({
-      mergeWorkspace: vi.fn().mockRejectedValue(staleError),
-    } as never);
+    ));
 
     const app = buildApp();
     const res = await app.request("/api/workspaces/ws-stale/merge", { method: "POST" });
@@ -137,9 +122,7 @@ describe("merge 409 structured body", () => {
   });
 
   it("returns 500 with non-empty error body when mergeWorkspace throws a plain Error", async () => {
-    mockedFactory.mockReturnValue({
-      mergeWorkspace: vi.fn().mockRejectedValue(new Error("something unexpected broke")),
-    } as never);
+    mockMerge(new Error("something unexpected broke"));
 
     const app = buildApp();
     const res = await app.request("/api/workspaces/ws-5/merge", { method: "POST" });
@@ -152,15 +135,11 @@ describe("merge 409 structured body", () => {
 
   it("returns 409 with reason=conflict for git-step merge failure", async () => {
     const { WorkspaceError } = await import("../services/workspace.service.js");
-    const workspaceError = new WorkspaceError(
+    mockMerge(new WorkspaceError(
       "Merge failed (git-merge step): fatal: not a git repository",
       "CONFLICT",
       { mergeReason: "conflict", step: "git-merge", branch: "feature/test", targetBranch: "master" },
-    );
-
-    mockedFactory.mockReturnValue({
-      mergeWorkspace: vi.fn().mockRejectedValue(workspaceError),
-    } as never);
+    ));
 
     const app = buildApp();
     const res = await app.request("/api/workspaces/ws-6/merge", { method: "POST" });

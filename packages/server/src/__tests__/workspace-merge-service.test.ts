@@ -988,3 +988,86 @@ describe("MergeService — error-skip (dirty main) throws without git merge", ()
     expect(mergeBranch).not.toHaveBeenCalled();
   });
 });
+
+// ─── mergeWorkspaceDeduped: concurrent-request deduplication (#631) ───────────
+
+describe("MergeService — mergeWorkspaceDeduped deduplicates concurrent requests", () => {
+  let db: ReturnType<typeof createTestDb>["db"];
+
+  beforeEach(() => {
+    ({ db } = createTestDb());
+  });
+
+  it("returns the same promise for concurrent calls to the same workspace", async () => {
+    const { workspaceId } = await seedWorkspace(db);
+    let mergeCallCount = 0;
+    const git = makeGit({
+      mergeBranch: vi.fn(async () => {
+        mergeCallCount++;
+        return "Merge made by the 'ort' strategy.";
+      }),
+    });
+
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+
+    const [r1, r2] = await Promise.all([
+      svc.mergeWorkspaceDeduped(workspaceId),
+      svc.mergeWorkspaceDeduped(workspaceId),
+    ]);
+
+    expect(mergeCallCount).toBe(1);
+    expect(r1).toBe(r2);
+  });
+
+  it("allows a second merge after the first completes", async () => {
+    const { workspaceId } = await seedWorkspace(db);
+    let mergeCallCount = 0;
+    const git = makeGit({
+      mergeBranch: vi.fn(async () => {
+        mergeCallCount++;
+        return "Merge made by the 'ort' strategy.";
+      }),
+    });
+
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+
+    await svc.mergeWorkspaceDeduped(workspaceId);
+    // First call merged and closed the workspace; second call should hit already-merged path
+    await svc.mergeWorkspaceDeduped(workspaceId);
+
+    // Two separate invocations (not deduplicated since first completed)
+    expect(mergeCallCount).toBe(1);
+  });
+
+  it("propagates rejections to all concurrent callers", async () => {
+    const { workspaceId } = await seedWorkspace(db);
+    const git = makeGit({
+      getUncommittedTrackedChanges: async () => ["dirty.ts"],
+    });
+
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+
+    const [p1, p2] = [
+      svc.mergeWorkspaceDeduped(workspaceId),
+      svc.mergeWorkspaceDeduped(workspaceId),
+    ];
+
+    await expect(p1).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(p2).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+});
