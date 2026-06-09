@@ -13,6 +13,7 @@ async function setupScenario(db: ReturnType<typeof createTestDb>["db"], opts: {
   issueStatusName?: string;
   workspaceStatus?: string;
   sessionPid?: number | null;
+  sessionStatus?: "running" | "completed" | "stopped";
   workspaceUpdatedAt?: string;
 }) {
   const now = makeNow();
@@ -67,7 +68,7 @@ async function setupScenario(db: ReturnType<typeof createTestDb>["db"], opts: {
     id: sessionId,
     workspaceId,
     executor: "claude-code",
-    status: "running",
+    status: opts.sessionStatus ?? "running",
     startedAt: now,
     pid: opts.sessionPid !== undefined ? opts.sessionPid : null,
   });
@@ -233,5 +234,99 @@ describe("reconcileCompletionStates", () => {
     });
 
     expect(count).toBe(0);
+  });
+
+  // ─── blocked workspace auto-recovery (#712) ──────────────────────────────────
+
+  it("auto-recovers blocked workspace to idle when session completed with committed changes", async () => {
+    const { workspaceId, sessionId } = await setupScenario(db, {
+      issueStatusName: "In Progress",
+      workspaceStatus: "blocked",
+      sessionStatus: "completed",
+      sessionPid: null,
+    });
+
+    const count = await reconcileCompletionStates(db, {
+      checkPid: () => false,
+      checkCommits: async () => true,
+    });
+
+    expect(count).toBe(1);
+
+    const [workspace] = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
+    expect(workspace.status).toBe("idle");
+
+    // Session status is not changed by blocked recovery — it already completed
+    const [session] = await db.select().from(sessions).where(eq(sessions.id, sessionId)).limit(1);
+    expect(session.status).toBe("completed");
+  });
+
+  it("auto-recovers blocked workspace to idle when session stopped with committed changes", async () => {
+    const { workspaceId } = await setupScenario(db, {
+      issueStatusName: "In Progress",
+      workspaceStatus: "blocked",
+      sessionStatus: "stopped",
+      sessionPid: null,
+    });
+
+    const count = await reconcileCompletionStates(db, {
+      checkPid: () => false,
+      checkCommits: async () => true,
+    });
+
+    expect(count).toBe(1);
+
+    const [workspace] = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
+    expect(workspace.status).toBe("idle");
+  });
+
+  it("does NOT auto-recover blocked workspace when session has no committed changes", async () => {
+    const { workspaceId } = await setupScenario(db, {
+      issueStatusName: "In Progress",
+      workspaceStatus: "blocked",
+      sessionStatus: "completed",
+      sessionPid: null,
+    });
+
+    const count = await reconcileCompletionStates(db, {
+      checkPid: () => false,
+      checkCommits: async () => false,
+    });
+
+    expect(count).toBe(0);
+
+    const [workspace] = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
+    expect(workspace.status).toBe("blocked");
+  });
+
+  it("does NOT auto-recover blocked workspace when workingDir or baseBranch is missing", async () => {
+    const now = makeNow();
+    const projectId = randomUUID();
+    const statusId = randomUUID();
+    const issueId = randomUUID();
+    const workspaceId = randomUUID();
+    const sessionId = randomUUID();
+
+    await db.insert(projects).values({ id: projectId, name: "T2", repoPath: "/t2", repoName: "t2", createdAt: now, updatedAt: now });
+    await db.insert(projectStatuses).values({ id: statusId, projectId, name: "In Progress", sortOrder: 0, isDefault: true, createdAt: now });
+    await db.insert(issues).values({ id: issueId, projectId, statusId, title: "T2", issueNumber: 3, createdAt: now, updatedAt: now });
+    await db.insert(workspaces).values({
+      id: workspaceId, issueId, branch: "feature/t2",
+      status: "blocked",
+      workingDir: null,
+      baseBranch: null,
+      isDirect: false, createdAt: now, updatedAt: now,
+    });
+    await db.insert(sessions).values({ id: sessionId, workspaceId, executor: "claude-code", status: "completed", startedAt: now, pid: null });
+
+    const count = await reconcileCompletionStates(db, {
+      checkPid: () => false,
+      checkCommits: async () => true,
+    });
+
+    expect(count).toBe(0);
+
+    const [workspace] = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
+    expect(workspace.status).toBe("blocked");
   });
 });
