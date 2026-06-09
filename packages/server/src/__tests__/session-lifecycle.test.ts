@@ -311,7 +311,7 @@ describe("session-lifecycle", () => {
 
   // --- Session state machine transitions ---
 
-  it("transitions running->stopped when the agent process exits with a non-zero code", async () => {
+  it("flags a short non-zero exit with substantive output as a model-error launch failure (#699)", async () => {
     const workspaceId = await seedWorkspace(db);
     const { service: agentService, getOnOutput } = createFakeAgentService();
     const onSessionExit = vi.fn();
@@ -325,22 +325,30 @@ describe("session-lifecycle", () => {
     );
 
     const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it" });
-    // Mark substantive output so the zero-output fast-exit path is not taken
+    // Simulate the model-error scenario: the CLI outputs an error message as assistantText
+    // (which the broadcast handler records as "substantive output"), then exits non-zero.
+    // This was the 2026-06-08 default_model outage: Claude got --model gpt-5.5, printed
+    // "There is an issue with the selected model", and exited code 1 in ~5s.
     state.sessionSubstantiveOutput.add(sessionId);
+    state.sessionFinalText.set(sessionId, "There is an issue with the selected model");
 
     const onOutput = getOnOutput();
     expect(onOutput).toBeDefined();
-    // Process exits with non-zero code — agent failed / was killed externally
     onOutput!({ type: "exit", exitCode: 1 } as never);
 
     await flush(() => onSessionExit.mock.calls.length > 0);
 
     const rows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
-    // Non-zero exit with substantive output still reaches the "completed" branch in session-lifecycle
-    // (the running→stopped path is specifically when stoppedByUser is set; otherwise exitCode is
-    // persisted and status is "completed" regardless of the numeric code)
-    expect(rows[0].status).toBe("completed");
+    // Session is "stopped" (not "completed") with launchFailure stamped
+    expect(rows[0].status).toBe("stopped");
     expect(rows[0].exitCode).toBe("1");
+    const stats = JSON.parse(rows[0].stats!);
+    expect(stats.launchFailure).toBe(true);
+    expect(stats.success).toBe(false);
+    expect(stats.agentSummary).toContain("issue with the selected model");
+
+    const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(wsRows[0].status).toBe("idle");
     expect(onSessionExit).toHaveBeenCalledWith(workspaceId, sessionId, 1, undefined);
   });
 
