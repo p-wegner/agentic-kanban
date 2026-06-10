@@ -2,9 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 export type NotificationEventType =
   | "workspace_merged"
+  | "workspace_ready_for_merge"
   | "session_completed"
   | "session_failed"
+  | "session_launched"
   | "workflow_error"
+  | "workflow_transition"
   | "approval_requested";
 
 export interface NotificationEvent {
@@ -59,8 +62,11 @@ function writeLastRead(projectId: string, ts: string) {
 
 const RELEVANT_REASONS = new Set<string>([
   "workspace_merged",
+  "workspace_ready_for_merge",
   "session_completed",
+  "session_launched",
   "workflow_error",
+  "workflow_transition",
 ]);
 
 interface IssueSnapshot {
