@@ -42,7 +42,8 @@ export type ViewMode =
   | "throughput"
   | "provider-mix"
   | "lead-time"
-  | "scorecard-distribution";
+  | "scorecard-distribution"
+  | "provider-cost";
 
 export interface ViewDescriptor {
   /** Stable view id — matches BoardPage's `viewMode` state. */
@@ -266,6 +267,11 @@ const ICON = {
   "scorecard-distribution": (
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M3 19h18M5 19v-5h3v5M10 19V9h3v10M16 19V4h3v15" />
+    </svg>
+  ),
+  "provider-cost": (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 13l4-3 4 2 4-5 4 3M3 19h18" />
     </svg>
   ),
 } as const;
@@ -600,6 +606,17 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     icon: ICON["scorecard-distribution"],
     paletteIcon: "SD",
     paletteDescription: "Histogram of workspace scorecard scores across recent workspaces",
+    activeClass: "bg-emerald-600 text-white",
+    group: "secondary",
+  },
+  {
+    id: "provider-cost",
+    toolbarLabel: "Cost",
+    label: "Provider Cost Over Time",
+    tooltip: "Provider Cost Over Time — stacked daily token cost per agent provider",
+    icon: ICON["provider-cost"],
+    paletteIcon: "$",
+    paletteDescription: "Stacked bar chart of estimated token cost per day grouped by agent provider (claude/codex/copilot)",
     activeClass: "bg-emerald-600 text-white",
     group: "secondary",
   },
