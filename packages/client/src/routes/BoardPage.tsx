@@ -517,24 +517,38 @@ export function BoardPage() {
     }
 
     // Activity notification bell — capture issue context from current board snapshot
-    const relevantReasons = new Set(["workspace_merged", "session_completed", "workflow_error"]);
+    const relevantReasons = new Set([
+      "workspace_merged", "workspace_ready_for_merge",
+      "session_completed", "session_launched",
+      "workflow_error", "workflow_transition",
+    ]);
     if (relevantReasons.has(reason)) {
-      // Find the most recently active workspace in the current columns snapshot
+      // Find the most relevant issue from the current board snapshot.
+      // For workspace events: find the issue whose workspace is most active/recent.
+      // For workflow transitions: the refresh after this will move the issue,
+      //   so just record the event without specific issue context.
       let bestIssue: { id: string; issueNumber?: number; title?: string; workspaceId?: string } | undefined;
-      for (const col of columnsRef.current) {
-        for (const iss of col.issues) {
-          const ws = iss.workspaceSummary?.main;
-          if (ws) {
-            bestIssue = {
-              id: iss.id,
-              issueNumber: iss.issueNumber ?? undefined,
-              title: iss.title,
-              workspaceId: ws.id,
-            };
-            break;
+      const isWorkspaceEvent = reason.startsWith("workspace_") || reason.startsWith("session_");
+      if (isWorkspaceEvent) {
+        // Pick the issue with the most recently-active workspace
+        let bestTime = 0;
+        for (const col of columnsRef.current) {
+          for (const iss of col.issues) {
+            const ws = iss.workspaceSummary?.main;
+            if (ws) {
+              const wsTime = ws.lastSessionAt ? new Date(ws.lastSessionAt).getTime() : 0;
+              if (wsTime > bestTime) {
+                bestTime = wsTime;
+                bestIssue = {
+                  id: iss.id,
+                  issueNumber: iss.issueNumber ?? undefined,
+                  title: iss.title,
+                  workspaceId: ws.id,
+                };
+              }
+            }
           }
         }
-        if (bestIssue) break;
       }
       addNotificationBoardEvent(reason, bestIssue);
     }
