@@ -4,10 +4,9 @@
 
 ## Status
 
-**Proposed** — design / next-steps record for kanban issue #720
-("Investigate next steps for PI agent support"). No code yet. This document is the
-plan a Builder follows to add Pi as a fourth provider, and the contract for how its
-hooks / subagents / skills map onto the existing per-provider machinery.
+**Active** — design approved in #722. Implementation tracked as child tickets
+#724–#730 on the board. Phases must run in order: #724 (CLI verification) unblocks
+all others. No code yet; this document is the contract a Builder follows.
 
 ## Context
 
@@ -99,12 +98,12 @@ inventing board-specific ones:
 Mirrors `docs/codex-agent-support.md`'s incremental sequence. Each phase is a
 board ticket; keep Claude as default and change no existing provider's flags.
 
-1. **Map & verify the CLI** — install Pi, capture real `--mode json` output for a
-   one-shot run, a resume, and a tool call. Confirm: the JSON event schema, the
+1. **#724 — Map & verify the CLI** — install Pi, capture real `--mode json` output
+   for a one-shot run, a resume, and a tool call. Confirm: the JSON event schema, the
    field carrying the **session id**, the **working-dir** mechanism, **rate-limit /
    usage** event shape, and **MCP** config support. (Resolves the open questions
    below — do this before any parser code, per the Codex lesson.)
-2. **Types & prefs** — add `"pi"` to `ProviderName`/`ProviderId`
+2. **#725 — Types & prefs** — add `"pi"` to `ProviderName`/`ProviderId`
    (`agent-provider/types.ts`), `ProfileSelection.provider` (`shared/types/api.ts`),
    the strategy provider literals (`strategy-objective.service.ts`), and
    `parseProviderName` (`agent-settings.service.ts`). Add `PREF_PI_PROFILE`
@@ -112,24 +111,24 @@ board ticket; keep Claude as default and change no existing provider's flags.
    PUT `allowedKeys` arrays in `routes/preferences.ts`. Decide Pi's
    profile/auth model (likely `PI_CODING_AGENT_DIR` per profile, mirroring
    `CODEX_HOME`).
-3. **Provider implementation** — `agent-provider/pi-provider.ts` implementing
+3. **#726 — Provider implementation** — `agent-provider/pi-provider.ts` implementing
    `buildLaunchConfig` (resolve the `pi` binary on Windows; build
    `--mode json --provider … --model … --approve` + cwd + resume + `--skill` flags)
    and `parseStreamEvent` (map Pi JSON events → `ParsedStreamEvent`: stats, tool
    activity, live model/context, rate-limit, session id). Register in `registry.ts`.
-4. **Client output parser** — `packages/client/src/lib/pi-output-parser.ts` +
+4. **#727 — Client output parser** — `packages/client/src/lib/pi-output-parser.ts` +
    `"pi-jsonl"` format in `agent-output-parser.ts`, wired through the parser factory
    by provider.
-5. **Skills + hooks materialization** — extend the worktree provisioning so a Pi
-   workspace gets skills via `--skill`/`.pi` and a Pi hook-adapter extension; reuse
+5. **#728 — Skills + hooks materialization** — extend the worktree provisioning so a
+   Pi workspace gets skills via `--skill`/`.pi` and a Pi hook-adapter extension; reuse
    `.claude/hooks/*.js` unchanged. Add a `convert-hooks-to-pi` skill modeled on
    `convert-hooks-to-opencode` if the adapter is non-trivial.
-6. **UI** — add a `<optgroup label="Pi">` and `piProfiles` state in
+6. **#729 — UI** — add a `<optgroup label="Pi">` and `piProfiles` state in
    `AgentSettings.tsx` / `SettingsPanel.tsx`, a `providerDisplayName("pi")` case, and
    Pi profile discovery (extend `/api/agent-profile-health`).
-7. **Validate** — run a real ticket end-to-end on Pi through the board (launch →
-   diff → review → merge), confirm hooks fire (DB-safety + cross-worktree guards) and
-   the Stop checks gate, then document operational detail in
+7. **#730 — Validate** — run a real ticket end-to-end on Pi through the board (launch
+   → diff → review → merge), confirm hooks fire (DB-safety + cross-worktree guards)
+   and the Stop checks gate, then document operational detail in
    `packages/server/CLAUDE.md` and the "Agent Providers" section of `CLAUDE.md`.
 
 ## Rationale
