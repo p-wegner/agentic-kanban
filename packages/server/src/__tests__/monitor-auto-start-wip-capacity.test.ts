@@ -152,4 +152,100 @@ describe("countActiveWip — launch failures do not occupy WIP (#690)", () => {
 
     expect(await countActiveWip(db, inProgressId)).toBe(1);
   });
+
+  // --- #713 regression tests: launch-failed workspace exclusion from auto-start WIP ---
+
+  it("workspace whose session stopped within seconds of creation does NOT count as active WIP", async () => {
+    // Requirement 1: agent launched, session stopped within seconds of workspace
+    // creation (launch-failure signature). Session exit handler sets workspace to
+    // "idle" with launch-failure stats. The old `status != 'closed'` check would
+    // have counted this as active WIP, blocking all auto-starts.
+    const { db } = createTestDb();
+    const { projectId, inProgressId, now } = await seed(db);
+    const issueId = await addIssue(db, projectId, inProgressId, now);
+
+    const wsId = await addWorkspace(db, issueId, "idle", now);
+    // Session started at workspace creation time, stopped 5s later — quick failure
+    const createdAt = new Date(now);
+    await db.insert(sessions).values({
+      id: randomUUID(),
+      workspaceId: wsId,
+      executor: "claude-code",
+      status: "stopped",
+      startedAt: createdAt.toISOString(),
+      endedAt: new Date(createdAt.getTime() + 5000).toISOString(),
+      exitCode: "1",
+      stats: JSON.stringify({ launchFailure: true, inputTokens: 0, outputTokens: 0 }),
+    });
+
+    expect(await countActiveWip(db, inProgressId)).toBe(0);
+  });
+
+  it("excluding failed launches frees WIP capacity so the monitor can fill remaining slots", async () => {
+    // Requirement 3: WIP limit = 3, with 1 active + 2 failed-launch workspaces.
+    // The monitor checks `wipLimit - countActiveWip` for available slots.
+    // If failed launches inflated the count, slotsAvailable would be 0 (stall).
+    // With the fix, only the genuinely active workspace counts → 2 slots available.
+    const { db } = createTestDb();
+    const { projectId, inProgressId, now } = await seed(db);
+
+    // 1 genuinely active workspace — counts toward WIP
+    const activeIssue = await addIssue(db, projectId, inProgressId, now);
+    await addWorkspace(db, activeIssue, "active", now);
+
+    // 2 failed-launch workspaces — must NOT count toward WIP
+    const blockedIssue = await addIssue(db, projectId, inProgressId, now);
+    const blockedWsId = await addWorkspace(db, blockedIssue, "blocked", now);
+    await db.insert(sessions).values({
+      id: randomUUID(),
+      workspaceId: blockedWsId,
+      executor: "codex",
+      status: "stopped",
+      startedAt: new Date(Date.now() - 3600000).toISOString(),
+      endedAt: new Date(Date.now() - 3596500).toISOString(),
+      exitCode: "1",
+      stats: JSON.stringify({
+        launchFailure: true,
+        rateLimited: true,
+        rateLimitKind: "codex-usage-limit",
+        inputTokens: 0,
+        outputTokens: 0,
+      }),
+    });
+
+    const idleIssue = await addIssue(db, projectId, inProgressId, now);
+    const idleWsId = await addWorkspace(db, idleIssue, "idle", now);
+    await db.insert(sessions).values({
+      id: randomUUID(),
+      workspaceId: idleWsId,
+      executor: "claude-code",
+      status: "stopped",
+      startedAt: now,
+      endedAt: new Date(new Date(now).getTime() + 500).toISOString(),
+      exitCode: "1",
+      stats: JSON.stringify({ launchFailure: true, inputTokens: 0, outputTokens: 0 }),
+    });
+
+    // Only the genuinely active workspace counts → WIP = 1, not 3
+    // With WIP limit 3: 2 slots available for auto-start (wipLimit - currentWip = 2)
+    expect(await countActiveWip(db, inProgressId)).toBe(1);
+  });
+
+  it("all In-Progress workspaces are failed launches: zero WIP, full capacity available", async () => {
+    // Edge case of requirement 3: every In-Progress workspace is a failed launch.
+    // Under the old `status != 'closed'` check this would return N, blocking all
+    // auto-starts. With the fix, WIP = 0 so the monitor fills all available slots.
+    const { db } = createTestDb();
+    const { projectId, inProgressId, now } = await seed(db);
+
+    // Blocked workspace (e.g. codex usage-limit failure)
+    const issue1 = await addIssue(db, projectId, inProgressId, now);
+    await addWorkspace(db, issue1, "blocked", now);
+
+    // Idle workspace (e.g. zero-output launch failure)
+    const issue2 = await addIssue(db, projectId, inProgressId, now);
+    await addWorkspace(db, issue2, "idle", now);
+
+    expect(await countActiveWip(db, inProgressId)).toBe(0);
+  });
 });
