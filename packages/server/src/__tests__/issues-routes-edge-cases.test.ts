@@ -469,11 +469,14 @@ describe("Issues route — export/import edge cases", () => {
   });
 
   it("POST import defaults invalid priority/type", async () => {
-    await app.request(`/api/projects/${ids.projectId}/issues/import`, json("POST", [{ title: "Def", priority: "mega", type: "super" }]));
+    const res = await app.request(`/api/projects/${ids.projectId}/issues/import`, json("POST", [{ title: "Def", priority: "mega", type: "super" }]));
+    const resJson = await res.json() as any;
+    // present-but-invalid values default to medium/feature and surface a warning.
+    expect(resJson.warnings).toHaveLength(2);
     const list = await (await app.request(`/api/issues?projectId=${ids.projectId}`)).json();
     const imported = list.find((i: any) => i.title === "Def");
     expect(imported.priority).toBe("medium");
-    expect(imported.issueType).toBe("task");
+    expect(imported.issueType).toBe("feature");
   });
 
   it("POST import reports parse errors for non-object items", async () => {
@@ -491,5 +494,113 @@ describe("Issues route — export/import edge cases", () => {
     const list = await (await app.request(`/api/issues?projectId=${newPid}`)).json();
     expect(list).toHaveLength(1);
     expect(list[0].title).toBe("Test Issue");
+  });
+});
+
+describe("Markdown + preview import", () => {
+  const { app, db, cleanup } = fileSetup();
+  let ids: Awaited<ReturnType<typeof fullSeed>>;
+
+  beforeEach(async () => { ids = await fullSeed(db); });
+  afterEach(() => { cleanup?.(); });
+
+  it("parses Markdown: one issue per top-level bullet, sub-bullets as description", async () => {
+    const md = [
+      "# Sprint plan",
+      "",
+      "- Add login page",
+      "  - Needs OAuth",
+      "  - Design first",
+      "- Fix N+1 queries",
+      "* Refactor config",
+    ].join("\n");
+    const res = await app.request(`/api/projects/${ids.projectId}/issues/import`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: md, format: "markdown" }),
+    });
+    expect(res.status).toBe(201);
+    const body = await res.json() as any;
+    expect(body.created).toBe(3);
+    const list = await (await app.request(`/api/issues?projectId=${ids.projectId}`)).json();
+    const login = list.find((i: any) => i.title === "Add login page");
+    expect(login.description).toBe("Needs OAuth\nDesign first");
+    // Markdown rows default to medium / feature.
+    expect(login.priority).toBe("medium");
+    expect(login.issueType).toBe("feature");
+  });
+
+  it("preview parses without persisting and returns resolved rows", async () => {
+    const csv = "title,priority,type\nA,high,bug\nB,,\n";
+    const res = await app.request(`/api/projects/${ids.projectId}/issues/import/preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: csv, format: "auto" }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.format).toBe("csv");
+    expect(body.rows).toHaveLength(2);
+    expect(body.rows[0]).toMatchObject({ title: "A", priority: "high", issueType: "bug" });
+    // Row B omits priority/type → defaulted silently (no warning), medium/feature.
+    expect(body.rows[1]).toMatchObject({ title: "B", priority: "medium", issueType: "feature" });
+    expect(body.warnings).toHaveLength(0);
+    // Nothing persisted.
+    const before = (await (await app.request(`/api/issues?projectId=${ids.projectId}`)).json()).length;
+    expect(before).toBe(1); // only the seeded issue
+  });
+
+  it("preview surfaces per-row warnings and skips (does not abort)", async () => {
+    const md = [
+      "- Good one",
+      "- Good two",
+      "- Good one", // duplicate → skipped
+      "- Bad value",
+    ].join("\n");
+    const res = await app.request(`/api/projects/${ids.projectId}/issues/import/preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: `${md}\n`, format: "markdown" }),
+    });
+    const body = await res.json() as any;
+    expect(body.format).toBe("markdown");
+    expect(body.rows.map((r: any) => r.title)).toEqual(["Good one", "Good two", "Bad value"]);
+    expect(body.skipped).toHaveLength(1);
+    expect(body.skipped[0].reason).toContain("duplicate");
+  });
+
+  it("auto-detects format: JSON array → json, bullets → markdown, else csv", async () => {
+    const jsonRes = await app.request(`/api/projects/${ids.projectId}/issues/import/preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: '[{"title":"X"}]', format: "auto" }),
+    });
+    expect((await jsonRes.json() as any).format).toBe("json");
+
+    const mdRes = await app.request(`/api/projects/${ids.projectId}/issues/import/preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "- An item\n", format: "auto" }),
+    });
+    expect((await mdRes.json() as any).format).toBe("markdown");
+
+    const csvRes = await app.request(`/api/projects/${ids.projectId}/issues/import/preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "title\nOnly a title\n", format: "auto" }),
+    });
+    expect((await csvRes.json() as any).format).toBe("csv");
+  });
+
+  it("imported issues land in the default (Backlog) status", async () => {
+    const res = await app.request(`/api/projects/${ids.projectId}/issues/import`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "title,type\nNew One,feature\n", format: "csv" }),
+    });
+    expect(res.status).toBe(201);
+    const list = await (await app.request(`/api/issues?projectId=${ids.projectId}`)).json();
+    const imported = list.find((i: any) => i.title === "New One");
+    expect(imported.statusName).toBe("Backlog");
   });
 });
