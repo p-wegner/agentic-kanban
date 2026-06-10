@@ -481,7 +481,7 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
   router.get("/:id/dashboard/throughput-by-provider", async (c) => {
     const projectId = c.req.param("id");
     const daysRaw = parseInt(c.req.query("days") ?? "14", 10);
-    const days = Math.min(Math.max(Number.isNaN(daysRaw) ? 14 : daysRaw, 1), 365) as 7 | 14 | 30;
+    const days = Math.min(Math.max(Number.isNaN(daysRaw) ? 14 : daysRaw, 1), 365);
 
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - days + 1);
@@ -490,10 +490,11 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
     // Find Done issues with their merged workspace's provider/profile.
     // An issue is counted if it's in "Done" status and moved to Done within the window.
     // We join to workspaces where mergedAt is set (actual merge happened) to get the
-    // provider attribution. If multiple workspaces merged for the same issue, we pick
-    // the one that actually merged (mergedAt is not null).
+    // provider attribution. If multiple workspaces merged for the same issue, the first
+    // merged workspace wins (deduplicated by issue ID).
     const rows = await database
       .select({
+        issueId: issues.id,
         issueCreatedAt: issues.createdAt,
         statusChangedAt: issues.statusChangedAt,
         provider: workspaces.provider,
@@ -511,14 +512,27 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
         ),
       );
 
-    // Group by provider (prefer merged workspace for attribution).
-    // Build a composite key from provider + profile.
+    function percentile(sorted: number[], p: number): number | null {
+      if (sorted.length === 0) return null;
+      const idx = (p / 100) * (sorted.length - 1);
+      const lo = Math.floor(idx);
+      const hi = Math.ceil(idx);
+      return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
+    }
+
+    // Group by provider:profile composite key.
+    // Deduplicate by issue ID — first merged workspace per issue wins.
     const groups = new Map<string, { count: number; leadTimes: number[] }>();
+    const seenIssueIds = new Set<string>();
+    const allLeadTimes: number[] = [];
 
     for (const r of rows) {
-      // Only count if this workspace actually merged (mergedAt set)
       if (!r.mergedAt) continue;
       if (!r.statusChangedAt || !r.issueCreatedAt) continue;
+
+      // Deduplicate: each issue counts only once
+      if (seenIssueIds.has(r.issueId)) continue;
+      seenIssueIds.add(r.issueId);
 
       const provider = r.provider ?? "unknown";
       const profile = r.claudeProfile ?? "";
@@ -527,26 +541,14 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
       const leadMs = new Date(r.statusChangedAt).getTime() - new Date(r.issueCreatedAt).getTime();
       if (leadMs < 0) continue;
 
+      allLeadTimes.push(leadMs);
+
       if (!groups.has(key)) {
         groups.set(key, { count: 0, leadTimes: [] });
       }
       const g = groups.get(key)!;
       g.count++;
       g.leadTimes.push(leadMs);
-    }
-
-    // Deduplicate: an issue may have multiple merged workspaces.
-    // We already filter by mergedAt, but the same issue could appear multiple times
-    // if re-merged. Use a simple approach: count each unique (issue, provider) once.
-    // Since we're grouping by provider key, duplicates within the same provider are fine —
-    // they represent re-merges of the same issue. The count is "issues merged by this provider".
-
-    function percentile(sorted: number[], p: number): number | null {
-      if (sorted.length === 0) return null;
-      const idx = (p / 100) * (sorted.length - 1);
-      const lo = Math.floor(idx);
-      const hi = Math.ceil(idx);
-      return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
     }
 
     const providers = [...groups.entries()]
@@ -562,7 +564,10 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
       })
       .sort((a, b) => b.count - a.count);
 
-    return c.json({ providers, window: `${days}d` });
+    const sortedAll = [...allLeadTimes].sort((a, b) => a - b);
+    const overallMedianLeadTimeMs = percentile(sortedAll, 50);
+
+    return c.json({ providers, window: `${days}d`, overallMedianLeadTimeMs });
   });
 
   return router;

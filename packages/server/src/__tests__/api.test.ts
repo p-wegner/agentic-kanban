@@ -228,6 +228,9 @@ describe("Agent Throughput by Provider (AK-514)", () => {
     expect(body.providers[1].provider).toBe("codex");
     expect(body.providers[1].profile).toBe("");
     expect(body.providers[1].count).toBe(2);
+
+    // Server should return overall median computed from individual issue lead times
+    expect(typeof body.overallMedianLeadTimeMs).toBe("number");
   });
 
   it("respects the time window filter", async () => {
@@ -329,6 +332,64 @@ describe("Agent Throughput by Provider (AK-514)", () => {
     // to codex from this issue. Other codex entries may exist from prior tests.
     // We just verify the endpoint doesn't crash and excludes the non-merged one.
     expect(body.providers).toBeDefined();
+  });
+
+  it("deduplicates issues with multiple merged workspaces (counts each issue once)", async () => {
+    // Create an issue with TWO merged workspaces — should only count once
+    const now = new Date();
+    const doneAt = new Date(now.getTime() - 1 * 24 * 60 * 60 * 1000).toISOString();
+    const createdAt = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000).toISOString();
+
+    const issueId = randomUUID();
+    await database.insert(schema.issues).values({
+      id: issueId,
+      title: "Double-merge issue",
+      projectId,
+      statusId: doneStatusId,
+      priority: "medium",
+      issueType: "task",
+      sortOrder: 0,
+      createdAt,
+      updatedAt: doneAt,
+      statusChangedAt: doneAt,
+    });
+
+    // First merged workspace (the one that should win)
+    await database.insert(schema.workspaces).values({
+      id: randomUUID(),
+      issueId,
+      branch: `test/dedup-a-${randomUUID().slice(0, 8)}`,
+      status: "merged",
+      provider: "copilot",
+      claudeProfile: null,
+      mergedAt: doneAt,
+      createdAt,
+      updatedAt: doneAt,
+    });
+
+    // Second merged workspace for the SAME issue — should NOT inflate count
+    await database.insert(schema.workspaces).values({
+      id: randomUUID(),
+      issueId,
+      branch: `test/dedup-b-${randomUUID().slice(0, 8)}`,
+      status: "merged",
+      provider: "copilot",
+      claudeProfile: null,
+      mergedAt: doneAt,
+      createdAt,
+      updatedAt: doneAt,
+    });
+
+    // Count copilot BEFORE adding the double-merge
+    const before = await app.request(
+      `/api/projects/${projectId}/dashboard/throughput-by-provider?days=7`
+    );
+    const beforeBody = await before.json() as any;
+    const copilotBefore = beforeBody.providers.find((p: any) => p.provider === "copilot");
+
+    // copilot count should only be 1 (from this issue), not 2
+    expect(copilotBefore).toBeDefined();
+    expect(copilotBefore.count).toBe(1);
   });
 });
 
