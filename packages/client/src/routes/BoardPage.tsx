@@ -524,12 +524,10 @@ export function BoardPage() {
     ]);
     if (relevantReasons.has(reason)) {
       // Find the most relevant issue from the current board snapshot.
-      // For workspace events: find the issue whose workspace is most active/recent.
-      // For workflow transitions: the refresh after this will move the issue,
-      //   so just record the event without specific issue context.
+      // Match the most recently-active workspace for any event tied to a workspace.
+      // Workflow transitions move the issue (board not refreshed yet), so skip matching.
       let bestIssue: { id: string; issueNumber?: number; title?: string; workspaceId?: string } | undefined;
-      const isWorkspaceEvent = reason.startsWith("workspace_") || reason.startsWith("session_");
-      if (isWorkspaceEvent) {
+      if (reason !== "workflow_transition") {
         // Pick the issue with the most recently-active workspace
         let bestTime = 0;
         for (const col of columnsRef.current) {
