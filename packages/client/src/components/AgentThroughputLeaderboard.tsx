@@ -12,6 +12,7 @@ interface ProviderEntry {
 interface ThroughputData {
   providers: ProviderEntry[];
   window: string;
+  overallMedianLeadTimeMs: number | null;
 }
 
 /** Stable color per provider key, drawn from the chartColors palette. */
@@ -140,19 +141,7 @@ export function AgentThroughputLeaderboard({ projectId }: { projectId: string })
                   Overall Median Lead
                 </div>
                 <div className="mt-1 text-2xl font-semibold text-gray-900 dark:text-gray-100">
-                  {fmtDuration(
-                    (() => {
-                      const all = data.providers.flatMap((p) =>
-                        Array(p.count).fill(p.medianLeadTimeMs).filter((v): v is number => v !== null)
-                      );
-                      if (all.length === 0) return null;
-                      all.sort((a, b) => a - b);
-                      const idx = 0.5 * (all.length - 1);
-                      const lo = Math.floor(idx);
-                      const hi = Math.ceil(idx);
-                      return all[lo] + (all[hi] - all[lo]) * (idx - lo);
-                    })()
-                  )}
+                  {fmtDuration(data.overallMedianLeadTimeMs)}
                 </div>
                 <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">creation → Done</div>
               </div>
