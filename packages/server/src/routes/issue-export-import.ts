@@ -139,6 +139,8 @@ async function fetchExportRows(projectId: string, database: Database): Promise<E
   }));
 }
 
+type ImportFormat = "csv" | "markdown" | "json";
+
 interface ImportInput {
   title: string;
   description?: string;
@@ -161,6 +163,34 @@ interface SkippedRow {
   reason: string;
 }
 
+interface WarningRow {
+  row: number;
+  title: string;
+  field: "priority" | "type";
+  message: string;
+}
+
+/** A row that survived validation, with its final resolved values. */
+interface PreviewRow {
+  row: number;
+  title: string;
+  description: string;
+  priority: string;
+  issueType: string;
+  estimate: string;
+}
+
+const VALID_PRIORITIES = new Set(["low", "medium", "high", "critical"]);
+const VALID_ISSUE_TYPES = new Set(["task", "bug", "feature", "epic", "chore"]);
+// Bulk import defaults for a missing/invalid priority or type (#426): medium /
+// feature. (Manual single-issue create still defaults to medium / task.)
+const DEFAULT_PRIORITY = "medium";
+const DEFAULT_ISSUE_TYPE = "feature";
+
+// Parsers emit the RAW value for priority/type (empty string when absent). The
+// shared `validateRows` step applies defaults + records a warning only when a
+// value was present-but-invalid, so omitted fields default silently.
+
 function parseJsonImport(body: unknown): { rows: ImportRow[]; errors: string[] } {
   const errors: string[] = [];
   if (!Array.isArray(body)) {
@@ -179,12 +209,13 @@ function parseJsonImport(body: unknown): { rows: ImportRow[]; errors: string[] }
       errors.push(`Item ${i}: title is required`);
       continue;
     }
+    const rawType = obj.type ?? obj.issueType;
     rows.push({
       title: String(obj.title).trim(),
       description: obj.description ? String(obj.description) : "",
-      priority: obj.priority ? String(obj.priority) : "medium",
-      issueType: obj.type ?? obj.issueType ? String(obj.type ?? obj.issueType) : "task",
-      estimate: obj.estimate ? String(obj.estimate) : "",
+      priority: obj.priority ? String(obj.priority).trim() : "",
+      issueType: rawType ? String(rawType).trim() : "",
+      estimate: obj.estimate ? String(obj.estimate).trim() : "",
     });
   }
   return { rows, errors };
@@ -219,44 +250,179 @@ function parseCsvImport(text: string): { rows: ImportRow[]; errors: string[] } {
     rows.push({
       title,
       description: descIdx !== -1 ? (fields[descIdx] ?? "").trim() : "",
-      priority: priorityIdx !== -1 ? (fields[priorityIdx] ?? "medium").trim() || "medium" : "medium",
-      issueType: typeIdx !== -1 ? (fields[typeIdx] ?? "task").trim() || "task" : "task",
+      priority: priorityIdx !== -1 ? (fields[priorityIdx] ?? "").trim() : "",
+      issueType: typeIdx !== -1 ? (fields[typeIdx] ?? "").trim() : "",
       estimate: estimateIdx !== -1 ? (fields[estimateIdx] ?? "").trim() : "",
     });
   }
   return { rows, errors };
 }
 
-const VALID_PRIORITIES = new Set(["low", "medium", "high", "critical"]);
-const VALID_ISSUE_TYPES = new Set(["task", "bug", "feature", "epic", "chore"]);
+/**
+ * Markdown import (#426): one issue per top-level bullet (`-`, `*`, or `+` at
+ * column 0). Indented sub-bullets following a top-level item become its
+ * description (joined with newlines). Headings, blank lines, and other prose
+ * are ignored. Markdown issues have no priority/type columns, so those default
+ * to medium / feature via validateRows.
+ */
+function parseMarkdownImport(text: string): { rows: ImportRow[]; errors: string[] } {
+  const errors: string[] = [];
+  const rows: ImportRow[] = [];
+  const lines = text.split(/\r?\n/);
+  const bulletRe = /^([ \t]*)([-*+])\s+(.+?)\s*$/;
+  let currentTitle: string | null = null;
+  let descLines: string[] = [];
 
-function validateAndMapRow(
-  row: ImportRow,
-  rowNum: number,
-  seenTitles: Set<string>,
-): { input: ImportInput | null; skipped: SkippedRow | null } {
-  if (!row.title.trim()) {
-    return { input: null, skipped: { row: rowNum, title: "", reason: "title is empty" } };
+  const flush = () => {
+    if (currentTitle !== null) {
+      rows.push({
+        title: currentTitle,
+        description: descLines.join("\n"),
+        priority: "",
+        issueType: "",
+        estimate: "",
+      });
+    }
+    currentTitle = null;
+    descLines = [];
+  };
+
+  for (const line of lines) {
+    const m = line.match(bulletRe);
+    if (!m) continue;
+    const indent = m[1].length;
+    const body = m[3];
+    if (indent === 0) {
+      flush();
+      currentTitle = body;
+    } else if (currentTitle !== null) {
+      // Sub-bullet → description line of the current issue.
+      descLines.push(body);
+    }
+    // An orphan sub-bullet (indented, no parent) is ignored.
   }
-  const titleKey = row.title.trim().toLowerCase();
-  if (seenTitles.has(titleKey)) {
-    return { input: null, skipped: { row: rowNum, title: row.title, reason: "duplicate title within this import" } };
+  flush();
+
+  if (rows.length === 0) {
+    errors.push("No top-level list items (- or *) found");
   }
-  seenTitles.add(titleKey);
+  return { rows, errors };
+}
 
-  const priority = VALID_PRIORITIES.has(row.priority) ? row.priority : "medium";
-  const issueType = VALID_ISSUE_TYPES.has(row.issueType) ? row.issueType : "task";
+function formatHintFromFilename(name: string | undefined): string {
+  const n = (name ?? "").toLowerCase();
+  if (n.endsWith(".csv")) return "csv";
+  if (n.endsWith(".md") || n.endsWith(".markdown")) return "markdown";
+  if (n.endsWith(".json")) return "json";
+  return "auto";
+}
 
-  return {
-    input: {
-      title: row.title.trim(),
-      description: row.description || undefined,
+function detectFormat(text: string, hint?: string): ImportFormat {
+  const h = (hint ?? "auto").toLowerCase();
+  if (h === "csv") return "csv";
+  if (h === "markdown" || h === "md") return "markdown";
+  if (h === "json") return "json";
+  // auto: JSON array/object wins, then markdown (has a top-level bullet), else csv.
+  const trimmed = text.trim();
+  if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+    try {
+      JSON.parse(trimmed);
+      return "json";
+    } catch {
+      // not parseable JSON — fall through
+    }
+  }
+  if (/^[ \t]*[-*+]\s+\S/m.test(text)) return "markdown";
+  return "csv";
+}
+
+function parseText(text: string, format: ImportFormat): { rows: ImportRow[]; errors: string[] } {
+  if (format === "json") {
+    try {
+      return parseJsonImport(JSON.parse(text));
+    } catch {
+      return { rows: [], errors: ["Invalid JSON: could not parse"] };
+    }
+  }
+  if (format === "markdown") return parseMarkdownImport(text);
+  return parseCsvImport(text);
+}
+
+/**
+ * Validate + default parsed rows. Shared by the preview and commit endpoints so
+ * the preview is exactly what gets created. Dedupes titles within the import,
+ * skips empty/duplicate titles, defaults missing/invalid priority & type, and
+ * records a per-row warning only when a present value was invalid.
+ */
+function validateRows(parsedRows: ImportRow[]): {
+  validInputs: ImportInput[];
+  skipped: SkippedRow[];
+  warnings: WarningRow[];
+  previewRows: PreviewRow[];
+} {
+  const seenTitles = new Set<string>();
+  const validInputs: ImportInput[] = [];
+  const skipped: SkippedRow[] = [];
+  const warnings: WarningRow[] = [];
+  const previewRows: PreviewRow[] = [];
+
+  for (let i = 0; i < parsedRows.length; i++) {
+    const rowNum = i + 1;
+    const row = parsedRows[i];
+    const title = row.title.trim();
+    if (!title) {
+      skipped.push({ row: rowNum, title: row.title, reason: "title is empty" });
+      continue;
+    }
+    const titleKey = title.toLowerCase();
+    if (seenTitles.has(titleKey)) {
+      skipped.push({ row: rowNum, title, reason: "duplicate title within this import" });
+      continue;
+    }
+    seenTitles.add(titleKey);
+
+    const priorityRaw = row.priority.trim();
+    let priority = priorityRaw;
+    if (!priorityRaw) {
+      priority = DEFAULT_PRIORITY;
+    } else if (!VALID_PRIORITIES.has(priorityRaw)) {
+      warnings.push({
+        row: rowNum,
+        title,
+        field: "priority",
+        message: `invalid priority "${priorityRaw}", defaulting to ${DEFAULT_PRIORITY}`,
+      });
+      priority = DEFAULT_PRIORITY;
+    }
+
+    const typeRaw = row.issueType.trim();
+    let issueType = typeRaw;
+    if (!typeRaw) {
+      issueType = DEFAULT_ISSUE_TYPE;
+    } else if (!VALID_ISSUE_TYPES.has(typeRaw)) {
+      warnings.push({
+        row: rowNum,
+        title,
+        field: "type",
+        message: `invalid type "${typeRaw}", defaulting to ${DEFAULT_ISSUE_TYPE}`,
+      });
+      issueType = DEFAULT_ISSUE_TYPE;
+    }
+
+    const description = row.description.trim() || undefined;
+    const estimate = row.estimate.trim() || null;
+    validInputs.push({ title, description, priority, issueType, estimate });
+    previewRows.push({
+      row: rowNum,
+      title,
+      description: row.description.trim(),
       priority,
       issueType,
-      estimate: row.estimate || null,
-    },
-    skipped: null,
-  };
+      estimate: row.estimate.trim(),
+    });
+  }
+
+  return { validInputs, skipped, warnings, previewRows };
 }
 
 export function createIssueExportImportRoute(
@@ -294,14 +460,62 @@ export function createIssueExportImportRoute(
     });
   });
 
+  // POST /api/projects/:projectId/issues/import/preview
+  // Parse text WITHOUT persisting. Accepts JSON { text, format } or a multipart
+  // "file" upload. Returns the detected format, resolved preview rows, and any
+  // per-row warnings/skips so the client can show a preview table before commit.
+  router.post("/:projectId/issues/import/preview", async (c) => {
+    const contentType = c.req.header("content-type") ?? "";
+    let text = "";
+    let hint = "auto";
+
+    if (contentType.includes("multipart/form-data")) {
+      const formData = await c.req.formData();
+      const file = formData.get("file");
+      if (file && typeof file !== "string") {
+        text = await (file as File).text();
+        hint = formatHintFromFilename((file as File).name);
+      } else {
+        const t = formData.get("text");
+        if (typeof t === "string") text = t;
+        const f = formData.get("format");
+        if (typeof f === "string") hint = f;
+      }
+    } else if (contentType.includes("application/json")) {
+      const body = await c.req.json().catch(() => null);
+      if (body && typeof body === "object" && !Array.isArray(body) && typeof (body as any).text === "string") {
+        text = String((body as any).text);
+        hint = (body as any).format ? String((body as any).format) : "auto";
+      } else if (typeof body === "string") {
+        text = body;
+      } else if (Array.isArray(body)) {
+        text = JSON.stringify(body);
+        hint = "json";
+      } else {
+        return c.json({ error: "Body must be { text, format } or a JSON array" }, 400);
+      }
+    } else {
+      return c.json({ error: "Content-Type must be application/json or multipart/form-data" }, 400);
+    }
+
+    const format = detectFormat(text, hint);
+    const { rows: parsedRows, errors: parseErrors } = parseText(text, format);
+    const { skipped, warnings, previewRows } = validateRows(parsedRows);
+
+    return c.json({ format, rows: previewRows, skipped, warnings, parseErrors });
+  });
+
   // POST /api/projects/:projectId/issues/import
-  // Accepts JSON body (array) or multipart form with a file field named "file"
+  // Accepts: a JSON array of issues, a JSON { text, format } object
+  // (format = auto|csv|markdown|json), or a multipart form with a "file" field.
+  // Parses (CSV / Markdown / JSON), skips malformed rows, and bulk-creates the
+  // rest into the project's default (Backlog) status.
   router.post("/:projectId/issues/import", async (c) => {
     const projectId = c.req.param("projectId");
     const contentType = c.req.header("content-type") ?? "";
 
-    let parsedRows: ImportRow[] = [];
-    let parseErrors: string[] = [];
+    let text: string | undefined;
+    let hint = "auto";
 
     if (contentType.includes("multipart/form-data")) {
       const formData = await c.req.formData();
@@ -309,41 +523,31 @@ export function createIssueExportImportRoute(
       if (!file || typeof file === "string") {
         return c.json({ error: "multipart upload must include a 'file' field" }, 400);
       }
-      const text = await (file as File).text();
-      const filename = (file as File).name?.toLowerCase() ?? "";
-      if (filename.endsWith(".csv")) {
-        ({ rows: parsedRows, errors: parseErrors } = parseCsvImport(text));
-      } else {
-        try {
-          const json = JSON.parse(text);
-          ({ rows: parsedRows, errors: parseErrors } = parseJsonImport(json));
-        } catch {
-          return c.json({ error: "Could not parse file as JSON or CSV" }, 400);
-        }
-      }
+      text = await (file as File).text();
+      hint = formatHintFromFilename((file as File).name);
     } else if (contentType.includes("application/json")) {
-      const body = await c.req.json();
-      ({ rows: parsedRows, errors: parseErrors } = parseJsonImport(body));
+      const body = await c.req.json().catch(() => null);
+      if (Array.isArray(body)) {
+        text = JSON.stringify(body);
+        hint = "json";
+      } else if (body && typeof body === "object" && typeof (body as any).text === "string") {
+        text = String((body as any).text);
+        hint = (body as any).format ? String((body as any).format) : "auto";
+      } else {
+        return c.json({ error: "JSON body must be an array of issues or a { text, format } object" }, 400);
+      }
     } else {
       return c.json({ error: "Content-Type must be application/json or multipart/form-data" }, 400);
     }
+
+    const format = detectFormat(text, hint);
+    const { rows: parsedRows, errors: parseErrors } = parseText(text, format);
 
     if (parsedRows.length === 0 && parseErrors.length > 0) {
       return c.json({ error: "No valid rows found", parseErrors }, 400);
     }
 
-    const seenTitles = new Set<string>();
-    const validInputs: ImportInput[] = [];
-    const skipped: SkippedRow[] = [];
-
-    for (let i = 0; i < parsedRows.length; i++) {
-      const { input, skipped: skip } = validateAndMapRow(parsedRows[i], i + 1, seenTitles);
-      if (skip) {
-        skipped.push(skip);
-      } else if (input) {
-        validInputs.push(input);
-      }
-    }
+    const { validInputs, skipped, warnings } = validateRows(parsedRows);
 
     let created = 0;
     if (validInputs.length > 0) {
@@ -356,6 +560,7 @@ export function createIssueExportImportRoute(
       skipped: skipped.length,
       skippedRows: skipped,
       parseErrors,
+      warnings,
     }, 201);
   });
 
