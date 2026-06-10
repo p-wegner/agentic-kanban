@@ -6,7 +6,7 @@ import type { CreateWorkspaceInput } from "../services/workspace.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { and, eq, gte, inArray, isNotNull } from "drizzle-orm";
-import { workspaces, issues } from "@agentic-kanban/shared/schema";
+import { workspaces, issues, sessions } from "@agentic-kanban/shared/schema";
 
 export function createWorkspacesRoute(
   database: Database,
@@ -78,6 +78,79 @@ export function createWorkspacesRoute(
     }
 
     const points = dates.map((date) => ({ date, counts: counts[date] ?? {} }));
+    return c.json({ series, points });
+  });
+
+  // GET /api/workspaces/cost-over-time?projectId=&days= — estimated token cost per provider per day
+  // Complements provider-mix (share of work) by showing the cost *trend* over time. Cost is read
+  // from each session's persisted `stats.totalCostUsd`; the provider comes from the session's
+  // workspace. Must be registered BEFORE /:id to avoid being matched as an ID param.
+  router.get("/cost-over-time", async (c) => {
+    const projectId = c.req.query("projectId");
+    if (!projectId) return c.json({ error: "projectId required" }, 400);
+    const daysRaw = parseInt(c.req.query("days") ?? "30", 10);
+    const days = Math.min(Math.max(Number.isNaN(daysRaw) ? 30 : daysRaw, 1), 365);
+
+    // Start-of-UTC-day cutoff so the day buckets (ISO date keys) line up with the filter.
+    const cutoffDate = new Date();
+    cutoffDate.setUTCDate(cutoffDate.getUTCDate() - days + 1);
+    cutoffDate.setUTCHours(0, 0, 0, 0);
+    const cutoffIso = cutoffDate.toISOString();
+
+    const rows = await database
+      .select({
+        provider: workspaces.provider,
+        startedAt: sessions.startedAt,
+        stats: sessions.stats,
+      })
+      .from(sessions)
+      .innerJoin(workspaces, eq(sessions.workspaceId, workspaces.id))
+      .innerJoin(issues, eq(workspaces.issueId, issues.id))
+      .where(
+        and(
+          eq(issues.projectId, projectId),
+          gte(sessions.startedAt, cutoffIso),
+        )
+      );
+
+    // Build a continuous UTC-day axis from the cutoff through today.
+    const today = new Date();
+    const dates: string[] = [];
+    for (let d = new Date(cutoffDate); d <= today; d.setUTCDate(d.getUTCDate() + 1)) {
+      dates.push(d.toISOString().slice(0, 10));
+    }
+
+    // Collect provider keys present in the window (stable, sorted).
+    const seriesSet = new Set<string>();
+    for (const r of rows) {
+      seriesSet.add(r.provider ?? "unknown");
+    }
+    const series = [...seriesSet].sort();
+
+    // Sum cost per day per provider.
+    const costs: Record<string, Record<string, number>> = {};
+    for (const date of dates) {
+      costs[date] = {};
+      for (const s of series) costs[date][s] = 0;
+    }
+    for (const r of rows) {
+      if (!r.startedAt || !r.stats) continue;
+      let sessionCost = 0;
+      try {
+        const parsed = JSON.parse(r.stats) as { totalCostUsd?: unknown };
+        const value = Number(parsed.totalCostUsd ?? 0);
+        if (Number.isFinite(value)) sessionCost = value;
+      } catch {
+        continue;
+      }
+      if (sessionCost === 0) continue;
+      const day = r.startedAt.slice(0, 10);
+      if (!costs[day]) continue; // session outside the axis window (shouldn't happen post-filter)
+      const key = r.provider ?? "unknown";
+      costs[day][key] = (costs[day][key] ?? 0) + sessionCost;
+    }
+
+    const points = dates.map((date) => ({ date, costs: costs[date] ?? {} }));
     return c.json({ series, points });
   });
 
