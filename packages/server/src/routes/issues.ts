@@ -380,7 +380,10 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     const daysRaw = parseInt(c.req.query("days") ?? "30", 10);
     const days = Math.min(Math.max(Number.isNaN(daysRaw) ? 30 : daysRaw, 1), 365);
 
-    const cutoffDate = new Date();
+    // Snapshot "today" once so the date axis and cutoff stay consistent even if
+    // the DB query crosses midnight.
+    const today = new Date();
+    const cutoffDate = new Date(today);
     cutoffDate.setDate(cutoffDate.getDate() - days + 1);
 
     // A remaining-open count on day D depends on every issue ever created — an issue opened
@@ -409,7 +412,6 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     });
 
     // Build the date axis (inclusive, trailing `days` days up to today).
-    const today = new Date();
     const dates: string[] = [];
     for (let d = new Date(cutoffDate); d <= today; d.setDate(d.getDate() + 1)) {
       dates.push(d.toISOString().slice(0, 10));

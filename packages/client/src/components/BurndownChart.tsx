@@ -42,7 +42,11 @@ export function BurndownChart({ projectId }: { projectId: string }) {
   }, [projectId, days, retryKey]);
 
   const stats = useMemo(() => {
-    if (!data || data.buckets.length === 0 || data.startCount === 0) return null;
+    if (!data || data.buckets.length === 0) return null;
+    // Show the empty state only when every day has zero remaining — projects that
+    // had no open issues at window-start but accumulated opens during the window
+    // should still render the chart (growth from zero is valid burndown data).
+    if (data.buckets.every((b) => b.remaining === 0)) return null;
     const maxRemaining = Math.max(...data.buckets.map((b) => b.remaining), 1);
     return { maxRemaining };
   }, [data]);
@@ -177,7 +181,7 @@ export function BurndownChart({ projectId }: { projectId: string }) {
                   const pts = data.buckets.map((b, i) => `${xPos(i, n)},${yVal(b.remaining, max)}`);
                   return (
                     <path
-                      d={`M ${pts[0]} L ${pts.join(" L ")} L ${xPos(n - 1, n)},${padTop + plotH} L ${xPos(0, n)},${padTop + plotH} Z`}
+                      d={`M ${pts[0]} L ${pts.slice(1).join(" L ")} L ${xPos(n - 1, n)},${padTop + plotH} L ${xPos(0, n)},${padTop + plotH} Z`}
                       fill={BRAND}
                       fillOpacity={0.12}
                     />
