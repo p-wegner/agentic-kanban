@@ -670,6 +670,7 @@ export function registerSessionCommand(program: Command) {
           gitResolved: boolean;
           implementerCommits: number;
           reviewerCommits: number;
+          reviewerCommitsNamingIssue: number; // reviewer commit whose subject references THIS issue (#N / ak-N) — high confidence, filters cross-branch noise
           reworkCommits: number;
           unattributedCommits: number;
           reviewerCommitSubjects: string[];
@@ -707,16 +708,22 @@ export function registerSessionCommand(program: Command) {
             gitResolved: commits.length > 0,
             implementerCommits: 0,
             reviewerCommits: 0,
+            reviewerCommitsNamingIssue: 0,
             reworkCommits: 0,
             unattributedCommits: 0,
             reviewerCommitSubjects: [],
             reviewSessionIds: ws.sessions.filter((s) => s.kind === "review").map((s) => s.id),
+          };
+          const namesIssue = (msg: string) => {
+            const m = msg.toLowerCase();
+            return m.includes(`#${ws.issueNumber}`) || m.includes(`ak-${ws.issueNumber}`) || m.includes(`(${ws.issueNumber})`);
           };
           for (const c of commits) {
             const s = attribute(c.date, ws.sessions);
             const kind = s?.kind ?? null;
             if (kind === "review") {
               res.reviewerCommits++;
+              if (namesIssue(c.message)) res.reviewerCommitsNamingIssue++;
               if (res.reviewerCommitSubjects.length < 5) res.reviewerCommitSubjects.push(c.message.slice(0, 60));
             } else if (kind === "rework") res.reworkCommits++;
             else if (kind === "build") res.implementerCommits++;
@@ -750,6 +757,7 @@ export function registerSessionCommand(program: Command) {
 
         const gitResolved = results.filter((r) => r.gitResolved);
         const reviewerCommittedWs = gitResolved.filter((r) => r.reviewerCommits > 0);
+        const highConfReviewerWs = gitResolved.filter((r) => r.reviewerCommitsNamingIssue > 0);
         const totalReviewerCommits = results.reduce((s, r) => s + r.reviewerCommits, 0);
         const totalImplCommits = results.reduce((s, r) => s + r.implementerCommits, 0);
         const totalReworkCommits = results.reduce((s, r) => s + r.reworkCommits, 0);
@@ -769,6 +777,9 @@ export function registerSessionCommand(program: Command) {
               "APPROXIMATE / lower bound. base..mergedHeadSha is polluted by the board's pre-merge rebases (stale baseCommitSha pulls in master commits), and mergedHeadSha is often null/unreachable. We strictly attribute a commit only when its author-time falls inside a review session's window, so this under-counts. Use --deep (transcript) as the source of truth.",
             workspacesWhereReviewerCommitted: reviewerCommittedWs.length,
             pctOfGitResolvedWhereReviewerCommitted: pct(reviewerCommittedWs.length, gitResolved.length),
+            highConfidenceReviewerFixes: highConfReviewerWs.length,
+            pctOfGitResolvedHighConfidence: pct(highConfReviewerWs.length, gitResolved.length),
+            highConfidenceNote: "reviewer commit subject references its own issue (#N / ak-N) — filters out cross-branch attribution noise",
             totalReviewerCommits,
             totalImplementerCommits: totalImplCommits,
             totalReworkCommits,
@@ -801,6 +812,7 @@ export function registerSessionCommand(program: Command) {
           provider: r.provider,
           implCommits: r.implementerCommits,
           reviewerCommits: r.reviewerCommits,
+          reviewerCommitsNamingIssue: r.reviewerCommitsNamingIssue,
           reworkCommits: r.reworkCommits,
           merged: r.merged,
           ...(options.deep
@@ -835,13 +847,14 @@ export function registerSessionCommand(program: Command) {
         L.push(`\n-- GIT method [corroboration, APPROX] (commit author-time inside a review window) --`);
         L.push(`  ⚠ under-counts: base..mergedHeadSha is rebase-polluted & mergedHeadSha often null; strict windowing drops ambiguous commits`);
         L.push(`  Reviewer committed within a review window in:  ${reviewerCommittedWs.length}/${gitResolved.length} git-resolved workspaces  (${g.pctOfGitResolvedWhereReviewerCommitted}%)`);
+        L.push(`  └ HIGH-CONFIDENCE (commit names its own issue, noise-filtered): ${highConfReviewerWs.length}/${gitResolved.length}  (${g.pctOfGitResolvedHighConfidence}%)`);
         L.push(`  Window-attributed commits by role:  implementer=${totalImplCommits}  reviewer=${totalReviewerCommits}  rework=${totalReworkCommits}`);
         L.push(`  Reviewer-fixed workspaces that merged: ${g.reviewerFixesThatMerged}/${reviewerCommittedWs.length}`);
-        L.push(`\n-- Workspaces where a commit landed in a review window (git) --`);
-        const fixed = results.filter((r) => r.reviewerCommits > 0).sort((a, b) => b.reviewerCommits - a.reviewerCommits);
+        L.push(`\n-- Workspaces where a commit landed in a review window (git; ✓ = commit names its own issue) --`);
+        const fixed = results.filter((r) => r.reviewerCommits > 0).sort((a, b) => b.reviewerCommitsNamingIssue - a.reviewerCommitsNamingIssue || b.reviewerCommits - a.reviewerCommits);
         if (!fixed.length) L.push("  (none)");
         for (const r of fixed) {
-          L.push(`  #${r.issue} [${r.provider ?? "?"}] reviewer+${r.reviewerCommits} impl+${r.implementerCommits}${options.deep && r.reviewFixedMajorCritical ? "  ⚑MAJOR/CRIT" : ""}  ${r.title}`);
+          L.push(`  ${r.reviewerCommitsNamingIssue > 0 ? "✓" : " "} #${r.issue} [${r.provider ?? "?"}] reviewer+${r.reviewerCommits} impl+${r.implementerCommits}${options.deep && r.reviewFixedMajorCritical ? "  ⚑MAJOR/CRIT" : ""}  ${r.title}`);
           for (const subj of r.reviewerCommitSubjects) L.push(`        └ ${subj}`);
         }
         L.push("");
