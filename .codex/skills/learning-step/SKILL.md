@@ -15,6 +15,8 @@ Determine your input mode from the arguments:
 ### No arguments (inline)
 You were called as a subagent. The parent conversation IS the session data. Analyze what you can see — what the agent did, what went wrong, what took extra turns. Skip data collection.
 
+If the inline context contains a structured session handoff, treat that handoff as the primary evidence. The feature worktree may already be clean, merged, or emptied by the board cleanup path. Do not turn an empty/missing worktree into a blocker; fall back to the handoff, commit hash, changed-file list, test result, and any local transcript snippets available.
+
 ### `--issue <N>`
 Fetch structured session data for kanban issue #N:
 
