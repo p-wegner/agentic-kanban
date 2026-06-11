@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { STATUS_COLORS } from "../lib/chartColors";
 import { getLocalDateKey } from "../lib/dateKey";
@@ -39,7 +40,7 @@ function isOverdue(dueDateStr: string): boolean {
   return dueKey < todayKey;
 }
 
-function escapeHandler(e: KeyboardEvent) {
+function escapeHandler(e: KeyboardEvent<HTMLDivElement>) {
   if (e.key === "Escape") e.stopPropagation();
 }
 
