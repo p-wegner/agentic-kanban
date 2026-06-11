@@ -4,84 +4,18 @@ import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { IssueCard, type ProjectTag, type QuickUpdateCallbacks } from "./IssueCard.js";
 import { evaluateWipLimit } from "../lib/wipLimits.js";
 import { computeDropSortOrder } from "../lib/reorderIssues.js";
+import {
+  groupByPriority,
+  groupByTag,
+  computeColumnEstimate,
+  sortIssues,
+  PRIORITY_LANE_STYLES,
+  type SortMode,
+} from "../lib/columnHelpers.js";
 import type { CardDensity } from "../hooks/useBoardPreferences.js";
 import "./BoardColumn.css";
 
 export type SwimlaneDimension = "none" | "priority" | "tag";
-
-const ESTIMATE_POINTS: Record<string, number> = { XS: 1, S: 2, M: 3, L: 5, XL: 8 };
-
-const PRIORITY_LANE_ORDER = ["critical", "high", "medium", "low", "ungrouped"];
-const PRIORITY_LANE_STYLES: Record<string, { label: string; headerBg: string; headerBorder: string; headerText: string; dot: string }> = {
-  critical: { label: "Critical", headerBg: "bg-red-50 dark:bg-red-950/40", headerBorder: "border-red-200 dark:border-red-800", headerText: "text-red-700 dark:text-red-400", dot: "bg-red-500" },
-  high: { label: "High", headerBg: "bg-orange-50 dark:bg-orange-950/40", headerBorder: "border-orange-200 dark:border-orange-800", headerText: "text-orange-700 dark:text-orange-400", dot: "bg-orange-500" },
-  medium: { label: "Medium", headerBg: "bg-yellow-50 dark:bg-yellow-950/40", headerBorder: "border-yellow-200 dark:border-yellow-800", headerText: "text-yellow-700 dark:text-yellow-400", dot: "bg-yellow-400" },
-  low: { label: "Low", headerBg: "bg-slate-50 dark:bg-slate-800/40", headerBorder: "border-slate-200 dark:border-slate-700", headerText: "text-slate-600 dark:text-slate-400", dot: "bg-slate-400" },
-  ungrouped: { label: "Ungrouped", headerBg: "bg-gray-50 dark:bg-gray-800/40", headerBorder: "border-gray-200 dark:border-gray-700", headerText: "text-gray-500 dark:text-gray-400", dot: "bg-gray-400" },
-};
-
-function groupByPriority(issues: IssueWithStatus[]): { key: string; issues: IssueWithStatus[] }[] {
-  const groups: Record<string, IssueWithStatus[]> = {};
-  for (const key of PRIORITY_LANE_ORDER) groups[key] = [];
-  for (const issue of issues) {
-    const p = issue.priority && PRIORITY_LANE_ORDER.includes(issue.priority) ? issue.priority : "ungrouped";
-    groups[p].push(issue);
-  }
-  return PRIORITY_LANE_ORDER.map((key) => ({ key, issues: groups[key] })).filter((g) => g.issues.length > 0);
-}
-
-function groupByTag(issues: IssueWithStatus[]): { key: string; label: string; color: string | null; issues: IssueWithStatus[] }[] {
-  const tagGroups: Map<string, { label: string; color: string | null; issues: IssueWithStatus[] }> = new Map();
-  const ungrouped: IssueWithStatus[] = [];
-  for (const issue of issues) {
-    const tags = issue.tags ?? [];
-    if (tags.length === 0) {
-      ungrouped.push(issue);
-    } else {
-      for (const tag of tags) {
-        if (!tagGroups.has(tag.id)) {
-          tagGroups.set(tag.id, { label: tag.name, color: tag.color, issues: [] });
-        }
-        tagGroups.get(tag.id)!.issues.push(issue);
-      }
-    }
-  }
-  const result: { key: string; label: string; color: string | null; issues: IssueWithStatus[] }[] = [];
-  for (const [key, g] of tagGroups) result.push({ key, ...g });
-  result.sort((a, b) => a.label.localeCompare(b.label));
-  if (ungrouped.length > 0) result.push({ key: "ungrouped", label: "Ungrouped", color: null, issues: ungrouped });
-  return result;
-}
-
-function computeColumnEstimate(issues: IssueWithStatus[]): { total: number; unestimated: number } {
-  let total = 0;
-  let unestimated = 0;
-  for (const issue of issues) {
-    if (issue.estimate && ESTIMATE_POINTS[issue.estimate] != null) {
-      total += ESTIMATE_POINTS[issue.estimate];
-    } else {
-      unestimated++;
-    }
-  }
-  return { total, unestimated };
-}
-
-type SortMode = "default" | "type";
-
-const ISSUE_TYPE_ORDER: Record<string, number> = {
-  bug: 0,
-  feature: 1,
-  task: 2,
-  chore: 3,
-};
-
-function sortIssues(issues: IssueWithStatus[], mode: SortMode): IssueWithStatus[] {
-  if (mode === "default") return issues;
-  return [...issues].sort(
-    (a, b) =>
-      (ISSUE_TYPE_ORDER[a.issueType ?? "task"] ?? 2) - (ISSUE_TYPE_ORDER[b.issueType ?? "task"] ?? 2)
-  );
-}
 
 const VALID_SORT_MODES = new Set<string>(["default", "type"]);
 
@@ -314,6 +248,40 @@ export function BoardColumn({
   const wipStatus = evaluateWipLimit(column.issues.length, wipLimit ?? null);
   const estimateRollup = computeColumnEstimate(column.issues);
 
+  // Single source of truth for the IssueCard prop binding shared by the flat list
+  // and both swimlane modes. The aging-heatmap props are only forwarded in the flat
+  // list (matching the original per-branch prop lists), so IssueCard's defaults
+  // still apply inside swimlanes.
+  const renderCard = (issue: IssueWithStatus, includeAging: boolean) => (
+    <IssueCard
+      issue={issue}
+      onClick={onIssueClick}
+      onWorkspaceClick={onWorkspaceClick}
+      onOpenDiff={onOpenDiff}
+      onStartWorkspace={onStartWorkspace}
+      onDryRun={onDryRun}
+      onDragStart={onDragStart}
+      onDuplicate={onDuplicate}
+      onMoveToNext={nextStatus && onMoveToNext ? (iss) => onMoveToNext(iss, nextStatus.id) : undefined}
+      nextStatusName={nextStatus?.name}
+      tags={issue.tags}
+      allProjectTags={allProjectTags}
+      quickUpdate={quickUpdate}
+      allStatuses={statusOptions}
+      onDeleteIssue={onDeleteIssue}
+      searchQuery={searchQuery}
+      liveActivity={sessionActivity?.[issue.id]}
+      liveStats={liveStats?.[issue.id]}
+      todos={sessionTodos?.[issue.id]}
+      isPendingIssue={pendingIssueIds?.has(issue.id)}
+      isPendingWorkspace={pendingWorkspaceIssueIds?.has(issue.id)}
+      isSelected={selectedIssueIds?.has(issue.id)}
+      isKeyboardFocused={keyboardCursorIssueId === issue.id}
+      cardDensity={cardDensity}
+      {...(includeAging ? { showAgingHeatmap, agingWarmDays, agingHotDays } : {})}
+    />
+  );
+
   const columnStyle: React.CSSProperties = width != null
     ? { width, minWidth: 160, maxWidth: 800, flexShrink: 0, ...style }
     : style ?? {};
@@ -441,35 +409,7 @@ export function BoardColumn({
                     visible={dragOver}
                     onDrop={(e) => handleDropGap(e, computeGapSortOrder(idx))}
                   />
-                  <IssueCard
-                    issue={issue}
-                    onClick={onIssueClick}
-                    onWorkspaceClick={onWorkspaceClick}
-                    onOpenDiff={onOpenDiff}
-                    onStartWorkspace={onStartWorkspace}
-                    onDryRun={onDryRun}
-                    onDragStart={onDragStart}
-                    onDuplicate={onDuplicate}
-                    onMoveToNext={nextStatus && onMoveToNext ? (iss) => onMoveToNext(iss, nextStatus.id) : undefined}
-                    nextStatusName={nextStatus?.name}
-                    tags={issue.tags}
-                    allProjectTags={allProjectTags}
-                    quickUpdate={quickUpdate}
-                    allStatuses={statusOptions}
-                    onDeleteIssue={onDeleteIssue}
-                    searchQuery={searchQuery}
-                    liveActivity={sessionActivity?.[issue.id]}
-                    liveStats={liveStats?.[issue.id]}
-                    todos={sessionTodos?.[issue.id]}
-                    isPendingIssue={pendingIssueIds?.has(issue.id)}
-                    isPendingWorkspace={pendingWorkspaceIssueIds?.has(issue.id)}
-                    isSelected={selectedIssueIds?.has(issue.id)}
-                    isKeyboardFocused={keyboardCursorIssueId === issue.id}
-                    cardDensity={cardDensity}
-                    showAgingHeatmap={showAgingHeatmap}
-                    agingWarmDays={agingWarmDays}
-                    agingHotDays={agingHotDays}
-                  />
+                  {renderCard(issue, true)}
                 </div>
               ))}
               {dragOver && displayedIssues.length > 0 && (
@@ -480,111 +420,16 @@ export function BoardColumn({
               )}
             </>
           )}
-          {swimlaneDimension === "priority" && (() => {
-            const groups = groupByPriority(displayedIssues);
-            if (groups.length === 0) return null;
-            return groups.map((group) => {
-              const style = PRIORITY_LANE_STYLES[group.key] ?? PRIORITY_LANE_STYLES.ungrouped;
-              return (
-                <SwimLaneGroup
-                  key={group.key}
-                  laneKey={group.key}
-                  label={style.label}
-                  dot={style.dot}
-                  headerBg={style.headerBg}
-                  headerBorder={style.headerBorder}
-                  headerText={style.headerText}
-                  count={group.issues.length}
-                  columnId={column.id}
-                  onDropWithLane={onDropWithLane}
-                >
-                  {group.issues.map((issue, idx) => (
-                    <div key={issue.id}>
-                      <IssueCard
-                        issue={issue}
-                        onClick={onIssueClick}
-                        onWorkspaceClick={onWorkspaceClick}
-                        onOpenDiff={onOpenDiff}
-                        onStartWorkspace={onStartWorkspace}
-                        onDryRun={onDryRun}
-                        onDragStart={onDragStart}
-                        onDuplicate={onDuplicate}
-                        onMoveToNext={nextStatus && onMoveToNext ? (iss) => onMoveToNext(iss, nextStatus.id) : undefined}
-                        nextStatusName={nextStatus?.name}
-                        tags={issue.tags}
-                        allProjectTags={allProjectTags}
-                        quickUpdate={quickUpdate}
-                        allStatuses={statusOptions}
-                        onDeleteIssue={onDeleteIssue}
-                        searchQuery={searchQuery}
-                        liveActivity={sessionActivity?.[issue.id]}
-                        liveStats={liveStats?.[issue.id]}
-                        todos={sessionTodos?.[issue.id]}
-                        isPendingIssue={pendingIssueIds?.has(issue.id)}
-                        isPendingWorkspace={pendingWorkspaceIssueIds?.has(issue.id)}
-                        isSelected={selectedIssueIds?.has(issue.id)}
-                        isKeyboardFocused={keyboardCursorIssueId === issue.id}
-                        cardDensity={cardDensity}
-                      />
-                      {idx < group.issues.length - 1 && <div className={`${cardDensity === "compact" ? "mt-1" : "mt-1.5"}`} />}
-                    </div>
-                  ))}
-                </SwimLaneGroup>
-              );
-            });
-          })()}
-          {swimlaneDimension === "tag" && (() => {
-            const groups = groupByTag(displayedIssues);
-            if (groups.length === 0) return null;
-            return groups.map((group) => (
-              <SwimLaneGroup
-                key={group.key}
-                laneKey={group.key}
-                label={group.label}
-                dot={undefined}
-                dotColor={group.color ?? undefined}
-                headerBg="bg-gray-50 dark:bg-gray-800/40"
-                headerBorder="border-gray-200 dark:border-gray-700"
-                headerText="text-gray-700 dark:text-gray-300"
-                count={group.issues.length}
-                columnId={column.id}
-                onDropWithLane={onDropWithLane}
-                dragOver={dragOver}
-              >
-                {group.issues.map((issue, idx) => (
-                  <div key={issue.id}>
-                    <IssueCard
-                      issue={issue}
-                      onClick={onIssueClick}
-                      onWorkspaceClick={onWorkspaceClick}
-                      onOpenDiff={onOpenDiff}
-                      onStartWorkspace={onStartWorkspace}
-                      onDryRun={onDryRun}
-                      onDragStart={onDragStart}
-                      onDuplicate={onDuplicate}
-                      onMoveToNext={nextStatus && onMoveToNext ? (iss) => onMoveToNext(iss, nextStatus.id) : undefined}
-                      nextStatusName={nextStatus?.name}
-                      tags={issue.tags}
-                      allProjectTags={allProjectTags}
-                      quickUpdate={quickUpdate}
-                      allStatuses={statusOptions}
-                      onDeleteIssue={onDeleteIssue}
-                      searchQuery={searchQuery}
-                      liveActivity={sessionActivity?.[issue.id]}
-                      liveStats={liveStats?.[issue.id]}
-                      todos={sessionTodos?.[issue.id]}
-                      isPendingIssue={pendingIssueIds?.has(issue.id)}
-                      isPendingWorkspace={pendingWorkspaceIssueIds?.has(issue.id)}
-                      isSelected={selectedIssueIds?.has(issue.id)}
-                      isKeyboardFocused={keyboardCursorIssueId === issue.id}
-                      cardDensity={cardDensity}
-                    />
-                    {idx < group.issues.length - 1 && <div className={`${cardDensity === "compact" ? "mt-1" : "mt-1.5"}`} />}
-                  </div>
-                ))}
-              </SwimLaneGroup>
-            ));
-          })()}
+          {swimlaneDimension !== "none" && (
+            <SwimlaneRenderer
+              dimension={swimlaneDimension}
+              issues={displayedIssues}
+              columnId={column.id}
+              onDropWithLane={onDropWithLane}
+              cardDensity={cardDensity}
+              renderIssueCard={(issue) => renderCard(issue, false)}
+            />
+          )}
           {isCreating && children}
           {column.issues.length === 0 && !isCreating && !dragOver && (
             <p className="text-xs text-gray-400 dark:text-gray-500 text-center py-4">No issues</p>
@@ -606,6 +451,80 @@ export function BoardColumn({
       </div>
     )}
     </div>
+  );
+}
+
+interface SwimlaneRendererProps {
+  dimension: Exclude<SwimlaneDimension, "none">;
+  issues: IssueWithStatus[];
+  columnId: string;
+  onDropWithLane?: (statusId: string, laneKey: string, sortOrder?: number) => void;
+  cardDensity: CardDensity;
+  renderIssueCard: (issue: IssueWithStatus) => React.ReactNode;
+}
+
+/** Renders the column's issues grouped into swimlanes (priority or tag).
+ *  Consolidates what used to be two near-identical inline JSX branches: the only
+ *  per-dimension differences are the grouping function and the lane header styling. */
+function SwimlaneRenderer({
+  dimension,
+  issues,
+  columnId,
+  onDropWithLane,
+  cardDensity,
+  renderIssueCard,
+}: SwimlaneRendererProps) {
+  const groups =
+    dimension === "priority"
+      ? groupByPriority(issues).map((group) => {
+          const style = PRIORITY_LANE_STYLES[group.key] ?? PRIORITY_LANE_STYLES.ungrouped;
+          return {
+            key: group.key,
+            label: style.label,
+            dot: style.dot as string | undefined,
+            dotColor: undefined as string | undefined,
+            headerBg: style.headerBg,
+            headerBorder: style.headerBorder,
+            headerText: style.headerText,
+            issues: group.issues,
+          };
+        })
+      : groupByTag(issues).map((group) => ({
+          key: group.key,
+          label: group.label,
+          dot: undefined as string | undefined,
+          dotColor: group.color ?? undefined,
+          headerBg: "bg-gray-50 dark:bg-gray-800/40",
+          headerBorder: "border-gray-200 dark:border-gray-700",
+          headerText: "text-gray-700 dark:text-gray-300",
+          issues: group.issues,
+        }));
+  if (groups.length === 0) return null;
+  return (
+    <>
+      {groups.map((group) => (
+        <SwimLaneGroup
+          key={group.key}
+          laneKey={group.key}
+          label={group.label}
+          dot={group.dot}
+          dotColor={group.dotColor}
+          headerBg={group.headerBg}
+          headerBorder={group.headerBorder}
+          headerText={group.headerText}
+          count={group.issues.length}
+          columnId={columnId}
+          onDropWithLane={onDropWithLane}
+        >
+          {group.issues.map((issue, idx) => (
+            <div key={issue.id}>
+              {renderIssueCard(issue)}
+              {idx < group.issues.length - 1 && <div className={`${cardDensity === "compact" ? "mt-1" : "mt-1.5"}`} />}
+            </div>
+          ))}
+        </SwimLaneGroup>
+      ))}
+    </>
   );
 }
 
