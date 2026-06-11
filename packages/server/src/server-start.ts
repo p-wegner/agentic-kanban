@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { createSecureServer } from "node:http2";
 import { serve } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
 import { Hono } from "hono";
@@ -123,9 +125,30 @@ export async function startServer(port?: number, hostname?: string) {
   monitorSetup.setupMonitorRoutes(app);
 
   console.log(`Server starting on port ${serverPort}...`);
-  const server = serve({ fetch: app.fetch, port: serverPort, hostname: serverHost }, (info) => {
-    console.log(`Server running at http://${serverHost}:${info.port}`);
-  });
+  // Optional HTTP/2: set KANBAN_TLS_CERT + KANBAN_TLS_KEY to PEM paths to serve over
+  // TLS with HTTP/2. Browsers only negotiate h2 over TLS, and h2 multiplexes every
+  // request over ONE connection — lifting the ~6-connection-per-origin HTTP/1.1 cap
+  // that throttles request fan-outs like the Settings panel. `allowHTTP1: true` keeps
+  // plain HTTP/1.1 clients AND WebSocket upgrades (@hono/node-ws upgrades over 1.1)
+  // working. With the env vars unset this is a no-op and the server stays HTTP/1.1.
+  // For network access via Tailscale: `tailscale cert <name>.ts.net` issues the PEMs.
+  const tlsKeyPath = process.env.KANBAN_TLS_KEY?.trim();
+  const tlsCertPath = process.env.KANBAN_TLS_CERT?.trim();
+  let tls: { key: Buffer; cert: Buffer } | null = null;
+  if (tlsKeyPath && tlsCertPath) {
+    try {
+      tls = { key: readFileSync(tlsKeyPath), cert: readFileSync(tlsCertPath) };
+    } catch (err) {
+      console.warn(`[http2] KANBAN_TLS_KEY/CERT set but unreadable — staying on HTTP/1.1: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+  const onListen = (info: { port: number }) => {
+    const scheme = tls ? "https" : "http";
+    console.log(`Server running at ${scheme}://${serverHost}:${info.port}${tls ? " (HTTP/2, HTTP/1.1 fallback enabled)" : ""}`);
+  };
+  const server = tls
+    ? serve({ fetch: app.fetch, port: serverPort, hostname: serverHost, createServer: createSecureServer, serverOptions: { key: tls.key, cert: tls.cert, allowHTTP1: true } }, onListen)
+    : serve({ fetch: app.fetch, port: serverPort, hostname: serverHost }, onListen);
   // Short keep-alive timeout so idle persistent connections close promptly when
   // tsx-watch restarts the server after a merge lands new TypeScript files.
   // The Node default is 5 s — long enough for a second request to arrive on the
