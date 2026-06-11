@@ -77,6 +77,19 @@ npx agentic-kanban status
 npx agentic-kanban-mcp
 ```
 
+## Running Over the Network (HTTPS / HTTP/2)
+
+`agentic-kanban dev` serves plain HTTP/1.1 on `127.0.0.1` by default — ideal for local single-user use. To reach the board from another machine, bind a routable host and (optionally) enable HTTP/2 over TLS so request-heavy views aren't throttled by the browser's ~6-connection HTTP/1.1 cap:
+
+```powershell
+$env:KANBAN_HOST     = "0.0.0.0"          # accept remote connections
+$env:KANBAN_TLS_CERT = "C:\certs\board.crt"   # optional: enables HTTP/2 over TLS
+$env:KANBAN_TLS_KEY  = "C:\certs\board.key"
+npx agentic-kanban dev
+```
+
+When `KANBAN_TLS_CERT` + `KANBAN_TLS_KEY` are set the server serves HTTP/2 with an HTTP/1.1 fallback (so WebSocket live-updates keep working); unset, it stays plain HTTP/1.1. Browsers only negotiate HTTP/2 over TLS. For Tailscale, `tailscale cert <name>.ts.net` issues a trusted cert/key. See [deployment.md → HTTPS / HTTP/2](deployment.md#https--http2-network-access) for details.
+
 ## MCP Server Configuration for Claude Code
 
 Add to your project's `.claude/settings.json` or global settings:
