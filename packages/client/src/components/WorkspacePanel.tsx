@@ -285,7 +285,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
   const [replaySession, setReplaySession] = useState<{ id: string; label: string; outputFormat: string } | null>(null);
 
   const [latestCommits, setLatestCommits] = useState<Record<string, { sha: string; message: string } | null>>({});
-  const [handoffContent, setHandoffContent] = useState<Record<string, string | null>>({});
   const [githubDrafts, setGithubDrafts] = useState<Record<string, string | null>>({});
   const [planContent, setPlanContent] = useState<Record<string, string | null>>({});
   const [planEditMode, setPlanEditMode] = useState<Record<string, boolean>>({});
@@ -343,6 +342,14 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
   });
 
   const { state: wsState, messages, disconnect, isWaitingForInput } = useWebSocket(activeSession);
+
+  // Primitive descriptors of the selected workspace. Effects that only care about
+  // the selected workspace's identity/status must depend on these, NOT the whole
+  // `workspaces` array — otherwise every setWorkspaces() (which produces a fresh
+  // array reference) re-runs them and re-fires expensive fetches (scorecard, diff).
+  const selectedWs = selectedWorkspace ? workspaces.find(w => w.id === selectedWorkspace) : undefined;
+  const selectedWsStatus = selectedWs?.status;
+  const selectedWsIsDirect = selectedWs?.isDirect ?? false;
 
   useEffect(() => {
     if (!initialSessionId || initialSessionAppliedRef.current || !selectedWorkspace) return;
@@ -454,21 +461,11 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
         }),
       );
       setLatestCommits(commits);
-      // Fetch handoff content for each workspace
-      const handoffs: Record<string, string | null> = {};
-      await Promise.all(
-        data.filter(ws => ws.workingDir && ws.status !== "closed").map(async (ws) => {
-          try {
-            const result = await apiFetch<{ content: string | null }>(
-              `/api/workspaces/${ws.id}/handoff`,
-            );
-            handoffs[ws.id] = result.content;
-          } catch {
-            handoffs[ws.id] = null;
-          }
-        }),
-      );
-      setHandoffContent(handoffs);
+      // NOTE: the per-workspace `/handoff` GET endpoint does not exist on the server
+      // (only `/handoff-bundle` and `/github-handoff-draft` do), so this loop always
+      // 404'd and `handoffContent` was never populated. Removed to kill the redundant
+      // per-workspace requests + console 404 noise on every panel open. Wiring the
+      // handoff display to a real endpoint is tracked separately.
       const drafts: Record<string, string | null> = {};
       await Promise.all(
         data.filter(ws => ws.status === "closed").map(async (ws) => {
@@ -524,10 +521,8 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
   }, [onClose, selectedHistoryId]);
 
   useEffect(() => {
-    if (!selectedWorkspace) return;
-    const ws = workspaces.find(w => w.id === selectedWorkspace);
-    if (!ws || ws.isDirect) return;
-    if (ws.status !== "idle" && !initialShowDiff) return;
+    if (!selectedWorkspace || !selectedWsStatus || selectedWsIsDirect) return;
+    if (selectedWsStatus !== "idle" && !initialShowDiff) return;
     if (diff || conflictState) return;
     apiFetch<DiffResponse>(`/api/workspaces/${selectedWorkspace}/diff`)
       .then((result) => {
@@ -536,7 +531,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
         if (result.conflicts) setConflictState(result.conflicts);
       })
       .catch(() => {});
-  }, [selectedWorkspace, workspaces]);
+  }, [selectedWorkspace, selectedWsStatus, selectedWsIsDirect, initialShowDiff]);
 
   useEffect(() => {
     if (!selectedWorkspace) {
@@ -557,7 +552,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     return () => {
       cancelled = true;
     };
-  }, [selectedWorkspace, workspaces]);
+  }, [selectedWorkspace]);
 
   async function handleQuickLaunch(withPlanMode: boolean) {
     setActionLoading(true);
@@ -1632,23 +1627,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                 )}
 
                 <SetupStatusPanel setup={ws.latestSetup ?? null} />
-
-                {handoffContent[ws.id] && (
-                  <details className="text-xs">
-                    <summary className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide cursor-pointer hover:text-gray-600 dark:hover:text-gray-300 flex items-center gap-1">
-                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
-                      </svg>
-                      Session Handoff
-                    </summary>
-                    <div className="mt-1 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 rounded p-2 max-h-40 overflow-y-auto">
-                      <div className="prose prose-xs max-w-none text-[11px] leading-relaxed text-gray-700 dark:text-gray-300">
-                        <ReactMarkdown>{handoffContent[ws.id]!}</ReactMarkdown>
-                      </div>
-                    </div>
-                  </details>
-                )}
-
 
                 {isThisRunning && (ws.contextTokens || ws.lastTool) && (
                   <div className="flex items-center gap-2 text-[10px] text-gray-400 dark:text-gray-500">
