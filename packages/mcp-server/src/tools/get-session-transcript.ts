@@ -48,7 +48,9 @@ export function registerGetSessionTranscript(server: McpServer, deps: ToolDeps =
 
       const messageLimit = limit ?? 200;
       // Prefer .out file for stdout; non-stdout rows from DB; fall back to DB-only for historical sessions
-      let messages: Array<{ id?: number; type: string; data?: string | null; exitCode?: number | null; createdAt?: string | null }>;
+      // exitCode is stored as TEXT in the DB (schema: text("exit_code")), so the Drizzle
+      // row type is string | null — match it here rather than number | null.
+      let messages: Array<{ id?: number; type: string; data?: string | null; exitCode?: string | null; createdAt?: string | null }>;
       const fileContent = readSessionStdoutFile(sessionId);
       if (fileContent !== null) {
         const stdoutMsg = { type: "stdout", data: fileContent };
