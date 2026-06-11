@@ -554,6 +554,7 @@ function makeGitForStateMachine(overrides: Partial<Record<string, (...a: unknown
     rebaseOntoBase: vi.fn(async () => ({ success: true })),
     abortRebase: vi.fn(async () => {}),
     detectConflicts: vi.fn(async () => ({ hasConflicts: false, conflictingFiles: [] as string[] })),
+    detectConflictsByBranch: vi.fn(async () => ({ hasConflicts: false, conflictingFiles: [] as string[] })),
     ...overrides,
   };
 }
@@ -756,10 +757,10 @@ describe("resolveMergeState — reconcile (branch already ancestor)", () => {
 });
 
 describe("resolveMergeState — conflict-ready (direct conflict detection)", () => {
-  it("returns conflict-ready when detectConflicts finds conflicts", async () => {
+  it("returns conflict-ready when read-only branch detection finds conflicts", async () => {
     const ws = makeWorkspace();
     const git = makeGitForStateMachine({
-      detectConflicts: vi.fn(async () => ({ hasConflicts: true, conflictingFiles: ["src/foo.ts", "src/bar.ts"] })),
+      detectConflictsByBranch: vi.fn(async () => ({ hasConflicts: true, conflictingFiles: ["src/foo.ts", "src/bar.ts"] })),
     });
     const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
     expect(result.kind).toBe("conflict-ready");
@@ -775,7 +776,7 @@ describe("resolveMergeState — conflict-ready (direct conflict detection)", () 
     const ws = makeWorkspace();
     const git = makeGitForStateMachine({
       countBehindCommits: vi.fn(async () => 0),
-      detectConflicts: vi.fn(async () => ({ hasConflicts: true, conflictingFiles: ["src/x.ts"] })),
+      detectConflictsByBranch: vi.fn(async () => ({ hasConflicts: true, conflictingFiles: ["src/x.ts"] })),
     });
     const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
     if (result.kind === "conflict-ready") {
@@ -784,13 +785,17 @@ describe("resolveMergeState — conflict-ready (direct conflict detection)", () 
   });
 });
 
-describe("resolveMergeState — conflict-ready (rebase fails when behind)", () => {
-  it("returns conflict-ready with behindCount when auto-rebase finds conflicts", async () => {
+describe("resolveMergeState — conflict-ready (behind base), read-only detection (#761)", () => {
+  it("returns conflict-ready with behindCount from READ-ONLY detection, never rebasing", async () => {
     const ws = makeWorkspace();
+    const rebaseOntoBase = vi.fn(async () => ({ success: false, conflictingFiles: ["src/service.ts"] }));
+    const abortRebase = vi.fn(async () => {});
     const git = makeGitForStateMachine({
       countBehindCommits: vi.fn(async () => 5),
-      rebaseOntoBase: vi.fn(async () => ({ success: false, conflictingFiles: ["src/service.ts"] })),
-      abortRebase: vi.fn(async () => {}),
+      // The real conflict signal now comes from the read-only branch-level merge-tree.
+      detectConflictsByBranch: vi.fn(async () => ({ hasConflicts: true, conflictingFiles: ["src/service.ts"] })),
+      rebaseOntoBase,
+      abortRebase,
     });
     const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
     expect(result.kind).toBe("conflict-ready");
@@ -799,29 +804,23 @@ describe("resolveMergeState — conflict-ready (rebase fails when behind)", () =
       expect(result.conflictFiles).toEqual(["src/service.ts"]);
       expect(result.error.data).toMatchObject({ mergeReason: "conflict", behindCount: 5 });
     }
+    // The destructive in-place rebase that caused the re-conflict loop must not run.
+    expect(rebaseOntoBase).not.toHaveBeenCalled();
+    expect(abortRebase).not.toHaveBeenCalled();
   });
 
-  it("aborts the leftover rebase state so the worktree is usable for fix-and-merge", async () => {
+  it("a behind-but-mechanically-mergeable branch PROCEEDS instead of looping on rebase", async () => {
     const ws = makeWorkspace();
-    const abortRebase = vi.fn(async () => {});
-    const git = makeGitForStateMachine({
-      countBehindCommits: vi.fn(async () => 2),
-      rebaseOntoBase: vi.fn(async () => ({ success: false, conflictingFiles: [] })),
-      abortRebase,
-    });
-    await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
-    expect(abortRebase).toHaveBeenCalledWith(ws.workingDir);
-  });
-
-  it("proceeds to conflict detection when auto-rebase succeeds", async () => {
-    const ws = makeWorkspace();
+    const rebaseOntoBase = vi.fn(async () => ({ success: true }));
     const git = makeGitForStateMachine({
       countBehindCommits: vi.fn(async () => 3),
-      rebaseOntoBase: vi.fn(async () => ({ success: true })),
-      detectConflicts: vi.fn(async () => ({ hasConflicts: false, conflictingFiles: [] })),
+      // merge-tree of branch→base is clean even though base moved past the branch.
+      detectConflictsByBranch: vi.fn(async () => ({ hasConflicts: false, conflictingFiles: [] })),
+      rebaseOntoBase,
     });
     const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
     expect(result.kind).toBe("proceed");
+    expect(rebaseOntoBase).not.toHaveBeenCalled();
   });
 });
 
