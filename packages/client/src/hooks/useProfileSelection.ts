@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
+import { getSettings } from "../lib/settingsStore.js";
 import {
   CODEX_DEFAULT_PROFILE,
   COPILOT_DEFAULT_PROFILE,
@@ -35,7 +36,7 @@ export function useProfileSelection(issueId: string): UseProfileSelectionResult 
   const [selectedModel, setSelectedModel] = useState<string>("");
 
   useEffect(() => {
-    apiFetch<Record<string, string>>("/api/preferences/settings")
+    getSettings()
       .then((s) => {
         setPrefs(s);
         setRequiresReview(s.auto_review !== "false");

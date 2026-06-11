@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
+import { getSettings, invalidateSettings } from "../lib/settingsStore.js";
 
 export interface IssueTemplate {
   id: string;
@@ -72,7 +73,7 @@ export function useIssueTemplates() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    apiFetch<Record<string, string>>("/api/preferences/settings")
+    getSettings()
       .then((s) => setCustomTemplates(parseTemplates(s.issue_templates)))
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -83,6 +84,7 @@ export function useIssueTemplates() {
       method: "PUT",
       body: JSON.stringify({ issue_templates: JSON.stringify(templates) }),
     });
+    invalidateSettings();
     setCustomTemplates(templates);
   }, []);
 
