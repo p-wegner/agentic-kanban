@@ -177,6 +177,20 @@ async function main() {
   console.error(`Agentic Kanban MCP server running on stdio (${registered} tools registered)`);
 }
 
+// Keep the stdio transport alive when a tool handler throws asynchronously. The MCP SDK
+// wraps tool callbacks in try/catch and returns isError results for awaited throws, but a
+// stray async rejection (e.g. a drizzle "Failed query: select ..." in an un-awaited promise
+// or timer callback) escapes that and would otherwise crash the process — the agent's MCP
+// client then reports `server "agentic-kanban" is not connected` and every board op fails.
+// Mirror the main server's resilience: log to stderr (never stdout — that is the JSON-RPC
+// stream) and stay up. (console.error writes to stderr, so it is safe here.)
+process.on("uncaughtException", (err) => {
+  console.error("[fatal] uncaughtException in MCP server:", err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[fatal] unhandledRejection in MCP server:", reason);
+});
+
 main().catch((err) => {
   console.error("Fatal error:", err);
   process.exit(1);

@@ -39,6 +39,7 @@ All git ops in `packages/shared/src/lib/git-service.ts`; `server/src/services/gi
 - **Hook commands in `settings.json`**: forward slashes (`\\` → `MODULE_NOT_FOUND`); relative paths fail on CWD shift; `$CLAUDE_PROJECT_DIR` not expanded.
 - **Codex hook parity**: `.codex/hooks.json` routes shell checks through `.claude/hooks/smart-hooks-runner.js`, patch/write through `prevent-cross-worktree-writes.js`. New Claude safety hooks must also handle Codex input (`tool_name`, `tool_input.command`, patch/write, `cwd`).
 - **Git tests**: `.trim()` content assertions (CRLF vs LF); assert on keywords, not exact strings.
+- **No `--no-edit` on `git rebase`** — that's a `git merge` flag; `git rebase` rejects it with "unknown option". Non-interactive rebase already opens no editor, so just drop the flag (recurring agent error, ~5 failed calls/window).
 
 ### PowerShell (worst-failing tool, ~17% of calls)
 - **Never name a variable `$pid`/`$host`/`$home`/`$true`/`$null`/`$pshome`** — read-only automatics; assigning throws and silently keeps the built-in (REST hits the WRONG id). Use `$procId`/`$projectId`. (Blocked by `validate-command-safety`.)
