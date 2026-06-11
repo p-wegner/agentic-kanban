@@ -63,6 +63,7 @@ function makeGit(overrides: Record<string, unknown> = {}) {
     rebaseOntoBase: vi.fn(async () => ({ success: true })),
     abortRebase: vi.fn(async () => {}),
     detectConflicts: vi.fn(async () => ({ hasConflicts: false, conflictingFiles: [] })),
+    detectConflictsByBranch: vi.fn(async () => ({ hasConflicts: false, conflictingFiles: [] })),
     autoRenumberMigrations: vi.fn(async () => ({ renumbered: false, renames: [] })),
     getCurrentBranch: vi.fn(async () => "master"),
     getChangedFilesBetween: vi.fn(async () => []),
@@ -77,9 +78,13 @@ function makeGit(overrides: Record<string, unknown> = {}) {
 }
 
 describe("workspace merge conflict detection service", () => {
-  it("reports auto-rebase conflicts with behindCount and aborts the rebase", async () => {
+  it("reports branch conflicts with behindCount WITHOUT mutating the worktree (#761)", async () => {
+    // A stale, conflicting cluster member: behind base AND merge-tree conflicts.
+    // The check must be purely read-only — no rebase, no abort — so repeated /merge
+    // attempts converge on the same files instead of re-conflicting on a replayed rebase.
     const git = makeGit({
       countBehindCommits: vi.fn(async () => 3),
+      detectConflictsByBranch: vi.fn(async () => ({ hasConflicts: true, conflictingFiles: ["src/a.ts"] })),
       rebaseOntoBase: vi.fn(async () => ({ success: false, conflictingFiles: ["src/a.ts"] })),
     });
 
@@ -91,12 +96,35 @@ describe("workspace merge conflict detection service", () => {
     });
 
     expect(result).toEqual({ kind: "conflict", conflictFiles: ["src/a.ts"], behindCount: 3 });
-    expect(git.abortRebase).toHaveBeenCalledWith("/repo/.worktrees/feature-test");
+    // The destructive in-place rebase is exactly what caused the re-conflict loop —
+    // it must never run during conflict detection.
+    expect(git.rebaseOntoBase).not.toHaveBeenCalled();
+    expect(git.abortRebase).not.toHaveBeenCalled();
   });
 
-  it("reports read-only merge-tree conflicts when the branch is current", async () => {
+  it("reports clear for a stale-but-mechanically-mergeable member (no rebase, no loop)", async () => {
+    // Behind base but git can merge-tree it cleanly: the real merge will land it.
+    // The old code rebased-in-place here and could re-conflict; now it just proceeds.
     const git = makeGit({
-      detectConflicts: vi.fn(async () => ({ hasConflicts: true, conflictingFiles: ["src/b.ts"] })),
+      countBehindCommits: vi.fn(async () => 5),
+      detectConflictsByBranch: vi.fn(async () => ({ hasConflicts: false, conflictingFiles: [] })),
+    });
+
+    const result = await detectWorkspaceMergeConflicts({
+      workspace: makeWorkspace() as never,
+      repoPath: "/repo",
+      baseBranch: "master",
+      gitService: git as never,
+    });
+
+    expect(result).toEqual({ kind: "clear" });
+    expect(git.rebaseOntoBase).not.toHaveBeenCalled();
+  });
+
+  it("uses branch-level merge-tree detection (mirrors the real merge), not the worktree", async () => {
+    const git = makeGit({
+      detectConflictsByBranch: vi.fn(async () => ({ hasConflicts: true, conflictingFiles: ["src/b.ts"] })),
+      detectConflicts: vi.fn(async () => ({ hasConflicts: false, conflictingFiles: [] })),
     });
 
     await expect(detectWorkspaceMergeConflicts({
@@ -105,6 +133,22 @@ describe("workspace merge conflict detection service", () => {
       baseBranch: "master",
       gitService: git as never,
     })).resolves.toEqual({ kind: "conflict", conflictFiles: ["src/b.ts"] });
+    expect(git.detectConflictsByBranch).toHaveBeenCalledWith("/repo", "feature/test", "master");
+  });
+
+  it("falls back to worktree-relative detectConflicts when branch-level detection is unavailable", async () => {
+    const git = makeGit({
+      detectConflictsByBranch: undefined,
+      detectConflicts: vi.fn(async () => ({ hasConflicts: true, conflictingFiles: ["src/c.ts"] })),
+    });
+
+    await expect(detectWorkspaceMergeConflicts({
+      workspace: makeWorkspace() as never,
+      repoPath: "/repo",
+      baseBranch: "master",
+      gitService: git as never,
+    })).resolves.toEqual({ kind: "conflict", conflictFiles: ["src/c.ts"] });
+    expect(git.detectConflicts).toHaveBeenCalledWith("/repo/.worktrees/feature-test", "master");
   });
 });
 
