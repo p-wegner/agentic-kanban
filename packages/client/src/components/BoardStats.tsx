@@ -20,6 +20,10 @@ const STATUS_CONFIG: Record<string, { bar: string; dot: string; text: string; bg
 
 const DEFAULT_CONFIG = { bar: "bg-gray-400", dot: "bg-gray-300", text: "text-gray-600", bg: "bg-gray-50" };
 
+// How long a fetched /stats result stays fresh — toggling the popover within
+// this window does not re-hit the endpoint.
+const STATS_CACHE_TTL_MS = 60_000;
+
 function getConfig(name: string) {
   return STATUS_CONFIG[name] ?? DEFAULT_CONFIG;
 }
@@ -61,12 +65,17 @@ export function BoardStats({
 
   const [commitCount, setCommitCount] = useState<number | null>(null);
   const [commitBranch, setCommitBranch] = useState<string | null>(null);
+  // Tracks the last successful-or-in-flight /stats fetch (per project, with a
+  // timestamp) so the popover-open effect below can dedupe StrictMode double
+  // runs and rapid open/close toggles without refetching.
+  const statsFetchRef = useRef<{ projectId: string; at: number } | null>(null);
 
   useEffect(() => {
-    if (!projectId) return;
-    apiFetch<{ commitCount: number; detectedBranch: string | null }>(`/api/projects/${projectId}/stats`)
-      .then((s) => { setCommitCount(s.commitCount); setCommitBranch(s.detectedBranch); })
-      .catch(() => {});
+    // Project switched: drop the previous project's stats so a stale commit
+    // count never shows in the popover.
+    setCommitCount(null);
+    setCommitBranch(null);
+    statsFetchRef.current = null;
   }, [projectId]);
 
   const [prevTotal, setPrevTotal] = useState(total);
@@ -96,6 +105,29 @@ export function BoardStats({
   // click on the completion ring. (#small-screen header overhaul)
   const [showBreakdown, setShowBreakdown] = useState(false);
   const breakdownRef = useRef<HTMLDivElement>(null);
+
+  // /api/projects/:id/stats runs expensive synchronous git + file-tree scans
+  // server-side (205ms warm, multi-second cold) and its data (commit count /
+  // branch) is ONLY rendered inside this popover — fetch it lazily on first
+  // open instead of on every board mount, with a short per-project cache.
+  useEffect(() => {
+    if (!showBreakdown || !projectId) return;
+    const last = statsFetchRef.current;
+    if (last && last.projectId === projectId && Date.now() - last.at < STATS_CACHE_TTL_MS) return;
+    const pid = projectId;
+    statsFetchRef.current = { projectId: pid, at: Date.now() };
+    apiFetch<{ commitCount: number; detectedBranch: string | null }>(`/api/projects/${pid}/stats`)
+      .then((s) => {
+        // Ignore responses that arrive after a project switch reset the ref.
+        if (statsFetchRef.current?.projectId !== pid) return;
+        setCommitCount(s.commitCount);
+        setCommitBranch(s.detectedBranch);
+      })
+      .catch(() => {
+        if (statsFetchRef.current?.projectId === pid) statsFetchRef.current = null;
+      });
+  }, [showBreakdown, projectId]);
+
   useEffect(() => {
     if (!showBreakdown) return;
     function handleClick(e: MouseEvent) {
