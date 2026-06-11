@@ -13,11 +13,11 @@
  */
 import { isTerminalStatusView } from "@agentic-kanban/shared";
 import { sessions, sessionMessages, workspaces, issues, projects, projectStatuses, issueComments, workflowNodes } from "@agentic-kanban/shared/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, ne, and, desc } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { getPreference, setPreference } from "../repositories/preferences.repository.js";
 import { ensureButlerSession, sendButlerTurn, subscribeButler, getButlerSession } from "./butler-sdk.service.js";
-import { readSessionStdoutFile } from "../repositories/session.repository.js";
+import { readSessionStdoutFileTail } from "../repositories/session.repository.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 
 /** Function signature for sending a follow-up turn to a workspace — injected so this
@@ -120,6 +120,35 @@ function parseSyntheticQuestionPayload(
   }
 }
 
+/**
+ * Per-project cache of computed pending-question responses.
+ *
+ * The listing is compute-on-read and was the slowest hot endpoint on large
+ * projects (500-850ms measured), polled every 15-20s by up to three client
+ * pollers. Entries pin the Database instance they were computed against so unit
+ * tests (fresh in-memory DB per test, reused project ids) never see another
+ * test's cache. Invalidation paths:
+ *  - any board event for the project (server-start wires
+ *    boardEvents.addInvalidationListener -> invalidateAgentQuestionsCache);
+ *    session exits, workspace status changes, and MCP comment inserts
+ *    (notifyBoard) all flow through that broadcast
+ *  - markAnswered / markDismissed (no projectId in scope -> clear all)
+ *  - setCachedRecommendations (a recommendation landing changes the attached
+ *    `recommendation` field -> clear all)
+ * The TTL is a safety net only — correctness comes from the invalidation paths.
+ */
+const AGENT_QUESTIONS_CACHE_TTL_MS = 30_000;
+const pendingQuestionsCache = new Map<
+  string,
+  { db: Database; result: PendingQuestionSet[]; computedAt: number }
+>();
+
+/** Drop the cached pending-questions response for one project (or all when omitted). */
+export function invalidateAgentQuestionsCache(projectId?: string): void {
+  if (projectId === undefined) pendingQuestionsCache.clear();
+  else pendingQuestionsCache.delete(projectId);
+}
+
 function answeredPrefKey(toolUseId: string): string {
   return `agent_question_answered_${toolUseId}`;
 }
@@ -138,6 +167,7 @@ export async function isAnswered(toolUseId: string, db: Database): Promise<boole
 
 export async function markAnswered(toolUseId: string, db: Database): Promise<void> {
   await setPreference(answeredPrefKey(toolUseId), "1", db);
+  invalidateAgentQuestionsCache();
 }
 
 /**
@@ -190,6 +220,7 @@ export async function writeAgentQuestionComment(
  *  so the service stays free of `Date.now()`/`new Date()`. */
 export async function markDismissed(toolUseId: string, dismissedAt: string, db: Database): Promise<void> {
   await setPreference(answeredPrefKey(toolUseId), JSON.stringify({ dismissed: true, dismissedAt }), db);
+  invalidateAgentQuestionsCache();
 }
 
 /** Cached recommendation array, one entry per sub-question. A null entry = couldn't recommend
@@ -215,6 +246,9 @@ export async function setCachedRecommendations(
   db: Database,
 ): Promise<void> {
   await setPreference(recommendationPrefKey(toolUseId), JSON.stringify({ recommendations }), db);
+  // A landed recommendation changes the `recommendation` field attached to the
+  // cached listing — drop the response cache so the next poll picks it up.
+  invalidateAgentQuestionsCache();
 }
 
 /**
@@ -326,9 +360,21 @@ export async function listPendingQuestionsForProject(
   sendTurn?: AutoAnswerSendTurn,
   nowOverride?: string,
 ): Promise<PendingQuestionSet[]> {
+  // Serve from the per-project response cache when fresh. Skipped when a caller
+  // injects its own clock (nowOverride) — deterministic tests need a recompute.
+  if (nowOverride === undefined) {
+    const cached = pendingQuestionsCache.get(projectId);
+    if (cached && cached.db === db && Date.now() - cached.computedAt < AGENT_QUESTIONS_CACHE_TTL_MS) {
+      return cached.result;
+    }
+  }
+
   // Pull all workspaces+issues for this project (one query). Includes the workspace
   // status/closedAt/readyForMerge and the issue's status-column name so staleness can
-  // be computed per card without extra round-trips.
+  // be computed per card without extra round-trips. Closed workspaces are excluded
+  // up front: computeStaleness returns "workspace-merged" for status === "closed"
+  // and those results are dropped unconditionally below, so scanning them is
+  // provably wasted work (609 of 648 workspaces on the measured project).
   const wsRows = await db
     .select({
       workspaceId: workspaces.id,
@@ -347,7 +393,7 @@ export async function listPendingQuestionsForProject(
     .innerJoin(issues, eq(workspaces.issueId, issues.id))
     .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
     .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
-    .where(eq(issues.projectId, projectId));
+    .where(and(eq(issues.projectId, projectId), ne(workspaces.status, "closed")));
 
   const results: PendingQuestionSet[] = [];
   const now = nowOverride ?? new Date().toISOString();
@@ -366,14 +412,28 @@ export async function listPendingQuestionsForProject(
 
     // Find the newest non-running session that actually carries pending questions.
     for (const sess of sessRows) {
+      // Only questions from the latest session (or sessions tied with its
+      // startedAt) can ever surface: anything strictly older is dropped as
+      // "superseded" by computeStaleness below. Rows are ordered newest-first,
+      // so stop at the first strictly-older session instead of reading its
+      // transcript for nothing.
+      if (
+        sess.startedAt !== null &&
+        latestSession.startedAt !== null &&
+        latestSession.startedAt > sess.startedAt
+      ) break;
       // A running session may not have the result yet.
       if (sess.status === "running") continue;
 
-      // Prefer .out file for stdout; fall back to DB rows for historical sessions
+      // Prefer the .out file for stdout; fall back to DB rows for historical
+      // sessions. The file is JSONL — split it into lines so each stream event
+      // is parsed individually (the whole file as one string can never
+      // JSON.parse, which silently hid questions from file-backed sessions).
+      // Only the tail is read: the result event is one of the last lines.
       let msgs: Array<{ type: string; data: string | null }>;
-      const fileContent = readSessionStdoutFile(sess.id);
+      const fileContent = readSessionStdoutFileTail(sess.id);
       if (fileContent !== null) {
-        msgs = [{ type: "stdout", data: fileContent }];
+        msgs = fileContent.split("\n").map((line) => ({ type: "stdout", data: line }));
       } else {
         msgs = await db
           .select({ type: sessionMessages.type, data: sessionMessages.data })
@@ -436,6 +496,11 @@ export async function listPendingQuestionsForProject(
     }
   }
 
+  // Synthetic (MCP clarify_or_propose) questions live in issue comments. Only
+  // kind "agent-question" rows can carry the `mcp_clarify_or_propose` payload
+  // (see mcp-server tools/clarify-or-propose.ts), so filter by kind instead of
+  // scanning every comment of the project — the unbounded scan grew with the
+  // full comment history.
   const syntheticRows = await db
     .select({
       id: issueComments.id,
@@ -449,7 +514,7 @@ export async function listPendingQuestionsForProject(
     })
     .from(issueComments)
     .innerJoin(issues, eq(issueComments.issueId, issues.id))
-    .where(eq(issues.projectId, projectId))
+    .where(and(eq(issues.projectId, projectId), eq(issueComments.kind, "agent-question")))
     .orderBy(desc(issueComments.createdAt));
 
   const seenToolUseIds = new Set(results.map((r) => r.toolUseId));
@@ -472,6 +537,9 @@ export async function listPendingQuestionsForProject(
     seenToolUseIds.add(parsed.toolUseId);
   }
 
+  if (nowOverride === undefined) {
+    pendingQuestionsCache.set(projectId, { db, result: results, computedAt: Date.now() });
+  }
   return results;
 }
 
