@@ -16,6 +16,7 @@ import { runScript } from "../services/script-runner.js";
 import { createSessionManager } from "../services/session.manager.js";
 import { getEffectiveProfile, parseProviderPref } from "./review-helpers.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
+import { buildLearningStepPrompt } from "../services/merge-helpers.service.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -91,7 +92,7 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
       const prefMapLearning = new Map(prefRowsLearning.map((r) => [r.key, r.value]));
       if (prefMapLearning.get("learning_step_before_merge") === "true" && workspace.workingDir) {
         try {
-          const learningPrompt = `/learning-step\n\nRun the learning step skill to extract insights from recent session transcripts and update docs/hooks before this workspace is merged.`;
+          const learningPrompt = buildLearningStepPrompt(true);
           const learningProfile = prefMapLearning.get("claude_profile") || undefined;
           const agentCmd = isMockProfile(learningProfile) ? MOCK_AGENT_COMMAND : (prefMapLearning.get("agent_command") || undefined);
           const agentArgs = prefMapLearning.get("agent_args") || undefined;

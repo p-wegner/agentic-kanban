@@ -1,6 +1,9 @@
 import { sessions } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
@@ -8,6 +11,27 @@ import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.servi
 import { PREF_LEARNING_STEP_BEFORE_MERGE } from "../constants/preference-keys.js";
 
 const execFileAsync = promisify(execFile);
+const moduleDir = dirname(fileURLToPath(import.meta.url));
+
+export function resolveCanonicalLearningStepSkillPath(): string {
+  const candidates = [
+    resolve(process.cwd(), ".claude/skills/learning-step/SKILL.md"),
+    resolve(moduleDir, "../../../../.claude/skills/learning-step/SKILL.md"),
+    resolve(moduleDir, "../../../.claude/skills/learning-step/SKILL.md"),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) || candidates[0];
+}
+
+export function buildLearningStepPrompt(beforeMerge = false): string {
+  const canonicalSkillPath = resolveCanonicalLearningStepSkillPath();
+  const timing = beforeMerge ? " before this workspace is merged" : "";
+  return `/learning-step
+
+Run the learning step skill to extract insights from recent session transcripts and update docs/hooks${timing}.
+
+If this project does not expose a local learning-step slash command or skill, read and follow the canonical board skill at:
+${canonicalSkillPath}`;
+}
 
 /**
  * If a merge changed files under packages/shared/src/**, rebuild the shared
@@ -101,7 +125,7 @@ export async function runLearningStep(
   if (prefMap.get(PREF_LEARNING_STEP_BEFORE_MERGE) !== "true") return;
 
   try {
-    const learningPrompt = `/learning-step\n\nRun the learning step skill to extract insights from recent session transcripts and update docs/hooks before this workspace is merged.`;
+    const learningPrompt = buildLearningStepPrompt(true);
     const { agentCommand: agentCmd, agentArgs, claudeProfile, profile, provider } = resolveAgentSettings(prefMap);
     const sm = getSessionManager();
     const learningSessId = await sm.startSession({ workspaceId, prompt: learningPrompt, agentCommand: agentCmd, agentArgs, claudeProfile, profile, provider: toExecutorProvider(provider), triggerType: "learning" });
