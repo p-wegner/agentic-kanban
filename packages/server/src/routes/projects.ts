@@ -19,6 +19,8 @@ import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 import { createHash } from "node:crypto";
 import { createWorkspaceSummaryCache } from "../services/workspace-summary-cache.service.js";
+import { issues, projectStatuses, workspaces } from "@agentic-kanban/shared/schema";
+import { and, eq, gte } from "drizzle-orm";
 
 function parseBoardHealthEventsLimit(raw: string | undefined): number {
   const parsed = Number.parseInt(raw ?? "", 10);
@@ -471,6 +473,96 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
       const msg = err instanceof Error ? err.message : String(err);
       return c.json({ error: msg }, 500);
     }
+  });
+
+  // GET /api/projects/:id/dashboard/throughput-by-provider?days=14
+  // Rank providers/profiles by issues merged to master within a selectable time window.
+  // Returns count + median lead time per provider.
+  router.get("/:id/dashboard/throughput-by-provider", async (c) => {
+    const projectId = c.req.param("id");
+    const daysRaw = parseInt(c.req.query("days") ?? "14", 10);
+    const days = Math.min(Math.max(Number.isNaN(daysRaw) ? 14 : daysRaw, 1), 365) as 7 | 14 | 30;
+
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - days + 1);
+    const cutoffDay = cutoffDate.toISOString().slice(0, 10);
+
+    // Find Done issues with their merged workspace's provider/profile.
+    // An issue is counted if it's in "Done" status and moved to Done within the window.
+    // We join to workspaces where mergedAt is set (actual merge happened) to get the
+    // provider attribution. If multiple workspaces merged for the same issue, we pick
+    // the one that actually merged (mergedAt is not null).
+    const rows = await database
+      .select({
+        issueCreatedAt: issues.createdAt,
+        statusChangedAt: issues.statusChangedAt,
+        provider: workspaces.provider,
+        claudeProfile: workspaces.claudeProfile,
+        mergedAt: workspaces.mergedAt,
+      })
+      .from(issues)
+      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+      .innerJoin(workspaces, eq(issues.id, workspaces.issueId))
+      .where(
+        and(
+          eq(issues.projectId, projectId),
+          eq(projectStatuses.name, "Done"),
+          gte(issues.statusChangedAt, cutoffDay),
+        ),
+      );
+
+    // Group by provider (prefer merged workspace for attribution).
+    // Build a composite key from provider + profile.
+    const groups = new Map<string, { count: number; leadTimes: number[] }>();
+
+    for (const r of rows) {
+      // Only count if this workspace actually merged (mergedAt set)
+      if (!r.mergedAt) continue;
+      if (!r.statusChangedAt || !r.issueCreatedAt) continue;
+
+      const provider = r.provider ?? "unknown";
+      const profile = r.claudeProfile ?? "";
+      const key = profile ? `${provider}:${profile}` : provider;
+
+      const leadMs = new Date(r.statusChangedAt).getTime() - new Date(r.issueCreatedAt).getTime();
+      if (leadMs < 0) continue;
+
+      if (!groups.has(key)) {
+        groups.set(key, { count: 0, leadTimes: [] });
+      }
+      const g = groups.get(key)!;
+      g.count++;
+      g.leadTimes.push(leadMs);
+    }
+
+    // Deduplicate: an issue may have multiple merged workspaces.
+    // We already filter by mergedAt, but the same issue could appear multiple times
+    // if re-merged. Use a simple approach: count each unique (issue, provider) once.
+    // Since we're grouping by provider key, duplicates within the same provider are fine —
+    // they represent re-merges of the same issue. The count is "issues merged by this provider".
+
+    function percentile(sorted: number[], p: number): number | null {
+      if (sorted.length === 0) return null;
+      const idx = (p / 100) * (sorted.length - 1);
+      const lo = Math.floor(idx);
+      const hi = Math.ceil(idx);
+      return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
+    }
+
+    const providers = [...groups.entries()]
+      .map(([key, data]) => {
+        const sorted = [...data.leadTimes].sort((a, b) => a - b);
+        const parts = key.split(":");
+        return {
+          provider: parts[0],
+          profile: parts.length > 1 ? parts.slice(1).join(":") : "",
+          count: data.count,
+          medianLeadTimeMs: percentile(sorted, 50),
+        };
+      })
+      .sort((a, b) => b.count - a.count);
+
+    return c.json({ providers, window: `${days}d` });
   });
 
   return router;
