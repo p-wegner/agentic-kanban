@@ -1,6 +1,9 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { preferences } from "@agentic-kanban/shared/schema";
+import type { Database } from "../db/index.js";
+import { fetchLiveQuotaUsage } from "./quota-usage.service.js";
 import type { QuotaUsageResult } from "./quota-usage.service.js";
 
 export type StrategySegmentKind = "work-type" | "provider" | "area" | "custom";
@@ -433,4 +436,67 @@ export function selectProviderFromStrategy(
   }
 
   return null;
+}
+
+/**
+ * Apply a resolved provider+profile selection onto a preference map in the same
+ * shape `resolveAgentSettings` expects (sets `provider` + the provider-specific
+ * `*_profile` key). Shared by the fresh-workspace POST fan-out and relaunch paths.
+ */
+export function applyProviderSelectionToPrefMap(
+  prefMap: Map<string, string>,
+  selected: { provider: "claude" | "codex" | "copilot"; profileName: string },
+): void {
+  if (selected.provider === "codex") {
+    if (selected.profileName) prefMap.set("codex_profile", selected.profileName);
+    prefMap.set("provider", "codex");
+  } else if (selected.provider === "copilot") {
+    if (selected.profileName) prefMap.set("copilot_profile", selected.profileName);
+    prefMap.set("provider", "copilot");
+  } else {
+    if (selected.profileName) prefMap.set("claude_profile", selected.profileName);
+    prefMap.set("provider", "claude");
+  }
+}
+
+/**
+ * Resolve the project's *current* default provider+profile from its Strategy
+ * Bullseye config, reading the `board_strategy_<projectId>` preference and
+ * consulting live quota usage (the same fan-out the fresh-workspace POST does in
+ * `buildAgentConfig`).
+ *
+ * Returns `null` when no project id is given, no strategy is configured, or the
+ * config selects no provider — in which case callers should fall back to whatever
+ * default they already hold (global pref or a workspace's baked value).
+ *
+ * Extracted so relaunch paths (fix-and-merge, conflict resolver) can honor the
+ * current board default at launch time instead of trusting the provider baked
+ * into the workspace record at original creation (#762).
+ */
+export async function resolveStrategyProviderSelection(
+  database: Database,
+  projectId: string | null | undefined,
+): Promise<{ provider: "claude" | "codex" | "copilot"; profileName: string } | null> {
+  if (!projectId) return null;
+  const prefRows = await database.select().from(preferences);
+  const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
+  const strategyRaw = prefMap.get(`board_strategy_${projectId}`);
+  if (!strategyRaw) return null;
+  try {
+    const strategyConfig = parseStrategyBullseyeConfig(strategyRaw);
+    // Fetch live quota data to enable usage-aware selection; non-fatal if unavailable.
+    let quota: QuotaUsageResult | null = null;
+    if (strategyConfig.providerPolicies?.some((p) => p.quotaProviderId)) {
+      try {
+        quota = await fetchLiveQuotaUsage();
+      } catch {
+        /* quota service unavailable — fall back to static priority */
+      }
+    }
+    const selected = selectProviderFromStrategy(strategyConfig, { quota });
+    if (!selected) return null;
+    return { provider: selected.provider, profileName: selected.profileName };
+  } catch {
+    return null;
+  }
 }
