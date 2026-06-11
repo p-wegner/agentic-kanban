@@ -62,6 +62,25 @@ node scripts/tool-failures.mjs --json
 
 Failure detection: Claude = a `tool_result` block with `is_error:true` (mapped to its tool via `tool_use_id`); Codex = a `function_call_output` whose `output` shows a nonzero `Exit code: N` (mapped via `call_id`). `--by error` normalizes paths/numbers/quotes into a signature so the same failure clusters. Baseline (last 7d, 2026-06-08): ~7% of ~47.6K calls fail; **PowerShell is the worst by far** (~15%, matches the project CLAUDE.md note), then codex `shell_command` (~10%); dominant clusters are vitest "No test files found" / UNRESOLVED_IMPORT in worktrees, `Read`/`Write`/`Grep` ordering+path errors, and PS quoting/`Invoke-RestMethod 404`s.
 
+## User prompts — "what did I ask the agents yesterday / on date X"
+
+For "list all of my prompts for a day (or rolling window)" across MANY sessions, **don't loop the per-session parsers** — use `user-prompts.mjs`. Same stat-filter-then-parse fan-out as `token-sinks.mjs`, but it extracts the REAL *human-typed* prompts and filters out everything that merely lands in `type:"user"` entries: tool_results, sidechain/subagent turns, meta entries, harness `<task-notification>`/`<bash-stdout>` echoes, `[SESSION HANDOFF]`, the Codex board-monitor objective, internal LLM utility calls (file-prediction, voice-note→ticket), and bare UI slash commands (`/clear`, `/model`). Date scoping uses each ENTRY's own timestamp in LOCAL time (a session can span midnight); mtime is only the cheap pre-filter. `<bash-input>` is unwrapped to `! cmd`; slash commands with args render as `/cmd args`.
+
+```powershell
+node scripts/user-prompts.mjs                  # yesterday (local), all providers, human prompts only
+node scripts/user-prompts.mjs --date 2026-06-10
+node scripts/user-prompts.mjs --today
+node scripts/user-prompts.mjs --days 3         # rolling: last N days incl. today
+node scripts/user-prompts.mjs --provider claude   # claude | codex | all
+node scripts/user-prompts.mjs --all            # ALSO show automated/agent-launch prompts (tagged [automated]/[noise])
+node scripts/user-prompts.mjs --tree           # hierarchical Project → Day → Chat grouping (projects sorted by volume)
+node scripts/user-prompts.mjs --days 7 --provider claude --tree   # e.g. weekly per-project/day/chat review
+node scripts/user-prompts.mjs --full           # don't truncate prompt text
+node scripts/user-prompts.mjs --json
+```
+
+Default output is a flat chronological list grouped by session (`HH:MM  <prompt>`). `--tree` instead nests **Project → Day → Chat**, projects ordered by prompt volume, with per-node counts — the right view for "what did I work on across projects this week". For a quick at-a-glance matrix, pipe `--json` and tally a project×day grid. Covers Claude + Codex; Copilot prompts live in `events.jsonl` `user.message` events — not yet wired in (add if needed). Caveat: a builder-launch ticket body without the workflow preamble can slip through as `human`, so worktree (`*-worktrees-feature-ak-*`) sessions may show one stray launch prompt.
+
 ## Directory naming convention
 
 Each working directory maps to a session dir by replacing path separators with `--`:
