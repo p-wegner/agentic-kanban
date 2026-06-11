@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api.js";
+import { getSettings, invalidateSettings } from "../lib/settingsStore.js";
 import { suggestBranchName, sanitizeBranchName } from "../lib/branch.js";
 import type { IssueWithStatus, ProfileSelection, WorkspaceResponse } from "@agentic-kanban/shared";
 import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
@@ -133,7 +134,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
       apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles").catch(() => ({ profiles: [] as string[] })),
       apiFetch<{ profiles: string[] }>("/api/preferences/codex-profiles").catch(() => ({ profiles: [CODEX_DEFAULT_PROFILE] as string[] })),
       apiFetch<{ profiles: string[] }>("/api/preferences/copilot-profiles").catch(() => ({ profiles: [COPILOT_DEFAULT_PROFILE] })),
-      apiFetch<Record<string, string>>("/api/preferences/settings").catch(() => ({} as Record<string, string>)),
+      getSettings().catch(() => ({} as Record<string, string>)),
     ]).then(([claudeData, codexData, copilotData, settings]) => {
       setClaudeProfiles(claudeData.profiles);
       setCodexProfiles(uniqueProfiles(codexData.profiles, CODEX_DEFAULT_PROFILE));
@@ -184,7 +185,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
         apiFetch("/api/preferences/settings", {
           method: "PUT",
           body: JSON.stringify({ [prefKey]: String(tddMode) }),
-        }).catch(() => {});
+        }).then(() => invalidateSettings()).catch(() => {});
       }
       onCreated({ id: result.id, sessionId: result.sessionId });
     } catch (err) {
@@ -276,6 +277,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
         method: "PUT",
         body: JSON.stringify({ [templateSettingsKey]: JSON.stringify(nextTemplates) }),
       });
+      invalidateSettings();
       setTemplates(nextTemplates);
       showToast(message, "success");
       return true;

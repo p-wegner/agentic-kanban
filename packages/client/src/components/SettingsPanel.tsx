@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
+import { invalidateSettings } from "../lib/settingsStore.js";
 import { showToast } from "./Toast.js";
 import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
 import { CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, DEFAULT_SETTINGS, TABS, uniqueProfiles, type AgentProfileHealth, type McpHealth, type MonitorTunables, type ProjectSettingsState, type ScheduledRun, type Settings, type SettingsPanelProps, type SkillSetting, type Tab, type TagSetting } from "./SettingsPanel.shared.js";
@@ -332,6 +333,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
         method: "PUT",
         body: JSON.stringify({ [`board_strategy_${activeProjectId}`]: JSON.stringify(strategyConfig) }),
       });
+      invalidateSettings();
       showToast("Migrated to Strategy Bullseye", "success");
       await fetchMonitorTunables();
     } catch {
@@ -421,6 +423,9 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
         );
       }
       await Promise.all(promises);
+      // Invalidate BEFORE onClose: the close handler re-reads settings via the
+      // shared store and must see the freshly saved values, not the cache.
+      invalidateSettings();
       showToast("Settings saved", "success");
       onClose();
     } catch {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
+import { getSettings } from "../lib/settingsStore.js";
 import { showToast } from "./Toast.js";
 import TicketMentionInput from "./TicketMentionInput.js";
 
@@ -94,7 +95,7 @@ export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPa
       .catch(() => showToast("Failed to load skills", "error"))
       .finally(() => setLoading(false));
     Promise.all([
-      apiFetch<Record<string, string>>("/api/preferences/settings"),
+      getSettings(),
       apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles").catch(() => ({ profiles: [] as string[] })),
       apiFetch<{ profiles: string[] }>("/api/preferences/codex-profiles").catch(() => ({ profiles: [CODEX_DEFAULT_PROFILE] as string[] })),
       apiFetch<{ profiles: string[] }>("/api/preferences/copilot-profiles").catch(() => ({ profiles: [COPILOT_DEFAULT_PROFILE] })),

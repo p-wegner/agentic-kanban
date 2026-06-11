@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { MonitorPopover, type MonitorStatus } from "./MonitorPopover.js";
 import { useOrchestrator } from "../hooks/useOrchestrator.js";
-import { apiFetch } from "../lib/api.js";
+import { getSettings } from "../lib/settingsStore.js";
 import { VoiceInboxButton } from "./VoiceInboxButton.js";
 import { ProjectScriptsMenu } from "./ProjectScriptsMenu.js";
 import { PRIMARY_VIEWS, SECONDARY_VIEWS, VIEW_REGISTRY, type ViewDescriptor } from "../lib/viewRegistry.js";
@@ -218,7 +218,7 @@ export function BoardToolbar({
   const [monitorButlerEnabled, setMonitorButlerEnabled] = useState(false);
   const [monitorButlerInterval, setMonitorButlerInterval] = useState(15);
   useEffect(() => {
-    apiFetch<Record<string, string>>("/api/preferences/settings")
+    getSettings()
       .then((s) => {
         setMonitorButlerEnabled(s.monitor_butler_enabled === "true");
         const raw = parseInt(s.monitor_butler_interval_min ?? "15", 10);
