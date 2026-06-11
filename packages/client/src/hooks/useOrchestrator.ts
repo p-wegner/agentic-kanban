@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "../lib/api.js";
+import { startStaggeredPoll } from "../lib/pollScheduler.js";
 
 // Mirrors OrchestratorStatus in
 // packages/server/src/services/orchestrator-monitor.service.ts
@@ -109,10 +110,12 @@ export function useOrchestrator(projectId: string | null) {
     }
 
     void load();
-    const interval = setInterval(() => void load(), POLL_MS);
+    // Staggered + visibility-gated so this poller stops phase-aligning with
+    // the other board pollers (measured contention spikes of 3.3-3.8s).
+    const poll = startStaggeredPoll(() => void load(), POLL_MS);
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      poll.stop();
     };
   }, [projectId]);
 

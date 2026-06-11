@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { getWipLimit, wipLimitKey } from "../lib/wipLimits.js";
+import { startStaggeredPoll, type PollHandle } from "../lib/pollScheduler.js";
 import type { MonitorStatus } from "../components/MonitorPopover.js";
 
 export type CardDensity = "comfortable" | "compact";
@@ -90,9 +91,6 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
         }
       }
       setWipLimits(loadedWipLimits);
-      apiFetch<MonitorStatus>("/api/internal/monitor-status")
-        .then((r) => setMonitorStatus(r))
-        .catch(() => {});
     } catch {
       // ignore
     }
@@ -103,13 +101,39 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
     loadPreferences();
   }, [loadPreferences]);
 
+  // Monitor-status is global (not project-scoped), so it lives in its own
+  // []-dep effect instead of loadPreferences — previously it was re-fetched
+  // on every projectId change and twice on load (null -> resolved id). The
+  // initial ~60KB fetch is deferred past first paint so it doesn't compete
+  // with the board fetch; the recurring poll is staggered + visibility-gated.
   useEffect(() => {
-    const t = setInterval(() => {
+    let stopped = false;
+    let poll: PollHandle | null = null;
+    const fetchStatus = () => {
       apiFetch<MonitorStatus>("/api/internal/monitor-status")
-        .then((r) => setMonitorStatus(r))
+        .then((r) => {
+          if (!stopped) setMonitorStatus(r);
+        })
         .catch(() => {});
-    }, 30_000);
-    return () => clearInterval(t);
+    };
+    const startPolling = () => {
+      if (stopped) return;
+      fetchStatus();
+      poll = startStaggeredPoll(fetchStatus, 30_000);
+    };
+    let idleId: number | null = null;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    if (typeof requestIdleCallback === "function") {
+      idleId = requestIdleCallback(() => startPolling(), { timeout: 3000 });
+    } else {
+      timeoutId = setTimeout(startPolling, 1500);
+    }
+    return () => {
+      stopped = true;
+      if (idleId !== null && typeof cancelIdleCallback === "function") cancelIdleCallback(idleId);
+      if (timeoutId !== null) clearTimeout(timeoutId);
+      poll?.stop();
+    };
   }, []);
 
   const toggleAutoMonitor = useCallback(async () => {
