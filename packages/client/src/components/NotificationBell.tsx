@@ -16,9 +16,12 @@ function formatRelativeTime(isoTimestamp: string): string {
 function eventLabel(type: NotificationEventType): string {
   switch (type) {
     case "workspace_merged": return "Merged";
+    case "workspace_ready_for_merge": return "Ready for review";
     case "session_completed": return "Completed";
     case "session_failed": return "Session failed";
+    case "session_launched": return "Agent launched";
     case "workflow_error": return "Workflow error";
+    case "workflow_transition": return "Issue moved";
     case "approval_requested": return "Agent needs input";
   }
 }
@@ -31,11 +34,24 @@ function EventIcon({ type }: { type: NotificationEventType }) {
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
       );
+    case "workspace_ready_for_merge":
+      return (
+        <svg className="h-4 w-4 text-violet-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v1m0 16v1m-8-9H3m18 0h-1m-2.636-6.364l-.707.707M6.343 17.657l-.707.707m0-12.728l.707.707m11.314 11.314l.707.707" />
+        </svg>
+      );
     case "session_completed":
       return (
         <svg className="h-4 w-4 text-blue-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <circle cx="12" cy="12" r="10" />
           <polyline points="12 6 12 12 16 14" />
+        </svg>
+      );
+    case "session_launched":
+      return (
+        <svg className="h-4 w-4 text-sky-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
         </svg>
       );
     case "session_failed":
@@ -45,6 +61,12 @@ function EventIcon({ type }: { type: NotificationEventType }) {
           <circle cx="12" cy="12" r="10" />
           <line x1="12" y1="8" x2="12" y2="12" />
           <line x1="12" y1="16" x2="12.01" y2="16" />
+        </svg>
+      );
+    case "workflow_transition":
+      return (
+        <svg className="h-4 w-4 text-indigo-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
         </svg>
       );
     case "approval_requested":
