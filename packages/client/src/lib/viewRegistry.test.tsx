@@ -26,7 +26,7 @@ describe("VIEW_REGISTRY", () => {
   });
 
   it("enumerates all board views", () => {
-    expect(VIEW_REGISTRY).toHaveLength(31);
+    expect(VIEW_REGISTRY).toHaveLength(33);
   });
 
   it("preserves the existing view ids", () => {
@@ -34,11 +34,7 @@ describe("VIEW_REGISTRY", () => {
       "kanban", "backlog", "graph", "table", "agents", "timeline", "metrics",
       "quality-metrics", "digest", "strategy", "focus", "butler", "workflows", "workflow-analytics", "insights", "swimlane", "flaky-tests",
       "monitor-history", "health-events", "runbooks", "capacity", "constellation", "momentum", "activity", "stale-work", "throughput",
-<<<<<<< HEAD
-      "provider-mix", "lead-time", "scorecard-distribution", "provider-cost", "fireworks",
-=======
-      "provider-mix", "lead-time", "scorecard-distribution", "fireworks", "burndown",
->>>>>>> 7185088f (feat(#510): add burndown chart of remaining open issues per day)
+      "provider-mix", "lead-time", "scorecard-distribution", "provider-cost", "fireworks", "calendar", "burndown",
     ];
     expect(VIEW_IDS.slice().sort()).toEqual(expected.slice().sort());
   });
@@ -85,18 +81,14 @@ describe("VIEW_REGISTRY", () => {
 
     // Primary views (no `group` or group === "primary") stay one click away.
     expect([...primaryIds].sort()).toEqual(
-      ["agents", "backlog", "butler", "graph", "kanban", "table", "timeline"].sort(),
+      ["agents", "backlog", "butler", "graph", "insights", "kanban", "monitor-history", "strategy", "table", "timeline", "workflows"].sort(),
     );
     // Analytics/secondary views live behind the "More" overflow dropdown.
     expect([...secondaryIds].sort()).toEqual(
       [
-        "digest", "flaky-tests", "focus", "insights", "metrics", "quality-metrics", "strategy", "swimlane", "workflows", "workflow-analytics",
-        "monitor-history", "health-events", "runbooks", "capacity", "constellation", "momentum", "activity", "stale-work", "throughput",
-<<<<<<< HEAD
-        "provider-mix", "lead-time", "scorecard-distribution", "provider-cost", "fireworks",
-=======
-        "provider-mix", "lead-time", "scorecard-distribution", "fireworks", "burndown",
->>>>>>> 7185088f (feat(#510): add burndown chart of remaining open issues per day)
+        "digest", "flaky-tests", "focus", "metrics", "quality-metrics", "swimlane", "workflow-analytics",
+        "health-events", "runbooks", "capacity", "constellation", "momentum", "activity", "stale-work", "throughput",
+        "provider-mix", "lead-time", "scorecard-distribution", "provider-cost", "fireworks", "calendar", "burndown",
       ].sort(),
     );
   });
