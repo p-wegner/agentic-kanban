@@ -16,9 +16,27 @@ import { FailurePatternHint } from "./FailurePatternHint.js";
 import TicketMentionInput from "./TicketMentionInput.js";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession.js";
 import { usePanelLayout } from "../hooks/usePanelLayout.js";
+import { useProfileSelection } from "../hooks/useProfileSelection.js";
 import { SessionReplay } from "./SessionReplay.js";
 import { SetupStatusPanel } from "./SetupStatusPanel.js";
 import { showToast } from "./Toast.js";
+import { suggestBranchName } from "../lib/branch.js";
+import {
+  CODEX_DEFAULT_PROFILE,
+  COPILOT_DEFAULT_PROFILE,
+  SESSION_STATUS_COLORS,
+  STATUS_COLORS,
+  formatDuration,
+  formatTokenCount,
+  getTriggerTypeLabel,
+  humanizeSkillName,
+  parseStats,
+  profileOptionValue,
+  profileSelectionFromValue,
+  providerLabel,
+  resolveQuickLaunchDefault,
+} from "../lib/workspace-helpers.js";
+import { SessionStatsBadge, SessionStatsSummary } from "../lib/session-stats.js";
 import type {
   AgentOutputMessage,
   IssueArtifact,
@@ -27,7 +45,6 @@ import type {
   DiffResponse,
   DiffComment,
   SessionSummaryResponse,
-  ProfileSelection,
 } from "@agentic-kanban/shared";
 import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
 
@@ -60,16 +77,6 @@ interface SessionInfo {
   skillName: string | null;
 }
 
-interface SessionStats {
-  durationMs: number;
-  totalCostUsd: number;
-  inputTokens: number;
-  outputTokens: number;
-  numTurns: number;
-  model: string;
-  success: boolean;
-}
-
 interface ScorecardDimension {
   name: string;
   score: number;
@@ -97,235 +104,11 @@ interface WorkspacePanelProps {
   initialShowDiff?: boolean;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  active: "bg-green-100 text-green-700",
-  reviewing: "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300",
-  fixing: "bg-orange-100 text-orange-700",
-  idle: "bg-yellow-100 text-yellow-700",
-  "awaiting-plan-approval": "bg-amber-100 text-amber-700",
-  error: "bg-red-100 text-red-700",
-  closed: "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400",
-};
-
-type AgentProvider = ProfileSelection["provider"];
-
-const COPILOT_DEFAULT_PROFILE = "default";
-const CODEX_DEFAULT_PROFILE = "default";
-
-type ProfileOption = {
-  provider: AgentProvider;
-  name: string;
-};
-
 type AvailableSkill = {
   id: string;
   name: string;
   description: string;
 };
-
-function profileOptionValue(option: ProfileOption): string {
-  return `${option.provider}:${option.name}`;
-}
-
-function uniqueProfileOptions(options: ProfileOption[]): ProfileOption[] {
-  const seen = new Set<string>();
-  return options.filter((option) => {
-    const value = profileOptionValue(option);
-    if (seen.has(value)) return false;
-    seen.add(value);
-    return true;
-  });
-}
-
-function providerLabel(provider?: string | null): string {
-  if (provider === "codex") return "Codex";
-  if (provider === "copilot") return "Copilot";
-  return "Claude";
-}
-
-function profileSelectionFromValue(value: string): ProfileSelection | undefined {
-  const colonIdx = value.indexOf(":");
-  if (colonIdx === -1) return undefined;
-  const provider = value.slice(0, colonIdx) as AgentProvider;
-  const name = value.slice(colonIdx + 1);
-  if ((provider !== "claude" && provider !== "codex" && provider !== "copilot") || !name) return undefined;
-  return { provider, name };
-}
-
-function defaultSelectedProfile(settings: Record<string, string>): string {
-  if (settings.provider === "codex") return `codex:${settings.codex_profile || CODEX_DEFAULT_PROFILE}`;
-  if (settings.provider === "copilot") return `copilot:${settings.copilot_profile || COPILOT_DEFAULT_PROFILE}`;
-  if (settings.claude_profile) return `claude:${settings.claude_profile}`;
-  return "";
-}
-
-/**
- * Resolve the "Default" quick-launch profile to an explicit {provider, name}
- * so the server doesn't fall through to Strategy Bullseye — keeping the
- * displayed profile in sync with what actually runs.
- * Returns undefined when no specific default exists (pure Claude, no profile).
- */
-function resolveQuickLaunchDefault(prefs: Record<string, string>): { provider: AgentProvider; name: string } | undefined {
-  if (prefs.provider === "codex") return { provider: "codex", name: prefs.codex_profile || CODEX_DEFAULT_PROFILE };
-  if (prefs.provider === "copilot") return { provider: "copilot", name: prefs.copilot_profile || COPILOT_DEFAULT_PROFILE };
-  if (prefs.claude_profile) return { provider: "claude", name: prefs.claude_profile };
-  return undefined;
-}
-
-const SESSION_STATUS_COLORS: Record<string, string> = {
-  running: "bg-blue-100 text-blue-700",
-  completed: "bg-green-100 text-green-700",
-  stopped: "bg-yellow-100 text-yellow-700",
-};
-
-const TRIGGER_TYPE_LABELS: Record<string, { label: string; className: string }> = {
-  agent: { label: "Agent", className: "bg-blue-50 text-blue-600" },
-  chat: { label: "Chat", className: "bg-indigo-50 text-indigo-600" },
-  review: { label: "AI Review", className: "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300" },
-  merge: { label: "AI Merge", className: "bg-emerald-100 text-emerald-700" },
-  "fix-conflicts": { label: "Fix Conflicts", className: "bg-orange-100 text-orange-700" },
-  "fix-and-merge": { label: "Fix & Merge", className: "bg-orange-100 text-orange-700" },
-  bisect: { label: "Auto-bisect", className: "bg-rose-100 text-rose-700" },
-  learning: { label: "Learning", className: "bg-teal-100 text-teal-700" },
-  "auto-start": { label: "Auto-start", className: "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400" },
-};
-
-const SKILL_NAME_ACRONYMS = new Set(["ui", "ai", "api", "llm", "url", "http", "id"]);
-function humanizeSkillName(name: string): string {
-  return name.replace(/[-_]/g, " ").replace(/\b\w+/g, w =>
-    SKILL_NAME_ACRONYMS.has(w.toLowerCase()) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)
-  );
-}
-
-function getTriggerTypeLabel(triggerType: string | null, skillName?: string | null): { label: string; className: string } | null {
-  if (!triggerType) {
-    if (skillName) return { label: `✨ ${humanizeSkillName(skillName)}`, className: "bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300" };
-    return null;
-  }
-  if (TRIGGER_TYPE_LABELS[triggerType]) return TRIGGER_TYPE_LABELS[triggerType];
-  if (triggerType.startsWith("skill:")) {
-    const name = triggerType.slice(6);
-    return { label: `✨ ${humanizeSkillName(name)}`, className: "bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300" };
-  }
-  return null;
-}
-
-function formatDuration(start: string, end: string | null): string {
-  if (!end) return "running";
-  const diffMs = new Date(end).getTime() - new Date(start).getTime();
-  const sec = Math.floor(diffMs / 1000);
-  if (sec < 60) return `${sec}s`;
-  const min = Math.floor(sec / 60);
-  const remSec = sec % 60;
-  return `${min}m ${remSec}s`;
-}
-
-function formatTokenCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
-}
-
-function parseStats(statsStr: string | null | undefined): SessionStats | null {
-  if (!statsStr) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(statsStr);
-  } catch {
-    return null;
-  }
-  // The stats column also holds non-token shapes (e.g. `{ friction: {...} }`
-  // written by some providers). Only treat it as SessionStats when the numeric
-  // fields the badges read are actually present; otherwise `s.inputTokens
-  // .toLocaleString()` throws and, with no error boundary, blanks the whole app.
-  if (!parsed || typeof parsed !== "object") return null;
-  const s = parsed as Record<string, unknown>;
-  const hasTokenStats =
-    typeof s.durationMs === "number" &&
-    typeof s.totalCostUsd === "number" &&
-    typeof s.inputTokens === "number" &&
-    typeof s.outputTokens === "number" &&
-    typeof s.numTurns === "number";
-  return hasTokenStats ? (parsed as SessionStats) : null;
-}
-
-function SessionStatsBadge({ stats }: { stats: string | null | undefined }) {
-  const s = parseStats(stats);
-  if (!s) return null;
-  return (
-    <span className="text-[10px] text-gray-400 dark:text-gray-500" title={`Tokens: ${s.inputTokens.toLocaleString('en-US')} in / ${s.outputTokens.toLocaleString('en-US')} out\nCost: $${s.totalCostUsd.toFixed(4)}\nDuration: ${(s.durationMs / 1000).toFixed(0)}s`}>
-      ${s.totalCostUsd.toFixed(2)}
-    </span>
-  );
-}
-
-function SessionStatsSummary({ stats }: { stats: string | null | undefined }) {
-  const s = parseStats(stats);
-  if (!s) return null;
-  return (
-    <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400 py-1 px-1">
-      <span title="Input / output tokens">{formatTokenCount(s.inputTokens)} in / {formatTokenCount(s.outputTokens)} out</span>
-      <span>${s.totalCostUsd.toFixed(2)}</span>
-      <span>{(s.durationMs / 1000).toFixed(0)}s</span>
-      {s.numTurns > 1 && <span>{s.numTurns} turns</span>}
-    </div>
-  );
-}
-
-import { suggestBranchName } from "../lib/branch.js";
-
-type RetryDecision = {
-  id: string;
-  sessionId: string;
-  testName: string;
-  decision: "flake" | "suspicious" | "real";
-  confidence: number;
-  retryCount: number;
-  finalOutcome: "confirmed_flake" | "confirmed_real" | "pending";
-  reasoning: string | null;
-};
-
-const RETRY_DECISION_COLORS: Record<string, string> = {
-  flake: "bg-amber-100 text-amber-700",
-  suspicious: "bg-orange-100 text-orange-700",
-  real: "bg-red-100 text-red-700",
-};
-const FINAL_OUTCOME_COLORS: Record<string, string> = {
-  confirmed_flake: "bg-red-100 text-red-700",
-  confirmed_real: "bg-green-100 text-green-700",
-  pending: "bg-gray-100 text-gray-500",
-};
-
-function RetryDecisionBadge({ decision }: { decision: RetryDecision }) {
-  const colorClass = RETRY_DECISION_COLORS[decision.decision] ?? "bg-gray-100 text-gray-500";
-  const label = decision.decision === "flake" ? "🔁 Flake" : decision.decision === "suspicious" ? "⚠ Suspicious" : "✗ Real";
-  const tooltip = [
-    `Test: ${decision.testName}`,
-    `Decision: ${decision.decision} (${(decision.confidence * 100).toFixed(0)}% confidence)`,
-    decision.retryCount > 0 ? `Retried ${decision.retryCount}×` : null,
-    decision.finalOutcome !== "pending" ? `Outcome: ${decision.finalOutcome.replace("_", " ")}` : null,
-    decision.reasoning ?? null,
-  ].filter(Boolean).join("\n");
-
-  const outcomeLabel = decision.finalOutcome === "confirmed_real"
-    ? " — confirmed flake"
-    : decision.finalOutcome === "confirmed_flake"
-    ? " — real regression"
-    : decision.retryCount > 0 ? ` (×${decision.retryCount})` : "";
-
-  const outcomeClass = FINAL_OUTCOME_COLORS[decision.finalOutcome] ?? "";
-
-  return (
-    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${colorClass}`} title={tooltip}>
-      {label}{outcomeLabel}
-      {decision.finalOutcome !== "pending" && (
-        <span className={`ml-1 text-[9px] px-1 rounded ${outcomeClass}`}>
-          {decision.finalOutcome === "confirmed_real" ? "✓ flake" : "✗ real"}
-        </span>
-      )}
-    </span>
-  );
-}
 
 interface WorkspaceQuickActionsProps {
   workspace: WorkspaceResponse;
@@ -504,7 +287,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
   const [latestCommits, setLatestCommits] = useState<Record<string, { sha: string; message: string } | null>>({});
   const [handoffContent, setHandoffContent] = useState<Record<string, string | null>>({});
   const [githubDrafts, setGithubDrafts] = useState<Record<string, string | null>>({});
-  const [retryDecisions, setRetryDecisions] = useState<RetryDecision[]>([]);
   const [planContent, setPlanContent] = useState<Record<string, string | null>>({});
   const [planEditMode, setPlanEditMode] = useState<Record<string, boolean>>({});
   const [planEditText, setPlanEditText] = useState<Record<string, string>>({});
@@ -513,18 +295,19 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
   const initialSessionAppliedRef = useRef(false);
 
   const [monitorRunning, setMonitorRunning] = useState(false);
-  const [requiresReview, setRequiresReview] = useState(false);
   const [visualProofArtifacts, setVisualProofArtifacts] = useState<IssueArtifact[]>([]);
   const [visualProofLoading, setVisualProofLoading] = useState(false);
   const [prompt, setPrompt] = useState("");
-  const [prefs, setPrefs] = useState<Record<string, string>>({});
   const [editingProfileWsId, setEditingProfileWsId] = useState<string | null>(null);
-  const [availableProfileOptions, setAvailableProfileOptions] = useState<ProfileOption[]>([
-    { provider: "codex", name: CODEX_DEFAULT_PROFILE },
-    { provider: "copilot", name: COPILOT_DEFAULT_PROFILE },
-  ]);
-  const [selectedProfile, setSelectedProfile] = useState<string>("");
-  const [selectedModel, setSelectedModel] = useState<string>("");
+  const {
+    prefs,
+    requiresReview,
+    selectedProfile,
+    setSelectedProfile,
+    selectedModel,
+    setSelectedModel,
+    availableProfileOptions,
+  } = useProfileSelection(issue.id);
   const [availableSkills, setAvailableSkills] = useState<AvailableSkill[]>([]);
   const [lastPrompt, setLastPrompt] = useState<string>(
     initialSessionId ? `${issue.title}${issue.description ? `\n\n${issue.description}` : ""}` : ""
@@ -724,27 +507,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
 
   useEffect(() => {
     fetchWorkspaces();
-    apiFetch<Record<string, string>>("/api/preferences/settings")
-      .then((s) => {
-        setPrefs(s);
-        setRequiresReview(s.auto_review !== "false");
-        setSelectedProfile(defaultSelectedProfile(s));
-        setSelectedModel(s.default_model || "");
-      })
-      .catch(() => {});
-    Promise.all([
-      apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles").catch(() => ({ profiles: [] as string[] })),
-      apiFetch<{ profiles: string[] }>("/api/preferences/codex-profiles").catch(() => ({ profiles: [CODEX_DEFAULT_PROFILE] as string[] })),
-      apiFetch<{ profiles: string[] }>("/api/preferences/copilot-profiles").catch(() => ({ profiles: [COPILOT_DEFAULT_PROFILE] })),
-    ]).then(([claudeData, codexData, copilotData]) => {
-      setAvailableProfileOptions(uniqueProfileOptions([
-        ...claudeData.profiles.map((name) => ({ provider: "claude" as const, name })),
-        { provider: "codex" as const, name: CODEX_DEFAULT_PROFILE },
-        ...codexData.profiles.map((name) => ({ provider: "codex" as const, name })),
-        { provider: "copilot" as const, name: COPILOT_DEFAULT_PROFILE },
-        ...copilotData.profiles.map((name) => ({ provider: "copilot" as const, name })),
-      ]));
-    }).catch(() => {});
     const skillsUrl = project ? `/api/agent-skills?projectId=${project.id}` : "/api/agent-skills";
     apiFetch<{ id: string; name: string; description: string }[]>(skillsUrl)
       .then(setAvailableSkills)
