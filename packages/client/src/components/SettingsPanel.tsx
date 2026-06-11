@@ -197,91 +197,97 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
   }
 
   useEffect(() => {
-    async function load() {
+    let cancelled = false;
+
+    // --- Critical path: cheap, render-essential data. Gates the loading spinner. ---
+    // All of these are sub-10ms preference/DB reads. The heavy status probes
+    // (agent-profile health ~600ms, branches ~200ms) and the per-skill install-status
+    // N+1 are moved to loadDeferred() so the panel is interactive in <250ms.
+    async function loadCore() {
       try {
-        const [data, profileData, codexProfileData, copilotProfileData, profileHealthData, mcpHealthData, skillsData, tagsData] = await Promise.all([
+        const [data, profileData, codexProfileData, copilotProfileData, skillsData, tagsData] = await Promise.all([
           apiFetch<Record<string, string>>("/api/preferences/settings"),
           apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles"),
           apiFetch<{ profiles: string[] }>("/api/preferences/codex-profiles"),
           apiFetch<{ profiles: string[] }>("/api/preferences/copilot-profiles").catch(() => ({ profiles: [COPILOT_DEFAULT_PROFILE] })),
-          apiFetch<{ profiles: AgentProfileHealth[] }>("/api/preferences/agent-profiles/health").catch(() => ({ profiles: [] })),
-          apiFetch<McpHealth>("/api/preferences/mcp/health").catch(() => null),
           apiFetch<{ id: string; name: string; description: string; prompt: string; model: string | null; projectId: string | null; isBuiltin: boolean }[]>("/api/agent-skills"),
           apiFetch<{ id: string; name: string; color: string | null; isBuiltin: boolean }[]>("/api/tags"),
         ]);
+        if (cancelled) return;
         setSettings({ ...DEFAULT_SETTINGS, ...data });
         setProfiles(profileData.profiles);
         setCodexProfiles(uniqueProfiles(codexProfileData.profiles, CODEX_DEFAULT_PROFILE));
         setCopilotProfiles(uniqueProfiles(copilotProfileData.profiles, COPILOT_DEFAULT_PROFILE));
-        setProfileHealth(profileHealthData.profiles);
-        setMcpHealth(mcpHealthData);
         setSkills(skillsData);
         setTagsList(tagsData);
 
-        // Check install status for each skill
-        const statusEntries = await Promise.all(
-          skillsData.map(async (skill) => {
-            try {
-              const s = await apiFetch<{ installed: boolean }>(`/api/agent-skills/${skill.id}/install-status`);
-              return [skill.id, s.installed] as const;
-            } catch {
-              return [skill.id, false] as const;
-            }
-          })
-        );
-        setInstalledSkills(Object.fromEntries(statusEntries));
-
-        // Load scheduled runs
+        // Project-scoped cheap reads — fire in parallel, don't block the spinner.
         if (activeProjectId) {
-          try {
-            const runs = await apiFetch<ScheduledRun[]>(`/api/scheduled-runs?projectId=${activeProjectId}`);
-            setScheduledRunsList(runs);
-          } catch { /* non-fatal */ }
-        }
+          apiFetch<ScheduledRun[]>(`/api/scheduled-runs?projectId=${activeProjectId}`)
+            .then((runs) => { if (!cancelled) setScheduledRunsList(runs); })
+            .catch(() => { /* non-fatal */ });
 
-        // Check for provider/profile divergence between global settings and the Bullseye
-        if (activeProjectId) {
-          try {
-            const div = await apiFetch<{ hasBullseye: boolean; bullseyeProvider: string | null; bullseyeProfile: string | null; settingsProvider: string | null; settingsProfile: string | null; diverged: boolean }>(
-              `/api/preferences/provider-divergence?projectId=${activeProjectId}`
-            );
-            setProviderDivergence(div);
-          } catch { /* non-fatal */ }
-        }
+          apiFetch<{ hasBullseye: boolean; bullseyeProvider: string | null; bullseyeProfile: string | null; settingsProvider: string | null; settingsProfile: string | null; diverged: boolean }>(
+            `/api/preferences/provider-divergence?projectId=${activeProjectId}`,
+          )
+            .then((div) => { if (!cancelled) setProviderDivergence(div); })
+            .catch(() => { /* non-fatal */ });
 
-        // Load project-specific settings
-        if (activeProjectId) {
-          try {
-            const projects = await apiFetch<{ id: string; defaultBranch: string | null; setupScript: string | null; setupBlocking: boolean; color: string | null }[]>(("/api/projects"));
-            const project = projects.find((p: any) => p.id === activeProjectId);
-            if (project) {
-              setProjectSettings({
-                defaultBranch: project.defaultBranch || "",
-                setupScript: project.setupScript || "",
-                setupBlocking: project.setupBlocking !== false,
-                setupEnabled: (project as any).setupEnabled !== false,
-                teardownScript: (project as any).teardownScript || "",
-                verifyScript: (data as Record<string, string>)[`verify_script_${activeProjectId}`] || "",
-                color: project.color || null,
-                symlinkEnabled: (project as any).symlinkEnabled === true,
-                symlinkDirs: (project as any).symlinkDirs || "",
-                defaultSkillId: (project as any).defaultSkillId || null,
-              });
-            }
-            apiFetch<{ local: string[]; remote: string[] }>(`/api/projects/${activeProjectId}/branches`)
-              .then(setProjectBranches)
-              .catch(() => setProjectBranches(null));
-          } catch {
-            // Use defaults for project settings
-          }
+          apiFetch<{ id: string; defaultBranch: string | null; setupScript: string | null; setupBlocking: boolean; color: string | null }[]>("/api/projects")
+            .then((projects) => {
+              if (cancelled) return;
+              const project = projects.find((p: any) => p.id === activeProjectId);
+              if (project) {
+                setProjectSettings({
+                  defaultBranch: project.defaultBranch || "",
+                  setupScript: project.setupScript || "",
+                  setupBlocking: project.setupBlocking !== false,
+                  setupEnabled: (project as any).setupEnabled !== false,
+                  teardownScript: (project as any).teardownScript || "",
+                  verifyScript: (data as Record<string, string>)[`verify_script_${activeProjectId}`] || "",
+                  color: project.color || null,
+                  symlinkEnabled: (project as any).symlinkEnabled === true,
+                  symlinkDirs: (project as any).symlinkDirs || "",
+                  defaultSkillId: (project as any).defaultSkillId || null,
+                });
+              }
+            })
+            .catch(() => { /* use defaults for project settings */ });
         }
       } catch {
         // Use defaults
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
-    load();
+
+    // --- Deferred path: heavy / secondary status data. Streams in after the panel is
+    // interactive; each populates a status badge or a non-default tab that handles its
+    // empty/initial state gracefully. ---
+    function loadDeferred() {
+      apiFetch<{ profiles: AgentProfileHealth[] }>("/api/preferences/agent-profiles/health")
+        .then((d) => { if (!cancelled) setProfileHealth(d.profiles); })
+        .catch(() => { /* non-fatal */ });
+
+      apiFetch<McpHealth>("/api/preferences/mcp/health")
+        .then((d) => { if (!cancelled) setMcpHealth(d); })
+        .catch(() => { /* non-fatal */ });
+
+      // Single batched request replaces the per-skill install-status N+1.
+      apiFetch<Record<string, boolean>>("/api/agent-skills/install-status")
+        .then((map) => { if (!cancelled) setInstalledSkills(map); })
+        .catch(() => { /* non-fatal */ });
+
+      if (activeProjectId) {
+        apiFetch<{ local: string[]; remote: string[] }>(`/api/projects/${activeProjectId}/branches`)
+          .then((b) => { if (!cancelled) setProjectBranches(b); })
+          .catch(() => { if (!cancelled) setProjectBranches(null); });
+      }
+    }
+
+    loadCore();
+    loadDeferred();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {

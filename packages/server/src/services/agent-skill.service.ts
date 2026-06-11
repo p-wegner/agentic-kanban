@@ -161,6 +161,19 @@ Current prompt: ${prompt?.trim() || "(none)"}`;
     return { installed, repoPath };
   }
 
+  // Batch install-status for every skill in one pass — resolves the active project
+  // repo path once and checks all skill files, instead of N per-skill requests each
+  // re-resolving the repo path. Returns a { [skillId]: installed } map.
+  async function getAllInstallStatuses(): Promise<Record<string, boolean>> {
+    const skills = await listAgentSkills(undefined, false, database);
+    const repoPath = await getActiveProjectRepoPath(database);
+    if (!repoPath) return Object.fromEntries(skills.map((s) => [s.id, false]));
+    const entries = await Promise.all(
+      skills.map(async (s) => [s.id, await isSkillInstalledLocally(repoPath, s.name)] as const),
+    );
+    return Object.fromEntries(entries);
+  }
+
   async function installSkill(id: string) {
     const skill = await getAgentSkillById(id, database);
     if (!skill) throw new AgentSkillError("Skill not found", "NOT_FOUND");
@@ -170,7 +183,7 @@ Current prompt: ${prompt?.trim() || "(none)"}`;
     return { installed: true, repoPath };
   }
 
-  return { listSkills, getSkill, createSkill, updateSkill, deleteSkill, enhanceSkill, getInstallStatus, installSkill };
+  return { listSkills, getSkill, createSkill, updateSkill, deleteSkill, enhanceSkill, getInstallStatus, getAllInstallStatuses, installSkill };
 }
 
 export const agentSkillService = createAgentSkillService({ database: db });
