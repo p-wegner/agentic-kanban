@@ -16,6 +16,8 @@ import {
 } from "../services/agent-profile-health.service.js";
 import { getMcpHealthSummary, probeMcpHealth } from "../services/mcp-health.service.js";
 import { fetchLiveQuotaUsage } from "../services/quota-usage.service.js";
+import { createAgentSkillService } from "../services/agent-skill.service.js";
+import { createTagService } from "../services/tag.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { preferences } from "@agentic-kanban/shared/schema";
@@ -24,6 +26,8 @@ import type { ProviderName } from "../services/agent-provider.js";
 export function createPreferencesRoute(database: Database = db) {
   const router = createRouter();
   const preferenceService = createPreferenceService({ database });
+  const agentSkillService = createAgentSkillService({ database });
+  const tagService = createTagService({ database });
 
   // GET /api/preferences/active-project
   router.get("/active-project", async (c) => {
@@ -41,6 +45,30 @@ export function createPreferencesRoute(database: Database = db) {
   // GET /api/preferences/settings — get all agent settings
   router.get("/settings", async (c) => {
     return c.json(await preferenceService.getSettings());
+  });
+
+  // GET /api/preferences/settings-bootstrap — one round trip for everything the Settings
+  // panel needs for its first paint: agent settings + all profile lists + skills + tags.
+  // Collapses 6 parallel requests into 1 so the panel's first render isn't throttled by
+  // the browser's ~6-connection per-host HTTP/1.1 cap (which was queuing the requests to
+  // ~1.2s). The heavy/secondary probes — agent-profile health (~600ms), mcp health,
+  // install-status, branches — stay separate and are loaded deferred by the client.
+  router.get("/settings-bootstrap", async (c) => {
+    const [settings, claudeProfiles, codexProfiles, skills, tags] = await Promise.all([
+      preferenceService.getSettings(),
+      preferenceService.listClaudeProfiles(),
+      preferenceService.listCodexProfiles(),
+      agentSkillService.listSkills(undefined, false),
+      tagService.listTags(),
+    ]);
+    return c.json({
+      settings,
+      claudeProfiles,
+      codexProfiles,
+      copilotProfiles: preferenceService.listCopilotProfiles(),
+      skills,
+      tags,
+    });
   });
 
   // PUT /api/preferences/settings — update agent settings
