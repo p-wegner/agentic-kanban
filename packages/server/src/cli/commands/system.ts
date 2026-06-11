@@ -149,6 +149,19 @@ Examples:
     .option("-p, --port <port>", "Server port", process.env.PORT || "3001")
     .option("-H, --host <host>", "Server hostname", process.env.KANBAN_HOST || "127.0.0.1")
     .option("--no-open", "Do not open browser")
+    .addHelpText("after", `
+Environment:
+  KANBAN_HOST       Bind address (same as --host). Use 0.0.0.0 (or a Tailscale/LAN IP)
+                    to accept connections from other machines.
+  KANBAN_TLS_CERT   Path to a PEM certificate. Set together with KANBAN_TLS_KEY to serve
+                    over TLS with HTTP/2 (keeps an HTTP/1.1 + WebSocket fallback). Unset,
+                    the server stays plain HTTP/1.1. Browsers only negotiate HTTP/2 over TLS.
+  KANBAN_TLS_KEY    Path to the PEM private key paired with KANBAN_TLS_CERT.
+
+Network access example (HTTP/2 over TLS):
+  $ KANBAN_HOST=0.0.0.0 KANBAN_TLS_CERT=./board.crt KANBAN_TLS_KEY=./board.key agentic-kanban dev
+    (Tailscale: 'tailscale cert <name>.ts.net' issues a trusted cert/key.)
+`)
     .action(async (options: { port: string; host: string; open: boolean }) => {
       try {
         const { dbExists, ensureDataDir } = await import("../../db/data-dir.js");
