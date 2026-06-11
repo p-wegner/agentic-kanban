@@ -23,14 +23,16 @@ import { TicketTrailStrip } from "./TicketTrailStrip.js";
 import { IssueCycleTimeBadge } from "./IssueCycleTimeBadge.js";
 import { IssueWorkLogSection } from "./IssueWorkLogSection.js";
 import { useIssueDisplayData } from "../hooks/useIssueDisplayData.js";
+import { useModalDrag } from "../hooks/useModalDrag.js";
+import { normalizeMarkdown } from "../lib/artifact-utils.js";
+import { getIssueArtifactRenderer, issueArtifactAuthor, issueArtifactKind } from "../lib/artifact-classifiers.js";
+import { issueArtifactRenderers } from "./ArtifactRenderers.js";
+import { DependencyDisplay } from "./DependencyDisplay.js";
 
-// Some issues were created via MCP/CLI calls whose JSON descriptions ended up
-// with literal `\n` / `\t` sequences rather than real newlines. Unescape when
-// the string has no real newlines so ReactMarkdown can render headings/lists.
-function normalizeMarkdown(s: string): string {
-  if (s.includes("\n")) return s;
-  return s.replace(/\\n/g, "\n").replace(/\\t/g, "\t");
-}
+// Re-exported so existing importers/tests keep working after the helpers moved
+// into lib/artifact-utils.ts and lib/artifact-classifiers.ts.
+export { issueArtifactPreview } from "../lib/artifact-utils.js";
+export { issueArtifactKind, issueArtifactAuthor } from "../lib/artifact-classifiers.js";
 
 interface StatusOption {
   id: string;
@@ -64,184 +66,6 @@ function mergeAttemptPayload(payload: unknown): { eventType?: string; sessionId?
     commitSha: typeof data.commitSha === "string" ? data.commitSha : undefined,
   };
 }
-
-function phaseArtifactName(caption: string | null): string {
-  const key = caption?.replace(/^phase-artifact:/, "").toLowerCase();
-  if (key === "tasks") return "tasks.md";
-  if (key === "design") return "design.md";
-  return "spec.md";
-}
-
-function isGithubHandoffDraft(artifact: IssueArtifact): boolean {
-  return artifact.type === "text" && artifact.caption === "github-handoff-draft";
-}
-
-export function issueArtifactKind(artifact: IssueArtifact): string {
-  if (isGithubHandoffDraft(artifact)) return "GitHub draft";
-  if (artifact.caption?.startsWith("phase-artifact:")) return `Phase ${phaseArtifactName(artifact.caption)}`;
-  if (artifact.caption) return artifact.caption;
-  return artifact.type.charAt(0).toUpperCase() + artifact.type.slice(1);
-}
-
-export function issueArtifactAuthor(artifact: IssueArtifact): string {
-  return artifact.workspaceId ? "agent" : "system";
-}
-
-const DEFAULT_ARTIFACT_PREVIEW_LENGTH = 140;
-
-type IssueArtifactRendererType = "text" | "diff" | "image" | "link" | "video" | "other";
-
-interface IssueArtifactRendererProps {
-  artifact: IssueArtifact;
-  expanded: boolean;
-  previewLength?: number;
-}
-
-function isDiffTextArtifact(artifact: IssueArtifact): boolean {
-  if (artifact.type !== "text") return false;
-  const caption = artifact.caption?.trim().toLowerCase() ?? "";
-  const mime = artifact.mimeType?.trim().toLowerCase() ?? "";
-  return caption === "diff" || caption === "patch" || caption === "unified-diff" || mime.includes("diff");
-}
-
-function artifactPreviewSource(artifact: IssueArtifact): string {
-  return artifact.type === "text" ? normalizeMarkdown(artifact.content) : artifact.caption || artifact.content;
-}
-
-function sanitizeArtifactPreview(source: string): string {
-  return source
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/[#*_`>\-[\]()]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-export function issueArtifactPreview(artifact: IssueArtifact, maxLength = DEFAULT_ARTIFACT_PREVIEW_LENGTH): string {
-  const preview = sanitizeArtifactPreview(artifactPreviewSource(artifact));
-  if (!preview) return artifact.type === "text" ? "Empty text artifact" : artifact.content;
-  return preview.length > maxLength ? `${preview.slice(0, maxLength - 1).trimEnd()}...` : preview;
-}
-
-function getIssueArtifactRenderer(artifact: IssueArtifact): IssueArtifactRendererType {
-  if (isDiffTextArtifact(artifact)) return "diff";
-  if (artifact.type === "text") return "text";
-  if (artifact.type === "image") return "image";
-  if (artifact.type === "link") return "link";
-  if (artifact.type === "video") return "video";
-  return "other";
-}
-
-function DiffArtifact({ artifact, expanded, previewLength = DEFAULT_ARTIFACT_PREVIEW_LENGTH }: IssueArtifactRendererProps) {
-  return (
-    <>
-      <p className="mt-1 text-xs text-gray-600 dark:text-gray-300 line-clamp-2">
-        {issueArtifactPreview(artifact, previewLength)}
-      </p>
-      {expanded && (
-        <pre className="mt-2 max-h-80 overflow-y-auto text-xs text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-900 p-2 rounded border border-gray-200 dark:border-gray-700 whitespace-pre-wrap">
-          {artifact.content}
-        </pre>
-      )}
-    </>
-  );
-}
-
-function TextArtifact({ artifact, expanded, previewLength = DEFAULT_ARTIFACT_PREVIEW_LENGTH }: IssueArtifactRendererProps) {
-  return (
-    <>
-      <p className="mt-1 text-xs text-gray-600 dark:text-gray-300 line-clamp-2">
-        {issueArtifactPreview(artifact, previewLength)}
-      </p>
-      {expanded && (
-        <div className="markdown-body mt-2 max-h-80 overflow-y-auto text-sm">
-          <ReactMarkdown>{normalizeMarkdown(artifact.content)}</ReactMarkdown>
-        </div>
-      )}
-    </>
-  );
-}
-
-function ImageArtifact({ artifact, expanded, previewLength = DEFAULT_ARTIFACT_PREVIEW_LENGTH }: IssueArtifactRendererProps) {
-  return (
-    <>
-      <p className="mt-1 text-xs text-gray-600 dark:text-gray-300 line-clamp-2">
-        {issueArtifactPreview(artifact, previewLength)}
-      </p>
-      {expanded && (
-        <a href={artifact.content} target="_blank" rel="noreferrer" className="block mt-2 max-h-80 overflow-y-auto">
-          <img
-            src={artifact.content}
-            alt={artifact.caption || "artifact image"}
-            className="max-w-full rounded border border-gray-200 dark:border-gray-700"
-          />
-        </a>
-      )}
-    </>
-  );
-}
-
-function LinkArtifact({ artifact, expanded }: IssueArtifactRendererProps) {
-  return (
-    <>
-      <p className="mt-1 text-xs text-gray-600 dark:text-gray-300 line-clamp-2 break-all">
-        {issueArtifactPreview(artifact)}
-      </p>
-      {expanded && (
-        <a
-          href={artifact.content}
-          target="_blank"
-          rel="noreferrer"
-          className="mt-2 block break-all text-blue-600 hover:text-blue-700 dark:text-blue-400"
-        >
-          {artifact.content}
-        </a>
-      )}
-    </>
-  );
-}
-
-function VideoArtifact({ artifact, expanded, previewLength = DEFAULT_ARTIFACT_PREVIEW_LENGTH }: IssueArtifactRendererProps) {
-  return (
-    <>
-      <p className="mt-1 text-xs text-gray-600 dark:text-gray-300 line-clamp-2">
-        {issueArtifactPreview(artifact, previewLength)}
-      </p>
-      {expanded && (
-        <video
-          src={artifact.content}
-          controls
-          className="mt-2 max-h-80 w-full rounded border border-gray-200 dark:border-gray-700"
-        >
-          Your browser does not support the video tag.
-        </video>
-      )}
-    </>
-  );
-}
-
-function UnknownArtifact({ artifact, expanded, previewLength = DEFAULT_ARTIFACT_PREVIEW_LENGTH }: IssueArtifactRendererProps) {
-  return (
-    <>
-      <p className="mt-1 text-xs text-gray-600 dark:text-gray-300 line-clamp-2">
-        {issueArtifactPreview(artifact, previewLength)}
-      </p>
-      {expanded && (
-        <div className="markdown-body mt-2 max-h-80 overflow-y-auto text-sm break-all">
-          {artifact.content}
-        </div>
-      )}
-    </>
-  );
-}
-
-const issueArtifactRenderers: Record<IssueArtifactRendererType, (props: IssueArtifactRendererProps) => JSX.Element> = {
-  text: TextArtifact,
-  diff: DiffArtifact,
-  image: ImageArtifact,
-  link: LinkArtifact,
-  video: VideoArtifact,
-  other: UnknownArtifact,
-};
 
 export async function copyIssueArtifactContent(
   artifact: IssueArtifact,
@@ -543,10 +367,11 @@ export function IssueDetailPanel({
     maxWidth: 1100,
   });
   const [sidebarSide, setSidebarSide] = useState<"left" | "right">("right");
-  const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
-  const [snapZone, setSnapZone] = useState<"left" | "right" | null>(null);
-  const dragStartRef = useRef<{ mouseX: number; mouseY: number; panelX: number; panelY: number } | null>(null);
-  const wasDraggingRef = useRef(false);
+  const { dragPos, setDragPos, snapZone, wasDraggingRef, handleHeaderMouseDown } = useModalDrag({
+    panelMode,
+    setPanelMode,
+    setSidebarSide,
+  });
   const [title, setTitle] = useState(issue.title);
   const [description, setDescription] = useState(issue.description ?? "");
   const [pastedImages, setPastedImages] = useState<string[]>([]);
@@ -557,12 +382,6 @@ export function IssueDetailPanel({
   const [externalUrl, setExternalUrl] = useState<string>(issue.externalUrl ?? "");
   const [skipAutoReview, setSkipAutoReview] = useState(issue.skipAutoReview ?? false);
   const [saving, setSaving] = useState(false);
-  const depTypeRef = useRef<HTMLSelectElement>(null);
-  const [depSearch, setDepSearch] = useState("");
-  const [depDropdownOpen, setDepDropdownOpen] = useState(false);
-  const [depHighlightIdx, setDepHighlightIdx] = useState(0);
-  const depComboRef = useRef<HTMLDivElement>(null);
-  const depInputRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
   const [enhancing, setEnhancing] = useState(false);
   const [preEnhanceSnapshot, setPreEnhanceSnapshot] = useState<{ title: string; description: string } | null>(null);
@@ -580,7 +399,6 @@ export function IssueDetailPanel({
   const [issueTags, setIssueTags] = useState<{ id: string; name: string; color: string | null }[]>([]);
   const [allTags, setAllTags] = useState<{ id: string; name: string; color: string | null }[]>([]);
   const [dependencies, setDependencies] = useState<DependencyInfo>({ dependencies: [] });
-  const [analyzingDeps, setAnalyzingDeps] = useState(false);
   const [availableIssues, setAvailableIssues] = useState<IssueWithStatus[]>([]);
   const [touchedFiles, setTouchedFiles] = useState<{ path: string; reason: string; confidence: "high" | "medium" | "low" }[] | null>(null);
   const [analyzingTouchedFiles, setAnalyzingTouchedFiles] = useState(false);
@@ -868,29 +686,6 @@ export function IssueDetailPanel({
       showToast(err instanceof Error ? err.message : "AI estimate failed", "error");
     } finally {
       setEstimating(false);
-    }
-  }
-
-  async function handleAnalyzeDeps() {
-    if (analyzingDeps) return;
-    setAnalyzingDeps(true);
-    try {
-      const result = await apiFetch<{ dependencies: Array<{ id: string; type: string; issueId: string; reason: string }>; total: number }>("/api/issues/analyze-dependencies", {
-        method: "POST",
-        body: JSON.stringify({ issueId: issue.id, projectId: issue.projectId }),
-      });
-      // Reload dependencies to show newly created ones
-      const deps = await apiFetch<DependencyInfo>(`/api/issues/${issue.id}/dependencies`);
-      setDependencies(deps);
-      if (result.total > 0) {
-        showToast(`Added ${result.total} dependenc${result.total === 1 ? "y" : "ies"}`, "success");
-      } else {
-        showToast("No new dependencies found");
-      }
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Dependency analysis failed", "error");
-    } finally {
-      setAnalyzingDeps(false);
     }
   }
 
@@ -1233,89 +1028,6 @@ export function IssueDetailPanel({
     } finally {
       setSaving(false);
     }
-  }
-
-  function handleHeaderMouseDown(e: React.MouseEvent) {
-    if ((e.target as HTMLElement).closest("button")) return;
-    const panel = (e.currentTarget as HTMLElement).closest("[data-panel]") as HTMLElement;
-    if (!panel) return;
-    const rect = panel.getBoundingClientRect();
-    dragStartRef.current = { mouseX: e.clientX, mouseY: e.clientY, panelX: rect.left, panelY: rect.top };
-
-    // Snap thresholds based on mouse position (not panel edge)
-    const EDGE_SNAP_THRESHOLD = 100; // px from screen edge where mouse triggers snap
-  const MODAL_WIDTH = Math.min(1200, window.innerWidth * 0.96);
-    // Track current drag mode via ref to avoid stale closure issues
-    let currentDragMode: "sidebar" | "modal" | "fullscreen" = panelMode;
-    let cleanup: (() => void) | null = null;
-
-    // If starting drag from sidebar, immediately switch to modal mode
-    if (currentDragMode === "sidebar") {
-      const modalWidth = Math.min(1200, window.innerWidth * 0.96);
-      // Position modal so the grab offset relative to panel left is preserved
-      const grabOffsetX = e.clientX - rect.left;
-      const idealModalX = e.clientX - Math.min(grabOffsetX, modalWidth - 80);
-      const modalX = Math.max(0, Math.min(window.innerWidth - modalWidth, idealModalX));
-      const modalY = Math.max(0, window.innerHeight * 0.05);
-      currentDragMode = "modal";
-      setPanelMode("modal");
-      setDragPos({ x: modalX, y: modalY });
-      // Reset drag origin to current mouse + modal position so subsequent moves are relative to now
-      dragStartRef.current = { mouseX: e.clientX, mouseY: e.clientY, panelX: modalX, panelY: modalY };
-    }
-
-    const onMove = (ev: MouseEvent) => {
-      if (!dragStartRef.current) return;
-      const dx = ev.clientX - dragStartRef.current.mouseX;
-      const dy = ev.clientY - dragStartRef.current.mouseY;
-      const newX = dragStartRef.current.panelX + dx;
-      const newY = dragStartRef.current.panelY + dy;
-      if (currentDragMode === "modal") {
-        // Snap based on mouse position relative to screen edges
-        const mouseNearRightEdge = ev.clientX >= window.innerWidth - EDGE_SNAP_THRESHOLD;
-        const mouseNearLeftEdge = ev.clientX <= EDGE_SNAP_THRESHOLD;
-        if (mouseNearRightEdge) {
-          currentDragMode = "sidebar";
-          setPanelMode("sidebar");
-          setSidebarSide("right");
-          setSnapZone(null);
-          setDragPos(null);
-          dragStartRef.current = null;
-          cleanup?.();
-          return;
-        }
-        if (mouseNearLeftEdge) {
-          currentDragMode = "sidebar";
-          setPanelMode("sidebar");
-          setSidebarSide("left");
-          setSnapZone(null);
-          setDragPos(null);
-          dragStartRef.current = null;
-          cleanup?.();
-          return;
-        }
-        // Show snap zone preview when mouse approaches edges
-        const SNAP_PREVIEW_THRESHOLD = EDGE_SNAP_THRESHOLD + 80;
-        const approachingRight = ev.clientX >= window.innerWidth - SNAP_PREVIEW_THRESHOLD;
-        const approachingLeft = ev.clientX <= SNAP_PREVIEW_THRESHOLD;
-        setSnapZone(approachingRight ? "right" : approachingLeft ? "left" : null);
-        setDragPos({ x: newX, y: newY });
-      }
-    };
-    const onUp = () => {
-      dragStartRef.current = null;
-      wasDraggingRef.current = true;
-      setSnapZone(null);
-      cleanup?.();
-      // Reset drag flag after current event cycle so backdrop onClick is suppressed
-      setTimeout(() => { wasDraggingRef.current = false; }, 0);
-    };
-    cleanup = () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
   }
 
   function handleBackdropClick() {
@@ -2238,268 +1950,15 @@ export function IssueDetailPanel({
           </div>
 
           {/* Dependencies section */}
-          <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                  Dependencies
-                </label>
-                <div className="flex items-center gap-1">
-                  {onViewInGraph && dependencies.dependencies.length > 0 && (
-                    <button
-                      onClick={() => onViewInGraph(issue.id)}
-                      className="text-[10px] text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 font-medium px-1.5 py-0.5 rounded border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-1"
-                      title="View in dependency graph"
-                    >
-                      <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <circle cx="5" cy="12" r="2" />
-                        <circle cx="19" cy="5" r="2" />
-                        <circle cx="19" cy="19" r="2" />
-                        <path d="M7 12h6M15 6.5l-4 4M15 17.5l-4-4" />
-                      </svg>
-                      Graph
-                    </button>
-                  )}
-                  <button
-                    onClick={handleAnalyzeDeps}
-                    disabled={analyzingDeps}
-                    className="text-[10px] text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 font-medium px-1.5 py-0.5 rounded border border-brand-200 dark:border-brand-700 hover:bg-brand-50 dark:hover:bg-brand-900/40 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
-                    title="Analyze dependencies with AI"
-                  >
-                    {analyzingDeps && (
-                      <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                      </svg>
-                    )}
-                    {analyzingDeps ? "Analyzing..." : "Analyze Deps"}
-                  </button>
-                </div>
-              </div>
-              {dependencies.dependencies.length > 0 ? (
-                <div className="space-y-1.5">
-                  {(() => {
-                    // Compute effective display type based on direction
-                    // For incoming deps, we show the inverse perspective
-                    type DisplayCategory = "depends_on" | "blocked_by" | "blocking" | "child_of" | "parent_of" | "related_to" | "duplicates";
-
-                    function getDisplayType(dep: typeof dependencies.dependencies[number]): DisplayCategory {
-                      const isOutgoing = dep.issueId === issue.id;
-                      if (isOutgoing) {
-                        // Outgoing: use the type as-is (but depends_on stays depends_on, blocked_by stays blocked_by)
-                        return dep.type as DisplayCategory;
-                      }
-                      // Incoming: invert
-                      switch (dep.type) {
-                        case "depends_on": return "blocking";    // someone depends on me = I'm blocking them
-                        case "blocked_by": return "blocking";   // someone blocked by me = I'm blocking them
-                        case "parent_of": return "child_of";    // someone is my parent = I'm their child
-                        case "child_of": return "parent_of";    // someone is my child = I'm their parent
-                        case "related_to": return "related_to";
-                        case "duplicates": return "duplicates";
-                        default: return "related_to";
-                      }
-                    }
-
-                    const DISPLAY_LABELS: Record<DisplayCategory, string> = {
-                      depends_on: "Depends on",
-                      blocked_by: "Blocked by",
-                      blocking: "Blocking",
-                      related_to: "Related to",
-                      duplicates: "Duplicates",
-                      parent_of: "Parent of",
-                      child_of: "Child of",
-                    };
-
-                    type DepWithDisplay = typeof dependencies.dependencies[number] & { displayType: DisplayCategory };
-                    const depsWithDisplay: DepWithDisplay[] = dependencies.dependencies.map((dep) => ({
-                      ...dep,
-                      displayType: getDisplayType(dep),
-                    }));
-
-                    // Group by display type
-                    const byDisplayType = new Map<DisplayCategory, DepWithDisplay[]>();
-                    for (const dep of depsWithDisplay) {
-                      const list = byDisplayType.get(dep.displayType) ?? [];
-                      list.push(dep);
-                      byDisplayType.set(dep.displayType, list);
-                    }
-
-                    const typeOrder: DisplayCategory[] = ["depends_on", "blocked_by", "blocking", "child_of", "parent_of", "related_to", "duplicates"];
-                    const typeColors: Record<DisplayCategory, string> = {
-                      depends_on: "bg-blue-50 text-blue-700",
-                      blocked_by: "bg-red-50 text-red-700",
-                      blocking: "bg-orange-50 text-orange-700",
-                      related_to: "bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300",
-                      duplicates: "bg-yellow-50 text-yellow-700",
-                      parent_of: "bg-green-50 text-green-700",
-                      child_of: "bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300",
-                    };
-                    return typeOrder
-                      .filter((t) => byDisplayType.has(t))
-                      .map((t) => (
-                        <div key={t}>
-                          <span className="text-xs text-gray-500 dark:text-gray-400 block mb-0.5">
-                            {DISPLAY_LABELS[t]}:
-                          </span>
-                          <div className="flex flex-wrap gap-1.5">
-                            {byDisplayType.get(t)!.map((dep) => {
-                              const isOutgoing = dep.issueId === issue.id;
-                              const targetIssueId = isOutgoing ? dep.dependsOnId : dep.issueId;
-                              const showBlockingDot = dep.issueStatusName !== "Done" && dep.issueStatusName !== "AI Reviewed" &&
-                                (dep.displayType === "depends_on" || dep.displayType === "blocked_by" || dep.displayType === "child_of");
-                              return (
-                                <span
-                                  key={dep.id}
-                                  className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full cursor-pointer hover:opacity-80 ${typeColors[t]}`}
-                                  onClick={() => onNavigateToIssue?.(targetIssueId)}
-                                  title={`#${dep.issueNumber ?? ""} ${dep.issueTitle}`}
-                                >
-                                  {showBlockingDot && (
-                                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
-                                  )}
-                                  {!showBlockingDot && dep.issueStatusName !== "Done" && dep.issueStatusName !== "AI Reviewed" && (
-                                    <span className="w-1.5 h-1.5 rounded-full bg-gray-300 dark:bg-gray-600 shrink-0" />
-                                  )}
-                                  {(dep.issueStatusName === "Done" || dep.issueStatusName === "AI Reviewed") && (
-                                    <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
-                                  )}
-                                  <span className="truncate max-w-[120px]">{dep.issueTitle}</span>
-                                  <button
-                                    onClick={async (e) => {
-                                      e.stopPropagation();
-                                      try {
-                                        await apiFetch(`/api/issues/${issue.id}/dependencies/${dep.id}`, { method: "DELETE" });
-                                        setDependencies((prev) => ({
-                                          dependencies: prev.dependencies.filter((d) => d.id !== dep.id),
-                                        }));
-                                        onIssueUpdate(issue);
-                                      } catch {
-                                        showToast("Failed to remove dependency", "error");
-                                      }
-                                    }}
-                                    className="opacity-50 hover:opacity-100"
-                                  >
-                                    &times;
-                                  </button>
-                                </span>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ));
-                  })()}
-                </div>
-              ) : null}
-              {(() => {
-                const existingTargetIds = new Set(
-                  dependencies.dependencies
-                    .filter((d) => d.issueId === issue.id)
-                    .map((d) => d.dependsOnId)
-                );
-                const candidates = availableIssues.filter((i) => !existingTargetIds.has(i.id));
-                const filteredCandidates = candidates.filter((i) => {
-                  const q = depSearch.toLowerCase();
-                  return (
-                    (i.issueNumber != null && String(i.issueNumber).includes(q)) ||
-                    i.title.toLowerCase().includes(q)
-                  );
-                });
-                const addDep = async (depId: string) => {
-                  const depType = depTypeRef.current?.value || "depends_on";
-                  try {
-                    await apiFetch(`/api/issues/${issue.id}/dependencies`, {
-                      method: "POST",
-                      body: JSON.stringify({ dependsOnId: depId, type: depType }),
-                    });
-                    const deps = await apiFetch<DependencyInfo>(`/api/issues/${issue.id}/dependencies`);
-                    setDependencies(deps);
-                    onIssueUpdate(issue);
-                    setDepSearch("");
-                    setDepDropdownOpen(false);
-                    setDepHighlightIdx(0);
-                  } catch (err: any) {
-                    const msg = err?.message ?? "Failed to add dependency";
-                    showToast(msg, "error");
-                  }
-                };
-                return candidates.length > 0 ? (
-                  <div className="flex gap-1 mt-1.5">
-                    <div ref={depComboRef} className="relative">
-                      <input
-                        ref={depInputRef}
-                        type="text"
-                        className="text-xs border border-gray-300 dark:border-gray-600 rounded px-1.5 py-0.5 w-44 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                        placeholder="+ Add dependency…"
-                        value={depSearch}
-                        onChange={(e) => {
-                          setDepSearch(e.target.value);
-                          setDepDropdownOpen(true);
-                          setDepHighlightIdx(0);
-                        }}
-                        onFocus={() => setDepDropdownOpen(true)}
-                        onBlur={(e) => {
-                          if (!depComboRef.current?.contains(e.relatedTarget as Node)) {
-                            setDepDropdownOpen(false);
-                          }
-                        }}
-                        onKeyDown={(e) => {
-                          if (!depDropdownOpen) {
-                            if (e.key === "ArrowDown" || e.key === "Enter") setDepDropdownOpen(true);
-                            return;
-                          }
-                          if (e.key === "ArrowDown") {
-                            e.preventDefault();
-                            setDepHighlightIdx((p) => Math.min(p + 1, filteredCandidates.length - 1));
-                          } else if (e.key === "ArrowUp") {
-                            e.preventDefault();
-                            setDepHighlightIdx((p) => Math.max(p - 1, 0));
-                          } else if (e.key === "Enter") {
-                            e.preventDefault();
-                            const item = filteredCandidates[depHighlightIdx];
-                            if (item) addDep(item.id);
-                          } else if (e.key === "Escape") {
-                            setDepDropdownOpen(false);
-                            setDepSearch("");
-                          }
-                        }}
-                      />
-                      {depDropdownOpen && (
-                        <div className="absolute z-50 top-full left-0 mt-0.5 w-64 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded shadow-lg max-h-48 overflow-y-auto">
-                          {filteredCandidates.length === 0 ? (
-                            <div className="text-xs text-gray-400 dark:text-gray-500 px-2 py-1.5">No matches</div>
-                          ) : (
-                            filteredCandidates.map((i, idx) => (
-                              <button
-                                key={i.id}
-                                tabIndex={-1}
-                                className={`w-full text-left text-xs px-2 py-1 truncate ${idx === depHighlightIdx ? "bg-brand-100 text-brand-800 dark:bg-brand-900/40 dark:text-brand-300" : "hover:bg-gray-100 dark:hover:bg-gray-800"}`}
-                                onMouseDown={(e) => { e.preventDefault(); addDep(i.id); }}
-                                onMouseEnter={() => setDepHighlightIdx(idx)}
-                              >
-                                {i.issueNumber != null ? <span className="font-mono text-gray-500 dark:text-gray-400">#{i.issueNumber} </span> : null}
-                                {i.title}
-                              </button>
-                            ))
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    <select
-                      ref={depTypeRef}
-                      className="text-xs border border-gray-300 dark:border-gray-600 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                      defaultValue="depends_on"
-                    >
-                      <option value="depends_on">depends on</option>
-                      <option value="blocked_by">blocked by</option>
-                      <option value="related_to">related to</option>
-                      <option value="duplicates">duplicates</option>
-                      <option value="parent_of">parent of</option>
-                      <option value="child_of">child of</option>
-                    </select>
-                  </div>
-                ) : null;
-              })()}
-            </div>
+          <DependencyDisplay
+            issue={issue}
+            dependencies={dependencies}
+            setDependencies={setDependencies}
+            availableIssues={availableIssues}
+            onIssueUpdate={onIssueUpdate}
+            onNavigateToIssue={onNavigateToIssue}
+            onViewInGraph={onViewInGraph}
+          />
 
           {/* Touched Files section */}
           <div>
