@@ -1,5 +1,6 @@
 import { execFile, execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { resolve, basename, relative } from "node:path";
 import type { ProjectStatsResponse } from "@agentic-kanban/shared";
 
@@ -12,12 +13,22 @@ export interface RepoInfo {
 
 function execGit(args: string[], cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile("git", args, { cwd, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile("git", args, { cwd, maxBuffer: 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
       if (err) {
         reject(new Error(`git ${args.join(" ")} failed: ${stderr || err.message}`));
       } else {
         resolve(stdout.toString().trim());
       }
+    });
+  });
+}
+
+/** Async git exec with a timeout, mirroring the sync execFileSync call options. Output is NOT trimmed. */
+function execGitCapture(args: string[], cwd: string, timeout: number, maxBuffer = 1024 * 1024): Promise<string> {
+  return new Promise((resolvePromise, reject) => {
+    execFile("git", args, { cwd, timeout, maxBuffer, windowsHide: true }, (err, stdout) => {
+      if (err) reject(err);
+      else resolvePromise(stdout.toString());
     });
   });
 }
@@ -110,7 +121,11 @@ const SKIP_DIRS = new Set([
 ]);
 const SOURCE_FILE_RE = /\.(c|cc|cpp|cs|css|go|h|hpp|html|java|js|jsx|kt|mjs|py|rb|rs|scss|sh|sql|svelte|swift|ts|tsx|vue)$/;
 const TEST_PATH_RE = /(^|\/)(__tests__|__mocks__|test|tests|spec|e2e|playwright)(\/|$)|\.(test|spec)\.[^.\/]+$/;
-const metricsCache = new Map<string, { timestamp: number; metrics: Pick<ProjectGitStats, "codeMetrics" | "history" | "hotspots"> }>();
+type CachedMetrics = Pick<ProjectGitStats, "codeMetrics" | "history" | "hotspots">;
+const metricsCache = new Map<string, { timestamp: number; metrics: CachedMetrics }>();
+// Dedupes concurrent cold computations: requests arriving while a compute for the same
+// repo+head is in flight await the shared promise instead of each spawning the walk.
+const inflightMetrics = new Map<string, Promise<CachedMetrics>>();
 
 function emptyCodeMetrics(): ProjectStatsResponse["codeMetrics"] {
   return {
@@ -146,6 +161,25 @@ function countLoc(text: string): number {
   return text.split(/\r?\n/).filter((line) => line.trim().length > 0).length;
 }
 
+function tallySourceFile(codeMetrics: ProjectStatsResponse["codeMetrics"], relPath: string, loc: number): void {
+  codeMetrics.sourceFilesScanned++;
+  codeMetrics.totalLoc += loc;
+  if (isTestPath(relPath)) {
+    codeMetrics.testLoc += loc;
+    codeMetrics.testFiles++;
+  } else {
+    codeMetrics.productionLoc += loc;
+    codeMetrics.productionFiles++;
+  }
+}
+
+function finalizeCodeMetrics(codeMetrics: ProjectStatsResponse["codeMetrics"]): ProjectStatsResponse["codeMetrics"] {
+  codeMetrics.testRatio = codeMetrics.totalLoc > 0
+    ? Number(((codeMetrics.testLoc / codeMetrics.totalLoc) * 100).toFixed(1))
+    : 0;
+  return codeMetrics;
+}
+
 function collectCurrentCodeMetrics(repoPath: string): ProjectStatsResponse["codeMetrics"] {
   const codeMetrics = emptyCodeMetrics();
   const stack = [repoPath];
@@ -171,25 +205,50 @@ function collectCurrentCodeMetrics(repoPath: string): ProjectStatsResponse["code
         if (statSync(path).size > MAX_SOURCE_BYTES) continue;
         const rel = normalizePath(relative(repoPath, path));
         const loc = countLoc(readFileSync(path, "utf8"));
-        codeMetrics.sourceFilesScanned++;
-        codeMetrics.totalLoc += loc;
-        if (isTestPath(rel)) {
-          codeMetrics.testLoc += loc;
-          codeMetrics.testFiles++;
-        } else {
-          codeMetrics.productionLoc += loc;
-          codeMetrics.productionFiles++;
-        }
+        tallySourceFile(codeMetrics, rel, loc);
       } catch {
         // Ignore unreadable generated or transient files.
       }
     }
   }
 
-  codeMetrics.testRatio = codeMetrics.totalLoc > 0
-    ? Number(((codeMetrics.testLoc / codeMetrics.totalLoc) * 100).toFixed(1))
-    : 0;
-  return codeMetrics;
+  return finalizeCodeMetrics(codeMetrics);
+}
+
+/** Async twin of collectCurrentCodeMetrics — same walk, same limits, but never blocks the event loop. */
+async function collectCurrentCodeMetricsAsync(repoPath: string): Promise<ProjectStatsResponse["codeMetrics"]> {
+  const codeMetrics = emptyCodeMetrics();
+  const stack = [repoPath];
+
+  while (stack.length > 0 && codeMetrics.sourceFilesScanned < MAX_SOURCE_FILES) {
+    const dir = stack.pop()!;
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const path = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) {
+        if (!SKIP_DIRS.has(entry.name)) stack.push(path);
+        continue;
+      }
+      if (!entry.isFile() || !isSourceFile(path)) continue;
+
+      try {
+        if ((await stat(path)).size > MAX_SOURCE_BYTES) continue;
+        const rel = normalizePath(relative(repoPath, path));
+        const loc = countLoc(await readFile(path, "utf8"));
+        tallySourceFile(codeMetrics, rel, loc);
+      } catch {
+        // Ignore unreadable generated or transient files.
+      }
+    }
+  }
+
+  return finalizeCodeMetrics(codeMetrics);
 }
 
 function weekKey(date: Date): string {
@@ -212,56 +271,48 @@ function buildEmptyWeeks(): ProjectStatsResponse["history"]["weeks"] {
   return weeks;
 }
 
-function collectHistoryMetrics(repoPath: string, branch: string): Pick<ProjectGitStats, "history" | "hotspots"> {
-  const weeks = buildEmptyWeeks();
+/** Pure parser for `git log --format=commit<SEP>%aI<SEP>%an --numstat` output, shared by sync and async paths. */
+function parseHistoryLog(
+  weeks: ProjectStatsResponse["history"]["weeks"],
+  logOut: string,
+): Pick<ProjectGitStats, "history" | "hotspots"> {
   const weekMap = new Map(weeks.map((week) => [week.week, week]));
   const contributors = new Map<string, number>();
   const hotspots = new Map<string, { path: string; additions: number; deletions: number; changes: number }>();
 
-  try {
-    const since = weeks[0].week;
-    const logOut = execFileSync(
-      "git",
-      ["log", branch, `--since=${since}`, `--format=commit${GIT_SEP}%aI${GIT_SEP}%an`, "--numstat", "--"],
-      { cwd: repoPath, timeout: 7000, maxBuffer: 4 * 1024 * 1024 },
-    ).toString();
-
-    let currentWeek: string | null = null;
-    for (const line of logOut.split(/\r?\n/)) {
-      if (!line) continue;
-      if (line.startsWith(`commit${GIT_SEP}`)) {
-        const [, iso, author] = line.split(GIT_SEP);
-        currentWeek = iso ? weekKey(new Date(iso)) : null;
-        const week = currentWeek ? weekMap.get(currentWeek) : null;
-        if (week) week.commits++;
-        if (author) contributors.set(author, (contributors.get(author) ?? 0) + 1);
-        continue;
-      }
-
-      if (!currentWeek) continue;
-      const week = weekMap.get(currentWeek);
-      if (!week) continue;
-      const [addedRaw, deletedRaw, pathRaw] = line.split("\t");
-      if (!pathRaw || addedRaw === "-" || deletedRaw === "-") continue;
-      if (!isSourceFile(pathRaw)) continue;
-      const additions = Number.parseInt(addedRaw, 10) || 0;
-      const deletions = Number.parseInt(deletedRaw, 10) || 0;
-      const net = additions - deletions;
-      week.insertions += additions;
-      week.deletions += deletions;
-      week.net += net;
-      if (isTestPath(pathRaw)) week.testNet += net;
-      else week.productionNet += net;
-
-      const path = normalizePath(pathRaw);
-      const existing = hotspots.get(path) ?? { path, additions: 0, deletions: 0, changes: 0 };
-      existing.additions += additions;
-      existing.deletions += deletions;
-      existing.changes += additions + deletions;
-      hotspots.set(path, existing);
+  let currentWeek: string | null = null;
+  for (const line of logOut.split(/\r?\n/)) {
+    if (!line) continue;
+    if (line.startsWith(`commit${GIT_SEP}`)) {
+      const [, iso, author] = line.split(GIT_SEP);
+      currentWeek = iso ? weekKey(new Date(iso)) : null;
+      const week = currentWeek ? weekMap.get(currentWeek) : null;
+      if (week) week.commits++;
+      if (author) contributors.set(author, (contributors.get(author) ?? 0) + 1);
+      continue;
     }
-  } catch {
-    // Git history is best-effort. Current LOC still makes the metrics view useful.
+
+    if (!currentWeek) continue;
+    const week = weekMap.get(currentWeek);
+    if (!week) continue;
+    const [addedRaw, deletedRaw, pathRaw] = line.split("\t");
+    if (!pathRaw || addedRaw === "-" || deletedRaw === "-") continue;
+    if (!isSourceFile(pathRaw)) continue;
+    const additions = Number.parseInt(addedRaw, 10) || 0;
+    const deletions = Number.parseInt(deletedRaw, 10) || 0;
+    const net = additions - deletions;
+    week.insertions += additions;
+    week.deletions += deletions;
+    week.net += net;
+    if (isTestPath(pathRaw)) week.testNet += net;
+    else week.productionNet += net;
+
+    const path = normalizePath(pathRaw);
+    const existing = hotspots.get(path) ?? { path, additions: 0, deletions: 0, changes: 0 };
+    existing.additions += additions;
+    existing.deletions += deletions;
+    existing.changes += additions + deletions;
+    hotspots.set(path, existing);
   }
 
   return {
@@ -277,7 +328,42 @@ function collectHistoryMetrics(repoPath: string, branch: string): Pick<ProjectGi
   };
 }
 
-function collectProjectCodeAndHistory(repoPath: string, branch: string): Pick<ProjectGitStats, "codeMetrics" | "history" | "hotspots"> {
+function historyLogArgs(since: string, branch: string): string[] {
+  return ["log", branch, `--since=${since}`, `--format=commit${GIT_SEP}%aI${GIT_SEP}%an`, "--numstat", "--"];
+}
+
+function collectHistoryMetrics(repoPath: string, branch: string): Pick<ProjectGitStats, "history" | "hotspots"> {
+  const weeks = buildEmptyWeeks();
+  let logOut = "";
+
+  try {
+    logOut = execFileSync(
+      "git",
+      historyLogArgs(weeks[0].week, branch),
+      { cwd: repoPath, timeout: 7000, maxBuffer: 4 * 1024 * 1024 },
+    ).toString();
+  } catch {
+    // Git history is best-effort. Current LOC still makes the metrics view useful.
+  }
+
+  return parseHistoryLog(weeks, logOut);
+}
+
+/** Async twin of collectHistoryMetrics — same git invocation and parsing, without blocking. */
+async function collectHistoryMetricsAsync(repoPath: string, branch: string): Promise<Pick<ProjectGitStats, "history" | "hotspots">> {
+  const weeks = buildEmptyWeeks();
+  let logOut = "";
+
+  try {
+    logOut = await execGitCapture(historyLogArgs(weeks[0].week, branch), repoPath, 7000, 4 * 1024 * 1024);
+  } catch {
+    // Git history is best-effort. Current LOC still makes the metrics view useful.
+  }
+
+  return parseHistoryLog(weeks, logOut);
+}
+
+function collectProjectCodeAndHistory(repoPath: string, branch: string): CachedMetrics {
   const head = (() => {
     try {
       return execFileSync("git", ["rev-parse", branch], { cwd: repoPath, timeout: 2000 }).toString().trim();
@@ -294,6 +380,47 @@ function collectProjectCodeAndHistory(repoPath: string, branch: string): Pick<Pr
   const metrics = { codeMetrics, history, hotspots };
   metricsCache.set(cacheKey, { timestamp: Date.now(), metrics });
   return metrics;
+}
+
+/**
+ * Async twin of collectProjectCodeAndHistory. Shares the same 60s HEAD-keyed cache;
+ * concurrent cold computes for the same repo+head share one in-flight promise instead
+ * of each spawning the full source walk + git history scan.
+ */
+async function collectProjectCodeAndHistoryAsync(repoPath: string, branch: string): Promise<CachedMetrics> {
+  let head: string;
+  try {
+    head = (await execGitCapture(["rev-parse", branch], repoPath, 2000)).trim();
+  } catch {
+    head = branch;
+  }
+  const cacheKey = `${repoPath}:${head}`;
+  const cached = metricsCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < METRICS_CACHE_TTL_MS) return cached.metrics;
+
+  const inflight = inflightMetrics.get(cacheKey);
+  if (inflight) return inflight;
+
+  const compute = (async () => {
+    const codeMetrics = await collectCurrentCodeMetricsAsync(repoPath);
+    const { history, hotspots } = await collectHistoryMetricsAsync(repoPath, branch);
+    const metrics = { codeMetrics, history, hotspots };
+    metricsCache.set(cacheKey, { timestamp: Date.now(), metrics });
+    return metrics;
+  })();
+  // Clear the in-flight slot regardless of outcome; the cache write above is the success path.
+  const tracked = compute.finally(() => {
+    inflightMetrics.delete(cacheKey);
+  });
+  inflightMetrics.set(cacheKey, tracked);
+  return tracked;
+}
+
+function parseRecentCommits(logOut: string): { hash: string; message: string; date: string }[] {
+  return logOut.split("\n").filter(Boolean).map((line) => {
+    const parts = line.split(GIT_SEP);
+    return { hash: (parts[0] ?? "").slice(0, 7), message: parts[1] ?? "", date: parts[2] ?? "" };
+  });
 }
 
 export function getProjectGitStats(repoPath: string, defaultBranch: string | null): ProjectGitStats {
@@ -326,14 +453,53 @@ export function getProjectGitStats(repoPath: string, defaultBranch: string | nul
     commitCount = parseInt(countOut, 10) || 0;
     // Use ASCII unit separator (\x1f) to avoid conflicts with commit message content
     const logOut = execFileSync("git", ["log", branch, `--format=%H${GIT_SEP}%s${GIT_SEP}%cr`, "-10"], { cwd: repoPath, timeout: 5000 }).toString().trim();
-    recentCommits = logOut.split("\n").filter(Boolean).map((line) => {
-      const parts = line.split(GIT_SEP);
-      return { hash: (parts[0] ?? "").slice(0, 7), message: parts[1] ?? "", date: parts[2] ?? "" };
-    });
+    recentCommits = parseRecentCommits(logOut);
   } catch { /* git unavailable or no commits */ }
 
   const metrics = existsSync(repoPath)
     ? collectProjectCodeAndHistory(repoPath, branch)
+    : { codeMetrics: emptyCodeMetrics(), history: emptyHistory(), hotspots: [] };
+  return { commitCount, recentCommits, detectedBranch: branch, ...metrics };
+}
+
+/**
+ * Async twin of getProjectGitStats — identical response shape, but all git/filesystem
+ * work runs off the event loop (promisified execFile + fs.promises), so a cold metrics
+ * compute no longer blocks every concurrent request for multiple seconds.
+ *
+ * NOTE: getProjectGitStats (sync) is kept only for its existing caller in
+ * project.service.ts getStats(); flip that call site to
+ * `await getProjectGitStatsAsync(...)` to activate the non-blocking path, then the
+ * sync variant can be removed.
+ */
+export async function getProjectGitStatsAsync(repoPath: string, defaultBranch: string | null): Promise<ProjectGitStats> {
+  let commitCount = 0;
+  let recentCommits: { hash: string; message: string; date: string }[] = [];
+
+  let branch = defaultBranch;
+  if (!branch) {
+    branch = await detectDefaultBranch(repoPath);
+  }
+
+  if (!branch) return {
+    commitCount,
+    recentCommits,
+    detectedBranch: null,
+    codeMetrics: emptyCodeMetrics(),
+    history: emptyHistory(),
+    hotspots: [],
+  };
+
+  try {
+    const countOut = (await execGitCapture(["rev-list", "--count", branch], repoPath, 5000)).trim();
+    commitCount = parseInt(countOut, 10) || 0;
+    // Use ASCII unit separator (\x1f) to avoid conflicts with commit message content
+    const logOut = (await execGitCapture(["log", branch, `--format=%H${GIT_SEP}%s${GIT_SEP}%cr`, "-10"], repoPath, 5000)).trim();
+    recentCommits = parseRecentCommits(logOut);
+  } catch { /* git unavailable or no commits */ }
+
+  const metrics = existsSync(repoPath)
+    ? await collectProjectCodeAndHistoryAsync(repoPath, branch)
     : { codeMetrics: emptyCodeMetrics(), history: emptyHistory(), hotspots: [] };
   return { commitCount, recentCommits, detectedBranch: branch, ...metrics };
 }
