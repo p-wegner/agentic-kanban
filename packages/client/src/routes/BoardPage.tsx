@@ -118,6 +118,27 @@ interface Tag {
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
 const BACKLOG_STATUS_NAME = "Backlog";
 
+/** Trailing-debounce window for coalescing WS-triggered board refetches. */
+const REFETCH_DEBOUNCE_MS = 250;
+
+/**
+ * Run `cb` once the browser is idle (`requestIdleCallback`, with a setTimeout
+ * fallback). Returns a cancel function. Used to keep non-critical mount
+ * fetches out of the first-paint request window.
+ */
+function deferUntilIdle(cb: () => void): () => void {
+  const w = window as unknown as {
+    requestIdleCallback?: (cb: () => void) => number;
+    cancelIdleCallback?: (handle: number) => void;
+  };
+  if (w.requestIdleCallback) {
+    const handle = w.requestIdleCallback(cb);
+    return () => w.cancelIdleCallback?.(handle);
+  }
+  const t = setTimeout(cb, 300);
+  return () => clearTimeout(t);
+}
+
 function stringifyForIssueCard(issue: IssueWithStatus): string {
   const normalized = {
     id: issue.id,
@@ -264,6 +285,15 @@ export function BoardPage() {
   const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>([]);
   const pendingBoardRefreshRef = useRef(false);
   const boardEtagRef = useRef<Record<string, string>>({});
+  // Coalesced-refetch bookkeeping: monotonic sequence guard (discard responses
+  // that resolve after a newer one was applied), trailing-debounce timer, and
+  // in-flight dedupe with a dirty flag for one follow-up fetch.
+  const refetchSeqRef = useRef(0);
+  const lastAppliedSeqRef = useRef(0);
+  const refetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refetchInFlightRef = useRef(false);
+  const refetchDirtyRef = useRef(false);
+  const runCoalescedRefetchRef = useRef<() => void>(() => {});
   const loadProjectsRef = useRef<() => Promise<string | undefined>>(async () => undefined);
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
   const [keyboardCursorIssueId, setKeyboardCursorIssueId] = useState<string | null>(null);
@@ -302,6 +332,11 @@ export function BoardPage() {
   const refetchBoard = useCallback(async (projectId?: string) => {
     const pid = projectId || activeProjectId;
     if (!pid) return;
+    // Monotonic sequence guard: overlapping refetches can resolve out of
+    // order; only the response of the newest request may be applied. The
+    // 304 path is covered too — it applies nothing and leaves the newer
+    // state (and its ETag) untouched.
+    const seq = ++refetchSeqRef.current;
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     const cachedEtag = boardEtagRef.current[pid];
     if (cachedEtag) headers["If-None-Match"] = cachedEtag;
@@ -317,9 +352,15 @@ export function BoardPage() {
       } catch {}
       throw new Error(message);
     }
+    const board = await res.json() as StatusWithIssues[];
+    if (seq <= lastAppliedSeqRef.current) {
+      // A newer refetch already applied its response — discard this stale
+      // one so it can't clobber fresher columns or the fresher ETag.
+      return columnsRef.current;
+    }
+    lastAppliedSeqRef.current = seq;
     const etag = res.headers.get("ETag");
     if (etag) boardEtagRef.current[pid] = etag;
-    const board = await res.json() as StatusWithIssues[];
     // Reconcile object identity: reuse unchanged issue refs so IssueCard.memo skips re-render
     const prevCols = columnsRef.current;
     if (prevCols.length > 0) {
@@ -377,6 +418,45 @@ export function BoardPage() {
     }
     return board;
   }, [activeProjectId]);
+
+  // Coalesced board refetch: agent merge/exit cascades broadcast 3-6
+  // board_changed events within 1-2s, and each used to trigger its own full
+  // /board fetch. runCoalescedRefetch dedupes against an in-flight fetch
+  // (dirty flag -> exactly one follow-up on completion); scheduleRefetch
+  // collapses an event burst into one trailing fetch per 250ms window.
+  const runCoalescedRefetch = useCallback(() => {
+    if (refetchInFlightRef.current) {
+      refetchDirtyRef.current = true;
+      return;
+    }
+    refetchInFlightRef.current = true;
+    void refetchBoard()
+      .catch(() => {
+        // WS-triggered refreshes were previously fire-and-forget; keep
+        // failures non-fatal (the next board event retries).
+      })
+      .finally(() => {
+        refetchInFlightRef.current = false;
+        if (refetchDirtyRef.current) {
+          refetchDirtyRef.current = false;
+          runCoalescedRefetchRef.current();
+        }
+      });
+  }, [refetchBoard]);
+  runCoalescedRefetchRef.current = runCoalescedRefetch;
+
+  const scheduleRefetch = useCallback(() => {
+    if (refetchTimerRef.current !== null) clearTimeout(refetchTimerRef.current);
+    refetchTimerRef.current = setTimeout(() => {
+      refetchTimerRef.current = null;
+      runCoalescedRefetchRef.current();
+    }, REFETCH_DEBOUNCE_MS);
+  }, []);
+
+  // Drop any pending coalesced refetch on unmount.
+  useEffect(() => () => {
+    if (refetchTimerRef.current !== null) clearTimeout(refetchTimerRef.current);
+  }, []);
 
   // Keep selectedIssue in sync with board data (F6 stale data fix)
   useEffect(() => {
@@ -453,8 +533,8 @@ export function BoardPage() {
       pendingBoardRefreshRef.current = true;
       return;
     }
-    refetchBoard();
-  }, [refetchBoard, creatingInColumnId, addNotificationBoardEvent]);
+    scheduleRefetch();
+  }, [refetchBoard, scheduleRefetch, creatingInColumnId, addNotificationBoardEvent]);
 
   const handleSessionActivity = useCallback((issueId: string, sessionId: string, activity: string) => {
     const isActive = columnsRef.current.some(col =>
@@ -592,9 +672,13 @@ export function BoardPage() {
 
   useEffect(() => {
     if (!activeProjectId) return;
-    apiFetch<{ policy: { activeAgentsTarget: number } }>(`/api/projects/${activeProjectId}/sprint-capacity`)
-      .then((plan) => setActiveAgentsTarget(plan.policy.activeAgentsTarget))
-      .catch(() => {});
+    // Deferred to idle: only feeds the drag-to-agent-slot capacity guard, so
+    // it must not compete with the board fetch in the first-paint window.
+    return deferUntilIdle(() => {
+      apiFetch<{ policy: { activeAgentsTarget: number } }>(`/api/projects/${activeProjectId}/sprint-capacity`)
+        .then((plan) => setActiveAgentsTarget(plan.policy.activeAgentsTarget))
+        .catch(() => {});
+    });
   }, [activeProjectId]);
 
   useEffect(() => {
@@ -806,15 +890,45 @@ export function BoardPage() {
     const { issueId } = raw as { issueId: string; sourceStatusId: string };
     if (!issueId) return;
 
+    const lanePriority = swimlaneDimension === "priority" && laneKey !== "ungrouped" ? laneKey : undefined;
     const updateBody: Record<string, unknown> = { statusId: targetStatusId };
     if (sortOrder !== undefined) updateBody.sortOrder = sortOrder;
-    if (swimlaneDimension === "priority" && laneKey !== "ungrouped") {
-      updateBody.priority = laneKey;
+    if (lanePriority !== undefined) updateBody.priority = lanePriority;
+
+    // Optimistic lane drop (status + lane priority) with exact-snapshot rollback.
+    const snapshotColumns = columns;
+    const movedIssue = columns.flatMap((c) => c.issues).find((i) => i.id === issueId);
+    const targetColumn = columns.find((col) => col.id === targetStatusId);
+    let optimistic = false;
+    if (movedIssue && targetColumn) {
+      const changedAt = new Date().toISOString();
+      setColumns((prev) => {
+        let next = moveIssueToStatus(prev, movedIssue, targetColumn, changedAt, sortOrder);
+        if (lanePriority !== undefined) {
+          next = next.map((col) =>
+            col.id !== targetColumn.id
+              ? col
+              : { ...col, issues: col.issues.map((i) => (i.id === issueId ? { ...i, priority: lanePriority } : i)) },
+          );
+        }
+        columnsRef.current = next;
+        return next;
+      });
+      optimistic = true;
     }
+
     try {
       await apiFetch(`/api/issues/${issueId}`, { method: "PATCH", body: JSON.stringify(updateBody) });
-      await refetchBoard();
+      if (optimistic) {
+        scheduleRefetch();
+      } else {
+        await refetchBoard();
+      }
     } catch {
+      if (optimistic) {
+        setColumns(snapshotColumns);
+        columnsRef.current = snapshotColumns;
+      }
       showToast("Failed to move issue", "error");
     }
   }
@@ -856,10 +970,19 @@ export function BoardPage() {
 
     const isReorder = sourceStatusId === targetStatusId && sortOrder !== undefined;
     const snapshotColumns = columns;
+    const movedIssue = columns.flatMap((c) => c.issues).find((i) => i.id === issueId);
+    let optimistic = false;
     if (isReorder) {
       const capturedIssueId = issueId;
       const capturedSortOrder = sortOrder;
       setColumns((prev) => applyLocalReorder(prev, targetStatusId, capturedIssueId, capturedSortOrder));
+      optimistic = true;
+    } else if (movedIssue && targetColumn) {
+      // Optimistic cross-column move: the card lands in the target column
+      // immediately; the PATCH + trailing coalesced refetch converge server
+      // state behind it. (The MoveToDone confirm path above stays blocking.)
+      moveIssueLocally(movedIssue, targetColumn, sortOrder);
+      optimistic = true;
     }
 
     try {
@@ -869,10 +992,15 @@ export function BoardPage() {
         method: "PATCH",
         body: JSON.stringify(body),
       });
-      await refetchBoard();
+      if (optimistic) {
+        scheduleRefetch();
+      } else {
+        await refetchBoard();
+      }
     } catch {
-      if (isReorder) {
+      if (optimistic) {
         setColumns(snapshotColumns);
+        columnsRef.current = snapshotColumns;
       }
       showToast("Failed to move issue", "error");
     }
@@ -901,25 +1029,43 @@ export function BoardPage() {
     const targetColumn = columns.find((col) => col.id === nextStatusId);
 
     const doMove = async () => {
-      try {
-        const isArchiveTarget = targetColumn && ARCHIVE_STATUS_NAMES.has(targetColumn.name);
-        if (isArchiveTarget) {
-          const ws = issue.workspaceSummary?.main;
-          if (ws && ws.status !== "closed") {
-            setMoveToDonePending({
-              issue,
-              confirm: async () => {
-                await apiFetch(`/api/issues/${issue.id}`, { method: "PATCH", body: JSON.stringify({ statusId: nextStatusId }) });
-                await refetchBoard();
-                setMoveToDonePending(null);
-              },
-            });
-            return;
-          }
+      const isArchiveTarget = targetColumn && ARCHIVE_STATUS_NAMES.has(targetColumn.name);
+      if (isArchiveTarget) {
+        const ws = issue.workspaceSummary?.main;
+        if (ws && ws.status !== "closed") {
+          // Intentionally blocking: MoveToDone is a confirm gate.
+          setMoveToDonePending({
+            issue,
+            confirm: async () => {
+              await apiFetch(`/api/issues/${issue.id}`, { method: "PATCH", body: JSON.stringify({ statusId: nextStatusId }) });
+              await refetchBoard();
+              setMoveToDonePending(null);
+            },
+          });
+          return;
         }
+      }
+      // Optimistic move with exact-snapshot rollback. doMove may run later
+      // (after the dependency-impact confirm), so snapshot the live columns
+      // ref rather than this handler's render-time closure.
+      const snapshotColumns = columnsRef.current;
+      let optimistic = false;
+      if (targetColumn) {
+        moveIssueLocally(issue, targetColumn);
+        optimistic = true;
+      }
+      try {
         await apiFetch(`/api/issues/${issue.id}`, { method: "PATCH", body: JSON.stringify({ statusId: nextStatusId }) });
-        await refetchBoard();
+        if (optimistic) {
+          scheduleRefetch();
+        } else {
+          await refetchBoard();
+        }
       } catch {
+        if (optimistic) {
+          setColumns(snapshotColumns);
+          columnsRef.current = snapshotColumns;
+        }
         showToast("Failed to move issue", "error");
       }
     };
@@ -946,10 +1092,10 @@ export function BoardPage() {
     await doMove();
   }
 
-  function moveIssueLocally(issue: IssueWithStatus, targetStatus: StatusWithIssues) {
+  function moveIssueLocally(issue: IssueWithStatus, targetStatus: StatusWithIssues, sortOrder?: number) {
     const changedAt = new Date().toISOString();
     setColumns((prev) => {
-      const next = moveIssueToStatus(prev, issue, targetStatus, changedAt);
+      const next = moveIssueToStatus(prev, issue, targetStatus, changedAt, sortOrder);
       columnsRef.current = next;
       return next;
     });
@@ -1126,9 +1272,13 @@ export function BoardPage() {
 
   useEffect(() => {
     if (!activeProjectId) return;
-    apiFetch<MilestoneResponse[]>(`/api/projects/${activeProjectId}/milestones`)
-      .then((ms) => setMilestones(ms))
-      .catch(() => {});
+    // Deferred to idle: milestones feed the filter menu / detail panel, not
+    // the first board paint.
+    return deferUntilIdle(() => {
+      apiFetch<MilestoneResponse[]>(`/api/projects/${activeProjectId}/milestones`)
+        .then((ms) => setMilestones(ms))
+        .catch(() => {});
+    });
   }, [activeProjectId]);
 
   const applyBoardViewState = useCallback((state: BoardViewState) => {
