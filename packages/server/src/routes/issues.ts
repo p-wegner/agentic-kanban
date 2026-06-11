@@ -365,6 +365,82 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
   });
 
   // GET /api/issues/:id — returns the issue with its full description (used for lazy-loading)
+  // GET /api/issues/burndown?projectId=&days= — burndown of remaining open issues per day.
+  // "Remaining open" on day D = issues created by end of D that are NOT yet in a terminal
+  // status (Done/Cancelled) by end of D. Returns one bucket per day in the trailing window
+  // plus the window-start count (drives the ideal target trend line on the client). Distinct
+  // from lead-time (#499): that measures creation→Done age; this measures remaining-work
+  // velocity. Reopen cycles are not modelled — fidelity matches the lead-time route (uses
+  // createdAt + current status + statusChangedAt).
+  // Registered before the `/:id` catch-all: literal sub-paths must precede it or Hono's
+  // order-sensitive router (fallback for this router's nested params) shadows them.
+  router.get("/burndown", async (c) => {
+    const projectId = c.req.query("projectId");
+    if (!projectId) return c.json({ error: "projectId required" }, 400);
+    const daysRaw = parseInt(c.req.query("days") ?? "30", 10);
+    const days = Math.min(Math.max(Number.isNaN(daysRaw) ? 30 : daysRaw, 1), 365);
+
+    // Snapshot "today" once so the date axis and cutoff stay consistent even if
+    // the DB query crosses midnight.
+    const today = new Date();
+    const cutoffDate = new Date(today);
+    cutoffDate.setDate(cutoffDate.getDate() - days + 1);
+
+    // A remaining-open count on day D depends on every issue ever created — an issue opened
+    // long before the window that is still open still counts as remaining — so fetch the lot.
+    const rows = await database
+      .select({
+        createdAt: issues.createdAt,
+        statusChangedAt: issues.statusChangedAt,
+        statusName: projectStatuses.name,
+      })
+      .from(issues)
+      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+      .where(eq(issues.projectId, projectId));
+
+    // Per issue: the day it entered the board (createdAt) and the day it stopped being open
+    // (statusChangedAt when the current status is terminal; an issue created straight into a
+    // terminal status with no explicit move is treated as never-open).
+    const TERMINAL = new Set(["Done", "Cancelled"]);
+    const items = rows.map((r) => {
+      const createdDay = r.createdAt.slice(0, 10);
+      let closedDay: string | null = null;
+      if (TERMINAL.has(r.statusName)) {
+        closedDay = r.statusChangedAt ? r.statusChangedAt.slice(0, 10) : createdDay;
+      }
+      return { createdDay, closedDay };
+    });
+
+    // Build the date axis (inclusive, trailing `days` days up to today).
+    const dates: string[] = [];
+    for (let d = new Date(cutoffDate); d <= today; d.setDate(d.getDate() + 1)) {
+      dates.push(d.toISOString().slice(0, 10));
+    }
+
+    // For each day count remaining-open issues (created by D, not closed by D) plus the
+    // opened/closed deltas. YYYY-MM-DD compares lexicographically == chronologically.
+    const buckets = dates.map((date) => {
+      let remaining = 0;
+      let opened = 0;
+      let closed = 0;
+      for (const it of items) {
+        if (it.createdDay <= date) {
+          if (it.closedDay === null || it.closedDay > date) remaining++;
+          if (it.createdDay === date) opened++;
+        }
+        if (it.closedDay === date) closed++;
+      }
+      return { date, remaining, opened, closed };
+    });
+
+    const startCount = buckets.length > 0 ? buckets[0].remaining : 0;
+    const endCount = buckets.length > 0 ? buckets[buckets.length - 1].remaining : 0;
+    const totalClosed = buckets.reduce((s, b) => s + b.closed, 0);
+    const totalOpened = buckets.reduce((s, b) => s + b.opened, 0);
+
+    return c.json({ buckets, startCount, endCount, totalClosed, totalOpened });
+  });
+
   router.get("/:id", async (c) => {
     const id = c.req.param("id");
     const result = await getIssueDescription(id, database);
