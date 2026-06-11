@@ -20,14 +20,20 @@ export function applyLocalReorder(
 
 /**
  * Optimistic cross-column move: removes the issue from its current column and
- * appends it to the target column with the next sortOrder and updated
- * status/timestamps. Columns that don't contain the issue keep their identity.
+ * places it in the target column with updated status/timestamps. Columns that
+ * don't contain the issue keep their identity.
+ *
+ * When `sortOrder` is omitted the issue is appended with the next sortOrder
+ * (previous behavior). When a drop position supplies an explicit `sortOrder`,
+ * the issue carries it and the target column is re-sorted so the card lands
+ * at the dropped position immediately.
  */
 export function moveIssueToStatus(
   columns: StatusWithIssues[],
   issue: IssueWithStatus,
   targetStatus: StatusWithIssues,
   changedAt: string,
+  sortOrder?: number,
 ): StatusWithIssues[] {
   let foundIssue: IssueWithStatus | undefined;
   const withoutIssue = columns.map((col) => {
@@ -43,22 +49,22 @@ export function moveIssueToStatus(
   const sourceIssue = foundIssue ?? issue;
   return withoutIssue.map((col) => {
     if (col.id !== targetStatus.id) return col;
-    const nextSortOrder = col.issues.length > 0
-      ? Math.max(...col.issues.map((item) => item.sortOrder)) + 100
-      : 0;
-    return {
-      ...col,
-      issues: [
-        ...col.issues,
-        {
-          ...sourceIssue,
-          statusId: targetStatus.id,
-          statusName: targetStatus.name,
-          sortOrder: nextSortOrder,
-          updatedAt: changedAt,
-          statusChangedAt: changedAt,
-        },
-      ],
+    const nextSortOrder = sortOrder !== undefined
+      ? sortOrder
+      : col.issues.length > 0
+        ? Math.max(...col.issues.map((item) => item.sortOrder)) + 100
+        : 0;
+    const moved = {
+      ...sourceIssue,
+      statusId: targetStatus.id,
+      statusName: targetStatus.name,
+      sortOrder: nextSortOrder,
+      updatedAt: changedAt,
+      statusChangedAt: changedAt,
     };
+    const issues = sortOrder !== undefined
+      ? [...col.issues, moved].sort((a, b) => a.sortOrder - b.sortOrder)
+      : [...col.issues, moved];
+    return { ...col, issues };
   });
 }
