@@ -224,7 +224,7 @@ export async function resolveMergeState(
       behindCount: conflictResult.behindCount,
       error: new WorkspaceError(
         conflictResult.behindCount
-          ? `Merge conflicts detected after auto-rebase (branch was ${conflictResult.behindCount} commit(s) behind ${baseBranch})`
+          ? `Merge conflicts detected (branch is ${conflictResult.behindCount} commit(s) behind ${baseBranch})`
           : "Merge conflicts detected",
         "CONFLICT",
         data,
