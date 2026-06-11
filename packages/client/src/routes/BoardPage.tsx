@@ -36,6 +36,7 @@ const LeadTimeTrendChart = lazy(() => import("../components/LeadTimeTrendChart.j
 const ScorecardDistributionChart = lazy(() => import("../components/ScorecardDistributionChart.js").then((m) => ({ default: m.ScorecardDistributionChart })));
 const ProviderCostOverTimeChart = lazy(() => import("../components/ProviderCostOverTimeChart.js").then((m) => ({ default: m.ProviderCostOverTimeChart })));
 const CalendarView = lazy(() => import("../components/CalendarView.js").then((m) => ({ default: m.CalendarView })));
+const AgentThroughputLeaderboard = lazy(() => import("../components/AgentThroughputLeaderboard.js").then((m) => ({ default: m.AgentThroughputLeaderboard })));
 import { useAgentQuestionsCount } from "../components/AgentQuestionsPanel.js";
 import { BoardErrorBoundary } from "../components/BoardErrorBoundary.js";
 import { BacklogView } from "../components/BacklogView.js";
@@ -1849,6 +1850,11 @@ export function BoardPage() {
         {viewMode === "provider-cost" && activeProjectId && (
           <BoardErrorBoundary columnName="Provider Cost Over Time">
             <ProviderCostOverTimeChart projectId={activeProjectId} />
+          </BoardErrorBoundary>
+        )}
+        {viewMode === "agent-throughput" && activeProjectId && (
+          <BoardErrorBoundary columnName="Agent Throughput Leaderboard">
+            <AgentThroughputLeaderboard projectId={activeProjectId} />
           </BoardErrorBoundary>
         )}
         {viewMode === "calendar" && (

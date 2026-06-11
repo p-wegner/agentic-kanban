@@ -44,6 +44,7 @@ export type ViewMode =
   | "lead-time"
   | "scorecard-distribution"
   | "provider-cost"
+  | "agent-throughput"
   | "calendar";
 
 export interface ViewDescriptor {
@@ -273,6 +274,12 @@ const ICON = {
   "provider-cost": (
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M3 13l4-3 4 2 4-5 4 3M3 19h18" />
+    </svg>
+  ),
+  "agent-throughput": (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+      <circle cx="18" cy="5" r="1.5" fill="currentColor" stroke="none" />
     </svg>
   ),
   calendar: (
@@ -624,6 +631,17 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     icon: ICON["provider-cost"],
     paletteIcon: "$",
     paletteDescription: "Stacked bar chart of estimated token cost per day grouped by agent provider (claude/codex/copilot)",
+    activeClass: "bg-emerald-600 text-white",
+    group: "secondary",
+  },
+  {
+    id: "agent-throughput",
+    toolbarLabel: "Leaderboard",
+    label: "Agent Throughput Leaderboard",
+    tooltip: "Agent Throughput Leaderboard — issues merged per provider with median lead time",
+    icon: ICON["agent-throughput"],
+    paletteIcon: "AT",
+    paletteDescription: "Rank agent providers by issues merged, with median lead time",
     activeClass: "bg-emerald-600 text-white",
     group: "secondary",
   },
