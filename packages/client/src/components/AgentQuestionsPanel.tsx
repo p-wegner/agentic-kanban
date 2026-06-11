@@ -10,6 +10,9 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "../lib/api.js";
+import { getAgentQuestions, invalidateAgentQuestions } from "../lib/agentQuestionsStore.js";
+import { startStaggeredPoll } from "../lib/pollScheduler.js";
+import { BOARD_WS_EVENT, type BoardWsEventDetail } from "../lib/useBoardEvents.js";
 
 export interface AgentQuestionOption {
   label: string;
@@ -224,6 +227,7 @@ function QuestionCard({
           answers,
         }),
       });
+      invalidateAgentQuestions(projectIdFromHash());
       onAnswered();
     } catch (err) {
       onError(err instanceof Error ? err.message : "Failed to submit answer");
@@ -394,10 +398,10 @@ export function AgentQuestionsPanel({ projectId, issueId, workspaceId, title, on
 
   async function load() {
     try {
-      const data = await apiFetch<{ questions: PendingQuestionSet[] }>(
-        `/api/projects/${projectId}/agent-questions`,
-      );
-      const filtered = data.questions.filter((set) => {
+      // Shared fetcher — dedupes with the badge hook and any sibling panel so
+      // overlapping pollers issue one request instead of bursts.
+      const questions = await getAgentQuestions(projectId);
+      const filtered = questions.filter((set) => {
         if (issueId && set.issueId !== issueId) return false;
         if (workspaceId && set.workspaceId !== workspaceId) return false;
         return true;
@@ -417,9 +421,10 @@ export function AgentQuestionsPanel({ projectId, issueId, workspaceId, title, on
     setExpanded(new Set());
     setConfirmDismissAll(false);
     void load();
-    // Poll every 15s — questions only arrive when sessions complete.
-    const interval = setInterval(() => void load(), 15_000);
-    return () => clearInterval(interval);
+    // Poll every 15s — questions only arrive when sessions complete. Staggered
+    // + visibility-gated so it doesn't phase-align with the other pollers.
+    const poll = startStaggeredPoll(() => void load(), 15_000);
+    return () => poll.stop();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, issueId, workspaceId]);
 
@@ -451,8 +456,10 @@ export function AgentQuestionsPanel({ projectId, issueId, workspaceId, title, on
     removeSet(toolUseId);
     try {
       await apiFetch(`/api/projects/${projectId}/agent-questions/${encodeURIComponent(toolUseId)}`, { method: "DELETE" });
+      invalidateAgentQuestions(projectId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to dismiss question");
+      invalidateAgentQuestions(projectId);
       void load(); // reconcile — the card may still be pending server-side.
     }
   }
@@ -464,11 +471,13 @@ export function AgentQuestionsPanel({ projectId, issueId, workspaceId, title, on
       await Promise.all(
         ids.map((id) => apiFetch(`/api/projects/${projectId}/agent-questions/${encodeURIComponent(id)}`, { method: "DELETE" })),
       );
+      invalidateAgentQuestions(projectId);
       setSets([]);
       setExpanded(new Set());
       onCountChange?.(0);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to dismiss questions");
+      invalidateAgentQuestions(projectId);
       void load();
     } finally {
       setDismissingAll(false);
@@ -550,8 +559,17 @@ export function AgentQuestionsPanel({ projectId, issueId, workspaceId, title, on
   );
 }
 
+/** Server reasons after which new agent questions can appear (questions are
+ *  extracted from completed sessions, so only session-end events matter). */
+const QUESTION_EVENT_REASONS = new Set(["session_completed", "session_stopped", "workspace_idle"]);
+
 /** Hook for the badge — separate from the panel so the toolbar can show a count
- *  without depending on the butler view being mounted. */
+ *  without depending on the butler view being mounted.
+ *
+ *  Polls slowly (60s, staggered, visibility-gated — the endpoint costs the
+ *  server ~500ms per call) and instead refreshes within ~3s of a relevant WS
+ *  event, so the badge updates FASTER than the old 20s poll on real changes
+ *  while polling 3x less. */
 export function useAgentQuestionsCount(projectId: string | null): number {
   const [count, setCount] = useState(0);
   useEffect(() => {
@@ -559,22 +577,41 @@ export function useAgentQuestionsCount(projectId: string | null): number {
       setCount(0);
       return;
     }
+    const pid = projectId;
     let cancelled = false;
     async function load() {
       try {
-        const data = await apiFetch<{ questions: PendingQuestionSet[] }>(
-          `/api/projects/${projectId}/agent-questions`,
-        );
-        if (!cancelled) setCount(data.questions.length);
+        const questions = await getAgentQuestions(pid);
+        if (!cancelled) setCount(questions.length);
       } catch {
         if (!cancelled) setCount(0);
       }
     }
     void load();
-    const interval = setInterval(() => void load(), 20_000);
+    const poll = startStaggeredPoll(() => void load(), 60_000);
+
+    // Event-driven refresh: a session just ended, so questions may have
+    // appeared. Trailing debounce collapses event cascades (3-6 board events
+    // within 1-2s observed on merge/exit) into a single fresh fetch.
+    let debounce: ReturnType<typeof setTimeout> | null = null;
+    const onWsEvent = (event: Event) => {
+      const detail = (event as CustomEvent<BoardWsEventDetail>).detail;
+      if (!detail || detail.projectId !== pid) return;
+      if (!QUESTION_EVENT_REASONS.has(detail.reason)) return;
+      if (debounce !== null) clearTimeout(debounce);
+      debounce = setTimeout(() => {
+        debounce = null;
+        invalidateAgentQuestions(pid);
+        void load();
+      }, 3_000);
+    };
+    window.addEventListener(BOARD_WS_EVENT, onWsEvent);
+
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      poll.stop();
+      if (debounce !== null) clearTimeout(debounce);
+      window.removeEventListener(BOARD_WS_EVENT, onWsEvent);
     };
   }, [projectId]);
   return count;

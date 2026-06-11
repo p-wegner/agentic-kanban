@@ -1,6 +1,20 @@
 import { useEffect, useRef, useCallback } from "react";
+import { startStaggeredPoll, type PollHandle } from "./pollScheduler.js";
 
 const POLL_INTERVAL_MS = 30_000;
+
+/**
+ * Window event re-dispatched for every WS `board_changed` message so always-on
+ * widgets (e.g. the agent-questions badge) can refresh on relevant server
+ * events without each opening its own WebSocket or threading new props
+ * through BoardPage. detail: { projectId: string, reason: string }.
+ */
+export const BOARD_WS_EVENT = "agentic-kanban:board-ws-event";
+
+export interface BoardWsEventDetail {
+  projectId: string;
+  reason: string;
+}
 
 interface BoardChangedEvent {
   type: "board_changed";
@@ -82,7 +96,7 @@ export function useBoardEvents(
   onApprovalRequested?: (req: ApprovalRequest) => void,
 ) {
   const wsRef = useRef<WebSocket | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollRef = useRef<PollHandle | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectDelayRef = useRef(1000);
   const unmountedRef = useRef(false);
@@ -126,6 +140,11 @@ export function useBoardEvents(
         const msg: BoardWsEvent = JSON.parse(event.data);
         if (msg.type === "board_changed") {
           onBoardChangeRef.current(msg.reason);
+          window.dispatchEvent(
+            new CustomEvent<BoardWsEventDetail>(BOARD_WS_EVENT, {
+              detail: { projectId: msg.projectId, reason: msg.reason },
+            }),
+          );
         } else if (msg.type === "projects_changed") {
           onBoardChangeRef.current(msg.reason);
         } else if (msg.type === "session_activity") {
@@ -163,9 +182,11 @@ export function useBoardEvents(
     connect();
 
     // Periodic polling fallback — catches MCP mutations, second-tab changes,
-    // CLI edits, and any other mutations that bypass WS broadcast.
+    // CLI edits, and any other mutations that bypass WS broadcast. Staggered
+    // and visibility-gated so background tabs and phase-aligned pollers don't
+    // storm the server.
     if (projectId) {
-      pollRef.current = setInterval(() => {
+      pollRef.current = startStaggeredPoll(() => {
         onBoardChangeRef.current("poll");
       }, POLL_INTERVAL_MS);
     }
@@ -182,7 +203,7 @@ export function useBoardEvents(
         wsRef.current = null;
       }
       if (pollRef.current) {
-        clearInterval(pollRef.current);
+        pollRef.current.stop();
         pollRef.current = null;
       }
     };
