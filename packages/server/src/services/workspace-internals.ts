@@ -1,7 +1,10 @@
-import { workspaces } from "@agentic-kanban/shared/schema";
+import { preferences, workspaces } from "@agentic-kanban/shared/schema";
 import type { WorkspaceSetupRun, WorkspaceSymlinkRun } from "@agentic-kanban/shared";
+import type { Database } from "../db/index.js";
 import type { ProviderName } from "./agent-provider.js";
 import type { AgentSettings } from "./agent-settings.service.js";
+import { resolveAgentSettings } from "./agent-settings.service.js";
+import { resolveStrategyProviderSelection, applyProviderSelectionToPrefMap } from "./strategy-objective.service.js";
 import * as realGitService from "./git.service.js";
 import { detectWorkspaceMergeConflicts } from "./workspace-merge-conflict.service.js";
 
@@ -36,6 +39,41 @@ export function applyWorkspaceAgentSelection(
     claudeProfile: provider === "claude" ? profileName : undefined,
     profile: profileName ? { provider: provider as ProviderName, name: profileName } : undefined,
   };
+}
+
+/**
+ * Resolve the agent selection for a *relaunched* session (fix-and-merge / conflict
+ * resolver) honoring the board's CURRENT default rather than the provider baked
+ * into the workspace record at original creation time (#762).
+ *
+ * A fresh-workspace POST resolves its provider from the Strategy Bullseye default
+ * (`selectProviderFromStrategy`); a relaunch historically read only
+ * `workspace.provider`, so after changing the board default, resolver sessions
+ * still ran under the stale provider and needed a manual stop → PATCH → relaunch.
+ *
+ * This re-reads the current strategy default at launch time, the same fan-out the
+ * POST uses. When no strategy default is configured (selection is `null`) it falls
+ * back to the workspace's baked provider via `applyWorkspaceAgentSelection`, which
+ * also preserves any provider explicitly pinned on the record.
+ */
+export async function resolveRelaunchAgentSelection(
+  database: Database,
+  projectId: string | null | undefined,
+  workspace: typeof workspaces.$inferSelect,
+  commandOverride?: string,
+): Promise<AgentSettings> {
+  const prefRows = await database.select().from(preferences);
+  const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
+
+  const selected = await resolveStrategyProviderSelection(database, projectId);
+  if (selected) {
+    applyProviderSelectionToPrefMap(prefMap, selected);
+    console.log(`[relaunch] strategy provider selection: ${selected.provider}:${selected.profileName} (workspace baked=${workspace.provider}:${workspace.claudeProfile})`);
+    return resolveAgentSettings(prefMap, commandOverride);
+  }
+
+  // No strategy default configured — fall back to the workspace's baked provider.
+  return applyWorkspaceAgentSelection(resolveAgentSettings(prefMap, commandOverride), workspace);
 }
 
 export function requireBaseBranch(baseBranch: string | null | undefined): string {
