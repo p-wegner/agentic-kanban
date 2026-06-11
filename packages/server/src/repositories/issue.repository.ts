@@ -179,35 +179,51 @@ export async function getIssuesByProject(
   issueNumber?: number,
   database: Database = db,
   statusName?: string,
+  opts?: { excludeDescription?: boolean },
 ) {
   const conditions = [eq(issues.projectId, projectId)];
   if (issueNumber !== undefined) conditions.push(eq(issues.issueNumber, issueNumber));
   if (statusName !== undefined) conditions.push(eq(projectStatuses.name, statusName));
   const whereClause = conditions.length === 1 ? conditions[0] : and(...conditions);
 
+  const fullSelection = {
+    id: issues.id,
+    issueNumber: issues.issueNumber,
+    title: issues.title,
+    description: issues.description,
+    priority: issues.priority,
+    issueType: issues.issueType,
+    sortOrder: issues.sortOrder,
+    statusId: issues.statusId,
+    projectId: issues.projectId,
+    createdAt: issues.createdAt,
+    updatedAt: issues.updatedAt,
+    statusChangedAt: issues.statusChangedAt,
+    skipAutoReview: issues.skipAutoReview,
+    estimate: issues.estimate,
+    dueDate: issues.dueDate,
+    externalKey: issues.externalKey,
+    externalUrl: issues.externalUrl,
+    pinned: issues.pinned,
+    milestoneId: issues.milestoneId,
+    statusName: projectStatuses.name,
+  };
+
+  if (opts?.excludeDescription) {
+    // Slim variant (?slim=1) for list consumers that never render descriptions —
+    // description is ~60% of a full-project payload. The key is absent
+    // (undefined), not null, in slim rows.
+    const { description: _description, ...slimSelection } = fullSelection;
+    return database
+      .select(slimSelection)
+      .from(issues)
+      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+      .where(whereClause)
+      .orderBy(issues.sortOrder);
+  }
+
   return database
-    .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
-      description: issues.description,
-      priority: issues.priority,
-      issueType: issues.issueType,
-      sortOrder: issues.sortOrder,
-      statusId: issues.statusId,
-      projectId: issues.projectId,
-      createdAt: issues.createdAt,
-      updatedAt: issues.updatedAt,
-      statusChangedAt: issues.statusChangedAt,
-      skipAutoReview: issues.skipAutoReview,
-      estimate: issues.estimate,
-      dueDate: issues.dueDate,
-      externalKey: issues.externalKey,
-      externalUrl: issues.externalUrl,
-      pinned: issues.pinned,
-      milestoneId: issues.milestoneId,
-      statusName: projectStatuses.name,
-    })
+    .select(fullSelection)
     .from(issues)
     .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
     .where(whereClause)

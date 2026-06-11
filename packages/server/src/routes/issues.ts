@@ -36,16 +36,20 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     boardEvents: options?.boardEvents,
   });
 
-  // GET /api/issues?projectId=...&issueNumber=N&statusName=InProgress
+  // GET /api/issues?projectId=...&issueNumber=N&statusName=InProgress&slim=1
+  // slim=1 omits the description field (the bulk of the payload) — opt-in,
+  // default response shape unchanged.
   router.get("/", async (c) => {
     const projectId = c.req.query("projectId");
     if (!projectId) return c.json({ error: "projectId query parameter required" }, 400);
     const issueNumberParam = c.req.query("issueNumber");
     const statusName = c.req.query("statusName") || undefined;
+    const slim = c.req.query("slim") === "1";
     const result = await issueService.listIssues(
       projectId,
       issueNumberParam ? Number(issueNumberParam) : undefined,
       statusName,
+      slim ? { excludeDescription: true } : undefined,
     );
     return c.json(result);
   });
