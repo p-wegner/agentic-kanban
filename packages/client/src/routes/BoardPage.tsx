@@ -53,6 +53,11 @@ import { ToastContainer, showToast } from "../components/Toast.js";
 import { suggestBranchName } from "../lib/branch.js";
 import { MentionProvider } from "../lib/MentionContext.js";
 import { apiFetch } from "../lib/api.js";
+import { matchesBoardFilters } from "../lib/boardFiltering.js";
+import { runCreateIssueFlow, type CreateIssuePayload } from "../lib/createIssueService.js";
+import { applyLocalReorder, moveIssueToStatus } from "../lib/issueMoveHelpers.js";
+import { createQuickUpdateHandlers } from "../lib/issueQuickUpdates.js";
+import { useColumnResize } from "../lib/columnResizeHandler.js";
 import { useBoardEvents, type LiveSessionStats, type TodoItem, type ApprovalRequest } from "../lib/useBoardEvents.js";
 import { sendDesktopNotification } from "../lib/desktop.js";
 import { useActivityNotifications, type NotificationEvent } from "../hooks/useActivityNotifications.js";
@@ -72,15 +77,12 @@ const BoardOverlayPanels = lazy(() => import("../components/BoardOverlayPanels.j
 import { AgentLiveTickerPanel } from "../components/AgentLiveTickerPanel.js";
 import { useAgentLiveTicker } from "../hooks/useAgentLiveTicker.js";
 import type {
-  CreateIssueRequest,
   DependencyInfo,
   IssueWithStatus,
   MilestoneResponse,
-  ProfileSelection,
   StatusWithIssues,
   UpdateIssueRequest,
 } from "@agentic-kanban/shared";
-import { isIssueInFlight } from "@agentic-kanban/shared";
 import type { BoardViewState, SavedViewReference } from "../lib/boardSavedViews.js";
 
 /** Lightweight fallback shown for the ~1 frame it takes to fetch a lazy view chunk. */
@@ -148,39 +150,6 @@ function stringifyForIssueCard(issue: IssueWithStatus): string {
     readyForMerge: (issue as IssueWithStatus & { readyForMerge?: boolean }).readyForMerge,
   };
   return JSON.stringify(normalized);
-}
-
-/** Filter predicate: true when the issue matches all active board filters. */
-function matchesBoardFilters(
-  issue: IssueWithStatus,
-  options: {
-    focusMode: boolean;
-    statusFilterId: string | null;
-    activeTagIds: Set<string>;
-    milestoneFilterId: string | null;
-    issueTypeFilter: string | null;
-    showBlocked: boolean;
-    showStaleOnly: boolean;
-    searchQuery: string;
-  },
-): boolean {
-  const { focusMode, statusFilterId, activeTagIds, milestoneFilterId, issueTypeFilter, showBlocked, showStaleOnly, searchQuery } = options;
-  if (focusMode && !isIssueInFlight(issue.workspaceSummary)) return false;
-  if (statusFilterId && issue.statusId !== statusFilterId) return false;
-  if (activeTagIds.size > 0 && !issue.tags?.some((tag) => activeTagIds.has(tag.id))) return false;
-  if (milestoneFilterId && issue.milestoneId !== milestoneFilterId) return false;
-  if (issueTypeFilter && issue.issueType !== issueTypeFilter) return false;
-  if (showBlocked && !(issue as IssueWithStatus & { isBlocked?: boolean }).isBlocked) return false;
-  if (showStaleOnly && !issue.isStale) return false;
-  if (searchQuery) {
-    const q = searchQuery.toLowerCase();
-    return (
-      issue.title.toLowerCase().includes(q) ||
-      (issue.description?.toLowerCase().includes(q) ?? false) ||
-      (issue.tags?.some((tag) => tag.name.toLowerCase().includes(q)) ?? false)
-    );
-  }
-  return true;
 }
 
 /** Milestone progress banner shown above the kanban board when a milestone filter is active. */
@@ -314,10 +283,7 @@ export function BoardPage() {
   const panels = useBoardPanels();
   const tickerEntries = useAgentLiveTicker(columns, sessionActivity, panels.showLiveActivityTicker);
   const agentQuestionsCount = useAgentQuestionsCount(activeProjectId);
-  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
-    try { return JSON.parse(localStorage.getItem("kanban-column-widths") ?? "{}"); } catch { return {}; }
-  });
-  const resizingRef = useRef<{ colId: string; startX: number; startWidth: number } | null>(null);
+  const { columnWidths, handleColumnResizeStart, resetColumnWidth } = useColumnResize();
 
   const [moveToDonePending, setMoveToDonePending] = useState<{ issue: IssueWithStatus; confirm: () => Promise<void> } | null>(null);
   const [dependencyImpactPending, setDependencyImpactPending] = useState<{
@@ -758,134 +724,23 @@ export function BoardPage() {
     showToast(`Removed "${project?.name ?? "project"}"`, "success");
   }
 
-  async function handleCreateIssue(data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; profile?: ProfileSelection; model?: string; isDirect?: boolean; skillId?: string }) {
-    setMutating(true);
-    setError(null);
-    const { startWorkspace, planMode, profile, model, isDirect, skillId, ...issueData } = data;
-    const tempIssueId = `pending-${Date.now()}`;
-    const targetColumn = columnsRef.current.find((col) => col.id === issueData.statusId);
-    const now = new Date().toISOString();
-    if (targetColumn) {
-      const optimisticIssue: IssueWithStatus = {
-        id: tempIssueId,
-        issueNumber: null,
-        title: issueData.title,
-        description: issueData.description ?? null,
-        priority: issueData.priority ?? "medium",
-        issueType: issueData.issueType ?? "task",
-        sortOrder: (targetColumn.issues[0]?.sortOrder ?? 0) - 100,
-        statusId: issueData.statusId,
-        projectId: issueData.projectId,
-        createdAt: now,
-        updatedAt: now,
-        statusChangedAt: null,
-        statusName: targetColumn.name,
-        skipAutoReview: issueData.skipAutoReview,
-        estimate: issueData.estimate ?? null,
-        dueDate: null,
-        tags: [],
-      };
-      const withOptimisticIssue = columnsRef.current.map((col) =>
-        col.id === issueData.statusId
-          ? { ...col, issues: [optimisticIssue, ...col.issues] }
-          : col,
-      );
-      setColumns(withOptimisticIssue);
-      columnsRef.current = withOptimisticIssue;
-      setPendingIssueIds((prev) => new Set([...prev, tempIssueId]));
-      if (startWorkspace) {
-        setPendingWorkspaceIssueIds((prev) => new Set([...prev, tempIssueId]));
-      }
-    }
-    try {
-      const created = await apiFetch<{ id: string; issueNumber: number; title: string }>(
-        "/api/issues",
-        { method: "POST", body: JSON.stringify(issueData) },
-      );
-      setCreatingInColumnId(null);
-      setExpandedCreatePanel(null);
-      setPendingIssueIds((prev) => {
-        const next = new Set(prev);
-        next.delete(tempIssueId);
-        return next;
-      });
-      setPendingWorkspaceIssueIds((prev) => {
-        const next = new Set(prev);
-        next.delete(tempIssueId);
-        if (startWorkspace) next.add(created.id);
-        return next;
-      });
-      const board = await refetchBoard();
-      pendingBoardRefreshRef.current = false;
-
-      if (startWorkspace && activeProject) {
-        try {
-          const branch = suggestBranchName({
-            issueNumber: created.issueNumber,
-            title: created.title,
-          });
-          const ws = await apiFetch<{ id: string; sessionId?: string }>("/api/workspaces", {
-            method: "POST",
-            body: JSON.stringify({
-              issueId: created.id,
-              branch: isDirect ? undefined : branch,
-              baseBranch: isDirect ? undefined : activeProject.defaultBranch ?? undefined,
-              isDirect: isDirect || undefined,
-              planMode: planMode || undefined,
-              profile: profile || undefined,
-              model: model || undefined,
-              skillId: skillId || undefined,
-            }),
-          });
-          let launchedBoard = board;
-          try {
-            launchedBoard = await refetchBoard();
-            pendingBoardRefreshRef.current = false;
-          } catch {
-            // workspace created; later realtime/poll refresh reconciles the card
-          }
-          for (const col of launchedBoard ?? board ?? columns) {
-            const found = col.issues.find((i) => i.id === created.id);
-            if (found) {
-              setWorkspaceIssue(found);
-              if (ws.sessionId) {
-                setWorkspaceInitial({ workspaceId: ws.id, sessionId: ws.sessionId });
-              }
-              break;
-            }
-          }
-          showToast("Issue and workspace created", "success");
-        } catch {
-          setPendingWorkspaceIssueIds((prev) => {
-            const next = new Set(prev);
-            next.delete(created.id);
-            return next;
-          });
-          showToast("Issue created, but workspace creation failed", "error");
-        }
-      } else {
-        showToast("Issue created", "success");
-      }
-    } catch {
-      setColumns((prev) => {
-        const next = prev.map((col) => ({ ...col, issues: col.issues.filter((issue) => issue.id !== tempIssueId) }));
-        columnsRef.current = next;
-        return next;
-      });
-      setPendingIssueIds((prev) => {
-        const next = new Set(prev);
-        next.delete(tempIssueId);
-        return next;
-      });
-      setPendingWorkspaceIssueIds((prev) => {
-        const next = new Set(prev);
-        next.delete(tempIssueId);
-        return next;
-      });
-      showToast("Failed to create issue", "error");
-    } finally {
-      setMutating(false);
-    }
+  async function handleCreateIssue(data: CreateIssuePayload) {
+    await runCreateIssueFlow(data, {
+      columns,
+      columnsRef,
+      pendingBoardRefreshRef,
+      activeProject,
+      setMutating,
+      setError,
+      setColumns,
+      setCreatingInColumnId,
+      setExpandedCreatePanel,
+      setPendingIssueIds,
+      setPendingWorkspaceIssueIds,
+      setWorkspaceIssue,
+      setWorkspaceInitial,
+      refetchBoard,
+    });
   }
 
   async function handleUpdateIssue(id: string, data: UpdateIssueRequest) {
@@ -920,86 +775,8 @@ export function BoardPage() {
     }
   }
 
-  function applyOptimisticIssueUpdate(issueId: string, updater: (issue: IssueWithStatus) => IssueWithStatus) {
-    setColumns((prev) => {
-      const next = prev.map((col) => ({
-        ...col,
-        issues: col.issues.map((iss) => (iss.id === issueId ? updater(iss) : iss)),
-      }));
-      columnsRef.current = next;
-      return next;
-    });
-  }
-
-  async function handleQuickPriorityChange(issueId: string, priority: string) {
-    const prev = columnsRef.current.flatMap((c) => c.issues).find((i) => i.id === issueId);
-    applyOptimisticIssueUpdate(issueId, (iss) => ({ ...iss, priority }));
-    try {
-      await apiFetch(`/api/issues/${issueId}`, {
-        method: "PATCH",
-        body: JSON.stringify({ priority }),
-      });
-      await refetchBoard();
-    } catch {
-      if (prev) applyOptimisticIssueUpdate(issueId, () => prev);
-      showToast("Failed to update priority", "error");
-    }
-  }
-
-  async function handleQuickAddTag(issueId: string, tagId: string) {
-    const tag = allTags.find((t) => t.id === tagId);
-    if (!tag) return;
-    applyOptimisticIssueUpdate(issueId, (iss) => ({
-      ...iss,
-      tags: [...(iss.tags ?? []), tag],
-    }));
-    try {
-      await apiFetch(`/api/issues/${issueId}/tags`, {
-        method: "POST",
-        body: JSON.stringify({ tagId }),
-      });
-      await refetchBoard();
-    } catch {
-      applyOptimisticIssueUpdate(issueId, (iss) => ({
-        ...iss,
-        tags: (iss.tags ?? []).filter((t) => t.id !== tagId),
-      }));
-      showToast("Failed to add tag", "error");
-    }
-  }
-
-  async function handleQuickRemoveTag(issueId: string, tagId: string) {
-    applyOptimisticIssueUpdate(issueId, (iss) => ({
-      ...iss,
-      tags: (iss.tags ?? []).filter((t) => t.id !== tagId),
-    }));
-    try {
-      await apiFetch(`/api/issues/${issueId}/tags/${tagId}`, { method: "DELETE" });
-      await refetchBoard();
-    } catch {
-      const tag = allTags.find((t) => t.id === tagId);
-      if (tag) {
-        applyOptimisticIssueUpdate(issueId, (iss) => ({
-          ...iss,
-          tags: [...(iss.tags ?? []), tag],
-        }));
-      }
-      showToast("Failed to remove tag", "error");
-    }
-  }
-
-  async function handleQuickTogglePinned(issueId: string, pinned: boolean) {
-    applyOptimisticIssueUpdate(issueId, (iss) => ({ ...iss, pinned }));
-    try {
-      await apiFetch(`/api/issues/${issueId}`, {
-        method: "PATCH",
-        body: JSON.stringify({ pinned }),
-      });
-    } catch {
-      applyOptimisticIssueUpdate(issueId, (iss) => ({ ...iss, pinned: !pinned }));
-      showToast("Failed to update pin", "error");
-    }
-  }
+  const { handleQuickPriorityChange, handleQuickAddTag, handleQuickRemoveTag, handleQuickTogglePinned } =
+    createQuickUpdateHandlers({ columnsRef, setColumns, allTags, refetchBoard });
 
   function handleDragStart(e: React.DragEvent, issue: IssueWithStatus) {
     e.dataTransfer.setData("application/json", JSON.stringify({
@@ -1081,19 +858,7 @@ export function BoardPage() {
     if (isReorder) {
       const capturedIssueId = issueId;
       const capturedSortOrder = sortOrder;
-      setColumns((prev) =>
-        prev.map((col) => {
-          if (col.id !== targetStatusId) return col;
-          const reordered = col.issues
-            .map((issue) =>
-              issue.id === capturedIssueId
-                ? { ...issue, sortOrder: capturedSortOrder }
-                : issue,
-            )
-            .sort((a, b) => a.sortOrder - b.sortOrder);
-          return { ...col, issues: reordered };
-        }),
-      );
+      setColumns((prev) => applyLocalReorder(prev, targetStatusId, capturedIssueId, capturedSortOrder));
     }
 
     try {
@@ -1183,38 +948,7 @@ export function BoardPage() {
   function moveIssueLocally(issue: IssueWithStatus, targetStatus: StatusWithIssues) {
     const changedAt = new Date().toISOString();
     setColumns((prev) => {
-      let foundIssue: IssueWithStatus | undefined;
-      const withoutIssue = prev.map((col) => {
-        const remaining = col.issues.filter((item) => {
-          if (item.id === issue.id) {
-            foundIssue = item;
-            return false;
-          }
-          return true;
-        });
-        return remaining.length === col.issues.length ? col : { ...col, issues: remaining };
-      });
-      const sourceIssue = foundIssue ?? issue;
-      const next = withoutIssue.map((col) => {
-        if (col.id !== targetStatus.id) return col;
-        const nextSortOrder = col.issues.length > 0
-          ? Math.max(...col.issues.map((item) => item.sortOrder)) + 100
-          : 0;
-        return {
-          ...col,
-          issues: [
-            ...col.issues,
-            {
-              ...sourceIssue,
-              statusId: targetStatus.id,
-              statusName: targetStatus.name,
-              sortOrder: nextSortOrder,
-              updatedAt: changedAt,
-              statusChangedAt: changedAt,
-            },
-          ],
-        };
-      });
+      const next = moveIssueToStatus(prev, issue, targetStatus, changedAt);
       columnsRef.current = next;
       return next;
     });
@@ -1335,31 +1069,6 @@ export function BoardPage() {
       });
     }
   }
-
-  const handleColumnResizeStart = useCallback((colId: string, e: React.MouseEvent) => {
-    e.preventDefault();
-    const colEl = document.getElementById(`column-${colId}`);
-    const startWidth = colEl ? colEl.getBoundingClientRect().width : (columnWidths[colId] ?? 288);
-    resizingRef.current = { colId, startX: e.clientX, startWidth };
-
-    const onMouseMove = (ev: MouseEvent) => {
-      if (!resizingRef.current) return;
-      const delta = ev.clientX - resizingRef.current.startX;
-      const newWidth = Math.max(160, Math.min(800, resizingRef.current.startWidth + delta));
-      setColumnWidths((prev) => ({ ...prev, [resizingRef.current!.colId]: newWidth }));
-    };
-    const onMouseUp = () => {
-      setColumnWidths((prev) => {
-        try { localStorage.setItem("kanban-column-widths", JSON.stringify(prev)); } catch {}
-        return prev;
-      });
-      resizingRef.current = null;
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-    };
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-  }, [columnWidths]);
 
   const [showBlocked, setShowBlocked] = useState(false);
   const [showStaleOnly, setShowStaleOnly] = useState(false);
@@ -2122,12 +1831,7 @@ export function BoardPage() {
             onMoveToNext={handleMoveToNext}
             onDeleteIssue={handleDeleteIssue}
             onColumnResizeStart={handleColumnResizeStart}
-            onColumnResizeReset={(colId) => setColumnWidths((prev) => {
-              const next = { ...prev };
-              delete next[colId];
-              try { localStorage.setItem("kanban-column-widths", JSON.stringify(next)); } catch {}
-              return next;
-            })}
+            onColumnResizeReset={resetColumnWidth}
             onCreateIssue={handleCreateIssue}
             onExpandCreate={(statusId, statusName, state) => setExpandedCreatePanel({ statusId, statusName, state })}
             selectedIssueIds={bulk.selectedBoardIssueIds}
