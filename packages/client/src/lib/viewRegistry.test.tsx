@@ -34,7 +34,11 @@ describe("VIEW_REGISTRY", () => {
       "kanban", "backlog", "graph", "table", "agents", "timeline", "metrics",
       "quality-metrics", "digest", "strategy", "focus", "butler", "workflows", "workflow-analytics", "insights", "swimlane", "flaky-tests",
       "monitor-history", "health-events", "runbooks", "capacity", "constellation", "momentum", "activity", "stale-work", "throughput",
+<<<<<<< HEAD
       "provider-mix", "lead-time", "scorecard-distribution", "provider-cost", "fireworks",
+=======
+      "provider-mix", "lead-time", "scorecard-distribution", "fireworks", "burndown",
+>>>>>>> 7185088f (feat(#510): add burndown chart of remaining open issues per day)
     ];
     expect(VIEW_IDS.slice().sort()).toEqual(expected.slice().sort());
   });
@@ -88,7 +92,11 @@ describe("VIEW_REGISTRY", () => {
       [
         "digest", "flaky-tests", "focus", "insights", "metrics", "quality-metrics", "strategy", "swimlane", "workflows", "workflow-analytics",
         "monitor-history", "health-events", "runbooks", "capacity", "constellation", "momentum", "activity", "stale-work", "throughput",
+<<<<<<< HEAD
         "provider-mix", "lead-time", "scorecard-distribution", "provider-cost", "fireworks",
+=======
+        "provider-mix", "lead-time", "scorecard-distribution", "fireworks", "burndown",
+>>>>>>> 7185088f (feat(#510): add burndown chart of remaining open issues per day)
       ].sort(),
     );
   });
