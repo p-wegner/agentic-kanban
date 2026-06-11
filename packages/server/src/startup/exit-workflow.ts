@@ -17,6 +17,7 @@ import { isCodexUsageLimitStats } from "../services/codex-rate-limit.js";
 import { rotateCodexLicense } from "../services/codex-license-ring.js";
 import { isClaudeUsageLimitStats } from "../services/claude-rate-limit.js";
 import { rotateClaudeSubscription } from "../services/claude-subscription-ring.js";
+import { buildLearningStepPrompt } from "../services/merge-helpers.service.js";
 
 type WorkspaceRow = typeof workspaces.$inferSelect;
 
@@ -54,7 +55,7 @@ async function launchLearningStep(database: Database, sessionManager: ReturnType
     const claudeProfile = isMockProfile(profile) ? undefined : profile;
     const effectiveProfile = getEffectiveProfile(learnPrefs, provider, claudeProfile);
     const profileSelection = effectiveProfile ? { provider, name: effectiveProfile } : undefined;
-    const prompt = `/learning-step\n\nRun the learning step skill to extract insights from recent session transcripts and update docs/hooks.`;
+    const prompt = buildLearningStepPrompt(false);
     const learnSessId = await sessionManager.startSession({ workspaceId, prompt, agentCommand, agentArgs, claudeProfile: effectiveProfile, provider: toExecutorProvider(provider), triggerType: "learning", profile: profileSelection });
     learningSessionIds.add(learnSessId);
     console.log(`[workflow] learning step (${label}) started: session=${learnSessId}`);
