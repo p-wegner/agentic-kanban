@@ -206,8 +206,31 @@ pnpm cli -- register /path/to/your/repo
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `3001` | HTTP server port |
+| `KANBAN_HOST` | `127.0.0.1` | Hostname/interface to bind. Set to `0.0.0.0` (or a specific Tailscale/LAN IP) to accept connections from other machines. |
+| `KANBAN_TLS_CERT` | — | Path to a PEM **certificate**. When set together with `KANBAN_TLS_KEY`, the server serves over TLS with **HTTP/2** instead of plain HTTP/1.1 (see below). |
+| `KANBAN_TLS_KEY` | — | Path to the PEM **private key** that pairs with `KANBAN_TLS_CERT`. |
 | `MOCK_AGENT` | — | Set to `1` to use mock agent for all workspace launches |
 | `AGENT_COMMAND` | — | Override the agent binary path (used by E2E tests) |
+
+### HTTPS / HTTP/2 (network access)
+
+By default the server runs plain **HTTP/1.1** — correct for the local-first, single-user case (`http://localhost:3001`). Browsers cap HTTP/1.1 at ~6 concurrent connections per origin, which can throttle request-heavy views when the board is accessed **over a network**.
+
+Set `KANBAN_TLS_CERT` **and** `KANBAN_TLS_KEY` to PEM file paths to serve over TLS with **HTTP/2**, which multiplexes every request over a single connection (no 6-connection cap). The opt-in is a no-op when the variables are unset.
+
+```powershell
+$env:KANBAN_TLS_CERT = "C:\certs\board.crt"
+$env:KANBAN_TLS_KEY  = "C:\certs\board.key"
+$env:KANBAN_HOST     = "0.0.0.0"          # accept remote connections
+npx agentic-kanban dev
+# → Server running at https://0.0.0.0:3001 (HTTP/2, HTTP/1.1 fallback enabled)
+```
+
+Notes:
+- **Browsers only negotiate HTTP/2 over TLS** — there is no benefit without a cert, and plain `http://localhost` dev stays HTTP/1.1.
+- **HTTP/1.1 still works** (the server sets `allowHTTP1`), so non-HTTP/2 clients and the board's **WebSocket** live-updates (which upgrade over HTTP/1.1) keep functioning.
+- If `KANBAN_TLS_CERT`/`KANBAN_TLS_KEY` are set but unreadable, the server logs a warning and falls back to HTTP/1.1.
+- **Tailscale:** `tailscale cert <name>.ts.net` issues a browser-trusted cert + key you can point these variables at. Alternatively, front the plain HTTP/1.1 server with a TLS-terminating reverse proxy (`tailscale serve`, Caddy, nginx) — that also lifts the connection cap with zero app config.
 
 ### Development Script (`pnpm dev`)
 
