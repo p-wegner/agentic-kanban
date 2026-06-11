@@ -45,7 +45,8 @@ export type ViewMode =
   | "scorecard-distribution"
   | "provider-cost"
   | "agent-throughput"
-  | "calendar";
+  | "calendar"
+  | "burndown";
 
 export interface ViewDescriptor {
   /** Stable view id — matches BoardPage's `viewMode` state. */
@@ -280,6 +281,13 @@ const ICON = {
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
       <circle cx="18" cy="5" r="1.5" fill="currentColor" stroke="none" />
+    </svg>
+  ),
+  burndown: (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 13l4-3 4 2 4-5 4 3" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeDasharray="3 3" d="M4 4l16 16" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 19h18" />
     </svg>
   ),
   calendar: (
@@ -642,6 +650,17 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     icon: ICON["agent-throughput"],
     paletteIcon: "AT",
     paletteDescription: "Rank agent providers by issues merged, with median lead time",
+    activeClass: "bg-emerald-600 text-white",
+    group: "secondary",
+  },
+  {
+    id: "burndown",
+    toolbarLabel: "Burn",
+    label: "Burndown",
+    tooltip: "Burndown — remaining open issues per day vs. the ideal trend to zero",
+    icon: ICON.burndown,
+    paletteIcon: "BD",
+    paletteDescription: "Burndown chart of remaining open issues per day with an ideal target trend line",
     activeClass: "bg-emerald-600 text-white",
     group: "secondary",
   },
