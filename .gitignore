@@ -29,6 +29,9 @@ bash.exe.stackdump
 HANDOFF.md
 CLAUDE.local.md
 verify-*.png
+# Scratch UI screenshots from visual verification — committed assets live in docs/screenshots/
+/*.png
+/screenshots/
 # npm pack build artifacts
 *.tgz
 
