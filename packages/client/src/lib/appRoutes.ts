@@ -32,6 +32,7 @@ const VIEW_ROUTE_PATHS: Record<ViewMode, string> = {
   "lead-time": "/lead-time",
   "scorecard-distribution": "/scorecard-distribution",
   "provider-cost": "/provider-cost",
+  calendar: "/calendar",
 };
 
 const ROUTE_ALIASES: Record<string, ViewMode> = {
