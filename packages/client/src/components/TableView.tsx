@@ -1,9 +1,16 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues, UpdateIssueRequest } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
-import { formatDateKeyLong, getLocalDateKey } from "../lib/dateKey.js";
+import { formatDateKeyLong } from "../lib/dateKey.js";
 import { showToast } from "./Toast.js";
 import { CollapsibleSection } from "./CollapsibleSection.js";
+import { filterIssues } from "../lib/tableView-filters.js";
+import { applySortDirection, compareSortKey } from "../lib/tableView-sorting.js";
+import type { SortDir, SortKey } from "../lib/tableView-sorting.js";
+import { bulkAddTag, bulkDeleteIssues, bulkMoveStatus, bulkRemoveTag, bulkUpdateIssues } from "../lib/tableView-bulk-ops.js";
+import type { BulkOpDeps } from "../lib/tableView-bulk-ops.js";
+import { useBulkOperations } from "../hooks/useBulkOperations.js";
+import type { Tag } from "../hooks/useBulkOperations.js";
 
 interface TableViewProps {
   columns: StatusWithIssues[];
@@ -12,12 +19,6 @@ interface TableViewProps {
   onRefresh?: () => void;
   createdDateFilter?: string | null;
   onClearCreatedDateFilter?: () => void;
-}
-
-interface Tag {
-  id: string;
-  name: string;
-  color: string | null;
 }
 
 const ISSUE_TYPE_LABEL: Record<string, string> = {
@@ -43,16 +44,8 @@ const STATUS_CLASS: Record<string, string> = {
   "Cancelled": "text-gray-500 bg-gray-100",
 };
 
-const ARCHIVE_STATUSES = new Set(["Done", "Cancelled"]);
-
-type SortKey = "number" | "title" | "status" | "priority" | "type" | "estimate" | "updated" | "dueDate";
-type SortDir = "asc" | "desc";
-
-const ISSUE_TYPE_ORDER: Record<string, number> = { bug: 0, feature: 1, task: 2, chore: 3 };
 const ESTIMATE_OPTIONS = ["XS", "S", "M", "L", "XL"] as const;
 const PRIORITY_OPTIONS = ["critical", "high", "medium", "low"] as const;
-const ESTIMATE_ORDER: Record<string, number> = { XS: 0, S: 1, M: 2, L: 3, XL: 4 };
-const PRIORITY_ORDER: Record<string, number> = { critical: 0, urgent: 0, high: 1, medium: 2, low: 3 };
 const PRIORITY_LABEL: Record<string, string> = { critical: "Critical", urgent: "Urgent", high: "High", medium: "Medium", low: "Low" };
 const PRIORITY_CLASS: Record<string, string> = {
   critical: "text-red-700 bg-red-50",
@@ -82,6 +75,136 @@ function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-US', { month: "short", day: "numeric", year: "numeric" });
 }
 
+type TableSort = { key: SortKey; dir: SortDir };
+
+const SORTABLE_COLUMNS: [SortKey, string][] = [
+  ["number", "#"],
+  ["title", "Title"],
+  ["status", "Status"],
+  ["priority", "Priority"],
+  ["type", "Type"],
+  ["estimate", "Estimate"],
+  ["updated", "Updated"],
+  ["dueDate", "Due Date"],
+];
+
+function SortIcon({ col, sort }: { col: SortKey; sort: TableSort }) {
+  if (sort.key !== col) return <span className="text-gray-300 dark:text-gray-600 ml-1">↕</span>;
+  return <span className="text-brand-500 ml-1">{sort.dir === "asc" ? "↑" : "↓"}</span>;
+}
+
+interface TableHeaderProps {
+  sort: TableSort;
+  onSortChange: (key: SortKey) => void;
+  allChecked: boolean;
+  someChecked: boolean;
+  onToggleSelectAll: () => void;
+}
+
+function TableHeader({ sort, onSortChange, allChecked, someChecked, onToggleSelectAll }: TableHeaderProps) {
+  return (
+    <thead className="sticky top-0 bg-gray-50 dark:bg-gray-800 z-10">
+      <tr>
+        <th className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 w-8">
+          <input
+            type="checkbox"
+            checked={allChecked}
+            ref={(el) => { if (el) el.indeterminate = someChecked && !allChecked; }}
+            onChange={onToggleSelectAll}
+            className="rounded border-gray-300 dark:border-gray-600 text-brand-500 cursor-pointer"
+            aria-label="Select all"
+          />
+        </th>
+        {SORTABLE_COLUMNS.map(([key, label]) => (
+          <th
+            key={key}
+            onClick={() => onSortChange(key)}
+            className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2 border-b border-gray-200 dark:border-gray-700 cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-200 whitespace-nowrap"
+          >
+            {label}<SortIcon col={key} sort={sort} />
+          </th>
+        ))}
+        <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2 border-b border-gray-200 dark:border-gray-700 whitespace-nowrap">
+          Tags
+        </th>
+      </tr>
+    </thead>
+  );
+}
+
+interface TableRowProps {
+  issue: IssueWithStatus;
+  selected: boolean;
+  onSelect: (e: React.MouseEvent) => void;
+  onClick: () => void;
+}
+
+function TableRow({ issue, selected, onSelect, onClick }: TableRowProps) {
+  return (
+    <tr
+      onClick={onClick}
+      className={`border-b border-gray-100 dark:border-gray-800 hover:bg-brand-50 dark:hover:bg-brand-900/20 cursor-pointer transition-colors ${selected ? "bg-brand-50/60 dark:bg-brand-900/10" : ""}`}
+    >
+      <td className="px-3 py-1.5" onClick={onSelect}>
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={() => {}}
+          className="rounded border-gray-300 dark:border-gray-600 text-brand-500 cursor-pointer"
+          aria-label={`Select issue ${issue.issueNumber}`}
+        />
+      </td>
+      <td className="px-3 py-1.5 text-gray-400 dark:text-gray-500 text-xs whitespace-nowrap">
+        #{issue.issueNumber ?? "—"}
+      </td>
+      <td className="px-3 py-1.5 max-w-xs">
+        <span className="font-medium text-gray-900 dark:text-gray-100 truncate block">{issue.title}</span>
+      </td>
+      <td className="px-3 py-1.5 whitespace-nowrap">
+        <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_CLASS[issue.statusName] ?? "text-gray-600 bg-gray-100"}`}>
+          {issue.statusName}
+        </span>
+      </td>
+      <td className="px-3 py-1.5 whitespace-nowrap">
+        <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${PRIORITY_CLASS[issue.priority ?? "medium"] ?? PRIORITY_CLASS.medium}`}>
+          {PRIORITY_LABEL[issue.priority ?? "medium"] ?? issue.priority ?? "medium"}
+        </span>
+      </td>
+      <td className="px-3 py-1.5 whitespace-nowrap">
+        <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${ISSUE_TYPE_CLASS[issue.issueType ?? "task"] ?? ""}`}>
+          {ISSUE_TYPE_LABEL[issue.issueType ?? "task"] ?? issue.issueType ?? "task"}
+        </span>
+      </td>
+      <td className="px-3 py-1.5 whitespace-nowrap text-xs text-gray-600 dark:text-gray-400">
+        {issue.estimate ?? <span className="text-gray-300 dark:text-gray-600">—</span>}
+      </td>
+      <td className="px-3 py-1.5 whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">
+        {formatDate(issue.updatedAt)}
+      </td>
+      <td className="px-3 py-1.5 whitespace-nowrap text-xs">
+        {issue.dueDate ? (() => {
+          const overdue = new Date(issue.dueDate) < new Date(new Date().toDateString()) &&
+            issue.statusName !== "Done" && issue.statusName !== "Cancelled";
+          return (
+            <span className={overdue ? "text-red-600 font-medium" : "text-gray-500 dark:text-gray-400"}>
+              {formatDate(issue.dueDate)}
+            </span>
+          );
+        })() : <span className="text-gray-300 dark:text-gray-600">—</span>}
+      </td>
+      <td className="px-3 py-1.5">
+        <div className="flex flex-wrap gap-1">
+          {(issue.tags ?? []).map((tag) => (
+            <span key={tag.id} className={`inline-flex px-1.5 py-0.5 rounded text-xs font-medium ${tagClass(tag.color)}`}>
+              {tag.name}
+            </span>
+          ))}
+        </div>
+      </td>
+    </tr>
+  );
+}
+
 export function TableView({
   columns,
   onIssueClick,
@@ -90,25 +213,27 @@ export function TableView({
   createdDateFilter,
   onClearCreatedDateFilter,
 }: TableViewProps) {
-  const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: "number", dir: "asc" });
+  const [sort, setSort] = useState<TableSort>({ key: "number", dir: "asc" });
   const [statusFilter, setStatusFilter] = useState<string>("active");
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [bulkLoading, setBulkLoading] = useState(false);
-  const [bulkStatusOpen, setBulkStatusOpen] = useState(false);
-  const [bulkPriorityOpen, setBulkPriorityOpen] = useState(false);
-  const [bulkEstimateOpen, setBulkEstimateOpen] = useState(false);
-  const [bulkDueDateOpen, setBulkDueDateOpen] = useState(false);
-  const [bulkTagOpen, setBulkTagOpen] = useState(false);
-  const [bulkRemoveTagOpen, setBulkRemoveTagOpen] = useState(false);
-  const [bulkDueDate, setBulkDueDate] = useState("");
-  const [allTags, setAllTags] = useState<Tag[]>([]);
-  const [tagsLoaded, setTagsLoaded] = useState(false);
-  const statusDropdownRef = useRef<HTMLDivElement>(null);
-  const priorityDropdownRef = useRef<HTMLDivElement>(null);
-  const estimateDropdownRef = useRef<HTMLDivElement>(null);
-  const dueDateDropdownRef = useRef<HTMLDivElement>(null);
-  const tagDropdownRef = useRef<HTMLDivElement>(null);
-  const removeTagDropdownRef = useRef<HTMLDivElement>(null);
+  const {
+    selectedIds, setSelectedIds,
+    bulkLoading, setBulkLoading,
+    bulkStatusOpen, setBulkStatusOpen,
+    bulkPriorityOpen, setBulkPriorityOpen,
+    bulkEstimateOpen, setBulkEstimateOpen,
+    bulkDueDateOpen, setBulkDueDateOpen,
+    bulkTagOpen, setBulkTagOpen,
+    bulkRemoveTagOpen, setBulkRemoveTagOpen,
+    bulkDueDate, setBulkDueDate,
+    allTags, setAllTags,
+    tagsLoaded, setTagsLoaded,
+    statusDropdownRef,
+    priorityDropdownRef,
+    estimateDropdownRef,
+    dueDateDropdownRef,
+    tagDropdownRef,
+    removeTagDropdownRef,
+  } = useBulkOperations();
 
   const allIssues = columns.flatMap((col) =>
     col.issues.map((issue) => ({ ...issue, statusName: col.name }))
@@ -119,42 +244,12 @@ export function TableView({
     if (createdDateFilter) setStatusFilter("all");
   }, [createdDateFilter]);
 
-  const q = searchQuery?.toLowerCase() ?? "";
-  const filtered = allIssues.filter((issue) => {
-    if (statusFilter === "active" && ARCHIVE_STATUSES.has(issue.statusName)) return false;
-    if (statusFilter !== "active" && statusFilter !== "all" && issue.statusName !== statusFilter) return false;
-    if (createdDateFilter && getLocalDateKey(issue.createdAt) !== createdDateFilter) return false;
-    if (q) return issue.title.toLowerCase().includes(q) || (issue.description ?? "").toLowerCase().includes(q);
-    return true;
-  });
+  const filtered = filterIssues(allIssues, { statusFilter, searchQuery, createdDateFilter });
 
-  const sorted = [...filtered].sort((a, b) => {
-    let cmp = 0;
-    switch (sort.key) {
-      case "number": cmp = (a.issueNumber ?? 0) - (b.issueNumber ?? 0); break;
-      case "title": cmp = a.title.localeCompare(b.title); break;
-      case "status": cmp = a.statusName.localeCompare(b.statusName); break;
-      case "priority": cmp = (PRIORITY_ORDER[a.priority ?? "medium"] ?? 2) - (PRIORITY_ORDER[b.priority ?? "medium"] ?? 2); break;
-      case "type": cmp = (ISSUE_TYPE_ORDER[a.issueType ?? "task"] ?? 2) - (ISSUE_TYPE_ORDER[b.issueType ?? "task"] ?? 2); break;
-      case "estimate": cmp = (ESTIMATE_ORDER[a.estimate ?? ""] ?? 99) - (ESTIMATE_ORDER[b.estimate ?? ""] ?? 99); break;
-      case "updated": cmp = new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime(); break;
-      case "dueDate": {
-        const aTime = a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
-        const bTime = b.dueDate ? new Date(b.dueDate).getTime() : Infinity;
-        cmp = aTime - bTime;
-        break;
-      }
-    }
-    return sort.dir === "asc" ? cmp : -cmp;
-  });
+  const sorted = [...filtered].sort((a, b) => applySortDirection(compareSortKey(a, b, sort.key), sort.dir));
 
   function toggleSort(key: SortKey) {
     setSort((prev) => prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
-  }
-
-  function SortIcon({ col }: { col: SortKey }) {
-    if (sort.key !== col) return <span className="text-gray-300 dark:text-gray-600 ml-1">↕</span>;
-    return <span className="text-brand-500 ml-1">{sort.dir === "asc" ? "↑" : "↓"}</span>;
   }
 
   const statusNames = [...new Set(columns.map((c) => c.name))];
@@ -193,138 +288,41 @@ export function TableView({
     }
   }
 
+  const bulkOpDeps = (): BulkOpDeps => ({
+    ids: [...activeSelectedIds],
+    api: apiFetch,
+    toast: showToast,
+    setSelectedIds,
+    setBulkLoading,
+    onRefresh,
+  });
+
   async function handleBulkMoveStatus(statusId: string, statusName: string) {
     setBulkStatusOpen(false);
-    setBulkLoading(true);
-    const ids = [...activeSelectedIds];
-    try {
-      await apiFetch("/api/issues/bulk", {
-        method: "PATCH",
-        body: JSON.stringify({ issueIds: ids, updates: { statusId } }),
-      });
-      setSelectedIds(new Set());
-      showToast(`Moved ${ids.length} issue${ids.length !== 1 ? "s" : ""} to "${statusName}"`, "success");
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Bulk move failed", "error");
-    } finally {
-      onRefresh?.();
-      setBulkLoading(false);
-    }
+    await bulkMoveStatus(statusId, statusName, bulkOpDeps());
   }
 
   async function handleBulkUpdate(data: UpdateIssueRequest, successLabel: string) {
     setBulkPriorityOpen(false);
     setBulkEstimateOpen(false);
     setBulkDueDateOpen(false);
-    setBulkLoading(true);
-    const ids = [...activeSelectedIds];
-    try {
-      await apiFetch("/api/issues/bulk", {
-        method: "PATCH",
-        body: JSON.stringify({ issueIds: ids, updates: data }),
-      });
-      setSelectedIds(new Set());
-      showToast(`${successLabel} for ${ids.length} issue${ids.length !== 1 ? "s" : ""}`, "success");
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Bulk update failed", "error");
-    } finally {
-      onRefresh?.();
-      setBulkLoading(false);
-    }
+    await bulkUpdateIssues(data, successLabel, bulkOpDeps());
   }
 
   async function handleBulkAddTag(tag: Tag) {
     setBulkTagOpen(false);
-    setBulkLoading(true);
-    const ids = [...activeSelectedIds];
-    try {
-      const results = await Promise.allSettled(ids.map((id) =>
-        apiFetch(`/api/issues/${id}/tags`, { method: "POST", body: JSON.stringify({ tagId: tag.id }) })
-      ));
-      const failed = results.filter((r) => r.status === "rejected").length;
-      const succeeded = ids.length - failed;
-      setSelectedIds(new Set());
-      if (failed === 0) {
-        showToast(`Added tag "${tag.name}" to ${succeeded} issue${succeeded !== 1 ? "s" : ""}`, "success");
-      } else {
-        showToast(`Added tag to ${succeeded} issue${succeeded !== 1 ? "s" : ""}; ${failed} failed`, "error");
-      }
-    } finally {
-      onRefresh?.();
-      setBulkLoading(false);
-    }
+    await bulkAddTag(tag, bulkOpDeps());
   }
 
   async function handleBulkRemoveTag(tag: Tag) {
     setBulkRemoveTagOpen(false);
-    setBulkLoading(true);
-    const ids = [...activeSelectedIds];
-    try {
-      const results = await Promise.allSettled(ids.map((id) =>
-        apiFetch(`/api/issues/${id}/tags/${tag.id}`, { method: "DELETE" })
-      ));
-      const failed = results.filter((r) => r.status === "rejected").length;
-      const succeeded = ids.length - failed;
-      setSelectedIds(new Set());
-      if (failed === 0) {
-        showToast(`Removed tag "${tag.name}" from ${succeeded} issue${succeeded !== 1 ? "s" : ""}`, "success");
-      } else {
-        showToast(`Removed tag from ${succeeded} issue${succeeded !== 1 ? "s" : ""}; ${failed} failed`, "error");
-      }
-    } finally {
-      onRefresh?.();
-      setBulkLoading(false);
-    }
+    await bulkRemoveTag(tag, bulkOpDeps());
   }
 
   async function handleBulkDelete() {
     if (!confirm(`Delete ${activeSelectedIds.length} issue${activeSelectedIds.length !== 1 ? "s" : ""}? This cannot be undone.`)) return;
-    setBulkLoading(true);
-    const ids = [...activeSelectedIds];
-    try {
-      const results = await Promise.allSettled(ids.map((id) =>
-        apiFetch(`/api/issues/${id}`, { method: "DELETE" })
-      ));
-      const failed = results.filter((r) => r.status === "rejected").length;
-      const succeeded = ids.length - failed;
-      setSelectedIds(new Set());
-      if (failed === 0) {
-        showToast(`Deleted ${succeeded} issue${succeeded !== 1 ? "s" : ""}`, "success");
-      } else {
-        showToast(`Deleted ${succeeded} issue${succeeded !== 1 ? "s" : ""}; ${failed} failed to delete`, "error");
-      }
-    } finally {
-      onRefresh?.();
-      setBulkLoading(false);
-    }
+    await bulkDeleteIssues(bulkOpDeps());
   }
-
-  // Close dropdowns on outside click
-  useEffect(() => {
-    if (!bulkStatusOpen && !bulkPriorityOpen && !bulkEstimateOpen && !bulkDueDateOpen && !bulkTagOpen && !bulkRemoveTagOpen) return;
-    function handle(e: MouseEvent) {
-      if (bulkStatusOpen && statusDropdownRef.current && !statusDropdownRef.current.contains(e.target as Node)) {
-        setBulkStatusOpen(false);
-      }
-      if (bulkPriorityOpen && priorityDropdownRef.current && !priorityDropdownRef.current.contains(e.target as Node)) {
-        setBulkPriorityOpen(false);
-      }
-      if (bulkEstimateOpen && estimateDropdownRef.current && !estimateDropdownRef.current.contains(e.target as Node)) {
-        setBulkEstimateOpen(false);
-      }
-      if (bulkDueDateOpen && dueDateDropdownRef.current && !dueDateDropdownRef.current.contains(e.target as Node)) {
-        setBulkDueDateOpen(false);
-      }
-      if (bulkTagOpen && tagDropdownRef.current && !tagDropdownRef.current.contains(e.target as Node)) {
-        setBulkTagOpen(false);
-      }
-      if (bulkRemoveTagOpen && removeTagDropdownRef.current && !removeTagDropdownRef.current.contains(e.target as Node)) {
-        setBulkRemoveTagOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handle);
-    return () => document.removeEventListener("mousedown", handle);
-  }, [bulkStatusOpen, bulkPriorityOpen, bulkEstimateOpen, bulkDueDateOpen, bulkTagOpen, bulkRemoveTagOpen]);
 
   return (
     <div className="flex flex-col flex-1 min-h-0 px-4 pb-4">
@@ -611,43 +609,13 @@ export function TableView({
 
       <div className="flex-1 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark">
         <table className="w-full text-sm border-collapse">
-          <thead className="sticky top-0 bg-gray-50 dark:bg-gray-800 z-10">
-            <tr>
-              <th className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 w-8">
-                <input
-                  type="checkbox"
-                  checked={allChecked}
-                  ref={(el) => { if (el) el.indeterminate = someChecked && !allChecked; }}
-                  onChange={toggleSelectAll}
-                  className="rounded border-gray-300 dark:border-gray-600 text-brand-500 cursor-pointer"
-                  aria-label="Select all"
-                />
-              </th>
-              {(
-                [
-                  ["number", "#"],
-                  ["title", "Title"],
-                  ["status", "Status"],
-                  ["priority", "Priority"],
-                  ["type", "Type"],
-                  ["estimate", "Estimate"],
-                  ["updated", "Updated"],
-                  ["dueDate", "Due Date"],
-                ] as [SortKey, string][]
-              ).map(([key, label]) => (
-                <th
-                  key={key}
-                  onClick={() => toggleSort(key)}
-                  className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2 border-b border-gray-200 dark:border-gray-700 cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-200 whitespace-nowrap"
-                >
-                  {label}<SortIcon col={key} />
-                </th>
-              ))}
-              <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2 border-b border-gray-200 dark:border-gray-700 whitespace-nowrap">
-                Tags
-              </th>
-            </tr>
-          </thead>
+          <TableHeader
+            sort={sort}
+            onSortChange={toggleSort}
+            allChecked={allChecked}
+            someChecked={someChecked}
+            onToggleSelectAll={toggleSelectAll}
+          />
           <tbody>
             {sorted.length === 0 && (
               <tr>
@@ -655,68 +623,13 @@ export function TableView({
               </tr>
             )}
             {sorted.map((issue) => (
-              <tr
+              <TableRow
                 key={issue.id}
+                issue={issue}
+                selected={selectedIds.has(issue.id)}
+                onSelect={(e) => toggleSelectOne(issue.id, e)}
                 onClick={() => onIssueClick(issue)}
-                className={`border-b border-gray-100 dark:border-gray-800 hover:bg-brand-50 dark:hover:bg-brand-900/20 cursor-pointer transition-colors ${selectedIds.has(issue.id) ? "bg-brand-50/60 dark:bg-brand-900/10" : ""}`}
-              >
-                <td className="px-3 py-1.5" onClick={(e) => toggleSelectOne(issue.id, e)}>
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.has(issue.id)}
-                    onChange={() => {}}
-                    className="rounded border-gray-300 dark:border-gray-600 text-brand-500 cursor-pointer"
-                    aria-label={`Select issue ${issue.issueNumber}`}
-                  />
-                </td>
-                <td className="px-3 py-1.5 text-gray-400 dark:text-gray-500 text-xs whitespace-nowrap">
-                  #{issue.issueNumber ?? "—"}
-                </td>
-                <td className="px-3 py-1.5 max-w-xs">
-                  <span className="font-medium text-gray-900 dark:text-gray-100 truncate block">{issue.title}</span>
-                </td>
-                <td className="px-3 py-1.5 whitespace-nowrap">
-                  <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_CLASS[issue.statusName] ?? "text-gray-600 bg-gray-100"}`}>
-                    {issue.statusName}
-                  </span>
-                </td>
-                <td className="px-3 py-1.5 whitespace-nowrap">
-                  <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${PRIORITY_CLASS[issue.priority ?? "medium"] ?? PRIORITY_CLASS.medium}`}>
-                    {PRIORITY_LABEL[issue.priority ?? "medium"] ?? issue.priority ?? "medium"}
-                  </span>
-                </td>
-                <td className="px-3 py-1.5 whitespace-nowrap">
-                  <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${ISSUE_TYPE_CLASS[issue.issueType ?? "task"] ?? ""}`}>
-                    {ISSUE_TYPE_LABEL[issue.issueType ?? "task"] ?? issue.issueType ?? "task"}
-                  </span>
-                </td>
-                <td className="px-3 py-1.5 whitespace-nowrap text-xs text-gray-600 dark:text-gray-400">
-                  {issue.estimate ?? <span className="text-gray-300 dark:text-gray-600">—</span>}
-                </td>
-                <td className="px-3 py-1.5 whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">
-                  {formatDate(issue.updatedAt)}
-                </td>
-                <td className="px-3 py-1.5 whitespace-nowrap text-xs">
-                  {issue.dueDate ? (() => {
-                    const overdue = new Date(issue.dueDate) < new Date(new Date().toDateString()) &&
-                      issue.statusName !== "Done" && issue.statusName !== "Cancelled";
-                    return (
-                      <span className={overdue ? "text-red-600 font-medium" : "text-gray-500 dark:text-gray-400"}>
-                        {formatDate(issue.dueDate)}
-                      </span>
-                    );
-                  })() : <span className="text-gray-300 dark:text-gray-600">—</span>}
-                </td>
-                <td className="px-3 py-1.5">
-                  <div className="flex flex-wrap gap-1">
-                    {(issue.tags ?? []).map((tag) => (
-                      <span key={tag.id} className={`inline-flex px-1.5 py-0.5 rounded text-xs font-medium ${tagClass(tag.color)}`}>
-                        {tag.name}
-                      </span>
-                    ))}
-                  </div>
-                </td>
-              </tr>
+              />
             ))}
           </tbody>
         </table>
