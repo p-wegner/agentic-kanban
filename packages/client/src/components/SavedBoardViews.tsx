@@ -11,6 +11,7 @@ import {
   type SavedViewReference,
 } from "../lib/boardSavedViews.js";
 import { apiFetch } from "../lib/api.js";
+import { getSettings, invalidateSettings } from "../lib/settingsStore.js";
 import { showToast } from "./Toast.js";
 
 interface SavedBoardViewsProps {
@@ -46,7 +47,7 @@ export function SavedBoardViews({
 
   useEffect(() => {
     let cancelled = false;
-    apiFetch<Record<string, string>>("/api/preferences/settings")
+    getSettings()
       .then((settings) => {
         if (cancelled) return;
         const loaded = sanitizeSavedBoardViews(settings[settingsKey]);
@@ -68,6 +69,7 @@ export function SavedBoardViews({
         method: "PUT",
         body: JSON.stringify({ [settingsKey]: JSON.stringify(nextViews) }),
       });
+      invalidateSettings();
       setViews(nextViews);
       showToast(message, "success");
       return true;

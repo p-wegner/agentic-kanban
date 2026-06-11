@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { ACCENT, BRAND, PRIORITY_META, TYPE_COLORS } from "../lib/chartColors";
 import { apiFetch } from "../lib/api.js";
+import { invalidateSettings } from "../lib/settingsStore.js";
 import { showToast } from "./Toast.js";
 
 type SegmentKind = "work-type" | "provider" | "area" | "custom";
@@ -281,6 +282,7 @@ function MonitorPolicyPresets({
         method: "PUT",
         body: JSON.stringify({ [key]: JSON.stringify(next) }),
       });
+      invalidateSettings();
       setCustomPresets(next);
       setSavingName("");
       setShowSaveForm(false);
@@ -299,6 +301,7 @@ function MonitorPolicyPresets({
         method: "PUT",
         body: JSON.stringify({ [key]: JSON.stringify(next) }),
       });
+      invalidateSettings();
       setCustomPresets(next);
     } catch {
       showToast("Failed to delete preset", "error");
@@ -667,6 +670,7 @@ export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQu
         method: "PUT",
         body: JSON.stringify({ [key]: JSON.stringify(payload) }),
       });
+      invalidateSettings();
       setConfig(payload);
       setSavedConfig(payload);
       setDirty(false);
@@ -706,6 +710,7 @@ export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQu
         method: "PUT",
         body: JSON.stringify({ [key]: JSON.stringify(next) }),
       });
+      invalidateSettings();
       setConfig(next);
       setSavedConfig(next);
       setDirty(false);

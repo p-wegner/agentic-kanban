@@ -1,5 +1,6 @@
 import type { Dispatch, ReactNode, RefObject, SetStateAction } from "react";
 import { apiFetch } from "../lib/api.js";
+import { getSettings } from "../lib/settingsStore.js";
 import { showToast } from "./Toast.js";
 import { SettingsPanel } from "./SettingsPanel.js";
 import { QuickTasksPanel } from "./QuickTasksPanel.js";
@@ -231,7 +232,10 @@ export function BoardOverlayPanels({
         <SettingsPanel
           onClose={() => {
             onCloseSettings();
-            apiFetch<Record<string, string>>("/api/preferences/settings")
+            // SettingsPanel invalidates the settings store after a successful
+            // save, so this re-read is fresh when anything changed and a cheap
+            // cache hit when the panel was closed without saving.
+            getSettings()
               .then(async (s) => {
                 let monitorStatus = null;
                 try {

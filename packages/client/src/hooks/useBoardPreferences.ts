@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
+import { getSettings, invalidateSettings } from "../lib/settingsStore.js";
 import { getWipLimit, wipLimitKey } from "../lib/wipLimits.js";
 import { startStaggeredPoll, type PollHandle } from "../lib/pollScheduler.js";
 import type { MonitorStatus } from "../components/MonitorPopover.js";
@@ -62,7 +63,9 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
 
   const loadPreferences = useCallback(async () => {
     try {
-      const s = await apiFetch<Record<string, string>>("/api/preferences/settings");
+      // Shared, deduped settings read: the null-projectId and resolved-projectId
+      // runs (plus StrictMode double-mounts) all resolve from one request/cache.
+      const s = await getSettings();
       setDynamicColumnScaling(s.dynamic_column_scaling === "true");
       setCardDensity(s.card_density === "compact" ? "compact" : "comfortable");
       if (projectId) {
@@ -144,6 +147,7 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
         method: "PUT",
         body: JSON.stringify({ auto_monitor: String(next) }),
       });
+      invalidateSettings();
       const status = await apiFetch<MonitorStatus>("/api/internal/monitor-status");
       setMonitorStatus(status);
     } catch {
@@ -164,22 +168,22 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
 
   const handleIntervalChange = useCallback(async (v: string) => {
     setAutoMonitorInterval(v);
-    await apiFetch("/api/preferences/settings", { method: "PUT", body: JSON.stringify({ auto_monitor_interval: v }) }).catch(() => {});
+    await apiFetch("/api/preferences/settings", { method: "PUT", body: JSON.stringify({ auto_monitor_interval: v }) }).then(() => invalidateSettings()).catch(() => {});
   }, []);
 
   const handleNudgeAutoStartChange = useCallback(async (v: boolean) => {
     setNudgeAutoStart(v);
-    await apiFetch("/api/preferences/settings", { method: "PUT", body: JSON.stringify({ nudge_auto_start: String(v) }) }).catch(() => {});
+    await apiFetch("/api/preferences/settings", { method: "PUT", body: JSON.stringify({ nudge_auto_start: String(v) }) }).then(() => invalidateSettings()).catch(() => {});
   }, []);
 
   const handleNudgeWipLimitChange = useCallback(async (v: string) => {
     setNudgeWipLimit(v);
-    await apiFetch("/api/preferences/settings", { method: "PUT", body: JSON.stringify({ nudge_wip_limit: v }) }).catch(() => {});
+    await apiFetch("/api/preferences/settings", { method: "PUT", body: JSON.stringify({ nudge_wip_limit: v }) }).then(() => invalidateSettings()).catch(() => {});
   }, []);
 
   const handleCardDensityChange = useCallback(async (v: CardDensity) => {
     setCardDensity(v);
-    await apiFetch("/api/preferences/settings", { method: "PUT", body: JSON.stringify({ card_density: v }) }).catch(() => {});
+    await apiFetch("/api/preferences/settings", { method: "PUT", body: JSON.stringify({ card_density: v }) }).then(() => invalidateSettings()).catch(() => {});
   }, []);
 
   const handleShowPriorityLegendChange = useCallback(async (v: boolean) => {
@@ -188,7 +192,7 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
     await apiFetch("/api/preferences/settings", {
       method: "PUT",
       body: JSON.stringify({ [`board_show_priority_legend_${projectId}`]: String(v) }),
-    }).catch(() => {});
+    }).then(() => invalidateSettings()).catch(() => {});
   }, [projectId]);
 
   const handleShowCardAgingHeatmapChange = useCallback(async (v: boolean) => {
@@ -197,7 +201,7 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
     await apiFetch("/api/preferences/settings", {
       method: "PUT",
       body: JSON.stringify({ [`board_card_aging_heatmap_${projectId}`]: String(v) }),
-    }).catch(() => {});
+    }).then(() => invalidateSettings()).catch(() => {});
   }, [projectId]);
 
   const handleAgingThresholdsChange = useCallback(async (warm: number, hot: number) => {
@@ -210,7 +214,7 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
         [`board_aging_warm_days_${projectId}`]: String(warm),
         [`board_aging_hot_days_${projectId}`]: String(hot),
       }),
-    }).catch(() => {});
+    }).then(() => invalidateSettings()).catch(() => {});
   }, [projectId]);
 
   const handleRecentMergesCollapsedChange = useCallback(async (v: boolean) => {
@@ -219,7 +223,7 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
     await apiFetch("/api/preferences/settings", {
       method: "PUT",
       body: JSON.stringify({ [`board_recent_merges_collapsed_${projectId}`]: String(v) }),
-    }).catch(() => {});
+    }).then(() => invalidateSettings()).catch(() => {});
   }, [projectId]);
 
   const handleHiddenColumnsChange = useCallback(async (statusName: string, hidden: boolean) => {
@@ -234,7 +238,7 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
     await apiFetch("/api/preferences/settings", {
       method: "PUT",
       body: JSON.stringify({ [`board_hidden_columns_${projectId}`]: [...next].join(",") }),
-    }).catch(() => {});
+    }).then(() => invalidateSettings()).catch(() => {});
   }, [projectId, hiddenColumns]);
 
   const handleSetWipLimit = useCallback(async (statusId: string, limit: number | null) => {
@@ -250,7 +254,7 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
     await apiFetch("/api/preferences/settings", {
       method: "PUT",
       body: JSON.stringify({ [wipLimitKey(statusId)]: limit != null ? String(limit) : "" }),
-    }).catch(() => {});
+    }).then(() => invalidateSettings()).catch(() => {});
   }, []);
 
   return {

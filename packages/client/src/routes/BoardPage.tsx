@@ -54,6 +54,7 @@ import { ToastContainer, showToast } from "../components/Toast.js";
 import { suggestBranchName } from "../lib/branch.js";
 import { MentionProvider } from "../lib/MentionContext.js";
 import { apiFetch } from "../lib/api.js";
+import { getSettings } from "../lib/settingsStore.js";
 import { matchesBoardFilters } from "../lib/boardFiltering.js";
 import { runCreateIssueFlow, type CreateIssuePayload } from "../lib/createIssueService.js";
 import { applyLocalReorder, moveIssueToStatus } from "../lib/issueMoveHelpers.js";
@@ -1178,7 +1179,7 @@ export function BoardPage() {
 
     setPendingWorkspaceIssueIds((prev) => new Set([...prev, issue.id]));
     try {
-      const s = await apiFetch<Record<string, string>>("/api/preferences/settings");
+      const s = await getSettings();
       const provider = (s.provider as "claude" | "codex" | "copilot") || "claude";
       const profileName = provider === "codex"
         ? (s.codex_profile || "default")
