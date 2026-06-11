@@ -34,6 +34,30 @@ import { DependencyDisplay } from "./DependencyDisplay.js";
 export { issueArtifactPreview } from "../lib/artifact-utils.js";
 export { issueArtifactKind, issueArtifactAuthor } from "../lib/artifact-classifiers.js";
 
+// Module-level cache for the project-wide issue list feeding the dependency
+// picker (it only needs id/issueNumber/title). The list is project-scoped, not
+// issue-scoped, so switching cards reuses it instead of refetching the largest
+// payload in the app on every panel open. slim=1 omits descriptions (~60% of
+// the bytes) — the picker never renders them. Invalidated explicitly when this
+// panel creates issues; the short TTL covers out-of-band mutations.
+const AVAILABLE_ISSUES_TTL_MS = 30_000;
+const availableIssuesCache = new Map<string, { data: IssueWithStatus[]; ts: number }>();
+
+function fetchAvailableIssues(projectId: string): Promise<IssueWithStatus[]> {
+  const cached = availableIssuesCache.get(projectId);
+  if (cached && Date.now() - cached.ts < AVAILABLE_ISSUES_TTL_MS) {
+    return Promise.resolve(cached.data);
+  }
+  return apiFetch<IssueWithStatus[]>(`/api/issues?projectId=${projectId}&slim=1`).then((data) => {
+    availableIssuesCache.set(projectId, { data, ts: Date.now() });
+    return data;
+  });
+}
+
+function invalidateAvailableIssuesCache(projectId: string) {
+  availableIssuesCache.delete(projectId);
+}
+
 interface StatusOption {
   id: string;
   name: string;
@@ -467,7 +491,7 @@ export function IssueDetailPanel({
           apiFetch<{ id: string; name: string; color: string | null }[]>(`/api/issues/${issue.id}/tags`),
           apiFetch<{ id: string; name: string; color: string | null }[]>(`/api/tags`),
           apiFetch<DependencyInfo>(`/api/issues/${issue.id}/dependencies`),
-          apiFetch<IssueWithStatus[]>(`/api/issues?projectId=${issue.projectId}`),
+          fetchAvailableIssues(issue.projectId),
           apiFetch<{ id: string; name: string; description: string }[]>(`/api/agent-skills?projectId=${issue.projectId}`).catch(() => [] as { id: string; name: string; description: string }[]),
           apiFetch<{ comments: IssueComment[] }>(`/api/issues/${issue.id}/comments`).catch(() => ({ comments: [] as IssueComment[] })),
           apiFetch<IssueArtifact[]>(`/api/issues/${issue.id}/artifacts`).catch(() => [] as IssueArtifact[]),
@@ -663,6 +687,7 @@ export function IssueDetailPanel({
         `/api/issues/${issue.id}/duplicate`,
         { method: "POST" },
       );
+      invalidateAvailableIssuesCache(issue.projectId);
       showToast(`Duplicated as #${result.issueNumber}`, "success");
       onNavigateToIssue?.(result.id);
     } catch (err) {
@@ -847,6 +872,7 @@ export function IssueDetailPanel({
         method: "POST",
         body: JSON.stringify({ dependsOnId: issue.id, type: "depends_on" }),
       }).catch(() => {});
+      invalidateAvailableIssuesCache(issue.projectId);
       setFollowUpTitle("");
       setShowFollowUp(false);
       showToast("Follow-up task created", "success");
