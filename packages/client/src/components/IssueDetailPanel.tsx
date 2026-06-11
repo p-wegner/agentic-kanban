@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { IssueArtifact, IssueWithStatus, UpdateIssueRequest, DependencyInfo, MilestoneResponse, MergedCommit, MergedCommitsResponse } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
+import { getCachedBundle, revalidateBundle } from "../lib/issueDetailBundleCache.js";
 import { isHttpUrl } from "../lib/url.js";
 import { formatRelativeTime, formatAbsoluteTime } from "../lib/formatRelativeTime.js";
 import { IssueActivitySection, type ActivityEvent } from "./IssueActivitySection.js";
@@ -502,35 +503,45 @@ export function IssueDetailPanel({
       try {
         // Per-issue data comes in ONE round-trip via the detail-bundle endpoint
         // (workspaces, issue tags, dependencies, comments, artifacts, activity,
-        // and the lazy-loaded description). Project-scoped data (all tags,
-        // available issues, skills, milestones) is the same across every issue
-        // in the project, so it stays on its own cacheable endpoints and runs
-        // in parallel with the bundle.
+        // and the lazy-loaded description), behind a stale-while-revalidate cache
+        // (issueDetailBundleCache) that also dedupes concurrent/prefetch fetches.
+        const applyBundle = (bundle: IssueDetailBundle) => {
+          setWorkspaceCount(bundle.workspaces.length);
+          setIssueTags(bundle.tags);
+          setDependencies(bundle.dependencies ?? { dependencies: [] });
+          setComments(bundle.comments);
+          setArtifacts(bundle.artifacts);
+          setActivityEvents(bundle.activity.events);
+          setArtifactsLoading(false);
+          setActivityLoading(false);
+          // Feed the lazy-loaded description up to the shared issue object so the
+          // separate description fetch is no longer needed.
+          if (issue.description === undefined && bundle.issue.description !== undefined) {
+            onIssueUpdate({ ...issue, description: bundle.issue.description });
+          }
+          setDescriptionFetching(false);
+        };
+
+        // Instant paint from a cached bundle (recently-viewed ticket / hover
+        // prefetch), then always revalidate in the background.
+        const cached = getCachedBundle(issue.id);
+        if (cached) applyBundle(cached.data as unknown as IssueDetailBundle);
+
+        // Project-scoped data (all tags, available issues, skills, milestones) is
+        // the same across every issue in the project — its own cacheable
+        // endpoints, fetched in parallel with the bundle revalidation.
         const [bundle, allTags, available, skills, milestonesResp] = await Promise.all([
-          apiFetch<IssueDetailBundle>(`/api/issues/${issue.id}/detail-bundle`),
+          revalidateBundle(issue.id) as unknown as Promise<IssueDetailBundle>,
           apiFetch<{ id: string; name: string; color: string | null }[]>(`/api/tags`),
           fetchAvailableIssues(issue.projectId),
           apiFetch<{ id: string; name: string; description: string }[]>(`/api/agent-skills?projectId=${issue.projectId}`).catch(() => [] as { id: string; name: string; description: string }[]),
           apiFetch<MilestoneResponse[]>(`/api/projects/${issue.projectId}/milestones`).catch(() => [] as MilestoneResponse[]),
         ]);
-        setWorkspaceCount(bundle.workspaces.length);
-        setIssueTags(bundle.tags);
-        setDependencies(bundle.dependencies ?? { dependencies: [] });
-        setComments(bundle.comments);
-        setArtifacts(bundle.artifacts);
-        setActivityEvents(bundle.activity.events);
+        applyBundle(bundle);
         setAllTags(allTags);
         setAvailableIssues(available.filter(i => i.id !== issue.id));
         setAvailableSkills(skills);
         setMilestones(milestonesResp);
-        setArtifactsLoading(false);
-        setActivityLoading(false);
-        // Feed the lazy-loaded description up to the shared issue object so the
-        // separate description fetch is no longer needed.
-        if (issue.description === undefined && bundle.issue.description !== undefined) {
-          onIssueUpdate({ ...issue, description: bundle.issue.description });
-        }
-        setDescriptionFetching(false);
         // Check for active showdown
         apiFetch<{ id: string }>(`/api/issues/${issue.id}/showdown`)
           .then(sd => setActiveShowdownId(sd.id))

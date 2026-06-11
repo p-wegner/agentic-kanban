@@ -2,6 +2,7 @@ import { memo, useRef, useState } from "react";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { apiFetch } from "../lib/api.js";
+import { prefetchBundle } from "../lib/issueDetailBundleCache.js";
 import { IssueWorkLogBadge } from "./IssueWorkLogBadge.js";
 import { showToast } from "./Toast.js";
 import { formatRelativeTime, formatAbsoluteTime } from "../lib/formatRelativeTime.js";
@@ -564,6 +565,8 @@ function IssueCardImpl({ issue, onClick, onWorkspaceClick, onOpenDiff, onStartWo
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       onClick={(e) => onClick(issue, e)}
+      onMouseEnter={() => prefetchBundle(issue.id)}
+      onFocus={() => prefetchBundle(issue.id)}
       onContextMenu={handleContextMenu}
       onKeyDown={handleCardKeyDown}
       aria-selected={isSelected ? "true" : undefined}
