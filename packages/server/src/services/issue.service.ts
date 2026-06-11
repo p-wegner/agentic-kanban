@@ -741,8 +741,13 @@ export function createIssueService(deps: {
     });
   }
 
-  async function listIssues(projectId: string, issueNumber?: number, statusName?: string) {
-    return getIssuesByProject(projectId, issueNumber, database, statusName);
+  async function listIssues(
+    projectId: string,
+    issueNumber?: number,
+    statusName?: string,
+    opts?: { excludeDescription?: boolean },
+  ) {
+    return getIssuesByProject(projectId, issueNumber, database, statusName, opts);
   }
 
   async function getIssueSummary(idParam: string) {
