@@ -519,33 +519,25 @@ export function IssueDetailPanel({
         setActivityLoading(false);
         // Ignore — non-critical
       }
-      // Load cached touched-files prediction (non-blocking, best-effort)
-      try {
-        const tf = await apiFetch<{ files: { path: string; reason: string; confidence: "high" | "medium" | "low" }[]; cached: boolean }>(`/api/issues/${issue.id}/touched-files`);
-        if (tf.files.length > 0) setTouchedFiles(tf.files);
-      } catch {
-        // No cached prediction yet — that's fine
-      }
-      // Load related issues (non-blocking, best-effort)
+      // Secondary, best-effort data. These were previously awaited one after
+      // another (touched-files -> related-issues -> merged-commits), a 3-deep
+      // serial chain on top of the main batch. Fire them in parallel instead;
+      // each updates its own state as it resolves.
       setRelatedIssuesLoading(true);
-      try {
-        const ri = await apiFetch<{ related: { id: string; issueNumber: number | null; title: string; sharedFileCount: number }[] }>(`/api/issues/${issue.id}/related-issues`);
-        setRelatedIssues(ri.related);
-      } catch {
-        setRelatedIssues([]);
-      } finally {
-        setRelatedIssuesLoading(false);
-      }
-      // Load merged commits that landed on the default branch (non-blocking, best-effort)
       setMergedCommitsLoading(true);
-      try {
-        const mc = await apiFetch<MergedCommitsResponse>(`/api/issues/${issue.id}/merged-commits`);
-        setMergedCommits(mc);
-      } catch {
-        setMergedCommits(null);
-      } finally {
-        setMergedCommitsLoading(false);
-      }
+      await Promise.allSettled([
+        apiFetch<{ files: { path: string; reason: string; confidence: "high" | "medium" | "low" }[]; cached: boolean }>(`/api/issues/${issue.id}/touched-files`)
+          .then((tf) => { if (tf.files.length > 0) setTouchedFiles(tf.files); })
+          .catch(() => { /* No cached prediction yet — that's fine */ }),
+        apiFetch<{ related: { id: string; issueNumber: number | null; title: string; sharedFileCount: number }[] }>(`/api/issues/${issue.id}/related-issues`)
+          .then((ri) => setRelatedIssues(ri.related))
+          .catch(() => setRelatedIssues([]))
+          .finally(() => setRelatedIssuesLoading(false)),
+        apiFetch<MergedCommitsResponse>(`/api/issues/${issue.id}/merged-commits`)
+          .then((mc) => setMergedCommits(mc))
+          .catch(() => setMergedCommits(null))
+          .finally(() => setMergedCommitsLoading(false)),
+      ]);
     }
     setMergedCommits(null);
     setMergedCommitsLoading(true);
