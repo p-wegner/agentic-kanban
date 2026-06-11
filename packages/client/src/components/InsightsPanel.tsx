@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api.js";
-import { PRIMARY_SERIES } from "../lib/chartColors";
+import { PRIMARY_SERIES, BRAND } from "../lib/chartColors";
 
 type ProviderFilter = "all" | string;
 
@@ -79,6 +79,18 @@ interface InsightsData {
     avgDurationMs: number;
     activeWorkspaceCount: number;
   }>;
+  topContextConsumers: {
+    windowFrom: string;
+    totalContextTokens: number;
+    rows: Array<{
+      issueId: string;
+      issueNumber: number | null;
+      issueTitle: string;
+      sessionCount: number;
+      contextTokens: number;
+      totalCostUsd: number;
+    }>;
+  };
   totals: {
     sessionCount: number;
     successCount: number;
@@ -478,6 +490,64 @@ function CostSparkline({ series }: { series: InsightsData["timeSeries"] }) {
   );
 }
 
+function TopContextConsumers({ data }: { data: InsightsData["topContextConsumers"] }) {
+  const rows = data?.rows ?? [];
+  const windowLabel = data?.windowFrom ? formatCompactDate(data.windowFrom) : null;
+  // Bars are scaled against the single biggest consumer so the leaderboard
+  // reads as a ranking, not against the window total (which would flatten everything).
+  const maxTokens = rows.length > 0 ? rows[0].contextTokens : 0;
+
+  return (
+    <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm overflow-hidden">
+      <div className="border-b border-gray-200 dark:border-gray-800 px-4 py-3">
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Top Context Consumers (Last 7 Days)</h3>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+          Issues ranked by context-window tokens (input + cache) consumed by their agent sessions
+          {windowLabel ? `, since ${windowLabel}` : ""}.
+          {data?.totalContextTokens ? ` ${formatTokens(data.totalContextTokens)} total.` : ""}
+        </p>
+      </div>
+      <div className="p-4">
+        {rows.length === 0 ? (
+          <p className="text-sm text-gray-500 dark:text-gray-400">No context usage recorded in the last 7 days.</p>
+        ) : (
+          <ol className="flex flex-col gap-2.5">
+            {rows.map((row, index) => {
+              const widthPct = maxTokens > 0 ? Math.max(2, (row.contextTokens / maxTokens) * 100) : 0;
+              const label = `${row.issueNumber ? `#${row.issueNumber} ` : ""}${row.issueTitle}`;
+              return (
+                <li key={row.issueId} className="flex items-center gap-3">
+                  <span className="w-5 shrink-0 text-right text-xs font-semibold tabular-nums text-gray-400 dark:text-gray-600">
+                    {index + 1}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="truncate text-sm font-medium text-gray-900 dark:text-gray-100" title={label}>
+                        {label}
+                      </span>
+                      <span className="shrink-0 text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+                        {formatTokens(row.contextTokens)}
+                      </span>
+                    </div>
+                    <div className="mt-1 flex items-center gap-2">
+                      <div className="relative h-2 flex-1 rounded-full bg-gray-100 dark:bg-gray-800 overflow-hidden">
+                        <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${widthPct}%`, backgroundColor: BRAND }} />
+                      </div>
+                      <span className="shrink-0 text-[11px] tabular-nums text-gray-500 dark:text-gray-400">
+                        {row.sessionCount} {row.sessionCount === 1 ? "session" : "sessions"} · {formatCurrency(row.totalCostUsd)}
+                      </span>
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ProviderProfileLedger({
   rows,
   providerFilter,
@@ -869,6 +939,8 @@ export function InsightsPanel({ projectId, onSessionClick }: InsightsPanelProps)
               providerFilter={providerFilter}
               onProviderFilterChange={setProviderFilter}
             />
+
+            <TopContextConsumers data={data.topContextConsumers} />
 
             <SortableMetricTable
               title="By Skill"

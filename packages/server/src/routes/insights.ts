@@ -23,6 +23,7 @@ interface ParsedSessionStats {
   success: boolean;
   agentSummary?: string;
   cacheReadTokens?: number;
+  contextTokens?: number;
   friction?: SessionFrictionStats;
 }
 
@@ -147,6 +148,27 @@ interface InsightsData {
     profile: string;
     activeWorkspaceCount: number;
   }>;
+  /**
+   * Leaderboard of the issues that consumed the most context tokens over a
+   * FIXED last-7-days window (independent of the panel's range selector).
+   * "Context tokens" follows the codebase convention: the stats'
+   * `contextTokens` if present, else `inputTokens + cacheReadTokens` — the
+   * tokens that actually occupy the model's context window, not output. (#751)
+   */
+  topContextConsumers: {
+    /** Inclusive ISO start of the 7-day window the leaderboard is computed over. */
+    windowFrom: string;
+    /** Total context tokens across every session in the window (the bar denominator). */
+    totalContextTokens: number;
+    rows: Array<{
+      issueId: string;
+      issueNumber: number | null;
+      issueTitle: string;
+      sessionCount: number;
+      contextTokens: number;
+      totalCostUsd: number;
+    }>;
+  };
   friction: {
     /** Sessions in the window that have persisted friction stats. */
     sessionsWithFriction: number;
@@ -202,6 +224,7 @@ function parseStats(raw: string | null): ParsedSessionStats | null {
       success: parsed.success === true,
       agentSummary: typeof parsed.agentSummary === "string" ? parsed.agentSummary : undefined,
       cacheReadTokens: Number(parsed.cacheReadTokens ?? 0),
+      contextTokens: Number(parsed.contextTokens ?? 0),
       friction: parsed.friction && typeof parsed.friction === "object" ? parsed.friction : undefined,
     };
   } catch {
@@ -211,6 +234,17 @@ function parseStats(raw: string | null): ParsedSessionStats | null {
 
 function isSuccessful(stats: ParsedSessionStats | null, exitCode: string | null) {
   return !!stats && (stats.success === true || exitCode === "0");
+}
+
+/**
+ * Context tokens for a session = the tokens that occupy the model's context
+ * window. Mirrors the `contextTokens || inputTokens + cacheReadTokens`
+ * convention used in workspace-summary / session-stats / workspace.repository.
+ */
+function contextTokensFor(stats: ParsedSessionStats | null): number {
+  if (!stats) return 0;
+  const explicit = stats.contextTokens ?? 0;
+  return explicit || (stats.inputTokens + (stats.cacheReadTokens ?? 0));
 }
 
 function createAggregateBucket(): AggregateBucket {
@@ -370,6 +404,21 @@ export function createInsightsRoute(database: Database = db) {
     const byProviderProfile = new Map<string, ProviderProfileBucket>();
     const timeSeries = new Map<string, TimeSeriesBucket>();
     const topExpensive: InsightsData["topExpensive"] = [];
+
+    // Per-issue context-token leaderboard over a FIXED last-7-days window,
+    // independent of the panel's range selector (the #751 feature is explicitly
+    // "Top context consumers in the last 7 days"). When the selected range is
+    // wider (30d/90d/all) we still only count sessions inside this window.
+    const contextWindowFrom = startOfUtcDay(addUtcDays(now, -(RANGE_DAYS["7d"] - 1)));
+    const contextByIssue = new Map<string, {
+      issueId: string;
+      issueNumber: number | null;
+      issueTitle: string;
+      sessionCount: number;
+      contextTokens: number;
+      totalCostUsd: number;
+    }>();
+    let contextWindowTotalTokens = 0;
 
     // Friction roll-up across the window (only from sessions with persisted friction).
     const frictionByTool = new Map<string, { calls: number; failed: number }>();
@@ -531,6 +580,27 @@ export function createInsightsRoute(database: Database = db) {
           startedAt: startedAtIso,
         });
       }
+
+      // Context-consumer leaderboard: only sessions within the fixed 7-day window.
+      if (startedAtIso >= contextWindowFrom.toISOString()) {
+        const sessionContextTokens = contextTokensFor(stats);
+        contextWindowTotalTokens += sessionContextTokens;
+        const existing = contextByIssue.get(row.issueId);
+        if (existing) {
+          existing.sessionCount += 1;
+          existing.contextTokens += sessionContextTokens;
+          existing.totalCostUsd += stats?.totalCostUsd ?? 0;
+        } else {
+          contextByIssue.set(row.issueId, {
+            issueId: row.issueId,
+            issueNumber: row.issueNumber,
+            issueTitle: row.issueTitle,
+            sessionCount: 1,
+            contextTokens: sessionContextTokens,
+            totalCostUsd: stats?.totalCostUsd ?? 0,
+          });
+        }
+      }
     }
 
     const effectiveDateFrom = range === "all"
@@ -636,6 +706,16 @@ export function createInsightsRoute(database: Database = db) {
       topExpensive: topExpensive
         .sort((a, b) => b.totalCostUsd - a.totalCostUsd || b.totalTokens - a.totalTokens || a.startedAt.localeCompare(b.startedAt))
         .slice(0, 10),
+      topContextConsumers: {
+        windowFrom: contextWindowFrom.toISOString(),
+        totalContextTokens: contextWindowTotalTokens,
+        rows: [...contextByIssue.values()]
+          .filter((row) => row.contextTokens > 0)
+          .sort((a, b) => b.contextTokens - a.contextTokens
+            || b.sessionCount - a.sessionCount
+            || (a.issueNumber ?? 0) - (b.issueNumber ?? 0))
+          .slice(0, 10),
+      },
       friction: frictionBlock,
       totals: {
         sessionCount,
