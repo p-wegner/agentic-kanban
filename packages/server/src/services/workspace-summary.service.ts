@@ -26,15 +26,26 @@ const CODE_METRICS_CACHE_TTL_MS = 5 * 60 * 1000;
 const GIT_OPS_CACHE_TTL_MS = 30 * 1000;
 
 // Short-lived per-branch cache for git commit ops. Keyed by workingDir or
-// workingDir:baseBranch. Cleared automatically when TTL expires.
+// workingDir:baseBranch. Stale-while-revalidate: a fresh entry is served as-is;
+// an expired entry is served immediately (last-known value) while a background
+// refresh updates it — so steady-state board rebuilds never block on these git
+// subprocesses (same SWR philosophy as diffStats/conflicts; values may be one
+// refresh cycle behind). Only a true first sighting (no entry at all) pays the
+// git call inline, so a fresh boot still shows commit info on the first build.
 const gitOpsCache = new Map<string, { value: unknown; expiresAt: number }>();
 function cachedGitOp<T>(key: string, fn: () => Promise<T>): Promise<T> {
   const entry = gitOpsCache.get(key);
-  if (entry && entry.expiresAt > Date.now()) return Promise.resolve(entry.value as T);
-  return fn().then(v => {
+  const refresh = () => fn().then(v => {
     gitOpsCache.set(key, { value: v, expiresAt: Date.now() + GIT_OPS_CACHE_TTL_MS });
     return v;
   });
+  if (entry) {
+    if (entry.expiresAt <= Date.now()) {
+      runBgGit(() => refresh().then(() => {}).catch(() => {}));
+    }
+    return Promise.resolve(entry.value as T);
+  }
+  return refresh();
 }
 
 export type { WorkspaceSummary } from "@agentic-kanban/shared";
