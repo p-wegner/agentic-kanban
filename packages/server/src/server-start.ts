@@ -25,6 +25,7 @@ import { startSessionMessagePruner, stopSessionMessagePruner } from "./services/
 import { getPreference } from "./repositories/preferences.repository.js";
 import { invalidateAgentQuestionsCache } from "./services/agent-questions.service.js";
 import { domainErrorHandler } from "./middleware/error-handler.js";
+import { jsonGzip } from "./middleware/compress.js";
 import { slowRequestLogger } from "./middleware/slow-request-logger.js";
 import { assertNoCommittedConflictMarkers } from "./startup/conflict-marker-scanner.js";
 import { checkHealthDeps } from "./services/health-deps.service.js";
@@ -58,6 +59,11 @@ export async function startServer(port?: number, hostname?: string) {
   const app = new Hono();
   app.use("/api/*", cors());
   app.use("/api/*", slowRequestLogger);
+  // Gzip for large buffered JSON GET responses (board ~172KB, issues ~1MB,
+  // monitor-status ~60KB) — ~85% wire reduction for remote (Tailscale) access.
+  // SSE (text/event-stream) is excluded by content-type inside the middleware;
+  // WebSocket upgrades live under /ws/* and never enter this mount.
+  app.use("/api/*", jsonGzip);
   // Dependency-aware health probe. A bare "status: ok" stayed green even when
   // the shared package's dist was missing after a restart (#691), so monitors
   // polling /health never noticed that every DB-backed API route was broken
