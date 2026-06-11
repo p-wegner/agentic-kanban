@@ -26,6 +26,7 @@ function makeGit(overrides: Partial<Record<string, (...a: unknown[]) => unknown>
     isAncestor: vi.fn(async () => false),
     mergeBranch: vi.fn(async () => "Merge made by the 'ort' strategy."),
     detectConflicts: vi.fn(async () => ({ hasConflicts: false, conflictingFiles: [] })),
+    detectConflictsByBranch: vi.fn(async () => ({ hasConflicts: false, conflictingFiles: [] })),
     syncBranchToHead: vi.fn(async () => false),
     removeWorktree: vi.fn(async () => {}),
     deleteBranch: vi.fn(async () => {}),
@@ -164,11 +165,11 @@ describe("merge — conflict-marker spillover blocked (regression #598/#599/#600
     expect(status.name).toBe("In Review");
   });
 
-  it("throws CONFLICT when detectConflicts reports hasConflicts=true before the merge attempt", async () => {
+  it("throws CONFLICT when read-only detection reports hasConflicts=true before the merge attempt", async () => {
     const { workspaceId } = await seedWorkspace(db);
     const git = makeGit({
-      // detectConflicts runs before mergeBranch — simulates stage-entry conflict
-      detectConflicts: async () => ({ hasConflicts: true, conflictingFiles: ["src/app.ts", "src/types.ts"] }),
+      // Branch-level merge-tree runs before mergeBranch — simulates stage-entry conflict
+      detectConflictsByBranch: async () => ({ hasConflicts: true, conflictingFiles: ["src/app.ts", "src/types.ts"] }),
     });
 
     const svc = createWorkspaceMergeService({
@@ -184,11 +185,11 @@ describe("merge — conflict-marker spillover blocked (regression #598/#599/#600
     });
   });
 
-  it("conflict error body includes conflicting files list when detectConflicts reports them", async () => {
+  it("conflict error body includes conflicting files list when read-only detection reports them", async () => {
     const { workspaceId } = await seedWorkspace(db);
     const conflictingFiles = ["packages/shared/src/schema.ts", "packages/server/src/routes/workspaces.ts"];
     const git = makeGit({
-      detectConflicts: async () => ({ hasConflicts: true, conflictingFiles }),
+      detectConflictsByBranch: async () => ({ hasConflicts: true, conflictingFiles }),
     });
 
     const svc = createWorkspaceMergeService({
@@ -333,7 +334,7 @@ describe("merge — stale readyForMerge cleared when behind-base rebase finds co
     ({ db } = createTestDb());
   });
 
-  it("clears readyForMerge and throws CONFLICT when branch is behind and rebase fails", async () => {
+  it("clears readyForMerge and throws CONFLICT when branch is behind and merge-tree conflicts", async () => {
     const { workspaceId } = await seedWorkspace(db, { readyForMerge: true });
     const git = makeGit({
       checkBranchTipIsAncestor: vi.fn(async () => ({
@@ -342,8 +343,9 @@ describe("merge — stale readyForMerge cleared when behind-base rebase finds co
         baseSha: "master-sha",
       })),
       countBehindCommits: vi.fn(async () => 3),
-      rebaseOntoBase: vi.fn(async () => ({
-        success: false,
+      // Conflict is now surfaced read-only (no destructive rebase) — #761.
+      detectConflictsByBranch: vi.fn(async () => ({
+        hasConflicts: true,
         conflictingFiles: ["packages/shared/src/schema.ts"],
       })),
     });
@@ -376,7 +378,7 @@ describe("merge — stale readyForMerge cleared when behind-base rebase finds co
         baseSha: "master-sha",
       })),
       countBehindCommits: vi.fn(async () => 5),
-      rebaseOntoBase: vi.fn(async () => ({ success: false, conflictingFiles })),
+      detectConflictsByBranch: vi.fn(async () => ({ hasConflicts: true, conflictingFiles })),
     });
 
     const svc = createWorkspaceMergeService({
@@ -417,9 +419,10 @@ describe("merge — stale readyForMerge cleared when behind-base rebase finds co
     expect(wsStatus.status).toBe("closed");
   });
 
-  it("rebaseOntoBase is called with preferLocalBase:true when branch is behind", async () => {
+  it("never rebases the worktree during conflict detection when branch is behind (#761 read-only)", async () => {
     const { workspaceId } = await seedWorkspace(db, { readyForMerge: true });
     const rebaseOntoBase = vi.fn(async () => ({ success: false, conflictingFiles: [] }));
+    const abortRebase = vi.fn(async () => {});
     const git = makeGit({
       checkBranchTipIsAncestor: vi.fn(async () => ({
         isAncestor: false as const,
@@ -427,7 +430,9 @@ describe("merge — stale readyForMerge cleared when behind-base rebase finds co
         baseSha: "master-sha",
       })),
       countBehindCommits: vi.fn(async () => 2),
+      detectConflictsByBranch: vi.fn(async () => ({ hasConflicts: true, conflictingFiles: ["src/app.ts"] })),
       rebaseOntoBase,
+      abortRebase,
     });
 
     const svc = createWorkspaceMergeService({
@@ -439,15 +444,13 @@ describe("merge — stale readyForMerge cleared when behind-base rebase finds co
 
     try { await svc.mergeWorkspace(workspaceId); } catch { /* expected */ }
 
-    expect(rebaseOntoBase).toHaveBeenCalledWith(
-      "/repo/.worktrees/feature_ak-608-edge-case",
-      "master",
-      "feature/ak-608-edge-case",
-      { preferLocalBase: true },
-    );
+    // The destructive in-place rebase was the root of the re-conflict loop — it must
+    // not run during a /merge attempt, so repeated attempts converge.
+    expect(rebaseOntoBase).not.toHaveBeenCalled();
+    expect(abortRebase).not.toHaveBeenCalled();
   });
 
-  it("workspace readyForMerge stays false after a stale-flag rebase conflict — merge endpoint never re-blocks on monitor loop", async () => {
+  it("workspace readyForMerge stays false after a behind-base conflict — merge endpoint never re-blocks on monitor loop", async () => {
     const { workspaceId } = await seedWorkspace(db, { readyForMerge: true });
     const git = makeGit({
       checkBranchTipIsAncestor: vi.fn(async () => ({
@@ -456,7 +459,7 @@ describe("merge — stale readyForMerge cleared when behind-base rebase finds co
         baseSha: "master-sha",
       })),
       countBehindCommits: vi.fn(async () => 4),
-      rebaseOntoBase: vi.fn(async () => ({ success: false, conflictingFiles: ["src/app.ts"] })),
+      detectConflictsByBranch: vi.fn(async () => ({ hasConflicts: true, conflictingFiles: ["src/app.ts"] })),
     });
 
     const svc = createWorkspaceMergeService({
