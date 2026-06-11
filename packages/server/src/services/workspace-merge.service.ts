@@ -19,12 +19,12 @@ import {
   buildConflictResolutionPrompt,
   buildFixAndMergePrompt,
 } from "./merge-helpers.service.js";
-import { loadAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
+import { toExecutorProvider } from "./agent-settings.service.js";
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 import {
   WorkspaceError,
-  applyWorkspaceAgentSelection,
+  resolveRelaunchAgentSelection,
   requireBaseBranch,
   activeMerges,
   describeMergeLock,
@@ -387,8 +387,9 @@ export function createWorkspaceMergeService(deps: {
     const baseBranch = requireBaseBranch(refreshedWorkspace.baseBranch || defaultBranch);
     const prompt = buildConflictResolutionPrompt(conflictingFiles, baseBranch);
 
+    const resolverProjectId = await resolveProjectId(id, database);
     const { agentCommand, agentArgs, claudeProfile, profile, provider } =
-      applyWorkspaceAgentSelection(await loadAgentSettings(database), refreshedWorkspace);
+      await resolveRelaunchAgentSelection(database, resolverProjectId, refreshedWorkspace);
     const executorProvider = toExecutorProvider(provider);
 
     const sessionId = await getSessionManager().startSession({
@@ -398,8 +399,7 @@ export function createWorkspaceMergeService(deps: {
 
     await updateWorkspaceStatus(id, "fixing", {}, database);
 
-    const projectId = await resolveProjectId(id, database);
-    if (projectId) boardEvents?.broadcast(projectId, "session_launched");
+    if (resolverProjectId) boardEvents?.broadcast(resolverProjectId, "session_launched");
 
     return { sessionId };
   }
@@ -423,8 +423,9 @@ export function createWorkspaceMergeService(deps: {
 
     const prompt = buildFixAndMergePrompt(`${errorMessage}\n\n${rebuildNote}`, baseBranch);
 
+    const fixProjectId = await resolveProjectId(id, database);
     const { agentCommand, agentArgs, claudeProfile, profile, provider } =
-      applyWorkspaceAgentSelection(await loadAgentSettings(database), workspace);
+      await resolveRelaunchAgentSelection(database, fixProjectId, workspace);
     const executorProvider = toExecutorProvider(provider);
 
     const sessionId = await getSessionManager().startSession({
@@ -441,8 +442,7 @@ export function createWorkspaceMergeService(deps: {
       { sessionId, mergeError: errorMessage, targetBranch: baseBranch },
     );
 
-    const projectId = await resolveProjectId(id, database);
-    if (projectId) boardEvents?.broadcast(projectId, "session_launched");
+    if (fixProjectId) boardEvents?.broadcast(fixProjectId, "session_launched");
 
     return { sessionId };
   }
@@ -551,7 +551,7 @@ export function createWorkspaceMergeService(deps: {
     });
 
     const { agentCommand, agentArgs, claudeProfile, profile, provider } =
-      applyWorkspaceAgentSelection(await loadAgentSettings(database), workspace);
+      await resolveRelaunchAgentSelection(database, projectId, workspace);
     const executorProvider = toExecutorProvider(provider);
 
     const sessionId = await getSessionManager().startSession({
