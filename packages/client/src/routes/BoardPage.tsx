@@ -465,8 +465,13 @@ export function BoardPage() {
     for (const col of columns) {
       const found = col.issues.find((i) => i.id === selectedIssue.id);
       if (found) {
+        // The board payload strips `description` (the panel lazy-loads it). A
+        // background board refresh must NOT count the stripped (undefined)
+        // description as a change, nor clobber the loaded one — otherwise the
+        // open panel's body vanishes on the next board_changed/poll tick.
+        const boardDescDiffers = found.description !== undefined && found.description !== selectedIssue.description;
         if (found.title !== selectedIssue.title ||
-            found.description !== selectedIssue.description ||
+            boardDescDiffers ||
             found.issueType !== selectedIssue.issueType ||
             found.statusId !== selectedIssue.statusId ||
             found.statusName !== selectedIssue.statusName ||
@@ -474,7 +479,11 @@ export function BoardPage() {
             found.workspaceSummary?.main?.contextTokens !== selectedIssue.workspaceSummary?.main?.contextTokens ||
             found.workspaceSummary?.main?.lastTool !== selectedIssue.workspaceSummary?.main?.lastTool ||
             found.workspaceSummary?.main?.status !== selectedIssue.workspaceSummary?.main?.status) {
-          setSelectedIssue(found);
+          setSelectedIssue(
+            found.description === undefined && selectedIssue.description !== undefined
+              ? { ...found, description: selectedIssue.description }
+              : found,
+          );
         }
         return;
       }

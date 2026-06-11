@@ -54,6 +54,18 @@ function fetchAvailableIssues(projectId: string): Promise<IssueWithStatus[]> {
   });
 }
 
+// Shape of GET /api/issues/:id/detail-bundle — the per-issue panel data folded
+// into one response (server-side parallel fetch).
+interface IssueDetailBundle {
+  issue: { id: string; description: string | null };
+  workspaces: { id: string }[];
+  tags: { id: string; name: string; color: string | null }[];
+  dependencies: DependencyInfo | null;
+  artifacts: IssueArtifact[];
+  comments: IssueComment[];
+  activity: { events: ActivityEvent[] };
+}
+
 function invalidateAvailableIssuesCache(projectId: string) {
   availableIssuesCache.delete(projectId);
 }
@@ -485,31 +497,40 @@ export function IssueDetailPanel({
       setActivityLoading(true);
       setArtifacts([]);
       setExpandedArtifactId(null);
+      // Description is stripped from the board payload; the bundle re-supplies it.
+      if (issue.description === undefined) setDescriptionFetching(true);
       try {
-        const [ws, tags, available, deps, issues, skills, commentsResp, artifactsResp, activityResp, milestonesResp] = await Promise.all([
-          apiFetch<{ id: string }[]>(`/api/issues/${issue.id}/workspaces`),
-          apiFetch<{ id: string; name: string; color: string | null }[]>(`/api/issues/${issue.id}/tags`),
+        // Per-issue data comes in ONE round-trip via the detail-bundle endpoint
+        // (workspaces, issue tags, dependencies, comments, artifacts, activity,
+        // and the lazy-loaded description). Project-scoped data (all tags,
+        // available issues, skills, milestones) is the same across every issue
+        // in the project, so it stays on its own cacheable endpoints and runs
+        // in parallel with the bundle.
+        const [bundle, allTags, available, skills, milestonesResp] = await Promise.all([
+          apiFetch<IssueDetailBundle>(`/api/issues/${issue.id}/detail-bundle`),
           apiFetch<{ id: string; name: string; color: string | null }[]>(`/api/tags`),
-          apiFetch<DependencyInfo>(`/api/issues/${issue.id}/dependencies`),
           fetchAvailableIssues(issue.projectId),
           apiFetch<{ id: string; name: string; description: string }[]>(`/api/agent-skills?projectId=${issue.projectId}`).catch(() => [] as { id: string; name: string; description: string }[]),
-          apiFetch<{ comments: IssueComment[] }>(`/api/issues/${issue.id}/comments`).catch(() => ({ comments: [] as IssueComment[] })),
-          apiFetch<IssueArtifact[]>(`/api/issues/${issue.id}/artifacts`).catch(() => [] as IssueArtifact[]),
-          apiFetch<{ events: ActivityEvent[] }>(`/api/issues/${issue.id}/activity`).catch(() => ({ events: [] })),
           apiFetch<MilestoneResponse[]>(`/api/projects/${issue.projectId}/milestones`).catch(() => [] as MilestoneResponse[]),
         ]);
-        setWorkspaceCount(ws.length);
-        setIssueTags(tags);
-        setAllTags(available);
-        setDependencies(deps);
-        setAvailableIssues(issues.filter(i => i.id !== issue.id));
+        setWorkspaceCount(bundle.workspaces.length);
+        setIssueTags(bundle.tags);
+        setDependencies(bundle.dependencies ?? { dependencies: [] });
+        setComments(bundle.comments);
+        setArtifacts(bundle.artifacts);
+        setActivityEvents(bundle.activity.events);
+        setAllTags(allTags);
+        setAvailableIssues(available.filter(i => i.id !== issue.id));
         setAvailableSkills(skills);
-        setComments(commentsResp.comments);
-        setArtifacts(artifactsResp);
-        setActivityEvents(activityResp.events);
         setMilestones(milestonesResp);
         setArtifactsLoading(false);
         setActivityLoading(false);
+        // Feed the lazy-loaded description up to the shared issue object so the
+        // separate description fetch is no longer needed.
+        if (issue.description === undefined && bundle.issue.description !== undefined) {
+          onIssueUpdate({ ...issue, description: bundle.issue.description });
+        }
+        setDescriptionFetching(false);
         // Check for active showdown
         apiFetch<{ id: string }>(`/api/issues/${issue.id}/showdown`)
           .then(sd => setActiveShowdownId(sd.id))
@@ -517,6 +538,7 @@ export function IssueDetailPanel({
       } catch {
         setArtifactsLoading(false);
         setActivityLoading(false);
+        setDescriptionFetching(false);
         // Ignore — non-critical
       }
       // Secondary, best-effort data. These were previously awaited one after
@@ -544,20 +566,8 @@ export function IssueDetailPanel({
     loadData();
   }, [issue.id]);
 
-  // Lazy-load description on demand (stripped from board payload to reduce size)
-  useEffect(() => {
-    if (issue.description !== undefined) return;
-    let cancelled = false;
-    setDescriptionFetching(true);
-    apiFetch<{ id: string; description: string | null }>(`/api/issues/${issue.id}`)
-      .then((data) => {
-        if (cancelled) return;
-        onIssueUpdate({ ...issue, description: data.description });
-      })
-      .catch(() => {})
-      .finally(() => { if (!cancelled) setDescriptionFetching(false); });
-    return () => { cancelled = true; };
-  }, [issue.id]);
+  // (Description is now supplied by the detail-bundle fetch above — no separate
+  // lazy-load round-trip.)
 
   // Sync local state when issue prop changes (stale data fix - F6)
   useEffect(() => {

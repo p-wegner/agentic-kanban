@@ -332,6 +332,38 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     return c.json(result);
   });
 
+  // GET /api/issues/:id/detail-bundle — one round-trip for the IssueDetailPanel.
+  // Collapses the per-issue fetches (issue+description, workspaces, tags,
+  // dependencies, artifacts, comments, activity) the panel otherwise fires as
+  // ~7 separate requests, which queue behind the browser's 6-connection
+  // HTTP/1.1 limit (head-of-line blocking — the same problem /settings-bootstrap
+  // solved for the settings panel). Project-scoped data (all tags, skills,
+  // milestones, available issues) and git-heavy best-effort data (touched-files,
+  // related-issues, merged-commits) stay on their own endpoints. Each sub-result
+  // is independent: a failure degrades that field rather than failing the bundle.
+  router.get("/:id/detail-bundle", async (c) => {
+    const id = c.req.param("id");
+    const issue = await getIssueDescription(id, database);
+    if (!issue) return c.json({ error: "Issue not found" }, 404);
+    const [workspaces, tags, dependencies, artifacts, comments, activity] = await Promise.all([
+      Promise.resolve(issueService.getEnrichedWorkspaces(id)).catch(() => []),
+      Promise.resolve(issueService.getTags(id)).catch(() => []),
+      Promise.resolve(issueService.getDependencies(id)).catch(() => null),
+      Promise.resolve(issueService.getArtifacts(id)).catch(() => []),
+      Promise.resolve(issueCommentsService.listComments(id)).catch(() => []),
+      Promise.resolve(getIssueActivity(id, database)).catch(() => null),
+    ]);
+    return c.json({
+      issue,
+      workspaces,
+      tags,
+      dependencies,
+      artifacts,
+      comments,
+      activity: activity ?? { events: [] },
+    });
+  });
+
   // GET /api/issues/:id — returns the issue with its full description (used for lazy-loading)
   router.get("/:id", async (c) => {
     const id = c.req.param("id");
