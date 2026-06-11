@@ -25,6 +25,12 @@ export function createAgentSkillsRoute(database: Database = db) {
     return c.json(await wrapAiOperation("skill-enhance", () => agentSkillService.enhanceSkill(body.name, body.description, body.prompt)));
   });
 
+  // GET /api/agent-skills/install-status — batch install-status for all skills in one
+  // pass (registered before /:id so the static path wins over the :id param route).
+  router.get("/install-status", async (c) => {
+    return c.json(await agentSkillService.getAllInstallStatuses());
+  });
+
   // GET /api/agent-skills/:id — get a single skill
   router.get("/:id", async (c) => {
     return c.json(await agentSkillService.getSkill(c.req.param("id")));
