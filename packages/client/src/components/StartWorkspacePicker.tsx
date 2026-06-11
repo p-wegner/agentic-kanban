@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
+import { getSettings } from "../lib/settingsStore.js";
 import { suggestBranchName } from "../lib/branch.js";
 import { showToast } from "./Toast.js";
 
@@ -58,7 +59,7 @@ export function StartWorkspacePicker({ issues, onClose, onStarted }: StartWorksp
     setStarting(true);
     try {
       const [settings] = await Promise.all([
-        apiFetch<Record<string, string>>("/api/preferences/settings").catch(() => ({} as Record<string, string>)),
+        getSettings().catch(() => ({} as Record<string, string>)),
       ]);
       const provider = (settings.provider as "claude" | "codex" | "copilot") || "claude";
       const profileName =

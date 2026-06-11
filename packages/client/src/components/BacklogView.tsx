@@ -6,6 +6,7 @@ import { CollapsibleSection } from "./CollapsibleSection.js";
 import { IssueCard } from "./IssueCard.js";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { apiFetch } from "../lib/api.js";
+import { getSettings, invalidateSettings } from "../lib/settingsStore.js";
 import { showToast } from "./Toast.js";
 
 type SortMode = "rank" | "newest" | "oldest" | "priority" | "type" | "due";
@@ -186,7 +187,7 @@ export function BacklogView({
 
   useEffect(() => {
     let cancelled = false;
-    apiFetch<Record<string, string>>("/api/preferences/settings")
+    getSettings()
       .then((settings) => {
         if (!cancelled) {
           const loaded = parsePresets(settings[presetSettingsKey]);
@@ -349,6 +350,7 @@ export function BacklogView({
         method: "PUT",
         body: JSON.stringify({ [presetSettingsKey]: JSON.stringify(nextPresets) }),
       });
+      invalidateSettings();
       setPresets(nextPresets);
       showToast(successMessage, "success");
       return true;

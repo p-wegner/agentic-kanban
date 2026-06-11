@@ -4,6 +4,7 @@ import type { CreateIssueRequest, IssueEstimate, ProfileSelection } from "@agent
 import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import type { CreateIssueFormState } from "./CreateIssueForm.js";
 import { apiFetch } from "../lib/api.js";
+import { getSettings } from "../lib/settingsStore.js";
 import { showToast } from "./Toast.js";
 import TicketMentionInput from "./TicketMentionInput.js";
 import TicketMentionRenderer from "./TicketMentionRenderer.js";
@@ -125,7 +126,7 @@ export function CreateIssuePanel({
     if (!startWorkspace || !projectId) return;
     Promise.all([
       apiFetch<Skill[]>(`/api/agent-skills?projectId=${projectId}`).catch(() => [] as Skill[]),
-      apiFetch<Record<string, string>>("/api/preferences/settings").catch(() => ({} as Record<string, string>)),
+      getSettings().catch(() => ({} as Record<string, string>)),
       apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles").catch(() => ({ profiles: [] as string[] })),
       apiFetch<{ profiles: string[] }>("/api/preferences/codex-profiles").catch(() => ({ profiles: [CODEX_DEFAULT_PROFILE] as string[] })),
       apiFetch<{ profiles: string[] }>("/api/preferences/copilot-profiles").catch(() => ({ profiles: [COPILOT_DEFAULT_PROFILE] })),
