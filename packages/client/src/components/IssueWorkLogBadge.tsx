@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { apiFetch } from "../lib/api.js";
+import { getIssueTimeEntries } from "../lib/timeEntriesCache.js";
 import { formatMinutes } from "./IssueWorkLogSection.js";
 
 interface IssueWorkLogBadgeProps {
@@ -11,7 +11,9 @@ export function IssueWorkLogBadge({ issueId }: IssueWorkLogBadgeProps) {
 
   useEffect(() => {
     setTotalMinutes(null);
-    apiFetch<{ entries: unknown[]; totalMinutes: number }>(`/api/issues/${issueId}/time-entries`)
+    // Shared module-level cache: dedupes the StrictMode double-mount and the
+    // per-card N+1 fetch storm on board load (see lib/timeEntriesCache.ts).
+    getIssueTimeEntries(issueId)
       .then((data) => setTotalMinutes(data.totalMinutes))
       .catch(() => {});
   }, [issueId]);
