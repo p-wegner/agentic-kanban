@@ -1,203 +1,39 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
-import { STATUS_COLORS, TYPE_COLORS, BRAND, ACCENT } from "../lib/chartColors";
-import { computeCriticalPath, type CriticalPathResult, type ChainStep } from "../lib/criticalPath.js";
-
-type DependencyType = "depends_on" | "blocked_by" | "related_to" | "duplicates" | "parent_of" | "child_of";
-
-const DEPENDENCY_TYPE_LABELS: Record<DependencyType, string> = {
-  depends_on: "Depends on",
-  blocked_by: "Blocked by",
-  related_to: "Related to",
-  duplicates: "Duplicates",
-  parent_of: "Parent of",
-  child_of: "Child of",
-};
-
-interface Dependency {
-  id: string;
-  issueId: string;
-  dependsOnId: string;
-  type: DependencyType;
-  issueTitle: string;
-  issueStatusName: string;
-  issueNumber: number | null;
-}
+import { STATUS_COLORS } from "../lib/chartColors";
+import { computeCriticalPath, type CriticalPathResult } from "../lib/criticalPath.js";
+import {
+  CHAIN_EDGE_COLOR,
+  COL_HEADER_H,
+  CYCLE_COLOR,
+  DEPENDENCY_COLORS,
+  H_GAP,
+  NODE_H,
+  NODE_W,
+  ROOT_BLOCKER_COLOR,
+  SWIMLANE_NODES_PER_ROW,
+  computeColumns,
+  computeLayout,
+  orderedStatusNames,
+  type Dependency,
+  type DependencyType,
+  type Node,
+} from "../lib/graphLayout.js";
+import { AddEdgePanel } from "./AddEdgePanel.js";
+import { CriticalPathSidePanel } from "./CriticalPathSidePanel.js";
+import { EdgeEditPanel } from "./EdgeEditPanel.js";
+import { GraphEdges } from "./GraphEdges.js";
+import { GraphNodes } from "./GraphNodes.js";
 
 interface GraphData {
   nodes: IssueWithStatus[];
   edges: Dependency[];
 }
 
-interface Node {
-  id: string;
-  x: number;
-  y: number;
-  issue: IssueWithStatus;
-}
-
-// Ordered workflow columns for status-based layout
-const STATUS_ORDER = ["Backlog", "Todo", "In Progress", "In Review", "AI Reviewed", "Done", "Cancelled"];
-
-const DEPENDENCY_COLORS: Record<DependencyType, string> = {
-  depends_on: "#8a8175",
-  blocked_by: "#b4453a",
-  related_to: ACCENT,
-  parent_of: "#c79a3e",
-  child_of: "#c79a3e",
-  duplicates: "#b07a8c",
-};
-
-/** Root blocker color — warm brick (same family as TYPE_COLORS.bug). */
-const ROOT_BLOCKER_COLOR = "#b4453a";
-/** Critical-chain edge color. */
-const CHAIN_EDGE_COLOR = "#c25f36";
-/** Cycle indicator color — amber. */
-const CYCLE_COLOR = "#f59e0b";
-
-const NODE_W = 220;
-const NODE_H = 64;
-const H_GAP = 48;
-const V_GAP = 16;
-const COL_HEADER_H = 28;
-const SWIMLANE_NODES_PER_ROW = 2;
-const DEPENDENCY_ROWS_PER_COLUMN = 8;
-const BAND_GAP = 64; // gap between status groups in swimlane layout
-
-function computeLayout(nodes: IssueWithStatus[], edges: Dependency[]): Node[] {
-  if (nodes.length === 0) return [];
-
-  const hasEdges = edges.length > 0;
-
-  if (hasEdges) {
-    // Dependency-based topological layout
-    const outEdges = new Map<string, string[]>();
-    const inDegree = new Map<string, number>();
-    for (const n of nodes) {
-      outEdges.set(n.id, []);
-      inDegree.set(n.id, 0);
-    }
-    for (const e of edges) {
-      if (outEdges.has(e.dependsOnId) && outEdges.has(e.issueId)) {
-        outEdges.get(e.dependsOnId)!.push(e.issueId);
-        inDegree.set(e.issueId, (inDegree.get(e.issueId) ?? 0) + 1);
-      }
-    }
-
-    const levels = new Map<string, number>();
-    const queue: string[] = [];
-    for (const [id, deg] of inDegree) {
-      if (deg === 0) queue.push(id);
-    }
-    while (queue.length > 0) {
-      const id = queue.shift()!;
-      const level = levels.get(id) ?? 0;
-      for (const next of outEdges.get(id) ?? []) {
-        const nextLevel = Math.max(levels.get(next) ?? 0, level + 1);
-        levels.set(next, nextLevel);
-        const deg = (inDegree.get(next) ?? 1) - 1;
-        inDegree.set(next, deg);
-        if (deg === 0) queue.push(next);
-      }
-    }
-    for (const n of nodes) {
-      if (!levels.has(n.id)) levels.set(n.id, 0);
-    }
-
-    const byLevel = new Map<number, IssueWithStatus[]>();
-    for (const n of nodes) {
-      const lv = levels.get(n.id) ?? 0;
-      if (!byLevel.has(lv)) byLevel.set(lv, []);
-      byLevel.get(lv)!.push(n);
-    }
-
-    const result: Node[] = [];
-    const sortedLevels = Array.from(byLevel.keys()).sort((a, b) => a - b);
-    let levelX = 40;
-    for (const lv of sortedLevels) {
-      const group = byLevel.get(lv)!;
-      for (let i = 0; i < group.length; i++) {
-        const subCol = Math.floor(i / DEPENDENCY_ROWS_PER_COLUMN);
-        const row = i % DEPENDENCY_ROWS_PER_COLUMN;
-        const x = levelX + subCol * (NODE_W + H_GAP);
-        const y = row * (NODE_H + V_GAP) + 40;
-        result.push({ id: group[i].id, x, y, issue: group[i] });
-      }
-      const levelCols = Math.max(1, Math.ceil(group.length / DEPENDENCY_ROWS_PER_COLUMN));
-      levelX += levelCols * (NODE_W + H_GAP) + BAND_GAP;
-    }
-    return result;
-  }
-
-  // Status-based swimlane layout (no dependency edges)
-  const byStatus = new Map<string, IssueWithStatus[]>();
-  for (const n of nodes) {
-    const s = n.statusName;
-    if (!byStatus.has(s)) byStatus.set(s, []);
-    byStatus.get(s)!.push(n);
-  }
-
-  // Order columns by STATUS_ORDER, then any remaining statuses alphabetically
-  const knownOrder = STATUS_ORDER.filter((s) => byStatus.has(s));
-  const extraStatuses = [...byStatus.keys()]
-    .filter((s) => !STATUS_ORDER.includes(s))
-    .sort();
-  const orderedStatuses = [...knownOrder, ...extraStatuses];
-
-  const result: Node[] = [];
-  let swimlaneX = 40;
-  for (let col = 0; col < orderedStatuses.length; col++) {
-    const status = orderedStatuses[col];
-    const group = byStatus.get(status)!;
-    for (let i = 0; i < group.length; i++) {
-      const subCol = i % SWIMLANE_NODES_PER_ROW;
-      const row = Math.floor(i / SWIMLANE_NODES_PER_ROW);
-      const x = swimlaneX + subCol * (NODE_W + H_GAP);
-      const y = row * (NODE_H + V_GAP) + COL_HEADER_H + 48;
-      result.push({ id: group[i].id, x, y, issue: group[i] });
-    }
-    const subCols = Math.min(group.length, SWIMLANE_NODES_PER_ROW);
-    swimlaneX += subCols * (NODE_W + H_GAP) + BAND_GAP;
-  }
-  return result;
-}
-
-/** Column headers for the status-based layout (no edges mode) */
-function computeColumns(nodes: IssueWithStatus[], edges: Dependency[]) {
-  if (edges.length > 0 || nodes.length === 0) return [];
-  const byStatus = new Map<string, number>();
-  for (const n of nodes) {
-    byStatus.set(n.statusName, (byStatus.get(n.statusName) ?? 0) + 1);
-  }
-  const knownOrder = STATUS_ORDER.filter((s) => byStatus.has(s));
-  const extraStatuses = [...byStatus.keys()]
-    .filter((s) => !STATUS_ORDER.includes(s))
-    .sort();
-  const orderedStatuses = [...knownOrder, ...extraStatuses];
-  const result = [];
-  let swimlaneX = 40;
-  for (const status of orderedStatuses) {
-    const count = byStatus.get(status) ?? 0;
-    result.push({ status, count, x: swimlaneX });
-    const subCols = Math.min(count, SWIMLANE_NODES_PER_ROW);
-    swimlaneX += subCols * (NODE_W + H_GAP) + BAND_GAP;
-  }
-  return result;
-}
-
 const BACKLOG_STATUS_NAME = "Backlog";
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
 const DEFAULT_HIDDEN_STATUS_NAMES = new Set([BACKLOG_STATUS_NAME, ...ARCHIVE_STATUS_NAMES]);
-
-function orderedStatusNames(statusNames: string[]) {
-  const unique = [...new Set(statusNames)];
-  const knownOrder = STATUS_ORDER.filter((s) => unique.includes(s));
-  const extraStatuses = unique
-    .filter((s) => !STATUS_ORDER.includes(s))
-    .sort();
-  return [...knownOrder, ...extraStatuses];
-}
 
 type GraphMode = "dependency" | "critical-path";
 
@@ -258,405 +94,6 @@ function GraphFilterControls({ statusFilters, statusNames, onStatusFiltersChange
           <option key={s} value={s}>{s}</option>
         ))}
       </select>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Critical Path Side Panel
-// ---------------------------------------------------------------------------
-
-interface CriticalPathSidePanelProps {
-  chainRoot: string;
-  criticalPathResult: CriticalPathResult;
-  nodeIssueMap: Map<string, IssueWithStatus>;
-  onClose: () => void;
-  onIssueClick: (issue: IssueWithStatus) => void;
-}
-
-function CriticalPathSidePanel({ chainRoot, criticalPathResult, nodeIssueMap, onClose, onIssueClick }: CriticalPathSidePanelProps) {
-  const chain = criticalPathResult.chainsByRoot.get(chainRoot);
-  const rootBlocker = criticalPathResult.rootBlockers.find((r) => r.id === chainRoot);
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [onClose]);
-
-  if (!chain || chain.length === 0) return null;
-
-  const rootIssue = nodeIssueMap.get(chainRoot);
-
-  return (
-    <div className="absolute top-0 right-0 bottom-0 z-20 animate-slide-in-right" style={{ width: 320 }}>
-      <div ref={panelRef} className="h-full bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 shadow-lg flex flex-col">
-        {/* Header */}
-        <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 dark:border-gray-700">
-          <div className="flex-1 min-w-0">
-            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
-              Critical Path
-            </h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              {rootBlocker ? `${rootBlocker.downstreamCount} issue${rootBlocker.downstreamCount !== 1 ? "s" : ""} blocked downstream` : "Chain details"}
-            </p>
-          </div>
-          <button
-            onClick={onClose}
-            className="rounded px-1.5 py-0.5 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 text-sm"
-          >
-            ✕
-          </button>
-        </div>
-
-        {/* Chain steps */}
-        <div className="flex-1 overflow-y-auto px-3 py-2">
-          {chain.map((step: ChainStep, idx: number) => {
-            const isRoot = idx === 0;
-            return (
-              <div key={step.id}>
-                <button
-                  onClick={() => {
-                    const issue = nodeIssueMap.get(step.id);
-                    if (issue) onIssueClick(issue);
-                  }}
-                  className={`w-full text-left rounded-md px-2.5 py-2 mb-0.5 transition-colors ${
-                    isRoot
-                      ? "bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800"
-                      : "hover:bg-gray-50 dark:hover:bg-gray-800 border border-transparent"
-                  }`}
-                >
-                  <div className="flex items-center gap-1.5">
-                    {step.issueNumber != null && (
-                      <span className="text-[10px] font-mono text-gray-400">#{step.issueNumber}</span>
-                    )}
-                    <span className="text-xs font-medium text-gray-800 dark:text-gray-200 truncate">
-                      {step.title}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <span
-                      className="w-1.5 h-1.5 rounded-full inline-block"
-                      style={{ background: STATUS_COLORS[step.statusName] ?? "#6b7280" }}
-                    />
-                    <span className="text-[10px] text-gray-500 dark:text-gray-400">{step.statusName}</span>
-                    {isRoot && (
-                      <span className="text-[10px] px-1 py-0.5 rounded bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300 ml-auto">
-                        root blocker
-                      </span>
-                    )}
-                    {step.isBlocked && !isRoot && (
-                      <span className="text-[10px] px-1 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 ml-auto">
-                        blocked
-                      </span>
-                    )}
-                  </div>
-                </button>
-                {/* Connector arrow */}
-                {idx < chain.length - 1 && (
-                  <div className="flex items-center justify-center py-0.5">
-                    <svg width="12" height="12" viewBox="0 0 12 12" className="text-gray-300 dark:text-gray-600">
-                      <path d="M6 2 L6 8 M3 6 L6 9 L9 6" stroke="currentColor" strokeWidth="1.5" fill="none" />
-                    </svg>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Best unblock callout */}
-        {criticalPathResult.bestUnblock && (
-          <div className="border-t border-gray-200 dark:border-gray-700 px-3 py-2.5 bg-amber-50 dark:bg-amber-900/20">
-            <div className="text-[10px] font-semibold text-amber-700 dark:text-amber-300 uppercase tracking-wide mb-1">
-              Next best unblock
-            </div>
-            <button
-              onClick={() => {
-                const issue = nodeIssueMap.get(criticalPathResult.bestUnblock!.id);
-                if (issue) onIssueClick(issue);
-              }}
-              className="w-full text-left"
-            >
-              <span className="text-xs text-gray-800 dark:text-gray-200">
-                Resolve{" "}
-                {(() => {
-                  const bi = nodeIssueMap.get(criticalPathResult.bestUnblock.id);
-                  return bi ? (
-                    <>
-                      {bi.issueNumber != null && <span className="font-mono text-gray-500">#{bi.issueNumber}</span>}
-                      {" "}{bi.title.length > 32 ? bi.title.slice(0, 32) + "…" : bi.title}
-                    </>
-                  ) : "this issue";
-                })()}
-              </span>
-              <span className="block text-[10px] text-amber-600 dark:text-amber-400 mt-0.5">
-                to unblock {criticalPathResult.bestUnblock.downstreamCount} issue{criticalPathResult.bestUnblock.downstreamCount !== 1 ? "s" : ""}
-              </span>
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Edge Edit Panel — shown when an edge is selected
-// ---------------------------------------------------------------------------
-
-interface EdgeEditPanelProps {
-  edge: Dependency;
-  sourceIssue: IssueWithStatus | null;
-  targetIssue: IssueWithStatus | null;
-  onClose: () => void;
-  onRemove: (edgeId: string) => Promise<void>;
-  onTypeChange: (edgeId: string, newType: DependencyType) => Promise<void>;
-}
-
-function EdgeEditPanel({ edge, sourceIssue, targetIssue, onClose, onRemove, onTypeChange }: EdgeEditPanelProps) {
-  const [removing, setRemoving] = useState(false);
-  const [typeChanging, setTypeChanging] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [onClose]);
-
-  async function handleRemove() {
-    setRemoving(true);
-    setError(null);
-    try {
-      await onRemove(edge.id);
-      onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to remove dependency");
-      setRemoving(false);
-    }
-  }
-
-  async function handleTypeChange(e: React.ChangeEvent<HTMLSelectElement>) {
-    const newType = e.target.value as DependencyType;
-    if (newType === edge.type) return;
-    setTypeChanging(true);
-    setError(null);
-    try {
-      await onTypeChange(edge.id, newType);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update dependency type");
-    } finally {
-      setTypeChanging(false);
-    }
-  }
-
-  const edgeColor = DEPENDENCY_COLORS[edge.type] ?? "#9ca3af";
-
-  return (
-    <div
-      className="absolute z-30 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-3"
-      style={{ bottom: 60, left: "50%", transform: "translateX(-50%)", minWidth: 320, maxWidth: 420 }}
-      data-testid="edge-edit-panel"
-    >
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Edit Dependency</h3>
-        <button
-          onClick={onClose}
-          className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 px-1"
-          aria-label="Close edge editor"
-        >✕</button>
-      </div>
-
-      {/* Source → Target */}
-      <div className="flex items-center gap-2 mb-3 text-xs">
-        <div className="flex-1 min-w-0 rounded px-2 py-1.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-          <div className="text-[10px] text-gray-400 mb-0.5">Source</div>
-          <div className="font-medium text-gray-800 dark:text-gray-200 truncate" title={sourceIssue?.title ?? edge.dependsOnId}>
-            {sourceIssue?.issueNumber != null && <span className="font-mono text-gray-400 mr-1">#{sourceIssue.issueNumber}</span>}
-            {sourceIssue?.title ?? edge.dependsOnId}
-          </div>
-        </div>
-        <div className="flex flex-col items-center shrink-0">
-          <svg width="24" height="16" viewBox="0 0 24 16">
-            <path d="M2,8 L18,8 M14,4 L19,8 L14,12" stroke={edgeColor} strokeWidth="1.5" fill="none" />
-          </svg>
-        </div>
-        <div className="flex-1 min-w-0 rounded px-2 py-1.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-          <div className="text-[10px] text-gray-400 mb-0.5">Target</div>
-          <div className="font-medium text-gray-800 dark:text-gray-200 truncate" title={targetIssue?.title ?? edge.issueId}>
-            {targetIssue?.issueNumber != null && <span className="font-mono text-gray-400 mr-1">#{targetIssue.issueNumber}</span>}
-            {targetIssue?.title ?? edge.issueId}
-          </div>
-        </div>
-      </div>
-
-      {/* Dependency type selector */}
-      <div className="mb-3">
-        <label className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide block mb-1">
-          Dependency Type
-        </label>
-        <select
-          value={edge.type}
-          onChange={handleTypeChange}
-          disabled={typeChanging}
-          className="w-full text-xs border border-gray-200 dark:border-gray-600 rounded px-2 py-1.5 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200"
-          aria-label="Dependency type"
-        >
-          {(Object.keys(DEPENDENCY_TYPE_LABELS) as DependencyType[]).map((t) => (
-            <option key={t} value={t}>{DEPENDENCY_TYPE_LABELS[t]}</option>
-          ))}
-        </select>
-      </div>
-
-      {error && (
-        <div className="text-xs text-red-600 dark:text-red-400 mb-2 px-1" role="alert">{error}</div>
-      )}
-
-      <button
-        onClick={handleRemove}
-        disabled={removing}
-        className="w-full text-xs px-3 py-1.5 rounded bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 transition-colors disabled:opacity-60"
-        aria-label="Remove dependency"
-      >
-        {removing ? "Removing…" : "Remove Dependency"}
-      </button>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Add Edge Panel — drawn when user initiates an add-edge flow
-// ---------------------------------------------------------------------------
-
-interface AddEdgePanelProps {
-  sourceIssue: IssueWithStatus | null;
-  allIssues: IssueWithStatus[];
-  projectId: string;
-  onAdd: (sourceId: string, targetId: string, type: DependencyType) => Promise<void>;
-  onCancel: () => void;
-}
-
-function AddEdgePanel({ sourceIssue, allIssues, projectId: _projectId, onAdd, onCancel }: AddEdgePanelProps) {
-  const [targetId, setTargetId] = useState("");
-  const [depType, setDepType] = useState<DependencyType>("depends_on");
-  const [adding, setAdding] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onCancel();
-    }
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [onCancel]);
-
-  async function handleAdd() {
-    if (!sourceIssue || !targetId) return;
-    setAdding(true);
-    setError(null);
-    try {
-      await onAdd(sourceIssue.id, targetId, depType);
-      onCancel();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to add dependency");
-      setAdding(false);
-    }
-  }
-
-  const otherIssues = allIssues.filter((i) => i.id !== sourceIssue?.id);
-
-  return (
-    <div
-      className="absolute z-30 bg-white dark:bg-gray-900 border border-blue-200 dark:border-blue-700 rounded-lg shadow-lg p-3"
-      style={{ bottom: 60, left: "50%", transform: "translateX(-50%)", minWidth: 340, maxWidth: 440 }}
-      data-testid="add-edge-panel"
-    >
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Add Dependency</h3>
-        <button
-          onClick={onCancel}
-          className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 px-1"
-          aria-label="Cancel add dependency"
-        >✕</button>
-      </div>
-
-      <div className="space-y-2 mb-3">
-        <div>
-          <label className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide block mb-1">
-            Source Issue
-          </label>
-          <div className="text-xs px-2 py-1.5 rounded bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-200">
-            {sourceIssue ? (
-              <>
-                {sourceIssue.issueNumber != null && <span className="font-mono text-gray-400 mr-1">#{sourceIssue.issueNumber}</span>}
-                {sourceIssue.title}
-              </>
-            ) : <span className="text-gray-400">Select a source node on the graph</span>}
-          </div>
-        </div>
-
-        <div>
-          <label className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide block mb-1">
-            Type
-          </label>
-          <select
-            value={depType}
-            onChange={(e) => setDepType(e.target.value as DependencyType)}
-            className="w-full text-xs border border-gray-200 dark:border-gray-600 rounded px-2 py-1.5 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200"
-            aria-label="New dependency type"
-          >
-            {(Object.keys(DEPENDENCY_TYPE_LABELS) as DependencyType[]).map((t) => (
-              <option key={t} value={t}>{DEPENDENCY_TYPE_LABELS[t]}</option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide block mb-1">
-            Target Issue
-          </label>
-          <select
-            value={targetId}
-            onChange={(e) => setTargetId(e.target.value)}
-            className="w-full text-xs border border-gray-200 dark:border-gray-600 rounded px-2 py-1.5 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200"
-            aria-label="Target issue"
-          >
-            <option value="">— select target —</option>
-            {otherIssues.map((i) => (
-              <option key={i.id} value={i.id}>
-                {i.issueNumber != null ? `#${i.issueNumber} ` : ""}{i.title}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {error && (
-        <div className="text-xs text-red-600 dark:text-red-400 mb-2 px-1" role="alert" data-testid="add-edge-error">{error}</div>
-      )}
-
-      <div className="flex gap-2">
-        <button
-          onClick={handleAdd}
-          disabled={adding || !sourceIssue || !targetId}
-          className="flex-1 text-xs px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-60"
-          aria-label="Confirm add dependency"
-        >
-          {adding ? "Adding…" : "Add Dependency"}
-        </button>
-        <button
-          onClick={onCancel}
-          className="text-xs px-3 py-1.5 rounded border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
-        >
-          Cancel
-        </button>
-      </div>
     </div>
   );
 }
@@ -1026,6 +463,28 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery, focus
   const edges = getEdges();
   const isCriticalPathMode = graphMode === "critical-path" && criticalPathResult !== null;
 
+  function handleEdgeClick(edge: Dependency) {
+    setSelectedEdge(selectedEdge?.id === edge.id ? null : edge);
+    setAddingEdge(false);
+  }
+
+  function handleNodeClick(node: Node) {
+    // In add-edge mode: first click sets source, second click sets target and opens add panel
+    if (addingEdge) {
+      if (!addEdgeSourceId) {
+        setAddEdgeSourceId(node.id);
+      } else if (addEdgeSourceId !== node.id) {
+        // Keep the add panel open with source pre-selected; don't navigate away
+      }
+      return;
+    }
+    if (isCriticalPathMode && rootBlockerIds.has(node.id)) {
+      setSelectedChainRoot(selectedChainRoot === node.id ? null : node.id);
+    }
+    setSelectedEdge(null);
+    onIssueClick(node.issue);
+  }
+
   return (
     <div ref={containerRef} className="relative h-full w-full overflow-hidden bg-gray-50 dark:bg-gray-950 select-none">
       <GraphFilterControls
@@ -1189,241 +648,33 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery, focus
             );
           })}
           {/* Edges */}
-          {edges.map((edge) => {
-            const src = nodeMap.get(edge.dependsOnId);
-            const dst = nodeMap.get(edge.issueId);
-            if (!src || !dst) return null;
-            const x1 = src.x + NODE_W;
-            const y1 = src.y + NODE_H / 2;
-            const x2 = dst.x;
-            const y2 = dst.y + NODE_H / 2;
-            const mx = (x1 + x2) / 2;
-            const isBlockingEdge = edge.type === "depends_on" || edge.type === "blocked_by";
-            const isSelectedEdge = selectedEdge?.id === edge.id;
-
-            // Critical-path mode: highlight chain edges, dim non-chain (no edge selection in this mode)
-            if (isCriticalPathMode) {
-              const isInSelectedChain = selectedChainRoot
-                ? selectedChainEdgeKeys.has(`${edge.dependsOnId}->${edge.issueId}`)
-                : isBlockingEdge && criticalPathResult!.chainNodeIds.has(edge.dependsOnId) && criticalPathResult!.chainNodeIds.has(edge.issueId);
-              const edgeOpacity = isInSelectedChain ? 0.9 : (isBlockingEdge ? 0.25 : 0.1);
-              const edgeStroke = isInSelectedChain ? CHAIN_EDGE_COLOR : (isBlockingEdge ? "#d17d54" : "#d1d5db");
-              const edgeWidth = isInSelectedChain ? 3 : 1.5;
-              const markerRef = isInSelectedChain ? "url(#arrow-critical-chain)" : `url(#arrow-${edge.type})`;
-
-              return (
-                <g key={edge.id}>
-                  <path
-                    d={`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`}
-                    fill="none"
-                    stroke={edgeStroke}
-                    strokeWidth={edgeWidth}
-                    opacity={edgeOpacity}
-                    markerEnd={markerRef}
-                  />
-                </g>
-              );
-            }
-
-            const color = DEPENDENCY_COLORS[edge.type] ?? "#9ca3af";
-            const d = `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;
-            return (
-              <g
-                key={edge.id}
-                data-edge-id={edge.id}
-                style={{ cursor: "pointer" }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (didDragRef.current) return;
-                  setSelectedEdge(isSelectedEdge ? null : edge);
-                  setAddingEdge(false);
-                }}
-              >
-                {/* Invisible wider hit target for easier clicking */}
-                <path
-                  d={d}
-                  fill="none"
-                  stroke="transparent"
-                  strokeWidth={12}
-                />
-                <path
-                  d={d}
-                  fill="none"
-                  stroke={isSelectedEdge ? BRAND : color}
-                  strokeWidth={isSelectedEdge ? 2.5 : 1.5}
-                  opacity={isSelectedEdge ? 1 : 0.7}
-                  markerEnd={`url(#arrow-${edge.type})`}
-                />
-                <text
-                  x={mx}
-                  y={(y1 + y2) / 2 - 4}
-                  fontSize={9}
-                  fill={isSelectedEdge ? BRAND : color}
-                  textAnchor="middle"
-                  opacity={0.8}
-                >
-                  {edge.type.replace(/_/g, " ")}
-                </text>
-              </g>
-            );
-          })}
+          <GraphEdges
+            edges={edges}
+            nodeMap={nodeMap}
+            isCriticalPathMode={isCriticalPathMode}
+            criticalPathResult={criticalPathResult}
+            selectedChainRoot={selectedChainRoot}
+            selectedChainEdgeKeys={selectedChainEdgeKeys}
+            selectedEdge={selectedEdge}
+            didDragRef={didDragRef}
+            onEdgeClick={handleEdgeClick}
+          />
           {/* Nodes */}
-          {nodes.map((node) => {
-            const color = STATUS_COLORS[node.issue.statusName] ?? "#6b7280";
-            const isSelected = selectedNode === node.id;
-            const isFocused = focusIssueId === node.id;
-            const isHighlighted = searchQuery
-              ? node.issue.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                (node.issue.description?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false)
-              : true;
-            const title = node.issue.title;
-            const displayTitle = title.length > 28 ? title.slice(0, 28) + "…" : title;
-
-            // Critical-path mode visual overrides
-            let nodeOpacity = isHighlighted ? 1 : 0.3;
-            let nodeStroke = isFocused ? BRAND : (isSelected ? BRAND : color);
-            let nodeStrokeWidth = isFocused ? 3 : (isSelected ? 2 : 1.5);
-            let nodeStrokeDasharray: string | undefined;
-            let isRootBlocker = false;
-            let downstreamBadge: number | null = null;
-
-            if (isCriticalPathMode) {
-              const isChainNode = criticalPathResult!.chainNodeIds.has(node.id);
-              const isCycleNode = criticalPathResult!.cycleNodeIds.has(node.id);
-              isRootBlocker = rootBlockerIds.has(node.id);
-              const isInSelectedChain = selectedChainRoot
-                ? selectedChainIds.has(node.id)
-                : isChainNode;
-
-              if (isCycleNode) {
-                nodeStroke = CYCLE_COLOR;
-                nodeStrokeWidth = 2;
-                nodeStrokeDasharray = "4 2";
-                nodeOpacity = 0.6;
-              } else if (isRootBlocker) {
-                nodeStroke = ROOT_BLOCKER_COLOR;
-                nodeStrokeWidth = 3;
-                downstreamBadge = downstreamCountMap.get(node.id) ?? null;
-                nodeOpacity = 1;
-              } else if (isInSelectedChain) {
-                nodeStroke = isSelected ? BRAND : color;
-                nodeOpacity = 1;
-              } else if (isChainNode) {
-                nodeOpacity = 0.5;
-              } else {
-                nodeOpacity = 0.2;
-              }
-
-              // If a chain root is selected, highlight its chain strongly
-              if (selectedChainRoot) {
-                if (isInSelectedChain || isRootBlocker) {
-                  nodeOpacity = 1;
-                } else {
-                  nodeOpacity = 0.15;
-                }
-              }
-            }
-
-            return (
-              <g
-                key={node.id}
-                data-node
-                data-critical-path-root={isRootBlocker || undefined}
-                data-critical-path-chain={isCriticalPathMode && criticalPathResult!.chainNodeIds.has(node.id) || undefined}
-                transform={`translate(${node.x},${node.y})`}
-                style={{ cursor: "pointer", opacity: nodeOpacity }}
-                onMouseDown={(e) => handleMouseDownNode(e, node.id)}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (didDragRef.current) return;
-                  // In add-edge mode: first click sets source, second click sets target and opens add panel
-                  if (addingEdge) {
-                    if (!addEdgeSourceId) {
-                      setAddEdgeSourceId(node.id);
-                    } else if (addEdgeSourceId !== node.id) {
-                      // Keep the add panel open with source pre-selected; don't navigate away
-                    }
-                    return;
-                  }
-                  if (isCriticalPathMode && isRootBlocker) {
-                    setSelectedChainRoot(selectedChainRoot === node.id ? null : node.id);
-                  }
-                  setSelectedEdge(null);
-                  onIssueClick(node.issue);
-                }}
-              >
-                <rect
-                  width={NODE_W}
-                  height={NODE_H}
-                  rx={6}
-                  ry={6}
-                  fill="white"
-                  stroke={nodeStroke}
-                  strokeWidth={nodeStrokeWidth}
-                  strokeDasharray={nodeStrokeDasharray}
-                  filter="drop-shadow(0 1px 3px rgba(0,0,0,0.12))"
-                />
-                {/* Status indicator bar */}
-                <rect width={4} height={NODE_H} rx={3} fill={color} />
-                {/* Priority dot */}
-                <circle
-                  cx={NODE_W - 12}
-                  cy={12}
-                  r={4}
-                  fill={
-                    node.issue.issueType === "bug" ? TYPE_COLORS.bug :
-                    node.issue.issueType === "feature" ? TYPE_COLORS.feature :
-                    node.issue.issueType === "chore" ? TYPE_COLORS.chore : "#a8a195"
-                  }
-                />
-                {/* Issue number */}
-                {node.issue.issueNumber != null && (
-                  <text x={12} y={18} fontSize={9} fill="#9ca3af" fontFamily="monospace">
-                    #{node.issue.issueNumber}
-                  </text>
-                )}
-                {/* Title */}
-                <text x={12} y={36} fontSize={11} fill="#111827" fontWeight={500}>
-                  {displayTitle}
-                </text>
-                {/* Status label */}
-                <text x={12} y={54} fontSize={9} fill={color}>
-                  {node.issue.statusName}
-                </text>
-                {/* Blocked indicator */}
-                {node.issue.isBlocked && !isCriticalPathMode && (
-                  <text x={NODE_W - 22} y={NODE_H - 6} fontSize={9} fill="#f59e0b">⚠</text>
-                )}
-                {/* Cycle label */}
-                {isCriticalPathMode && criticalPathResult!.cycleNodeIds.has(node.id) && (
-                  <text x={NODE_W - 40} y={NODE_H - 6} fontSize={8} fill={CYCLE_COLOR}>cycle</text>
-                )}
-                {/* Downstream count badge (root blockers in critical-path mode) */}
-                {downstreamBadge != null && downstreamBadge > 0 && (
-                  <>
-                    <circle
-                      cx={NODE_W - 8}
-                      cy={-4}
-                      r={9}
-                      fill={ROOT_BLOCKER_COLOR}
-                      stroke="white"
-                      strokeWidth={1.5}
-                    />
-                    <text
-                      x={NODE_W - 8}
-                      y={-0.5}
-                      fontSize={8}
-                      fill="white"
-                      fontWeight={700}
-                      textAnchor="middle"
-                    >
-                      {downstreamBadge > 99 ? "99+" : downstreamBadge}
-                    </text>
-                  </>
-                )}
-              </g>
-            );
-          })}
+          <GraphNodes
+            nodes={nodes}
+            selectedNode={selectedNode}
+            focusIssueId={focusIssueId}
+            searchQuery={searchQuery}
+            isCriticalPathMode={isCriticalPathMode}
+            criticalPathResult={criticalPathResult}
+            rootBlockerIds={rootBlockerIds}
+            downstreamCountMap={downstreamCountMap}
+            selectedChainRoot={selectedChainRoot}
+            selectedChainIds={selectedChainIds}
+            didDragRef={didDragRef}
+            onNodeMouseDown={handleMouseDownNode}
+            onNodeClick={handleNodeClick}
+          />
         </g>
       </svg>
 
