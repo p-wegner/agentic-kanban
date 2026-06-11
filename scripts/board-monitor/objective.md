@@ -23,7 +23,7 @@ When selecting a provider for a new workspace, apply these rules in priority ord
 1. **FILL** profiles should always have capacity — start work on them first.
 2. **THROTTLE** profiles are preferred for main work. Respect their headroom percentage.
 3. **FALLBACK-ONLY** profiles are last resort — only use if all others are exhausted or the user explicitly selects them.
-- **policy-claude-zai** [claude:zai]: FILL — use aggressively, keep busy at all times (Primary harness - all new workspaces launch on claude:zai. Single source of truth.)
+- **policy-codex-default** [codex:default]: FILL — use aggressively, keep busy at all times (Primary harness - all new workspaces launch on codex:default. Single source of truth (set-provider-default skill).)
 <!-- STRATEGY_BULLSEYE_GENERATED_END -->
 
 ## FOCUS POLICY (operator directive 2026-06-09 — authoritative; overrides the REFILL_FOCUS wording above)
