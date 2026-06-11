@@ -26,7 +26,7 @@ describe("VIEW_REGISTRY", () => {
   });
 
   it("enumerates all board views", () => {
-    expect(VIEW_REGISTRY).toHaveLength(33);
+    expect(VIEW_REGISTRY).toHaveLength(34);
   });
 
   it("preserves the existing view ids", () => {
@@ -34,7 +34,7 @@ describe("VIEW_REGISTRY", () => {
       "kanban", "backlog", "graph", "table", "agents", "timeline", "metrics",
       "quality-metrics", "digest", "strategy", "focus", "butler", "workflows", "workflow-analytics", "insights", "swimlane", "flaky-tests",
       "monitor-history", "health-events", "runbooks", "capacity", "constellation", "momentum", "activity", "stale-work", "throughput",
-      "provider-mix", "lead-time", "scorecard-distribution", "provider-cost", "fireworks", "calendar", "burndown",
+      "provider-mix", "lead-time", "scorecard-distribution", "provider-cost", "agent-throughput", "fireworks", "calendar", "burndown",
     ];
     expect(VIEW_IDS.slice().sort()).toEqual(expected.slice().sort());
   });
@@ -88,7 +88,7 @@ describe("VIEW_REGISTRY", () => {
       [
         "digest", "flaky-tests", "focus", "metrics", "quality-metrics", "swimlane", "workflow-analytics",
         "health-events", "runbooks", "capacity", "constellation", "momentum", "activity", "stale-work", "throughput",
-        "provider-mix", "lead-time", "scorecard-distribution", "provider-cost", "fireworks", "calendar", "burndown",
+        "provider-mix", "lead-time", "scorecard-distribution", "provider-cost", "agent-throughput", "fireworks", "calendar", "burndown",
       ].sort(),
     );
   });
