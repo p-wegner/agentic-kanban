@@ -9,7 +9,7 @@ import { listAgentSkills } from "../repositories/agent-skill.repository.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { eq, and, notInArray, sql } from "drizzle-orm";
 import type { Database } from "../db/index.js";
-import { branchExists, detectRepoInfo, getProjectGitStats } from "./git-info.service.js";
+import { branchExists, detectRepoInfo, getProjectGitStatsAsync } from "./git-info.service.js";
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree } from "./git.service.js";
 import { buildWorkspaceSummaryMap, buildBlockedMap, buildTagMap, buildGraphEdges } from "./board-aggregation.service.js";
 import { getProjectById, getProjectByRepoPath, getAllProjects, insertProject, deleteProjectCascade, getProjectStats, getProjectStatuses, createProjectStatus, deleteProjectStatus, updateProjectStatusSortOrder } from "../repositories/project.repository.js";
@@ -446,7 +446,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     const project = await getProjectById(projectId, database);
     if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
 
-    const { commitCount, recentCommits, detectedBranch, codeMetrics, history, hotspots } = getProjectGitStats(project.repoPath, project.defaultBranch);
+    const { commitCount, recentCommits, detectedBranch, codeMetrics, history, hotspots } = await getProjectGitStatsAsync(project.repoPath, project.defaultBranch);
 
     const issueRows = await getProjectStats(projectId, database);
     const issueCounts: Record<string, number> = {};
