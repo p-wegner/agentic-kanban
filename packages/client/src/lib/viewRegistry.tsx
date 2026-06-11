@@ -43,7 +43,8 @@ export type ViewMode =
   | "provider-mix"
   | "lead-time"
   | "scorecard-distribution"
-  | "provider-cost";
+  | "provider-cost"
+  | "calendar";
 
 export interface ViewDescriptor {
   /** Stable view id — matches BoardPage's `viewMode` state. */
@@ -272,6 +273,12 @@ const ICON = {
   "provider-cost": (
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M3 13l4-3 4 2 4-5 4 3M3 19h18" />
+    </svg>
+  ),
+  calendar: (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <rect x="3" y="4" width="18" height="18" rx="2" />
+      <path strokeLinecap="round" d="M16 2v4M8 2v4M3 10h18" />
     </svg>
   ),
 } as const;
@@ -618,6 +625,17 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteIcon: "$",
     paletteDescription: "Stacked bar chart of estimated token cost per day grouped by agent provider (claude/codex/copilot)",
     activeClass: "bg-emerald-600 text-white",
+    group: "secondary",
+  },
+  {
+    id: "calendar",
+    toolbarLabel: "Calendar",
+    label: "Calendar",
+    tooltip: "Calendar — issues by due date on a monthly grid",
+    icon: ICON.calendar,
+    paletteIcon: "Cal",
+    paletteDescription: "Show issues on a monthly calendar by due date",
+    shortcut: "a",
     group: "secondary",
   },
 ];
