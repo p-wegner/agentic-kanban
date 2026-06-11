@@ -70,11 +70,16 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
   const router = createRouter();
 
   const workspaceSummaryCache = createWorkspaceSummaryCache();
-  if (options?.boardEvents) {
-    options.boardEvents.addInvalidationListener((projectId) => workspaceSummaryCache.invalidate(projectId));
-  }
-
   const projectService = createProjectService({ database, workspaceSummaryCache });
+  if (options?.boardEvents) {
+    options.boardEvents.addInvalidationListener((projectId) => {
+      workspaceSummaryCache.invalidate(projectId);
+      // Warm-ahead: start the board rebuild now (debounced to collapse event bursts)
+      // so the client's WS-triggered refetch ~100-300ms later hits a warm or in-flight
+      // cache instead of paying the full cold rebuild (measured 121-205ms per refetch).
+      projectService.scheduleBoardWarmup(projectId);
+    });
+  }
 
   // GET /api/projects
   router.get("/", async (c) => {
