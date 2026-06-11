@@ -1,5 +1,5 @@
 import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
-import { issues, projectStatuses, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { desc, eq, sql, or, isNull, notInArray, and } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { createBoardEvents } from "../services/board-events.js";
@@ -11,13 +11,26 @@ import { NOISE_TRIGGER_TYPES } from "../services/session-filter.js";
 import { commitLeftoverChanges, getCommitCountAhead, getWorkingTreeDiff } from "../services/git.service.js";
 import { startManualReview } from "../services/review.service.js";
 import { isCodexUsageLimitStats } from "../services/codex-rate-limit.js";
+import {
+  MAX_SESSIONS,
+  NON_TRIVIAL_WORKTREE_DIFF_CHARS,
+  hasRepeatedFailedCommand,
+  isBuilderSession,
+  isZeroDiffInReviewAwaiting,
+  parseStuckBuilderTimeoutMs,
+  type LatestSession,
+} from "./monitor-cycle-rules.js";
+import {
+  closeDirectWorkspaceAsDone,
+  getProjectStatusIdByName,
+  mergeWorkspaceWithFixFallback,
+  type LogMonitorActionFn,
+} from "./monitor-cycle-actions.js";
 
-const MAX_SESSIONS = 10;
+export { DEFAULT_STUCK_BUILDER_TIMEOUT_MS } from "./monitor-cycle-rules.js";
+
 export const MAX_MONITOR_RELAUNCHES_PER_CYCLE = 2;
 export const MAX_MONITOR_MERGES_PER_CYCLE = 2;
-export const DEFAULT_STUCK_BUILDER_TIMEOUT_MS = 9 * 60 * 1000;
-const NON_TRIVIAL_WORKTREE_DIFF_CHARS = 80;
-const REPEATED_FAILED_COMMAND_MIN_COUNT = 3;
 
 export interface WorkspaceCandidate {
   wsId: string;
@@ -79,55 +92,23 @@ export interface ProcessWorkspaceDeps {
   startReview?: typeof startManualReview;
 }
 
-type LatestSession = {
-  id: string;
-  status: string;
-  startedAt: string;
-  triggerType: string | null;
-  stats: string | null;
+/** Shared per-cycle state handed to the per-status handlers. `stats` is the
+ * SAME mutable object the cap closures read, so cap-check-before-action math
+ * is unchanged by the decomposition. */
+type CycleContext = {
+  deps: ProcessWorkspaceDeps;
+  stats: { relaunched: number; merged: number; nudged: number };
+  logAction: LogMonitorActionFn;
+  canStartRelaunch: (ws: WorkspaceCandidate) => boolean;
+  canStartMerge: (ws: WorkspaceCandidate) => boolean;
+  stuckBuilderTimeoutMs: number;
 };
-
-function parseStuckBuilderTimeoutMs(): number {
-  const fromEnv = Number(process.env.STUCK_BUILDER_TIMEOUT_MS);
-  return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : DEFAULT_STUCK_BUILDER_TIMEOUT_MS;
-}
-
-function parseSessionStats(stats: string | null): Record<string, unknown> {
-  if (!stats) return {};
-  try {
-    const parsed = JSON.parse(stats);
-    return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : {};
-  } catch {
-    return {};
-  }
-}
-
-function hasRepeatedFailedCommand(stats: string | null): boolean {
-  const parsed = parseSessionStats(stats);
-  const friction = parsed.friction && typeof parsed.friction === "object"
-    ? parsed.friction as Record<string, unknown>
-    : null;
-  if (!friction) return false;
-  const failedToolCalls = Number(friction.failedToolCalls ?? 0);
-  const errorCount = Number(friction.errorCount ?? 0);
-  const repeatedCommands = Array.isArray(friction.repeatedCommands) ? friction.repeatedCommands : [];
-  return (failedToolCalls >= 2 || errorCount >= 2)
-    && repeatedCommands.some((cmd) =>
-      cmd
-      && typeof cmd === "object"
-      && Number((cmd as Record<string, unknown>).count ?? 0) >= REPEATED_FAILED_COMMAND_MIN_COUNT,
-    );
-}
-
-function isBuilderSession(sess: LatestSession): boolean {
-  return !sess.triggerType || sess.triggerType === "agent" || sess.triggerType === "chat" || sess.triggerType === "plan-implement";
-}
 
 async function recoverStuckBuilder(
   ws: WorkspaceCandidate,
   sess: LatestSession,
   deps: ProcessWorkspaceDeps,
-  logAction: (action: MonitorActionName, workspaceId: string, issueId: string, extra?: Pick<MonitorAction, "endpoint" | "httpStatus" | "responseSummary" | "verificationResult">) => void,
+  logAction: LogMonitorActionFn,
 ): Promise<boolean> {
   if (ws.isDirect || !ws.workingDir || !ws.baseBranch || !isBuilderSession(sess)) return false;
 
@@ -156,10 +137,9 @@ async function recoverStuckBuilder(
     return true;
   }
 
-  const inReviewSt = await db.select({ id: projectStatuses.id }).from(projectStatuses)
-    .where(sql`${projectStatuses.name} = 'In Review' AND ${projectStatuses.projectId} = ${ws.projectId}`).limit(1);
-  if (inReviewSt[0]) {
-    await db.update(issues).set({ statusId: inReviewSt[0].id, updatedAt: new Date().toISOString() }).where(eq(issues.id, ws.issueId));
+  const inReviewStatusId = await getProjectStatusIdByName(ws.projectId, "In Review");
+  if (inReviewStatusId) {
+    await db.update(issues).set({ statusId: inReviewStatusId, updatedAt: new Date().toISOString() }).where(eq(issues.id, ws.issueId));
     await syncCurrentNodeToStatus(db, ws.issueId);
   }
 
@@ -179,12 +159,187 @@ async function recoverStuckBuilder(
   return true;
 }
 
+async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession | undefined, sessionCount: number, ctx: CycleContext): Promise<void> {
+  const { deps, stats, logAction, canStartRelaunch, canStartMerge } = ctx;
+  if (isCodexUsageLimitStats(sess?.stats)) {
+    await db.update(workspaces).set({ status: "blocked", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
+    console.log(`[monitor] Needs attention: workspace ${ws.wsId} for issue #${ws.issueNumber ?? "?"} hit a Codex usage limit; skipping relaunch`);
+    deps.boardEvents.broadcast(ws.projectId, "board_changed");
+    return;
+  }
+  if (isZeroDiffInReviewAwaiting(ws)) {
+    console.log(`[monitor] Needs attention: idle-awaiting workspace ${ws.wsId} for issue #${ws.issueNumber ?? "?"} is In Review with no file changes and is not ready for merge`);
+    return;
+  }
+  if (ws.isDirect) {
+    await closeDirectWorkspaceAsDone(ws, logAction);
+    console.log(`[monitor] Closed stale direct workspace ${ws.wsId}  issue moved to Done`);
+    deps.boardEvents.broadcast(ws.projectId, "board_changed");
+  } else if (ws.readyForMerge) {
+    if (!deps.autoMergeEnabled) {
+      console.log(`[monitor] Skipping auto-merge for idle+readyForMerge workspace ${ws.wsId}  auto_merge is disabled`);
+      return;
+    }
+    if (deps.autoMergeDisabledProjectIds?.has(ws.projectId)) {
+      console.log(`[monitor] Skipping auto-merge for idle+readyForMerge workspace ${ws.wsId}  auto_merge_disabled for project ${ws.projectId}`);
+      return;
+    }
+    if (!canStartMerge(ws)) return;
+    await mergeWorkspaceWithFixFallback(ws, deps.serverPort, logAction, {
+      conflictMsg: `[monitor] Merge conflict for idle+readyForMerge workspace ${ws.wsId}  triggered fix-and-merge`,
+      successMsg: `[monitor] Triggered merge for idle+readyForMerge workspace ${ws.wsId}`,
+    });
+    stats.merged++;
+    deps.boardEvents.broadcast(ws.projectId, "board_changed");
+  } else if (sessionCount >= MAX_SESSIONS) {
+    const needsReviewStatusId = await getProjectStatusIdByName(ws.projectId, "Needs Review");
+    const inReviewStatusId = await getProjectStatusIdByName(ws.projectId, "In Review");
+    const fallbackStatusId = needsReviewStatusId ?? inReviewStatusId;
+    if (fallbackStatusId) await db.update(issues).set({ statusId: fallbackStatusId }).where(eq(issues.id, ws.issueId)).catch(() => {});
+    await db.update(workspaces).set({ status: "closed", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
+    logAction("mark_idle", ws.wsId, ws.issueId, { responseSummary: `${sessionCount} sessions — flagged stuck`, verificationResult: "ok" });
+    console.log(`[monitor] Workspace ${ws.wsId} has ${sessionCount} sessions  flagged as stuck, closing`);
+    deps.boardEvents.broadcast(ws.projectId, "board_changed");
+  } else if (sessionCount >= 5 && ws.issueStatusName === "In Review") {
+    await db.update(workspaces).set({ status: "closed", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
+    logAction("mark_idle", ws.wsId, ws.issueId, { responseSummary: "Closed to break review loop", verificationResult: "ok" });
+    console.log(`[monitor] Workspace ${ws.wsId} has ${sessionCount} sessions with issue in review  closing to break review loop (merge or create new workspace)`);
+    deps.boardEvents.broadcast(ws.projectId, "board_changed");
+  } else if (ws.issueStatusName === "In Review") {
+    if (deps.autoMergeEnabled && deps.autoMergeInReview && !deps.autoMergeDisabledProjectIds?.has(ws.projectId)) {
+      if (!canStartMerge(ws)) return;
+      await mergeWorkspaceWithFixFallback(ws, deps.serverPort, logAction, {
+        conflictMsg: `[monitor] Merge conflict for idle In-Review workspace ${ws.wsId} (auto_merge_in_review)  triggered fix-and-merge`,
+        successMsg: `[monitor] Auto-merged idle In-Review workspace ${ws.wsId} (auto_merge_in_review, not marked ready)`,
+      });
+      stats.merged++;
+      deps.boardEvents.broadcast(ws.projectId, "board_changed");
+    } else {
+      console.log(`[monitor] Skipping relaunch for idle workspace ${ws.wsId}  issue #${ws.issueNumber} is in review (committed work awaiting merge; enable auto_merge_in_review to land it)`);
+    }
+  } else {
+    if (!canStartRelaunch(ws)) return;
+    const launchEndpoint = `/api/workspaces/${ws.wsId}/launch`;
+    const launchRes = await fetch(`http://127.0.0.1:${deps.serverPort}${launchEndpoint}`, { method: "POST" }).catch(() => null);
+    stats.relaunched++;
+    logAction("relaunch", ws.wsId, ws.issueId, {
+      endpoint: launchEndpoint,
+      httpStatus: launchRes?.status,
+      verificationResult: launchRes?.ok ? "ok" : "failed",
+    });
+    console.log(`[monitor] Relaunched idle workspace ${ws.wsId}`);
+    deps.boardEvents.broadcast(ws.projectId, "board_changed");
+  }
+}
+
+async function handleReviewingWorkspace(ws: WorkspaceCandidate, sess: LatestSession | undefined, ctx: CycleContext): Promise<void> {
+  const { deps, stats, logAction, canStartMerge } = ctx;
+  if (isZeroDiffInReviewAwaiting(ws)) {
+    console.log(`[monitor] Needs attention: idle-awaiting workspace ${ws.wsId} for issue #${ws.issueNumber ?? "?"} is In Review with no file changes and is not ready for merge`);
+    return;
+  }
+  if (!ws.workingDir) {
+    console.log(`[monitor] Ghost workspace ${ws.wsId} (workingDir empty)  deleting and resetting issue to In Progress`);
+    const deleteEndpoint = `/api/workspaces/${ws.wsId}`;
+    const deleteRes = await fetch(`http://127.0.0.1:${deps.serverPort}${deleteEndpoint}`, { method: "DELETE" }).catch(() => null);
+    const inProgressStatusId = await getProjectStatusIdByName(ws.projectId, "In Progress");
+    if (inProgressStatusId) await db.update(issues).set({ statusId: inProgressStatusId }).where(eq(issues.id, ws.issueId)).catch(() => {});
+    logAction("mark_idle", ws.wsId, ws.issueId, {
+      endpoint: deleteEndpoint,
+      httpStatus: deleteRes?.status,
+      responseSummary: "Ghost workspace deleted",
+      verificationResult: "ok",
+    });
+    deps.boardEvents.broadcast(ws.projectId, "board_changed");
+  } else if (sess?.status === "stopped") {
+    if (!deps.autoMergeEnabled) {
+      console.log(`[monitor] Skipping auto-merge for reviewing+stopped workspace ${ws.wsId}  auto_merge is disabled`);
+      return;
+    }
+    if (deps.autoMergeDisabledProjectIds?.has(ws.projectId)) {
+      console.log(`[monitor] Skipping auto-merge for reviewing+stopped workspace ${ws.wsId}  auto_merge_disabled for project ${ws.projectId}`);
+      return;
+    }
+    if (!canStartMerge(ws)) return;
+    // Deliberately NO fix-and-merge fallback on this path: a reviewing
+    // workspace whose merge fails must not spawn a fix-and-merge session.
+    const mergeEndpoint = `/api/workspaces/${ws.wsId}/merge`;
+    const mergeRes = await fetch(`http://127.0.0.1:${deps.serverPort}${mergeEndpoint}`, { method: "POST" }).catch(() => null);
+    stats.merged++;
+    logAction("merge", ws.wsId, ws.issueId, {
+      endpoint: mergeEndpoint,
+      httpStatus: mergeRes?.status,
+      verificationResult: mergeRes?.ok ? "ok" : "failed",
+    });
+    console.log(`[monitor] Triggered merge for reviewing workspace ${ws.wsId}`);
+    deps.boardEvents.broadcast(ws.projectId, "board_changed");
+  }
+}
+
+async function handleActiveStoppedWorkspace(ws: WorkspaceCandidate, sess: LatestSession, ctx: CycleContext): Promise<void> {
+  const { deps, logAction } = ctx;
+  if (isCodexUsageLimitStats(sess.stats)) {
+    await db.update(workspaces).set({ status: "blocked", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
+    console.log(`[monitor] Needs attention: active workspace ${ws.wsId} stopped after Codex usage limit; marking blocked`);
+    deps.boardEvents.broadcast(ws.projectId, "board_changed");
+    return;
+  }
+  if (ws.isDirect) {
+    await closeDirectWorkspaceAsDone(ws, logAction);
+    console.log(`[monitor] Direct active workspace ${ws.wsId} has stopped session  closing`);
+  } else {
+    await db.update(workspaces).set({ status: "idle" }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
+    logAction("mark_idle", ws.wsId, ws.issueId, { verificationResult: "ok" });
+    console.log(`[monitor] Active workspace ${ws.wsId} has stopped session  marking idle for relaunch`);
+  }
+  deps.boardEvents.broadcast(ws.projectId, "board_changed");
+}
+
+async function handleActiveRunningWorkspace(ws: WorkspaceCandidate, sess: LatestSession, ctx: CycleContext): Promise<void> {
+  const { deps, stats, logAction, stuckBuilderTimeoutMs } = ctx;
+  if (!deps.sessionManager.isProcessAlive(sess.id)) {
+    await db.update(workspaces).set({ status: "idle" }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
+    await db.update(sessions).set({ status: "stopped", endedAt: new Date().toISOString() }).where(eq(sessions.id, sess.id)).catch(() => {});
+    logAction("mark_dead", ws.wsId, ws.issueId, { verificationResult: "ok" });
+    console.log(`[monitor] Workspace ${ws.wsId} process dead  marking idle`);
+    deps.boardEvents.broadcast(ws.projectId, "board_changed");
+    return;
+  } else if (Date.now() - new Date(sess.startedAt).getTime() > stuckBuilderTimeoutMs) {
+    const recovered = await recoverStuckBuilder(ws, sess, deps, logAction);
+    if (recovered) return;
+    // A false return deliberately falls through to the nudge block below.
+  }
+  if (Date.now() - new Date(sess.startedAt).getTime() > 5 * 60 * 1000) {
+    const previousNudge = deps.monitorRecentActions.find((a) => a.action === "nudge" && a.workspaceId === ws.wsId);
+    if (previousNudge) {
+      const excerpts = await deps.getRecentAgentExcerpts(sess.id);
+      if (deps.shouldSkipNudge(excerpts)) {
+        console.log(`[monitor] Skipping re-nudge for workspace ${ws.wsId}  agent appears to be actively working`);
+        return;
+      }
+      if (excerpts.length > 0) console.log(`[monitor] Re-nudging workspace ${ws.wsId}  last agent excerpt: "${excerpts[0]?.slice(0, 100)}..."`);
+      emitButlerSystemEvent({ projectId: ws.projectId, kind: "stuck_agent", workspaceId: ws.wsId, issueNumber: ws.issueNumber ?? undefined, text: `Agent on workspace ${ws.wsId} (issue #${ws.issueNumber ?? "?"} "${ws.issueTitle}") has been stuck without progress; monitor re-nudged.` });
+    }
+    const nudged = sendMonitorNudge({
+      sessionManager: deps.sessionManager,
+      sessionId: sess.id,
+      workspaceId: ws.wsId,
+      issueId: ws.issueId,
+      projectId: ws.projectId,
+      prompt: await deps.buildMonitorNudgePrompt(ws.projectId),
+      logAction: (action, workspaceId, issueId) => logAction(action, workspaceId, issueId),
+      broadcast: (projectId, event) => deps.boardEvents.broadcast(projectId, event),
+    });
+    if (nudged) stats.nudged++;
+  }
+}
+
 export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[], deps: ProcessWorkspaceDeps): Promise<{ relaunched: number; merged: number; nudged: number }> {
   const stats = { relaunched: 0, merged: 0, nudged: 0 };
   const maxRelaunches = deps.maxRelaunchesPerCycle ?? MAX_MONITOR_RELAUNCHES_PER_CYCLE;
   const maxMerges = deps.maxMergesPerCycle ?? MAX_MONITOR_MERGES_PER_CYCLE;
   const stuckBuilderTimeoutMs = deps.stuckBuilderTimeoutMs ?? parseStuckBuilderTimeoutMs();
-  const logAction = (action: MonitorActionName, workspaceId: string, issueId: string, extra?: Pick<MonitorAction, "endpoint" | "httpStatus" | "responseSummary" | "verificationResult">) => deps.logMonitorAction(deps.monitorRecentActions, action, workspaceId, issueId, extra);
+  const logAction: LogMonitorActionFn = (action, workspaceId, issueId, extra) => deps.logMonitorAction(deps.monitorRecentActions, action, workspaceId, issueId, extra);
   const canStartRelaunch = (ws: WorkspaceCandidate) => {
     if (stats.relaunched < maxRelaunches) return true;
     console.log(`[monitor] Relaunch cap reached (${maxRelaunches}/cycle)  leaving workspace ${ws.wsId} idle until the next monitor run`);
@@ -195,14 +350,7 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
     console.log(`[monitor] Merge cap reached (${maxMerges}/cycle)  leaving workspace ${ws.wsId} queued until the next monitor run`);
     return false;
   };
-  const isZeroDiffInReviewAwaiting = (ws: WorkspaceCandidate) =>
-    ws.issueStatusName === "In Review"
-    && !ws.isDirect
-    && !!ws.workingDir
-    && !ws.readyForMerge
-    && ws.diffStatCacheFilesChanged === 0
-    && (ws.diffStatCacheInsertions ?? 0) === 0
-    && (ws.diffStatCacheDeletions ?? 0) === 0;
+  const ctx: CycleContext = { deps, stats, logAction, canStartRelaunch, canStartMerge, stuckBuilderTimeoutMs };
   for (const ws of candidates) {
     try {
       const [sess] = await db.select({ id: sessions.id, status: sessions.status, startedAt: sessions.startedAt, triggerType: sessions.triggerType, stats: sessions.stats }).from(sessions)
@@ -215,216 +363,16 @@ export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[
       const sessionCount = Number(sessionCountRows[0]?.count ?? 0);
 
       if (ws.wsStatus === "idle") {
-        if (isCodexUsageLimitStats(sess?.stats)) {
-          await db.update(workspaces).set({ status: "blocked", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
-          console.log(`[monitor] Needs attention: workspace ${ws.wsId} for issue #${ws.issueNumber ?? "?"} hit a Codex usage limit; skipping relaunch`);
-          deps.boardEvents.broadcast(ws.projectId, "board_changed");
-          continue;
-        }
-        if (isZeroDiffInReviewAwaiting(ws)) {
-          console.log(`[monitor] Needs attention: idle-awaiting workspace ${ws.wsId} for issue #${ws.issueNumber ?? "?"} is In Review with no file changes and is not ready for merge`);
-          continue;
-        }
-        if (ws.isDirect) {
-          const now = new Date().toISOString();
-          await db.update(workspaces).set({ status: "closed", workingDir: null, updatedAt: now }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
-          const doneStatusRow = await db.select({ id: projectStatuses.id }).from(projectStatuses).where(sql`${projectStatuses.name} = 'Done' AND ${projectStatuses.projectId} = ${ws.projectId}`).limit(1);
-          if (doneStatusRow.length > 0) await db.update(issues).set({ statusId: doneStatusRow[0].id, updatedAt: now }).where(eq(issues.id, ws.issueId)).catch(() => {});
-          logAction("merge", ws.wsId, ws.issueId, { verificationResult: "ok" });
-          console.log(`[monitor] Closed stale direct workspace ${ws.wsId}  issue moved to Done`);
-          deps.boardEvents.broadcast(ws.projectId, "board_changed");
-        } else if (ws.readyForMerge) {
-          if (!deps.autoMergeEnabled) {
-            console.log(`[monitor] Skipping auto-merge for idle+readyForMerge workspace ${ws.wsId}  auto_merge is disabled`);
-            continue;
-          }
-          if (deps.autoMergeDisabledProjectIds?.has(ws.projectId)) {
-            console.log(`[monitor] Skipping auto-merge for idle+readyForMerge workspace ${ws.wsId}  auto_merge_disabled for project ${ws.projectId}`);
-            continue;
-          }
-          if (!canStartMerge(ws)) continue;
-          const mergeEndpoint = `/api/workspaces/${ws.wsId}/merge`;
-          const mergeRes = await fetch(`http://127.0.0.1:${deps.serverPort}${mergeEndpoint}`, { method: "POST" }).catch(() => null);
-          if (!mergeRes || !mergeRes.ok) {
-            const body = mergeRes ? await mergeRes.json().catch(() => ({})) : {};
-            const mergeError = (body as Record<string, string>)?.message || "merge failed";
-            const fixEndpoint = `/api/workspaces/${ws.wsId}/fix-and-merge`;
-            const fixRes = await fetch(`http://127.0.0.1:${deps.serverPort}${fixEndpoint}`, {
-              method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mergeError }),
-            }).catch(() => null);
-            console.log(`[monitor] Merge conflict for idle+readyForMerge workspace ${ws.wsId}  triggered fix-and-merge`);
-            logAction("merge", ws.wsId, ws.issueId, {
-              endpoint: fixEndpoint,
-              httpStatus: fixRes?.status,
-              responseSummary: mergeError.slice(0, 200),
-              verificationResult: fixRes?.ok ? "ok" : "failed",
-            });
-          } else {
-            console.log(`[monitor] Triggered merge for idle+readyForMerge workspace ${ws.wsId}`);
-            logAction("merge", ws.wsId, ws.issueId, {
-              endpoint: mergeEndpoint,
-              httpStatus: mergeRes.status,
-              verificationResult: "ok",
-            });
-          }
-          stats.merged++;
-          deps.boardEvents.broadcast(ws.projectId, "board_changed");
-        } else if (sessionCount >= MAX_SESSIONS) {
-          const needsReviewSt = await db.select({ id: projectStatuses.id }).from(projectStatuses).where(sql`${projectStatuses.name} = 'Needs Review' AND ${projectStatuses.projectId} = ${ws.projectId}`).limit(1);
-          const inReviewSt = await db.select({ id: projectStatuses.id }).from(projectStatuses).where(sql`${projectStatuses.name} = 'In Review' AND ${projectStatuses.projectId} = ${ws.projectId}`).limit(1);
-          const fallbackSt = needsReviewSt[0] ?? inReviewSt[0];
-          if (fallbackSt) await db.update(issues).set({ statusId: fallbackSt.id }).where(eq(issues.id, ws.issueId)).catch(() => {});
-          await db.update(workspaces).set({ status: "closed", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
-          logAction("mark_idle", ws.wsId, ws.issueId, { responseSummary: `${sessionCount} sessions — flagged stuck`, verificationResult: "ok" });
-          console.log(`[monitor] Workspace ${ws.wsId} has ${sessionCount} sessions  flagged as stuck, closing`);
-          deps.boardEvents.broadcast(ws.projectId, "board_changed");
-        } else if (sessionCount >= 5 && ws.issueStatusName === "In Review") {
-          await db.update(workspaces).set({ status: "closed", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
-          logAction("mark_idle", ws.wsId, ws.issueId, { responseSummary: "Closed to break review loop", verificationResult: "ok" });
-          console.log(`[monitor] Workspace ${ws.wsId} has ${sessionCount} sessions with issue in review  closing to break review loop (merge or create new workspace)`);
-          deps.boardEvents.broadcast(ws.projectId, "board_changed");
-        } else if (ws.issueStatusName === "In Review") {
-          if (deps.autoMergeEnabled && deps.autoMergeInReview && !deps.autoMergeDisabledProjectIds?.has(ws.projectId)) {
-            if (!canStartMerge(ws)) continue;
-            const mergeEndpoint = `/api/workspaces/${ws.wsId}/merge`;
-            const mergeRes = await fetch(`http://127.0.0.1:${deps.serverPort}${mergeEndpoint}`, { method: "POST" }).catch(() => null);
-            if (!mergeRes || !mergeRes.ok) {
-              const body = mergeRes ? await mergeRes.json().catch(() => ({})) : {};
-              const mergeError = (body as Record<string, string>)?.message || "merge failed";
-              const fixEndpoint = `/api/workspaces/${ws.wsId}/fix-and-merge`;
-              const fixRes = await fetch(`http://127.0.0.1:${deps.serverPort}${fixEndpoint}`, {
-                method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mergeError }),
-              }).catch(() => null);
-              console.log(`[monitor] Merge conflict for idle In-Review workspace ${ws.wsId} (auto_merge_in_review)  triggered fix-and-merge`);
-              logAction("merge", ws.wsId, ws.issueId, {
-                endpoint: fixEndpoint,
-                httpStatus: fixRes?.status,
-                responseSummary: mergeError.slice(0, 200),
-                verificationResult: fixRes?.ok ? "ok" : "failed",
-              });
-            } else {
-              console.log(`[monitor] Auto-merged idle In-Review workspace ${ws.wsId} (auto_merge_in_review, not marked ready)`);
-              logAction("merge", ws.wsId, ws.issueId, {
-                endpoint: mergeEndpoint,
-                httpStatus: mergeRes.status,
-                verificationResult: "ok",
-              });
-            }
-            stats.merged++;
-            deps.boardEvents.broadcast(ws.projectId, "board_changed");
-          } else {
-            console.log(`[monitor] Skipping relaunch for idle workspace ${ws.wsId}  issue #${ws.issueNumber} is in review (committed work awaiting merge; enable auto_merge_in_review to land it)`);
-          }
-        } else {
-          if (!canStartRelaunch(ws)) continue;
-          const launchEndpoint = `/api/workspaces/${ws.wsId}/launch`;
-          const launchRes = await fetch(`http://127.0.0.1:${deps.serverPort}${launchEndpoint}`, { method: "POST" }).catch(() => null);
-          stats.relaunched++;
-          logAction("relaunch", ws.wsId, ws.issueId, {
-            endpoint: launchEndpoint,
-            httpStatus: launchRes?.status,
-            verificationResult: launchRes?.ok ? "ok" : "failed",
-          });
-          console.log(`[monitor] Relaunched idle workspace ${ws.wsId}`);
-          deps.boardEvents.broadcast(ws.projectId, "board_changed");
-        }
+        await handleIdleWorkspace(ws, sess, sessionCount, ctx);
       } else if (ws.wsStatus === "reviewing") {
-        if (isZeroDiffInReviewAwaiting(ws)) {
-          console.log(`[monitor] Needs attention: idle-awaiting workspace ${ws.wsId} for issue #${ws.issueNumber ?? "?"} is In Review with no file changes and is not ready for merge`);
-          continue;
-        }
-        if (!ws.workingDir) {
-          console.log(`[monitor] Ghost workspace ${ws.wsId} (workingDir empty)  deleting and resetting issue to In Progress`);
-          const deleteEndpoint = `/api/workspaces/${ws.wsId}`;
-          const deleteRes = await fetch(`http://127.0.0.1:${deps.serverPort}${deleteEndpoint}`, { method: "DELETE" }).catch(() => null);
-          const inProgressSt = await db.select({ id: projectStatuses.id }).from(projectStatuses).where(sql`${projectStatuses.name} = 'In Progress' AND ${projectStatuses.projectId} = ${ws.projectId}`).limit(1);
-          if (inProgressSt.length > 0) await db.update(issues).set({ statusId: inProgressSt[0].id }).where(eq(issues.id, ws.issueId)).catch(() => {});
-          logAction("mark_idle", ws.wsId, ws.issueId, {
-            endpoint: deleteEndpoint,
-            httpStatus: deleteRes?.status,
-            responseSummary: "Ghost workspace deleted",
-            verificationResult: "ok",
-          });
-          deps.boardEvents.broadcast(ws.projectId, "board_changed");
-        } else if (sess?.status === "stopped") {
-          if (!deps.autoMergeEnabled) {
-            console.log(`[monitor] Skipping auto-merge for reviewing+stopped workspace ${ws.wsId}  auto_merge is disabled`);
-            continue;
-          }
-          if (deps.autoMergeDisabledProjectIds?.has(ws.projectId)) {
-            console.log(`[monitor] Skipping auto-merge for reviewing+stopped workspace ${ws.wsId}  auto_merge_disabled for project ${ws.projectId}`);
-            continue;
-          }
-          if (!canStartMerge(ws)) continue;
-          const mergeEndpoint = `/api/workspaces/${ws.wsId}/merge`;
-          const mergeRes = await fetch(`http://127.0.0.1:${deps.serverPort}${mergeEndpoint}`, { method: "POST" }).catch(() => null);
-          stats.merged++;
-          logAction("merge", ws.wsId, ws.issueId, {
-            endpoint: mergeEndpoint,
-            httpStatus: mergeRes?.status,
-            verificationResult: mergeRes?.ok ? "ok" : "failed",
-          });
-          console.log(`[monitor] Triggered merge for reviewing workspace ${ws.wsId}`);
-          deps.boardEvents.broadcast(ws.projectId, "board_changed");
-        }
+        await handleReviewingWorkspace(ws, sess, ctx);
       } else if (ws.wsStatus === "blocked") {
         console.log(`[monitor] Needs attention: blocked workspace ${ws.wsId} for issue #${ws.issueNumber ?? "?"}; skipping automation`);
         continue;
       } else if (ws.wsStatus === "active" && sess?.status === "stopped") {
-        if (isCodexUsageLimitStats(sess.stats)) {
-          await db.update(workspaces).set({ status: "blocked", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
-          console.log(`[monitor] Needs attention: active workspace ${ws.wsId} stopped after Codex usage limit; marking blocked`);
-          deps.boardEvents.broadcast(ws.projectId, "board_changed");
-          continue;
-        }
-        if (ws.isDirect) {
-          const now = new Date().toISOString();
-          await db.update(workspaces).set({ status: "closed", workingDir: null, updatedAt: now }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
-          const doneStatusRow = await db.select({ id: projectStatuses.id }).from(projectStatuses).where(sql`${projectStatuses.name} = 'Done' AND ${projectStatuses.projectId} = ${ws.projectId}`).limit(1);
-          if (doneStatusRow.length > 0) await db.update(issues).set({ statusId: doneStatusRow[0].id, updatedAt: now }).where(eq(issues.id, ws.issueId)).catch(() => {});
-          logAction("merge", ws.wsId, ws.issueId, { verificationResult: "ok" });
-          console.log(`[monitor] Direct active workspace ${ws.wsId} has stopped session  closing`);
-        } else {
-          await db.update(workspaces).set({ status: "idle" }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
-          logAction("mark_idle", ws.wsId, ws.issueId, { verificationResult: "ok" });
-          console.log(`[monitor] Active workspace ${ws.wsId} has stopped session  marking idle for relaunch`);
-        }
-        deps.boardEvents.broadcast(ws.projectId, "board_changed");
+        await handleActiveStoppedWorkspace(ws, sess, ctx);
       } else if (ws.wsStatus === "active" && sess?.status === "running") {
-        if (!deps.sessionManager.isProcessAlive(sess.id)) {
-          await db.update(workspaces).set({ status: "idle" }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
-          await db.update(sessions).set({ status: "stopped", endedAt: new Date().toISOString() }).where(eq(sessions.id, sess.id)).catch(() => {});
-          logAction("mark_dead", ws.wsId, ws.issueId, { verificationResult: "ok" });
-          console.log(`[monitor] Workspace ${ws.wsId} process dead  marking idle`);
-          deps.boardEvents.broadcast(ws.projectId, "board_changed");
-          continue;
-        } else if (Date.now() - new Date(sess.startedAt).getTime() > stuckBuilderTimeoutMs) {
-          const recovered = await recoverStuckBuilder(ws, sess, deps, logAction);
-          if (recovered) continue;
-        }
-        if (Date.now() - new Date(sess.startedAt).getTime() > 5 * 60 * 1000) {
-          const previousNudge = deps.monitorRecentActions.find((a) => a.action === "nudge" && a.workspaceId === ws.wsId);
-          if (previousNudge) {
-            const excerpts = await deps.getRecentAgentExcerpts(sess.id);
-            if (deps.shouldSkipNudge(excerpts)) {
-              console.log(`[monitor] Skipping re-nudge for workspace ${ws.wsId}  agent appears to be actively working`);
-              continue;
-            }
-            if (excerpts.length > 0) console.log(`[monitor] Re-nudging workspace ${ws.wsId}  last agent excerpt: "${excerpts[0]?.slice(0, 100)}..."`);
-            emitButlerSystemEvent({ projectId: ws.projectId, kind: "stuck_agent", workspaceId: ws.wsId, issueNumber: ws.issueNumber ?? undefined, text: `Agent on workspace ${ws.wsId} (issue #${ws.issueNumber ?? "?"} "${ws.issueTitle}") has been stuck without progress; monitor re-nudged.` });
-          }
-          const nudged = sendMonitorNudge({
-            sessionManager: deps.sessionManager,
-            sessionId: sess.id,
-            workspaceId: ws.wsId,
-            issueId: ws.issueId,
-            projectId: ws.projectId,
-            prompt: await deps.buildMonitorNudgePrompt(ws.projectId),
-            logAction: (action, workspaceId, issueId) => logAction(action, workspaceId, issueId),
-            broadcast: (projectId, event) => deps.boardEvents.broadcast(projectId, event),
-          });
-          if (nudged) stats.nudged++;
-        }
+        await handleActiveRunningWorkspace(ws, sess, ctx);
       }
     } catch (err) {
       console.warn(`[monitor] Error processing workspace ${ws.wsId}:`, err);
