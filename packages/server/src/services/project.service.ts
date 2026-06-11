@@ -114,7 +114,10 @@ export function createProjectService(deps: { database: Database; workspaceSummar
   // In-flight workspace-summary rebuilds keyed by projectId. Concurrent cold getBoard
   // calls (and invalidation-triggered warmups) await ONE shared rebuild instead of each
   // launching their own — duplicate cold rebuilds were measured stacking 155/182/205ms.
-  const pendingSummaryRebuilds = new Map<string, Promise<Map<string, WorkspaceSummary>>>();
+  // The cache generation at rebuild start rides along so a joiner arriving AFTER a
+  // newer invalidation can detect the in-flight result is pre-mutation and chain a
+  // fresh rebuild instead of being served stale data.
+  const pendingSummaryRebuilds = new Map<string, { promise: Promise<Map<string, WorkspaceSummary>>; generation: number | undefined }>();
 
   // Pending warm-ahead debounce timers keyed by projectId.
   const boardWarmupTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -483,9 +486,19 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     defaultBranch: string | null,
     archivedIssueIds: Set<string>,
   ): Promise<Map<string, WorkspaceSummary>> {
-    const existing = pendingSummaryRebuilds.get(projectId);
-    if (existing) return existing;
     const generation = workspaceSummaryCache?.getGeneration(projectId);
+    const existing = pendingSummaryRebuilds.get(projectId);
+    if (existing) {
+      // Same generation: the in-flight rebuild reflects current data — join it.
+      if (existing.generation === generation) return existing.promise;
+      // The in-flight rebuild started before the latest invalidation: its result may
+      // be pre-mutation (e.g. a card still in the old column after a status PATCH).
+      // Wait for it to settle, then start/join a fresh rebuild — the same
+      // await-then-recheck dance warmBoardCache performs.
+      return existing.promise
+        .catch(() => undefined)
+        .then(() => startSummaryRebuild(projectId, issueIds, defaultBranch, archivedIssueIds));
+    }
     const promise: Promise<Map<string, WorkspaceSummary>> = buildWorkspaceSummaryMap(issueIds, defaultBranch, database, archivedIssueIds)
       .then((m) => {
         if (workspaceSummaryCache && workspaceSummaryCache.getGeneration(projectId) === generation) {
@@ -494,9 +507,9 @@ export function createProjectService(deps: { database: Database; workspaceSummar
         return m;
       })
       .finally(() => {
-        if (pendingSummaryRebuilds.get(projectId) === promise) pendingSummaryRebuilds.delete(projectId);
+        if (pendingSummaryRebuilds.get(projectId)?.promise === promise) pendingSummaryRebuilds.delete(projectId);
       });
-    pendingSummaryRebuilds.set(projectId, promise);
+    pendingSummaryRebuilds.set(projectId, { promise, generation });
     return promise;
   }
 
@@ -535,7 +548,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     // If a rebuild is already in flight, wait for it — if it gets discarded by the
     // generation guard (started pre-invalidation), the re-check below starts a fresh one.
     const pending = pendingSummaryRebuilds.get(projectId);
-    if (pending) await pending.catch(() => {});
+    if (pending) await pending.promise.catch(() => {});
     const cached = workspaceSummaryCache.get(projectId);
     if (cached && !cached.stale) return; // a request already rebuilt during the debounce window
     const project = await getProjectById(projectId, database);

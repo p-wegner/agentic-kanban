@@ -559,9 +559,10 @@ export function AgentQuestionsPanel({ projectId, issueId, workspaceId, title, on
   );
 }
 
-/** Server reasons after which new agent questions can appear (questions are
- *  extracted from completed sessions, so only session-end events matter). */
-const QUESTION_EVENT_REASONS = new Set(["session_completed", "session_stopped", "workspace_idle"]);
+/** Server reasons after which new agent questions can appear: session-end events
+ *  (questions extracted from completed sessions) AND mcp_clarifying_question —
+ *  the MCP clarify_or_propose tool creates a pending question MID-session. */
+const QUESTION_EVENT_REASONS = new Set(["session_completed", "session_stopped", "workspace_idle", "mcp_clarifying_question"]);
 
 /** Hook for the badge — separate from the panel so the toolbar can show a count
  *  without depending on the butler view being mounted.
