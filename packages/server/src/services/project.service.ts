@@ -98,8 +98,26 @@ obj/
 `,
 };
 
+// Archive columns (Done/Cancelled) by DB status name — used to skip the heavy
+// per-session message scan + lastAssistantMessage/lastTool blobs for archived
+// issues (their cards render via CompletedCard, which shows neither). Exact
+// lowercased match avoids the "Cancelled" collapsed-bar substring footgun.
+const ARCHIVE_STATUS_NAMES = new Set(["done", "cancelled"]);
+
+// Debounce for invalidation-triggered warm-ahead board rebuilds: one session exit
+// emits several broadcast reasons back-to-back; collapse the burst into one rebuild.
+const BOARD_WARMUP_DEBOUNCE_MS = 75;
+
 export function createProjectService(deps: { database: Database; workspaceSummaryCache?: WorkspaceSummaryCache }) {
   const { database, workspaceSummaryCache } = deps;
+
+  // In-flight workspace-summary rebuilds keyed by projectId. Concurrent cold getBoard
+  // calls (and invalidation-triggered warmups) await ONE shared rebuild instead of each
+  // launching their own — duplicate cold rebuilds were measured stacking 155/182/205ms.
+  const pendingSummaryRebuilds = new Map<string, Promise<Map<string, WorkspaceSummary>>>();
+
+  // Pending warm-ahead debounce timers keyed by projectId.
+  const boardWarmupTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   async function registerProject(body: {
     repoPath: string;
@@ -455,6 +473,90 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     return { commitCount, recentCommits, issueCounts, detectedBranch, codeMetrics, history, hotspots };
   }
 
+  // Start (or join) the single in-flight workspace-summary rebuild for a project.
+  // The cache generation is captured at start: if an invalidation arrives mid-build,
+  // the result is discarded instead of cached (it may reflect pre-mutation data) —
+  // the same correctness rule the SWR write-back guard enforces via isRebuilding().
+  function startSummaryRebuild(
+    projectId: string,
+    issueIds: string[],
+    defaultBranch: string | null,
+    archivedIssueIds: Set<string>,
+  ): Promise<Map<string, WorkspaceSummary>> {
+    const existing = pendingSummaryRebuilds.get(projectId);
+    if (existing) return existing;
+    const generation = workspaceSummaryCache?.getGeneration(projectId);
+    const promise: Promise<Map<string, WorkspaceSummary>> = buildWorkspaceSummaryMap(issueIds, defaultBranch, database, archivedIssueIds)
+      .then((m) => {
+        if (workspaceSummaryCache && workspaceSummaryCache.getGeneration(projectId) === generation) {
+          workspaceSummaryCache.set(projectId, m);
+        }
+        return m;
+      })
+      .finally(() => {
+        if (pendingSummaryRebuilds.get(projectId) === promise) pendingSummaryRebuilds.delete(projectId);
+      });
+    pendingSummaryRebuilds.set(projectId, promise);
+    return promise;
+  }
+
+  // Issue ids + archived-issue ids for the default board view (Archived column excluded),
+  // mirroring getBoard's own queries — used by the invalidation-triggered warm-ahead path.
+  async function fetchBoardIssueIds(projectId: string): Promise<{ issueIds: string[]; archivedIssueIds: Set<string> }> {
+    const statuses = await database
+      .select({ id: projectStatuses.id, name: projectStatuses.name })
+      .from(projectStatuses)
+      .where(eq(projectStatuses.projectId, projectId));
+    const archivedStatusIds = statuses.filter((s) => s.name === "Archived").map((s) => s.id);
+    const rows = await database
+      .select({ id: issues.id, statusName: projectStatuses.name })
+      .from(issues)
+      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+      .where(
+        archivedStatusIds.length === 0
+          ? eq(issues.projectId, projectId)
+          : and(eq(issues.projectId, projectId), notInArray(issues.statusId, archivedStatusIds)),
+      );
+    return {
+      issueIds: rows.map((r) => r.id),
+      archivedIssueIds: new Set(
+        rows
+          .filter((r) => r.statusName && ARCHIVE_STATUS_NAMES.has(r.statusName.toLowerCase()))
+          .map((r) => r.id),
+      ),
+    };
+  }
+
+  // Rebuild the workspace-summary cache for a project if it is cold/stale, so the
+  // client's post-event refetch hits a warm (or in-flight) cache instead of paying
+  // the full cold rebuild (measured 121-205ms per post-event GET /board).
+  async function warmBoardCache(projectId: string): Promise<void> {
+    if (!workspaceSummaryCache) return;
+    // If a rebuild is already in flight, wait for it — if it gets discarded by the
+    // generation guard (started pre-invalidation), the re-check below starts a fresh one.
+    const pending = pendingSummaryRebuilds.get(projectId);
+    if (pending) await pending.catch(() => {});
+    const cached = workspaceSummaryCache.get(projectId);
+    if (cached && !cached.stale) return; // a request already rebuilt during the debounce window
+    const project = await getProjectById(projectId, database);
+    if (!project) return;
+    const { issueIds, archivedIssueIds } = await fetchBoardIssueIds(projectId);
+    await startSummaryRebuild(projectId, issueIds, project.defaultBranch, archivedIssueIds);
+  }
+
+  // Fire-and-forget, debounced warm-ahead — called from the board invalidation listener.
+  function scheduleBoardWarmup(projectId: string): void {
+    if (!workspaceSummaryCache) return;
+    const existing = boardWarmupTimers.get(projectId);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      boardWarmupTimers.delete(projectId);
+      warmBoardCache(projectId).catch(() => {});
+    }, BOARD_WARMUP_DEBOUNCE_MS);
+    (timer as NodeJS.Timeout).unref?.();
+    boardWarmupTimers.set(projectId, timer);
+  }
+
   async function getBoard(projectId: string, nowOverride?: string, opts?: { includeArchived?: boolean }) {
     const project = await getProjectById(projectId, database);
     if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
@@ -507,11 +609,6 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     const issueIds = projectIssues.map((i) => i.id);
     const defaultBranch = project.defaultBranch;
 
-    // Archive columns (Done/Cancelled) by DB status name â€” used to skip the heavy
-    // per-session message scan + lastAssistantMessage/lastTool blobs for archived
-    // issues (their cards render via CompletedCard, which shows neither). Exact
-    // lowercased match avoids the "Cancelled" collapsed-bar substring footgun.
-    const ARCHIVE_STATUS_NAMES = new Set(["done", "cancelled"]);
     const archivedIssueIds = new Set(
       projectIssues
         .filter((i) => i.statusName && ARCHIVE_STATUS_NAMES.has(i.statusName.toLowerCase()))
@@ -542,11 +639,9 @@ export function createProjectService(deps: { database: Database; workspaceSummar
           .finally(() => { workspaceSummaryCache.clearRebuilding(projectId); });
       }
     } else {
-      // Cold miss — must block on rebuild (no stale data available)
-      summaryMapPromise = buildWorkspaceSummaryMap(issueIds, defaultBranch, database, archivedIssueIds).then((m) => {
-        workspaceSummaryCache?.set(projectId, m);
-        return m;
-      });
+      // Cold miss — must block on a rebuild (no stale data available), but coalesce:
+      // concurrent cold requests share ONE in-flight rebuild instead of stacking duplicates.
+      summaryMapPromise = startSummaryRebuild(projectId, issueIds, defaultBranch, archivedIssueIds);
     }
 
     const [workspaceSummaryMap, blockedMap, issueTagMap, staleDaysRow, inProgressStaleDaysRow] = await Promise.all([
@@ -853,6 +948,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     removeWorktreeById,
     getStats,
     getBoard,
+    scheduleBoardWarmup,
     getBoardSummary,
     getGraph,
     getCrossProjectWorkspaces,

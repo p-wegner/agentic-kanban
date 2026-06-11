@@ -29,6 +29,13 @@ export function createWorkspaceSummaryCache(options: WorkspaceSummaryCacheOption
 
   const cache = new Map<string, CacheEntry>();
 
+  // Per-project invalidation generation, bumped on every invalidate()/clear().
+  // A rebuild captures the generation when it starts; if it differs on completion,
+  // a mutation arrived mid-build and the result must be discarded instead of cached.
+  // Keys are never deleted (a reset to 0 could falsely match a captured 0) — entries
+  // are a (string, number) pair per project ever invalidated, negligible memory.
+  const generations = new Map<string, number>();
+
   /**
    * Returns the cached value with a `stale` flag.
    * - Fresh (within TTL): stale=false
@@ -76,17 +83,25 @@ export function createWorkspaceSummaryCache(options: WorkspaceSummaryCacheOption
 
   function invalidate(projectId: string): void {
     cache.delete(projectId);
+    generations.set(projectId, (generations.get(projectId) ?? 0) + 1);
   }
 
   function clear(): void {
+    const known = new Set([...cache.keys(), ...generations.keys()]);
     cache.clear();
+    for (const key of known) generations.set(key, (generations.get(key) ?? 0) + 1);
+  }
+
+  /** Current invalidation generation for a project (monotonic; bumped by invalidate/clear). */
+  function getGeneration(projectId: string): number {
+    return generations.get(projectId) ?? 0;
   }
 
   function size(): number {
     return cache.size;
   }
 
-  return { get, set, invalidate, clear, size, isRebuilding, markRebuilding, clearRebuilding };
+  return { get, set, invalidate, clear, size, isRebuilding, markRebuilding, clearRebuilding, getGeneration };
 }
 
 export type WorkspaceSummaryCache = ReturnType<typeof createWorkspaceSummaryCache>;
