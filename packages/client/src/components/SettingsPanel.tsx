@@ -199,27 +199,29 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
   useEffect(() => {
     let cancelled = false;
 
-    // --- Critical path: cheap, render-essential data. Gates the loading spinner. ---
-    // All of these are sub-10ms preference/DB reads. The heavy status probes
-    // (agent-profile health ~600ms, branches ~200ms) and the per-skill install-status
-    // N+1 are moved to loadDeferred() so the panel is interactive in <250ms.
+    // --- Critical path: a single bootstrap round trip with everything needed for first
+    // paint (settings + profile lists + skills + tags). One request instead of six, so it
+    // grabs a connection immediately instead of queuing behind the browser's ~6-connection
+    // per-host cap. The heavy status probes (agent-profile health ~600ms, branches ~200ms)
+    // and the install-status batch are loaded deferred, after first paint. ---
     async function loadCore() {
       try {
-        const [data, profileData, codexProfileData, copilotProfileData, skillsData, tagsData] = await Promise.all([
-          apiFetch<Record<string, string>>("/api/preferences/settings"),
-          apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles"),
-          apiFetch<{ profiles: string[] }>("/api/preferences/codex-profiles"),
-          apiFetch<{ profiles: string[] }>("/api/preferences/copilot-profiles").catch(() => ({ profiles: [COPILOT_DEFAULT_PROFILE] })),
-          apiFetch<{ id: string; name: string; description: string; prompt: string; model: string | null; projectId: string | null; isBuiltin: boolean }[]>("/api/agent-skills"),
-          apiFetch<{ id: string; name: string; color: string | null; isBuiltin: boolean }[]>("/api/tags"),
-        ]);
+        const boot = await apiFetch<{
+          settings: Record<string, string>;
+          claudeProfiles: string[];
+          codexProfiles: string[];
+          copilotProfiles: string[];
+          skills: { id: string; name: string; description: string; prompt: string; model: string | null; projectId: string | null; isBuiltin: boolean }[];
+          tags: { id: string; name: string; color: string | null; isBuiltin: boolean }[];
+        }>("/api/preferences/settings-bootstrap");
         if (cancelled) return;
+        const data = boot.settings;
         setSettings({ ...DEFAULT_SETTINGS, ...data });
-        setProfiles(profileData.profiles);
-        setCodexProfiles(uniqueProfiles(codexProfileData.profiles, CODEX_DEFAULT_PROFILE));
-        setCopilotProfiles(uniqueProfiles(copilotProfileData.profiles, COPILOT_DEFAULT_PROFILE));
-        setSkills(skillsData);
-        setTagsList(tagsData);
+        setProfiles(boot.claudeProfiles);
+        setCodexProfiles(uniqueProfiles(boot.codexProfiles, CODEX_DEFAULT_PROFILE));
+        setCopilotProfiles(uniqueProfiles(boot.copilotProfiles?.length ? boot.copilotProfiles : [COPILOT_DEFAULT_PROFILE], COPILOT_DEFAULT_PROFILE));
+        setSkills(boot.skills);
+        setTagsList(boot.tags);
 
         // Project-scoped cheap reads — fire in parallel, don't block the spinner.
         if (activeProjectId) {
@@ -285,8 +287,9 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
       }
     }
 
-    loadCore();
-    loadDeferred();
+    // Run the deferred probes only after the critical bootstrap resolves, so the heavy
+    // status requests don't compete for the connection pool during first paint.
+    loadCore().finally(() => { if (!cancelled) loadDeferred(); });
     return () => { cancelled = true; };
   }, []);
 
