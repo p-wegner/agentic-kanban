@@ -1,90 +1,70 @@
 import { db } from "../db/index.js";
-import { projects, projectStatuses, issues, workspaces, sessions, sessionMessages, preferences, workflowNodes } from "@agentic-kanban/shared/schema";
-import { eq, inArray, desc } from "drizzle-orm";
-import { detectConflicts } from "./git.service.js";
-import { getWorkspaceDiffStats } from "./workspace-diff-stats.js";
-import { extractMeaningfulOutput, isTerminalStatusIdView, ACTIVE_WORKSPACE_STATUSES, workspaceStatusPriority } from "@agentic-kanban/shared";
+import { projects, projectStatuses, issues, workspaces, sessions, preferences, workflowNodes } from "@agentic-kanban/shared/schema";
+import { eq, inArray } from "drizzle-orm";
+import { isTerminalStatusIdView, ACTIVE_WORKSPACE_STATUSES, workspaceStatusPriority } from "@agentic-kanban/shared";
 import type { BoardStatusResponse, BoardStatusIssue } from "@agentic-kanban/shared";
 import { isAnalyticsNoise } from "./session-filter.js";
-import { readSessionStdoutFile } from "../repositories/session.repository.js";
+import {
+  classifyBoardStatusIssueAttention,
+  classifyBoardStatusIssueMergeState,
+  type BoardStatusClassificationOptions,
+} from "./board-status-classifiers.js";
+import { collectBoardStatusEntryWork, type ConflictCacheEntry } from "./board-status-enrichment.js";
+
+export { classifyBoardStatusIssueAttention, classifyBoardStatusIssueMergeState } from "./board-status-classifiers.js";
 
 // In-memory conflict cache: workspaceId → { result, timestamp }
-const conflictCache = new Map<string, { result: { hasConflicts: boolean; conflictingFiles: string[] }; ts: number }>();
+const conflictCache = new Map<string, ConflictCacheEntry>();
 const CONFLICT_CACHE_TTL = 60_000; // 60 seconds
 
-function isZeroDiff(stats: BoardStatusIssue["diffStats"]): boolean {
-  return !!stats && stats.filesChanged === 0 && stats.insertions === 0 && stats.deletions === 0;
-}
-
-export function classifyBoardStatusIssueAttention(issue: BoardStatusIssue): BoardStatusIssue["attention"] {
-  if (issue.mergeState?.bucket === "pending_merge") return null;
-
-  if (
-    issue.statusName === "In Review"
-    && issue.workspace
-    && !issue.workspace.readyForMerge
-  ) {
-    if (issue.workspace.status === "closed") {
-      return {
-        bucket: "needs_attention",
-        reason: "closed-in-review",
-        label: "In Review issue points at a closed or already-merged workspace",
-      };
-    }
-    if (!issue.diffStats) {
-      return {
-        bucket: "needs_attention",
-        reason: "stale-in-review",
-        label: "In Review workspace has no available diff stats and may be stale",
-      };
-    }
-    if (isZeroDiff(issue.diffStats)) {
-      return {
-        bucket: "needs_attention",
-        reason: "idle-awaiting",
-        label: "In Review workspace has no file changes and is not ready for merge",
-      };
-    }
-  }
-  return null;
-}
-
-interface BoardStatusClassificationOptions {
-  autoMergeEnabled: boolean;
-  autoMergeInReview: boolean;
-}
-
-function hasDiff(stats: BoardStatusIssue["diffStats"]): boolean {
-  return !!stats && (stats.filesChanged > 0 || stats.insertions > 0 || stats.deletions > 0);
-}
-
-export function classifyBoardStatusIssueMergeState(
-  issue: BoardStatusIssue,
-  options: BoardStatusClassificationOptions,
-): BoardStatusIssue["mergeState"] {
-  if (
-    options.autoMergeEnabled
-    && options.autoMergeInReview
-    && issue.statusName === "In Review"
-    && issue.workspace
-    && issue.workspace.status === "idle"
-    && !issue.workspace.readyForMerge
-    && hasDiff(issue.diffStats)
-  ) {
-    return {
-      bucket: "pending_merge",
-      reason: "auto-merge-in-review",
-      label: "Auto-merge pending for idle In Review workspace",
-    };
-  }
-
-  return null;
-}
+type WorkspaceRow = typeof workspaces.$inferSelect;
 
 export interface BoardStatusOptions {
   projectId?: string;
   includeClosed?: boolean;
   tailLines?: number;
+}
+
+function parseSessionStats(stats: string): BoardStatusIssue["sessionStats"] {
+  try {
+    const p = JSON.parse(stats);
+    return {
+      durationMs: p.durationMs ?? 0,
+      totalCostUsd: p.totalCostUsd ?? 0,
+      inputTokens: p.inputTokens ?? 0,
+      outputTokens: p.outputTokens ?? 0,
+      numTurns: p.numTurns ?? 1,
+      model: p.model ?? "",
+      success: p.success ?? false,
+      agentSummary: p.agentSummary,
+    };
+  } catch {
+    return null; // ignore bad stats JSON
+  }
+}
+
+/**
+ * Picks the most relevant workspace for an issue (by status priority, then
+ * recency) and resolves the issue's effective status name from the
+ * workspace's current workflow node (falling back to the issue's own status).
+ */
+function selectMainWorkspace(
+  wsForIssue: WorkspaceRow[],
+  fallbackStatusName: string,
+  currentNodeStatusById: Map<string, string | null>,
+  statusByName: Map<string, { id: string; name: string }>,
+): { mainWs: WorkspaceRow | null; effectiveStatusName: string } {
+  const mainWs = wsForIssue.sort((a, b) =>
+    workspaceStatusPriority(a.status) - workspaceStatusPriority(b.status) ||
+    (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "")
+  )[0] ?? null;
+  const workflowStatusName = mainWs?.status !== "closed" && mainWs?.currentNodeId
+    ? currentNodeStatusById.get(mainWs.currentNodeId)
+    : null;
+  const effectiveStatusName = workflowStatusName
+    ? statusByName.get(workflowStatusName.toLowerCase())?.name ?? fallbackStatusName
+    : fallbackStatusName;
+  return { mainWs, effectiveStatusName };
 }
 
 export async function getBoardStatus(
@@ -214,38 +194,16 @@ export async function getBoardStatus(
   const asyncWork: Promise<void>[] = [];
 
   for (const issue of projectIssues) {
-    const wsForIssue = wsByIssue.get(issue.id) ?? [];
-    const mainWs = wsForIssue.sort((a, b) =>
-      workspaceStatusPriority(a.status) - workspaceStatusPriority(b.status) ||
-      (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "")
-    )[0] ?? null;
-    const workflowStatusName = mainWs?.status !== "closed" && mainWs?.currentNodeId
-      ? currentNodeStatusById.get(mainWs.currentNodeId)
-      : null;
-    const effectiveStatusName = workflowStatusName
-      ? statusByName.get(workflowStatusName.toLowerCase())?.name ?? issue.statusName
-      : issue.statusName;
+    const { mainWs, effectiveStatusName } = selectMainWorkspace(
+      wsByIssue.get(issue.id) ?? [],
+      issue.statusName,
+      currentNodeStatusById,
+      statusByName,
+    );
 
     const mainSessions = mainWs ? (sessionsByWs.get(mainWs.id) ?? []) : [];
     // Prefer the latest non-noise session for analytics; fall back to latest overall
     const latestSession = mainSessions.find(s => !isAnalyticsNoise(s)) ?? mainSessions[0] ?? null;
-
-    let sessionStats: BoardStatusIssue["sessionStats"] = null;
-    if (latestSession?.stats) {
-      try {
-        const p = JSON.parse(latestSession.stats);
-        sessionStats = {
-          durationMs: p.durationMs ?? 0,
-          totalCostUsd: p.totalCostUsd ?? 0,
-          inputTokens: p.inputTokens ?? 0,
-          outputTokens: p.outputTokens ?? 0,
-          numTurns: p.numTurns ?? 1,
-          model: p.model ?? "",
-          success: p.success ?? false,
-          agentSummary: p.agentSummary,
-        };
-      } catch { /* ignore bad stats JSON */ }
-    }
 
     const entry: BoardStatusIssue = {
       issueNumber: issue.issueNumber,
@@ -263,7 +221,7 @@ export async function getBoardStatus(
         id: latestSession.id, status: latestSession.status,
         startedAt: latestSession.startedAt, endedAt: latestSession.endedAt,
       } : null,
-      sessionStats,
+      sessionStats: latestSession?.stats ? parseSessionStats(latestSession.stats) : null,
       diffStats: null,
       conflicts: null,
       lastActivity: null,
@@ -274,131 +232,14 @@ export async function getBoardStatus(
     };
 
     // For non-closed workspaces with a workingDir: compute diff stats + last output
-    if (mainWs && mainWs.workingDir && mainWs.status !== "closed") {
-      const baseBranch = mainWs.baseBranch || project.defaultBranch;
-
-      asyncWork.push(
-        getWorkspaceDiffStats(mainWs, project.defaultBranch)
-          .then(stats => { entry.diffStats = stats; })
-          .catch((err) => { console.error(`[board-status] diff failed for ${mainWs.branch}:`, err instanceof Error ? err.message : String(err)); }),
-      );
-
-      // Conflict detection for non-direct idle workspaces (cached, non-blocking)
-      if (!mainWs.isDirect && mainWs.status === "idle") {
-        if (baseBranch) {
-          const cached = conflictCache.get(mainWs.id);
-          if (cached && Date.now() - cached.ts < CONFLICT_CACHE_TTL) {
-            entry.conflicts = cached.result;
-          } else {
-            asyncWork.push(
-              detectConflicts(mainWs.workingDir, baseBranch)
-                .then(result => {
-                  conflictCache.set(mainWs.id, { result, ts: Date.now() });
-                  entry.conflicts = result;
-                })
-                .catch(() => { /* non-critical */ }),
-            );
-          }
-        }
-      }
-
-      if (latestSession) {
-        asyncWork.push(
-          (async () => {
-            // Try .out file first; fall back to DB rows for historical sessions
-            const fileContent = readSessionStdoutFile(latestSession.id);
-            if (fileContent !== null) {
-              const stdoutRows = [{ type: "stdout" as const, data: fileContent, createdAt: null }];
-              entry.lastOutput = extractMeaningfulOutput(stdoutRows, tailLines);
-              // Parse JSONL for last agent message (file is in chronological order; iterate in reverse)
-              const lines = fileContent.split("\n");
-              for (let i = lines.length - 1; i >= 0; i--) {
-                const trimmed = lines[i].trim();
-                if (!trimmed) continue;
-                try {
-                  const obj = JSON.parse(trimmed);
-                  if (obj.type === "assistant" && obj.message?.content) {
-                    const content = Array.isArray(obj.message.content) ? obj.message.content : [obj.message.content];
-                    for (const block of [...content].reverse() as { type: string; text?: string }[]) {
-                      if (block.type === "text" && typeof block.text === "string" && block.text.trim()) {
-                        entry.lastAgentMessage = block.text.trim().slice(0, 300);
-                        break;
-                      }
-                    }
-                  }
-                  if (obj.type === "assistant.message" && obj.data) {
-                    const data = obj.data as Record<string, unknown>;
-                    const raw = data.content;
-                    const contentStr = typeof raw === "string" ? raw
-                      : Array.isArray(raw)
-                        ? (raw as { type?: string; text?: string }[])
-                            .filter(b => b.type === "text" && typeof b.text === "string")
-                            .map(b => b.text as string)
-                            .join("\n")
-                        : "";
-                    if (contentStr.trim()) entry.lastAgentMessage = contentStr.trim().slice(0, 300);
-                  }
-                  if (obj.type === "item.completed" && obj.item?.type === "agent_message" && typeof obj.item.text === "string" && obj.item.text.trim()) {
-                    entry.lastAgentMessage = obj.item.text.trim().slice(0, 300);
-                  }
-                } catch { /* not JSON */ }
-                if (entry.lastAgentMessage) break;
-              }
-            } else {
-              const msgs = await database
-                .select({ type: sessionMessages.type, data: sessionMessages.data, createdAt: sessionMessages.createdAt })
-                .from(sessionMessages)
-                .where(eq(sessionMessages.sessionId, latestSession.id))
-                .orderBy(desc(sessionMessages.id))
-                .limit(50);
-
-              if (msgs.length > 0 && msgs[0].createdAt) {
-                entry.lastActivity = msgs[0].createdAt;
-              }
-
-              const chronological = msgs.reverse();
-              entry.lastOutput = extractMeaningfulOutput(chronological, tailLines);
-
-              for (const msg of msgs) {
-                if (msg.type !== "stdout" || !msg.data) continue;
-                for (const line of msg.data.split("\n")) {
-                  const trimmed = line.trim();
-                  if (!trimmed) continue;
-                  try {
-                    const obj = JSON.parse(trimmed);
-                    if (obj.type === "assistant" && obj.message?.content) {
-                      const content = Array.isArray(obj.message.content) ? obj.message.content : [obj.message.content];
-                      for (const block of [...content].reverse()) {
-                        if (block.type === "text" && typeof block.text === "string" && block.text.trim()) {
-                          entry.lastAgentMessage = block.text.trim().slice(0, 300);
-                          break;
-                        }
-                      }
-                    }
-                    if (obj.type === "assistant.message" && obj.data) {
-                      const data = obj.data as Record<string, unknown>;
-                      const raw = data.content;
-                      const contentStr = typeof raw === "string" ? raw
-                        : Array.isArray(raw)
-                          ? (raw as { type?: string; text?: string }[])
-                              .filter(b => b.type === "text" && typeof b.text === "string")
-                              .map(b => b.text as string)
-                              .join("\n")
-                          : "";
-                      if (contentStr.trim()) entry.lastAgentMessage = contentStr.trim().slice(0, 300);
-                    }
-                    if (obj.type === "item.completed" && obj.item?.type === "agent_message" && typeof obj.item.text === "string" && obj.item.text.trim()) {
-                      entry.lastAgentMessage = obj.item.text.trim().slice(0, 300);
-                    }
-                  } catch { /* not JSON */ }
-                  if (entry.lastAgentMessage) break;
-                }
-                if (entry.lastAgentMessage) break;
-              }
-            }
-          })(),
-        );
-      }
+    if (mainWs) {
+      asyncWork.push(...collectBoardStatusEntryWork(entry, mainWs, latestSession?.id ?? null, {
+        defaultBranch: project.defaultBranch,
+        database,
+        tailLines,
+        conflictCache,
+        conflictCacheTtl: CONFLICT_CACHE_TTL,
+      }));
     }
 
     result.push(entry);
