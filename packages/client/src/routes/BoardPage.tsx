@@ -35,6 +35,7 @@ const ProviderMixChart = lazy(() => import("../components/ProviderMixChart.js").
 const LeadTimeTrendChart = lazy(() => import("../components/LeadTimeTrendChart.js").then((m) => ({ default: m.LeadTimeTrendChart })));
 const ScorecardDistributionChart = lazy(() => import("../components/ScorecardDistributionChart.js").then((m) => ({ default: m.ScorecardDistributionChart })));
 const ProviderCostOverTimeChart = lazy(() => import("../components/ProviderCostOverTimeChart.js").then((m) => ({ default: m.ProviderCostOverTimeChart })));
+const CalendarView = lazy(() => import("../components/CalendarView.js").then((m) => ({ default: m.CalendarView })));
 import { useAgentQuestionsCount } from "../components/AgentQuestionsPanel.js";
 import { BoardErrorBoundary } from "../components/BoardErrorBoundary.js";
 import { BacklogView } from "../components/BacklogView.js";
@@ -1848,6 +1849,15 @@ export function BoardPage() {
         {viewMode === "provider-cost" && activeProjectId && (
           <BoardErrorBoundary columnName="Provider Cost Over Time">
             <ProviderCostOverTimeChart projectId={activeProjectId} />
+          </BoardErrorBoundary>
+        )}
+        {viewMode === "calendar" && (
+          <BoardErrorBoundary columnName="Calendar">
+            <CalendarView
+              columns={columns}
+              onIssueClick={handleIssueClick}
+              searchQuery={searchQuery}
+            />
           </BoardErrorBoundary>
         )}
         {viewMode === "strategy" && activeProjectId && (
