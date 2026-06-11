@@ -23,6 +23,7 @@ import { runSessionRestore } from "./startup/session-restore.js";
 import { startBackupScheduler, stopBackupScheduler } from "./startup/backup-scheduler.js";
 import { startSessionMessagePruner, stopSessionMessagePruner } from "./services/session-message-pruner.service.js";
 import { getPreference } from "./repositories/preferences.repository.js";
+import { invalidateAgentQuestionsCache } from "./services/agent-questions.service.js";
 import { domainErrorHandler } from "./middleware/error-handler.js";
 import { slowRequestLogger } from "./middleware/slow-request-logger.js";
 import { assertNoCommittedConflictMarkers } from "./startup/conflict-marker-scanner.js";
@@ -75,6 +76,10 @@ export async function startServer(port?: number, hostname?: string) {
   const boardEvents = createBoardEvents();
   boardEvents.startCleanup();
   cleanupCallbacks.push(() => boardEvents.stopCleanup());
+  // Keep the agent-questions response cache correct: any board event for a
+  // project (session exit, workspace status change, MCP comment notify, ...)
+  // drops that project's cached pending-questions listing.
+  boardEvents.addInvalidationListener((projectId) => invalidateAgentQuestionsCache(projectId));
   let runWorkflowOnExit: ReturnType<typeof createWorkflowEngine>["runWorkflowOnExit"] = async () => {};
   let autoMerge: ReturnType<typeof createAutoMerge> = async () => {};
   const sessionManager = createSessionManager(upgradeWebSocket, {
