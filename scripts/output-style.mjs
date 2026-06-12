@@ -17,7 +17,8 @@
 //   --codex                       ALL Codex sessions (~/.codex/sessions/**)
 //   --copilot                     ALL Copilot sessions (~/.copilot/session-state)
 //   --fleet <dir>                 aggregate every session under <dir>
-//   --builders                    (fleet) keep only worktree/feature builder sessions
+//   --builders                    (fleet) keep only worktree/feature sessions (builders+reviewers run here)
+//   --reviewers                   (fleet) keep only code-review sessions (launch-prompt signature; precise)
 //   --top N                       (fleet) cap to N largest sessions by bytes
 //   --days N                      (fleet) only sessions modified in the last N days
 //
@@ -38,6 +39,7 @@ const SAMPLES = parseInt(flag('--samples', '4'), 10);
 const JSON_OUT = has('--json');
 const HUMAN = has('--human');
 const BUILDERS = has('--builders');
+const REVIEWERS = has('--reviewers');
 const TOP = parseInt(flag('--top', '0'), 10);
 const DAYS = parseInt(flag('--days', '0'), 10);
 
@@ -67,7 +69,7 @@ function listFleet() {
   } else if (has('--claude')) {
     const root = path.join(os.homedir(), '.claude', 'projects');
     let dirs = fs.readdirSync(root);
-    if (BUILDERS) dirs = dirs.filter(d => /worktree|feature-ak-|feature-\d/i.test(d)); // dir-name pre-filter (cheap)
+    if (BUILDERS || REVIEWERS) dirs = dirs.filter(d => /worktree|feature-ak-|feature-\d/i.test(d)); // worktree pre-filter (cheap; builders+reviewers both run in worktrees)
     for (const d of dirs) for (const f of fs.readdirSync(path.join(root, d)).filter(x => x.endsWith('.jsonl'))) files.push(path.join(root, d, f));
   } else if (has('--codex')) {
     files = walkJsonl(path.join(os.homedir(), '.codex', 'sessions'));
@@ -122,6 +124,20 @@ function builderCwd(lines, fmt) {
   return '';
 }
 const isBuilder = cwd => /worktree|feature[_-]ak-|[\\/]\.worktrees[\\/]/i.test(cwd);
+
+// A reviewer session is launched with the code-review prompt — detect by its
+// stable signature in the FIRST user/launch message (reviewers run in the same
+// worktree as builders, so cwd can't distinguish them; the launch prompt can).
+const REVIEW_SIG = /You are an AI code reviewer|Classify each issue as CRITICAL|mark_ready_for_merge|code reviewer\.\s|Review the changes on branch/i;
+function launchPrompt(lines, fmt) {
+  for (const l of lines) {
+    if (fmt === 'codex') { if (!l.includes('user_message')) continue; let o; try { o = JSON.parse(l); } catch { continue; } if (o.type === 'event_msg' && o.payload?.type === 'user_message') return o.payload.message || ''; }
+    else if (fmt === 'copilot') { if (!l.includes('user.message')) continue; let o; try { o = JSON.parse(l); } catch { continue; } if (o.type === 'user.message') { const c = o.data?.content; return typeof c === 'string' ? c : (c?.map?.(x => x.text).join('') || ''); } }
+    else { if (!l.includes('"role":"user"') && !l.includes('"type":"user"')) continue; let o; try { o = JSON.parse(l); } catch { continue; } if (o.type === 'user' && o.message?.role === 'user') { const c = o.message.content; if (typeof c === 'string') return c; if (Array.isArray(c)) return c.filter(b => b?.type === 'text').map(b => b.text).join(''); } }
+  }
+  return '';
+}
+const isReviewer = (lines, fmt) => REVIEW_SIG.test(launchPrompt(lines, fmt));
 
 // ---------- shared accumulator ----------
 const acc = {
@@ -226,8 +242,9 @@ let skippedNonBuilder = 0; const fmtCounts = {};
 for (const f of FILES) {
   let lines; try { lines = fs.readFileSync(f, 'utf8').split('\n'); } catch { continue; }
   const fmt = detectFormat(lines);
-  // builder filter: copilot/codex by cwd (claude is pre-filtered by dir name in listFleet)
-  if (BUILDERS && (fmt === 'copilot' || fmt === 'codex') && !isBuilder(builderCwd(lines, fmt))) { skippedNonBuilder++; continue; }
+  if (REVIEWERS) { // precise: launch-prompt is the code-review prompt (all providers)
+    if (!isReviewer(lines, fmt)) { skippedNonBuilder++; continue; }
+  } else if (BUILDERS && (fmt === 'copilot' || fmt === 'codex') && !isBuilder(builderCwd(lines, fmt))) { skippedNonBuilder++; continue; }
   fmtCounts[fmt] = (fmtCounts[fmt] || 0) + 1; acc.files++;
   if (fmt === 'copilot') parseCopilot(lines);
   else if (fmt === 'codex') parseCodex(lines);
@@ -257,7 +274,7 @@ const topTools = Object.entries(acc.tools).sort((a, b) => b[1] - a[1]);
 const topOpeners = Object.entries(acc.openers).filter(([k]) => k).sort((a, b) => b[1] - a[1]).slice(0, 12);
 const longSamples = [...acc.samples].sort((a, b) => b.words - a.words).slice(0, SAMPLES);
 const report = {
-  scope: isFleet ? `${acc.files} sessions${BUILDERS ? ' (builders)' : ''}` : path.basename(FILES[0]),
+  scope: isFleet ? `${acc.files} sessions${REVIEWERS ? ' (reviewers)' : BUILDERS ? ' (builders)' : ''}` : path.basename(FILES[0]),
   assistantTurns: acc.turns, outputTokens: acc.outTokens,
   blocks: { text: acc.textBlocks, tool: acc.toolBlocks, reasoning: acc.reasoningBlocks },
   silentToolTurnPct: pct(acc.silentToolTurns, acc.turns),
@@ -271,7 +288,7 @@ if (JSON_OUT) { console.log(JSON.stringify({ ...report, samples: longSamples }, 
 
 const bar = (n, max, w = 18) => '█'.repeat(Math.max(0, Math.round((n / (max || 1)) * w)));
 console.log(`\n■ OUTPUT-STYLE — ${report.scope}`);
-if (skippedNonBuilder) console.log(`  (skipped ${skippedNonBuilder} non-builder sessions)`);
+if (skippedNonBuilder) console.log(`  (skipped ${skippedNonBuilder} ${REVIEWERS ? 'non-reviewer' : 'non-builder'} sessions)`);
 console.log(`  turns ${acc.turns}  ·  output tokens ${acc.outTokens.toLocaleString()}  ·  end/shutdown ${JSON.stringify(acc.stop)}`);
 const codex = provider === 'codex';
 console.log(`\n  Blocks: ${acc.textBlocks} prose · ${acc.toolBlocks} tool · ${acc.reasoningBlocks} reasoning`);
