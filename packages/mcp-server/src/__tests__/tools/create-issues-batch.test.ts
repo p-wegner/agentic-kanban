@@ -202,6 +202,68 @@ describe("create_issues_batch tool", () => {
     expect(edges).toHaveLength(0);
   });
 
+  it("persists tags on batch-created issues, creating unknown tags on the fly", async () => {
+    const { invoke, db } = setupTool(registerCreateIssuesBatch);
+    const { projectId } = await seedProject(db);
+
+    const result = await invoke({
+      projectId,
+      issues: [
+        { title: "Meta epic", tags: ["no-auto-start"] },
+        { title: "Child", tags: ["feature", "frontend"] },
+        { title: "Untagged" },
+      ],
+    });
+    const data = parseResult(result);
+    const idByTitle = new Map(data.issues.map((i: any) => [i.title, i.id]));
+
+    // Tags were created.
+    const allTags = await db.select().from(schema.tags);
+    expect(allTags.map((t) => t.name).sort()).toEqual(["feature", "frontend", "no-auto-start"]);
+
+    // Meta epic carries exactly no-auto-start — the tag that suppresses auto-start.
+    const metaTags = await db.select({ name: schema.tags.name })
+      .from(schema.issueTags)
+      .innerJoin(schema.tags, eq(schema.issueTags.tagId, schema.tags.id))
+      .where(eq(schema.issueTags.issueId, idByTitle.get("Meta epic") as string));
+    expect(metaTags.map((t) => t.name)).toEqual(["no-auto-start"]);
+
+    // Child carries both of its tags; untagged issue has none.
+    const childLinks = await db.select().from(schema.issueTags)
+      .where(eq(schema.issueTags.issueId, idByTitle.get("Child") as string));
+    expect(childLinks).toHaveLength(2);
+    const untaggedLinks = await db.select().from(schema.issueTags)
+      .where(eq(schema.issueTags.issueId, idByTitle.get("Untagged") as string));
+    expect(untaggedLinks).toHaveLength(0);
+  });
+
+  it("reuses an existing tag (case-insensitive) instead of creating a duplicate", async () => {
+    const { invoke, db } = setupTool(registerCreateIssuesBatch);
+    const { projectId } = await seedProject(db);
+
+    // A builtin tag already exists, as the seed would create.
+    await db.insert(schema.tags).values({
+      id: "builtin-no-auto-start", name: "no-auto-start", color: null,
+      isBuiltin: true, createdAt: new Date().toISOString(),
+    });
+
+    const result = await invoke({
+      projectId,
+      issues: [{ title: "Meta", tags: ["No-Auto-Start"] }],
+    });
+    const data = parseResult(result);
+
+    // No duplicate tag row was created.
+    const allTags = await db.select().from(schema.tags);
+    expect(allTags).toHaveLength(1);
+
+    // The issue links to the pre-existing builtin tag.
+    const links = await db.select().from(schema.issueTags)
+      .where(eq(schema.issueTags.issueId, data.issues[0].id));
+    expect(links).toHaveLength(1);
+    expect(links[0].tagId).toBe("builtin-no-auto-start");
+  });
+
   it("rejects a cycle across the batch's directional edges", async () => {
     const { invoke, db } = setupTool(registerCreateIssuesBatch);
     const { projectId } = await seedProject(db);

@@ -43,11 +43,16 @@ function main() {
   const ports = [serverPort, clientPort].filter(Boolean);
   const runningPorts = [];
 
-  // Check all ports in a single PowerShell call to avoid per-port spawn overhead
+  // Check all ports in a single PowerShell call to avoid per-port spawn overhead.
+  // Only flag a port whose owning process is actually a dev server (node) — a
+  // foreign system service (e.g. TeamViewer holds 5939, which collides with a
+  // worktree's computed 5173+N port) is NOT ours to kill, can't be killed
+  // without admin, and would otherwise wedge every Stop in that worktree.
+  const DEV_SERVER_PROCS = new Set(["node"]);
   try {
     const portList = ports.join(",");
     const output = execSync(
-      `powershell.exe -NoProfile -Command "Get-NetTCPConnection -LocalPort ${portList} -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LocalPort | Sort-Object -Unique"`,
+      `powershell.exe -NoProfile -Command "Get-NetTCPConnection -LocalPort ${portList} -State Listen -ErrorAction SilentlyContinue | ForEach-Object { $p = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue; '{0} {1}' -f $_.LocalPort, $p.ProcessName } | Sort-Object -Unique"`,
       {
         encoding: "utf8",
         timeout: 5000,
@@ -55,11 +60,17 @@ function main() {
         stdio: ["pipe", "pipe", "pipe"],
       }
     );
-    const listeningPorts = new Set(
-      output.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
-    );
+    // Each line is "<port> <processName>"; keep only node-owned listeners.
+    const devServerPorts = new Set();
+    for (const line of output.split(/\r?\n/)) {
+      const [portStr, procName] = line.trim().split(/\s+/);
+      if (!portStr) continue;
+      if (procName && DEV_SERVER_PROCS.has(procName.toLowerCase())) {
+        devServerPorts.add(portStr);
+      }
+    }
     for (const p of ports) {
-      if (listeningPorts.has(String(p))) runningPorts.push(p);
+      if (devServerPorts.has(String(p))) runningPorts.push(p);
     }
   } catch {
     // PowerShell returned non-zero (no matches) — no ports listening
