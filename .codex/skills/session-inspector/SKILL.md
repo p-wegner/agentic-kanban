@@ -24,6 +24,18 @@ node scripts/analyze-codex-session.mjs   --latest
 node scripts/analyze-copilot-session.mjs --latest
 ```
 
+### Style & ranking — "which session, and how did it read?"
+
+For *style* questions ("describe the prompting / output style", "which session wrote the most") use these two — they compute aggregate signals + pull representative samples, so you characterize a session **without reading all its tokens**:
+
+```powershell
+node scripts/session-rank.mjs --by output      # rank this project's sessions: prompts|output|turns|duration|cost
+node scripts/output-style.mjs <file>           # ASSISTANT output style: tool mix, prose:tool ratio, length dist, formatting tics, longest prose
+node scripts/output-style.mjs <file> --human   # PROMPTING style: human prompt count, length dist, lowercase/imperative/question %, opening tics, all prompts
+```
+
+Workflow: `session-rank` to find the session, then `output-style` (assistant) or `--human` (prompting) to profile it. `--json` on either for machine-readable. `session-rank`'s `prompts` count is REAL human prompts (filters tool_results + `<task-notification>` echoes) — so it differs from a raw `type:"user"` row count. Caveat: thinking-block *text* is stripped from transcripts (signature only), so output-style reports thinking-block **count**, not volume.
+
 When the analyzer isn't enough and you need custom parsing, load the matching **manual recipe file** (PowerShell snippets, loaded on demand):
 - `references/claude-recipes.md` — find a session by issue #, quick overview, parse tail, detect "started but never responded", read last message / sent prompt, find by `stop_reason`.
 - `references/codex-recipes.md` — Codex `{timestamp,type,payload}` event types, list, parse tail, launch-failure detection, find user messages.
