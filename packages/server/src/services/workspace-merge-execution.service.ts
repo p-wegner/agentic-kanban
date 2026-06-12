@@ -126,7 +126,14 @@ async function mergeBranchOrThrow(args: {
 }): Promise<string> {
   const { workspace, repoPath, targetBranch, gitService } = args;
   try {
-    return await gitService.mergeBranch(repoPath, workspace.branch, targetBranch, { deferWorkingTreeSync: true });
+    return await gitService.mergeBranch(repoPath, workspace.branch, targetBranch, {
+      deferWorkingTreeSync: true,
+      // #763: auto-resolve pure-append hot-file conflicts (a wave of tickets all
+      // appending to one shared smoke test / log) by concatenating both tails, instead
+      // of 409ing and forcing the cluster through fix-and-merge thrash. Non-append
+      // conflicts still throw and route to fix-and-merge as before.
+      autoResolveAppendConflicts: true,
+    });
   } catch (err) {
     await args.recordMergeAttempt(
       workspace,
