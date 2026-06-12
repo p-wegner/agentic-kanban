@@ -35,8 +35,11 @@ node scripts/output-style.mjs <file> --human      # PROMPTING style: human promp
 node scripts/output-style.mjs --claude  --builders   # FLEET aggregate across worktree sessions (builders+reviewers)
 node scripts/output-style.mjs --codex   --reviewers  # ONLY code-review sessions (precise launch-prompt filter)
 node scripts/output-style.mjs --copilot --reviewers  # ... per provider (--claude/--codex/--copilot)
+node scripts/output-style.mjs --claude  --compare    # builders vs reviewers side-by-side (one provider, pure buckets)
 node scripts/output-style.mjs --fleet <dir> --top 50 --days 14   # any dir; --top N (largest) / --days N (mtime) caps
 ```
+
+`--compare` (one provider at a time) splits the worktree fleet into **pure builders** (worktree, not a code-review launch) vs **reviewers** and prints a side-by-side metric table — the fast path for "how does role change behavior within a provider". `--json` emits `{provider, builders, reviewers}`.
 
 Workflow: `session-rank` to find a session, then `output-style` (assistant) or `--human` (prompting) to profile it. `output-style` **auto-detects all three providers** — Claude (`~/.claude/projects/*.jsonl`), Codex (`~/.codex/sessions/**`, `event_msg`/`response_item`), Copilot (`events.jsonl`) — and aggregates a fleet into ONE profile via `--claude`/`--codex`/`--copilot`/`--fleet`.
 
