@@ -19,6 +19,7 @@
 //   --fleet <dir>                 aggregate every session under <dir>
 //   --builders                    (fleet) keep only worktree/feature sessions (builders+reviewers run here)
 //   --reviewers                   (fleet) keep only code-review sessions (launch-prompt signature; precise)
+//   --compare                     (fleet, one provider) builders vs reviewers side-by-side table
 //   --top N                       (fleet) cap to N largest sessions by bytes
 //   --days N                      (fleet) only sessions modified in the last N days
 //
@@ -40,6 +41,7 @@ const JSON_OUT = has('--json');
 const HUMAN = has('--human');
 const BUILDERS = has('--builders');
 const REVIEWERS = has('--reviewers');
+const COMPARE = has('--compare'); // builders vs reviewers, side by side, one provider
 const TOP = parseInt(flag('--top', '0'), 10);
 const DAYS = parseInt(flag('--days', '0'), 10);
 
@@ -69,7 +71,7 @@ function listFleet() {
   } else if (has('--claude')) {
     const root = path.join(os.homedir(), '.claude', 'projects');
     let dirs = fs.readdirSync(root);
-    if (BUILDERS || REVIEWERS) dirs = dirs.filter(d => /worktree|feature-ak-|feature-\d/i.test(d)); // worktree pre-filter (cheap; builders+reviewers both run in worktrees)
+    if (BUILDERS || REVIEWERS || COMPARE) dirs = dirs.filter(d => /worktree|feature-ak-|feature-\d/i.test(d)); // worktree pre-filter (cheap; builders+reviewers both run in worktrees)
     for (const d of dirs) for (const f of fs.readdirSync(path.join(root, d)).filter(x => x.endsWith('.jsonl'))) files.push(path.join(root, d, f));
   } else if (has('--codex')) {
     files = walkJsonl(path.join(os.homedir(), '.codex', 'sessions'));
@@ -139,20 +141,21 @@ function launchPrompt(lines, fmt) {
 }
 const isReviewer = (lines, fmt) => REVIEW_SIG.test(launchPrompt(lines, fmt));
 
-// ---------- shared accumulator ----------
-const acc = {
+// ---------- accumulator (factory so --compare can keep two) ----------
+const newAcc = () => ({
   files: 0, turns: 0, outTokens: 0,
   textBlocks: 0, toolBlocks: 0, reasoningBlocks: 0, silentToolTurns: 0,
   textWords: 0, reasoningWords: 0,
   blockWordLens: [], tools: {}, openers: {}, stop: {},
   md: { headers: 0, bullets: 0, numbered: 0, bold: 0, codeFence: 0, inlineCode: 0, tables: 0, links: 0, blockquote: 0 },
   emoji: 0, samples: [], prompts: [],
-};
+});
+const acc = newAcc();
 const emojiRe = /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}]/u;
 const NOISE = ['<command-name>', '<local-command-stdout>', '<command-message>', '<task-notification>',
   '<bash-input>', '<bash-stdout>', 'Caveat:', 'This session is being continued', '[Request interrupted', '[SESSION HANDOFF]'];
 
-function eatProse(t) {
+function eatProse(acc, t) {
   if (!t.trim()) return;
   acc.textBlocks++;
   const words = t.split(/\s+/).filter(Boolean).length;
@@ -173,20 +176,20 @@ function eatProse(t) {
   if (op) acc.openers[op] = (acc.openers[op] || 0) + 1;
   acc.samples.push({ words, text: t.trim() });
 }
-function eatPrompt(text) {
+function eatPrompt(acc, text) {
   text = (text || '').trim();
   if (!text || NOISE.some(n => text.includes(n))) return;
   acc.prompts.push(text);
 }
 
-function parseClaude(lines) {
+function parseClaude(acc, lines) {
   for (const l of lines) { if (!l.trim()) continue; let o; try { o = JSON.parse(l); } catch { continue; }
     if (HUMAN) {
       if (o.type !== 'user' || o.isMeta) continue;
       const m = o.message; if (!m || m.role !== 'user') continue;
       let text = ''; if (typeof m.content === 'string') text = m.content;
       else if (Array.isArray(m.content)) { if (m.content.some(b => b && b.type === 'tool_result')) continue; text = m.content.filter(b => b && b.type === 'text').map(b => b.text).join(''); }
-      eatPrompt(text); continue;
+      eatPrompt(acc, text); continue;
     }
     if (o.type !== 'assistant' || !o.message) continue;
     acc.turns++;
@@ -197,15 +200,15 @@ function parseClaude(lines) {
     for (const b of blocks) { if (!b) continue;
       if (b.type === 'tool_use') { acc.toolBlocks++; toolsThis++; acc.tools[b.name] = (acc.tools[b.name] || 0) + 1; }
       else if (b.type === 'thinking') { acc.reasoningBlocks++; } // text stripped in claude
-      else if (b.type === 'text' && b.text?.trim()) { textThis = true; eatProse(b.text); }
+      else if (b.type === 'text' && b.text?.trim()) { textThis = true; eatProse(acc, b.text); }
     }
     if (toolsThis > 0 && !textThis) acc.silentToolTurns++;
   }
 }
-function parseCopilot(lines) {
+function parseCopilot(acc, lines) {
   for (const l of lines) { if (!l.trim()) continue; let o; try { o = JSON.parse(l); } catch { continue; }
     const d = o.data || {};
-    if (HUMAN) { if (o.type === 'user.message') eatPrompt(typeof d.content === 'string' ? d.content : (d.content?.map?.(c => c.text).join('') || '')); continue; }
+    if (HUMAN) { if (o.type === 'user.message') eatPrompt(acc, typeof d.content === 'string' ? d.content : (d.content?.map?.(c => c.text).join('') || '')); continue; }
     if (o.type === 'session.shutdown' && d.shutdownType) acc.stop[d.shutdownType] = (acc.stop[d.shutdownType] || 0) + 1;
     if (o.type !== 'assistant.message') continue;
     acc.turns++;
@@ -214,11 +217,11 @@ function parseCopilot(lines) {
     const reqs = Array.isArray(d.toolRequests) ? d.toolRequests : [];
     for (const r of reqs) { acc.toolBlocks++; const n = r.name || r.toolName || '?'; acc.tools[n] = (acc.tools[n] || 0) + 1; }
     const text = typeof d.content === 'string' ? d.content : (Array.isArray(d.content) ? d.content.map(c => c.text || '').join('') : '');
-    if (text.trim()) eatProse(text); else if (reqs.length) acc.silentToolTurns++;
+    if (text.trim()) eatProse(acc, text); else if (reqs.length) acc.silentToolTurns++;
   }
 }
 
-function parseCodex(lines) {
+function parseCodex(acc, lines) {
   // Codex has no clean assistant-turn bundling, so silent-turn% / tool-per-turn
   // are left provider-n/a; we count prose blocks (agent_message), tool blocks
   // (function_call + custom_tool_call), reasoning blocks (text encrypted), and
@@ -227,8 +230,8 @@ function parseCodex(lines) {
   for (const l of lines) { if (!l.trim()) continue; let o; try { o = JSON.parse(l); } catch { continue; }
     const p = o.data ? null : o.payload || {}; if (p === null) continue;
     if (o.type === 'event_msg') {
-      if (HUMAN) { if (p.type === 'user_message') eatPrompt(p.message); continue; }
-      if (p.type === 'agent_message') { acc.turns++; if (p.message?.trim()) eatProse(p.message); }
+      if (HUMAN) { if (p.type === 'user_message') eatPrompt(acc, p.message); continue; }
+      if (p.type === 'agent_message') { acc.turns++; if (p.message?.trim()) eatProse(acc, p.message); }
       else if (p.type === 'token_count' && p.info?.total_token_usage) lastOut = p.info.total_token_usage.output_tokens || lastOut;
     } else if (!HUMAN && o.type === 'response_item') {
       if (p.type === 'function_call' || p.type === 'custom_tool_call') { acc.toolBlocks++; const n = p.name || '?'; acc.tools[n] = (acc.tools[n] || 0) + 1; }
@@ -238,19 +241,71 @@ function parseCodex(lines) {
   acc.outTokens += lastOut;
 }
 
+const parseInto = (acc, fmt, lines) => fmt === 'copilot' ? parseCopilot(acc, lines) : fmt === 'codex' ? parseCodex(acc, lines) : parseClaude(acc, lines);
 let skippedNonBuilder = 0; const fmtCounts = {};
+const accB = newAcc(), accR = newAcc(); // for --compare
+
 for (const f of FILES) {
   let lines; try { lines = fs.readFileSync(f, 'utf8').split('\n'); } catch { continue; }
   const fmt = detectFormat(lines);
+  if (COMPARE) { // route each worktree session to reviewer or pure-builder bucket
+    const rev = isReviewer(lines, fmt);
+    const wt = fmt === 'claude' ? true /* dir pre-filtered */ : isBuilder(builderCwd(lines, fmt));
+    if (!rev && !wt) { skippedNonBuilder++; continue; }
+    fmtCounts[fmt] = (fmtCounts[fmt] || 0) + 1;
+    const bucket = rev ? accR : accB; bucket.files++; parseInto(bucket, fmt, lines);
+    continue;
+  }
   if (REVIEWERS) { // precise: launch-prompt is the code-review prompt (all providers)
     if (!isReviewer(lines, fmt)) { skippedNonBuilder++; continue; }
   } else if (BUILDERS && (fmt === 'copilot' || fmt === 'codex') && !isBuilder(builderCwd(lines, fmt))) { skippedNonBuilder++; continue; }
   fmtCounts[fmt] = (fmtCounts[fmt] || 0) + 1; acc.files++;
-  if (fmt === 'copilot') parseCopilot(lines);
-  else if (fmt === 'codex') parseCodex(lines);
-  else parseClaude(lines);
+  parseInto(acc, fmt, lines);
 }
 const provider = Object.entries(fmtCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+
+// ---------- COMPARE report (builders vs reviewers, one provider) ----------
+if (COMPARE) {
+  const codex = provider === 'codex';
+  const metrics = (a) => {
+    const tm = Object.entries(a.tools).sort((x, y) => y[1] - x[1]).slice(0, 6).map(([n, c]) => `${n} ${pct(c, a.toolBlocks)}%`);
+    return {
+      sessions: a.files, turns: a.turns, outTokens: a.outTokens,
+      proseTool: a.toolBlocks ? +(a.textBlocks / a.toolBlocks).toFixed(2) : 0,
+      silentPct: codex ? null : pct(a.silentToolTurns, a.turns),
+      toolsPerTurn: codex ? null : (a.turns ? +(a.toolBlocks / a.turns).toFixed(2) : 0),
+      proseMed: quant(a.blockWordLens, 0.5), proseP90: quant(a.blockWordLens, 0.9),
+      reasonBlocks: a.reasoningBlocks, reasonWords: a.reasoningWords,
+      boldPerBlock: a.textBlocks ? +(a.md.bold / a.textBlocks).toFixed(2) : 0,
+      codePerBlock: a.textBlocks ? +(a.md.inlineCode / a.textBlocks).toFixed(2) : 0,
+      tables: a.md.tables, toolMix: tm,
+    };
+  };
+  const B = metrics(accB), R = metrics(accR);
+  if (JSON_OUT) { console.log(JSON.stringify({ provider, builders: B, reviewers: R }, null, 2)); process.exit(0); }
+  const rows = [
+    ['sessions', B.sessions, R.sessions],
+    ['output tokens', B.outTokens.toLocaleString(), R.outTokens.toLocaleString()],
+    ['prose:tool ratio', B.proseTool, R.proseTool],
+    ['silent-turn %', B.silentPct == null ? 'n/a' : B.silentPct + '%', R.silentPct == null ? 'n/a' : R.silentPct + '%'],
+    ['tool calls/turn', B.toolsPerTurn == null ? 'n/a' : B.toolsPerTurn, R.toolsPerTurn == null ? 'n/a' : R.toolsPerTurn],
+    ['prose words median', B.proseMed, R.proseMed],
+    ['prose words p90', B.proseP90, R.proseP90],
+    ['reasoning blocks', B.reasonBlocks, R.reasonBlocks],
+    ['reasoning words', B.reasonWords.toLocaleString(), R.reasonWords.toLocaleString()],
+    ['bold / prose block', B.boldPerBlock, R.boldPerBlock],
+    ['`code` / prose block', B.codePerBlock, R.codePerBlock],
+    ['tables', B.tables, R.tables],
+  ];
+  const w0 = Math.max(...rows.map(r => r[0].length), 18);
+  const w1 = Math.max(...rows.map(r => String(r[1]).length), 'BUILDERS'.length) + 2;
+  console.log(`\n■ BUILDERS vs REVIEWERS — ${provider}  (${accB.files} builders · ${accR.files} reviewers · skipped ${skippedNonBuilder})\n`);
+  console.log(`  ${''.padEnd(w0)}${'BUILDERS'.padStart(w1)}${'REVIEWERS'.padStart(w1 + 2)}`);
+  for (const [k, b, r] of rows) console.log(`  ${k.padEnd(w0)}${String(b).padStart(w1)}${String(r).padStart(w1 + 2)}`);
+  console.log(`\n  builder top tools:  ${B.toolMix.join(' · ')}`);
+  console.log(`  reviewer top tools: ${R.toolMix.join(' · ')}\n`);
+  process.exit(0);
+}
 
 // ---------- HUMAN report ----------
 if (HUMAN) {
