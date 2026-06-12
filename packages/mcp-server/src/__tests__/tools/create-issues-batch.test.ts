@@ -182,6 +182,26 @@ describe("create_issues_batch tool", () => {
     expect(rows).toHaveLength(0);
   });
 
+  it("rejects a duplicate edge up-front instead of crashing the transaction", async () => {
+    const { invoke, db } = setupTool(registerCreateIssuesBatch);
+    const { projectId } = await seedProject(db);
+
+    const result = await invoke({
+      projectId,
+      issues: [{ title: "A" }, { title: "B" }],
+      dependencies: [
+        { issueIndex: 1, dependsOnIndex: 0 },
+        { issueIndex: 1, dependsOnIndex: 0 },
+      ],
+    });
+    expect(result.content[0].text).toContain("duplicate edge");
+
+    const rows = await db.select().from(schema.issues).where(eq(schema.issues.projectId, projectId));
+    expect(rows).toHaveLength(0);
+    const edges = await db.select().from(schema.issueDependencies);
+    expect(edges).toHaveLength(0);
+  });
+
   it("rejects a cycle across the batch's directional edges", async () => {
     const { invoke, db } = setupTool(registerCreateIssuesBatch);
     const { projectId } = await seedProject(db);
