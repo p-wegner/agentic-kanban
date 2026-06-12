@@ -4,7 +4,7 @@ import { projects, projectStatuses, preferences } from "@agentic-kanban/shared/s
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { runMigrations, DEFAULT_STATUSES, logDefaultBranch } from "../shared.js";
-import { getDefaultSkillId, ensureAgentGitignore, ensureStarterClaudeMd, ensureHookScaffold } from "../../services/project-scaffold.js";
+import { getDefaultSkillId, ensureAgentGitignore, ensureStarterClaudeMd, ensureStarterAgentsMd, ensureHookScaffold } from "../../services/project-scaffold.js";
 
 export function registerCreateCommand(program: Command) {
   program
@@ -146,6 +146,7 @@ Setup:
         // Scaffold the fresh repo: generic agent-artifact ignores + a starter CLAUDE.md + hooks.
         ensureAgentGitignore(repoInfo.repoPath);
         ensureStarterClaudeMd(repoInfo.repoPath);
+        ensureStarterAgentsMd(repoInfo.repoPath);
         ensureHookScaffold(repoInfo.repoPath);
 
         dirCreated = false;
