@@ -47,6 +47,15 @@ export async function detectWorkspaceMergeConflicts(args: {
   // worktree-relative merge-tree if branch-level detection isn't wired up.
   const conflicts = await detectConflictsReadOnly(repoPath, workspace, baseBranch, gitService);
   if (conflicts.hasConflicts) {
+    // #763: if the conflict is ONLY on pure-append hot files (both sides appended
+    // distinct trailing content to a shared-ancestor file — a smoke test, log, or
+    // changelog a whole wave appends to), the plumbing merge can auto-resolve it by
+    // concatenation. Report `clear` so the merge proceeds (with
+    // autoResolveAppendConflicts) instead of stranding the member in fix-and-merge.
+    const appendOnly = await detectAppendOnlyResolvableSafe(repoPath, workspace.branch, baseBranch, gitService);
+    if (appendOnly && appendOnly.length > 0) {
+      return { kind: "clear" };
+    }
     return behindCount > 0
       ? { kind: "conflict", conflictFiles: conflicts.conflictingFiles, behindCount }
       : { kind: "conflict", conflictFiles: conflicts.conflictingFiles };
@@ -76,6 +85,25 @@ async function detectConflictsReadOnly(
   }
   if (!workspace.workingDir) return { hasConflicts: false, conflictingFiles: [] };
   return gitService.detectConflicts(workspace.workingDir, baseBranch);
+}
+
+/**
+ * Best-effort wrapper around {@link GitService.detectAppendOnlyResolvableConflicts}.
+ * Returns the pure-append conflicting files (when ALL conflicts are pure appends), or
+ * null when the capability is absent, errors, or any conflict is a non-append edit.
+ */
+async function detectAppendOnlyResolvableSafe(
+  repoPath: string,
+  branch: string,
+  baseBranch: string,
+  gitService: GitService,
+): Promise<string[] | null> {
+  if (typeof gitService.detectAppendOnlyResolvableConflicts !== "function") return null;
+  try {
+    return await gitService.detectAppendOnlyResolvableConflicts(repoPath, branch, baseBranch);
+  } catch {
+    return null;
+  }
 }
 
 async function countBehindCommitsSafe(
