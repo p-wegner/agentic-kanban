@@ -415,6 +415,15 @@ async function tryResolveAppendOnlyMerge(
   targetBranch: string,
   featureBranch: string,
   conflictingFiles: string[],
+  /**
+   * The conflicted merged tree from `git merge-tree --write-tree` (#763). It already
+   * carries the correct 3-way merge of EVERY non-conflicting file — including any file
+   * the feature branch added or edited cleanly — with conflict markers only in the
+   * conflicting (append) paths. We seed the scratch index from THIS tree and overwrite
+   * just the conflicting blobs, so the feature branch's clean changes are preserved.
+   * Seeding from the target tree instead would silently drop them (silent merge loss).
+   */
+  mergedTreeSha: string,
 ): Promise<{ commitSha: string; resolvedFiles: string[] } | null> {
   if (conflictingFiles.length === 0) return null;
 
@@ -440,8 +449,10 @@ async function tryResolveAppendOnlyMerge(
     resolutions.push({ path, content: merged });
   }
 
-  // Start from the target tree (it has every other file at its current state) and
-  // overwrite just the resolved blobs via `git update-index`/`read-tree` in a temp index.
+  // Start from the conflicted MERGED tree (the proper 3-way merge of every other file,
+  // incl. the feature branch's clean additions/edits) and overwrite just the resolved
+  // append blobs via `git read-tree`/`update-index` in a temp index. Seeding from the
+  // target tree instead would drop the feature's non-conflicting changes (#763).
   // Using a scratch index file keeps the real index untouched (safe alongside a checkout).
   const scratchIndex = join(repoPath, ".git", `append-merge-index-${targetSha.slice(0, 8)}`);
   const indexEnvGit = (args: string[]) =>
@@ -458,7 +469,7 @@ async function tryResolveAppendOnlyMerge(
     });
 
   try {
-    await indexEnvGit(["read-tree", targetSha]);
+    await indexEnvGit(["read-tree", mergedTreeSha]);
     for (const { path, content } of resolutions) {
       const blobSha = await hashObjectFromStdin(repoPath, content);
       await indexEnvGit(["update-index", "--cacheinfo", `100644,${blobSha},${path}`]);
@@ -684,6 +695,7 @@ export async function mergeBranch(
       targetBranch,
       featureBranch,
       conflictingFiles,
+      treeSha,
     );
     if (resolved) {
       await execGit(["update-ref", `refs/heads/${targetBranch}`, resolved.commitSha], repoPath);
