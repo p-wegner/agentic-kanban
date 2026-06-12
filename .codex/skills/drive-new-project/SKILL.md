@@ -43,9 +43,23 @@ The goal of these tickets is to exercise the board at scale, so the graph must a
 2. **Several feature tickets that depend ONLY on the shell** and touch **disjoint files/modules** — these are the parallel wave. Avoid having every ticket edit one hot file (`main.js`, `index.html`); same-file dependents serialize and conflict at merge.
 3. One **integration** ticket depending on the parallel wave, and a **retrospection** ticket last.
 
+### Pre-resolve EVERY shared hot file at scaffold (not just `index.html`)
+
+A **hot file** is any file that *more than one* wave ticket will write — especially **append-only** files (script-tag lists, module registries, **shared test/smoke files**, route tables, barrel `index` files, `package.json` deps). The shell ticket must pre-resolve ALL of them, not only the obvious entry point. The Space Invaders run (`docs/board-runs/space-invaders-html5.md`, friction #3) pre-wired `index.html` script tags and `src/*.js` stubs but left a single shared `test/smoke.test.js` — every wave ticket appended to it, producing **12 touches and a fix-and-merge thrash** that stranded three tickets and forced a manual `git merge`. The entry-point foresight was right; the blind spot was not generalizing it.
+
+For each hot file, pick ONE of:
+
+- **Split it — give each ticket its OWN file.** Preferred for tests: each feature ticket gets `test/<feature>.test.js`, plus a shell-owned **aggregate runner** that globs/requires them (`test/all.test.js` or an `npm test` that runs the dir). No two tickets ever touch the same test file → zero append conflicts.
+- **Pre-wire ownership.** When the file genuinely can't be split (a single `index.html`, one registry), the shell pre-creates a **per-ticket stub section with clear ownership markers** (`<!-- BEGIN: invaders (ticket #N) -->` … `<!-- END: invaders -->`, or a stub `import './invaders.js'` line per ticket) so each ticket edits only its own region and diffs don't overlap.
+
+Spell out the chosen ownership in the relevant ticket bodies ("edit ONLY `test/invaders.test.js`" / "fill ONLY the `invaders` section of `index.html`") so builders don't reach for the shared file.
+
 Seed issues **and their dependency edges in ONE `mcp__agentic-kanban__create_issues_batch` call** — pass the `dependencies` array (edges reference issues by their 0-based `issueIndex`/`dependsOnIndex` in the same call) and `parentIssueId` to link them under the epic. Issues and edges commit in a single transaction, so **never** batch-create first and POST edges in a second step: with autodrive on, a builder launches within seconds and would build against a ticket whose blocker edge isn't persisted yet (the #765 Space-Invaders failure — wave ticket built against an empty engine stub, had to be stopped/deleted/returned to Todo). Then run the **`dependency-analyzer`** skill over the seeded set and fix any chain that's accidentally linear or any two parallel tickets that overlap files. A good epic has a *wide middle*, not a ladder.
 
-> Sanity check before enabling autodrive: on the board, count tickets whose `isBlocked == false` after the shell merges. If that's `1`, you built a chain — restructure.
+> **Hot-file checklist (do this before enabling autodrive):** enumerate EVERY file more than one wave ticket will write — script-tag/entry files, module/route registries, barrel `index` files, **all shared test/smoke files**, `package.json`. For each, confirm it is either split per-ticket (with an aggregate runner) or pre-wired with ownership markers in the shell scaffold. If any shared file would be touched by *all* wave tickets, you have not finished scaffolding.
+> Record this as a tiny ownership matrix in the shell/meta ticket before `create_issues_batch`: `file -> owning ticket(s) -> split/pre-wired region`. If a row has multiple owners and no split/region, fix the scaffold before launching builders.
+>
+> Sanity check: on the board, count tickets whose `isBlocked == false` after the shell merges. If that's `1`, you built a chain — restructure.
 
 ---
 
@@ -100,6 +114,7 @@ Only when `GET /api/issues?projectId=` shows the epic's children all Done/Cancel
 
 - ❌ Marking the meta-ticket Review at setup time. Ownership of "finish the epic" must not be dropped.
 - ❌ A linear / same-file dependency chain sold as a "10+ ticket epic." It serializes and conflicts.
+- ❌ Pre-wiring only the *obvious* entry file (`index.html`) while leaving another shared/append-only file — a single `test/smoke.test.js`, a registry, `package.json` — for every wave ticket to append to. That file becomes the new hot spot and thrashes fix-and-merge. Pre-resolve EVERY shared file, not just the entry point.
 - ❌ Trusting `/board` over `/api/issues` + git to judge progress.
 - ❌ Enabling autodrive without verifying `auto_merge`, WIP target, and profile≠mock first.
 - ❌ Assuming the Conductor will drive a non-agentic-kanban project. It won't.
