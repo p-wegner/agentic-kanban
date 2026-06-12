@@ -29,12 +29,14 @@ node scripts/analyze-copilot-session.mjs --latest
 For *style* questions ("describe the prompting / output style", "which session wrote the most") use these two — they compute aggregate signals + pull representative samples, so you characterize a session **without reading all its tokens**:
 
 ```powershell
-node scripts/session-rank.mjs --by output      # rank this project's sessions: prompts|output|turns|duration|cost
-node scripts/output-style.mjs <file>           # ASSISTANT output style: tool mix, prose:tool ratio, length dist, formatting tics, longest prose
-node scripts/output-style.mjs <file> --human   # PROMPTING style: human prompt count, length dist, lowercase/imperative/question %, opening tics, all prompts
+node scripts/session-rank.mjs --by output         # rank this project's sessions: prompts|output|turns|duration|cost
+node scripts/output-style.mjs <file>              # ASSISTANT output style: tool mix, prose:tool ratio, silent-turn %, length dist, formatting tics, longest prose
+node scripts/output-style.mjs <file> --human      # PROMPTING style: human prompt count, length dist, lowercase/imperative/question %, opening tics, all prompts
+node scripts/output-style.mjs --copilot --builders  # FLEET aggregate across ALL Copilot builder sessions (one merged profile)
+node scripts/output-style.mjs --fleet <dir> --top 50  # aggregate any dir of sessions; --top N caps to N largest
 ```
 
-Workflow: `session-rank` to find the session, then `output-style` (assistant) or `--human` (prompting) to profile it. `--json` on either for machine-readable. `session-rank`'s `prompts` count is REAL human prompts (filters tool_results + `<task-notification>` echoes) — so it differs from a raw `type:"user"` row count. Caveat: thinking-block *text* is stripped from transcripts (signature only), so output-style reports thinking-block **count**, not volume.
+Workflow: `session-rank` to find the session, then `output-style` (assistant) or `--human` (prompting) to profile it. `output-style` auto-detects **Claude** (`*.jsonl`) vs **Copilot** (`events.jsonl`) format and aggregates a fleet into ONE profile when given `--copilot`/`--fleet` (use `--builders` to keep only worktree/feature sessions). `--json` on either for machine-readable. `session-rank`'s `prompts` count is REAL human prompts (filters tool_results + `<task-notification>` echoes). Caveats: Claude thinking-block *text* is stripped (signature only → reasoning-words shows 0; Copilot keeps `reasoningText` so its reasoning volume IS measured); `--top N` (fleet) is a size pre-filter that biases toward the chattiest sessions — omit it for a representative aggregate. Key builder signal it surfaces: **silent-turn %** (turns that fire tools with zero prose).
 
 When the analyzer isn't enough and you need custom parsing, load the matching **manual recipe file** (PowerShell snippets, loaded on demand):
 - `references/claude-recipes.md` — find a session by issue #, quick overview, parse tail, detect "started but never responded", read last message / sent prompt, find by `stop_reason`.
