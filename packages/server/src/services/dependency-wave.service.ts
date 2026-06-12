@@ -34,7 +34,10 @@ export interface DependencyWaveStartDeps {
   getSessionManager?: () => SessionManager;
   boardEvents?: BoardEvents;
   gitService?: GitService;
-  createWorkspace?: (issue: { id: string; issueNumber: number | null; title: string }) => Promise<{ id?: string; error?: string }>;
+  createWorkspace?: (
+    issue: { id: string; issueNumber: number | null; title: string },
+    options: { planMode: boolean },
+  ) => Promise<{ id?: string; error?: string }>;
 }
 
 function slugifyTitle(title: string): string {
@@ -265,11 +268,16 @@ export async function startNextDependencyWave(
   for (const issue of candidates) {
     let result: { id?: string; error?: string };
     try {
+      // Wave-launched builders go straight to implementing — match the normal
+      // New-Workspace default (execute mode), not the high/critical-priority
+      // plan-mode default. Without this a codex builder burns minutes planning
+      // first, which is indistinguishable from a stalled session (see #767).
       result = deps.createWorkspace
-        ? await deps.createWorkspace(issue)
+        ? await deps.createWorkspace(issue, { planMode: false })
         : await workspaceService!.createWorkspace({
           issueId: issue.id,
           branch: `feature/ak-${issue.issueNumber ?? "next"}-${slugifyTitle(issue.title)}`,
+          planMode: false,
         });
     } catch (err) {
       result = { error: err instanceof Error ? err.message : String(err) };
