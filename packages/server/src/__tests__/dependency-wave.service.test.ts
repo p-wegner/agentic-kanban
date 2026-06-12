@@ -177,4 +177,18 @@ describe("dependency wave planner", () => {
     expect(createWorkspace).toHaveBeenCalledTimes(1);
     expect([readyOne, readyTwo]).toContain(createWorkspace.mock.calls[0][0].id);
   });
+
+  it("forwards planMode:false so wave-launched builders start in execute mode (#767)", async () => {
+    const { db } = createTestDb();
+    const { projectId, statusIds } = await seedProject(db);
+    await insertIssue(db, { projectId, statusId: statusIds.Todo, title: "Ready one", issueNumber: 1 });
+    const createWorkspace = vi.fn(async (issue: { id: string }) => ({ id: `ws-${issue.id}` }));
+
+    await startNextDependencyWave(db, projectId, { createWorkspace });
+
+    expect(createWorkspace).toHaveBeenCalledTimes(1);
+    // Wave builders must skip plan mode (matching the New-Workspace execute default),
+    // otherwise a codex builder burns minutes planning and trips stall detection.
+    expect(createWorkspace.mock.calls[0][1]).toEqual({ planMode: false });
+  });
 });
