@@ -351,6 +351,182 @@ async function scanTreeForConflictMarkers(repoPath: string, treeSha: string, pat
   });
 }
 
+/** Read a blob's content at a given tree-ish path; returns null when the path is absent there. */
+async function readBlobAtRef(repoPath: string, ref: string, path: string): Promise<string | null> {
+  try {
+    return await execGit(["show", `${ref}:${path}`], repoPath);
+  } catch {
+    return null;
+  }
+}
+
+/** Hash a string into the object DB as a blob and return its SHA. */
+function hashObjectFromStdin(repoPath: string, content: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = execFile(
+      "git",
+      ["hash-object", "-w", "--stdin"],
+      { cwd: repoPath, maxBuffer: 10 * 1024 * 1024 },
+      (err, stdout, stderr) => {
+        if (err) reject(new Error(`git hash-object failed: ${stderr || err.message}`));
+        else resolve(stdout.toString().trim());
+      },
+    );
+    child.stdin?.end(content);
+  });
+}
+
+/**
+ * Decide whether a single file's conflict is a *pure append* and, if so, compute the
+ * concatenated resolution. A pure-append conflict is one where the merge-base content
+ * is a textual PREFIX of BOTH the target and feature versions — i.e. each side only
+ * added lines at the tail and neither edited any existing line. The resolution keeps
+ * the shared base, then appends the target's new tail followed by the feature's new
+ * tail (target-first is deterministic and matches "base already advanced, replay
+ * feature's addition after it"). Returns null when the file isn't a pure append.
+ */
+function resolveAppendOnlyFile(base: string | null, target: string | null, feature: string | null): string | null {
+  // A brand-new file added on both sides (no common ancestor) is an add/add conflict,
+  // not an append — skip (we can't know a safe order).
+  if (base === null || target === null || feature === null) return null;
+  if (!target.startsWith(base) || !feature.startsWith(base)) return null;
+  const targetTail = target.slice(base.length);
+  const featureTail = feature.slice(base.length);
+  // Both unchanged would not have conflicted; if exactly one changed, git merges it
+  // cleanly without a conflict — so by the time we're here both tails are non-empty.
+  // Guard `base` ending without a trailing newline so the concatenation doesn't glue
+  // the base's last line onto the first appended line.
+  const joiner = base.length > 0 && !base.endsWith("\n") ? "\n" : "";
+  return base + joiner + targetTail + (targetTail.endsWith("\n") || targetTail === "" ? "" : "\n") + featureTail;
+}
+
+/**
+ * Attempt to resolve an append-only merge conflict between two branches (#763).
+ *
+ * For every conflicting file, fetch its merge-base / target / feature versions and
+ * check it is a pure append (see {@link resolveAppendOnlyFile}). If EVERY conflicting
+ * file qualifies, build the merged tree from the target's tree with the concatenated
+ * blobs substituted in, create a merge commit (two parents), and return its SHA. If any
+ * file is a non-append conflict — or the conflicting-file list is unknown — return null
+ * so the caller falls back to throwing.
+ */
+async function tryResolveAppendOnlyMerge(
+  repoPath: string,
+  targetBranch: string,
+  featureBranch: string,
+  conflictingFiles: string[],
+  /**
+   * The conflicted merged tree from `git merge-tree --write-tree` (#763). It already
+   * carries the correct 3-way merge of EVERY non-conflicting file — including any file
+   * the feature branch added or edited cleanly — with conflict markers only in the
+   * conflicting (append) paths. We seed the scratch index from THIS tree and overwrite
+   * just the conflicting blobs, so the feature branch's clean changes are preserved.
+   * Seeding from the target tree instead would silently drop them (silent merge loss).
+   */
+  mergedTreeSha: string,
+): Promise<{ commitSha: string; resolvedFiles: string[] } | null> {
+  if (conflictingFiles.length === 0) return null;
+
+  const targetSha = (await execGit(["rev-parse", targetBranch], repoPath)).trim();
+  const featureSha = (await execGit(["rev-parse", featureBranch], repoPath)).trim();
+  let baseSha: string;
+  try {
+    baseSha = (await execGit(["merge-base", targetBranch, featureBranch], repoPath)).trim();
+  } catch {
+    return null;
+  }
+  if (!baseSha) return null;
+
+  const resolutions: { path: string; content: string }[] = [];
+  for (const path of conflictingFiles) {
+    const [base, target, feature] = await Promise.all([
+      readBlobAtRef(repoPath, baseSha, path),
+      readBlobAtRef(repoPath, targetSha, path),
+      readBlobAtRef(repoPath, featureSha, path),
+    ]);
+    const merged = resolveAppendOnlyFile(base, target, feature);
+    if (merged === null) return null; // a non-append conflict — bail, throw normally
+    resolutions.push({ path, content: merged });
+  }
+
+  // Start from the conflicted MERGED tree (the proper 3-way merge of every other file,
+  // incl. the feature branch's clean additions/edits) and overwrite just the resolved
+  // append blobs via `git read-tree`/`update-index` in a temp index. Seeding from the
+  // target tree instead would drop the feature's non-conflicting changes (#763).
+  // Using a scratch index file keeps the real index untouched (safe alongside a checkout).
+  const scratchIndex = join(repoPath, ".git", `append-merge-index-${targetSha.slice(0, 8)}`);
+  const indexEnvGit = (args: string[]) =>
+    new Promise<string>((resolve, reject) => {
+      execFile(
+        "git",
+        args,
+        { cwd: repoPath, maxBuffer: 10 * 1024 * 1024, env: { ...process.env, GIT_INDEX_FILE: scratchIndex } },
+        (err, stdout, stderr) => {
+          if (err) reject(new Error(`git ${args.join(" ")} failed: ${stderr || err.message}`));
+          else resolve(stdout.toString());
+        },
+      );
+    });
+
+  try {
+    await indexEnvGit(["read-tree", mergedTreeSha]);
+    for (const { path, content } of resolutions) {
+      const blobSha = await hashObjectFromStdin(repoPath, content);
+      await indexEnvGit(["update-index", "--cacheinfo", `100644,${blobSha},${path}`]);
+    }
+    const mergedTree = (await indexEnvGit(["write-tree"])).trim();
+    const commitSha = (await execGit(
+      ["commit-tree", mergedTree, "-p", targetSha, "-p", featureSha, "-m", `Merge branch '${featureBranch}' (append-only auto-resolve)`],
+      repoPath,
+    )).trim();
+    return { commitSha, resolvedFiles: resolutions.map((r) => r.path) };
+  } catch {
+    return null;
+  } finally {
+    await rm(scratchIndex, { force: true }).catch(() => undefined);
+  }
+}
+
+/**
+ * Read-only check (#763): would merging `featureBranch` into `targetBranch` conflict
+ * ONLY on pure-append hot files? Returns the list of pure-append conflicting files when
+ * EVERY conflicting file is a pure append (so {@link mergeBranch} with
+ * `autoResolveAppendConflicts` would land it by concatenation), or null when there are
+ * no conflicts or any conflict is a non-append edit. Never mutates the working tree —
+ * safe for the merge pre-flight to call to route an append-cluster member to a normal
+ * merge instead of fix-and-merge.
+ */
+export async function detectAppendOnlyResolvableConflicts(
+  repoPath: string,
+  featureBranch: string,
+  targetBranch: string,
+): Promise<string[] | null> {
+  const { hasConflicts, conflictingFiles } = await detectConflictsByBranch(repoPath, featureBranch, targetBranch);
+  if (!hasConflicts || conflictingFiles.length === 0) return null;
+
+  let targetSha: string;
+  let featureSha: string;
+  let baseSha: string;
+  try {
+    targetSha = (await execGit(["rev-parse", targetBranch], repoPath)).trim();
+    featureSha = (await execGit(["rev-parse", featureBranch], repoPath)).trim();
+    baseSha = (await execGit(["merge-base", targetBranch, featureBranch], repoPath)).trim();
+  } catch {
+    return null;
+  }
+  if (!baseSha) return null;
+
+  for (const path of conflictingFiles) {
+    const [base, target, feature] = await Promise.all([
+      readBlobAtRef(repoPath, baseSha, path),
+      readBlobAtRef(repoPath, targetSha, path),
+      readBlobAtRef(repoPath, featureSha, path),
+    ]);
+    if (resolveAppendOnlyFile(base, target, feature) === null) return null;
+  }
+  return conflictingFiles;
+}
+
 /**
  * Merge a feature branch into targetBranch using git plumbing commands only.
  *
@@ -378,7 +554,20 @@ export async function mergeBranch(
   repoPath: string,
   featureBranch: string,
   targetBranch: string,
-  options?: { syncWorkingTree?: boolean; deferWorkingTreeSync?: boolean },
+  options?: {
+    syncWorkingTree?: boolean;
+    deferWorkingTreeSync?: boolean;
+    /**
+     * When true, a conflict whose conflicting files are ALL pure-append (both the
+     * target and the feature branch only appended distinct trailing content to a
+     * shared-ancestor file, with no edits to existing lines) is auto-resolved by
+     * concatenating both sides' appended tails instead of throwing (#763). Used to
+     * stop fix-and-merge thrash on append-only "hot files" (shared smoke tests, logs,
+     * changelogs) that a whole wave of parallel tickets all append to. A conflict with
+     * ANY non-append (edited/overlapping) file still throws as before.
+     */
+    autoResolveAppendConflicts?: boolean;
+  },
 ): Promise<string> {
   const targetSha = (await execGit(["rev-parse", targetBranch], repoPath)).trim();
   const featureSha = (await execGit(["rev-parse", featureBranch], repoPath)).trim();
@@ -493,6 +682,33 @@ export async function mergeBranch(
       },
     );
   });
+
+  // #763: when the ONLY conflicts are pure-append hot files (both sides appended
+  // distinct trailing content to a shared-ancestor file, no edits to existing lines),
+  // resolve them by concatenating both tails instead of throwing — provided the caller
+  // opted in. This lands a wave of parallel tickets that all append to one shared file
+  // (a smoke test, changelog, log) without fix-and-merge thrash. Any non-append conflict
+  // falls through to the normal throw.
+  if ((conflictingFiles.length > 0 || mergeTreeHadConflictExit) && options?.autoResolveAppendConflicts) {
+    const resolved = await tryResolveAppendOnlyMerge(
+      repoPath,
+      targetBranch,
+      featureBranch,
+      conflictingFiles,
+      treeSha,
+    );
+    if (resolved) {
+      await execGit(["update-ref", `refs/heads/${targetBranch}`, resolved.commitSha], repoPath);
+      const needsSync = options?.syncWorkingTree || targetIsCheckedOut;
+      if (needsSync && !options?.deferWorkingTreeSync) {
+        await syncWorkingTreeHard(repoPath, resolved.commitSha);
+      }
+      const deferTag = needsSync && options?.deferWorkingTreeSync
+        ? ` [pending-wt-sync:${resolved.commitSha}]`
+        : "";
+      return `Merge branch '${featureBranch}' into ${targetBranch} (append-merge: ${resolved.commitSha}; concatenated ${resolved.resolvedFiles.join(", ")})${deferTag}`;
+    }
+  }
 
   if (conflictingFiles.length > 0) {
     throw new Error(`Merge conflict in: ${conflictingFiles.join(", ")}`);

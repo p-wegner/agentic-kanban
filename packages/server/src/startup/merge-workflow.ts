@@ -163,7 +163,12 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
               }
 
               const targetBranch = workspace.baseBranch || defaultBranch || "main";
-              const mergeOutput = await gitService.mergeBranch(repoPath, workspace.branch, targetBranch);
+              // #763: auto-resolve pure-append hot-file conflicts by concatenation so a
+              // wave of tickets that all append to one shared smoke test / log lands
+              // without fix-and-merge thrash. Non-append conflicts still throw.
+              const mergeOutput = await gitService.mergeBranch(repoPath, workspace.branch, targetBranch, {
+                autoResolveAppendConflicts: true,
+              });
 
               // Post-merge invariant: verify the branch tip is now reachable from target.
               // If not, the git merge did not actually land the work (e.g. plumbing anomaly
