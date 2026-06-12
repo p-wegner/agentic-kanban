@@ -1,6 +1,6 @@
 ---
 name: drive-new-project
-description: Drive a freshly-created project hands-off to a finished multi-ticket epic — the playbook for "use the board to build a new app / implement a 10+ ticket epic" tickets. Encodes the completion CONTRACT (don't mark the meta-ticket Review until the epic is N/N Done), a preflight prerequisites check, fan-out epic seeding, autodrive enablement, and a REQUIRED resident watch that recovers stalls instead of abandoning them. Use when a ticket asks you to register/scaffold a new project and take it to completion via the board.
+description: Drive a freshly-created project hands-off to a finished multi-ticket epic — the playbook for "use the board to build a new app / implement a 10+ ticket epic" tickets. Encodes the completion CONTRACT (keep the meta-ticket In Progress until the epic is N/N Done, then drive the meta itself to Done — not parked in Review), a preflight prerequisites check, fan-out epic seeding, autodrive enablement, and a REQUIRED resident watch that recovers stalls instead of abandoning them. Use when a ticket asks you to register/scaffold a new project and take it to completion via the board.
 ---
 
 You are the **epic orchestrator** for a brand-new project. Your job is NOT done when the project is set up and the first ticket is building — it is done when the **whole epic is merged to the target project's master**, or you have escalated a blocker you genuinely cannot resolve. Read `## Agent Roles` and `## Driving a different project hands-off` in `CLAUDE.md` first; this skill operationalizes them.
@@ -13,7 +13,7 @@ You are the **epic orchestrator** for a brand-new project. Your job is NOT done 
 
 1. The meta-ticket stays **In Progress** until every child ticket of the seeded epic is **Done/Cancelled** AND the target project's `master` actually contains the work (verify with git, not the board snapshot — see [[pitfall_silent_merge_loss]]).
 2. You MUST leave a **resident watch** running (Step 4) before you stop. Setup-then-exit is a failed run even if the board looks healthy at that instant.
-3. Only after N/N Done + a clean integration pass do you move the meta-ticket to **Review** and write the run doc.
+3. After N/N Done + a clean integration pass, drive the meta-ticket all the way to **Done** (the project's terminal column) — **not** parked in Review — as the final step, then write the run doc. A run that ends with the meta-ticket in Review has **not** met the contract: the meta closes only once every child is merged, and so must the meta itself. (Run #1 of Space Invaders left all 10 children Done but the meta stuck in Review — the blind spot this step closes.)
 
 ---
 
@@ -78,7 +78,8 @@ With prereqs green and the epic seeded:
 The Conductor (`scripts/board-monitor/`) is hard-wired to *this* board and will NOT drive your new project. For another project the supported pattern is: in-process autodrive does the driving, and **you leave a lightweight watch** that polls completion and recovers stalls. Set one up before you stop:
 
 ```
-/loop 10m  poll project <projectId>: list issues; if all child tickets of epic #<n> are Done -> report done & stop;
+/loop 10m  poll project <projectId>: list issues; if all child tickets of epic #<n> are Done -> run Step 6 close-out
+           (verify master + build, then move meta-ticket #<n> to Done, NOT Review), report done & stop;
            else check for stalls (Step 5) and recover the narrowest one, then keep looping.
 ```
 
@@ -100,19 +101,24 @@ Never resume many stale workspaces at once — one, then at most two more once h
 
 ---
 
-## Step 6 — Close out
+## Step 6 — Close out (drive the meta to Done, not Review)
 
-Only when `GET /api/issues?projectId=` shows the epic's children all Done/Cancelled and `git -C <projectPath> log master` confirms the merges:
+Only when `GET /api/issues?projectId=` shows the epic's children all Done/Cancelled and `git -C <projectPath> log master` confirms the merges, run this final checklist **in order**:
 
-1. Tear down the resident `/loop`.
-2. Write a short run doc under `docs/board-runs/<project>.md` (what was seeded, how many tickets, parallelism achieved, any escalations).
-3. Move the meta-ticket to **Review** and commit.
+1. **Verify N/N children Done** — `GET /api/issues?projectId=` shows every child of the epic in **Done/Cancelled** (count them; `done == total`). Trust `/api/issues`, not `/board` (#551/#552).
+2. **Verify master advanced** — `git -C <projectPath> log master` confirms each child's work is actually on master (not just a board "merged" flag — [[pitfall_silent_merge_loss]]).
+3. **Verify build green** — the integration/smoke check passes on master.
+4. Tear down the resident `/loop`.
+5. Write a short run doc under `docs/board-runs/<project>.md` (what was seeded, how many tickets, parallelism achieved, any escalations).
+6. **Move the meta-ticket to Done** — its terminal column, NOT Review. Use `mcp__agentic-kanban__update_issue` (resolve the meta's UUID first via `get_issue`, then set `statusId`/move to the Done node) or `move_issue`. This is the contract's final state: with every child merged, the meta closes too. **Do not stop with the meta in Review.**
+7. Verify the move landed: re-read `GET /api/issues?projectId=` and confirm the meta-ticket is in **Done**, then commit.
 
 ---
 
 ## Anti-patterns (the #664 failure modes — do not repeat)
 
 - ❌ Marking the meta-ticket Review at setup time. Ownership of "finish the epic" must not be dropped.
+- ❌ Ending the run with the meta-ticket parked in **Review** after N/N children are Done. The contract closes the meta to **Done** — Review is not the terminal state (the Space Invaders run #1 blind spot). Drive it to the last column (Step 6).
 - ❌ A linear / same-file dependency chain sold as a "10+ ticket epic." It serializes and conflicts.
 - ❌ Pre-wiring only the *obvious* entry file (`index.html`) while leaving another shared/append-only file — a single `test/smoke.test.js`, a registry, `package.json` — for every wave ticket to append to. That file becomes the new hot spot and thrashes fix-and-merge. Pre-resolve EVERY shared file, not just the entry point.
 - ❌ Trusting `/board` over `/api/issues` + git to judge progress.
