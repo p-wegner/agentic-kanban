@@ -125,6 +125,69 @@ async function isSpecPlanningNode(database: Database, currentNodeId: string | nu
 export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, database }: WorkflowDeps) {
   const db = database ?? defaultDb;
   const reviewSessionIds = new Set<string>(), fixAndMergeSessionIds = new Set<string>(), learningSessionIds = new Set<string>();
+
+  /**
+   * #764 stranded-resolver guard. After a fix-and-merge resolver session exits, verify the
+   * branch actually landed on its base. If it did NOT (the concurrent-merge loser whose
+   * conflict against the moved base is real — autoMerge's plumbing merge threw and was
+   * swallowed), make sure the workspace stays OPEN and idle so it is retryable, and clear the
+   * stale readyForMerge flag so nothing re-treats a conflicted branch as mergeable. Never close
+   * it — that is exactly the strand (ticket conflicted, no workspace) this guard prevents.
+   *
+   * Best-effort and idempotent: if the branch DID land, autoMerge has already closed the
+   * workspace and this is a no-op (we only touch OPEN workspaces). If the ancestry check can't
+   * run, we conservatively leave the open workspace idle (still retryable) rather than risk
+   * stranding it.
+   */
+  async function keepResolverWorkspaceRetryableIfUnlanded(
+    workspace: WorkspaceRow,
+    projectId: string,
+    issueId: string,
+    defaultBranch: string | null,
+    sessionId: string,
+  ): Promise<void> {
+    try {
+      // Re-read the live workspace: autoMerge may have closed it on a successful landing.
+      const freshRows = await db.select().from(workspaces).where(eq(workspaces.id, workspace.id)).limit(1);
+      const fresh = freshRows[0];
+      // Already closed/merged (resolver succeeded) or worktree gone — nothing to keep open.
+      if (!fresh || fresh.status === "closed" || fresh.mergedAt || !fresh.workingDir || fresh.isDirect) return;
+
+      const baseBranch = fresh.baseBranch || defaultBranch;
+      const repoRows = await db.select({ repoPath: projects.repoPath }).from(projects).where(eq(projects.id, projectId)).limit(1);
+      const repoPath = repoRows[0]?.repoPath;
+
+      let landed = false;
+      if (baseBranch && repoPath) {
+        try {
+          const ancestry = await gitService.checkBranchTipIsAncestor(repoPath, fresh.branch, baseBranch, fresh.workingDir ?? undefined);
+          landed = ancestry.isAncestor;
+        } catch (err) {
+          // Couldn't determine — assume NOT landed and keep it retryable (safe default).
+          console.warn(`[workflow] #764 landing check failed for workspace ${workspace.id} (treating as not landed):`, err instanceof Error ? err.message : String(err));
+        }
+      }
+
+      if (landed) return; // Branch is on base; resolver did its job (cleanup runs elsewhere).
+
+      // Not landed: keep the workspace OPEN + idle and retryable. Clear readyForMerge so a
+      // conflicted branch is not silently re-queued as "ready". Surface a clear signal.
+      const now = new Date().toISOString();
+      await db.update(workspaces).set({ status: "idle", readyForMerge: false, updatedAt: now }).where(eq(workspaces.id, workspace.id));
+      boardEvents.broadcast(projectId, "workspace_idle");
+      boardEvents.broadcast(projectId, "workflow_error");
+      emitButlerSystemEvent({
+        projectId,
+        kind: "merge_failed",
+        workspaceId: workspace.id,
+        text: `Fix-and-merge resolver for workspace ${workspace.id} (branch ${fresh.branch}) exited but the branch did not land on ${baseBranch ?? "base"} (likely a real concurrent-merge conflict). Workspace left open and idle for retry — not stranded.`,
+      });
+      console.warn(`[workflow] #764 fix-and-merge resolver for workspace ${workspace.id} (session ${sessionId}) did NOT land branch ${fresh.branch} on ${baseBranch ?? "base"} — kept open + idle for retry`);
+    } catch (err) {
+      console.warn(`[workflow] #764 stranded-resolver guard failed (non-fatal) for workspace ${workspace.id}:`, err instanceof Error ? err.message : String(err));
+    }
+  }
+
   async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCode: number | null, wasPlanMode?: boolean) {
     try {
       const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
@@ -308,6 +371,8 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
             boardEvents.broadcast(projectId, "workspace_idle");
           } else {
             console.log(`[workflow] fix-and-merge session ${sessionId} completed  retrying merge`);
+            // autoMerge swallows its own conflict errors, so its return tells us nothing.
+            // The landing guard below is what verifies the branch actually merged.
             await autoMerge(workspace, projectId, issueId, findStatus("Done")?.id ?? null, now);
           }
         } else {
@@ -315,6 +380,15 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
           boardEvents.broadcast(projectId, "workflow_error");
           emitButlerSystemEvent({ projectId, kind: "merge_failed", workspaceId, text: `Fix-and-merge session for workspace ${workspaceId} exited with code ${exitCode}.` });
         }
+        // #764: stranded-resolver guard. A fix-and-merge resolver can exit (any code) WITHOUT
+        // the branch landing — the concurrent-merge LOSER whose conflict against the moved base
+        // is real, so autoMerge's plumbing merge throws and is swallowed. Left unchecked the
+        // ticket ends up conflicted with NO open workspace to retry from (manual git recovery).
+        // Verify the branch actually landed; if it did NOT, KEEP the workspace OPEN and idle
+        // (retryable) and clear the stale readyForMerge flag so nothing treats a conflicted
+        // branch as mergeable. Never close/strand it. (Acceptance for the concurrent-merge-loser
+        // path; complements #761/#762.)
+        await keepResolverWorkspaceRetryableIfUnlanded(workspace, projectId, issueId, defaultBranch, sessionId);
         return;
       }
       if (learningSessionIds.has(sessionId)) { learningSessionIds.delete(sessionId); console.log(`[workflow] learning step session ${sessionId} completed  no further workflow action`); return; }
