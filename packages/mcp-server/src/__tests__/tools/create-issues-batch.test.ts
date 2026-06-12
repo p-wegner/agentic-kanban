@@ -117,4 +117,106 @@ describe("create_issues_batch tool", () => {
     expect(deps).toHaveLength(2);
     expect(deps.every((dep) => dep.type === "child_of")).toBe(true);
   });
+
+  it("seeds issues AND dependency edges atomically in one transaction (#765)", async () => {
+    const { invoke, db, deps } = setupTool(registerCreateIssuesBatch);
+    const { projectId } = await seedProject(db);
+
+    // Fan-out epic: #0 base engine, #1 blocks #2 (wave ticket depends on engine).
+    const result = await invoke({
+      projectId,
+      issues: [{ title: "Engine" }, { title: "Renderer" }, { title: "Wave spawner" }],
+      dependencies: [
+        { issueIndex: 1, dependsOnIndex: 0 },
+        { issueIndex: 2, dependsOnIndex: 0, type: "blocked_by" },
+      ],
+    });
+    const data = parseResult(result);
+    expect(data.issues).toHaveLength(3);
+    expect(data.dependenciesCreated).toBe(2);
+
+    const idByNumber = new Map(data.issues.map((i: any) => [i.title, i.id]));
+    const edges = await db.select().from(schema.issueDependencies);
+    expect(edges).toHaveLength(2);
+
+    const rendererEdge = edges.find((e) => e.issueId === idByNumber.get("Renderer"));
+    expect(rendererEdge?.dependsOnId).toBe(idByNumber.get("Engine"));
+    expect(rendererEdge?.type).toBe("depends_on");
+
+    const waveEdge = edges.find((e) => e.issueId === idByNumber.get("Wave spawner"));
+    expect(waveEdge?.dependsOnId).toBe(idByNumber.get("Engine"));
+    expect(waveEdge?.type).toBe("blocked_by");
+
+    expect(deps.notifyBoard).toHaveBeenCalledWith(projectId, "mcp_dependency_added");
+  });
+
+  it("rolls back issues when a dependency index is out of range — nothing persisted", async () => {
+    const { invoke, db } = setupTool(registerCreateIssuesBatch);
+    const { projectId } = await seedProject(db);
+
+    const result = await invoke({
+      projectId,
+      issues: [{ title: "A" }, { title: "B" }],
+      dependencies: [{ issueIndex: 1, dependsOnIndex: 5 }],
+    });
+    expect(result.content[0].text).toContain("dependsOnIndex 5 out of range");
+
+    const rows = await db.select().from(schema.issues).where(eq(schema.issues.projectId, projectId));
+    expect(rows).toHaveLength(0);
+    const edges = await db.select().from(schema.issueDependencies);
+    expect(edges).toHaveLength(0);
+  });
+
+  it("rejects a self-dependency edge without persisting anything", async () => {
+    const { invoke, db } = setupTool(registerCreateIssuesBatch);
+    const { projectId } = await seedProject(db);
+
+    const result = await invoke({
+      projectId,
+      issues: [{ title: "A" }],
+      dependencies: [{ issueIndex: 0, dependsOnIndex: 0 }],
+    });
+    expect(result.content[0].text).toContain("cannot depend on itself");
+
+    const rows = await db.select().from(schema.issues).where(eq(schema.issues.projectId, projectId));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("rejects a duplicate edge up-front instead of crashing the transaction", async () => {
+    const { invoke, db } = setupTool(registerCreateIssuesBatch);
+    const { projectId } = await seedProject(db);
+
+    const result = await invoke({
+      projectId,
+      issues: [{ title: "A" }, { title: "B" }],
+      dependencies: [
+        { issueIndex: 1, dependsOnIndex: 0 },
+        { issueIndex: 1, dependsOnIndex: 0 },
+      ],
+    });
+    expect(result.content[0].text).toContain("duplicate edge");
+
+    const rows = await db.select().from(schema.issues).where(eq(schema.issues.projectId, projectId));
+    expect(rows).toHaveLength(0);
+    const edges = await db.select().from(schema.issueDependencies);
+    expect(edges).toHaveLength(0);
+  });
+
+  it("rejects a cycle across the batch's directional edges", async () => {
+    const { invoke, db } = setupTool(registerCreateIssuesBatch);
+    const { projectId } = await seedProject(db);
+
+    const result = await invoke({
+      projectId,
+      issues: [{ title: "A" }, { title: "B" }],
+      dependencies: [
+        { issueIndex: 0, dependsOnIndex: 1 },
+        { issueIndex: 1, dependsOnIndex: 0 },
+      ],
+    });
+    expect(result.content[0].text).toContain("would create a cycle");
+
+    const rows = await db.select().from(schema.issues).where(eq(schema.issues.projectId, projectId));
+    expect(rows).toHaveLength(0);
+  });
 });
