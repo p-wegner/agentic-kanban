@@ -56,11 +56,23 @@ async function fileAtMain(relativePath: string): Promise<string> {
   return git(repo, ["show", `main:${relativePath}`]);
 }
 
-/** Cut `branch` from `main`, append `block` to the shared smoke test, and commit. */
-async function makeAppendBranch(branch: string, block: string, base = "main"): Promise<void> {
+/**
+ * Cut `branch` from `main`, append `block` to the shared smoke test, AND add the
+ * branch's own unique source file (the realistic wave-ticket shape: each ticket adds
+ * its feature file and appends a test for it to the one shared smoke test). `ownFile`,
+ * when given, is the relative path of that per-branch file — it must survive the
+ * auto-resolved merge (regression guard against dropping the feature's clean changes).
+ */
+async function makeAppendBranch(
+  branch: string,
+  block: string,
+  base = "main",
+  ownFile?: string,
+): Promise<void> {
   await git(repo, ["checkout", "-B", branch, base]);
   const current = await readFile(join(repo, ...SMOKE.split("/")), "utf-8");
   await writeRepoFile(SMOKE, current + block);
+  if (ownFile) await writeRepoFile(ownFile, `// ${branch} feature\nexport const ${branch.replace(/\W/g, "_")} = true;\n`);
   await git(repo, ["add", "-A"]);
   await git(repo, ["commit", "-m", `${branch}: append smoke test`]);
 }
@@ -85,9 +97,9 @@ describe("#763 append-only hot-file merge auto-resolution", () => {
   it("lands a 3-ticket append-only cluster via the plumbing merge with no manual git or strand", async () => {
     // Three wave tickets, each cut from the SAME base, each appending its own block to
     // the one shared smoke test — the exact Space Invaders shape.
-    await makeAppendBranch("feature/ak-1", "test('a', () => {});\n");
-    await makeAppendBranch("feature/ak-2", "test('b', () => {});\n");
-    await makeAppendBranch("feature/ak-3", "test('c', () => {});\n");
+    await makeAppendBranch("feature/ak-1", "test('a', () => {});\n", "main", "src/feat1.js");
+    await makeAppendBranch("feature/ak-2", "test('b', () => {});\n", "main", "src/feat2.js");
+    await makeAppendBranch("feature/ak-3", "test('c', () => {});\n", "main", "src/feat3.js");
 
     await git(repo, ["checkout", "main"]);
 
@@ -112,6 +124,14 @@ describe("#763 append-only hot-file merge auto-resolution", () => {
     expect(merged).not.toContain("<<<<<<<");
     expect(merged).not.toContain("=======");
     expect(merged).not.toContain(">>>>>>>");
+
+    // CRITICAL regression (silent merge loss): the auto-resolve must NOT drop the
+    // non-conflicting files each ticket added. Seeding the merge tree from the target
+    // tree (instead of the proper merge-tree) used to lose feat2/feat3 entirely even
+    // though their branches were recorded as parents.
+    expect(await fileAtMain("src/feat1.js")).toContain("feature/ak-1 feature");
+    expect(await fileAtMain("src/feat2.js")).toContain("feature/ak-2 feature");
+    expect(await fileAtMain("src/feat3.js")).toContain("feature/ak-3 feature");
 
     for (const branch of ["feature/ak-1", "feature/ak-2", "feature/ak-3"]) {
       const branchSha = (await git(repo, ["rev-parse", branch])).trim();
