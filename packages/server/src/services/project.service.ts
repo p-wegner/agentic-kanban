@@ -3,7 +3,7 @@ import { execSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { resolve, sep, join } from "node:path";
 import { projects, projectStatuses, issues, workspaces, preferences } from "@agentic-kanban/shared/schema";
-import { ensureAgentGitignore, ensureStarterClaudeMd, ensureHookScaffold, ensureVerifyGateRunner, getDefaultSkillId, commitProjectScaffoldArtifacts } from "./project-scaffold.js";
+import { ensureAgentGitignore, ensureStarterClaudeMd, ensureStarterAgentsMd, ensureHookScaffold, ensureVerifyGateRunner, getDefaultSkillId, commitProjectScaffoldArtifacts } from "./project-scaffold.js";
 import { isSkillsDirAbsentOrEmpty, writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { listAgentSkills } from "../repositories/agent-skill.repository.js";
 import { getPreference } from "../repositories/preferences.repository.js";
@@ -168,6 +168,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     // history and gives agents a baseline working agreement.
     ensureAgentGitignore(repoInfo.repoPath, body.gitignoreTemplate ? GITIGNORE_TEMPLATES[body.gitignoreTemplate] : undefined);
     ensureStarterClaudeMd(repoInfo.repoPath);
+    ensureStarterAgentsMd(repoInfo.repoPath);
     ensureHookScaffold(repoInfo.repoPath);
     ensureVerifyGateRunner(repoInfo.repoPath);
     await commitProjectScaffoldArtifacts(repoInfo.repoPath);
@@ -282,6 +283,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     // Scaffold the fresh repo with the generic agent-artifact ignores + a starter CLAUDE.md + hooks.
     ensureAgentGitignore(repoInfo.repoPath, body.gitignoreTemplate ? GITIGNORE_TEMPLATES[body.gitignoreTemplate] : undefined);
     ensureStarterClaudeMd(repoInfo.repoPath);
+    ensureStarterAgentsMd(repoInfo.repoPath);
     ensureHookScaffold(repoInfo.repoPath);
     ensureVerifyGateRunner(repoInfo.repoPath);
     await commitProjectScaffoldArtifacts(repoInfo.repoPath);

@@ -6,10 +6,12 @@ import { execFileSync } from "node:child_process";
 import {
   ensureAgentGitignore,
   ensureStarterClaudeMd,
+  ensureStarterAgentsMd,
   ensureHookScaffold,
   ensureVerifyGateRunner,
   GENERIC_AGENT_GITIGNORE,
   STARTER_CLAUDE_MD,
+  STARTER_AGENTS_MD,
 } from "../services/project-scaffold.js";
 
 async function tmp(): Promise<string> {
@@ -63,6 +65,38 @@ describe("project-scaffold", () => {
       await writeFile(join(dir, "CLAUDE.md"), "custom project guidance");
       ensureStarterClaudeMd(dir);
       expect(await readFile(join(dir, "CLAUDE.md"), "utf8")).toBe("custom project guidance");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("writes a starter AGENTS.md only when absent (never clobbers an existing one)", async () => {
+    const dir = await tmp();
+    try {
+      ensureStarterAgentsMd(dir);
+      expect(await readFile(join(dir, "AGENTS.md"), "utf8")).toBe(STARTER_AGENTS_MD);
+      await writeFile(join(dir, "AGENTS.md"), "custom agents guidance");
+      ensureStarterAgentsMd(dir);
+      expect(await readFile(join(dir, "AGENTS.md"), "utf8")).toBe("custom agents guidance");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("the starter AGENTS.md carries the PowerShell + codex pitfalls block (the shell tax guardrail)", async () => {
+    const dir = await tmp();
+    try {
+      ensureStarterAgentsMd(dir);
+      const agents = await readFile(join(dir, "AGENTS.md"), "utf8");
+      // codex reads AGENTS.md, not CLAUDE.md — must say so
+      expect(agents).toContain("codex reads THIS file");
+      // The recurring PowerShell pitfalls the kanban CLAUDE.md already documents
+      expect(agents).toContain("$pid"); // read-only automatic variables
+      expect(agents).toContain("2>&1"); // native stderr redirect flips $?
+      expect(agents).toContain("ParserError"); // unterminated-string failure
+      expect(agents).toContain("PowerShell 5.1"); // no && / || / ternary
+      // Prefer dedicated tools over the shell (Get-Content / git status / git diff spam)
+      expect(agents).toContain("Get-Content");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
