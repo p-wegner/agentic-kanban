@@ -11,14 +11,19 @@
 //              lowercase/imperative/question tics, opening phrases, samples.
 //
 // Targets (single OR fleet — one shared profile is computed across all):
-//   <file.jsonl>                  one Claude session, OR a Copilot events.jsonl
+//   <file.jsonl>                  one Claude/Codex/Copilot session (auto-detect)
 //   --latest                      newest Claude session for this cwd's project
+//   --claude                      ALL Claude sessions (~/.claude/projects/*)
+//   --codex                       ALL Codex sessions (~/.codex/sessions/**)
 //   --copilot                     ALL Copilot sessions (~/.copilot/session-state)
 //   --fleet <dir>                 aggregate every session under <dir>
 //   --builders                    (fleet) keep only worktree/feature builder sessions
 //   --top N                       (fleet) cap to N largest sessions by bytes
+//   --days N                      (fleet) only sessions modified in the last N days
 //
 //   --samples N (default 4) · --json
+//
+// One run = one provider (turn semantics differ); compare providers across runs.
 //
 // Find what to profile first:  node scripts/session-rank.mjs --by output
 
@@ -34,6 +39,7 @@ const JSON_OUT = has('--json');
 const HUMAN = has('--human');
 const BUILDERS = has('--builders');
 const TOP = parseInt(flag('--top', '0'), 10);
+const DAYS = parseInt(flag('--days', '0'), 10);
 
 const sum = a => a.reduce((x, y) => x + y, 0);
 const pct = (n, d) => d ? Math.round((n / d) * 100) : 0;
@@ -45,27 +51,42 @@ function claudeProjDir() {
   return path.join(os.homedir(), '.claude', 'projects',
     'C--' + cwd.replace(/^[A-Za-z]:[\\/]/, '').replace(/[\\/]/g, '-'));
 }
+function walkJsonl(root) { // recursive *.jsonl finder
+  const out = [];
+  const stack = [root];
+  while (stack.length) { const d = stack.pop(); let ents; try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { continue; }
+    for (const e of ents) { const p = path.join(d, e.name);
+      if (e.isDirectory()) stack.push(p); else if (e.name.endsWith('.jsonl')) out.push(p); } }
+  return out;
+}
 function listFleet() {
   let files = [];
   if (has('--copilot')) {
     const root = path.join(os.homedir(), '.copilot', 'session-state');
     files = fs.readdirSync(root).map(d => path.join(root, d, 'events.jsonl')).filter(f => fs.existsSync(f));
+  } else if (has('--claude')) {
+    const root = path.join(os.homedir(), '.claude', 'projects');
+    let dirs = fs.readdirSync(root);
+    if (BUILDERS) dirs = dirs.filter(d => /worktree|feature-ak-|feature-\d/i.test(d)); // dir-name pre-filter (cheap)
+    for (const d of dirs) for (const f of fs.readdirSync(path.join(root, d)).filter(x => x.endsWith('.jsonl'))) files.push(path.join(root, d, f));
+  } else if (has('--codex')) {
+    files = walkJsonl(path.join(os.homedir(), '.codex', 'sessions'));
   } else {
     const dir = flag('--fleet', null);
     if (!fs.existsSync(dir)) { console.error('No dir:', dir); process.exit(1); }
-    // copilot-style (<uuid>/events.jsonl) or claude-style (*.jsonl)?
     const sub = fs.readdirSync(dir);
     if (sub.some(s => fs.existsSync(path.join(dir, s, 'events.jsonl'))))
       files = sub.map(d => path.join(dir, d, 'events.jsonl')).filter(f => fs.existsSync(f));
     else files = sub.filter(s => s.endsWith('.jsonl')).map(s => path.join(dir, s));
   }
+  if (DAYS > 0) { const cut = Date.now() - DAYS * 864e5; files = files.filter(f => { try { return fs.statSync(f).mtimeMs >= cut; } catch { return false; } }); }
   if (TOP > 0) files = files.map(f => ({ f, s: fs.statSync(f).size })).sort((a, b) => b.s - a.s).slice(0, TOP).map(x => x.f);
   return files;
 }
 function targets() {
   const explicit = args.find(a => a.endsWith('.jsonl'));
   if (explicit) return [explicit];
-  if (has('--copilot') || has('--fleet')) return listFleet();
+  if (has('--copilot') || has('--claude') || has('--codex') || has('--fleet')) return listFleet();
   if (has('--latest')) {
     const d = claudeProjDir();
     if (!fs.existsSync(d)) { console.error('No project dir', d); process.exit(1); }
@@ -81,14 +102,23 @@ const isFleet = FILES.length > 1;
 
 // ---------- format detection ----------
 function detectFormat(lines) {
+  // vote across the first several parseable lines (old Codex files don't lead
+  // with session_meta; Claude entries carry a `message` + sessionId/uuid).
+  let n = 0;
   for (const l of lines) { if (!l.trim()) continue; let o; try { o = JSON.parse(l); } catch { continue; }
     if (typeof o.type === 'string' && /^(session|assistant|user|tool|hook|system)\./.test(o.type)) return 'copilot';
-    return 'claude'; }
+    if (o.payload !== undefined || /^(session_meta|event_msg|response_item|turn_context)$/.test(o.type)) return 'codex';
+    if (o.message && (o.uuid || o.sessionId || o.parentUuid !== undefined)) return 'claude';
+    if (++n >= 15) break;
+  }
   return 'claude';
 }
-function builderCwd(lines) {
-  for (const l of lines) { if (!l.includes('session.start')) continue; let o; try { o = JSON.parse(l); } catch { continue; }
-    const cwd = o.data?.context?.cwd || o.data?.cwd || ''; return cwd; }
+function builderCwd(lines, fmt) {
+  for (const l of lines) {
+    if (fmt === 'codex') { if (!l.includes('session_meta')) continue; let o; try { o = JSON.parse(l); } catch { continue; } return o.payload?.cwd || ''; }
+    if (!l.includes('session.start')) continue; let o; try { o = JSON.parse(l); } catch { continue; }
+    return o.data?.context?.cwd || o.data?.cwd || '';
+  }
   return '';
 }
 const isBuilder = cwd => /worktree|feature[_-]ak-|[\\/]\.worktrees[\\/]/i.test(cwd);
@@ -172,14 +202,38 @@ function parseCopilot(lines) {
   }
 }
 
-let skippedNonBuilder = 0;
+function parseCodex(lines) {
+  // Codex has no clean assistant-turn bundling, so silent-turn% / tool-per-turn
+  // are left provider-n/a; we count prose blocks (agent_message), tool blocks
+  // (function_call + custom_tool_call), reasoning blocks (text encrypted), and
+  // read cumulative output tokens from the LAST token_count.
+  let lastOut = 0;
+  for (const l of lines) { if (!l.trim()) continue; let o; try { o = JSON.parse(l); } catch { continue; }
+    const p = o.data ? null : o.payload || {}; if (p === null) continue;
+    if (o.type === 'event_msg') {
+      if (HUMAN) { if (p.type === 'user_message') eatPrompt(p.message); continue; }
+      if (p.type === 'agent_message') { acc.turns++; if (p.message?.trim()) eatProse(p.message); }
+      else if (p.type === 'token_count' && p.info?.total_token_usage) lastOut = p.info.total_token_usage.output_tokens || lastOut;
+    } else if (!HUMAN && o.type === 'response_item') {
+      if (p.type === 'function_call' || p.type === 'custom_tool_call') { acc.toolBlocks++; const n = p.name || '?'; acc.tools[n] = (acc.tools[n] || 0) + 1; }
+      else if (p.type === 'reasoning') acc.reasoningBlocks++; // summary usually empty / encrypted
+    }
+  }
+  acc.outTokens += lastOut;
+}
+
+let skippedNonBuilder = 0; const fmtCounts = {};
 for (const f of FILES) {
   let lines; try { lines = fs.readFileSync(f, 'utf8').split('\n'); } catch { continue; }
   const fmt = detectFormat(lines);
-  if (BUILDERS && fmt === 'copilot' && !isBuilder(builderCwd(lines))) { skippedNonBuilder++; continue; }
-  acc.files++;
-  if (fmt === 'copilot') parseCopilot(lines); else parseClaude(lines);
+  // builder filter: copilot/codex by cwd (claude is pre-filtered by dir name in listFleet)
+  if (BUILDERS && (fmt === 'copilot' || fmt === 'codex') && !isBuilder(builderCwd(lines, fmt))) { skippedNonBuilder++; continue; }
+  fmtCounts[fmt] = (fmtCounts[fmt] || 0) + 1; acc.files++;
+  if (fmt === 'copilot') parseCopilot(lines);
+  else if (fmt === 'codex') parseCodex(lines);
+  else parseClaude(lines);
 }
+const provider = Object.entries(fmtCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
 
 // ---------- HUMAN report ----------
 if (HUMAN) {
@@ -219,9 +273,10 @@ const bar = (n, max, w = 18) => '█'.repeat(Math.max(0, Math.round((n / (max ||
 console.log(`\n■ OUTPUT-STYLE — ${report.scope}`);
 if (skippedNonBuilder) console.log(`  (skipped ${skippedNonBuilder} non-builder sessions)`);
 console.log(`  turns ${acc.turns}  ·  output tokens ${acc.outTokens.toLocaleString()}  ·  end/shutdown ${JSON.stringify(acc.stop)}`);
+const codex = provider === 'codex';
 console.log(`\n  Blocks: ${acc.textBlocks} prose · ${acc.toolBlocks} tool · ${acc.reasoningBlocks} reasoning`);
-console.log(`  Silent (tool-only, no prose) turns: ${report.silentToolTurnPct}%`);
-console.log(`  Prose:tool ratio ${report.proseToToolRatio} · tool calls/turn ${report.toolCallsPerTurn}`);
+console.log(`  Silent (tool-only, no prose) turns: ${codex ? 'n/a (no turn bundling)' : report.silentToolTurnPct + '%'}`);
+console.log(`  Prose:tool ratio ${report.proseToToolRatio} · tool calls/turn ${codex ? 'n/a' : report.toolCallsPerTurn}`);
 console.log(`  Prose words ${acc.textWords.toLocaleString()} · reasoning words ${acc.reasoningWords.toLocaleString()}${acc.reasoningWords ? '' : ' (stripped/none)'}`);
 console.log(`  Prose block length (words): median ${report.proseBlockWords.median} · p90 ${report.proseBlockWords.p90} · max ${report.proseBlockWords.max}`);
 console.log(`\n  Tool mix (${acc.toolBlocks} calls):`);
