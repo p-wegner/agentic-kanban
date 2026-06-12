@@ -32,13 +32,17 @@ For *style* questions ("describe the prompting / output style", "which session w
 node scripts/session-rank.mjs --by output         # rank this project's sessions: prompts|output|turns|duration|cost
 node scripts/output-style.mjs <file>              # ASSISTANT output style: tool mix, prose:tool ratio, silent-turn %, length dist, formatting tics, longest prose
 node scripts/output-style.mjs <file> --human      # PROMPTING style: human prompt count, length dist, lowercase/imperative/question %, opening tics, all prompts
-node scripts/output-style.mjs --claude  --builders  # FLEET aggregate across ALL Claude builder sessions
-node scripts/output-style.mjs --codex   --builders  # ... Codex builders
-node scripts/output-style.mjs --copilot --builders  # ... Copilot builders (one merged profile each)
+node scripts/output-style.mjs --claude  --builders   # FLEET aggregate across worktree sessions (builders+reviewers)
+node scripts/output-style.mjs --codex   --reviewers  # ONLY code-review sessions (precise launch-prompt filter)
+node scripts/output-style.mjs --copilot --reviewers  # ... per provider (--claude/--codex/--copilot)
 node scripts/output-style.mjs --fleet <dir> --top 50 --days 14   # any dir; --top N (largest) / --days N (mtime) caps
 ```
 
-Workflow: `session-rank` to find a session, then `output-style` (assistant) or `--human` (prompting) to profile it. `output-style` **auto-detects all three providers** — Claude (`~/.claude/projects/*.jsonl`), Codex (`~/.codex/sessions/**`, `event_msg`/`response_item`), Copilot (`events.jsonl`) — and aggregates a fleet into ONE profile via `--claude`/`--codex`/`--copilot`/`--fleet`. `--builders` keeps only worktree/feature sessions (Claude filtered by project-dir name, Codex/Copilot by `session_meta`/`session.start` cwd). One run = one provider (turn semantics differ — compare across runs). `--json` for machine-readable. Caveats: reasoning *text* is stripped for Claude (thinking signature only) and encrypted for Codex (`reasoning` summary) → both show 0 reasoning-words; only Copilot's `reasoningText` is measurable. **silent-turn %** (tool-only turns, zero prose) is the key builder signal but needs turn-bundling, so it's `n/a` for Codex (no assistant-turn boundary — its `tool-calls/turn` is also n/a). `--top N`/`--days N` bias the aggregate — omit for a representative fleet.
+Workflow: `session-rank` to find a session, then `output-style` (assistant) or `--human` (prompting) to profile it. `output-style` **auto-detects all three providers** — Claude (`~/.claude/projects/*.jsonl`), Codex (`~/.codex/sessions/**`, `event_msg`/`response_item`), Copilot (`events.jsonl`) — and aggregates a fleet into ONE profile via `--claude`/`--codex`/`--copilot`/`--fleet`.
+
+Role filters: **`--builders`** keeps worktree/feature sessions (Claude by project-dir name; Codex/Copilot by `session_meta`/`session.start` cwd) — note this is a *superset*: reviewers run in the same worktree as builders, so `--builders` includes them. **`--reviewers`** is precise — it matches the code-review launch-prompt signature ("You are an AI code reviewer" / "Classify each issue as CRITICAL" / "mark_ready_for_merge") in the first user message, across all providers. One run = one provider (turn semantics differ — compare across runs). `--json` for machine-readable.
+
+Caveats: reasoning *text* is stripped for Claude (thinking signature only) and encrypted for Codex (`reasoning` summary) → both show 0 reasoning-words; only Copilot's `reasoningText` is measurable. **silent-turn %** (tool-only turns, zero prose) needs turn-bundling, so it's `n/a` for Codex (no assistant-turn boundary — `tool-calls/turn` too). `--top N`/`--days N` bias the aggregate — omit for a representative fleet.
 
 When the analyzer isn't enough and you need custom parsing, load the matching **manual recipe file** (PowerShell snippets, loaded on demand):
 - `references/claude-recipes.md` — find a session by issue #, quick overview, parse tail, detect "started but never responded", read last message / sent prompt, find by `stop_reason`.
