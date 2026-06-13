@@ -7,6 +7,7 @@ import { db as defaultDb } from "../db/index.js";
 import { MOCK_AGENT_COMMAND, isMockProfile, toExecutorProvider } from "../services/agent-settings.service.js";
 import { createBoardEvents } from "../services/board-events.js";
 import { emitButlerSystemEvent } from "../services/butler-event-feed.js";
+import { ensurePnpmBuildApproval } from "../services/project-scaffold.js";
 import * as gitService from "../services/git.service.js";
 import { createSessionManager } from "../services/session.manager.js";
 import { applyWorkspaceProfileToPrefs, buildReviewArgs, buildReviewPrompt, getEffectiveProfile, parseProviderPref } from "./review-helpers.js";
@@ -442,6 +443,24 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
         // (the diff-only LLM review can't catch that on its own).
         const verifyScript = prefMap.get(`verify_script_${projectId}`);
         if (verifyScript && verifyScript.trim() && workspace.workingDir) {
+          // #783: a builder that created package.json may not have approved native build
+          // scripts (esbuild) or pinned a pnpm version that honors the approval — so a fresh
+          // clone of master fails `pnpm install` even though the per-worktree gate passes
+          // (the warm pnpm store hides it). Repair the manifest and COMMIT it onto the branch
+          // BEFORE the verify build, so the fix merges to master and clones build clean.
+          try {
+            const approvalChanged = ensurePnpmBuildApproval(workspace.workingDir);
+            if (approvalChanged) {
+              const committed = await gitService.commitPaths(
+                workspace.workingDir,
+                ["package.json", "pnpm-workspace.yaml"],
+                "chore: pin pnpm + approve native build scripts (verify gate #783)",
+              );
+              if (committed) console.log(`[workflow] committed pnpm build-approval repair for workspace ${workspaceId} (#783)`);
+            }
+          } catch (e) {
+            console.warn(`[workflow] pnpm build-approval repair failed for workspace ${workspaceId}: ${e instanceof Error ? e.message : String(e)}`);
+          }
           const result = await runSetupScript(workspace.workingDir, verifyScript).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e) }));
           if (result.exitCode !== 0) {
             console.log(`[workflow] verify_script failed (exit ${result.exitCode}) for workspace ${workspaceId} — withholding readyForMerge`);
