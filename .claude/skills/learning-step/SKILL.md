@@ -6,186 +6,88 @@ argument-hint: "[--issue <N>] [--last] [--session <path>] [--analysis-only]"
 
 # Learning Step — Agent Interaction Analysis
 
-You analyze past agent interactions to identify friction and improve future sessions. You are a diagnostic and improvement tool.
+Analyze past agent interactions to find friction and improve future sessions. You are a diagnostic + improvement tool.
 
-## Input Modes
+## Input modes (from arguments)
 
-Determine your input mode from the arguments:
+**No arguments (inline)** — you're a subagent; the parent conversation IS the session data. Analyze what you can see (what the agent did, what went wrong, what took extra turns); skip data collection. If the inline context has a structured session handoff, treat it as primary evidence — the feature worktree may already be clean/merged/emptied by board cleanup, so don't treat an empty/missing worktree as a blocker; fall back to the handoff, commit hash, changed-file list, test result, and any local transcript snippets.
 
-### No arguments (inline)
-You were called as a subagent. The parent conversation IS the session data. Analyze what you can see — what the agent did, what went wrong, what took extra turns. Skip data collection.
-
-If the inline context contains a structured session handoff, treat that handoff as the primary evidence. The feature worktree may already be clean, merged, or emptied by the board cleanup path. Do not turn an empty/missing worktree into a blocker; fall back to the handoff, commit hash, changed-file list, test result, and any local transcript snippets available.
-
-### `--issue <N>`
-Fetch structured session data for kanban issue #N:
-
+**`--issue <N>`** — fetch structured data for kanban issue #N:
 ```powershell
-# Get workspace + session metadata
 $status = Invoke-RestMethod "http://localhost:3001/api/issues?projectId=f6046402-8373-4294-9624-e0e4e54e1961&issueNumber=<N>"
 $ws = Invoke-RestMethod "http://localhost:3001/api/issues/$($status[0].id)/workspaces"
-# Get session summary
 $summary = Invoke-RestMethod "http://localhost:3001/api/sessions/$sessionId/summary"
 ```
+Or, preferred when available: `pnpm cli -- session analyze <session-id>`.
 
-Or use the CLI (preferred when available):
-```bash
-pnpm cli -- session analyze <session-id>
-```
-
-### `--last`
-Analyze the most recent agent sessions.
-
-**⚠️ Worktree caveat**: `pnpm cli --` commands fail in worktrees with `ERR_MODULE_NOT_FOUND` because `packages/shared/dist` is not built. Use the SQL fallback instead:
-
+**`--last`** — analyze the most recent sessions: `pnpm cli -- session recent --limit 5`, then `session analyze` each. **⚠️ In a worktree, `pnpm cli --` fails with `ERR_MODULE_NOT_FOUND`** (`packages/shared/dist` unbuilt) — query the `session_store` DB directly, then read checkpoints/turns for the interesting IDs:
 ```sql
--- Fallback: query session_store directly (database: "session_store")
-SELECT s.id, s.branch, substr(s.summary, 1, 120), s.updated_at, COUNT(t.turn_index) as turns
+SELECT s.id, s.branch, substr(s.summary,1,120), s.updated_at, COUNT(t.turn_index) AS turns
 FROM sessions s LEFT JOIN turns t ON t.session_id = s.id
 WHERE s.repository = 'p-wegner/agentic-kanban'
-GROUP BY s.id HAVING turns > 0
-ORDER BY s.updated_at DESC LIMIT 10;
+GROUP BY s.id HAVING turns > 0 ORDER BY s.updated_at DESC LIMIT 10;
 ```
 
-If not in a worktree, you can also use the CLI:
-```bash
-pnpm cli -- session recent --limit 5
-```
+**`--session <path>`** — read a JSONL transcript (session-inspector patterns): `Get-Content $path -Tail N` (never the whole file); parse each line with `ConvertFrom-Json -ErrorAction SilentlyContinue`; extract `tool_use` (name+input), `tool_result` (is_error+content), assistant text blocks.
 
-Then pick the most interesting sessions and run `session analyze` on each (or query turns/checkpoints via SQL).
+**`--analysis-only`** — produce the report but apply no changes.
 
-**In a worktree** (or when CLI fails with `ERR_MODULE_NOT_FOUND`), query the session_store SQL database directly:
-```sql
--- Get recent sessions with multiple turns (more interesting for analysis)
-SELECT s.id, s.branch, COUNT(t.turn_index) as turns, s.updated_at
-FROM sessions s JOIN turns t ON t.session_id = s.id
-GROUP BY s.id HAVING turns > 1 ORDER BY s.updated_at DESC LIMIT 10;
-```
-Then read checkpoints and turns for the most interesting session IDs.
+## Friction patterns (scan each session)
 
-### `--session <path>`
-Read a specific JSONL transcript file. Use session-inspector patterns:
-- Always use `Get-Content $path -Tail N` (never read the whole file)
-- Parse each line with `ConvertFrom-Json -ErrorAction SilentlyContinue`
-- Extract `tool_use` blocks (name + input), `tool_result` blocks (is_error + content), assistant text blocks
-
-### `--analysis-only`
-Produce the improvement report but do not apply changes. Useful for review before committing.
-
-## Analysis Framework
-
-For each session, scan for these friction patterns:
-
-### 1. Wasted Turns
-**Signal**: Multiple Read/Bash calls before finding the right target, obvious backtracking, or trying `--json` with `pnpm cli --` (known to fail).
-**Ask**: Could a better doc entry, skill prompt, or CLI command have cut these turns?
-
-### 2. Wrong Tool Choice
-**Signal**: Agent used `curl` instead of `Invoke-RestMethod`, `cat`/`grep` instead of Read/Grep tools, Bash `find` instead of Glob, piped to `jq` (not available on Windows).
-**Ask**: Is this a documentation gap or a missing tool?
-
-### 3. Missing Knowledge
-**Signal**: Agent discovers a feature mid-session ("oh, there's a CLI command for this"), uses REST API manually when MCP/CLI tool exists, doesn't know about `workspace resume` or `issue status`.
-**Ask**: Should this be in CLAUDE.md, a memory file, or a skill prompt?
-
-### 4. Repeated Errors
-**Signal**: Same error 2+ times (check `toolUsePatterns[].failedCount` and `errors[]`), or agent retrying the same failing command (check `repeatedCommands[]`).
-**Ask**: Could a hook catch this? Could a better error message guide the agent?
-
-### 5. Incomplete Session
-**Signal**: Session status is "stopped" not "completed", last agent message is mid-thought, or issue was not moved to correct status after work.
-**Ask**: Was this a process gap (no reminder) or infrastructure failure?
-
-### 6. Model-Specific Behavior
-**Signal**: Haiku misinterpreting "resume" as "investigate yourself", wasting turns on flag bugs, or not following CLAUDE.md task→command tables.
-**Ask**: Should CLAUDE.md include model-specific guidance?
-
-### 7. Rate Limiting
-**Signal**: `rateLimits` array has entries, or session stalled for long periods.
-**Ask**: Could the agent have been more efficient with fewer tool calls?
-
-## Improvement Classification
-
-For each friction point, classify the fix:
-
-| Type | Target | When | Constraint |
+| # | Pattern | Signal | Ask |
 |---|---|---|---|
-| Documentation | Memory files, CLAUDE.md, `.llm/workflows.md` | Agent lacked knowledge | 1-3 line addition, never removal |
-| Skill update | `.claude/skills/*/SKILL.md` | Skill prompt was missing a step | Preserve structure, add guidance |
-| Hook addition | `.claude/hooks/` | Failure mode could be mechanically prevented | Suggest pattern, never weaken hooks |
-| Code improvement | CLI commands, REST, MCP tools | Missing tool would prevent friction | Implement simple additions; flag complex ones |
+| 1 | **Wasted turns** | Many Read/Bash before finding the target; backtracking; `--json` with `pnpm cli --` (known to fail) | Could a doc/skill/CLI command have cut these turns? |
+| 2 | **Wrong tool** | `curl` not `Invoke-RestMethod`; `cat`/`grep` not Read/Grep; `find` not Glob; piped to `jq` (absent on Windows) | Doc gap or missing tool? |
+| 3 | **Missing knowledge** | Discovers a feature mid-session; uses REST manually when MCP/CLI exists; doesn't know `workspace resume` / `issue status` | CLAUDE.md, memory file, or skill prompt? |
+| 4 | **Repeated errors** | Same error 2+ times (`toolUsePatterns[].failedCount`, `errors[]`); retries a failing command (`repeatedCommands[]`) | Could a hook catch it, or a better error message guide it? |
+| 5 | **Incomplete session** | status `stopped` not `completed`; last message mid-thought; issue not moved to correct status | Process gap (no reminder) or infra failure? |
+| 6 | **Model-specific** | Haiku reading "resume" as "investigate yourself", wasting turns on flag bugs, ignoring CLAUDE.md task→command tables | Should CLAUDE.md add model-specific guidance? |
+| 7 | **Rate limiting** | `rateLimits` has entries; long stalls | Could the agent have used fewer tool calls? |
 
-## Output Format
+## Improvement classification + application rules
+
+For each friction point, classify the fix and apply per these constraints:
+
+| Type | Target | When | Rules |
+|---|---|---|---|
+| **Documentation** | memory files, CLAUDE.md, `.llm/workflows.md` | agent lacked knowledge | 1-3 lines, never removal. Memory: create in `C:\Users\pwegner\.claude\projects\C--andrena-agentic-kanban\memory\` as `pitfall_/pattern_/feedback_<topic>.md` with frontmatter `type: feedback` (or `project`), AND add an index entry to `MEMORY.md`. CLAUDE.md: Architecture Patterns sections (root, client, server). |
+| **Skill update** | `.claude/skills/*/SKILL.md` | a skill prompt missed a step | preserve frontmatter + structure, add guidance |
+| **Hook addition** | `.claude/hooks/` config | failure mode is mechanically preventable | suggest the pattern, never weaken existing hooks |
+| **Code** | CLI / REST / MCP tools | a missing tool would prevent friction | implement simple additions; flag complex architectural ones for user review |
+
+**Committing:** `docs: learning step -- <short key finding>`. **Verify it landed** — run `git log --oneline -2` and confirm the SHA; do NOT report a commit in "Changes Applied" without seeing the hash (prior sessions falsely reported applied-without-committing).
+
+## Output format
 
 ```
 ## Learning Step Report
-
 **Session**: #N <title> | Model: <model> | Duration: <duration>
 **Source**: <kanban-session | jsonl-transcript | inline>
-**Tool patterns**: <top 5 tools by count>
-**Repeated commands**: <commands run 2+ times>
-**Errors**: <count> | Rate limits: <count>
+**Tool patterns**: <top 5 by count>   **Repeated commands**: <run 2+ times>
+**Errors**: <count>   Rate limits: <count>
 
 ### Friction Points
-
 #### FP-1: <one-line description>
-- **Evidence**: <quote from session data, max 2 lines>
-- **Turns wasted**: <N> (estimated)
-- **Severity**: low/medium/high
+- Evidence: <quote, max 2 lines>   Turns wasted: <N> (est)   Severity: low/med/high
 
 ### Improvements
-
 #### IMP-1: <action title>
-- **Addresses**: FP-<N>
-- **Type**: <documentation | skill-update | hook | code>
-- **Target**: <file path>
-- **Change**: <what to add/modify>
-- **Priority**: low/medium/high
+- Addresses: FP-<N>   Type: <doc|skill|hook|code>   Target: <path>
+- Change: <what to add/modify>   Priority: low/med/high
 
 ### Changes Applied
-- <file> -- <what was added>
-- (or "None -- --analysis-only" or "None -- no actionable improvements")
+- <file> -- <what was added>   (or "None -- --analysis-only" / "None -- no actionable improvements")
 
 ### Skipped (below threshold)
 - <minor observation>
 ```
 
-## Application Rules
+## Quality gates (verify before emitting each improvement)
 
-### Memory files
-Create in `C:\Users\pwegner\.claude\projects\C--andrena-agentic-kanban\memory\`.
-File name: `pitfall_<topic>.md`, `pattern_<topic>.md`, or `feedback_<topic>.md`.
-Frontmatter must include `type: feedback` (or `project`).
-Must add entry to `MEMORY.md` index.
+1. **Non-obvious** — any experienced dev would know it → skip.
+2. **Project-specific** — generic advice is noise.
+3. **Actionable** — the reader knows exactly what to do.
+4. **Non-duplicative** — check existing memory files + CLAUDE.md first.
+5. **Not already in this branch** — check `git log --oneline master..HEAD` for prior learning-step commits on the same finding.
 
-### CLAUDE.md
-May add to Architecture Patterns sections in root, `packages/client/CLAUDE.md`, `packages/server/CLAUDE.md`.
-1-3 lines per finding. Never remove existing entries.
-
-### Hooks
-May add patterns to `.claude/hooks/` config files.
-Never weaken existing hooks.
-
-### Skills
-May edit `.claude/skills/*/SKILL.md`.
-Preserve frontmatter and section structure.
-
-### Code
-May implement simple additions (new CLI commands, API endpoints, MCP tool improvements).
-Flag complex architectural changes for user review.
-
-### Committing
-After applying changes, commit with: `docs: learning step -- <short description of key finding>`
-
-**Verify the commit actually happened** — after committing, run `git log --oneline -2` to confirm the commit SHA appears. Do NOT report a commit in "Changes Applied" unless you can see the commit hash in the log. Previous learning-step sessions have falsely reported changes as applied without committing.
-
-## Quality Gates
-
-Before outputting each improvement, verify:
-1. **Non-obvious?** If any experienced developer would know it, skip.
-2. **Project-specific?** Generic advice is noise.
-3. **Actionable?** The reader must know exactly what to do.
-4. **Non-duplicative?** Check existing memory files and CLAUDE.md before adding.
-5. **Not already in this branch?** Check `git log --oneline master..HEAD` for prior learning-step commits that may have addressed the same finding.
-
-Skip improvements that fail any gate. A clean report is better than a noisy one.
+Skip improvements failing any gate. A clean report beats a noisy one.

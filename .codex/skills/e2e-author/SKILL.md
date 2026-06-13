@@ -6,20 +6,13 @@ argument-hint: "[feature or flow to test]"
 
 # e2e-author
 
-Scaffold a new Playwright E2E test under `packages/e2e/tests/` for the feature in `$ARGUMENTS`.
-The goal: produce a test that follows ALL of the project's hard-won anti-flake rules so it
-never reintroduces the flakiness documented in CLAUDE.md.
+Scaffold a new Playwright E2E test under `packages/e2e/tests/` for the feature in `$ARGUMENTS`, following ALL the project's hard-won anti-flake rules so it never reintroduces the flakiness documented in CLAUDE.md.
 
 ## Where tests live
-- UI tests: `packages/e2e/tests/ui/<name>.test.ts`
-- API tests: `packages/e2e/tests/api/<name>.test.ts`
-- Shared helpers: `packages/e2e/tests/helpers/`
-  - `port.ts` exports `SERVER_URL`, `CLIENT_URL`, `SERVER_PORT`, `CLIENT_PORT` (all already on `127.0.0.1`).
-  - `e2e-project.ts` exports `getE2EProject(request)` and `getE2EProjectId(request)`.
+- UI: `packages/e2e/tests/ui/<name>.test.ts` · API: `packages/e2e/tests/api/<name>.test.ts`
+- Helpers (`packages/e2e/tests/helpers/`): `port.ts` exports `SERVER_URL`/`CLIENT_URL`/`SERVER_PORT`/`CLIENT_PORT` (all on `127.0.0.1`); `e2e-project.ts` exports `getE2EProject(request)` / `getE2EProjectId(request)`.
 
-`playwright.config.ts` sets `baseURL` to `http://127.0.0.1:${clientPort}`, so `page.goto("/")`
-already targets the right host/port. Always import `SERVER_URL` from `../helpers/port.js` for
-API calls instead of building URLs yourself.
+`playwright.config.ts` sets `baseURL` to `http://127.0.0.1:${clientPort}`, so `page.goto("/")` already targets the right host/port. For API calls import `SERVER_URL` from `../helpers/port.js` — never build URLs yourself.
 
 ## RULES the new test MUST follow (non-negotiable)
 
@@ -153,18 +146,11 @@ test.describe("<FEATURE> UI", () => {
 ```
 
 ## Run just the new test
-Use a worktree-aware command on `127.0.0.1` (ports are read from env automatically):
-
+Ports are read from env automatically:
 ```bash
 pnpm --filter @agentic-kanban/e2e exec playwright test tests/ui/<name>.test.ts
 ```
-
-If the dev server isn't running, the `webServer` block in `playwright.config.ts` starts it
-(`reuseExistingServer: true`). In a worktree, the server/client ports come from
-`$env:KANBAN_SERVER_PORT` / `$env:KANBAN_CLIENT_PORT` via `scripts/dev.mjs` — never pass
-hardcoded ports.
+If the dev server isn't running, the `webServer` block in `playwright.config.ts` starts it (`reuseExistingServer: true`). In a worktree the ports come from `$env:KANBAN_SERVER_PORT` / `$env:KANBAN_CLIENT_PORT` via `scripts/dev.mjs` — never pass hardcoded ports.
 
 ## Before finishing
-- Re-read RULES 1–8 against the file you wrote; fix any violation.
-- Confirm there's no `projects[0]`, no `localhost`, no hardcoded `3001`/`5173`, no `test.skip()`
-  on setup failure, and no fixed sleep used for correctness.
+Re-read RULES 1–8 against the file you wrote and fix any violation — confirm no `projects[0]`, no `localhost`, no hardcoded `3001`/`5173`, no `test.skip()` on setup failure, no fixed sleep for correctness.

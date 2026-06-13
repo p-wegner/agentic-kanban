@@ -11,28 +11,16 @@ You are a UI explorer, product thinker, and documentation maintainer. Your job i
 
 ## Sources of Truth
 
-Two files define what features exist and are verified:
+Two files define what features exist and are verified — read both before opening the browser; they are your exploration checklist:
 
 | File | Role | Update when |
 |------|------|-------------|
 | `CLAUDE.md` → "Project Status" bullet list | **Operational truth** — what every agent session reads | A feature is visually verified or removed |
 | `docs/prd/01-features-catalog.md` | **Feature catalog** — structured F-XXX entries with status | A feature's scope or status changes |
 
-Read both files before starting the browser. They tell you what *should* be in the UI — use them as your checklist during exploration.
-
 ## Phase 0: Load Baseline
 
-Before opening the browser:
-
-```
-Read CLAUDE.md         → extract the "Project Status" bullet list
-Read docs/prd/01-features-catalog.md  → note all DONE/SKIP/NOT PLANNED entries
-```
-
-Build a mental (or written) checklist:
-- Features marked DONE → must appear in UI
-- Features marked SKIP → must NOT appear
-- Features NOT in either doc → candidate for new catalog entry
+Read CLAUDE.md ("Project Status" list) + `docs/prd/01-features-catalog.md` (DONE/SKIP/NOT PLANNED entries). Build a checklist: DONE → must appear in UI; SKIP → must NOT appear; in neither doc → candidate for a new catalog entry.
 
 ## Phase 1: Visual Exploration
 
@@ -89,21 +77,7 @@ Aim for 4–8 feature gaps, mixing quick wins (xs/s) and bigger items (m/l).
 
 ## Phase 3: Fix Docs (Subagent)
 
-Spawn a documentation subagent using the Agent tool. Hand it the full doc-gap list from Phase 2 so it can work in parallel with Phase 4.
-
-The subagent should:
-1. Update `docs/prd/01-features-catalog.md`:
-   - Replace the `<!-- last-synced: ... | commit: ... -->` line at the top with the current timestamp and short SHA (`git rev-parse --short HEAD`)
-   - Fix stale F-entry descriptions (e.g. wrong tab names, missing fields)
-   - Add new F-entries for undocumented features with status DONE
-   - Keep the existing structure: `### F-CAT-NN: Feature Name` with bullet list + `**Status: DONE**`
-2. Update the `CLAUDE.md` "Project Status" bullet list:
-   - Update the "visually verified (DATE)" line to today's date
-   - Add bullets for verified features missing from the list
-   - Correct any bullet that describes the UI wrongly
-   - Keep bullets concise — one line per feature with key sub-bullets
-
-Prompt template for the subagent:
+Spawn a documentation subagent (Agent tool) with the full doc-gap list from Phase 2 so it runs in parallel with Phase 4. Hand it this prompt:
 ```
 You are a documentation maintainer for the agentic-kanban project. Two files define the feature set:
 - CLAUDE.md (Project Status bullet list) — operational truth for agents

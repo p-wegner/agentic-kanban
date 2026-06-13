@@ -29,18 +29,14 @@ Match the symptom to a section below:
 
 ## Step 2 — Migrations won't apply / locked / stale WAL → `pnpm db:repair`
 
-**This is the FIRST move for any migration/lock/WAL problem.** Do not reach for deletion.
+**The FIRST move for any migration/lock/WAL problem** — not deletion.
 
-1. Stop the dev server first (see Step 3 kill commands) — a running server holds the SQLite handle and causes `EBUSY`.
-2. Run:
-   ```powershell
-   pnpm db:repair
-   ```
-   It (in order): backs up db+wal+shm to `packages/server/.db-backups/`, probes for a lock, `PRAGMA wal_checkpoint(TRUNCATE)` to flush stale WAL, `PRAGMA integrity_check`, then runs the **programmatic** drizzle migrator in place.
+1. Stop the dev server (Step 3 kill commands) — a running server holds the SQLite handle and causes `EBUSY`.
+2. Run `pnpm db:repair`. In order it: backs up db+wal+shm to `packages/server/.db-backups/`, probes for a lock, `PRAGMA wal_checkpoint(TRUNCATE)` to flush stale WAL, `PRAGMA integrity_check`, then runs the **programmatic** drizzle migrator in place.
 3. **Do NOT use `drizzle-kit migrate` (the CLI) — it can hang.** The programmatic migrator inside `db:repair` is the one that works.
-4. If `db:repair` reports the DB is **LOCKED** (exit 3), it refused to touch it — go to Step 3, kill the holder, then re-run.
-5. If it reports the DB is **unusable** (zero-byte / `SQLITE_NOTADB`, exit 2): a backup was already taken. **STOP and ask the user** before considering `--force` (which recreates an empty DB). Do not run `--force` autonomously.
-6. Restart the server (see Step 6) and verify.
+4. Reports **LOCKED** (exit 3) → it refused to touch the DB; go to Step 3, kill the holder, re-run.
+5. Reports **unusable** (zero-byte / `SQLITE_NOTADB`, exit 2) → a backup was taken; **STOP and ask the user** before considering `--force` (recreates an empty DB). Never run `--force` autonomously.
+6. Restart (Step 6) and verify.
 
 ## Step 3 — DB locked but `/health` responds → orphaned tsx/node process
 
