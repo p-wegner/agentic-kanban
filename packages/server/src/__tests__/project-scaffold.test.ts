@@ -336,18 +336,51 @@ describe("project-scaffold", () => {
       }
     });
 
-    it("repairs a broken pnpm-workspace.yaml placeholder to a valid esbuild approval (never the placeholder)", async () => {
+    it("repairs a broken pnpm-workspace.yaml (bogus allowBuilds placeholder) to a VALID onlyBuiltDependencies list", async () => {
       const dir = await tmp();
       try {
         const broken =
           'packages:\n  - "packages/*"\nallowBuilds:\n  esbuild: "set this to true or false"\n';
         await writeFile(join(dir, "pnpm-workspace.yaml"), broken);
-        ensurePnpmBuildApproval(dir);
+        const changed = ensurePnpmBuildApproval(dir);
+        expect(changed).toBe(true);
         const ws = await readFile(join(dir, "pnpm-workspace.yaml"), "utf8");
+        // never the placeholder, never the bogus (non-pnpm) allowBuilds key
         expect(ws).not.toContain("set this to true or false");
-        expect(ws).toMatch(/esbuild:\s*true/);
-        // indentation preserved
-        expect(ws).toContain("  esbuild: true");
+        expect(ws).not.toContain("allowBuilds");
+        // a real pnpm key with esbuild approved
+        expect(ws).toMatch(/onlyBuiltDependencies:/);
+        expect(ws).toMatch(/-\s*esbuild/);
+        // the unrelated packages block is preserved
+        expect(ws).toContain('packages:');
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("pins packageManager to a pnpm version that honors the approval, for a pnpm project (#783)", async () => {
+      const dir = await tmp();
+      try {
+        await writeFile(join(dir, "package.json"), JSON.stringify({ name: "app" }, null, 2) + "\n");
+        await writeFile(join(dir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+        const changed = ensurePnpmBuildApproval(dir);
+        expect(changed).toBe(true);
+        const pkg = JSON.parse(await readFile(join(dir, "package.json"), "utf8"));
+        expect(typeof pkg.packageManager).toBe("string");
+        expect(pkg.packageManager).toMatch(/^pnpm@/);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("does NOT pin pnpm onto a non-pnpm project (no lockfile / pnpm config)", async () => {
+      const dir = await tmp();
+      try {
+        // npm-style project: has a package.json but no pnpm signal
+        await writeFile(join(dir, "package.json"), JSON.stringify({ name: "npm-app" }, null, 2) + "\n");
+        ensurePnpmBuildApproval(dir);
+        const pkg = JSON.parse(await readFile(join(dir, "package.json"), "utf8"));
+        expect(pkg.packageManager).toBeUndefined();
       } finally {
         await rm(dir, { recursive: true, force: true });
       }

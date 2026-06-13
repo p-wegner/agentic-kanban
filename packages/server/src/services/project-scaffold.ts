@@ -523,26 +523,41 @@ export function ensureVerifyGateRunner(repoPath: string): void {
  */
 export const PNPM_BUILD_APPROVED_DEPS = ["esbuild", "@swc/core"];
 
+/**
+ * A pnpm version that HONORS `pnpm.onlyBuiltDependencies`. The global pnpm 11.0.8 ignores
+ * the approval config in package.json / pnpm-workspace.yaml / .npmrc entirely (still throws
+ * ERR_PNPM_IGNORED_BUILDS on a clean install), so a scaffolded toy with no `packageManager`
+ * pin runs under whatever global pnpm exists and fails. Pinning corepack to this version —
+ * the same one the board itself uses — makes the approval take effect. (#783)
+ */
+export const PNPM_PACKAGE_MANAGER_PIN = "pnpm@10.12.1";
+
 /** The literal placeholder a buggy scaffold once emitted — must NEVER appear in output. */
 const PNPM_PLACEHOLDER_MARKER = "set this to true or false";
 
 /**
- * Ensure a scaffolded project approves the native build steps it needs (esbuild for Vite).
+ * Ensure a scaffolded project approves the native build steps it needs (esbuild for Vite)
+ * AND pins a pnpm version that honors that approval, so a fresh `pnpm install && pnpm build`
+ * of master is green. Returns true if it changed any file (so callers can commit the repair).
  *
- * pnpm 11 ignores unapproved postinstall builds by default, so a fresh `pnpm install &&
- * pnpm build` of a scaffolded Vite app fails with `ERR_PNPM_IGNORED_BUILDS`. This writes a
- * valid approval and, critically, NEVER emits the placeholder string
- * `esbuild: "set this to true or false"` (the #777 false-pass that left master unbuildable).
+ * pnpm 11 ignores unapproved postinstall builds by default, so a fresh build of a scaffolded
+ * Vite app fails with `ERR_PNPM_IGNORED_BUILDS`. This writes a valid approval and, critically,
+ * NEVER emits the placeholder string `esbuild: "set this to true or false"` (the #777
+ * false-pass that left master unbuildable).
  *
  * Behavior (clobber-safe, idempotent, non-fatal):
  * - If a `package.json` exists: ensure `pnpm.onlyBuiltDependencies` includes the approved
- *   deps (preserving any the project already declared). This is the canonical mechanism
- *   pnpm 11 accepts and matches the board's own root manifest.
- * - If a `pnpm-workspace.yaml` exists and contains the broken placeholder, repair the
- *   esbuild line to `esbuild: true` (never re-emit the placeholder).
+ *   deps (preserving any the project already declared) AND — for a clearly-pnpm project with
+ *   no `packageManager` yet — pin `packageManager` so the approval is honored (#783). The
+ *   registration scaffold runs before the builder creates package.json; the verify gate runs
+ *   this again post-build when the file exists and commits the result.
+ * - If a `pnpm-workspace.yaml` exists and contains the broken placeholder OR a bogus
+ *   `allowBuilds:` block (not a real pnpm key — the previous repair left `allowBuilds:
+ *   esbuild: true`, a no-op), replace it with a VALID `onlyBuiltDependencies:` list.
  * - No package.json and no workspace file ⇒ no-op (nothing to approve yet).
  */
-export function ensurePnpmBuildApproval(repoPath: string): void {
+export function ensurePnpmBuildApproval(repoPath: string): boolean {
+  let changed = false;
   try {
     const pkgJsonPath = join(repoPath, "package.json");
     if (existsSync(pkgJsonPath)) {
@@ -553,6 +568,16 @@ export function ensurePnpmBuildApproval(repoPath: string): void {
       } catch {
         pkg = {};
       }
+      let pkgChanged = false;
+
+      // Capture the pnpm signal from the ORIGINAL manifest (before we add the pnpm field
+      // below) so we never flip a non-pnpm repo to pnpm just because we wrote a (harmless)
+      // pnpm.onlyBuiltDependencies key.
+      const hadPnpmConfig =
+        pkg.pnpm !== undefined ||
+        (typeof pkg.packageManager === "string" && (pkg.packageManager as string).startsWith("pnpm@"));
+
+      // 1. Approve native build scripts (the canonical pnpm mechanism).
       const pnpmCfg = (pkg.pnpm ?? {}) as Record<string, unknown>;
       const existing = Array.isArray(pnpmCfg.onlyBuiltDependencies)
         ? (pnpmCfg.onlyBuiltDependencies as unknown[]).filter((d): d is string => typeof d === "string")
@@ -561,31 +586,55 @@ export function ensurePnpmBuildApproval(repoPath: string): void {
       for (const dep of PNPM_BUILD_APPROVED_DEPS) {
         if (!merged.includes(dep)) merged.push(dep);
       }
-      // Only rewrite when something actually changed (idempotent).
       if (merged.length !== existing.length || !existing.every((d, i) => d === merged[i])) {
         pnpmCfg.onlyBuiltDependencies = merged;
         pkg.pnpm = pnpmCfg;
+        pkgChanged = true;
+      }
+
+      // 2. Pin a pnpm version that HONORS the approval (#783). Only when the project has no
+      //    packageManager yet (never clobber a deliberate npm/yarn/pnpm@X choice) and is
+      //    clearly a pnpm project (a pnpm lockfile exists, or it declares a pnpm config) — so
+      //    we don't pin pnpm onto a non-pnpm repo.
+      const isPnpmProject =
+        existsSync(join(repoPath, "pnpm-lock.yaml")) ||
+        existsSync(join(repoPath, "pnpm-workspace.yaml")) ||
+        hadPnpmConfig;
+      if (pkg.packageManager === undefined && isPnpmProject) {
+        pkg.packageManager = PNPM_PACKAGE_MANAGER_PIN;
+        pkgChanged = true;
+      }
+
+      if (pkgChanged) {
         const trailingNewline = raw.endsWith("\n") ? "\n" : "";
         writeFileSync(pkgJsonPath, JSON.stringify(pkg, null, 2) + trailingNewline, "utf8");
+        changed = true;
       }
     }
 
-    // Repair a broken pnpm-workspace.yaml placeholder if one was emitted.
+    // Repair a broken pnpm-workspace.yaml: a placeholder OR a bogus `allowBuilds:` block
+    // (not a real pnpm key — the old repair left `allowBuilds: esbuild: true`, a silent no-op).
+    // Replace it with a VALID `onlyBuiltDependencies:` list.
     const wsPath = join(repoPath, "pnpm-workspace.yaml");
     if (existsSync(wsPath)) {
       const ws = readFileSync(wsPath, "utf8");
-      if (ws.includes(PNPM_PLACEHOLDER_MARKER)) {
-        // Replace the placeholder value with a valid approval, preserving indentation.
-        const repaired = ws.replace(
-          /^(\s*esbuild:\s*).*$/m,
-          (_match, prefix: string) => `${prefix}true`
-        );
-        writeFileSync(wsPath, repaired, "utf8");
+      if (ws.includes(PNPM_PLACEHOLDER_MARKER) || /^\s*allowBuilds\s*:/m.test(ws)) {
+        // Drop the bogus `allowBuilds:` key and its indented children.
+        let repaired = ws.replace(/^[ \t]*allowBuilds[ \t]*:[ \t]*\r?\n(?:[ \t]+\S.*\r?\n?)*/m, "");
+        if (!/^\s*onlyBuiltDependencies\s*:/m.test(repaired)) {
+          const list = PNPM_BUILD_APPROVED_DEPS.map((d) => `  - ${d}`).join("\n");
+          repaired = repaired.replace(/\s*$/, "\n") + `onlyBuiltDependencies:\n${list}\n`;
+        }
+        if (repaired !== ws) {
+          writeFileSync(wsPath, repaired, "utf8");
+          changed = true;
+        }
       }
     }
   } catch {
     /* non-fatal: scaffolding must never block registration */
   }
+  return changed;
 }
 
 /**
