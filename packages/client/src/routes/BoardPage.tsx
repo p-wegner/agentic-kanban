@@ -111,6 +111,7 @@ interface Project {
   setupBlocking?: boolean;
   symlinkEnabled?: boolean;
   symlinkDirs?: string | null;
+  archivedAt?: string | null;
 }
 
 interface Tag {
@@ -247,6 +248,7 @@ export function BoardPage() {
   const [loading, setLoading] = useState(true);
   const [switchingProject, setSwitchingProject] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [archivedProjects, setArchivedProjects] = useState<Project[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const notifications = useActivityNotifications(activeProjectId);
   const { addBoardEvent: addNotificationBoardEvent, addApprovalEvent: addNotificationApprovalEvent } = notifications;
@@ -644,9 +646,19 @@ export function BoardPage() {
     }
   }, [creatingInColumnId, refetchBoard]);
 
+  const loadArchivedProjects = useCallback(async () => {
+    try {
+      const all = await apiFetch<Project[]>("/api/projects?includeArchived=true");
+      setArchivedProjects(all.filter((p) => p.archivedAt));
+    } catch {
+      // non-fatal — archived list is supplementary
+    }
+  }, []);
+
   const loadProjects = useCallback(async () => {
     const projs = await apiFetch<Project[]>("/api/projects");
     setProjects(projs);
+    void loadArchivedProjects();
     if (projs.length === 0) {
       setActiveProjectId(null);
       return undefined;
@@ -663,7 +675,7 @@ export function BoardPage() {
     const firstId = projs[0].id;
     setActiveProjectId(firstId);
     return firstId;
-  }, []);
+  }, [loadArchivedProjects]);
   loadProjectsRef.current = loadProjects;
 
   useEffect(() => {
@@ -832,6 +844,29 @@ export function BoardPage() {
     }
     await loadProjects();
     showToast(`Removed "${project?.name ?? "project"}"`, "success");
+  }
+
+  async function handleArchiveProject(id: string) {
+    const project = projects.find((p) => p.id === id);
+    await apiFetch(`/api/projects/${id}/archive`, { method: "POST" });
+    if (activeProjectId === id) {
+      const remaining = projects.filter((p) => p.id !== id);
+      if (remaining.length > 0) {
+        await handleProjectChange(remaining[0].id);
+      } else {
+        setActiveProjectId(null);
+      }
+    }
+    await loadProjects();
+    showToast(`Archived "${project?.name ?? "project"}"`, "success");
+  }
+
+  async function handleUnarchiveProject(id: string) {
+    const project = archivedProjects.find((p) => p.id === id);
+    await apiFetch(`/api/projects/${id}/unarchive`, { method: "POST" });
+    await loadProjects();
+    await handleProjectChange(id);
+    showToast(`Restored "${project?.name ?? "project"}"`, "success");
   }
 
   async function handleCreateIssue(data: CreateIssuePayload) {
@@ -1563,6 +1598,9 @@ export function BoardPage() {
       activeProjectId={activeProjectId}
       onProjectChange={handleProjectChange}
       onUnregisterProject={handleUnregisterProject}
+      onArchiveProject={handleArchiveProject}
+      onUnarchiveProject={handleUnarchiveProject}
+      archivedProjects={archivedProjects}
       searchQuery={searchQuery}
       onSearchChange={setSearchQuery}
       onRegisterProject={handleRegisterProject}

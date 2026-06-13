@@ -8,6 +8,7 @@ interface Project {
   id: string;
   name: string;
   color?: string | null;
+  archivedAt?: string | null;
 }
 
 interface RegisterOptions {
@@ -22,6 +23,9 @@ interface LayoutProps {
   activeProjectId?: string | null;
   onProjectChange?: (id: string) => void;
   onUnregisterProject?: (id: string) => Promise<void>;
+  onArchiveProject?: (id: string) => Promise<void>;
+  onUnarchiveProject?: (id: string) => Promise<void>;
+  archivedProjects?: Project[];
   onRegisterProject?: (args: { repoPath: string; gitignoreTemplate: string; generateReadme: boolean }) => Promise<void>;
   onCreateProject?: (name: string, path: string, gitignoreTemplate: string, generateReadme: boolean) => Promise<void>;
   searchQuery?: string;
@@ -50,6 +54,9 @@ export function Layout({
   activeProjectId,
   onProjectChange,
   onUnregisterProject,
+  onArchiveProject,
+  onUnarchiveProject,
+  archivedProjects = [],
   onRegisterProject,
   onCreateProject,
   searchQuery = "",
@@ -74,6 +81,9 @@ export function Layout({
   const [showRegister, setShowRegister] = useState(false);
   const [confirmUnregister, setConfirmUnregister] = useState<Project | null>(null);
   const [unregistering, setUnregistering] = useState(false);
+  const [confirmArchive, setConfirmArchive] = useState<Project | null>(null);
+  const [archiving, setArchiving] = useState(false);
+  const [unarchivingId, setUnarchivingId] = useState<string | null>(null);
   const [modalTab, setModalTab] = useState<"import" | "create">("import");
   const [repoPath, setRepoPath] = useState("");
   const [gitignoreTemplate, setGitignoreTemplate] = useState("");
@@ -154,6 +164,27 @@ export function Layout({
     }
   }
 
+  async function handleConfirmArchive() {
+    if (!confirmArchive || !onArchiveProject) return;
+    setArchiving(true);
+    try {
+      await onArchiveProject(confirmArchive.id);
+    } finally {
+      setArchiving(false);
+      setConfirmArchive(null);
+    }
+  }
+
+  async function handleUnarchive(id: string) {
+    if (!onUnarchiveProject) return;
+    setUnarchivingId(id);
+    try {
+      await onUnarchiveProject(id);
+    } finally {
+      setUnarchivingId(null);
+    }
+  }
+
   function openRegister() {
     setRegisterError(null);
     setCreateError(null);
@@ -222,6 +253,20 @@ export function Layout({
                   />
                 )}
               </div>
+            )}
+            {projects.length > 0 && onArchiveProject && (
+              <button
+                onClick={() => {
+                  const active = projects.find((p) => p.id === activeProjectId) ?? projects[0];
+                  setConfirmArchive(active);
+                }}
+                className="p-1 text-gray-400 dark:text-gray-500 hover:text-amber-500 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
+                title="Archive project"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 8v13H3V8M1 3h22v5H1zM10 12h4" />
+                </svg>
+              </button>
             )}
             {projects.length > 0 && onUnregisterProject && (
               <button
@@ -425,6 +470,33 @@ export function Layout({
         </div>
       )}
 
+      {confirmArchive && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-surface-raised dark:bg-surface-raised-dark rounded-lg shadow-xl w-full max-w-sm mx-4 p-6">
+            <h2 className="text-lg font-semibold text-ink dark:text-stone-100 mb-2">Archive project?</h2>
+            <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">
+              Archive <span className="font-medium">{confirmArchive.name}</span>? It will be hidden from the project list and its data is kept — restore it any time from the Add Project dialog.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setConfirmArchive(null)}
+                disabled={archiving}
+                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmArchive}
+                disabled={archiving}
+                className="px-4 py-2 text-sm font-medium text-white bg-amber-600 rounded-md hover:bg-amber-700 disabled:opacity-50"
+              >
+                {archiving ? "Archiving..." : "Archive"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showRegister && (
         <div
           className="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
@@ -610,6 +682,32 @@ export function Layout({
                   </button>
                 </div>
               </form>
+            )}
+
+            {onUnarchiveProject && archivedProjects.length > 0 && (
+              <div className="mt-5 pt-4 border-t border-gray-200 dark:border-gray-700">
+                <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Archived projects</h3>
+                <ul className="space-y-1 max-h-48 overflow-y-auto">
+                  {archivedProjects.map((p) => (
+                    <li key={p.id} className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800">
+                      <span className="flex items-center gap-2 min-w-0">
+                        {p.color && (
+                          <span className="h-2.5 w-2.5 rounded-full border border-black/10 dark:border-white/20 shrink-0" style={{ backgroundColor: p.color }} />
+                        )}
+                        <span className="truncate text-sm text-gray-700 dark:text-gray-200">{p.name}</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleUnarchive(p.id)}
+                        disabled={unarchivingId === p.id}
+                        className="shrink-0 px-2 py-1 text-xs font-medium text-brand-700 dark:text-brand-300 border border-brand-300 dark:border-brand-700 rounded-md hover:bg-brand-50 dark:hover:bg-brand-950/50 disabled:opacity-50"
+                      >
+                        {unarchivingId === p.id ? "Restoring…" : "Restore"}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
           </div>
         </div>

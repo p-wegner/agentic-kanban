@@ -102,6 +102,7 @@ export interface ProjectResponse {
   maxRetries: number | null;
   symlinkEnabled: boolean;
   symlinkDirs: string | null;
+  archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }

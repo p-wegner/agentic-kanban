@@ -12,7 +12,7 @@ import type { Database } from "../db/index.js";
 import { branchExists, detectRepoInfo, getProjectGitStatsAsync } from "./git-info.service.js";
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree } from "./git.service.js";
 import { buildWorkspaceSummaryMap, buildBlockedMap, buildTagMap, buildGraphEdges } from "./board-aggregation.service.js";
-import { getProjectById, getProjectByRepoPath, getAllProjects, insertProject, deleteProjectCascade, getProjectStats, getProjectStatuses, createProjectStatus, deleteProjectStatus, updateProjectStatusSortOrder } from "../repositories/project.repository.js";
+import { getProjectById, getProjectByRepoPath, getAllProjects, insertProject, deleteProjectCascade, setProjectArchived, getProjectStats, getProjectStatuses, createProjectStatus, deleteProjectStatus, updateProjectStatusSortOrder } from "../repositories/project.repository.js";
 import { generateSetupScript as generateSetupScriptAI, generateTeardownScript as generateTeardownScriptAI, generateVerifyScript as generateVerifyScriptAI } from "./project-setup.service.js";
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
 import type { WorkspaceSummaryCache } from "./workspace-summary-cache.service.js";
@@ -361,6 +361,25 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     const project = await getProjectById(id, database);
     if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
     await deleteProjectCascade(id, database);
+  }
+
+  async function archiveProject(id: string) {
+    const project = await getProjectById(id, database);
+    if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
+    await setProjectArchived(id, true, database);
+    // Clear the active-project preference if it pointed at the now-archived project,
+    // so the board doesn't try to render a hidden project on next load.
+    await database
+      .delete(preferences)
+      .where(and(eq(preferences.key, "activeProjectId"), eq(preferences.value, id)));
+    return { id };
+  }
+
+  async function unarchiveProject(id: string) {
+    const project = await getProjectById(id, database);
+    if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
+    await setProjectArchived(id, false, database);
+    return { id };
   }
 
   async function getWorktrees(projectId: string) {
@@ -871,8 +890,8 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     spawn(cmd, args, { detached: true, stdio: "ignore" }).unref();
   }
 
-  async function listProjects() {
-    return getAllProjects(database);
+  async function listProjects(opts: { includeArchived?: boolean } = {}) {
+    return getAllProjects(database, opts);
   }
 
   async function listStatuses(projectId: string) {
@@ -959,6 +978,8 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     createProject,
     updateProject,
     deleteProject,
+    archiveProject,
+    unarchiveProject,
     getWorktrees,
     removeWorktreeById,
     getStats,
