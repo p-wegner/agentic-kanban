@@ -338,21 +338,14 @@ Use the description field as a shared progress log — update with blockers, dec
 No separate branch — changes go directly to the default branch. You must still move issue status. The system does NOT auto-review direct workspaces — run a self-review subagent before marking Done.
 
 ### 4. Run tests and commit your changes
-Mandatory before finishing. While iterating, prefer a fast or filtered test
-command so you don't chase false failures: if the project defines a script that
-skips known-flaky suites (check its CLAUDE.md / README / package.json scripts),
-use that; otherwise run the tests that cover only your changed files, e.g.:
+Mandatory before finishing. While iterating, prefer a fast/filtered command so you don't chase false failures: use the project's flaky-skipping script if it has one (check CLAUDE.md / README / package.json), else run only tests covering your changed files:
 \`\`\`
-# targeted (preferred for refactoring) — adjust the runner to the project:
-<test command> --related <changed-files>
-# or derive the changed files from git:
-<test command> --related $(git diff --name-only HEAD)
+<test command> --related <changed-files>                       # targeted (preferred for refactoring)
+<test command> --related $(git diff --name-only HEAD)          # or derive from git
 \`\`\`
-Run the project's full test suite once before you mark work ready (or when
-cross-cutting changes may affect unrelated tests).
-Stage and commit all changed files with a descriptive message.
+Run the full suite once before marking work ready (or when cross-cutting changes may affect unrelated tests), then stage and commit all changed files with a descriptive message.
 
-**Commit checkpoint — commit the moment the core is green.** The instant \`tsc -b --noEmit\` passes for the packages you touched AND the directly-related test file(s) pass (\`pnpm --filter agentic-kanban test -- --related <changed-files>\`), **commit immediately**. Then continue any polish, extra tests, or flaky-suite debugging in follow-up commits. Do NOT batch a multi-step diff into one final end-of-task commit — an interruption (crash, hot-reload, timeout) loses all of it. A branch that does meaningful work should normally show two or more commits, not one.
+**Commit at the green checkpoint:** the instant \`tsc -b --noEmit\` passes for the packages you touched AND the directly-related tests pass, **commit immediately**; continue polish/extra tests in follow-up commits. Don't batch a multi-step diff into one end-of-task commit — an interruption (crash, hot-reload, timeout) loses all of it. Meaningful work normally shows two or more commits, not one.
 
 ### 5. Review
 **Branched workspaces:** system auto-launches review after your session exits.
@@ -412,11 +405,10 @@ Do NOT call \`update_issue(statusName="Done")\` separately — it is redundant a
 3. **Board reflects reality** — move statuses in real-time, don't batch.
 4. **Complete the full ticket** — if the ticket lists steps, do all of them.
 5. **Commit before review** — never trigger review with uncommitted changes.
-6. **Commit at the green checkpoint** — the moment \`tsc -b --noEmit\` is clean and the directly-related tests pass, commit. Queued polish goes in follow-up commits. Never batch a multi-step diff into one end-of-task commit — an interruption loses all of it.
+6. **Commit at the green checkpoint** (see Step 4) — never batch a multi-step diff into one end-of-task commit; an interruption loses all of it.
 7. **Description is a shared log** — write progress notes so the user can follow along.
 8. **Done means done** — code committed, tests green, review passed, no loose ends.
-9. **Cancelled is not failure** — use it freely when scope changes.
-10. **Targeted tests for refactoring** — use \`vitest --related <changed-files>\` instead of the full suite when refactoring. Faster and proves the changed code is covered without re-running unrelated tests.`,
+9. **Cancelled is not failure** — use it freely when scope changes.`,
     model: null,
   },
   {
@@ -804,13 +796,8 @@ The issue description should include the target project id. Resolve the board AP
 
 Use \`http://127.0.0.1:<port>/api\`. Never use localhost.
 
-## scc resolution — prefer the code-metrics skill's bundled binary
-Rather than relying on \`scc\` being on PATH, prefer the bundled \`scc.exe\` from the
-\`code-metrics\` skill. Resolve in order:
-1. \`$HOME\\.claude\\skills\\code-metrics\\tools\\scc.exe\` (bundled by the skill's setup.ps1)
-2. \`scc\` on PATH as fallback
-
-If neither is available, skip LOC metrics and report the blocker.
+## scc resolution
+Prefer the \`code-metrics\` skill's bundled binary over PATH: resolve \`$HOME\\.claude\\skills\\code-metrics\\tools\\scc.exe\` first (bundled by its setup.ps1), then \`scc\` on PATH. If neither resolves, skip LOC metrics and report the blocker — never fabricate numbers.
 
 ## Metrics
 Use stable metric keys:
