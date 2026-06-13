@@ -36,7 +36,7 @@ export interface IssueSummaryResult {
   summary?: null;
 }
 
-const DEFAULT_STATUSES = [
+export const DEFAULT_STATUSES = [
   { name: "Backlog", sortOrder: -1, isDefault: false },
   { name: "Todo", sortOrder: 0, isDefault: true },
   { name: "In Progress", sortOrder: 1, isDefault: false },

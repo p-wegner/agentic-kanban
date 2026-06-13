@@ -500,6 +500,89 @@ export function ensureVerifyGateRunner(repoPath: string): void {
     if (!existsSync(destConfig)) {
       writeFileSync(destConfig, VERIFY_GATE_CONFIG_STUB, "utf8");
     }
+
+    // Part of the quality gate: a scaffolded pnpm project must actually build on a clean
+    // checkout. Approve esbuild's native build so `pnpm install && pnpm build` doesn't fail
+    // with ERR_PNPM_IGNORED_BUILDS (and never leave the broken placeholder). (#777)
+    ensurePnpmBuildApproval(repoPath);
+  } catch {
+    /* non-fatal: scaffolding must never block registration */
+  }
+}
+
+// ---------------------------------------------------------------------------
+// pnpm build-approval scaffold (#777)
+// ---------------------------------------------------------------------------
+
+/**
+ * Native deps whose postinstall build step pnpm 11 blocks by default until approved.
+ * A scaffolded Vite/React/TS project pulls in esbuild (Vite's bundler); without an
+ * approval `pnpm install` / `pnpm build` fail on a clean checkout with
+ * `ERR_PNPM_IGNORED_BUILDS` (exit 1). Keep this list aligned with the board's own
+ * root package.json `pnpm.onlyBuiltDependencies`.
+ */
+export const PNPM_BUILD_APPROVED_DEPS = ["esbuild", "@swc/core"];
+
+/** The literal placeholder a buggy scaffold once emitted — must NEVER appear in output. */
+const PNPM_PLACEHOLDER_MARKER = "set this to true or false";
+
+/**
+ * Ensure a scaffolded project approves the native build steps it needs (esbuild for Vite).
+ *
+ * pnpm 11 ignores unapproved postinstall builds by default, so a fresh `pnpm install &&
+ * pnpm build` of a scaffolded Vite app fails with `ERR_PNPM_IGNORED_BUILDS`. This writes a
+ * valid approval and, critically, NEVER emits the placeholder string
+ * `esbuild: "set this to true or false"` (the #777 false-pass that left master unbuildable).
+ *
+ * Behavior (clobber-safe, idempotent, non-fatal):
+ * - If a `package.json` exists: ensure `pnpm.onlyBuiltDependencies` includes the approved
+ *   deps (preserving any the project already declared). This is the canonical mechanism
+ *   pnpm 11 accepts and matches the board's own root manifest.
+ * - If a `pnpm-workspace.yaml` exists and contains the broken placeholder, repair the
+ *   esbuild line to `esbuild: true` (never re-emit the placeholder).
+ * - No package.json and no workspace file ⇒ no-op (nothing to approve yet).
+ */
+export function ensurePnpmBuildApproval(repoPath: string): void {
+  try {
+    const pkgJsonPath = join(repoPath, "package.json");
+    if (existsSync(pkgJsonPath)) {
+      const raw = readFileSync(pkgJsonPath, "utf8");
+      let pkg: Record<string, unknown>;
+      try {
+        pkg = JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        pkg = {};
+      }
+      const pnpmCfg = (pkg.pnpm ?? {}) as Record<string, unknown>;
+      const existing = Array.isArray(pnpmCfg.onlyBuiltDependencies)
+        ? (pnpmCfg.onlyBuiltDependencies as unknown[]).filter((d): d is string => typeof d === "string")
+        : [];
+      const merged = [...existing];
+      for (const dep of PNPM_BUILD_APPROVED_DEPS) {
+        if (!merged.includes(dep)) merged.push(dep);
+      }
+      // Only rewrite when something actually changed (idempotent).
+      if (merged.length !== existing.length || !existing.every((d, i) => d === merged[i])) {
+        pnpmCfg.onlyBuiltDependencies = merged;
+        pkg.pnpm = pnpmCfg;
+        const trailingNewline = raw.endsWith("\n") ? "\n" : "";
+        writeFileSync(pkgJsonPath, JSON.stringify(pkg, null, 2) + trailingNewline, "utf8");
+      }
+    }
+
+    // Repair a broken pnpm-workspace.yaml placeholder if one was emitted.
+    const wsPath = join(repoPath, "pnpm-workspace.yaml");
+    if (existsSync(wsPath)) {
+      const ws = readFileSync(wsPath, "utf8");
+      if (ws.includes(PNPM_PLACEHOLDER_MARKER)) {
+        // Replace the placeholder value with a valid approval, preserving indentation.
+        const repaired = ws.replace(
+          /^(\s*esbuild:\s*).*$/m,
+          (_match, prefix: string) => `${prefix}true`
+        );
+        writeFileSync(wsPath, repaired, "utf8");
+      }
+    }
   } catch {
     /* non-fatal: scaffolding must never block registration */
   }

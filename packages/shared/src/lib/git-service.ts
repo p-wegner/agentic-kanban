@@ -141,9 +141,10 @@ export async function removeWorktree(
   repoPath: string,
   worktreePath: string,
 ): Promise<void> {
-  // Unlink junctions first so neither git nor the fs.rm fallback can traverse
-  // into the main checkout via a Windows junction (data-loss bug #518).
-  await unlinkTopLevelJunctions(worktreePath).catch(() => undefined);
+  // Break junctions first (top-level AND nested packages/<pkg>/node_modules) so
+  // neither git nor the fs.rm fallback can traverse into the main checkout via a
+  // Windows junction and delete the shared store (data-loss bugs #518 / #780).
+  await breakJunctionsRecursively(worktreePath).catch(() => undefined);
 
   try {
     await execGit(["worktree", "remove", "--force", worktreePath], repoPath);
@@ -166,25 +167,64 @@ export async function pruneWorktrees(repoPath: string): Promise<void> {
 }
 
 /**
- * Unlink any top-level symlinks/junctions in a directory WITHOUT recursing into them.
- * This prevents `fs.rm({ recursive })` from following a junction into the main checkout.
+ * Recursively break every symlink/junction inside a directory WITHOUT recursing
+ * INTO any link, so neither `git worktree remove` nor `fs.rm({ recursive })` can
+ * traverse a Windows junction into the main checkout and delete the shared store
+ * it points at (data-loss bugs #518 / #780).
+ *
+ * On a pnpm/yarn workspace with "Dependency Symlinks" enabled, the worktree gets
+ * junctions at `node_modules` AND each nested `packages/<pkg>/node_modules` — all
+ * pointing at the real shared store. Unlinking only the top level leaves the
+ * nested junctions for the recursive delete to follow. So we descend into REAL
+ * directories looking for deeper junctions, but for any entry that is itself a
+ * link we only remove the LINK (never its target's contents).
+ *
+ * A junction reports `isSymbolicLink()` via lstat on Windows; we remove the link
+ * with `unlink` (falls back to a non-recursive `rm` for platforms where a dir
+ * symlink can't be unlinked), which deletes only the link, not the target.
  */
-async function unlinkTopLevelJunctions(dirPath: string): Promise<void> {
-  let entries: string[];
+async function breakJunctionsRecursively(dirPath: string, depth = 0): Promise<void> {
+  // Bound recursion defensively; legitimate junction nesting is shallow
+  // (root + packages/<pkg>/node_modules).
+  if (depth > 8) return;
+
+  let entries: import("node:fs").Dirent[];
   try {
-    entries = await readdir(dirPath);
+    entries = await readdir(dirPath, { withFileTypes: true });
   } catch {
     return;
   }
+
   for (const entry of entries) {
-    const entryPath = join(dirPath, entry);
+    const entryPath = join(dirPath, entry.name);
+    let st;
     try {
-      const st = await lstat(entryPath);
-      if (st.isSymbolicLink()) {
-        await unlink(entryPath);
-      }
+      st = await lstat(entryPath);
     } catch {
-      // ignore — entry may have disappeared between readdir and lstat
+      // entry may have disappeared between readdir and lstat
+      continue;
+    }
+
+    if (st.isSymbolicLink()) {
+      // Remove ONLY the link itself — never recurse into / recursively delete its target.
+      try {
+        await unlink(entryPath);
+      } catch {
+        // Some platforms/dir-symlinks need rmdir-style removal of the link;
+        // recursive:false removes the link node, NOT the target's contents.
+        try {
+          await rm(entryPath, { recursive: false, force: true });
+        } catch {
+          // best effort — leave it; the caller's safety guards still apply
+        }
+      }
+      continue;
+    }
+
+    // Only descend into REAL directories to find deeper junctions
+    // (e.g. worktree/packages/<pkg>/node_modules).
+    if (st.isDirectory()) {
+      await breakJunctionsRecursively(entryPath, depth + 1);
     }
   }
 }
@@ -206,9 +246,10 @@ async function removeLeftoverWorktreeDirectory(repoPath: string, worktreePath: s
     throw new Error(`Refusing to recursively remove unsafe worktree path: ${worktreePath}`);
   }
 
-  // Unlink top-level symlinks/junctions before recursive delete to prevent
-  // fs.rm from following them into the main checkout (Windows junction data-loss bug).
-  await unlinkTopLevelJunctions(worktreePath);
+  // Break ALL symlinks/junctions (top-level + nested packages/<pkg>/node_modules)
+  // before the recursive delete to prevent fs.rm from following them into the main
+  // checkout's shared store (Windows junction data-loss bugs #518 / #780).
+  await breakJunctionsRecursively(worktreePath);
 
   await rm(worktreePath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   return !existsSync(worktreePath);

@@ -9,6 +9,8 @@ import {
   ensureStarterAgentsMd,
   ensureHookScaffold,
   ensureVerifyGateRunner,
+  ensurePnpmBuildApproval,
+  PNPM_BUILD_APPROVED_DEPS,
   GENERIC_AGENT_GITIGNORE,
   STARTER_CLAUDE_MD,
   STARTER_AGENTS_MD,
@@ -286,6 +288,90 @@ describe("project-scaffold", () => {
         ensureVerifyGateRunner(dir);
         expect(await readFile(join(hooksDir, "verify-gate-runner.js"), "utf8")).toBe("// custom runner");
         expect(JSON.parse(await readFile(join(hooksDir, "verify-gate.config.json"), "utf8")).command).toBe("npm test");
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("ensurePnpmBuildApproval (#777)", () => {
+    it("adds esbuild to package.json pnpm.onlyBuiltDependencies so a Vite app builds clean", async () => {
+      const dir = await tmp();
+      try {
+        await writeFile(
+          join(dir, "package.json"),
+          JSON.stringify({ name: "scaffolded-app", devDependencies: { vite: "^5", esbuild: "^0.21" } }, null, 2) + "\n"
+        );
+        ensurePnpmBuildApproval(dir);
+        const pkg = JSON.parse(await readFile(join(dir, "package.json"), "utf8"));
+        for (const dep of PNPM_BUILD_APPROVED_DEPS) {
+          expect(pkg.pnpm.onlyBuiltDependencies).toContain(dep);
+        }
+        // esbuild specifically is approved (the #777 false-pass)
+        expect(pkg.pnpm.onlyBuiltDependencies).toContain("esbuild");
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("preserves deps the project already approved and is idempotent", async () => {
+      const dir = await tmp();
+      try {
+        await writeFile(
+          join(dir, "package.json"),
+          JSON.stringify({ name: "app", pnpm: { onlyBuiltDependencies: ["sharp"] } }, null, 2) + "\n"
+        );
+        ensurePnpmBuildApproval(dir);
+        let pkg = JSON.parse(await readFile(join(dir, "package.json"), "utf8"));
+        expect(pkg.pnpm.onlyBuiltDependencies).toContain("sharp");
+        expect(pkg.pnpm.onlyBuiltDependencies).toContain("esbuild");
+        const afterFirst = await readFile(join(dir, "package.json"), "utf8");
+        ensurePnpmBuildApproval(dir);
+        const afterSecond = await readFile(join(dir, "package.json"), "utf8");
+        expect(afterSecond).toBe(afterFirst); // idempotent — no churn
+        pkg = JSON.parse(afterSecond);
+        expect(pkg.pnpm.onlyBuiltDependencies.filter((d: string) => d === "esbuild").length).toBe(1);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("repairs a broken pnpm-workspace.yaml placeholder to a valid esbuild approval (never the placeholder)", async () => {
+      const dir = await tmp();
+      try {
+        const broken =
+          'packages:\n  - "packages/*"\nallowBuilds:\n  esbuild: "set this to true or false"\n';
+        await writeFile(join(dir, "pnpm-workspace.yaml"), broken);
+        ensurePnpmBuildApproval(dir);
+        const ws = await readFile(join(dir, "pnpm-workspace.yaml"), "utf8");
+        expect(ws).not.toContain("set this to true or false");
+        expect(ws).toMatch(/esbuild:\s*true/);
+        // indentation preserved
+        expect(ws).toContain("  esbuild: true");
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("no-ops when there is no package.json or pnpm-workspace.yaml", async () => {
+      const dir = await tmp();
+      try {
+        ensurePnpmBuildApproval(dir); // must not throw
+        const { existsSync } = await import("node:fs");
+        expect(existsSync(join(dir, "package.json"))).toBe(false);
+        expect(existsSync(join(dir, "pnpm-workspace.yaml"))).toBe(false);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("is invoked by ensureVerifyGateRunner so the scaffold flow approves esbuild", async () => {
+      const dir = await tmp();
+      try {
+        await writeFile(join(dir, "package.json"), JSON.stringify({ name: "app" }, null, 2) + "\n");
+        ensureVerifyGateRunner(dir);
+        const pkg = JSON.parse(await readFile(join(dir, "package.json"), "utf8"));
+        expect(pkg.pnpm.onlyBuiltDependencies).toContain("esbuild");
       } finally {
         await rm(dir, { recursive: true, force: true });
       }

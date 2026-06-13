@@ -149,6 +149,43 @@ describe("getWorkspaceLaunchFailures", () => {
     expect(result.failures[0].lastMessage).toBe("Provider auth failed");
   });
 
+  it("surfaces captured provider stderr in lastMessage for a zero-output launch failure (#779)", async () => {
+    // Regression for the #779 fix-and-merge "0-token zombie": a detached claude.exe that exits 1
+    // immediately writes its reason to stderr, which used to be discarded. Now that stderr is
+    // captured and folded into stats.failureReason, the operator-facing failure must carry it.
+    const { db } = createTestDb();
+    const now = new Date().toISOString();
+    const start = new Date(Date.now() - 60 * 60 * 1000);
+    const end = new Date(start.getTime() + 500); // <=1s, zero tokens => zero-output
+
+    const projectId = randomUUID();
+    const statusId = randomUUID();
+    const issueId = randomUUID();
+    const wsId = randomUUID();
+    const sessionId = randomUUID();
+
+    const stderrReason =
+      "Agent launch failed: provider process exited within 10s without assistant output, " +
+      "tool activity, or usage stats.\nProvider stderr:\nfatal: cwd is in the middle of a rebase";
+
+    await db.insert(projects).values(baseProject(projectId, now));
+    await db.insert(projectStatuses).values(baseStatus(statusId, projectId, "In Progress", now));
+    await db.insert(issues).values(baseIssue(issueId, projectId, statusId, now));
+    await db.insert(workspaces).values(baseWorkspace(wsId, issueId, now, { status: "fixing" }));
+    await db.insert(sessions).values(baseSession(sessionId, wsId, now, {
+      startedAt: start.toISOString(),
+      endedAt: end.toISOString(),
+      exitCode: "1",
+      stats: JSON.stringify({ launchFailure: true, failureReason: stderrReason, inputTokens: 0, outputTokens: 0 }),
+    }));
+
+    const result = await getWorkspaceLaunchFailures(projectId, db);
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0].failureCategory).toBe("zero-output");
+    expect(result.failures[0].lastMessage).toContain("Provider stderr:");
+    expect(result.failures[0].lastMessage).toContain("middle of a rebase");
+  });
+
   it("detects setup-failed workspaces", async () => {
     const { db } = createTestDb();
     const now = new Date().toISOString();

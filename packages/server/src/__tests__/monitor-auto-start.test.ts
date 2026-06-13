@@ -224,6 +224,64 @@ describe("runAutoStart Backlog promotion for auto-driven projects", () => {
   });
 });
 
+describe("runAutoStart #773 feature tickets on auto-driven projects", () => {
+  it("auto-starts a feature-typed Backlog issue on an auto-driven project (exclusion skipped)", async () => {
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]) as ReturnType<typeof db.select>) // inProgressStatuses
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop1 activeWip
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // loop1 inProgressIssues (none)
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop2 inProgressCount
+      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]) as ReturnType<typeof db.select>) // todoStatus
+      .mockReturnValueOnce(makeSelectChain([{ id: "backlog-1" }]) as ReturnType<typeof db.select>) // backlogStatus (auto-driven)
+      .mockReturnValueOnce(makeSelectChain([
+        { id: "feature-1", title: "Feature: epic step 1", description: "", issueType: "feature", projectId: "proj-1", issueNumber: 11 },
+      ]) as ReturnType<typeof db.select>) // todoIssues — SQL would exclude this for a non-auto-driven project
+      .mockReturnValueOnce(makeSelectChain([{ id: "done-1" }]) as ReturnType<typeof db.select>) // doneStatuses
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // existingWs (none)
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // no-auto-start tag (none)
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>); // deps (none)
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ id: "ws-feat" }) } as Response);
+
+    await runAutoStart(
+      new Map([["nudge_wip_limit", "5"]]),
+      makeDeps({ isAutoDrivenProject: () => true }),
+    );
+
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+    const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
+    expect(body.issueId).toBe("feature-1");
+  });
+});
+
+describe("runAutoStart #775 launch failure visibility", () => {
+  it("records a failure action and warns when the launch returns a non-ok response", async () => {
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]) as ReturnType<typeof db.select>) // inProgressStatuses
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop1 activeWip
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // loop1 inProgressIssues (none)
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop2 inProgressCount
+      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]) as ReturnType<typeof db.select>) // todoStatus
+      .mockReturnValueOnce(makeSelectChain([{ id: "issue-1", title: "Ready", description: "", projectId: "proj-1", issueNumber: 12 }]) as ReturnType<typeof db.select>) // todoIssues
+      .mockReturnValueOnce(makeSelectChain([{ id: "done-1" }]) as ReturnType<typeof db.select>) // doneStatuses
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // existingWs (none)
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // no-auto-start tag (none)
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>); // deps (none)
+    vi.mocked(fetch).mockResolvedValue({ ok: false, status: 400, text: async () => "No default branch" } as Response);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const logMonitorAction = vi.fn();
+
+    await runAutoStart(
+      new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "5"]]),
+      makeDeps({ logMonitorAction }),
+    );
+
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+    expect(logMonitorAction).toHaveBeenCalledWith("auto_start", "failed", "issue-1");
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("HTTP 400"));
+    warnSpy.mockRestore();
+  });
+});
+
 describe("runAutoStart opt-out + scoping", () => {
   it("skips an In-Progress issue tagged no-auto-start", async () => {
     vi.mocked(db.select)

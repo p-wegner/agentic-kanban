@@ -71,6 +71,38 @@ export function sessionOutputPath(sessionId: string): string {
   return join(tmpdir(), `kanban-session-${sessionId}.out`);
 }
 
+/**
+ * Get the stderr capture file path for a detached session.
+ *
+ * Detached agents (claude on Windows — see {@link launchAgent}) redirect stdout to the
+ * `.out` file, but stderr used to be discarded (`stdio[2] = "ignore"`). When the provider
+ * process dies BEFORE emitting any stdout (e.g. claude.exe exits 1 immediately from a
+ * fix-and-merge launch in a mid-rebase / conflicted worktree), the `.out` file is 0 bytes
+ * and the only diagnostic — the reason on stderr — was thrown away, producing an invisible
+ * "0-token zombie" (#779). We now redirect stderr to this file so the failure is debuggable.
+ */
+export function sessionErrorPath(sessionId: string): string {
+  return join(tmpdir(), `kanban-session-${sessionId}.err`);
+}
+
+/**
+ * Read the captured stderr file for a detached session and, if non-empty, emit it as a
+ * stderr output event. Called once on process exit so the failure reason of a crash-on-launch
+ * (which a detached claude.exe writes to stderr, not stdout) reaches session_messages instead
+ * of being silently discarded (#779). Best-effort: missing/empty file is a no-op.
+ */
+function drainCapturedStderr(sessionId: string, onOutput: (event: AgentOutputEvent) => void): void {
+  try {
+    const errPath = sessionErrorPath(sessionId);
+    if (!existsSync(errPath)) return;
+    const data = readFileSync(errPath, "utf8");
+    if (!data.trim()) return;
+    onOutput({ type: "stderr", sessionId, data });
+  } catch (err) {
+    console.warn(`[agent] failed to drain captured stderr: sessionId=${sessionId}`, err);
+  }
+}
+
 function killPid(pid: number, context: Record<string, unknown>): boolean {
   if (!guardProcessKill(pid, context)) return false;
   if (process.platform === "win32") {
@@ -224,11 +256,23 @@ export function launch(
   // When suppressStdinPrompt is true (e.g. copilot passes prompt via -p argv), stdin can be
   // "ignore" — this prevents Windows from allocating a console window for the detached process.
   let outFd: number | undefined;
-  let stdioConfig: ["pipe" | "ignore", "pipe" | number, "pipe" | "ignore"];
+  let errFd: number | undefined;
+  let stdioConfig: ["pipe" | "ignore", "pipe" | number, "pipe" | number | "ignore"];
   if (shouldDetach) {
     const outPath = sessionOutputPath(sessionId);
     outFd = openSync(outPath, "w");
-    stdioConfig = [suppressStdinPrompt ? "ignore" : "pipe", outFd, "ignore"];
+    // Capture stderr to a separate file instead of discarding it (#779). A detached
+    // claude.exe that dies immediately writes its failure reason to stderr; with stderr
+    // ignored the only artifact was a 0-byte .out file and an exit code, making the
+    // crash impossible to diagnose. The .err file is drained into session_messages on exit.
+    const errPath = sessionErrorPath(sessionId);
+    try {
+      errFd = openSync(errPath, "w");
+    } catch (err) {
+      console.warn(`[agent] failed to open stderr capture file: sessionId=${sessionId}`, err);
+      errFd = undefined;
+    }
+    stdioConfig = [suppressStdinPrompt ? "ignore" : "pipe", outFd, errFd ?? "ignore"];
   } else {
     stdioConfig = ["pipe", "pipe", "pipe"];
   }
@@ -261,6 +305,13 @@ export function launch(
   });
   // Allow server to exit/restart without waiting for real agents
   if (shouldDetach) proc.unref();
+
+  // Close the parent's copies of the inherited file descriptors. The spawned child holds
+  // its own dup'd handles, so closing here doesn't truncate the child's output — it just
+  // releases our references and lets the .err file be read once the child exits.
+  if (errFd !== undefined) {
+    try { closeSync(errFd); } catch { /* already closed / invalid */ }
+  }
 
   console.log(`[agent] spawned: sessionId=${sessionId} pid=${proc.pid} command=${command} shell=${useShell} detached=${shouldDetach}`);
 
@@ -320,6 +371,11 @@ export function launch(
     if (watcher) { watcher.close(); agentState.outputWatchers.delete(sessionId); }
     const pidW = agentState.pidWatchers.get(sessionId);
     if (pidW) { pidW.close(); agentState.pidWatchers.delete(sessionId); }
+    // Drain any captured stderr (detached agents) and surface it BEFORE the exit event,
+    // so a process that died with zero stdout but a stderr reason is no longer an invisible
+    // "0-token zombie" (#779). Emitted as a stderr event so it lands in session_messages and
+    // the launch-failure handler can attribute the crash.
+    if (shouldDetach) drainCapturedStderr(sessionId, onOutput);
     try {
       onOutput({ type: "exit", sessionId, exitCode: code });
     } catch (err) {

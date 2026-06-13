@@ -19,7 +19,11 @@ A new project drives hands-off only if ALL of these hold. Read `GET /api/prefere
 
 | Prereq | Check | Fix |
 |---|---|---|
-| Project registered | `pnpm cli -- list` shows it; resolve its `projectId` | `pnpm cli -- register <path>` or `POST /api/projects/create` |
+| Project registered | `pnpm cli -- list` shows it; resolve its **full** `projectId` (UUID, never a truncated prefix) | `pnpm cli -- register <path>` or `POST /api/projects/create` |
+| **Status columns exist** | `GET /api/projects/<id>/statuses` returns the 7 columns (not `[]`) | registration can leave them empty (#772) → `POST /api/projects/<id>/statuses` for each: Backlog/-1, Todo/0, In Progress/1, In Review/2, AI Reviewed/3, Done/4, Cancelled/5. Without statuses, `POST /api/issues/batch` 400s 'No statuses found'. |
+| **Default branch set** | project record `defaultBranch` is the repo's branch (not `null`) | `PATCH /api/projects/<id> {"defaultBranch":"master"}`. Null → `POST /api/workspaces` 400s and **auto-start swallows it silently** (#772/#775) → board looks idle with no error. |
+| **Tickets use an eligible issueType** | epic tickets are `task`/`bug` (NOT `feature`/`enhancement`) and titles don't start `feature:`/`enhancement:` | monitor auto-start skips feature/enhancement-typed issues (#773) → the whole epic is invisible. Seed as `task` (or convert via `PATCH /api/issues/<id> {"issueType":"task"}`). |
+| **Verify gate set** | `verify_script_<projectId>` is a real build/test cmd | `PUT {"verify_script_<projectId>":"pnpm install && pnpm build"}` — the #531 quality gate runs it in the worktree post-session and WITHHOLDS merge on non-zero. This is how the dev-board's verify-before-merge ports to the toy stack ([[project_timetracker_drive_and_autonomy_obstacles]]). |
 | Per-project autodrive ON | `board_autodrive_<projectId> == "true"` | PUT `{"board_autodrive_<projectId>":"true"}` |
 | Auto-merge ON + monitor strategy | `auto_merge == "true"`, strategy resolves to `monitor`, `auto_merge_in_review == "true"` | PUT settings accordingly |
 | WIP target ≥ 2 (real parallelism) | `board_strategy_<projectId>` (`activeAgentsTarget`) or legacy `nudge_wip_limit` | set `board_strategy_<projectId>` `{activeAgentsTarget:3, maxNewStartsPerCycle:3, backlogFloor:0}` |
@@ -27,7 +31,11 @@ A new project drives hands-off only if ALL of these hold. Read `GET /api/prefere
 | First-merge hazards cleared | new-project `.gitignore` dirty-main, scaffold committed | commit scaffold + `.gitignore` BEFORE seeding ([[pitfall_new_project_gitignore_dirty_main_blocks_first_merge]]) |
 | Builder guidance present | codex reads `AGENTS.md` not `CLAUDE.md`; strip "screenshot/visually verify" from ticket bodies | [[pitfall_codex_playwright_install_hang_visual_verify]] |
 
+**Force the provider per-project (don't trust the global default).** The global `provider` is often `codex`, whose quota stalls have repeatedly stranded unattended runs. To pin claude/anth for THIS project without touching the global default, add a provider policy to `board_strategy_<projectId>`: `"providerPolicies":[{"id":"claude:anth","label":"Claude anth","provider":"claude","profileName":"anth","mode":"fill","headroomPct":0}]` — `selectProviderFromStrategy` returns the first `fill` policy, so every auto-started/relaunched workspace uses it. Verify a started workspace's returned `provider` is `claude` (else [[pitfall_post_workspaces_defaults_codex]]).
+
 Can't satisfy a prereq → **stop and report it**; don't seed an epic that can't drain.
+
+> **Sanity-launch the shell once and watch it.** After preflight, force one monitor cycle (`POST /api/internal/monitor-run`) and confirm the shell ticket actually auto-starts (`[monitor] Auto-started workspace…` in the dev log + a workspace appears). If it doesn't, re-check statuses/defaultBranch/issueType above — auto-start failures are SILENT (#775). Only once you've seen the monitor self-start a ticket can you trust the wave to cascade hands-off.
 
 ## Step 2 — Seed a FAN-OUT epic (not a chain)
 

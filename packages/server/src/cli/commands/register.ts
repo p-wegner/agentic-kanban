@@ -1,16 +1,28 @@
 import type { Command } from "commander";
 import { db } from "../../db/index.js";
-import { projects, projectStatuses, preferences } from "@agentic-kanban/shared/schema";
+import { projects, preferences } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { detectRepoInfo } from "../../services/git-info.service.js";
-import { runMigrations, DEFAULT_STATUSES, logDefaultBranch } from "../shared.js";
+import { getCurrentBranch } from "../../services/git.service.js";
+import { initializeProjectStatuses, DEFAULT_STATUSES } from "../../repositories/issue.repository.js";
+import { runMigrations, logDefaultBranch } from "../shared.js";
 import { getDefaultSkillId, ensureAgentGitignore, ensureStarterClaudeMd, ensureStarterAgentsMd, ensureHookScaffold, ensureVerifyGateRunner, commitProjectScaffoldArtifacts } from "../../services/project-scaffold.js";
+
+/** Fall back to the repo's checked-out branch when main/master isn't detected, so the project is never left undriveable (#772). */
+async function resolveCliDefaultBranch(repoPath: string, detected: string | null): Promise<string | null> {
+  if (detected) return detected;
+  try {
+    const current = (await getCurrentBranch(repoPath)).trim();
+    if (current && current !== "HEAD") return current;
+  } catch { /* no commits / git unavailable */ }
+  return null;
+}
 
 export function registerRegisterCommand(program: Command) {
   program
     .command("register")
-    .description("Register a git repo as a project.\n\nAuto-detects repo name, default branch, and remote URL from the git repo at <path>. Creates 6 default statuses (Todo, In Progress, In Review, AI Reviewed, Done, Cancelled) and sets the project as the active project.\n\nIf the repo is already registered (same path), it skips without error.")
+    .description("Register a git repo as a project.\n\nAuto-detects repo name, default branch, and remote URL from the git repo at <path>. Creates the default statuses (Backlog, Todo, In Progress, In Review, AI Reviewed, Done, Cancelled) and sets the project as the active project.\n\nIf the repo is already registered (same path), it skips without error.")
     .argument("<path>", "Path to the git repository")
     .option("-n, --name <name>", "Custom project name (defaults to repo directory name)")
     .addHelpText("after", `
@@ -39,29 +51,22 @@ Examples:
 
         const now = new Date().toISOString();
         const projectId = randomUUID();
+        const defaultBranch = await resolveCliDefaultBranch(repoInfo.repoPath, repoInfo.defaultBranch);
 
         await db.insert(projects).values({
           id: projectId,
           name: projectName,
           repoPath: repoInfo.repoPath,
           repoName: repoInfo.repoName,
-          defaultBranch: repoInfo.defaultBranch,
+          defaultBranch,
           remoteUrl: repoInfo.remoteUrl,
           defaultSkillId: await getDefaultSkillId(),
           createdAt: now,
           updatedAt: now,
         });
 
-        for (const status of DEFAULT_STATUSES) {
-          await db.insert(projectStatuses).values({
-            id: randomUUID(),
-            projectId,
-            name: status.name,
-            sortOrder: status.sortOrder,
-            isDefault: status.isDefault,
-            createdAt: now,
-          });
-        }
+        // Canonical 7-status set (incl. Backlog at -1) so auto-driven Backlog-pull works (#772).
+        await initializeProjectStatuses(projectId, now);
 
         await db
           .insert(preferences)
@@ -85,7 +90,7 @@ Examples:
 
         console.log(`Registered project "${projectName}"`);
         console.log(`  Repo: ${repoInfo.repoPath}`);
-        logDefaultBranch(repoInfo.defaultBranch);
+        logDefaultBranch(defaultBranch);
         if (repoInfo.remoteUrl) {
           console.log(`  Remote: ${repoInfo.remoteUrl}`);
         }
