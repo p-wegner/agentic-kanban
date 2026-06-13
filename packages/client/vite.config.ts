@@ -4,7 +4,12 @@ import tailwindcss from "@tailwindcss/vite";
 
 const serverPort = Number(process.env.SERVER_PORT) || 3001;
 const clientPort = Number(process.env.VITE_PORT) || 5173;
-const clientHost = process.env.VITE_HOST || "127.0.0.1";
+// Bind to "::" by default so the dev server answers on both IPv6 (::1) and
+// IPv4 (127.0.0.1) localhost. Browsers resolve "localhost" to ::1 first on
+// Windows, so an IPv4-only bind made http://localhost:5173 fail to connect.
+// Node opens "::" as a dual-stack socket (ipv6Only=false), so IPv4 clients
+// still reach it. Override with VITE_HOST=127.0.0.1 to restrict to IPv4.
+const clientHost = process.env.VITE_HOST || "::";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
