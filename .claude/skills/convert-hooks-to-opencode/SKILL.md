@@ -6,27 +6,14 @@ argument-hint: "[path to .claude/settings.json, defaults to current repo]"
 
 # convert-hooks-to-opencode
 
-Port a repo's Claude Code hooks to an OpenCode plugin. Claude Code declares hooks
-in a `hooks` block in `settings.json` pointing at scripts; OpenCode has **no hooks
-config block** — instead you drop a TS/JS plugin into `.opencode/plugin/` that
-exports a function returning a hooks object. OpenCode auto-loads it at startup.
+Port a repo's Claude Code hooks to an OpenCode plugin. Claude Code declares hooks in a `hooks` block in `settings.json` pointing at scripts; OpenCode has **no hooks config block** — instead you drop a TS/JS plugin into `.opencode/plugin/` exporting a function that returns a hooks object, auto-loaded at startup.
 
-## Core principle: adapt, don't rewrite
-
-If the existing hooks are non-trivial scripts (safety guards, stateful checks),
-make the OpenCode plugin a **thin adapter** that re-runs those same scripts with
-synthesized Claude-shaped stdin and translates the result back. This keeps a
-single source of truth and avoids silently diverging from hard-won guard logic.
-Only re-implement inline when a hook is a trivial one-liner.
+**Core principle — adapt, don't rewrite.** For non-trivial hooks (safety guards, stateful checks), make the plugin a **thin adapter** that re-runs those same scripts with synthesized Claude-shaped stdin and translates the result back — one source of truth, no divergence from hard-won guard logic. Re-implement inline only for trivial one-liners.
 
 ## Step 1: Inventory the existing hooks
 
-1. Read `.claude/settings.json` (and `settings.local.json`) — the `hooks` block.
-   Note each event (`PreToolUse`, `PostToolUse`, `Stop`, `UserPromptSubmit`,
-   `SessionStart`, etc.), its `matcher`, and the command it runs.
-2. Read every script the commands invoke (usually `.claude/hooks/*.js`). For each,
-   determine: what stdin shape it expects, what it emits (`{decision:"block",
-   reason}` on stdout, exit codes), and any env vars / override flags it honors.
+1. Read `.claude/settings.json` (+ `settings.local.json`) `hooks` block: each event (`PreToolUse`, `PostToolUse`, `Stop`, `UserPromptSubmit`, `SessionStart`, …), its `matcher`, the command.
+2. Read every invoked script (usually `.claude/hooks/*.js`): what stdin shape it expects, what it emits (`{decision:"block",reason}` on stdout, exit codes), and any env vars / override flags it honors.
 
 ## Step 2: Apply the mapping
 
@@ -46,14 +33,7 @@ Only re-implement inline when a hook is a trivial one-liner.
   `output.args` holds the (mutable) arguments. For bash, `output.args.command`;
   for write/edit, `output.args.filePath`.
 
-**The `Stop` caveat (the one imperfect mapping):** OpenCode's `session.idle` fires
-*after* the turn ends and **cannot veto it** the way Claude's `Stop` blocks-and-
-re-prompts. Best available: run the Stop checks on idle and, if they fail,
-re-inject the reason via `client.session.prompt({ sessionID, parts:[{type:"text",
-text:reason}] })`, guarded by a per-session `Set` so it nudges at most once per
-idle cycle (clear the entry when the session becomes active again). Tell the user
-this is a **soft nudge, not a hard gate** — for a true pre-completion gate, CI or
-a pre-commit hook is the reliable place.
+**The `Stop` caveat (the one imperfect mapping):** OpenCode's `session.idle` fires *after* the turn ends and **cannot veto it** the way Claude's `Stop` blocks-and-re-prompts. Best available: run the Stop checks on idle and, if they fail, re-inject the reason via `client.session.prompt({ sessionID, parts:[{type:"text",text:reason}] })`, guarded by a per-session `Set` so it nudges at most once per idle cycle (clear the entry when the session goes active again). This is a **soft nudge, not a hard gate** — for a true pre-completion gate, CI or a pre-commit hook is the reliable place.
 
 ## Step 3: Write the plugin
 
@@ -125,28 +105,17 @@ export const RepoHooks = async ({ client }: { client: any }) => ({
 });
 ```
 
-Replace `<...>` placeholders with the actual script names from Step 1, and drop
-any hook arms the repo doesn't use. If a hook was a trivial inline command (not a
-script), implement it directly instead of spawning.
+Replace `<...>` with the actual script names from Step 1, drop hook arms the repo doesn't use, and for a trivial inline command (not a script) implement it directly instead of spawning.
 
 ## Step 4: Document and verify
 
-1. Write `.opencode/plugin/README.md`: the mapping table, the tool-name
-   differences, and the `Stop` soft-nudge caveat. Note which SDK fields
-   (`client.session.prompt`, `event.properties.sessionID`) are from docs and
-   should be re-confirmed against `@opencode-ai/plugin` types once OpenCode is
-   installed.
-2. Syntax-check the plugin (OpenCode types usually aren't installed, so transpile-
-   only):
+1. Write `.opencode/plugin/README.md`: the mapping table, tool-name differences, and the `Stop` soft-nudge caveat. Note which SDK fields (`client.session.prompt`, `event.properties.sessionID`) are doc-sourced and should be re-confirmed against `@opencode-ai/plugin` types once OpenCode is installed.
+2. Syntax-check (types usually absent → transpile-only):
    ```bash
    npx --no-install esbuild .opencode/plugin/<repo>-hooks.ts --bundle --platform=node --external:node:* --format=esm > /dev/null && echo "SYNTAX OK"
    ```
-3. Leave the original `.claude/hooks/*.js` scripts in place — the adapter reuses
-   them. Do not delete or weaken any safety-guard script.
+3. Leave the original `.claude/hooks/*.js` in place — the adapter reuses them; never delete or weaken a safety-guard script.
 
 ## Reporting
 
-Tell the user: where the plugin lives, the mapping applied, and the three things
-that differ from Claude Code — no PowerShell/MultiEdit/NotebookEdit tools, the
-`Stop` hook is a soft nudge not a hard gate, and the SDK surface needs confirming
-against the installed OpenCode version.
+Tell the user: where the plugin lives, the mapping applied, and the three Claude-Code differences — no PowerShell/MultiEdit/NotebookEdit tools, `Stop` is a soft nudge not a hard gate, and the SDK surface needs confirming against the installed OpenCode version.

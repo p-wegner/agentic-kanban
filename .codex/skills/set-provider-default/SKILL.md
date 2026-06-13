@@ -5,7 +5,7 @@ description: Set the board's default agent provider+profile (and optional model)
 
 # set-provider-default
 
-**Why this exists.** "Provider default" used to live in four independent places that silently drifted — and that drift caused a multi-cycle board stall (objective.md said `claude:anth`, the Bullseye said `codex`, and a stale `default_model=gpt-5.5` codex model id was passed to `claude.exe`, killing every launch). This skill makes the **Strategy Bullseye preference (`board_strategy_<projectId>`) the single source of truth** and keeps the two outliers locked to it, so there is exactly one command to run and nothing can drift.
+**Why this exists.** "Provider default" used to live in four independent places that silently drifted, causing a multi-cycle board stall (objective.md said `claude:anth`, the Bullseye said `codex`, and a stale `default_model=gpt-5.5` codex id was passed to `claude.exe`, killing every launch). This skill makes the **Strategy Bullseye pref (`board_strategy_<projectId>`) the single source of truth** and locks the outliers to it — one command, nothing drifts.
 
 ## The four sources and how they relate
 
@@ -106,8 +106,8 @@ git status --short   # expect clean (objective.md auto-committed)
 Report the verify block to the user. If `CONSISTENT: NO`, do not leave it — re-run step 2.
 
 ## Notes & guardrails
-- **Live workspaces already launched** keep their baked-in provider — this only changes the DEFAULT for NEW launches. A running builder on the old provider must be DELETE+recreated to switch (the Conductor does this automatically next cycle; or do it via the board's workspace endpoints — never hand-edit).
-- **Never** set `default_model` to a model id from a different provider than `provider` (the original stall). When in doubt, leave it empty.
-- **Do not** flip `claude_profile` to `mock` here — that's the stand-down switch, handled separately.
-- This is a **project-specific** skill — it lives only in `.claude/skills/`; do NOT add it to `builtin-skills.ts`.
-- The deeper code-level fix (collapse #2/#3 so they cannot exist independently of #1) is tracked on the board — this skill is the operational single-entry-point until that lands.
+- **Already-launched workspaces** keep their baked-in provider — this only changes the DEFAULT for NEW launches. To switch a running builder, DELETE+recreate it (the Conductor does this next cycle; or use the board's workspace endpoints — never hand-edit).
+- **Never** set `default_model` to a model id from a provider other than `provider` (the original stall) — when in doubt, leave it empty.
+- **Don't** flip `claude_profile` to `mock` here — that's the stand-down switch, handled separately.
+- **Project-specific** skill — lives only in `.claude/skills/`; do NOT add to `builtin-skills.ts`.
+- The code-level fix (collapse #2/#3 so they can't exist independently of #1) is tracked on the board; this skill is the single entry point until it lands.

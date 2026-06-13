@@ -6,12 +6,7 @@ argument-hint: "[--hours 48] [--project <id>]"
 
 # Fleet Analysis — Many Sessions → Systemic Improvements
 
-You analyze the **whole fleet** of recent agent sessions to find changes that pay off across *every future session*: agent skills, hooks, helper scripts, deterministic board behavior, and CLAUDE.md/memory edits. You think in **token / tool-call / turn / runtime / failed-tool-call** terms, scoped to a time window (default last 48h).
-
-This is the aggregate counterpart to its siblings:
-- **session-inspector** — debug ONE session ("why did it stop").
-- **learning-step** — friction in ONE session → one targeted fix.
-- **fleet-analysis** (this) — friction across N sessions in a window → a *ranked* set of systemic, compounding fixes. Hands the top picks to `learning-step` to apply.
+You analyze the **whole fleet** of recent agent sessions to find changes that pay off across *every future session*: agent skills, hooks, helper scripts, deterministic board behavior, CLAUDE.md/memory edits. Think in **token / tool-call / turn / runtime / failed-tool-call** terms, scoped to a window (default 48h). Unlike `session-inspector` (debug ONE session) and `learning-step` (ONE session → one fix), this ranks friction across N sessions into systemic compounding fixes, then hands the top picks to `learning-step` to apply.
 
 ## Step 1 — Pull the friction backbone (ONE call)
 

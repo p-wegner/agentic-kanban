@@ -69,51 +69,17 @@ Ask the user targeted questions to fill gaps and capture constraints. Structure 
 Synthesize answers into a decision log. Do NOT proceed to Phase 3 until you have clear answers to all sections.
 
 ## Phase 3: Synthesized Implementation Plan
-Produce a structured plan document with these sections:
+Produce a structured markdown plan with these sections:
 
-### Executive Summary
-- High-level goal
-- Success criteria
-- Timeline estimate
-- Resource estimate
-
-### Tech Stack Decision Matrix
-- Framework: name, version, rationale
-- Language: Java version, build tool, rationale
-- Data Layer: database choice, schema strategy, ORM/query builder
-- Async Model: threading strategy, rationale
-- Messaging/Integration: event bus, inter-service communication
-- Deployment: container strategy, orchestration, scaling
-- Observability: logging, metrics, tracing, alerting
-
-### Module Structure & Boundaries
-Define 3-5 core service modules based on Phase 1 analysis:
-- Module Name, Responsibilities, Input/Output, Dependencies, Estimated Effort
-
-### Data Model Migration Strategy
-- Existing Schema: current tables and relationships
-- Proposed Java Entities: entity classes and annotations
-- Schema Alignment: 1:1 mappings and redesign areas
-- Migration Path: Flyway/Liquibase migrations, dual-write phase
-- Rollback Plan
-
-### Phased Rollout Plan
-Break work into 3-4 phases, each with:
-- Goals, Dependencies, Key Milestones, Go/No-Go Criteria, Effort
-
-### Risk Analysis & Mitigation
-For each identified risk: Risk, Impact, Likelihood, Mitigation
-
-### Testing & Quality Strategy
-- Unit Testing, Integration Testing, E2E Testing, Performance Testing, Rollback Testing
-
-### DevOps & Deployment
-- Build & Package, CI/CD, Deployment Strategy, Monitoring & Alerting, Incident Response
-
-### Known Unknowns & Next Steps
-- Open questions needing resolution
-- Architecture spike recommendations
-- Team training suggestions
+- **Executive Summary** — high-level goal, success criteria, timeline + resource estimate.
+- **Tech Stack Decision Matrix** (name/version/rationale per row) — Framework; Language (Java version, build tool); Data Layer (database, schema strategy, ORM/query builder); Async Model (threading strategy); Messaging/Integration (event bus, inter-service comms); Deployment (container, orchestration, scaling); Observability (logging, metrics, tracing, alerting).
+- **Module Structure & Boundaries** — 3–5 core service modules from Phase 1, each with Name, Responsibilities, Input/Output, Dependencies, Estimated Effort.
+- **Data Model Migration Strategy** — existing schema (tables + relationships); proposed Java entities (classes + annotations); schema alignment (1:1 mappings vs redesign); migration path (Flyway/Liquibase, dual-write phase); rollback plan.
+- **Phased Rollout Plan** — 3–4 phases, each with Goals, Dependencies, Key Milestones, Go/No-Go Criteria, Effort.
+- **Risk Analysis & Mitigation** — per risk: Risk, Impact, Likelihood, Mitigation.
+- **Testing & Quality Strategy** — Unit, Integration, E2E, Performance, Rollback testing.
+- **DevOps & Deployment** — Build & Package, CI/CD, Deployment Strategy, Monitoring & Alerting, Incident Response.
+- **Known Unknowns & Next Steps** — open questions, architecture-spike recommendations, team training.
 
 ## Rules
 1. Use MCP tools to fetch real codebase data - do NOT invent or hallucinate route signatures or schema
