@@ -694,6 +694,18 @@ Be helpful and well-organized; lead with the answer and avoid unnecessary preamb
         .set({ prompt: reconcilerSkill.prompt, description: reconcilerSkill.description, updatedAt: now })
         .where(sql`${agentSkills.name} = 'merge-reconciler' AND ${agentSkills.projectId} IS NULL AND ${agentSkills.isBuiltin} = 1`);
     }
+
+    // These builtin prompts are refined for token efficiency over time; keep the global
+    // rows current so existing installs pick up the trimmed playbooks (the insert loop
+    // above only adds missing skills). Project-scoped overrides are untouched.
+    for (const refreshName of ["kanban-workflow", "quality-metrics-collector"]) {
+      const refreshSkill = BUILTIN_SKILLS.find((s) => s.name === refreshName);
+      if (refreshSkill) {
+        await database.update(agentSkills)
+          .set({ prompt: refreshSkill.prompt, description: refreshSkill.description, updatedAt: now })
+          .where(sql`${agentSkills.name} = ${refreshName} AND ${agentSkills.projectId} IS NULL AND ${agentSkills.isBuiltin} = 1`);
+      }
+    }
   }
 
   // Upsert code-review-thorough skill (may not exist in older installs)
