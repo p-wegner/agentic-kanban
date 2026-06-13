@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { issues, issueTags, issueDependencies, issueArtifacts, issueComments, showdowns, workspaces, projectStatuses, workflowTemplates, sessions } from "@agentic-kanban/shared/schema";
+import { issues, issueTags, issueDependencies, issueArtifacts, issueComments, showdowns, workspaces, projectStatuses, workflowTemplates, workflowNodes, sessions } from "@agentic-kanban/shared/schema";
 import { eq, and, or, sql, inArray, desc } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "./board-events.js";
 import type { WebhookIssueStatusPayload } from "@agentic-kanban/shared/lib";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
 import { getStartNode, resolveStatusId, syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { isTerminalStatusView } from "@agentic-kanban/shared";
 import {
   resolveNewIssueDefaults,
   getIssueProjectId,
@@ -269,15 +270,31 @@ export function createIssueService(deps: {
     // Capture issue number before update for webhook payload
     let issueNumberForWebhook: number | null = null;
     let issueTitleForWebhook = "";
-    if (body.statusId !== undefined && sendWebhook) {
-      const issueRow = await database
-        .select({ issueNumber: issues.issueNumber, title: issues.title })
+
+    // Capture pre-update terminal-ness so we only act on a transition INTO a
+    // terminal status (Done/Cancelled/Archived), not on every update of an
+    // already-terminal issue.
+    let wasTerminal = false;
+    if (body.statusId !== undefined) {
+      const beforeRow = await database
+        .select({
+          issueNumber: issues.issueNumber,
+          title: issues.title,
+          statusId: issues.statusId,
+          statusName: projectStatuses.name,
+          currentNodeId: issues.currentNodeId,
+        })
         .from(issues)
+        .leftJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
         .where(eq(issues.id, id))
         .limit(1);
-      if (issueRow[0]) {
-        issueNumberForWebhook = issueRow[0].issueNumber;
-        issueTitleForWebhook = issueRow[0].title;
+      if (beforeRow[0]) {
+        issueNumberForWebhook = beforeRow[0].issueNumber;
+        issueTitleForWebhook = beforeRow[0].title;
+        wasTerminal = isTerminalStatusView({
+          statusName: beforeRow[0].statusName,
+          currentNodeId: beforeRow[0].currentNodeId,
+        });
       }
     }
 
@@ -289,12 +306,47 @@ export function createIssueService(deps: {
       await syncCurrentNodeToStatus(database, id).catch(() => {});
     }
 
-    if (body.statusId !== undefined && sendWebhook) {
+    // Resolve the new status name once; reused for the terminal-transition check
+    // below and the webhook payload.
+    let newStatusName: string | null = null;
+    if (body.statusId !== undefined) {
       const statusRow = await database
         .select({ name: projectStatuses.name })
         .from(projectStatuses)
         .where(eq(projectStatuses.id, body.statusId as string))
         .limit(1);
+      newStatusName = statusRow[0]?.name ?? null;
+    }
+
+    // When an issue transitions INTO a terminal status (Done/Cancelled/Archived),
+    // close any still-open workspace for it. Otherwise the in-process monitor keeps
+    // trying to relaunch the now-pointless idle workspace every cycle (#776). Only
+    // act on the non-terminal -> terminal edge so re-saving an already-Done issue is
+    // a no-op. We use a direct DB status update (mirroring close_workspace / merge's
+    // terminal "closed" state) rather than importing the workspace service, to avoid
+    // an import cycle; downstream worktree cleanup is handled on the next reconcile.
+    if (body.statusId !== undefined && !wasTerminal) {
+      const afterRow = await database
+        .select({ currentNodeId: issues.currentNodeId, currentNodeType: workflowNodes.nodeType })
+        .from(issues)
+        .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
+        .where(eq(issues.id, id))
+        .limit(1);
+      const nowTerminal = isTerminalStatusView({
+        statusName: newStatusName,
+        currentNodeId: afterRow[0]?.currentNodeId ?? null,
+        currentNodeType: afterRow[0]?.currentNodeType ?? null,
+      });
+      if (nowTerminal) {
+        const closedAt = new Date().toISOString();
+        await database
+          .update(workspaces)
+          .set({ status: "closed", closedAt, updatedAt: closedAt })
+          .where(and(eq(workspaces.issueId, id), sql`${workspaces.status} != 'closed'`));
+      }
+    }
+
+    if (body.statusId !== undefined && sendWebhook) {
       sendWebhook(projectId, {
         event: "issue.status_changed",
         issueId: id,
@@ -302,7 +354,7 @@ export function createIssueService(deps: {
         title: issueTitleForWebhook,
         projectId,
         newStatusId: body.statusId as string,
-        newStatusName: statusRow[0]?.name ?? null,
+        newStatusName: newStatusName,
         statusChangedAt: now,
       });
     }

@@ -34,10 +34,17 @@ export interface SessionLifecycleDeps {
 
 export const ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS = 10_000;
 
-function buildZeroOutputLaunchFailureStats(executor: string, durationMs: number, exitCode: number | null) {
+function buildZeroOutputLaunchFailureStats(executor: string, durationMs: number, exitCode: number | null, stderrText?: string) {
+  // Surface the provider's captured stderr (#779). A detached claude.exe that dies on launch
+  // writes its reason to stderr, not stdout; including it here turns an opaque "zero output"
+  // crash into a diagnosable failure (e.g. a mid-rebase worktree, bad cwd, auth error).
+  const stderrSnippet = stderrText?.trim()
+    ? `\nProvider stderr:\n${stderrText.trim().length > 500 ? stderrText.trim().slice(0, 500) + "…" : stderrText.trim()}`
+    : "";
   const reason =
     `Agent launch failed: provider process exited within ${Math.round(ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS / 1000)}s ` +
-    "without assistant output, tool activity, or usage stats.";
+    "without assistant output, tool activity, or usage stats." +
+    stderrSnippet;
   return {
     durationMs,
     totalCostUsd: 0,
@@ -451,10 +458,19 @@ export function createSessionLifecycle(
           const withinWindow = durationMs <= ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS;
           const isZeroOutput = !hadSubstantiveOutput;
           const isNonZeroExit = exitCode !== 0 && exitCode !== null;
+          // Captured provider stderr (detached agents drain their .err file into a stderr
+          // message on exit — #779). Use it as the diagnostic for an otherwise-opaque
+          // zero-output crash, and as a fallback error text for a non-zero-exit failure
+          // when the agent emitted no assistant/plan text.
+          const capturedStderr = messages
+            .filter((m) => m.type === "stderr")
+            .map((m) => m.data ?? "")
+            .join("")
+            .trim();
           if (withinWindow && (isZeroOutput || isNonZeroExit)) {
-            const errorText = planText?.trim() || "";
+            const errorText = planText?.trim() || capturedStderr || "";
             const stats = isZeroOutput
-              ? buildZeroOutputLaunchFailureStats(executor, durationMs, exitCode)
+              ? buildZeroOutputLaunchFailureStats(executor, durationMs, exitCode, capturedStderr)
               : buildModelErrorLaunchFailureStats(executor, durationMs, exitCode, errorText);
             const effectiveExitCode = isNonZeroExit ? exitCode! : 1;
             void (async () => {

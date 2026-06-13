@@ -93,6 +93,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
   const noteStart = (projectId: string) => startedByProject.set(projectId, (startedByProject.get(projectId) ?? 0) + 1);
 
   for (const inProgressSt of inProgressStatuses) {
+    const allowFeatureTypes = isAutoDrivenProject(inProgressSt.projectId);
     const wipLimit = tunablesFor(inProgressSt.projectId).activeAgentsTarget;
     let currentWip = await countActiveWip(db, inProgressSt.id);
     if (currentWip >= wipLimit) continue;
@@ -105,7 +106,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       const openWs = await db.select({ id: workspaces.id }).from(workspaces)
         .where(sql`${workspaces.issueId} = ${issue.id} AND ${workspaces.status} != 'closed'`).limit(1);
       if (openWs.length > 0) continue;
-      if (!isMonitorEligibleIssue(issue)) continue;
+      if (!isMonitorEligibleIssue(issue, allowFeatureTypes)) continue;
       if (await hasSkipAutoStartTag(issue.id)) continue;
       const branchSlug = issue.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").substring(0, 40);
       const branch = `feature/ak-${issue.issueNumber}-${branchSlug}`;
@@ -113,9 +114,22 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       const launchBody: Record<string, unknown> = { issueId: issue.id, branch, customPrompt: prompt };
       // Auto-driven projects must not stall in plan-only mode (#666).
       if (isAutoDrivenProject(inProgressSt.projectId)) launchBody.planMode = false;
-      await fetch(`${baseUrl}/api/workspaces`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(launchBody) }).catch(() => {});
+      const resp = await fetch(`${baseUrl}/api/workspaces`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(launchBody) }).catch((err) => {
+        // #775: surface a thrown launch instead of swallowing it.
+        console.warn(`[monitor] Auto-start launch threw for In Progress issue #${issue.issueNumber} (${issue.id}): ${err instanceof Error ? err.message : String(err)}`);
+        return null;
+      });
+      // Count the slot as consumed regardless (we attempted a launch this cycle), but
+      // only record SUCCESS as an auto_start action; a failed launch records a failure
+      // (#775) so it is no longer invisible in the monitor logs / recentActions.
       currentWip++;
       noteStart(inProgressSt.projectId);
+      if (!resp || !resp.ok) {
+        const body = resp ? await resp.text().catch(() => "") : "";
+        console.warn(`[monitor] Auto-start FAILED for In Progress issue #${issue.issueNumber} (${issue.id}): ${resp ? `HTTP ${resp.status} ${body.slice(0, 500)}` : "no response"}`);
+        logMonitorAction("auto_start", "failed", issue.id);
+        continue;
+      }
       logMonitorAction("auto_start", "", issue.id);
       boardEvents.broadcast(inProgressSt.projectId, "board_changed");
       console.log(`[monitor] Auto-started workspace for In Progress issue #${issue.issueNumber} (no open workspace)`);
@@ -123,6 +137,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
   }
 
   for (const inProgressSt of inProgressStatuses) {
+    const allowFeatureTypes = isAutoDrivenProject(inProgressSt.projectId);
     const wipLimit = tunablesFor(inProgressSt.projectId).activeAgentsTarget;
     const currentWip = await countActiveWip(db, inProgressSt.id);
     if (currentWip >= wipLimit) continue;
@@ -132,19 +147,28 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
     if (todoStatus.length === 0) continue;
 
     const slotsAvailable = wipLimit - currentWip;
-    const fetchLimit = Math.max(1, Math.min(slotsAvailable, startsRemaining(inProgressSt.projectId))) * 3;
 
     // For auto-driven projects, also pull Backlog issues so newly-created tickets
     // start without requiring a manual Backlog→Todo promotion (#536).
     const candidateStatusIds = [todoStatus[0].id];
-    if (isAutoDrivenProject(inProgressSt.projectId)) {
+    if (allowFeatureTypes) {
       const backlogStatus = await db.select({ id: projectStatuses.id }).from(projectStatuses)
         .where(sql`${projectStatuses.name} = 'Backlog' AND ${projectStatuses.projectId} = ${inProgressSt.projectId}`).limit(1);
       if (backlogStatus.length > 0) candidateStatusIds.push(backlogStatus[0].id);
     }
 
+    // #774: do NOT pre-truncate the candidate set with an UNORDERED `limit(fetchLimit)`.
+    // SQLite returns rows in an arbitrary order, so a small fetchLimit could return only
+    // dep-blocked / already-workspaced candidates and silently DROP the one ticket whose
+    // blockers are all Done+merged — exactly the ticket `dependency-waves/start-next`
+    // launches correctly (it scans ALL issues, orders them, then filters). Fetch all
+    // eligible candidates ordered by issue number (deterministic, FIFO-ish) and let the
+    // per-issue gates below decide; the slotsAvailable / startsRemaining caps still bound
+    // how many actually launch this cycle.
+    // #773: skip the feature/enhancement type-exclusion for auto-driven projects.
     const todoIssues = await db.select({ id: issues.id, title: issues.title, description: issues.description, issueType: issues.issueType, projectId: issues.projectId, issueNumber: issues.issueNumber }).from(issues)
-      .where(and(inArray(issues.statusId, candidateStatusIds), monitorEligibleIssueSql())).limit(fetchLimit);
+      .where(and(inArray(issues.statusId, candidateStatusIds), monitorEligibleIssueSql(allowFeatureTypes)))
+      .orderBy(issues.issueNumber);
     const doneStatuses = await db.select({ id: projectStatuses.id }).from(projectStatuses)
       .where(sql`${projectStatuses.name} IN ('Done', 'Cancelled')`);
     const doneStatusIds = new Set(doneStatuses.map((s) => s.id));
@@ -156,7 +180,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       const existingWs = await db.select({ id: workspaces.id }).from(workspaces)
         .where(sql`${workspaces.issueId} = ${issue.id} AND ${workspaces.status} != 'closed'`).limit(1);
       if (existingWs.length > 0) continue;
-      if (!isMonitorEligibleIssue(issue)) continue;
+      if (!isMonitorEligibleIssue(issue, allowFeatureTypes)) continue;
       if (await hasSkipAutoStartTag(issue.id)) continue;
 
       const deps = await db.select({ dependsOnId: issueDependencies.dependsOnId }).from(issueDependencies)
@@ -197,7 +221,12 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       const launchBody: Record<string, unknown> = { issueId: issue.id, branch };
       // Auto-driven projects must not stall in plan-only mode (#666).
       if (isAutoDrivenProject(issue.projectId)) launchBody.planMode = false;
-      const resp = await fetch(`${baseUrl}/api/workspaces`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(launchBody) }).catch(() => null);
+      const resp = await fetch(`${baseUrl}/api/workspaces`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(launchBody) }).catch((err) => {
+        // #775: surface a thrown launch (network/connection error) instead of silently
+        // dropping it — record a failure action so it shows in the monitor logs.
+        console.warn(`[monitor] Auto-start launch threw for issue "${issue.title}" (${issue.id}): ${err instanceof Error ? err.message : String(err)}`);
+        return null;
+      });
       if (resp?.ok) {
         const wsData = await resp.json().catch(() => null) as { id?: string } | null;
         logMonitorAction("auto_start", wsData?.id ?? "unknown", issue.id);
@@ -205,6 +234,13 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
         boardEvents.broadcast(issue.projectId, "board_changed");
         started++;
         noteStart(inProgressSt.projectId);
+      } else if (resp) {
+        // #775: a non-ok response (e.g. HTTP 400 "No default branch") was previously
+        // invisible — no log, no recorded action. Warn with the status + body and record
+        // an auto_start action against the issue so the failure surfaces in recentActions.
+        const body = await resp.text().catch(() => "");
+        console.warn(`[monitor] Auto-start FAILED for issue "${issue.title}" (${issue.id}): HTTP ${resp.status} ${body.slice(0, 500)}`);
+        logMonitorAction("auto_start", "failed", issue.id);
       }
     }
   }

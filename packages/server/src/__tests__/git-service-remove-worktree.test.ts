@@ -108,6 +108,42 @@ describe("git service removeWorktree cleanup fallback", () => {
     expect(existsSync(join(sourceDir, "sentinel.txt"))).toBe(true);
   });
 
+  it("does not delete NESTED packages/<pkg>/node_modules junction targets when removing a worktree (#780)", async () => {
+    // Simulate the "Dependency Symlinks" layout: the shared store lives in the main
+    // checkout and is junctioned into the worktree at packages/<pkg>/node_modules.
+    const sharedStore = join(tempRoot, "shared-pnpm-store");
+    await mkdir(sharedStore, { recursive: true });
+    await writeFile(join(sharedStore, "drizzle-orm.js"), "module.exports = {};\n");
+
+    // Real (non-link) nested directory structure, then a nested junction inside it.
+    const nestedParent = join(worktreePath, "packages", "server");
+    await mkdir(nestedParent, { recursive: true });
+    const nestedJunction = join(nestedParent, "node_modules");
+    // Use fs.symlink with the "junction" type on Windows (real junction, same as the
+    // bootstrap) — avoids shelling out through the mocked child_process.execFile.
+    await symlink(sharedStore, nestedJunction, process.platform === "win32" ? "junction" : "dir");
+
+    execFileMock.mockImplementation((_cmd, args, _opts, callback) => {
+      if (args[0] === "worktree" && args[1] === "remove") {
+        callback(new Error("git worktree remove failed"), "", "fatal: Directory not empty");
+        return;
+      }
+      if (args[0] === "worktree" && args[1] === "prune") {
+        callback(null, "", "");
+        return;
+      }
+      callback(new Error(`unexpected git args: ${args.join(" ")}`), "", "");
+    });
+
+    await expect(removeWorktree(repoPath, worktreePath)).resolves.toBeUndefined();
+
+    // Worktree directory itself must be gone
+    expect(existsSync(worktreePath)).toBe(false);
+    // The shared store behind the NESTED junction must be untouched
+    expect(existsSync(sharedStore)).toBe(true);
+    expect(existsSync(join(sharedStore, "drizzle-orm.js"))).toBe(true);
+  });
+
   it("cleans up an already-merged worktree missing .git before retrying branch deletion", async () => {
     execFileMock.mockImplementation((_cmd, args, _opts, callback) => {
       if (args[0] === "worktree" && args[1] === "remove") {
