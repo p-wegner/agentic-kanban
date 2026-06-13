@@ -3,6 +3,8 @@ import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import { issues, preferences, projectStatuses, projects, scheduledRunHistory, scheduledRuns, sessions, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { desc, eq } from "drizzle-orm";
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { db as defaultDb } from "../db/index.js";
 import { MOCK_AGENT_COMMAND, isMockProfile, toExecutorProvider } from "../services/agent-settings.service.js";
 import { createBoardEvents } from "../services/board-events.js";
@@ -451,15 +453,30 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
           try {
             const approvalChanged = ensurePnpmBuildApproval(workspace.workingDir);
             if (approvalChanged) {
-              const committed = await gitService.commitPaths(
-                workspace.workingDir,
-                ["package.json", "pnpm-workspace.yaml"],
-                "chore: pin pnpm + approve native build scripts (verify gate #783)",
+              // Only stage files that actually exist — `git add -- <missing>` fails the WHOLE
+              // command on a missing pathspec (e.g. a single-package app has no
+              // pnpm-workspace.yaml), which would otherwise throw and leave the manifest dirty.
+              const candidatePaths = ["package.json", "pnpm-workspace.yaml"].filter((p) =>
+                existsSync(join(workspace.workingDir!, p)),
               );
+              const committed = candidatePaths.length
+                ? await gitService.commitPaths(
+                    workspace.workingDir,
+                    candidatePaths,
+                    "chore: pin pnpm + approve native build scripts (verify gate #783)",
+                  )
+                : false;
               if (committed) console.log(`[workflow] committed pnpm build-approval repair for workspace ${workspaceId} (#783)`);
             }
           } catch (e) {
+            // Never let a repair failure leave the worktree dirty — an uncommitted manifest
+            // change would block the auto-merge (silent merge loss). Revert and continue.
             console.warn(`[workflow] pnpm build-approval repair failed for workspace ${workspaceId}: ${e instanceof Error ? e.message : String(e)}`);
+            try {
+              await new Promise<void>((resolve) =>
+                execFile("git", ["checkout", "--", "package.json", "pnpm-workspace.yaml"], { cwd: workspace.workingDir! }, () => resolve()),
+              );
+            } catch { /* best-effort cleanup */ }
           }
           const result = await runSetupScript(workspace.workingDir, verifyScript).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e) }));
           if (result.exitCode !== 0) {
