@@ -82,6 +82,36 @@ describe("Projects API", () => {
     expect(body[0].repoPath).toBeDefined();
   });
 
+  it("archive hides a project from the default list and unarchive restores it", async () => {
+    const tempId = await createProjectDirectly(database, { name: "Archivable", repoPath: "/tmp/archivable" });
+
+    const archiveRes = await app.request(`/api/projects/${tempId}/archive`, { method: "POST" });
+    expect(archiveRes.status).toBe(200);
+
+    // Hidden from the default list...
+    const listed = await (await app.request("/api/projects")).json() as any[];
+    expect(listed.some((p) => p.id === tempId)).toBe(false);
+
+    // ...but present with includeArchived and stamped with archivedAt.
+    const withArchived = await (await app.request("/api/projects?includeArchived=true")).json() as any[];
+    const archived = withArchived.find((p) => p.id === tempId);
+    expect(archived).toBeDefined();
+    expect(archived.archivedAt).toBeTruthy();
+
+    const unarchiveRes = await app.request(`/api/projects/${tempId}/unarchive`, { method: "POST" });
+    expect(unarchiveRes.status).toBe(200);
+
+    const relisted = await (await app.request("/api/projects")).json() as any[];
+    const restored = relisted.find((p) => p.id === tempId);
+    expect(restored).toBeDefined();
+    expect(restored.archivedAt).toBeFalsy();
+  });
+
+  it("POST /api/projects/:id/archive returns 404 for missing project", async () => {
+    const res = await app.request(`/api/projects/${randomUUID()}/archive`, { method: "POST" });
+    expect(res.status).toBe(404);
+  });
+
   it("GET /api/projects/:id/branches returns error for non-git path", async () => {
     const res = await app.request(`/api/projects/${projectId}/branches`);
     expect(res.status).toBe(500);

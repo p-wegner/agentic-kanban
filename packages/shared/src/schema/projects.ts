@@ -23,6 +23,8 @@ export const projects = sqliteTable("projects", {
   symlinkDirs: text("symlink_dirs"),
   /** Default skill applied to new workspaces when no explicit skill is chosen and no workflow provides one. */
   defaultSkillId: text("default_skill_id"),
+  /** ISO timestamp when the project was archived; null = active. Archived projects are hidden from the default project list. */
+  archivedAt: text("archived_at"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
 });

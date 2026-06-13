@@ -106,9 +106,10 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
     });
   }
 
-  // GET /api/projects
+  // GET /api/projects  (?includeArchived=true to include archived projects)
   router.get("/", async (c) => {
-    const result = await projectService.listProjects();
+    const includeArchived = c.req.query("includeArchived") === "true";
+    const result = await projectService.listProjects({ includeArchived });
     return c.json(result);
   });
 
@@ -133,6 +134,22 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
     const id = c.req.param("id");
     const body = await parseJsonBody(c);
     const result = await projectService.updateProject(id, body);
+    options?.boardEvents?.broadcastProjectsChanged(id, "project_updated");
+    return c.json(result);
+  });
+
+  // POST /api/projects/:id/archive — hide a project without deleting its data
+  router.post("/:id/archive", async (c) => {
+    const id = c.req.param("id");
+    const result = await projectService.archiveProject(id);
+    options?.boardEvents?.broadcastProjectsChanged(id, "project_updated");
+    return c.json(result);
+  });
+
+  // POST /api/projects/:id/unarchive — restore an archived project
+  router.post("/:id/unarchive", async (c) => {
+    const id = c.req.param("id");
+    const result = await projectService.unarchiveProject(id);
     options?.boardEvents?.broadcastProjectsChanged(id, "project_updated");
     return c.json(result);
   });

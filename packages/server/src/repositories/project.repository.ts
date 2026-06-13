@@ -1,5 +1,5 @@
 import { projects, projectStatuses, issues, workspaces, preferences, tags, issueTags, scheduledRuns, agentSkills, repos, flakyTests, qualityMetrics, projectScriptShortcuts } from "@agentic-kanban/shared/schema";
-import { eq, sql, and, inArray } from "drizzle-orm";
+import { eq, sql, and, inArray, isNull } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -26,8 +26,25 @@ export async function getProjectByRepoPath(
   return rows[0] ?? null;
 }
 
-export async function getAllProjects(database: Database = db) {
-  return database.select().from(projects);
+export async function getAllProjects(
+  database: Database = db,
+  opts: { includeArchived?: boolean } = {},
+) {
+  if (opts.includeArchived) {
+    return database.select().from(projects);
+  }
+  return database.select().from(projects).where(isNull(projects.archivedAt));
+}
+
+export async function setProjectArchived(
+  projectId: string,
+  archived: boolean,
+  database: Database = db,
+): Promise<void> {
+  await database
+    .update(projects)
+    .set({ archivedAt: archived ? new Date().toISOString() : null, updatedAt: new Date().toISOString() })
+    .where(eq(projects.id, projectId));
 }
 
 export async function getProjectStatuses(
