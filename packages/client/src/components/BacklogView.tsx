@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import type { CreateIssueRequest, DependencyWaveIssue, DependencyWavePlan, DependencyWaveStartResult, IssueWithStatus, ProfileSelection, StatusWithIssues } from "@agentic-kanban/shared";
 import type { CreateIssueFormState } from "./CreateIssueForm.js";
 import { CreateIssueForm } from "./CreateIssueForm.js";
-import { CollapsibleSection } from "./CollapsibleSection.js";
 import { IssueCard } from "./IssueCard.js";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { apiFetch } from "../lib/api.js";
@@ -176,10 +175,12 @@ export function BacklogView({
   const [wavePlan, setWavePlan] = useState<DependencyWavePlan | null>(null);
   const [waveLoading, setWaveLoading] = useState(false);
   const [startingWave, setStartingWave] = useState(false);
-  // Presets tucked behind a toggle; the Filters/Sort and Dependency Waves
-  // sections are expansion panels (CollapsibleSection) so the issue list gets
-  // the vertical space, especially on small screens.
+  // Secondary controls (presets, dependency waves) are tucked behind toggles so
+  // the always-visible compact toolbar stays a single wrapping row and the issue
+  // list keeps the vertical space — critical on small screens where stacked
+  // panels used to push the list off-screen.
   const [showPresets, setShowPresets] = useState(false);
+  const [showWaves, setShowWaves] = useState(false);
 
   const backlogIssues = backlogColumn?.issues ?? [];
   const q = searchQuery.toLowerCase();
@@ -280,7 +281,13 @@ export function BacklogView({
   const blockedCount = backlogIssues.filter((issue) => issue.isBlocked).length;
   const workspaceCount = backlogIssues.filter((issue) => issue.workspaceSummary?.main).length;
   const readyCount = backlogIssues.filter((issue) => !issue.isBlocked && !issue.workspaceSummary?.main).length;
-  const filterSummary = `${FILTERS.find((f) => f.id === filterMode)?.label ?? "All"} · ${SORT_LABELS[sortMode]}${groupMode === "none" ? "" : ` · grouped by ${groupMode === "priority" ? "Priority" : "Type"}`}`;
+  const filterCounts: Record<FilterMode, number> = {
+    all: backlogIssues.length,
+    blocked: blockedCount,
+    ready: readyCount,
+    workspace: workspaceCount,
+  };
+  const waveSlots = wavePlan?.wip.available ?? 0;
 
   function toggleSelected(issueId: string) {
     setSelectedIds((prev) => {
@@ -454,85 +461,80 @@ export function BacklogView({
       onDragLeave={() => setDragOver(false)}
       onDrop={handleDrop}
     >
-      <div className="shrink-0 border-b border-black/[0.07] dark:border-white/10 bg-surface-raised dark:bg-surface-raised-dark px-4 py-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-base font-semibold text-ink dark:text-gray-100">Backlog</h2>
-              <span
-                aria-label="Backlog issue count"
-                className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300"
-              >
-                {backlogIssues.length}
-              </span>
-            </div>
-            <div className="mt-1 flex flex-wrap gap-2 text-xs text-gray-500 dark:text-gray-400">
-              <span>{readyCount} ready</span>
-              <span>{blockedCount} blocked</span>
-              <span>{workspaceCount} with workspace</span>
-              {searchQuery && <span>{sortedIssues.length} matching search</span>}
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={toggleAllVisible}
-              className="rounded border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+      <div className="shrink-0 border-b border-black/[0.07] dark:border-white/10 bg-surface-raised dark:bg-surface-raised-dark px-3 py-2.5">
+        {/* Single compact toolbar — title + filter chips (carrying their own
+            counts) + sort/group + secondary toggles all wrap on one row so the
+            issue list keeps the vertical space on small screens. */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <div className="flex items-center gap-2">
+            <h2 className="text-base font-semibold text-ink dark:text-gray-100">Backlog</h2>
+            <span
+              aria-label="Backlog issue count"
+              className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300"
             >
-              {allVisibleSelected ? "Clear Visible" : "Select Visible"}
-            </button>
-            <button
-              onClick={() => setShowCreate((value) => !value)}
-              className="rounded border border-brand-200 bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100 dark:border-brand-800 dark:bg-brand-900/40 dark:text-brand-300"
-            >
-              {showCreate ? "Close Create" : "New Backlog Issue"}
-            </button>
+              {backlogIssues.length}
+            </span>
+            {searchQuery && (
+              <span className="text-xs text-gray-400 dark:text-gray-500">{sortedIssues.length} matching</span>
+            )}
           </div>
-        </div>
 
-        <CollapsibleSection title="Filters & Sort" summary={filterSummary} defaultOpen className="mt-3">
-          <div className="flex flex-wrap items-center gap-2">
-          <div className="flex rounded-md border border-gray-200 bg-white p-0.5 dark:border-gray-700 dark:bg-gray-900">
-            {FILTERS.map((filter) => (
-              <button
-                key={filter.id}
-                onClick={() => setFilterMode(filter.id)}
-                className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
-                  filterMode === filter.id
-                    ? "bg-brand-600 text-white"
-                    : "text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800"
-                }`}
-              >
-                {filter.label}
-              </button>
-            ))}
+          {/* Filter chips double as the stats line: each shows its own count. */}
+          <div className="flex flex-wrap items-center gap-0.5 rounded-md border border-gray-200 bg-white p-0.5 dark:border-gray-700 dark:bg-gray-900">
+            {FILTERS.map((filter) => {
+              const active = filterMode === filter.id;
+              return (
+                <button
+                  key={filter.id}
+                  onClick={() => setFilterMode(filter.id)}
+                  className={`flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition-colors ${
+                    active
+                      ? "bg-brand-600 text-white"
+                      : "text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800"
+                  }`}
+                >
+                  {filter.label}
+                  <span
+                    className={`rounded-full px-1 text-[10px] font-semibold leading-none ${
+                      active
+                        ? "bg-white/25 text-white"
+                        : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+                    }`}
+                  >
+                    {filterCounts[filter.id]}
+                  </span>
+                </button>
+              );
+            })}
           </div>
+
           <label className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
-            Sort
+            <span className="sr-only sm:not-sr-only">Sort</span>
             <select
+              aria-label="Sort backlog"
               value={sortMode}
               onChange={(e) => setSortMode(e.target.value as SortMode)}
               className="rounded border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
             >
-              <option value="rank">Manual order</option>
-              <option value="newest">Newest</option>
-              <option value="oldest">Oldest</option>
-              <option value="priority">Priority</option>
-              <option value="type">Type</option>
-              <option value="due">Due date</option>
+              {(Object.keys(SORT_LABELS) as SortMode[]).map((mode) => (
+                <option key={mode} value={mode}>{SORT_LABELS[mode]}</option>
+              ))}
             </select>
           </label>
           <label className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
-            Group
+            <span className="sr-only sm:not-sr-only">Group</span>
             <select
+              aria-label="Group backlog"
               value={groupMode}
               onChange={(e) => setGroupMode(e.target.value as GroupMode)}
               className="rounded border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
             >
-              <option value="none">None</option>
-              <option value="priority">Priority</option>
-              <option value="type">Type</option>
+              <option value="none">No grouping</option>
+              <option value="priority">By priority</option>
+              <option value="type">By type</option>
             </select>
           </label>
+
           <div className="relative">
             <button
               type="button"
@@ -602,48 +604,85 @@ export function BacklogView({
               </div>
             )}
           </div>
+
+          <button
+            type="button"
+            onClick={() => setShowWaves((v) => !v)}
+            aria-expanded={showWaves}
+            className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
+              showWaves
+                ? "border-brand-300 bg-brand-50 text-brand-700 dark:border-brand-700 dark:bg-brand-900/40 dark:text-brand-300"
+                : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+            }`}
+            title="Dependency waves"
+          >
+            Waves
+            {waveSlots > 0 && (
+              <span className="rounded-full bg-green-100 px-1.5 text-[10px] font-semibold leading-none text-green-700 dark:bg-green-950 dark:text-green-300">{waveSlots}</span>
+            )}
+            <svg className={`h-2.5 w-2.5 transition-transform ${showWaves ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
+            </svg>
+          </button>
+
+          {/* Right-aligned primary actions. */}
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <button
+              onClick={toggleAllVisible}
+              className="rounded border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+            >
+              {allVisibleSelected ? "Clear Visible" : "Select Visible"}
+            </button>
+            <button
+              onClick={() => setShowCreate((value) => !value)}
+              className="rounded border border-brand-200 bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100 dark:border-brand-800 dark:bg-brand-900/40 dark:text-brand-300"
+            >
+              {showCreate ? "Close" : "New Issue"}
+            </button>
           </div>
-        </CollapsibleSection>
+        </div>
+
+        {showWaves && (
+          <div className="mt-2.5 rounded-md border border-gray-200 bg-white p-2.5 dark:border-gray-700 dark:bg-gray-900">
+            <DependencyWavePanel
+              plan={wavePlan}
+              loading={waveLoading}
+              starting={startingWave}
+              onRefresh={loadWavePlan}
+              onStartNextWave={startNextWave}
+            />
+          </div>
+        )}
 
         {selectedVisibleIds.length > 0 && (
-          <CollapsibleSection
-            tone="brand"
-            defaultOpen
-            className="mt-3"
-            bodyClassName="border-t border-brand-200 px-3 py-2 dark:border-brand-800"
-            title={<span className="normal-case text-brand-700 dark:text-brand-300">Selection</span>}
-            badge={
+          <div className="mt-2.5 flex flex-wrap items-center gap-2 rounded-md border border-brand-200 bg-brand-50 px-3 py-2 dark:border-brand-800 dark:bg-brand-900/30">
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-700 dark:text-brand-300">
               <span className="inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-brand-600 px-1 text-[10px] font-semibold leading-none text-white">
                 {selectedVisibleIds.length}
               </span>
-            }
-            summary="selected"
-            actions={
+              selected
+            </span>
+            {moveTargetColumns.map((status) => (
               <button
-                onClick={() => setSelectedIds(new Set())}
-                className="text-xs text-brand-600 underline dark:text-brand-300"
+                key={status.id}
+                disabled={bulkMoving}
+                onClick={() => bulkMove(status)}
+                className="rounded border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
               >
-                Clear
+                Move to {status.name}
               </button>
-            }
-          >
-            <div className="flex flex-wrap items-center gap-2">
-              {moveTargetColumns.map((status) => (
-                <button
-                  key={status.id}
-                  disabled={bulkMoving}
-                  onClick={() => bulkMove(status)}
-                  className="rounded border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
-                >
-                  Move to {status.name}
-                </button>
-              ))}
-            </div>
-          </CollapsibleSection>
+            ))}
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="ml-auto text-xs text-brand-600 underline dark:text-brand-300"
+            >
+              Clear
+            </button>
+          </div>
         )}
 
         {showCreate && (
-          <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900">
+          <div className="mt-2.5 rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900">
             <CreateIssueForm
               projectId={projectId}
               statusId={backlogColumn.id}
@@ -657,17 +696,6 @@ export function BacklogView({
             />
           </div>
         )}
-
-      </div>
-
-      <div className="shrink-0 border-b border-black/[0.07] px-4 py-3 dark:border-white/10">
-        <DependencyWavePanel
-          plan={wavePlan}
-          loading={waveLoading}
-          starting={startingWave}
-          onRefresh={loadWavePlan}
-          onStartNextWave={startNextWave}
-        />
       </div>
 
       <div className="flex-1 overflow-y-auto p-3">
@@ -775,12 +803,13 @@ function DependencyWavePanel({
     : loading ? "Loading wave plan" : "Wave plan unavailable";
 
   return (
-    <CollapsibleSection
-      title="Dependency Waves"
-      summary={summary}
-      bodyClassName="px-3 pb-2"
-      actions={
-        <>
+    <div>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Dependency Waves</span>
+          <span className="min-w-0 truncate text-xs text-gray-400 dark:text-gray-500">{summary}</span>
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
           <button
             type="button"
             onClick={onRefresh}
@@ -797,11 +826,10 @@ function DependencyWavePanel({
           >
             {starting ? "Starting..." : `Start Next Wave${startLimit > 0 ? ` (${startLimit})` : ""}`}
           </button>
-        </>
-      }
-    >
+        </div>
+      </div>
       {plan ? (
-        <div className="grid max-h-72 grid-cols-1 gap-2 overflow-y-auto lg:grid-cols-3">
+        <div className="grid max-h-72 grid-cols-1 gap-2 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3">
           <WaveColumn title="Ready Now" issues={plan.readyNow} emptyText="No ready open issues" tone="ready" />
           <WaveColumn title="Blocked" issues={plan.blocked} emptyText="No blocked issues" tone="blocked" />
           <WaveColumn title="Cyclic/Invalid" issues={plan.cyclicInvalid} emptyText="No invalid dependency chains" tone="invalid" />
@@ -809,7 +837,7 @@ function DependencyWavePanel({
       ) : (
         <div className="text-xs text-gray-400 dark:text-gray-500">{loading ? "Loading wave plan…" : "Wave plan unavailable"}</div>
       )}
-    </CollapsibleSection>
+    </div>
   );
 }
 
