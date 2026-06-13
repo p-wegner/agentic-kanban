@@ -704,24 +704,24 @@ export function BacklogView({
             {searchQuery ? "No backlog issues match the current search." : "Backlog is empty."}
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-3">
             {groups.map((group) => (
               <section key={group.key}>
                 {groupMode !== "none" && (
-                  <div className="mb-2 flex items-center gap-2 px-1">
+                  <div className="mb-1.5 flex items-center gap-2 px-1">
                     <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{group.label}</h3>
                     <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400">
                       {group.issues.length}
                     </span>
                   </div>
                 )}
-                <div className="grid grid-cols-1 gap-2 lg:grid-cols-2 2xl:grid-cols-3">
+                <div className="grid grid-cols-1 items-start gap-1.5 lg:grid-cols-2 2xl:grid-cols-3">
                   {group.issues.map((issue) => (
-                    <div key={issue.id} className="flex min-w-0 gap-2">
+                    <div key={issue.id} className="flex min-w-0 items-start gap-1.5">
                       <button
                         onClick={() => toggleSelected(issue.id)}
                         aria-label={selectedIds.has(issue.id) ? `Deselect issue ${issue.issueNumber}` : `Select issue ${issue.issueNumber}`}
-                        className={`mt-2 h-5 w-5 shrink-0 rounded border text-[10px] ${
+                        className={`mt-1.5 h-4 w-4 shrink-0 rounded border text-[10px] ${
                           selectedIds.has(issue.id)
                             ? "border-brand-500 bg-brand-500 text-white"
                             : "border-gray-300 bg-white text-transparent hover:border-brand-300 dark:border-gray-700 dark:bg-gray-900"
@@ -729,7 +729,7 @@ export function BacklogView({
                         title={selectedIds.has(issue.id) ? "Deselect issue" : "Select issue"}
                       >
                         {selectedIds.has(issue.id) && (
-                          <svg className="m-auto h-3 w-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                          <svg className="m-auto h-2.5 w-2.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
                             <path d="M13.5 4.5 6.25 11.75 2.5 8" strokeLinecap="round" strokeLinejoin="round" />
                           </svg>
                         )}
@@ -746,13 +746,14 @@ export function BacklogView({
                           onMoveToNext={defaultTargetStatus ? (iss) => promoteIssue(iss, defaultTargetStatus) : undefined}
                           nextStatusName={defaultTargetStatus?.name}
                           searchQuery={searchQuery}
+                          cardDensity="compact"
                           liveActivity={sessionActivity[issue.id]}
                           liveStats={liveStats[issue.id]}
                           todos={sessionTodos[issue.id]}
                           isPendingIssue={pendingIssueIds.has(issue.id)}
                           isPendingWorkspace={pendingWorkspaceIssueIds.has(issue.id)}
                         />
-                        <div className="mt-1 flex flex-wrap gap-1">
+                        <div className="mt-0.5 flex flex-wrap gap-1">
                           {moveTargetColumns.map((status) => (
                             <button
                               key={status.id}

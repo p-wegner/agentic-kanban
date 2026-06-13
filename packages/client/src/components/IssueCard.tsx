@@ -435,8 +435,11 @@ function IssueCardActions({
 }) {
   if (!hasAnyAction || isDragging) return null;
 
+  // Comfortable: keep the row in flow (opacity fade) so hovering never shifts
+  // surrounding cards. Compact: collapse it entirely until hover so dense lists
+  // don't pay ~26px of reserved blank space per card.
   return (
-    <div className={`${compact ? "mt-1" : "mt-1.5"} flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity`}>
+    <div className={`flex items-center gap-1.5 transition-opacity ${compact ? "mt-1 hidden group-hover:flex" : "mt-1.5 opacity-0 group-hover:opacity-100"}`}>
       {showResume && (
         <button
           onClick={(e) => { e.stopPropagation(); onWorkspaceClick!(issue, ws?.main?.id); }}
