@@ -7,6 +7,7 @@ import { getCurrentBranch } from "../../services/git.service.js";
 import { initializeProjectStatuses, DEFAULT_STATUSES } from "../../repositories/issue.repository.js";
 import { runMigrations, logDefaultBranch } from "../shared.js";
 import { getDefaultSkillId, ensureAgentGitignore, ensureStarterClaudeMd, ensureStarterAgentsMd, ensureHookScaffold } from "../../services/project-scaffold.js";
+import { detectStackProfile } from "../../services/stack-profile.service.js";
 
 /** Fall back to the repo's checked-out branch when main/master isn't detected, so the project is never left undriveable (#772). */
 async function resolveCliDefaultBranch(repoPath: string, detected: string | null): Promise<string | null> {
@@ -149,7 +150,9 @@ Setup:
           .onConflictDoUpdate({ target: preferences.key, set: { value: projectId, updatedAt: now } });
 
         // Scaffold the fresh repo: generic agent-artifact ignores + a starter CLAUDE.md + hooks.
-        ensureAgentGitignore(repoInfo.repoPath);
+        // A fresh empty repo has no stack markers yet (stack === null ⇒ no per-stack block); detect
+        // anyway so a pre-seeded directory still gets its per-stack build-output ignores (#811).
+        ensureAgentGitignore(repoInfo.repoPath, undefined, detectStackProfile(repoInfo.repoPath).stack);
         ensureStarterClaudeMd(repoInfo.repoPath);
         ensureStarterAgentsMd(repoInfo.repoPath);
         ensureHookScaffold(repoInfo.repoPath);
