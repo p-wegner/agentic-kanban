@@ -20,6 +20,7 @@ import {
 } from "./stack-profile.service.js";
 import { HARNESS_IDS, harnessSettingKey } from "./harness-settings.js";
 import { generateDriveRetro } from "@agentic-kanban/shared/lib/drive-retro";
+import { resolveStartPolicy, startModePrefKey, type StartMode } from "./start-policy.service.js";
 
 /**
  * One-switch "Drive this project" (#806).
@@ -69,6 +70,8 @@ export interface DriveEnablementStatus {
     autoMerge: boolean;
     hasStackProfile: boolean;
     hasVerifyScript: boolean;
+    /** The resolved per-project Start Mode (explicit pref, else derived from legacy flags). */
+    startMode: StartMode;
   };
 }
 
@@ -94,6 +97,7 @@ export async function getDriveStatus(
       autoMerge: prefMap.get("auto_merge") === "true",
       hasStackProfile: (await getStackProfile(projectId, database)) !== null,
       hasVerifyScript: !!(verify && verify.trim()),
+      startMode: resolveStartPolicy(prefMap, projectId).mode,
     },
   };
 }
@@ -126,6 +130,10 @@ export async function setDriveEnabled(
   entries.push({ key: autodrivePrefKey(projectId), value: enabled ? "true" : "false" });
   // Kill-switch is the inverse of drive: clear it ON, re-arm it OFF.
   entries.push({ key: autoMergeDisabledPrefKey(projectId), value: enabled ? "false" : "true" });
+  // Start Mode is the single source of truth that gates every auto-start path; keep it
+  // coherent with the one-switch so they never drift. (The dogfood board sets `conductor`
+  // out-of-band; this maps the binary Drive toggle to monitor⇄manual.)
+  entries.push({ key: startModePrefKey(projectId), value: enabled ? "monitor" : "manual" });
 
   if (enabled) {
     // The drive needs the global review→merge pipeline live; without these the project is

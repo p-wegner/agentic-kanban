@@ -4,6 +4,7 @@ import { getProjectById } from "../repositories/project.repository.js";
 import { getAllPreferences } from "../repositories/preferences.repository.js";
 import { readOrchestratorStatus } from "../services/orchestrator-monitor.service.js";
 import { resolveMonitorTunables } from "../services/strategy-objective.service.js";
+import { resolveStartPolicy } from "../services/start-policy.service.js";
 
 /**
  * Read-only observability for the detached board-monitor orchestrator loop
@@ -38,7 +39,8 @@ export function createBoardMonitorRoute(database: Database) {
     const rows = await getAllPreferences(database);
     const prefMap = new Map(rows.map((r) => [r.key, r.value]));
     const { tunables, source } = resolveMonitorTunables(prefMap, projectId);
-    return c.json({ tunables, source });
+    const startPolicy = resolveStartPolicy(prefMap, projectId);
+    return c.json({ tunables, source, startPolicy });
   });
 
   return router;

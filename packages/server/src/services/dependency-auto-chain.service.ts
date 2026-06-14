@@ -7,6 +7,7 @@ import type { BoardEvents } from "./board-events.js";
 import type { SessionManager } from "./session.manager.js";
 import type { GitService } from "./workspace-internals.js";
 import { createWorkspaceCrudService } from "./workspace-crud.service.js";
+import { resolveStartPolicy } from "./start-policy.service.js";
 
 const BLOCKING_DEPENDENCY_TYPES = ["depends_on", "blocked_by"] as const;
 const AUTO_CHAIN_TRIGGER_TYPES = ["depends_on", "blocked_by", "child_of"] as const;
@@ -266,11 +267,14 @@ export async function autoStartUnblockedDependencyIssue(args: {
 }): Promise<void> {
   const { database, projectId, completedIssueId, prefMap, getSessionManager, boardEvents, gitService } = args;
   if (!projectId) return;
-  if (prefMap.get("dependency_auto_chain") !== "true") return;
+  // The post-merge cascade is gated by the project's Start Mode (the single source of truth),
+  // NOT by `dependency_auto_chain` alone. `manual` (and `conductor`) mode stop it — this closes
+  // the leak where the cascade kept auto-starting tickets with every "drive" switch off.
+  const policy = resolveStartPolicy(prefMap, projectId);
+  if (!policy.postMergeCascade) return;
   if (!getSessionManager && !args.createWorkspace) return;
 
-  const parsedLimit = Number.parseInt(prefMap.get("nudge_wip_limit") || "5", 10);
-  const wipLimit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 5;
+  const wipLimit = policy.wip.activeAgentsTarget;
   const decision = await findAutoStartableDependencyIssue({ database, projectId, completedIssueId, wipLimit });
   if (!decision.candidate) {
     const reasonText: Record<AutoStartDecision["reason"], string> = {
