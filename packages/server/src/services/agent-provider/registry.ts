@@ -2,6 +2,7 @@ import type { AgentLaunchConfig, AgentProvider, BuildAgentLaunchConfigOptions } 
 import { ClaudeProvider } from "./claude-provider.js";
 import { CodexProvider } from "./codex-provider.js";
 import { CopilotProvider } from "./copilot-provider.js";
+import { PiProvider } from "./pi-provider.js";
 
 const providers = new Map<string, AgentProvider>();
 let defaultProviderName = "claude";
@@ -25,6 +26,7 @@ export function setDefaultProvider(name: string): void {
 registerProvider(new ClaudeProvider());
 registerProvider(new CodexProvider());
 registerProvider(new CopilotProvider());
+registerProvider(new PiProvider());
 
 export function buildAgentLaunchConfig(options: BuildAgentLaunchConfigOptions = {}): AgentLaunchConfig {
   const providerName = options.provider ?? undefined;

@@ -298,3 +298,34 @@ export function resolveCopilotNpmLoader(command: string, fs: FileSystem = nodeFi
   }
   return undefined;
 }
+
+export function resolvePiExecutable(command: string, fs: FileSystem = nodeFileSystem): string | undefined {
+  if (process.platform !== "win32") return undefined;
+
+  const candidates: string[] = [];
+  const base = basename(command).toLowerCase();
+  if (base !== "pi" && base !== "pi.exe" && base !== "pi.cmd" && base !== "pi.ps1") {
+    return undefined;
+  }
+
+  if (command.includes("\\") || command.includes("/")) {
+    candidates.push(command);
+  } else {
+    const extensions = [".exe", ".cmd", ".ps1", ""];
+    const pathDirs = (process.env.PATH ?? "").split(delimiter).filter(Boolean);
+    const commonDirs = [
+      process.env.APPDATA ? join(process.env.APPDATA, "npm") : undefined,
+      process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, "Programs", "nodejs") : undefined,
+      process.env.ProgramFiles ? join(process.env.ProgramFiles, "nodejs") : undefined,
+      process.env["ProgramFiles(x86)"] ? join(process.env["ProgramFiles(x86)"], "nodejs") : undefined,
+    ].filter((dir): dir is string => !!dir);
+
+    for (const dir of [...pathDirs, ...commonDirs]) {
+      for (const ext of extensions) {
+        candidates.push(join(dir, `pi${ext}`));
+      }
+    }
+  }
+
+  return candidates.find((candidate) => fs.existsSync(candidate));
+}
