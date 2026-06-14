@@ -59,6 +59,29 @@ async function insertIssue(db: TestDb, input: {
   return id;
 }
 
+async function insertWorkspace(db: TestDb, input: {
+  issueId: string;
+  branch: string;
+  mergedAt?: string | null;
+  isDirect?: boolean;
+  status?: string;
+}) {
+  const now = new Date().toISOString();
+  await db.insert(workspaces).values({
+    id: randomUUID(),
+    issueId: input.issueId,
+    branch: input.branch,
+    workingDir: `/tmp/wave-project/.worktrees/${input.branch}`,
+    baseBranch: "main",
+    isDirect: input.isDirect ?? false,
+    status: input.status ?? "closed",
+    provider: "claude",
+    mergedAt: input.mergedAt ?? null,
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
 async function insertDependency(db: TestDb, issueId: string, dependsOnId: string) {
   await db.insert(issueDependencies).values({
     id: randomUUID(),
@@ -147,6 +170,60 @@ describe("dependency wave planner", () => {
     // The Done blocker should be resolved; the dependent should be in readyNow.
     expect(plan.readyNow.map((i) => i.id)).toContain(dependent);
     expect(plan.blocked.map((i) => i.id)).not.toContain(dependent);
+  });
+
+  // #784/#798: the wave planner now shares computeBlockerReadiness, so a Done blocker
+  // whose workspace is closed-but-unmerged (mergedAt null, not direct) does NOT unblock
+  // its dependent — the work isn't on the base branch yet.
+  it("keeps a dependent blocked when its Done blocker is closed-but-unmerged (#784)", async () => {
+    const { db } = createTestDb();
+    const { projectId, statusIds } = await seedProject(db);
+    const blockerDone = await insertIssue(db, { projectId, statusId: statusIds.Done, title: "Foundation (unmerged)", issueNumber: 1 });
+    const dependent = await insertIssue(db, { projectId, statusId: statusIds.Todo, title: "Needs foundation", issueNumber: 2 });
+    await insertDependency(db, dependent, blockerDone);
+    // Workspace closed at the Done transition, but its branch→base merge is still queued.
+    await insertWorkspace(db, { issueId: blockerDone, branch: "feature/ak-1-foundation", mergedAt: null, isDirect: false });
+
+    const plan = await buildDependencyWavePlan(db, projectId, { wipLimit: 5 });
+
+    expect(plan.blocked.map((i) => i.id)).toContain(dependent);
+    expect(plan.readyNow.map((i) => i.id)).not.toContain(dependent);
+    const blockedDep = plan.blocked.find((i) => i.id === dependent);
+    expect(blockedDep?.blockers).toEqual([
+      expect.objectContaining({ issueId: blockerDone, issueNumber: 1 }),
+    ]);
+
+    // Once the blocker's merge lands, the dependent becomes ready.
+    await db.update(workspaces).set({ mergedAt: new Date().toISOString() }).where(eq(workspaces.issueId, blockerDone));
+    const planAfter = await buildDependencyWavePlan(db, projectId, { wipLimit: 5 });
+    expect(planAfter.readyNow.map((i) => i.id)).toContain(dependent);
+  });
+
+  // #782/#798: a fan-in dependent depends on TWO blockers; it stays blocked until BOTH
+  // land on the base branch, then becomes ready.
+  it("keeps a fan-in dependent blocked until every blocker lands (#782)", async () => {
+    const { db } = createTestDb();
+    const { projectId, statusIds } = await seedProject(db);
+    const blockerA = await insertIssue(db, { projectId, statusId: statusIds.Done, title: "Foundation A", issueNumber: 1 });
+    const blockerB = await insertIssue(db, { projectId, statusId: statusIds.Done, title: "Foundation B", issueNumber: 2 });
+    const fanIn = await insertIssue(db, { projectId, statusId: statusIds.Todo, title: "Integrates A and B", issueNumber: 3 });
+    await insertDependency(db, fanIn, blockerA);
+    await insertDependency(db, fanIn, blockerB);
+    // A is merged; B is closed-but-unmerged.
+    await insertWorkspace(db, { issueId: blockerA, branch: "feature/ak-1-a", mergedAt: new Date().toISOString() });
+    await insertWorkspace(db, { issueId: blockerB, branch: "feature/ak-2-b", mergedAt: null, isDirect: false });
+
+    const plan = await buildDependencyWavePlan(db, projectId, { wipLimit: 5 });
+    expect(plan.blocked.map((i) => i.id)).toContain(fanIn);
+    // Only the un-landed blocker (B) is reported, not the already-merged A.
+    const blockedFanIn = plan.blocked.find((i) => i.id === fanIn);
+    expect(blockedFanIn?.blockers.map((b) => b.issueId)).toEqual([blockerB]);
+
+    // Land B too — now the fan-in dependent is ready.
+    await db.update(workspaces).set({ mergedAt: new Date().toISOString() }).where(eq(workspaces.issueId, blockerB));
+    const planAfter = await buildDependencyWavePlan(db, projectId, { wipLimit: 5 });
+    expect(planAfter.readyNow.map((i) => i.id)).toContain(fanIn);
+    expect(planAfter.blocked.map((i) => i.id)).not.toContain(fanIn);
   });
 
   it("starts only the next ready wave that fits under the WIP limit", async () => {

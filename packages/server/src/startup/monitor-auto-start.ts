@@ -1,4 +1,4 @@
-import { ACTIVE_WORKSPACE_STATUSES, isTerminalStatusIdView } from "@agentic-kanban/shared";
+import { ACTIVE_WORKSPACE_STATUSES, computeBlockerReadiness, isTerminalStatusIdView, type BlockerWorkspaceLanding } from "@agentic-kanban/shared";
 import { issueDependencies, issues, issueTags, projectStatuses, tags, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { and, eq, sql, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
@@ -198,44 +198,26 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
           .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
           .where(inArray(issues.id, blockerIds));
 
-        // A blocker only unblocks its dependents once its work is actually ON the base
-        // branch — not merely when the issue reaches a terminal STATUS, and NOT even when
-        // its workspace is `closed`. The old guard used `status != 'closed'` as a proxy for
-        // "merged", but a workspace can be closed at the Done transition while the branch→base
-        // merge is still QUEUED for the async auto-merge orchestrator (it drains on a timer).
-        // So "Done" — and even "closed" — does not imply "on master" (#784): a dependent was
-        // cut from the PRE-merge base (an empty scaffold), some builders re-scaffolded the app,
-        // and the blocker's merge was silently lost. This generalizes #535/#778 to every edge
-        // and is FATAL when the blocker provides foundational code.
-        //
-        // The authoritative "landed on base" signal is `mergedAt`, which is stamped ONLY after
-        // the git merge succeeds AND post-merge ancestry is verified (workspace-merge-execution).
-        // A direct workspace (`isDirect`) commits straight to the branch with no merge step, so
-        // it counts as landed. A blocker with NO workspace at all was resolved manually (nothing
-        // to merge) → also landed. An open review / closed-but-unmerged workspace contributes
-        // nothing, so a blocker whose only work is still un-merged stays blocked until the
-        // orchestrator lands it on a later cycle.
+        // Dependency readiness is decided by the ONE shared `computeBlockerReadiness`
+        // helper (also used by the dependency-wave planner) so the whole #535/#537/#782/#784
+        // class is fixed in one place: a blocker unblocks its dependents only when it
+        // reached a terminal status AND its work actually landed on the base branch
+        // (`mergedAt`/`isDirect`), not merely when the issue is Done or its workspace closed.
         const blockerWorkspaces = await db
           .select({ issueId: workspaces.issueId, mergedAt: workspaces.mergedAt, isDirect: workspaces.isDirect })
           .from(workspaces)
           .where(inArray(workspaces.issueId, blockerIds));
-        const wsByBlocker = new Map<string, { mergedAt: string | null; isDirect: boolean }[]>();
+        const wsByBlocker = new Map<string, BlockerWorkspaceLanding[]>();
         for (const w of blockerWorkspaces) {
           const list = wsByBlocker.get(w.issueId) ?? [];
           list.push({ mergedAt: w.mergedAt, isDirect: w.isDirect });
           wsByBlocker.set(w.issueId, list);
         }
-        // A blocker's work is "landed" on the base branch iff it has no workspace (manual done)
-        // or at least one workspace that actually reached the branch (merged, or a direct commit).
-        const isBlockerLanded = (blockerId: string): boolean => {
-          const list = wsByBlocker.get(blockerId);
-          if (!list || list.length === 0) return true;
-          return list.some((w) => w.mergedAt != null || w.isDirect);
-        };
 
-        const allResolved = blockerIssues.every(
-          (b) => isTerminalStatusIdView(b, doneStatusIds) && isBlockerLanded(b.id),
-        );
+        const allResolved = blockerIssues.every((b) => computeBlockerReadiness({
+          isTerminal: isTerminalStatusIdView(b, doneStatusIds),
+          workspaces: wsByBlocker.get(b.id) ?? [],
+        }));
         if (!allResolved) continue;
       }
 
