@@ -12,6 +12,13 @@ Use the **agentic-kanban MCP** tools (prefix `mcp__agentic-kanban__`) to keep th
 
 Builder sessions should use the harness-native file inspection tools where available: Claude `Read` for file contents and `Grep` for content search; Codex `rg`/shell inspection is acceptable when those tools are not available. Avoid fragile PowerShell text pipelines for review/search work (`git show HEAD:file | Select-String` fails with German-locale quoting errors); prefer searching a real file path with the harness-native search tool.
 
+## Session constraints
+
+Builder sessions are headless - there is no human at the terminal.
+**Never** invoke `ExitPlanMode`, `EnterPlanMode`, or `AskUserQuestion`.
+For task tracking, use `TaskCreate` / `TaskUpdate` instead of plan mode.
+For clarification needs, make a reasonable assumption, document it in the commit message, and proceed.
+
 ## Available MCP Tools
 
 | Tool | Purpose |
