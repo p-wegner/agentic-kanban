@@ -14,7 +14,7 @@ import { listBranches, listWorktrees, getDiffShortstat, removeWorktree } from ".
 import { buildWorkspaceSummaryMap, buildBlockedMap, buildTagMap, buildGraphEdges } from "./board-aggregation.service.js";
 import { getProjectById, getProjectByRepoPath, getAllProjects, insertProject, deleteProjectCascade, setProjectArchived, getProjectStats, getProjectStatuses, createProjectStatus, deleteProjectStatus, updateProjectStatusSortOrder } from "../repositories/project.repository.js";
 import { generateSetupScript as generateSetupScriptAI, generateTeardownScript as generateTeardownScriptAI, generateVerifyScript as generateVerifyScriptAI } from "./project-setup.service.js";
-import { populateStackProfile } from "./stack-profile.service.js";
+import { populateStackProfile, populateVerifyScript } from "./stack-profile.service.js";
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
 import type { WorkspaceSummaryCache } from "./workspace-summary-cache.service.js";
 import type { WorkspaceSummary } from "./workspace-summary.service.js";
@@ -202,8 +202,12 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     // Populate the durable stack profile (#786) — ONE descriptor every harness piece
     // (hooks/verify/dev-server/build-clean) reads instead of re-deriving stack facts.
     // The rule-based pass is fast; the optional LLM gap-fill is best-effort and must not
-    // block (or fail) registration, so run it fire-and-forget.
-    void populateStackProfile(id, repoInfo.repoPath, database).catch(() => { /* non-fatal */ });
+    // block (or fail) registration, so run it fire-and-forget. Once the profile lands,
+    // auto-populate & activate the verify (merge-gate) command (#788) — the keystone
+    // auto-merge gate must be live from ticket #1, derived from the same profile.
+    void populateStackProfile(id, repoInfo.repoPath, database)
+      .then((profile) => populateVerifyScript(id, repoInfo.repoPath, database, profile))
+      .catch(() => { /* non-fatal */ });
 
     return { ...result, id };
   }
