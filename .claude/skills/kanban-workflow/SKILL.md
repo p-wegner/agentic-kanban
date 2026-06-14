@@ -8,6 +8,10 @@ argument-hint: [issue-id or issue-number]
 
 Use the **agentic-kanban MCP** tools (prefix `mcp__agentic-kanban__`) to keep the board in sync with your actual work.
 
+## Tool selection
+
+Builder sessions should use dedicated tools for file inspection: Read for file contents and Grep for content search. Never use PowerShell to read files (`Get-Content`, `Get-ChildItem`) or search content (`rg`, `Select-String`); `git show HEAD:file | Select-String` fails with German-locale quoting errors, so use Grep with a file path instead.
+
 ## Available MCP Tools
 
 | Tool | Purpose |
