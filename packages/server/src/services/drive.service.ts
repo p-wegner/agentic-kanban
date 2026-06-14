@@ -19,6 +19,7 @@ import {
   verifyScriptPrefKey,
 } from "./stack-profile.service.js";
 import { HARNESS_IDS, harnessSettingKey } from "./harness-settings.js";
+import { generateDriveRetro } from "@agentic-kanban/shared/lib/drive-retro";
 
 /**
  * One-switch "Drive this project" (#806).
@@ -252,7 +253,19 @@ export function createDriveService({ database }: { database: Database }) {
     if (status !== "completed" && status !== "abandoned") {
       throw new DriveError("finish status must be 'completed' or 'abandoned'", "BAD_REQUEST");
     }
-    return update(projectId, id, { status, finishedAt: new Date().toISOString() });
+    const finished = await update(projectId, id, { status, finishedAt: new Date().toISOString() });
+    // #804: completing a drive auto-writes its retro from the event log. Best-effort
+    // and non-fatal — a generation failure must not block finishing the drive. Only on
+    // "completed" (an abandoned drive has nothing to retro).
+    if (status === "completed") {
+      try {
+        const result = await generateDriveRetro(finished, database);
+        if (result) console.log(`[drive] wrote retro for drive ${id} -> ${result.path}`);
+      } catch (err) {
+        console.warn(`[drive] retro generation failed for drive ${id} (non-fatal):`, err instanceof Error ? err.message : String(err));
+      }
+    }
+    return finished;
   }
 
   async function remove(projectId: string, id: string) {
