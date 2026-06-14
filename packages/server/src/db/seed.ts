@@ -189,8 +189,10 @@ Steps:
    - Is the title descriptive enough? Rewrite if vague.
    - Does the description include: what to implement, acceptance criteria, relevant files/areas?
    - Are there implicit requirements that should be made explicit?
+   - Do not add build-time screenshot, browser automation, Playwright, or browser-install instructions.
 3. Use update_issue to save the improved title and/or description
 4. Keep the original intent — enhance, don't redesign
+5. If visual confirmation is relevant, describe it only as board-owned after-merge verification configured by \`visual_verification_mode\` / \`after_merge_verify_agent\`, not as a builder task.
 
 Format the description with clear sections:
 - What needs to be done
