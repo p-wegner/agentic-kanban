@@ -18,6 +18,7 @@ blob-report/
 coverage/
 .claude/hooks/.edited-files.json
 .claude/hooks/.smart-hooks-state.json
+.claude/hooks/.read-tracking-state.json
 .claude/hooks/.verify-gate-state.json
 .claude/hooks/.verify-gate-escalation.json
 .claude/worktrees/
