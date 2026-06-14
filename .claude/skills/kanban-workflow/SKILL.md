@@ -55,6 +55,7 @@ update_issue(issueId, description="## Progress\n- Schema migrated\n- API route W
    cd packages/server && node node_modules/vitest/vitest.mjs related $(git diff --name-only HEAD | grep "^packages/server" | sed 's|packages/server/||')
    pnpm test:mine   # fast iteration, safe subset, no known-flaky
    ```
+   If `pnpm test:mine` fails with "could not find vitest", check whether `node_modules` is a junction: `(Get-Item node_modules).LinkType`. If it returns `Junction` → do NOT install (deps are shared). If it returns nothing or `Directory` → the worktree predates symlinks; run `pnpm install` once to create local deps.
    Full suite (`pnpm --filter agentic-kanban test`) only for cross-cutting changes or a final pre-commit check.
 2. Stage and commit all changed files with a message summarizing what + why; reference the issue if appropriate.
 
