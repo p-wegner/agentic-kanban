@@ -80,6 +80,16 @@ export function stopConductor(repoPath: string): ConductorActionResult {
         try { process.kill(-pid, "SIGTERM"); } catch { try { process.kill(pid, "SIGTERM"); } catch { /* gone */ } }
       }
     }
+    // Robust backstop: kill EVERY loop.sh process (+ its agent-child tree), not just the
+    // recorded PID. Repeated start/stop can overwrite loop.server.pid and orphan an earlier
+    // loop whose in-flight cycle keeps driving the board — this reaps those too.
+    if (process.platform === "win32") {
+      const ps =
+        "Get-CimInstance Win32_Process -Filter \"Name='bash.exe'\" -ErrorAction SilentlyContinue | " +
+        "Where-Object { $_.CommandLine -match 'board-monitor.loop\\.sh' } | " +
+        "ForEach-Object { Start-Process -NoNewWindow taskkill -ArgumentList '/F','/T','/PID',$_.ProcessId }";
+      execFile("powershell", ["-NoProfile", "-Command", ps], () => { /* best-effort */ });
+    }
     // Clear the pid files so the status reader reports stopped on its next poll.
     try { unlinkSync(pidPath); } catch { /* already gone */ }
     try { unlinkSync(join(boardMonitorDir(repoPath), "loop.pid")); } catch { /* already gone */ }
