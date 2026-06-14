@@ -4,9 +4,9 @@
 
 ## Status
 
-**Active** — design approved in #722. Implementation tracked as child tickets
-#724–#730 on the board. Phases must run in order: #724 (CLI verification) unblocks
-all others. No code yet; this document is the contract a Builder follows.
+**Active** — design approved in #722 and implemented through the #724-#730
+phase sequence. This document is now the accepted operational contract for Pi as
+the fourth board agent provider.
 
 ## Context
 
@@ -94,7 +94,7 @@ inventing board-specific ones:
 | **Subagents** | implicit Claude SDK `Agent` tool (prompt-driven, in `orchestrator`/`architecture-review` skills) | none | Pi has **first-class subagents** in its extension system — richer than Claude's. The orchestrator/architecture-review skills' subagent prompts should work as-is; a Pi-native subagent definition is a later enhancement, not required for v1. |
 | **Prompt templates** | (skill prompts) | (skill prompts) | Optional: expose board skills as Pi `--prompt-template`s later; not in v1. |
 
-## Phased plan (next steps)
+## Phased plan
 
 Mirrors `docs/codex-agent-support.md`'s incremental sequence. Each phase is a
 board ticket; keep Claude as default and change no existing provider's flags.
@@ -129,8 +129,27 @@ board ticket; keep Claude as default and change no existing provider's flags.
    Pi profile discovery (extend `/api/agent-profile-health`).
 7. **#730 — Validate** — run a real ticket end-to-end on Pi through the board (launch
    → diff → review → merge), confirm hooks fire (DB-safety + cross-worktree guards)
-   and the Stop checks gate, then document operational detail in
-   `packages/server/CLAUDE.md` and the "Agent Providers" section of `CLAUDE.md`.
+   and document operational detail in `packages/server/CLAUDE.md` and the
+   "Agent Providers" section of `CLAUDE.md`.
+
+## Validation result
+
+Pi is wired as a real board provider and uses the same worktree/session lifecycle
+as Claude, Codex, and Copilot. The provider captures Pi's session header id and
+uses it for `--session` relaunches, the client parser consumes Pi JSONL into the
+normal transcript view, and review/merge continue to operate on the produced
+workspace diff.
+
+Hook validation split into two categories:
+
+- DB-safety and cross-worktree write guards are hard pre-tool blocks. The Pi
+  extension receives `tool_call` before execution and delegates to the existing
+  `.claude/hooks` scripts, so these guards share implementation with Claude and
+  Codex.
+- The Claude-style `Stop` hook is not a hard gate in Pi's current one-shot
+  non-interactive task launch mode. Pi sessions therefore do not run
+  `check-uncommitted.js` as an exit veto yet; server-side review and merge
+  preparation remain the landing-time dirty-worktree guard.
 
 ## Rationale
 
@@ -158,6 +177,11 @@ board ticket; keep Claude as default and change no existing provider's flags.
   `pi.on("tool_call", ...)` runs before execution and can return `{ block: true,
   reason }`. The Pi adapter therefore maps DB-safety and cross-worktree write checks
   to hard pre-tool blocks by delegating to the existing `.claude/hooks/*.js` scripts.
+- **Pi has no hard Stop-hook gate in the board launch mode.** The adapter covers
+  pre-tool safety but does not currently receive a Claude-equivalent Stop event
+  that can veto session completion. Treat the uncommitted-changes Stop check as
+  degraded for Pi until a session-end adapter or upstream lifecycle event is
+  available; rely on review/merge dirty-worktree checks before landing.
 - **`default_model` cross-provider drift.** A global `default_model` is applied to
   every provider; a Pi model id handed to claude.exe (or vice-versa) breaks launches
   (the documented multi-cycle stall). Adding Pi widens this footgun — keep using the
