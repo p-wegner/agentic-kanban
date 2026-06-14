@@ -435,11 +435,26 @@ export function createWorkspaceCrudService(deps: {
     if (/\bplaywright\s+install\b/.test(normalized)) return true;
     if (/\binstall\b.*\b(browser|browsers|runtime|runtimes|global package|playwright)\b/.test(normalized)) return true;
 
-    const mentionsVisualTool =
-      /\b(playwright-cli|run playwright|playwright directly|visual verification|visually verify|screenshot|screenshots|visual proof)\b/.test(normalized);
-    if (!mentionsVisualTool) return false;
+    if (/\b(playwright-cli|run playwright|playwright directly)\b/.test(normalized)) return true;
 
-    return /\b(must|should|required|after completing|before finishing|verify|attach|proof|take|capture|use|run|open the app|navigate)\b/.test(normalized);
+    const lifecycleInstruction =
+      /\b(after completing|after completion|before finishing|before completion|when done|before submitting|before review|before proposing review)\b/.test(normalized);
+    const productRequirement =
+      /\b(implement|add|create|build|support|display|render|save|upload|download|button|component|endpoint|api|user|users|customer|client|canvas|image|attachment|attachments)\b/.test(normalized);
+    if (productRequirement && !lifecycleInstruction) return false;
+
+    const proofInstruction =
+      /\b(attach|provide|include|submit|upload|capture|take)\b.*\b(proof|evidence|screenshot|screenshots|visual proof)\b/.test(normalized) ||
+      /\b(screenshot|screenshots|visual proof)\b.*\b(proof|evidence|showing it working|before finishing|after completing)\b/.test(normalized);
+    const verificationInstruction =
+      /\b(visual verification|visually verify|verify visually)\b/.test(normalized) &&
+      /\b(must|should|required|run|perform|complete|do|use|before|after|verify)\b/.test(normalized);
+
+    return (
+      (lifecycleInstruction && (proofInstruction || verificationInstruction)) ||
+      proofInstruction ||
+      verificationInstruction
+    );
   }
 
   async function resolveSkillFile(

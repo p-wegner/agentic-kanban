@@ -261,6 +261,48 @@ describe("workspace creation hardening (AK-501 / AK-587)", () => {
     expect(prompt).not.toContain("visual proof before finishing");
   });
 
+  it("keeps legitimate screenshot-related product requirements", async () => {
+    const { issueId } = await seedIssue(db, [
+      "Implement screenshot capture for the canvas.",
+      "Add a Screenshot button that saves the current canvas image.",
+      "Users should be able to upload screenshots as issue attachments.",
+      "Before finishing, attach visual proof that the UI still works.",
+    ].join("\n"));
+
+    const sessionManager = {
+      startSession: vi.fn(async () => "session-id"),
+      stopSession: vi.fn(),
+      subscribe: vi.fn(),
+      unsubscribe: vi.fn(),
+    };
+
+    const svc = createWorkspaceCrudService({
+      database: db,
+      getSessionManager: () => sessionManager as never,
+      gitService: makeGitService() as never,
+    });
+
+    await svc.createWorkspace({
+      issueId,
+      branch: "feature/ak-1-test",
+      isDirect: false,
+      requiresReview: false,
+      thoroughReview: false,
+      planMode: false,
+      tddMode: false,
+      includeVisualProof: false,
+      skipSetup: true,
+      skipContextPacker: true,
+    });
+    await vi.runAllTimersAsync();
+
+    const prompt = sessionManager.startSession.mock.calls[0]?.[0]?.prompt ?? "";
+    expect(prompt).toContain("Implement screenshot capture for the canvas.");
+    expect(prompt).toContain("Add a Screenshot button that saves the current canvas image.");
+    expect(prompt).toContain("Users should be able to upload screenshots as issue attachments.");
+    expect(prompt).not.toContain("Before finishing, attach visual proof");
+  });
+
   it("marks stale safety-policy preflight launch failures as workspace errors", async () => {
     const { issueId } = await seedIssue(db);
 
