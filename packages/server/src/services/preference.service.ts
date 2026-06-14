@@ -8,13 +8,13 @@ import { allHarnessSettingKeys } from "./harness-settings.js";
 import { commitObjectiveFile, isBoardStrategyKey, parseStrategyBullseyeConfig, projectIdFromBoardStrategyKey, selectProviderFromStrategy, writeStrategyObjective } from "./strategy-objective.service.js";
 import { projects } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
-import { PREF_BUILDER_GUARDRAILS, PREF_MERGE_STRATEGY, PREF_CODEX_LICENSE_RING, PREF_CODEX_LICENSE_ROTATION, PREF_CLAUDE_SUBSCRIPTION_RING, PREF_CLAUDE_SUBSCRIPTION_ROTATION } from "../constants/preference-keys.js";
+import { PREF_BUILDER_GUARDRAILS, PREF_MERGE_STRATEGY, PREF_PI_PROFILE, PREF_CODEX_LICENSE_RING, PREF_CODEX_LICENSE_ROTATION, PREF_CLAUDE_SUBSCRIPTION_RING, PREF_CLAUDE_SUBSCRIPTION_ROTATION } from "../constants/preference-keys.js";
 import { parseCodexLicenseRing, ringProfileNames, discoverCodexHomeProfiles } from "./codex-license-ring.js";
 import { parseClaudeSubscriptionRing, ringProfileNames as claudeRingProfileNames, discoverClaudeConfigDirProfiles } from "./claude-subscription-ring.js";
 
 export const SETTINGS_KEYS = [
   "agent_command", "agent_args", "output_parser", "skip_permissions", "claude_profile",
-  "codex_profile", "copilot_profile", "provider", "default_model", "mock_agent_profile", "mock_agent_delay_ms",
+  "codex_profile", PREF_PI_PROFILE, "copilot_profile", "provider", "default_model", "mock_agent_profile", "mock_agent_delay_ms",
   "permission_prompt_tool", "auto_review", "auto_merge", "auto_merge_in_review", "resume_with_new_model",
   "review_auto_fix", "disabled_mcp_tools", "auto_start_followup", "require_manual_approval",
   "dependency_auto_chain",
@@ -211,6 +211,8 @@ export function createPreferenceService({ database }: { database: Database }) {
     const settingsProvider = prefMap.get("provider") || "claude";
     const settingsProfile = settingsProvider === "codex"
       ? (prefMap.get("codex_profile") || null)
+      : settingsProvider === "pi"
+        ? (prefMap.get(PREF_PI_PROFILE) || null)
       : settingsProvider === "copilot"
         ? (prefMap.get("copilot_profile") || null)
         : (prefMap.get("claude_profile") || null);

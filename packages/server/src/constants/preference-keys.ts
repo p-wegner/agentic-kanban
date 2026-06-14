@@ -3,6 +3,9 @@ export const PREF_AGENT_ARGS = "agent_args";
 export const PREF_SKIP_PERMISSIONS = "skip_permissions";
 export const PREF_CLAUDE_PROFILE = "claude_profile";
 export const PREF_CODEX_PROFILE = "codex_profile";
+// Pi profiles select an isolated PI_CODING_AGENT_DIR per profile. The exact LLM
+// provider/key mapping inside that directory is owned by Pi's config.
+export const PREF_PI_PROFILE = "pi_profile";
 export const PREF_CODEX_LICENSE_RING = "codex_license_ring";
 export const PREF_CODEX_LICENSE_ROTATION = "codex_license_rotation";
 export const PREF_CLAUDE_SUBSCRIPTION_RING = "claude_subscription_ring";
