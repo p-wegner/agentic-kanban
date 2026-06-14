@@ -113,6 +113,35 @@ describe("workflow-engine", () => {
     expect(tpl[0].builtinKey).toBe("simple-ticket");
   });
 
+  it("refreshes existing built-in workflow guidance on reseed", async () => {
+    const [template] = await db
+      .select()
+      .from(schema.workflowTemplates)
+      .where(eq(schema.workflowTemplates.builtinKey, "simple-ticket"));
+    const [implement] = await db
+      .select()
+      .from(schema.workflowNodes)
+      .where(eq(schema.workflowNodes.templateId, template.id))
+      .orderBy(asc(schema.workflowNodes.sortOrder))
+      .limit(1);
+
+    await db
+      .update(schema.workflowNodes)
+      .set({ config: JSON.stringify({ guidance: "stale guidance" }) })
+      .where(eq(schema.workflowNodes.id, implement.id));
+
+    await ensureBuiltinWorkflows(db as any);
+
+    const [refreshed] = await db
+      .select()
+      .from(schema.workflowNodes)
+      .where(eq(schema.workflowNodes.templateId, template.id))
+      .orderBy(asc(schema.workflowNodes.sortOrder))
+      .limit(1);
+    expect(refreshed.config).toContain("visual_verification_mode");
+    expect(refreshed.config).not.toContain("stale guidance");
+  });
+
   it("seeds an opt-in spec-driven phased planning template with interactive gates", async () => {
     const templates = await db
       .select()

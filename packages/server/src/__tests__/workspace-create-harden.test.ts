@@ -32,7 +32,7 @@ function makeGitService(overrides: Record<string, unknown> = {}) {
   };
 }
 
-async function seedIssue(db: ReturnType<typeof createTestDb>["db"]) {
+async function seedIssue(db: ReturnType<typeof createTestDb>["db"], description?: string) {
   const now = new Date().toISOString();
   const projectId = randomUUID();
   const statusId = randomUUID();
@@ -59,6 +59,7 @@ async function seedIssue(db: ReturnType<typeof createTestDb>["db"]) {
     id: issueId,
     issueNumber: 1,
     title: "Harden POST workspaces",
+    description: description ?? null,
     priority: "medium",
     sortOrder: 0,
     statusId,
@@ -174,6 +175,132 @@ describe("workspace creation hardening (AK-501 / AK-587)", () => {
     const { eq } = await import("drizzle-orm");
     const [row] = await db.select({ status: workspaces.status }).from(workspaces).where(eq(workspaces.id, result.id));
     expect(row?.status).toBe("idle");
+  });
+
+  it("does not inject builder screenshot steps when visual proof is requested", async () => {
+    const { issueId } = await seedIssue(db);
+
+    const sessionManager = {
+      startSession: vi.fn(async () => "session-id"),
+      stopSession: vi.fn(),
+      subscribe: vi.fn(),
+      unsubscribe: vi.fn(),
+    };
+
+    const svc = createWorkspaceCrudService({
+      database: db,
+      getSessionManager: () => sessionManager as never,
+      gitService: makeGitService() as never,
+    });
+
+    await svc.createWorkspace({
+      issueId,
+      branch: "feature/ak-1-test",
+      isDirect: false,
+      requiresReview: false,
+      thoroughReview: false,
+      planMode: false,
+      tddMode: false,
+      includeVisualProof: true,
+      skipSetup: true,
+      skipContextPacker: true,
+    });
+    await vi.runAllTimersAsync();
+
+    const prompt = sessionManager.startSession.mock.calls[0]?.[0]?.prompt ?? "";
+    expect(prompt).toContain("## Board-Owned Visual Verification");
+    expect(prompt).toContain("visual_verification_mode");
+    expect(prompt).not.toContain("## Visual Verification Required");
+    expect(prompt).not.toContain("playwright-cli");
+    expect(prompt).not.toContain("take a screenshot");
+    expect(prompt).not.toContain("attach_artifact");
+  });
+
+  it("neutralizes obvious ticket-provided build-time visual verification foot-guns", async () => {
+    const { issueId } = await seedIssue(db, [
+      "Implement the UI polish.",
+      "1. Run npx playwright install before testing.",
+      "2. Use playwright-cli to open the app in a browser.",
+      "3. Take a screenshot and attach visual proof before finishing.",
+      "AC: board-owned after-merge verification still runs.",
+    ].join("\n"));
+
+    const sessionManager = {
+      startSession: vi.fn(async () => "session-id"),
+      stopSession: vi.fn(),
+      subscribe: vi.fn(),
+      unsubscribe: vi.fn(),
+    };
+
+    const svc = createWorkspaceCrudService({
+      database: db,
+      getSessionManager: () => sessionManager as never,
+      gitService: makeGitService() as never,
+    });
+
+    await svc.createWorkspace({
+      issueId,
+      branch: "feature/ak-1-test",
+      isDirect: false,
+      requiresReview: false,
+      thoroughReview: false,
+      planMode: false,
+      tddMode: false,
+      includeVisualProof: false,
+      skipSetup: true,
+      skipContextPacker: true,
+    });
+    await vi.runAllTimersAsync();
+
+    const prompt = sessionManager.startSession.mock.calls[0]?.[0]?.prompt ?? "";
+    expect(prompt).toContain("Implement the UI polish.");
+    expect(prompt).toContain("AC: board-owned after-merge verification still runs.");
+    expect(prompt).not.toContain("npx playwright install");
+    expect(prompt).not.toContain("playwright-cli");
+    expect(prompt).not.toContain("Take a screenshot");
+    expect(prompt).not.toContain("visual proof before finishing");
+  });
+
+  it("keeps legitimate screenshot-related product requirements", async () => {
+    const { issueId } = await seedIssue(db, [
+      "Implement screenshot capture for the canvas.",
+      "Add a Screenshot button that saves the current canvas image.",
+      "Users should be able to upload screenshots as issue attachments.",
+      "Before finishing, attach visual proof that the UI still works.",
+    ].join("\n"));
+
+    const sessionManager = {
+      startSession: vi.fn(async () => "session-id"),
+      stopSession: vi.fn(),
+      subscribe: vi.fn(),
+      unsubscribe: vi.fn(),
+    };
+
+    const svc = createWorkspaceCrudService({
+      database: db,
+      getSessionManager: () => sessionManager as never,
+      gitService: makeGitService() as never,
+    });
+
+    await svc.createWorkspace({
+      issueId,
+      branch: "feature/ak-1-test",
+      isDirect: false,
+      requiresReview: false,
+      thoroughReview: false,
+      planMode: false,
+      tddMode: false,
+      includeVisualProof: false,
+      skipSetup: true,
+      skipContextPacker: true,
+    });
+    await vi.runAllTimersAsync();
+
+    const prompt = sessionManager.startSession.mock.calls[0]?.[0]?.prompt ?? "";
+    expect(prompt).toContain("Implement screenshot capture for the canvas.");
+    expect(prompt).toContain("Add a Screenshot button that saves the current canvas image.");
+    expect(prompt).toContain("Users should be able to upload screenshots as issue attachments.");
+    expect(prompt).not.toContain("Before finishing, attach visual proof");
   });
 
   it("marks stale safety-policy preflight launch failures as workspace errors", async () => {
