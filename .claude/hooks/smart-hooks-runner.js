@@ -177,6 +177,83 @@ function extractCommand(input) {
   );
 }
 
+function normalizePathForCompare(p) {
+  return String(p || "").replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+}
+
+function pathIsInside(child, parent) {
+  const c = normalizePathForCompare(child);
+  const p = normalizePathForCompare(parent);
+  return c === p || c.startsWith(`${p}\\`);
+}
+
+function getMainCheckout() {
+  return process.env.KANBAN_MAIN_CHECKOUT || "C:\\andrena\\agentic-kanban";
+}
+
+function isWorktreePath(p) {
+  return /[\/\\]\.worktrees[\/\\]/i.test(String(p || "")) || /--\.worktrees--/i.test(String(p || ""));
+}
+
+function commandRunsVitest(command) {
+  return (
+    /\bvitest\b/i.test(command) ||
+    /\btest:mine\b/i.test(command) ||
+    /\bpnpm(?:\.cmd)?\b[^\n]*(?:\btest\b|\bexec\s+vitest\b)/i.test(command)
+  );
+}
+
+function commandMovesToMainCheckout(command) {
+  return /\b(?:cd|Set-Location|Push-Location)\s+["']?C:[\/\\]andrena[\/\\]agentic-kanban\b/i.test(command);
+}
+
+function getToolCwd(input) {
+  return (
+    input.tool_input?.cwd ||
+    input.tool_input?.workdir ||
+    input.tool_input?.working_dir ||
+    input.cwd ||
+    ""
+  );
+}
+
+function getSessionProjectHint(input) {
+  return (
+    input.transcript_path ||
+    input.transcriptPath ||
+    input.cwd ||
+    process.env.CLAUDE_PROJECT_DIR ||
+    ""
+  );
+}
+
+function wrongCheckoutVitestReason(input, command) {
+  if (!commandRunsVitest(command)) return null;
+  const sessionProject = getSessionProjectHint(input);
+  if (!isWorktreePath(sessionProject)) return null;
+
+  const mainCheckout = getMainCheckout();
+  const cwd = getToolCwd(input);
+  const cwdIsMain = cwd && pathIsInside(cwd, mainCheckout);
+  if (!cwdIsMain && !commandMovesToMainCheckout(command)) return null;
+
+  return [
+    "Run worktree tests from the worktree root, not the main checkout.",
+    "",
+    `This session is for a worktree (${sessionProject}), but the test command is running under:`,
+    `  ${cwdIsMain ? cwd : mainCheckout}`,
+    "",
+    "Use:",
+    "  cd <your worktree root>",
+    "  pnpm test:mine -- --changed HEAD",
+    "",
+    "Or from a package directory in that same worktree:",
+    "  pnpm exec vitest related <file>",
+    "",
+    "Do not run pnpm install to fix vitest import errors; report the environment issue and continue.",
+  ].join("\n");
+}
+
 function handlePreToolUse(input) {
   const toolName = input.tool_name;
 
@@ -187,6 +264,19 @@ function handlePreToolUse(input) {
   }
 
   const command = extractCommand(input);
+  const wrongCheckoutReason = wrongCheckoutVitestReason(input, command);
+  if (wrongCheckoutReason) {
+    console.error("[smart-hooks] Wrong-checkout Vitest guard: PREVENTED");
+    console.error(wrongCheckoutReason);
+    process.stdout.write(
+      JSON.stringify({
+        decision: "block",
+        reason: wrongCheckoutReason,
+      }) + "\n"
+    );
+    process.exit(2);
+  }
+
   const policyDir = getScriptProjectDir();
   const config = loadConfig(policyDir);
   const checks = config.hooks?.PreToolUse || [];
@@ -329,4 +419,10 @@ async function main() {
   process.exit(0);
 }
 
-main().catch(() => process.exit(0));
+if (require.main === module) {
+  main().catch(() => process.exit(0));
+}
+
+module.exports = {
+  wrongCheckoutVitestReason,
+};
