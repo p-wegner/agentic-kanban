@@ -171,6 +171,26 @@ describe("Preferences API - settings", () => {
     expect(body.copilot_profile).toBe("agent:reviewer");
   });
 
+  it("GET /api/preferences/settings returns Pi provider settings", async () => {
+    const { app: freshApp } = createTestApp();
+
+    await freshApp.request("/api/preferences/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        provider: "pi",
+        pi_profile: "local",
+      }),
+    });
+
+    const res = await freshApp.request("/api/preferences/settings");
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.provider).toBe("pi");
+    expect(body.pi_profile).toBe("local");
+  });
+
+
   it("PUT /api/preferences/settings ignores disallowed keys", async () => {
     const { app: freshApp } = createTestApp();
 
@@ -291,6 +311,7 @@ describe("Preferences API - settings", () => {
         agent_args: "--flag value",
         output_parser: "custom",
         claude_profile: "mock",
+        pi_profile: "local",
         copilot_profile: "gpt-5.2",
       }),
     });
@@ -301,6 +322,7 @@ describe("Preferences API - settings", () => {
     expect(body.agent_args).toBe("--flag value");
     expect(body.output_parser).toBe("custom");
     expect(body.claude_profile).toBe("mock");
+    expect(body.pi_profile).toBe("local");
     expect(body.copilot_profile).toBe("gpt-5.2");
   });
 

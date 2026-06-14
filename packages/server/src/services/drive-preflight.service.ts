@@ -92,7 +92,7 @@ function isProfileCooledDown(
  * `*_profile` prefs when no strategy policy is configured.
  */
 function checkProviderHealth(projectId: string, prefMap: Map<string, string>, now: Date): PreflightCheck {
-  let provider: "claude" | "codex" | "copilot" = "claude";
+  let provider: "claude" | "codex" | "copilot" | "pi" = "claude";
   let profileName = "";
 
   const strategyRaw = prefMap.get(`board_strategy_${projectId}`);
@@ -109,12 +109,14 @@ function checkProviderHealth(projectId: string, prefMap: Map<string, string>, no
   }
   if (!profileName) {
     const globalProvider = prefMap.get("provider");
-    if (globalProvider === "codex" || globalProvider === "copilot" || globalProvider === "claude") {
+    if (globalProvider === "codex" || globalProvider === "copilot" || globalProvider === "pi" || globalProvider === "claude") {
       provider = globalProvider;
     }
     profileName =
       provider === "codex"
         ? prefMap.get("codex_profile") ?? ""
+        : provider === "pi"
+          ? prefMap.get("pi_profile") ?? ""
         : provider === "copilot"
           ? prefMap.get("copilot_profile") ?? ""
           : prefMap.get("claude_profile") ?? "";
