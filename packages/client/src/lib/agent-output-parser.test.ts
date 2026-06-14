@@ -6,6 +6,7 @@ import {
   getOutputFormatForProvider,
   RawOutputParser,
 } from "./agent-output-parser.js";
+import { PiOutputParser } from "./pi-output-parser.js";
 
 describe("agent output parser factory", () => {
   it("creates the Claude stream-json parser by default", () => {
@@ -36,6 +37,125 @@ describe("agent output parser factory", () => {
     expect(parser).toBeInstanceOf(CopilotOutputParser);
     expect(parser.format).toBe("copilot-jsonl");
     expect(parser.label).toBe("copilot-jsonl");
+  });
+
+  it("creates the Pi JSONL parser", () => {
+    const parser = createAgentOutputParser("pi-jsonl");
+
+    expect(parser).toBeInstanceOf(PiOutputParser);
+    expect(parser.format).toBe("pi-jsonl");
+    expect(parser.label).toBe("pi-jsonl");
+  });
+});
+
+describe("PiOutputParser", () => {
+  it("parses session and assistant text_delta events from Pi JSONL", () => {
+    const parser = new PiOutputParser();
+    const output = [
+      "{\"type\":\"session\",\"version\":3,\"id\":\"019ec69d-bed7-75ad-9b25-2b19161227d5\",\"timestamp\":\"2026-06-14T14:51:27.320Z\",\"cwd\":\"C:\\\\Users\\\\pwegner\\\\AppData\\\\Local\\\\Temp\\\\ak-pi-cli-findings\\\\work\"}",
+      "{\"type\":\"message_update\",\"assistantMessageEvent\":{\"type\":\"text_delta\",\"contentIndex\":0,\"delta\":\"one-shot-ok\",\"partial\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"one-shot-ok\"}],\"api\":\"ak-faux-api\",\"provider\":\"ak-faux\",\"model\":\"ak-faux-1\",\"usage\":{\"input\":1329,\"output\":3,\"cacheRead\":0,\"cacheWrite\":1329,\"totalTokens\":2661,\"cost\":{\"input\":0,\"output\":0,\"cacheRead\":0,\"cacheWrite\":0,\"total\":0}},\"stopReason\":\"stop\",\"timestamp\":1781448687453}},\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"one-shot-ok\"}],\"api\":\"ak-faux-api\",\"provider\":\"ak-faux\",\"model\":\"ak-faux-1\",\"usage\":{\"input\":1329,\"output\":3,\"cacheRead\":0,\"cacheWrite\":1329,\"totalTokens\":2661,\"cost\":{\"input\":0,\"output\":0,\"cacheRead\":0,\"cacheWrite\":0,\"total\":0}},\"stopReason\":\"stop\",\"timestamp\":1781448687453}}",
+      "{\"type\":\"agent_end\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"one-shot schema capture\"}],\"timestamp\":1781448687447},{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"one-shot-ok\"}],\"api\":\"ak-faux-api\",\"provider\":\"ak-faux\",\"model\":\"ak-faux-1\",\"usage\":{\"input\":1329,\"output\":3,\"cacheRead\":0,\"cacheWrite\":1329,\"totalTokens\":2661,\"cost\":{\"input\":0,\"output\":0,\"cacheRead\":0,\"cacheWrite\":0,\"total\":0}},\"stopReason\":\"stop\",\"timestamp\":1781448687453}]}",
+    ].join("\n") + "\n";
+
+    expect(parser.feed(output)).toEqual([
+      {
+        kind: "init",
+        model: "pi",
+        sessionId: "019ec69d-bed7-75ad-9b25-2b19161227d5",
+        cwd: "C:\\Users\\pwegner\\AppData\\Local\\Temp\\ak-pi-cli-findings\\work",
+        tools: [],
+        mcpServers: [],
+        permissionMode: "",
+      },
+      { kind: "assistant", text: "one-shot-ok", model: "ak-faux-1" },
+      {
+        kind: "result",
+        success: true,
+        durationMs: 0,
+        result: "",
+        totalCostUsd: 0,
+        inputTokens: 1329,
+        outputTokens: 3,
+        model: "ak-faux-1",
+      },
+    ]);
+  });
+
+  it("parses Pi tool execution start and end events", () => {
+    const parser = new PiOutputParser();
+    const output = [
+      "{\"type\":\"tool_execution_start\",\"toolCallId\":\"tool-call-read-sample\",\"toolName\":\"read\",\"args\":{\"path\":\"sample.txt\"}}",
+      "{\"type\":\"tool_execution_end\",\"toolCallId\":\"tool-call-read-sample\",\"toolName\":\"read\",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"pi scratch sample file\\r\\n\"}]},\"isError\":false}",
+      "{\"type\":\"tool_execution_start\",\"toolCallId\":\"tool-call-write-blocked\",\"toolName\":\"write\",\"args\":{\"path\":\"blocked.txt\",\"content\":\"blocked\"}}",
+      "{\"type\":\"tool_execution_end\",\"toolCallId\":\"tool-call-write-blocked\",\"toolName\":\"write\",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"blocked by ak faux extension\"}],\"details\":{}},\"isError\":true}",
+    ].join("\n") + "\n";
+
+    expect(parser.feed(output)).toEqual([
+      {
+        kind: "tool_use",
+        id: "tool-call-read-sample",
+        name: "read",
+        input: "{\"path\":\"sample.txt\"}",
+        inputParsed: { path: "sample.txt" },
+      },
+      {
+        kind: "tool_result",
+        toolName: "read",
+        toolUseId: "tool-call-read-sample",
+        output: "pi scratch sample file\r\n",
+        isError: false,
+      },
+      {
+        kind: "tool_use",
+        id: "tool-call-write-blocked",
+        name: "write",
+        input: "{\"path\":\"blocked.txt\",\"content\":\"blocked\"}",
+        inputParsed: { path: "blocked.txt", content: "blocked" },
+      },
+      {
+        kind: "tool_result",
+        toolName: "write",
+        toolUseId: "tool-call-write-blocked",
+        output: "blocked by ak faux extension",
+        isError: true,
+      },
+    ]);
+  });
+
+  it("parses Pi assistant error messages as failed result events", () => {
+    const parser = new PiOutputParser();
+    const output = "{\"type\":\"message_start\",\"message\":{\"role\":\"assistant\",\"content\":[],\"api\":\"ak-faux-api\",\"provider\":\"ak-faux\",\"model\":\"ak-faux-1\",\"usage\":{\"input\":729,\"output\":0,\"cacheRead\":620,\"cacheWrite\":730,\"totalTokens\":2079,\"cost\":{\"input\":0,\"output\":0,\"cacheRead\":0,\"cacheWrite\":0,\"total\":0}},\"stopReason\":\"error\",\"errorMessage\":\"No more faux responses queued\",\"timestamp\":1781448948042}}\n";
+
+    expect(parser.feed(output)).toEqual([
+      {
+        kind: "result",
+        success: false,
+        durationMs: 0,
+        result: "No more faux responses queued",
+        totalCostUsd: 0,
+        inputTokens: 729,
+        outputTokens: 0,
+        model: "ak-faux-1",
+      },
+    ]);
+  });
+
+  it("buffers Pi JSONL partial lines across feed calls", () => {
+    const parser = new PiOutputParser();
+    const line = "{\"type\":\"message_update\",\"assistantMessageEvent\":{\"type\":\"text_delta\",\"contentIndex\":0,\"delta\":\"resume-ok\",\"partial\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"resume-ok\"}],\"api\":\"ak-faux-api\",\"provider\":\"ak-faux\",\"model\":\"ak-faux-1\",\"usage\":{\"input\":1341,\"output\":3,\"cacheRead\":0,\"cacheWrite\":1341,\"totalTokens\":2685,\"cost\":{\"input\":0,\"output\":0,\"cacheRead\":0,\"cacheWrite\":0,\"total\":0}},\"stopReason\":\"stop\",\"timestamp\":1781448703091}},\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"resume-ok\"}],\"api\":\"ak-faux-api\",\"provider\":\"ak-faux\",\"model\":\"ak-faux-1\",\"usage\":{\"input\":1341,\"output\":3,\"cacheRead\":0,\"cacheWrite\":1341,\"totalTokens\":2685,\"cost\":{\"input\":0,\"output\":0,\"cacheRead\":0,\"cacheWrite\":0,\"total\":0}},\"stopReason\":\"stop\",\"timestamp\":1781448703091}}";
+    const splitAt = 118;
+
+    expect(parser.feed(line.slice(0, splitAt))).toEqual([]);
+    expect(parser.feed(line.slice(splitAt) + "\n")).toEqual([
+      { kind: "assistant", text: "resume-ok", model: "ak-faux-1" },
+    ]);
+  });
+
+  it("flushes a buffered Pi line", () => {
+    const parser = new PiOutputParser();
+
+    expect(parser.feed("{\"type\":\"session\",\"version\":3")).toEqual([]);
+    expect(parser.flush()).toEqual([{ kind: "raw", text: "{\"type\":\"session\",\"version\":3" }]);
   });
 });
 
@@ -376,6 +496,12 @@ describe("getOutputFormatForAgent", () => {
     expect(getOutputFormatForAgent("C:\\Users\\test\\AppData\\Local\\GitHub\\copilot.exe")).toBe("copilot-jsonl");
   });
 
+  it("returns pi-jsonl for pi command", () => {
+    expect(getOutputFormatForAgent("pi")).toBe("pi-jsonl");
+    expect(getOutputFormatForAgent("pi.cmd")).toBe("pi-jsonl");
+    expect(getOutputFormatForAgent("C:\\Users\\test\\AppData\\Roaming\\npm\\pi.cmd")).toBe("pi-jsonl");
+  });
+
   it("returns raw for other agent commands", () => {
     expect(getOutputFormatForAgent("aider")).toBe("raw");
     expect(getOutputFormatForAgent("custom-agent")).toBe("raw");
@@ -400,6 +526,10 @@ describe("getOutputFormatForProvider", () => {
 
   it("returns copilot-jsonl for copilot provider", () => {
     expect(getOutputFormatForProvider("copilot")).toBe("copilot-jsonl");
+  });
+
+  it("returns pi-jsonl for pi provider", () => {
+    expect(getOutputFormatForProvider("pi")).toBe("pi-jsonl");
   });
 
   it("returns raw for unknown providers", () => {
