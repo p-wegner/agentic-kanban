@@ -126,12 +126,22 @@ export function ProjectSettings({ activeProjectId, settings, setSettings, projec
                       </Field>
                       <ProjectScriptsSettingsSection projectId={activeProjectId} />
                       <StackProfileSettingsSection projectId={activeProjectId} />
+                      <div className="pt-2">
+                        <h3 className="text-sm font-semibold text-gray-700">Worktree Setup</h3>
+                        <p className="text-xs text-gray-500 mt-1">
+                          How each new worktree gets working dependencies. By default the stack's install
+                          command runs in the worktree (the Setup Script below, e.g. <code>pnpm install -r</code>,{" "}
+                          <code>uv sync</code>, <code>cargo fetch</code>). As a faster Windows-only alternative
+                          you can junction-link dependency directories from the main checkout instead — see
+                          Dependency Symlinks. Use one or the other.
+                        </p>
+                      </div>
                       <CollapsibleSection
-                        title="Setup Script"
+                        title="Setup Script (install dependencies)"
                         configured={!!projectSettings.setupScript}
                         defaultOpen={!!projectSettings.setupScript}
                       >
-                        <p className="text-xs text-gray-500">Shell command(s) to run in each new workspace after the git worktree is created. Use && to chain multiple commands.</p>
+                        <p className="text-xs text-gray-500">Runs in each new worktree after it is created — typically the stack's install command (<code>pnpm install -r</code>, <code>uv sync</code>, <code>cargo fetch</code>, …), auto-derived on project registration. Use && to chain multiple commands.</p>
                         <textarea
                           value={projectSettings.setupScript}
                           onChange={(e) => setProjectSettings(s => ({ ...s, setupScript: e.target.value }))}
@@ -186,6 +196,48 @@ export function ProjectSettings({ activeProjectId, settings, setSettings, projec
                           label="Run setup before agent"
                           hint="When enabled, the setup script must complete before the agent starts. When disabled, both run in parallel (faster but the agent may start before dependencies are installed)."
                         />
+                      </CollapsibleSection>
+                      <CollapsibleSection
+                        title="Dependency Symlinks (alternative to install)"
+                        configured={projectSettings.symlinkEnabled}
+                        defaultOpen={projectSettings.symlinkEnabled}
+                      >
+                        <p className="text-xs text-gray-500">
+                          Opt-in, Windows-only fast-path that <strong>replaces</strong> the install above:
+                          instead of running the setup script, junction-link dependency directories from the
+                          main checkout into each new worktree. Saves the ~10s install at the cost of Windows
+                          junction fragility, so it is off by default — prefer the install setup script.
+                          Stack-agnostic: works for any directory (<code>node_modules</code>, <code>.venv</code>,
+                          <code>target</code>, <code>vendor</code>, build caches). For a pnpm/yarn workspace,
+                          listing <code>node_modules</code> also links each <code>packages/*/node_modules</code>
+                          (deps live per-package under a strict linker). If a branch later changes its
+                          dependencies, the worktree is auto-isolated (junctions removed) before install, so it
+                          never corrupts the main checkout.
+                        </p>
+                        <Toggle
+                          checked={projectSettings.symlinkEnabled}
+                          onChange={(v) => setProjectSettings(s => ({ ...s, symlinkEnabled: v }))}
+                          label="Use dependency symlinks instead of the install script"
+                          hint="When enabled, listed directories are junction-linked from the main checkout into new worktrees on Windows, and the setup/install script is typically not needed."
+                        />
+                        {projectSettings.symlinkEnabled && (
+                          <div className="space-y-2">
+                            <label className="block text-xs font-medium text-gray-700">
+                              Directories to symlink
+                            </label>
+                            <input
+                              type="text"
+                              value={projectSettings.symlinkDirs}
+                              onChange={(e) => setProjectSettings(s => ({ ...s, symlinkDirs: e.target.value }))}
+                              placeholder='["node_modules", ".venv"]'
+                              className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 font-mono"
+                            />
+                            <p className="text-xs text-gray-400">
+                              JSON array of directory names relative to the repo root. These must exist in the main checkout.
+                              <code>node_modules</code> auto-expands to per-package node_modules in a workspace.
+                            </p>
+                          </div>
+                        )}
                       </CollapsibleSection>
                       <Toggle
                         checked={projectSettings.setupEnabled}
@@ -315,43 +367,6 @@ export function ProjectSettings({ activeProjectId, settings, setSettings, projec
                           ))}
                         </select>
                       </Field>
-                      <CollapsibleSection
-                        title="Dependency Symlinks"
-                        configured={projectSettings.symlinkEnabled}
-                        defaultOpen={projectSettings.symlinkEnabled}
-                      >
-                        <p className="text-xs text-gray-500">
-                          Junction-link dependency directories (e.g. node_modules) from the main checkout into new worktrees.
-                          Eliminates the need for pnpm install in each worktree, so tests and builds run in-worktree.
-                          For a pnpm/yarn workspace, listing <code>node_modules</code> also links each <code>packages/*/node_modules</code>
-                          (deps live per-package under a strict linker). If a branch later changes its dependencies, the worktree
-                          is auto-isolated (junctions removed) before install, so it never corrupts the main checkout.
-                        </p>
-                        <Toggle
-                          checked={projectSettings.symlinkEnabled}
-                          onChange={(v) => setProjectSettings(s => ({ ...s, symlinkEnabled: v }))}
-                          label="Enable dependency symlinks"
-                          hint="When enabled, listed directories are junction-linked from the main checkout into new worktrees on Windows."
-                        />
-                        {projectSettings.symlinkEnabled && (
-                          <div className="space-y-2">
-                            <label className="block text-xs font-medium text-gray-700">
-                              Directories to symlink
-                            </label>
-                            <input
-                              type="text"
-                              value={projectSettings.symlinkDirs}
-                              onChange={(e) => setProjectSettings(s => ({ ...s, symlinkDirs: e.target.value }))}
-                              placeholder='["node_modules", ".venv"]'
-                              className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 font-mono"
-                            />
-                            <p className="text-xs text-gray-400">
-                              JSON array of directory names relative to the repo root. These must exist in the main checkout.
-                              <code>node_modules</code> auto-expands to per-package node_modules in a workspace.
-                            </p>
-                          </div>
-                        )}
-                      </CollapsibleSection>
                       <div className="pt-4 border-t border-gray-100">
                         <ArchiveDoneSection projectId={activeProjectId} />
                       </div>
