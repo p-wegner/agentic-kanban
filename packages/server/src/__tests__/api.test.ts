@@ -1901,6 +1901,24 @@ describe("Workspaces API", () => {
     expect(res.status).toBe(400);
   });
 
+  it("GET /api/workspaces surfaces the model column in the list projection (#819)", async () => {
+    const createRes = await app.request("/api/workspaces", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ issueId, branch: "feature/model-proj", model: "sonnet" }),
+    });
+    expect(createRes.status).toBe(201);
+
+    const listRes = await app.request(`/api/workspaces?issueId=${issueId}`);
+    expect(listRes.status).toBe(200);
+    const rows = await listRes.json() as Array<{ model?: string | null }>;
+    // The bug: the list projection omitted `model` entirely, so the field was absent from every row
+    // and the API reported null even when a builder launched with a real model. Assert the column is
+    // now part of the projected shape (value plumbing is covered by provider-config-resolution tests).
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((w) => "model" in w)).toBe(true);
+  });
+
   it("POST /api/workspaces skips setup script for direct workspaces", async () => {
     const repoPath = mkdtempSync(join(tmpdir(), "kanban-direct-setup-"));
     execFileSync("git", ["init", "-b", "main"], { cwd: repoPath });

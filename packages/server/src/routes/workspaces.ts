@@ -272,6 +272,10 @@ export function createWorkspacesRoute(
       status: workspaces.status,
       readyForMerge: workspaces.readyForMerge,
       provider: workspaces.provider,
+      // The model column is persisted at creation (insertWorkspaceRecord) but was missing from
+      // this projection, so the API always returned model=null even when a builder launched with a
+      // real model (e.g. claude-sonnet-4-6). Surface it alongside provider (#819).
+      model: workspaces.model,
       createdAt: workspaces.createdAt,
       updatedAt: workspaces.updatedAt,
     };
