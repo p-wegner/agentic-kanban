@@ -11,12 +11,13 @@ vi.mock("node:fs", () => ({
   writeFileSync: vi.fn(),
   existsSync: vi.fn(() => false),
   readFileSync: vi.fn(),
+  readdirSync: vi.fn(() => []),
 }));
 
 // Import after mocking
 import { launch, kill, killAll, sendInput, closeStdin, isStdinOpen, getProcess, agentState } from "../services/agent.service.js";
 import { spawn as spawnMock } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { createMockProc } from "./helpers/mocks.js";
 
 describe("agent.service", () => {
@@ -80,6 +81,43 @@ describe("agent.service", () => {
       expect(mockProc.stdin.end).toHaveBeenCalledWith(expect.stringContaining("[Attached context files]"));
       expect(mockProc.stdin.end).toHaveBeenCalledWith(expect.stringContaining("# Ticket context"));
       expect(mockProc.stdin.end).toHaveBeenCalledWith(expect.stringContaining("test prompt"));
+    });
+
+    it("passes Pi materialized skill files and hook adapter extension from the worktree", () => {
+      delete process.env.AGENT_COMMAND;
+      const mockProc = createMockProc();
+      (spawnMock as any).mockReturnValue(mockProc);
+      (readdirSync as any).mockReturnValue([
+        { name: "kanban-workflow", isDirectory: () => true },
+        { name: "not-a-skill.md", isDirectory: () => false },
+      ]);
+      (existsSync as any).mockImplementation((path: string) =>
+        path.endsWith(".pi\\plugin\\agentic-kanban-hooks.ts") ||
+        path.endsWith(".pi/plugin/agentic-kanban-hooks.ts") ||
+        path.endsWith(".claude\\skills\\kanban-workflow\\SKILL.md") ||
+        path.endsWith(".claude/skills/kanban-workflow/SKILL.md")
+      );
+
+      launch(
+        "C:\\repo\\worktree",
+        "sess-pi-skills",
+        "test prompt",
+        undefined,
+        vi.fn(),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "pi",
+      );
+
+      const [, args] = (spawnMock as any).mock.calls[0];
+      expect(args).toContain("--extension");
+      expect(args).toContain("C:\\repo\\worktree\\.pi\\plugin\\agentic-kanban-hooks.ts");
+      expect(args).toContain("--skill");
+      expect(args).toContain("C:\\repo\\worktree\\.claude\\skills\\kanban-workflow\\SKILL.md");
     });
 
     it("registers stdout/stderr/exit handlers", () => {
