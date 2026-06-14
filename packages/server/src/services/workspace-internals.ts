@@ -193,8 +193,29 @@ export async function resolveMergeState(
   // mergedAt is stamped immediately after git merge lands (#575 crash-recovery guard).
   // If it's set, the merge already completed — run cleanup and move to Done without
   // another git merge, regardless of workspace.status.
+  //
+  // Trust-but-verify (#820): the "already-merged" path deletes the branch and moves the issue to
+  // Done. Trusting the mergedAt board flag ALONE is a silent-merge-loss vector — the flag can go
+  // stale (a deferred working-tree sync that reverted, a base reset, a crash between the early
+  // stamp and finalize) while the branch is NOT actually on the base branch. So verify via git:
+  //   - branch tip IS an ancestor of base  → genuinely merged, honor the flag.
+  //   - branch ref is gone (branchSha null) → merged-and-deleted by normal cleanup, honor the flag.
+  //   - branch still EXISTS but is NOT an ancestor → the flag is lying. Do NOT short-circuit (which
+  //     would delete the branch + mark Done and lose the work); fall through to normal resolution so
+  //     the work is actually merged (reconcile/proceed) or surfaced as a conflict.
   if (workspace.mergedAt) {
-    return { kind: "already-merged" };
+    const verify = await gitService.checkBranchTipIsAncestor(
+      repoPath,
+      workspace.branch,
+      baseBranch,
+      workspace.workingDir ?? undefined,
+    );
+    if (verify.isAncestor || verify.branchSha === null) {
+      return { kind: "already-merged" };
+    }
+    console.warn(
+      `[workspace-merge] stale mergedAt on ws=${workspace.id}: branch '${workspace.branch}' (${verify.branchSha}) is NOT an ancestor of '${baseBranch}' — re-resolving instead of silently marking Done (#820)`,
+    );
   }
 
   if (workspace.status === "closed") {

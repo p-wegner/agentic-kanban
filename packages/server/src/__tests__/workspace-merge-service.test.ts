@@ -265,7 +265,8 @@ describe("MergeService — idempotency: retry after dropped response", () => {
       status: "closed",
       readyForMerge: false,
     });
-    const git = makeGit();
+    // Genuinely merged → branch is an ancestor (#820 guard verifies before honoring mergedAt).
+    const git = makeGit({ checkBranchTipIsAncestor: async () => ({ isAncestor: true, branchSha: "feature-sha", baseSha: "master-sha" }) });
 
     const svc = createWorkspaceMergeService({
       database: db,
@@ -295,7 +296,8 @@ describe("MergeService — idempotency: retry after dropped response", () => {
       readyForMerge: false,
     });
     const mergeBranch = vi.fn(async () => "Merge made by the 'ort' strategy.");
-    const git = makeGit({ mergeBranch });
+    // Genuinely merged → branch is an ancestor (#820 guard verifies before honoring mergedAt).
+    const git = makeGit({ mergeBranch, checkBranchTipIsAncestor: async () => ({ isAncestor: true, branchSha: "feature-sha", baseSha: "master-sha" }) });
 
     const svc = createWorkspaceMergeService({
       database: db,
@@ -679,13 +681,38 @@ describe("MergeService — retryable sessions recover from stale failed fix-and-
   });
 });
 
-describe("resolveMergeState — already-merged (mergedAt set)", () => {
-  it("returns already-merged when mergedAt is stamped regardless of status", async () => {
+describe("resolveMergeState — already-merged (mergedAt set), git-verified (#820)", () => {
+  it("returns already-merged when mergedAt is set AND the branch tip is genuinely an ancestor of base", async () => {
     const ws = makeWorkspace({ mergedAt: new Date().toISOString(), status: "idle" });
-    const git = makeGitForStateMachine();
+    const git = makeGitForStateMachine({
+      checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: true, branchSha: "sha-branch", baseSha: "sha-base" })),
+    });
     const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
     expect(result.kind).toBe("already-merged");
-    expect(git.checkBranchTipIsAncestor).not.toHaveBeenCalled();
+    // The flag is now trust-but-verified: the ancestry check MUST run before honoring mergedAt.
+    expect(git.checkBranchTipIsAncestor).toHaveBeenCalled();
+  });
+
+  it("honors mergedAt when the branch ref is already gone (merged-and-deleted by cleanup)", async () => {
+    const ws = makeWorkspace({ mergedAt: new Date().toISOString(), status: "closed" });
+    const git = makeGitForStateMachine({
+      checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: false, branchSha: null, reason: "branch-not-found" })),
+    });
+    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    expect(result.kind).toBe("already-merged");
+  });
+
+  it("does NOT short-circuit to already-merged when mergedAt is set but the branch is NOT an ancestor (stale flag — silent-merge-loss guard)", async () => {
+    // The #820 vector: a stale mergedAt while the branch still holds unmerged work. Short-circuiting
+    // would delete the branch + mark the issue Done and lose the work. The branch still exists
+    // (branchSha present) and is not an ancestor, so resolveMergeState must re-resolve instead.
+    const ws = makeWorkspace({ mergedAt: new Date().toISOString(), status: "idle" });
+    const git = makeGitForStateMachine({
+      checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: false, branchSha: "sha-branch", baseSha: "sha-base" })),
+    });
+    const result = await resolveMergeState(ws, "/repo", "master", { gitService: git as never });
+    expect(result.kind).not.toBe("already-merged");
+    expect(result.kind).toBe("proceed"); // re-resolves to an actual merge, no silent loss
   });
 });
 
