@@ -21,6 +21,7 @@ import { setupProcessHandlers } from "./startup/process-handlers.js";
 import { setupRoutes } from "./startup/route-setup.js";
 import { setupScheduledTasks, stopScheduledTasks } from "./startup/scheduled-tasks.js";
 import { startMonitorButler, stopMonitorButler } from "./services/monitor-butler.js";
+import { startProjectConductorSupervisor } from "./services/project-conductor.service.js";
 import { runStartupTasks } from "./startup/startup-tasks.js";
 import { runSessionRestore } from "./startup/session-restore.js";
 import { startBackupScheduler, stopBackupScheduler } from "./startup/backup-scheduler.js";
@@ -194,6 +195,8 @@ export async function startServer(port?: number, hostname?: string) {
   // monitor_butler_enabled preference; off by default). See services/monitor-butler.ts.
   startMonitorButler();
   cleanupCallbacks.push(stopMonitorButler);
+  const projectConductorSupervisor = startProjectConductorSupervisor({ database: db, boardRepoRoot: serverStartRepoRoot });
+  cleanupCallbacks.push(() => projectConductorSupervisor.stop());
   setupProcessHandlers(server, agentService, { cleanupStartupTimers });
 
   // Periodic database backups (interval from the backup_interval_min preference).

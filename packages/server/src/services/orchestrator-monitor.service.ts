@@ -12,6 +12,7 @@
 
 import { existsSync, statSync, openSync, readSync, closeSync, readFileSync } from "fs";
 import { join } from "path";
+import { PROJECT_CONDUCTOR_OBJECTIVE_RELATIVE_PATH, PROJECT_CONDUCTOR_STATE_RELATIVE_DIR } from "./strategy-objective.service.js";
 
 // A healthy loop sleeps MONITOR_SLEEP (default 300s) between iterations and streams
 // output during each one, so loop.log is touched at least every few minutes. If it
@@ -123,8 +124,12 @@ export function readOrchestratorStatus(
   opts: { recentLimit?: number } = {}
 ): OrchestratorStatus {
   if (!repoPath) return UNAVAILABLE;
-  const dir = join(repoPath, "scripts", "board-monitor");
-  if (!existsSync(join(dir, "loop.sh"))) return UNAVAILABLE;
+  const legacyDir = join(repoPath, "scripts", "board-monitor");
+  const conductorDir = join(repoPath, PROJECT_CONDUCTOR_STATE_RELATIVE_DIR);
+  const hasLegacyLoop = existsSync(join(legacyDir, "loop.sh"));
+  const hasProjectObjective = existsSync(join(repoPath, PROJECT_CONDUCTOR_OBJECTIVE_RELATIVE_PATH));
+  if (!hasLegacyLoop && !hasProjectObjective && !existsSync(conductorDir)) return UNAVAILABLE;
+  const dir = hasLegacyLoop ? legacyDir : conductorDir;
 
   const recentLimit = Math.min(40, Math.max(1, opts.recentLimit ?? 12));
 
