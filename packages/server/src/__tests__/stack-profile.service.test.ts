@@ -146,6 +146,7 @@ describe("detectStackProfile", () => {
     await writeFile(join(dir, "build.gradle.kts"), `plugins { kotlin("multiplatform") version "2.0.21" }\n`);
     await writeFile(join(dir, "settings.gradle.kts"), `rootProject.name = "x"\n`);
     await writeFile(join(dir, "gradlew"), "#!/bin/sh\n");
+    await writeFile(join(dir, "gradlew.bat"), "@echo off\n");
     await mkdir(join(dir, "src", "commonTest", "kotlin"), { recursive: true });
     const p = detectStackProfile(dir);
     expect(p.stack).toBe("java");
@@ -154,6 +155,19 @@ describe("detectStackProfile", () => {
     expect(p.devCommand).toBeNull();
     expect(p.isWeb).toBe(false);
     expect(p.testDir).toBe("src/commonTest/kotlin");
+    // KMP has no `test` task — must target the `allTests` aggregate.
+    const w = process.platform === "win32" ? ".\\gradlew.bat" : "./gradlew";
+    expect(p.testCommand).toBe(`${w} allTests`);
+  });
+
+  it("a plain kotlin-jvm gradle project keeps the aggregate `test` task", async () => {
+    await writeFile(join(dir, "build.gradle.kts"), `plugins { kotlin("jvm") version "2.0.21" }\n`);
+    await writeFile(join(dir, "gradlew"), "#!/bin/sh\n");
+    await writeFile(join(dir, "gradlew.bat"), "@echo off\n");
+    const p = detectStackProfile(dir);
+    const w = process.platform === "win32" ? ".\\gradlew.bat" : "./gradlew";
+    expect(p.testCommand).toBe(`${w} test`); // kotlin-jvm DOES have a `test` task
+    expect(p.typecheckCommand).toBeNull(); // still Kotlin → no compileJava
   });
 
   it("a Java (non-Kotlin) gradle project still gets compileJava typecheck", async () => {
