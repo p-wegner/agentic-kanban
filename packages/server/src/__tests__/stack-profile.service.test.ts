@@ -9,6 +9,7 @@ import {
   buildSmartHooksRules,
   writeSmartHooksRules,
   smartHooksRulesPath,
+  deriveTestScaffold,
 } from "../services/stack-profile.service.js";
 
 async function tmp(): Promise<string> {
@@ -135,6 +136,37 @@ describe("detectStackProfile", () => {
     expect(p.buildCommand).toBe("./gradlew build");
   });
 
+  it("a Kotlin Multiplatform gradle project has no compileJava typecheck and no bootRun dev command", async () => {
+    // KMP applies the kotlin multiplatform plugin via the Kotlin DSL — there is no `compileJava`
+    // task (would brick a blocking per-edit hook) and no Spring `bootRun` task.
+    await writeFile(join(dir, "build.gradle.kts"), `plugins { kotlin("multiplatform") version "2.0.21" }\n`);
+    await writeFile(join(dir, "settings.gradle.kts"), `rootProject.name = "x"\n`);
+    await writeFile(join(dir, "gradlew"), "#!/bin/sh\n");
+    await mkdir(join(dir, "src", "commonTest", "kotlin"), { recursive: true });
+    const p = detectStackProfile(dir);
+    expect(p.stack).toBe("java");
+    expect(p.packageManager).toBe("gradle");
+    expect(p.typecheckCommand).toBeNull();
+    expect(p.devCommand).toBeNull();
+    expect(p.isWeb).toBe(false);
+    expect(p.testDir).toBe("src/commonTest/kotlin");
+  });
+
+  it("a Java (non-Kotlin) gradle project still gets compileJava typecheck", async () => {
+    await writeFile(join(dir, "build.gradle"), "plugins { id 'java' }\n");
+    await writeFile(join(dir, "gradlew"), "#!/bin/sh\n");
+    const p = detectStackProfile(dir);
+    expect(p.typecheckCommand).toBe("./gradlew compileJava");
+  });
+
+  it("a Spring Boot gradle project keeps bootRun + isWeb", async () => {
+    await writeFile(join(dir, "build.gradle"), "plugins { id 'org.springframework.boot' }\n");
+    await writeFile(join(dir, "gradlew"), "#!/bin/sh\n");
+    const p = detectStackProfile(dir);
+    expect(p.devCommand).toBe("./gradlew bootRun");
+    expect(p.isWeb).toBe(true);
+  });
+
   it("returns an empty-but-valid profile when no markers are present", () => {
     const p = detectStackProfile(dir);
     expect(p.stack).toBeNull();
@@ -207,6 +239,41 @@ describe("buildSmartHooksRules", () => {
     expect(tc.filePatterns).toContain("**/*.ts");
     expect(tc.filePatterns).toContain("**/*.rs");
     expect(tc.filePatterns).toContain("**/*.py");
+  });
+
+  it("skips the per-edit test rule for the slow JVM (gradle) family — too slow to gate each edit", () => {
+    // A Kotlin Multiplatform profile (typecheck null, gradle test) must NOT produce a blocking
+    // `./gradlew test` per-edit rule; the verify gate handles correctness at merge.
+    const out = buildSmartHooksRules(
+      profile({ stack: "java", typecheckCommand: null, testCommand: "./gradlew test", quickTestCommand: "./gradlew test" }),
+    );
+    expect(out.rules).toEqual([]);
+  });
+
+  it("keeps a Java compileJava typecheck rule but downgrades it to non-blocking (gradle is slow)", () => {
+    const out = buildSmartHooksRules(
+      profile({ stack: "java", typecheckCommand: "./gradlew compileJava", testCommand: "./gradlew test" }),
+    );
+    expect(out.rules.map((r) => r.name)).toEqual(["Typecheck"]); // no per-edit Tests rule
+    expect(out.rules[0].blocking).toBe(false);
+  });
+});
+
+describe("deriveTestScaffold (Kotlin)", () => {
+  it("generates a kotlin.test .kt scaffold under commonTest for a Kotlin gradle project", () => {
+    const p = profile({ stack: "java", testRunner: "gradle", testDir: "src/commonTest/kotlin" });
+    const scaffold = deriveTestScaffold(p, false, /* isKotlin */ true);
+    expect(scaffold).not.toBeNull();
+    expect(scaffold!.path).toBe("src/commonTest/kotlin/ScaffoldTest.kt");
+    expect(scaffold!.content).toContain("import kotlin.test.Test");
+    expect(scaffold!.content).not.toContain("org.junit");
+  });
+
+  it("still generates a JUnit .java scaffold for a non-Kotlin (Java) gradle project", () => {
+    const p = profile({ stack: "java", testRunner: "gradle", testDir: "src/test/java" });
+    const scaffold = deriveTestScaffold(p, false, /* isKotlin */ false);
+    expect(scaffold!.path).toBe("src/test/java/ScaffoldTest.java");
+    expect(scaffold!.content).toContain("org.junit.jupiter.api.Test");
   });
 });
 
