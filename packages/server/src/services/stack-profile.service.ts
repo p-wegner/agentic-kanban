@@ -194,13 +194,25 @@ function detectOtherProfile(repoPath: string, markers: Set<string>): Partial<Sta
     // needs every subproject's deps materialized before the first build. `assemble` builds
     // all subproject artifacts, which downloads/resolves every module's dependencies.
     const install = isMultiModule ? `${wrapper} assemble` : `${wrapper} dependencies`;
+    const kotlin = isKotlinGradle(repoPath);
+    const spring = isSpringBootGradle(repoPath);
     return {
       stack: "java", packageManager: "gradle", isMonorepo: isMultiModule,
       workspaces: [], installCommand: install, buildCommand: `${wrapper} build`,
       testCommand: `${wrapper} test`, quickTestCommand: `${wrapper} test`, lintCommand: `${wrapper} check`,
-      typecheckCommand: `${wrapper} compileJava`, devCommand: `${wrapper} bootRun`,
-      isWeb: existsSync(join(repoPath, "src", "main", "resources", "application.properties")) || existsSync(join(repoPath, "src", "main", "resources", "application.yml")),
-      devHealthUrl: null, devPort: null, testDir: firstExistingDir(repoPath, ["src/test/java", "src/test"]), testRunner: "gradle",
+      // `compileJava` only exists when the java plugin is applied. A Kotlin (incl. Kotlin
+      // Multiplatform) project has no `compileJava` task — running it fails "task not found",
+      // which would brick a per-edit blocking typecheck hook. KMP also has no single compile-only
+      // task name (`compileKotlin` for kotlin-jvm vs per-target `compileKotlinJvm`/`compileKotlinJs`
+      // /`compileKotlinMetadata` for multiplatform), so for Kotlin we skip a standalone typecheck
+      // and let the build/test command cover compilation. Java keeps `compileJava`.
+      typecheckCommand: kotlin ? null : `${wrapper} compileJava`,
+      // `bootRun` is a Spring Boot plugin task; a plain library/app without it has no such task.
+      devCommand: spring ? `${wrapper} bootRun` : null,
+      isWeb: spring,
+      devHealthUrl: null, devPort: null,
+      testDir: firstExistingDir(repoPath, ["src/commonTest/kotlin", "src/test/kotlin", "src/test/java", "src/test"]),
+      testRunner: "gradle",
     };
   }
   if (markers.has("pom.xml")) {
@@ -234,6 +246,39 @@ function readFileSafe(path: string): string {
   } catch {
     return "";
   }
+}
+
+/** Concatenated text of whichever Gradle build script(s) the repo has (KTS or Groovy). */
+function gradleBuildText(repoPath: string): string {
+  return readFileSafe(join(repoPath, "build.gradle.kts")) + "\n" + readFileSafe(join(repoPath, "build.gradle"));
+}
+
+/** True for any directory entry that looks like a Kotlin source file (shallow check is enough). */
+function repoHasKotlinSources(repoPath: string): boolean {
+  // commonMain (KMP) and main (kotlin-jvm) are the conventional roots; a `.kt` anywhere under
+  // src is a strong signal. A shallow existence check of the usual roots avoids a deep walk.
+  for (const dir of ["src/commonMain/kotlin", "src/main/kotlin", "src/jvmMain/kotlin"]) {
+    if (existsSync(join(repoPath, dir))) return true;
+  }
+  return false;
+}
+
+/** A Gradle project is Kotlin when it uses the Kotlin DSL or applies a Kotlin plugin / has .kt sources. */
+function isKotlinGradle(repoPath: string): boolean {
+  if (existsSync(join(repoPath, "build.gradle.kts"))) return true; // Kotlin DSL ⇒ Kotlin tooling
+  const text = gradleBuildText(repoPath).toLowerCase();
+  if (/kotlin\(|org\.jetbrains\.kotlin|kotlin-gradle-plugin|kotlin\("multiplatform"\)/.test(text)) return true;
+  return repoHasKotlinSources(repoPath);
+}
+
+/** A Gradle project is a Spring Boot app when the boot plugin/dependency is present. */
+function isSpringBootGradle(repoPath: string): boolean {
+  const text = gradleBuildText(repoPath).toLowerCase();
+  if (/spring-boot|org\.springframework\.boot/.test(text)) return true;
+  return (
+    existsSync(join(repoPath, "src", "main", "resources", "application.properties")) ||
+    existsSync(join(repoPath, "src", "main", "resources", "application.yml"))
+  );
 }
 
 const EMPTY_PROFILE: Omit<StackProfile, "source" | "detectedMarkers" | "updatedAt"> = {
@@ -463,21 +508,31 @@ export function buildSmartHooksRules(profile: StackProfile): SmartHooksRulesFile
   const patterns = sourcePatternsForStack(profile.stack);
   const rules: SmartHooksRule[] = [];
 
+  // Gradle/Maven (the `java` family) have multi-second cold-daemon startup and, for Kotlin
+  // Multiplatform, a full `test` runs every target (jvmTest + jsNodeTest). Running that as a
+  // BLOCKING hook on every edit stalls the builder for minutes per keystroke-batch; running the
+  // full test suite per edit is worse still. So for this family: skip the per-edit test rule
+  // entirely and downgrade the (compile) typecheck to a non-blocking reminder. The verify gate
+  // (`testCommand && buildCommand`) at merge time stays the real correctness gate. Fast stacks
+  // (node/rust/go/python) keep the blocking per-edit loop, which is cheap there.
+  const isSlowJvm = profile.stack === "java";
+
   // Typecheck is the cheapest correctness signal — run it per-edit when present.
   if (profile.typecheckCommand) {
     rules.push({
       name: "Typecheck",
       command: profile.typecheckCommand,
       filePatterns: patterns,
-      blocking: true,
+      blocking: !isSlowJvm,
       timeout: 120,
     });
   }
 
   // Quick/affected tests give behavioral feedback. Fall back to the full test command only
-  // when there is no quick variant (and no typecheck already covering the edit).
+  // when there is no quick variant (and no typecheck already covering the edit). Skipped for the
+  // slow JVM family (see above) — too slow to run on every edit.
   const testCommand = profile.quickTestCommand ?? profile.testCommand;
-  if (testCommand) {
+  if (testCommand && !isSlowJvm) {
     rules.push({
       name: profile.quickTestCommand ? "Quick tests" : "Tests",
       command: testCommand,
@@ -549,7 +604,7 @@ const STACK_DEFAULT_TEST_DIR: Record<string, string> = {
 };
 
 /** Map a (possibly null) testRunner + stack to the canonical runner key we generate for. */
-function resolveRunnerKey(profile: StackProfile): string | null {
+function resolveRunnerKey(profile: StackProfile, isKotlin?: boolean): string | null {
   const runner = (profile.testRunner ?? "").toLowerCase();
   if (runner.includes("pytest")) return "pytest";
   if (runner.includes("vitest")) return "vitest";
@@ -558,6 +613,8 @@ function resolveRunnerKey(profile: StackProfile): string | null {
   if (runner.includes("playwright")) return "playwright";
   if (runner.includes("cargo")) return "cargo";
   if (runner.includes("go")) return "go";
+  // Kotlin on Gradle/Maven uses the multiplatform `kotlin.test` API, not a JUnit `.java` file.
+  if ((runner === "gradle" || runner === "maven") && isKotlin) return "kotlintest";
   if (runner === "gradle" || runner === "maven") return "junit";
 
   // No (or unrecognized) runner — fall back to the stack family's conventional runner.
@@ -687,6 +744,27 @@ func TestScaffoldRuns(t *testing.T) {
 `,
       };
     }
+    case "kotlintest": {
+      // Kotlin (incl. Kotlin Multiplatform): tests live under commonTest/kotlin (or test/kotlin) and
+      // use the multiplatform `kotlin.test` API, NOT JUnit in src/test/java. A `.java` JUnit file in a
+      // KMP project sits in no source set (no java plugin) — dead, untracked, and dirties main.
+      const ktDir = (profile.testDir ?? "src/commonTest/kotlin").replace(/\\/g, "/").replace(/\/+$/, "");
+      return {
+        path: ktDir === "." ? "ScaffoldTest.kt" : `${ktDir}/ScaffoldTest.kt`,
+        content: `import kotlin.test.Test
+import kotlin.test.assertEquals
+
+// Stack-aware scaffold (agentic-kanban): a runnable starting point in this project's real test
+// dir + runner (kotlin.test, multiplatform). Replace with a real test for the feature you're building.
+class ScaffoldTest {
+    @Test
+    fun scaffoldRuns() {
+        assertEquals(2, 1 + 1)
+    }
+}
+`,
+      };
+    }
     case "junit": {
       return {
         path: join2(dir, "ScaffoldTest.java"),
@@ -720,10 +798,16 @@ class ScaffoldTest {
  *
  * @param isTypeScript hint that a Node project is TypeScript (so the scaffold gets a `.ts`
  *   extension); writeTestScaffold derives it from a tsconfig.json on disk. Ignored for non-Node.
+ * @param isKotlin hint that a Gradle/Maven project is Kotlin (so the scaffold is a `kotlin.test`
+ *   `.kt` file under commonTest, not a JUnit `.java` file). Ignored for non-JVM stacks.
  */
-export function deriveTestScaffold(profile: StackProfile | null, isTypeScript?: boolean): TestScaffold | null {
+export function deriveTestScaffold(
+  profile: StackProfile | null,
+  isTypeScript?: boolean,
+  isKotlin?: boolean,
+): TestScaffold | null {
   if (!profile) return null;
-  const runner = resolveRunnerKey(profile);
+  const runner = resolveRunnerKey(profile, isKotlin);
   if (!runner) return null;
   return scaffoldForRunner(runner, profile, isTypeScript);
 }
@@ -740,7 +824,8 @@ export function deriveTestScaffold(profile: StackProfile | null, isTypeScript?: 
 export function writeTestScaffold(repoPath: string, profile: StackProfile): string | null {
   try {
     const isTypeScript = existsSync(join(repoPath, "tsconfig.json"));
-    const scaffold = deriveTestScaffold(profile, isTypeScript);
+    const isKotlin = profile.stack === "java" && isKotlinGradle(repoPath);
+    const scaffold = deriveTestScaffold(profile, isTypeScript, isKotlin);
     if (!scaffold) return null;
     const outPath = join(repoPath, scaffold.path);
     if (existsSync(outPath)) return null; // never clobber an existing test
