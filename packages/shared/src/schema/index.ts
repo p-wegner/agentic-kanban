@@ -43,3 +43,10 @@ export { milestones, milestonesRelations } from "./milestones.js";
 export { issueTimeEntries, issueTimeEntriesRelations } from "./issue-time-entries.js";
 export { drives, drivesRelations, DRIVE_STATUSES } from "./drives.js";
 export type { DriveStatus } from "./drives.js";
+export {
+  driveObstacles,
+  driveObstaclesRelations,
+  DRIVE_OBSTACLE_KINDS,
+  DRIVE_OBSTACLE_SEVERITIES,
+} from "./drive-obstacles.js";
+export type { DriveObstacleKind, DriveObstacleSeverity } from "./drive-obstacles.js";
