@@ -11,6 +11,8 @@ import { NOISE_TRIGGER_TYPES } from "../services/session-filter.js";
 import { commitLeftoverChanges, getCommitCountAhead, getWorkingTreeDiff } from "../services/git.service.js";
 import { startManualReview } from "../services/review.service.js";
 import { isCodexUsageLimitStats } from "../services/codex-rate-limit.js";
+import { getPreference } from "../repositories/preferences.repository.js";
+import { getStackProfile, verifyScriptPrefKey } from "../services/stack-profile.service.js";
 import {
   MAX_SESSIONS,
   NON_TRIVIAL_WORKTREE_DIFF_CHARS,
@@ -103,6 +105,26 @@ type CycleContext = {
   canStartMerge: (ws: WorkspaceCandidate) => boolean;
   stuckBuilderTimeoutMs: number;
 };
+
+/**
+ * Whether a project has an automatic pre-merge quality gate — a `verify_script` (build/test) and/or
+ * a web smoke check (isWeb stack profile → boot + render check). The verify+smoke gate runs when a
+ * review session EXITS (exit-workflow) and sets `readyForMerge` only on pass. So for a gated
+ * project the monitor must NOT bypass `readyForMerge` via auto_merge_in_review — doing so races the
+ * in-flight review and merges the work before (or instead of) the gate, which then sees the work
+ * "already merged" and is skipped entirely. The fix: for gated projects, only auto-merge work the
+ * gate has approved (readyForMerge=true); un-ready In-Review work waits for the review's gate.
+ */
+export async function projectHasMergeGate(projectId: string, database = db): Promise<boolean> {
+  try {
+    const verify = await getPreference(verifyScriptPrefKey(projectId), database);
+    if (verify && verify.trim()) return true;
+    const profile = await getStackProfile(projectId, database);
+    return profile?.isWeb === true;
+  } catch {
+    return false; // best-effort: never block the monitor on a gate-detection error
+  }
+}
 
 async function recoverStuckBuilder(
   ws: WorkspaceCandidate,
@@ -207,6 +229,12 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
     deps.boardEvents.broadcast(ws.projectId, "board_changed");
   } else if (ws.issueStatusName === "In Review") {
     if (deps.autoMergeEnabled && deps.autoMergeInReview && !deps.autoMergeDisabledProjectIds?.has(ws.projectId)) {
+      // Don't bypass the readyForMerge gate for a project that has a verify/smoke gate — the review's
+      // exit-workflow gate sets readyForMerge on pass; merging un-ready work here races and skips it.
+      if (!ws.readyForMerge && await projectHasMergeGate(ws.projectId)) {
+        console.log(`[monitor] Holding idle In-Review workspace ${ws.wsId}  project has a verify/smoke gate; waiting for the review to set readyForMerge (not bypassing the quality gate)`);
+        return;
+      }
       if (!canStartMerge(ws)) return;
       await mergeWorkspaceWithFixFallback(ws, deps.serverPort, logAction, {
         conflictMsg: `[monitor] Merge conflict for idle In-Review workspace ${ws.wsId} (auto_merge_in_review)  triggered fix-and-merge`,
@@ -258,6 +286,13 @@ async function handleReviewingWorkspace(ws: WorkspaceCandidate, sess: LatestSess
     }
     if (deps.autoMergeDisabledProjectIds?.has(ws.projectId)) {
       console.log(`[monitor] Skipping auto-merge for reviewing+stopped workspace ${ws.wsId}  auto_merge_disabled for project ${ws.projectId}`);
+      return;
+    }
+    // A reviewing workspace whose review session STOPPED should be readyForMerge if its gate passed.
+    // If it isn't ready and the project has a verify/smoke gate, the gate failed/withheld (or didn't
+    // run) — do NOT auto-merge unverified work; leave it In Review for re-review/fix.
+    if (!ws.readyForMerge && await projectHasMergeGate(ws.projectId)) {
+      console.log(`[monitor] Holding reviewing+stopped workspace ${ws.wsId}  not readyForMerge and project has a verify/smoke gate (review did not approve; not auto-merging unverified work)`);
       return;
     }
     if (!canStartMerge(ws)) return;
