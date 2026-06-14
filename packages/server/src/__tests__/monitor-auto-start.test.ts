@@ -38,8 +38,11 @@ beforeEach(() => {
 
 describe("runAutoStart dependency resolution (blocker must be MERGED, not just terminal)", () => {
   // Mock prefix for: 1 In-Progress status, 0 In-Progress issues, 1 Todo issue with 1 blocker.
-  // The final two mocks are blockerIssues + the open-workspace check.
-  function mockUpToDepCheck(blockerRow: Record<string, unknown>, openWsRows: unknown[]) {
+  // The final two mocks are blockerIssues + the blocker-workspaces query (mergedAt/isDirect).
+  // `blockerWsRows` is the set of workspace rows returned for the blocker — the readiness
+  // gate treats a blocker as "landed" only if it has a merged (`mergedAt`) or direct workspace,
+  // OR no workspace at all (manually resolved). See #784.
+  function mockUpToDepCheck(blockerRow: Record<string, unknown>, blockerWsRows: unknown[]) {
     vi.mocked(db.select)
       .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]) as ReturnType<typeof db.select>) // inProgressStatuses
       .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop1 activeWip
@@ -52,16 +55,40 @@ describe("runAutoStart dependency resolution (blocker must be MERGED, not just t
       .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // no-auto-start tag (none)
       .mockReturnValueOnce(makeSelectChain([{ dependsOnId: "blocker-1" }]) as ReturnType<typeof db.select>) // deps
       .mockReturnValueOnce(makeSelectChain([blockerRow]) as ReturnType<typeof db.select>) // blockerIssues
-      .mockReturnValueOnce(makeSelectChain(openWsRows) as ReturnType<typeof db.select>); // open-workspace check
+      .mockReturnValueOnce(makeSelectChain(blockerWsRows) as ReturnType<typeof db.select>); // blocker-workspaces (mergedAt/isDirect)
   }
 
   it("does NOT start a dependent whose blocker is Done but not yet merged (open workspace)", async () => {
-    mockUpToDepCheck({ id: "blocker-1", statusId: "done-1", currentNodeId: null, currentNodeType: null }, [{ issueId: "blocker-1" }]);
+    mockUpToDepCheck({ id: "blocker-1", statusId: "done-1", currentNodeId: null, currentNodeType: null }, [{ issueId: "blocker-1", mergedAt: null, isDirect: false }]);
     await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "5"]]), makeDeps());
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
   });
 
-  it("starts a dependent once its blocker is terminal AND merged (no open workspace)", async () => {
+  // #784 regression: the blocker's workspace is already CLOSED (it was closed at the Done
+  // transition) but its branch→base merge is still queued, so `mergedAt` is null. The old
+  // guard keyed on `status != 'closed'` and wrongly treated this as merged → cut the
+  // dependent from a pre-merge base. The new guard keys on `mergedAt` and must NOT start.
+  it("does NOT start a dependent whose blocker workspace is closed-but-unmerged (#784 premature cascade)", async () => {
+    mockUpToDepCheck({ id: "blocker-1", statusId: "done-1", currentNodeId: null, currentNodeType: null }, [{ issueId: "blocker-1", mergedAt: null, isDirect: false }]);
+    await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "5"]]), makeDeps());
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  it("starts a dependent once its blocker workspace is actually merged (mergedAt set)", async () => {
+    mockUpToDepCheck({ id: "blocker-1", statusId: "done-1", currentNodeId: null, currentNodeType: null }, [{ issueId: "blocker-1", mergedAt: "2026-06-14T10:00:00.000Z", isDirect: false }]);
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ id: "ws-new" }) } as Response);
+    await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "5"]]), makeDeps());
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces", expect.any(Object));
+  });
+
+  it("starts a dependent whose blocker committed via a direct workspace (no merge step)", async () => {
+    mockUpToDepCheck({ id: "blocker-1", statusId: "done-1", currentNodeId: null, currentNodeType: null }, [{ issueId: "blocker-1", mergedAt: null, isDirect: true }]);
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ id: "ws-new" }) } as Response);
+    await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "5"]]), makeDeps());
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces", expect.any(Object));
+  });
+
+  it("starts a dependent whose terminal blocker has no workspace at all (manually resolved)", async () => {
     mockUpToDepCheck({ id: "blocker-1", statusId: "done-1", currentNodeId: null, currentNodeType: null }, []);
     vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ id: "ws-new" }) } as Response);
     await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "5"]]), makeDeps());
@@ -78,7 +105,7 @@ describe("runAutoStart dependency resolution (blocker must be MERGED, not just t
   // was never advanced to `end` (node desync) but whose STATUS is terminal MUST still
   // unblock its dependent once merged.
   it("starts a dependent whose workflow blocker is Done-STATUS but stuck on a non-end node (node desync)", async () => {
-    mockUpToDepCheck({ id: "blocker-1", statusId: "done-1", currentNodeId: "node-review", currentNodeType: "normal" }, []);
+    mockUpToDepCheck({ id: "blocker-1", statusId: "done-1", currentNodeId: "node-review", currentNodeType: "normal" }, [{ issueId: "blocker-1", mergedAt: "2026-06-14T10:00:00.000Z", isDirect: false }]);
     vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ id: "ws-new" }) } as Response);
     await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "5"]]), makeDeps());
     expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces", expect.any(Object));

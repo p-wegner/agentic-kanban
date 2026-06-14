@@ -198,20 +198,43 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
           .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
           .where(inArray(issues.id, blockerIds));
 
-        // A blocker only unblocks its dependents once its work is actually MERGED — not merely
-        // when the issue reaches a terminal STATUS. A successful merge closes the workspace, so
-        // an open (non-closed) workspace means the merge hasn't landed yet. Requiring "terminal
-        // AND no open workspace" stops a dependent from auto-starting against a premature-Done
-        // blocker (#535) and branching its worktree from a pre-merge base — which guaranteed
-        // rebase conflicts (seen live: a dependent branched from the scaffold commit before its
-        // blocker's merge landed). A terminal blocker with no workspace at all (manually done)
-        // still counts as resolved.
-        const openWsRows = await db.select({ issueId: workspaces.issueId }).from(workspaces)
-          .where(and(inArray(workspaces.issueId, blockerIds), sql`${workspaces.status} != 'closed'`));
-        const blockersWithOpenWorkspace = new Set(openWsRows.map((r) => r.issueId));
+        // A blocker only unblocks its dependents once its work is actually ON the base
+        // branch — not merely when the issue reaches a terminal STATUS, and NOT even when
+        // its workspace is `closed`. The old guard used `status != 'closed'` as a proxy for
+        // "merged", but a workspace can be closed at the Done transition while the branch→base
+        // merge is still QUEUED for the async auto-merge orchestrator (it drains on a timer).
+        // So "Done" — and even "closed" — does not imply "on master" (#784): a dependent was
+        // cut from the PRE-merge base (an empty scaffold), some builders re-scaffolded the app,
+        // and the blocker's merge was silently lost. This generalizes #535/#778 to every edge
+        // and is FATAL when the blocker provides foundational code.
+        //
+        // The authoritative "landed on base" signal is `mergedAt`, which is stamped ONLY after
+        // the git merge succeeds AND post-merge ancestry is verified (workspace-merge-execution).
+        // A direct workspace (`isDirect`) commits straight to the branch with no merge step, so
+        // it counts as landed. A blocker with NO workspace at all was resolved manually (nothing
+        // to merge) → also landed. An open review / closed-but-unmerged workspace contributes
+        // nothing, so a blocker whose only work is still un-merged stays blocked until the
+        // orchestrator lands it on a later cycle.
+        const blockerWorkspaces = await db
+          .select({ issueId: workspaces.issueId, mergedAt: workspaces.mergedAt, isDirect: workspaces.isDirect })
+          .from(workspaces)
+          .where(inArray(workspaces.issueId, blockerIds));
+        const wsByBlocker = new Map<string, { mergedAt: string | null; isDirect: boolean }[]>();
+        for (const w of blockerWorkspaces) {
+          const list = wsByBlocker.get(w.issueId) ?? [];
+          list.push({ mergedAt: w.mergedAt, isDirect: w.isDirect });
+          wsByBlocker.set(w.issueId, list);
+        }
+        // A blocker's work is "landed" on the base branch iff it has no workspace (manual done)
+        // or at least one workspace that actually reached the branch (merged, or a direct commit).
+        const isBlockerLanded = (blockerId: string): boolean => {
+          const list = wsByBlocker.get(blockerId);
+          if (!list || list.length === 0) return true;
+          return list.some((w) => w.mergedAt != null || w.isDirect);
+        };
 
         const allResolved = blockerIssues.every(
-          (b) => isTerminalStatusIdView(b, doneStatusIds) && !blockersWithOpenWorkspace.has(b.id),
+          (b) => isTerminalStatusIdView(b, doneStatusIds) && isBlockerLanded(b.id),
         );
         if (!allResolved) continue;
       }
