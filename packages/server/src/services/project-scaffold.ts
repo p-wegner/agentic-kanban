@@ -269,6 +269,12 @@ function getWorktreeGuardSource(): string | null {
   return _worktreeGuardSource;
 }
 
+let _smartRunnerSource: string | null | undefined = undefined;
+function getSmartRunnerSource(): string | null {
+  if (_smartRunnerSource === undefined) _smartRunnerSource = resolveHookSource("smart-hooks-runner.js");
+  return _smartRunnerSource;
+}
+
 /** True when the repo has more than one git worktree. */
 function repoHasWorktrees(repoPath: string): boolean {
   try {
@@ -322,11 +328,23 @@ more than one worktree at scaffold time.
 
 Set \`ALLOW_CROSS_WORKTREE_WRITE=1\`.
 
+## smart-hooks-runner.js + smart-hooks-rules.json
+
+The runner gives your builder incremental edit-time feedback: after each Write/Edit it runs
+the quick check for the file's stack (typecheck / quick tests), and again on Stop. It is wired
+in \`.claude/settings.json\` (PostToolUse + Stop) and is **project-agnostic** — every command
+comes from the rules file, nothing is hard-coded.
+
+\`../smart-hooks-rules.json\` (in \`.claude/\`, **machine-generated** — do not hand-edit) maps
+source-file patterns to those commands. The board regenerates it from the project's detected
+stack profile whenever the profile changes. To refresh it, re-detect the stack profile
+(Project Settings -> Stack Profile, or \`GET /api/projects/:id/stack-profile?refresh=true\`).
+
 ## smart-hooks-config.json
 
-Config file for the smart-hooks-runner pattern (if you add it later). Currently empty —
-add PreToolUse / Stop hook entries here and wire \`smart-hooks-runner.js\` in
-\`.claude/settings.json\` to activate them.
+Optional hand-authored hooks for the runner (PreToolUse / Stop entries), merged with the
+generated rules. Currently empty — add entries here for project-specific checks the generated
+rules don't cover.
 
 ## settings.json entries
 
@@ -440,6 +458,23 @@ export function ensureHookScaffold(repoPath: string, options: HookScaffoldOption
       writeFileSync(smartConfigPath, EMPTY_SMART_HOOKS_CONFIG, "utf8");
     }
 
+    // --- smart-hooks-runner.js (#787) ---
+    // The generic, project-agnostic runner that reads the generated smart-hooks-rules.json and
+    // gives a driven project's builder incremental PostToolUse/Stop feedback. The rules file
+    // itself is generated from the stack profile (writeSmartHooksRules); the runner contains no
+    // project-specific logic, so it is safe to copy verbatim into any repo.
+    const smartRunnerPath = join(hooksDir, "smart-hooks-runner.js");
+    const smartRunnerWritten =
+      existsSync(smartRunnerPath) ||
+      (() => {
+        const src = getSmartRunnerSource();
+        if (src) {
+          writeFileSync(smartRunnerPath, src, "utf8");
+          return true;
+        }
+        return false;
+      })();
+
     // --- hooks README ---
     const readmePath = join(hooksDir, "README.md");
     if (!existsSync(readmePath)) {
@@ -460,6 +495,19 @@ export function ensureHookScaffold(repoPath: string, options: HookScaffoldOption
         event: "PreToolUse",
         matcher: "Write|Edit|MultiEdit|NotebookEdit",
         command: "node $CLAUDE_PROJECT_DIR/.claude/hooks/prevent-cross-worktree-writes.js",
+      });
+    }
+    // Wire the edit-time feedback runner only when its source was actually delivered (#787),
+    // so we never reference a runner the repo doesn't have.
+    if (smartRunnerWritten) {
+      newEntries.push({
+        event: "PostToolUse",
+        matcher: "Write|Edit|MultiEdit",
+        command: "node $CLAUDE_PROJECT_DIR/.claude/hooks/smart-hooks-runner.js PostToolUse",
+      });
+      newEntries.push({
+        event: "Stop",
+        command: "node $CLAUDE_PROJECT_DIR/.claude/hooks/smart-hooks-runner.js Stop",
       });
     }
     mergeSettingsHooks(settingsPath, newEntries);
