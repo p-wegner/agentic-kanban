@@ -33,7 +33,8 @@ export type ButlerEvent =
   | { type: "turn-start" }
   | { type: "user"; text: string }
   | { type: "text"; text: string }
-  | { type: "tool"; name: string }
+  | { type: "tool"; name: string; toolId?: string; input?: Record<string, unknown> }
+  | { type: "tool-result"; toolId?: string; output?: string; isError?: boolean }
   | { type: "result"; text?: string; isError?: boolean }
   | { type: "usage"; contextTokens: number }
   | { type: "meta"; model?: string; contextWindow?: number; mcpConnected?: boolean }
@@ -424,7 +425,10 @@ function runProviderTurn(session: ButlerSession, content: string): void {
         broadcast(session, { type: "text", text: evt.assistantText });
       }
       if (evt.toolActivity) {
-        broadcast(session, { type: "tool", name: evt.toolActivity.name });
+        broadcast(session, { type: "tool", name: evt.toolActivity.name, toolId: evt.toolActivity.toolUseId, input: evt.toolActivity.input });
+      }
+      if (evt.toolResult) {
+        broadcast(session, { type: "tool-result", toolId: evt.toolResult.toolUseId, output: evt.toolResult.agentResultText });
       }
       if (evt.liveStats?.contextTokens) {
         session.contextTokens = evt.liveStats.contextTokens;
@@ -527,6 +531,32 @@ export function isInvalidThinkingSignatureError(message: string): boolean {
   return /invalid signature in thinking block/i.test(message);
 }
 
+/**
+ * Flatten a tool_result `content` field into display text. The SDK hands it back as
+ * a plain string or an array of content blocks ({type:"text",text} / images). We keep
+ * the text, note images, and cap the length so a huge file read can't flood the stream.
+ */
+function stringifyToolResult(content: unknown): string | undefined {
+  let text: string;
+  if (typeof content === "string") {
+    text = content;
+  } else if (Array.isArray(content)) {
+    text = content
+      .map((b) => {
+        const block = b as { type?: string; text?: string };
+        if (block?.type === "text" && typeof block.text === "string") return block.text;
+        if (block?.type === "image") return "[image]";
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n");
+  } else {
+    return undefined;
+  }
+  const MAX = 4000;
+  return text.length > MAX ? `${text.slice(0, MAX)}\n… (${text.length - MAX} more chars)` : text;
+}
+
 async function runLoop(session: ButlerSession, input: Pushable<SDKUserMessage>, options: Options): Promise<void> {
   let retrying = false;
   try {
@@ -554,9 +584,20 @@ async function runLoop(session: ButlerSession, input: Pushable<SDKUserMessage>, 
           broadcast(session, { type: "text", text: ev.delta.text });
         }
       } else if (type === "assistant") {
-        const content = (msg as { message?: { content?: Array<{ type?: string; name?: string }> } }).message?.content ?? [];
+        const content = (msg as { message?: { content?: Array<{ type?: string; name?: string; id?: string; input?: Record<string, unknown> }> } }).message?.content ?? [];
         for (const block of content) {
-          if (block.type === "tool_use" && block.name) broadcast(session, { type: "tool", name: block.name });
+          if (block.type === "tool_use" && block.name) {
+            broadcast(session, { type: "tool", name: block.name, toolId: block.id, input: block.input });
+          }
+        }
+      } else if (type === "user") {
+        // Tool results arrive as a synthetic user message whose content holds
+        // tool_result blocks. Surface each so the UI can pair it with its tool call.
+        const content = (msg as { message?: { content?: Array<{ type?: string; tool_use_id?: string; is_error?: boolean; content?: unknown }> } }).message?.content ?? [];
+        for (const block of content) {
+          if (block.type === "tool_result") {
+            broadcast(session, { type: "tool-result", toolId: block.tool_use_id, output: stringifyToolResult(block.content), isError: block.is_error });
+          }
         }
       } else if (type === "result") {
         session.busy = false;
