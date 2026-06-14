@@ -14,6 +14,14 @@ target) and exits. Durable memory lives outside the model — in the board, git,
 set `MONITOR_AGENT=codex` for `codex exec`). Both harnesses read the same `objective.md` and fire the
 repo's hooks (PreToolUse safety + Stop commit-discipline); only the launch command differs.
 
+> **Scope: this control plane is agentic-kanban-only.** `objective.md` is hand-authored for THIS
+> dogfooding board (its project name, cwd, port 3001, and board skill names are not generalized) and
+> is **not** a template for other repos. Any *other* project the board drives hands-off runs on the
+> in-process engine instead (`runMonitorCycle` + auto-review/auto-merge + the stranded-review
+> reconciler), steered by the Strategy Bullseye via `resolveMonitorTunables` — no `objective.md`
+> required. Enable a project with `board_autodrive_<projectId> = "true"`. See decision 006's
+> "Driven projects" section for the formal split.
+
 **`objective.md` is the single source of truth for monitor policy.** Both this codex loop and the
 in-process **Monitor Butler** (`packages/server/src/services/monitor-butler.ts`, off by default)
 read this same file — its `STRATEGY_FILE` points here. There is no separate `.claude/monitor-strategy.md`.
