@@ -10,7 +10,9 @@ import {
   ensureHookScaffold,
   ensureVerifyGateRunner,
   ensurePnpmBuildApproval,
+  ensureBuildableFromClean,
   PNPM_BUILD_APPROVED_DEPS,
+  PACKAGE_MANAGER_PINS,
   GENERIC_AGENT_GITIGNORE,
   STARTER_CLAUDE_MD,
   STARTER_AGENTS_MD,
@@ -432,6 +434,121 @@ describe("project-scaffold", () => {
         ensureVerifyGateRunner(dir);
         const pkg = JSON.parse(await readFile(join(dir, "package.json"), "utf8"));
         expect(pkg.pnpm.onlyBuiltDependencies).toContain("esbuild");
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("ensureBuildableFromClean — per package manager (#789)", () => {
+    it("ensurePnpmBuildApproval is a backward-compatible alias (same behavior for pnpm)", async () => {
+      const dir = await tmp();
+      try {
+        await writeFile(join(dir, "package.json"), JSON.stringify({ name: "app" }, null, 2) + "\n");
+        await writeFile(join(dir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+        expect(ensurePnpmBuildApproval(dir)).toBe(true);
+        const pkg = JSON.parse(await readFile(join(dir, "package.json"), "utf8"));
+        expect(pkg.pnpm.onlyBuiltDependencies).toContain("esbuild");
+        expect(pkg.packageManager).toMatch(/^pnpm@/);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("bun: trusts native deps + pins bun, NOT pnpm.onlyBuiltDependencies", async () => {
+      const dir = await tmp();
+      try {
+        await writeFile(join(dir, "package.json"), JSON.stringify({ name: "bun-app" }, null, 2) + "\n");
+        await writeFile(join(dir, "bun.lockb"), "");
+        const changed = ensureBuildableFromClean(dir);
+        expect(changed).toBe(true);
+        const pkg = JSON.parse(await readFile(join(dir, "package.json"), "utf8"));
+        // bun uses trustedDependencies, not pnpm's key
+        expect(pkg.trustedDependencies).toContain("esbuild");
+        expect(pkg.pnpm).toBeUndefined();
+        expect(pkg.packageManager).toBe(PACKAGE_MANAGER_PINS.bun);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("npm: pins npm engine, approves nothing (npm runs scripts on clean install)", async () => {
+      const dir = await tmp();
+      try {
+        await writeFile(join(dir, "package.json"), JSON.stringify({ name: "npm-app" }, null, 2) + "\n");
+        await writeFile(join(dir, "package-lock.json"), "{}\n");
+        const changed = ensureBuildableFromClean(dir);
+        expect(changed).toBe(true);
+        const pkg = JSON.parse(await readFile(join(dir, "package.json"), "utf8"));
+        expect(pkg.packageManager).toBe(PACKAGE_MANAGER_PINS.npm);
+        expect(pkg.pnpm).toBeUndefined();
+        expect(pkg.trustedDependencies).toBeUndefined();
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("yarn: pins yarn engine from yarn.lock", async () => {
+      const dir = await tmp();
+      try {
+        await writeFile(join(dir, "package.json"), JSON.stringify({ name: "yarn-app" }, null, 2) + "\n");
+        await writeFile(join(dir, "yarn.lock"), "# yarn lockfile v1\n");
+        const changed = ensureBuildableFromClean(dir);
+        expect(changed).toBe(true);
+        const pkg = JSON.parse(await readFile(join(dir, "package.json"), "utf8"));
+        expect(pkg.packageManager).toBe(PACKAGE_MANAGER_PINS.yarn);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("never clobbers a deliberate packageManager choice", async () => {
+      const dir = await tmp();
+      try {
+        await writeFile(
+          join(dir, "package.json"),
+          JSON.stringify({ name: "app", packageManager: "pnpm@9.0.0" }, null, 2) + "\n"
+        );
+        ensureBuildableFromClean(dir);
+        const pkg = JSON.parse(await readFile(join(dir, "package.json"), "utf8"));
+        expect(pkg.packageManager).toBe("pnpm@9.0.0"); // untouched
+        // an explicit pnpm@ pin is still recognized as pnpm → approval added
+        expect(pkg.pnpm.onlyBuiltDependencies).toContain("esbuild");
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("non-Node stacks (cargo/go/python) are a clean no-op", async () => {
+      for (const marker of ["Cargo.toml", "go.mod", "pyproject.toml"]) {
+        const dir = await tmp();
+        try {
+          await writeFile(join(dir, marker), "");
+          const changed = ensureBuildableFromClean(dir);
+          expect(changed).toBe(false); // nothing to approve; no package.json
+        } finally {
+          await rm(dir, { recursive: true, force: true });
+        }
+      }
+    });
+
+    it("bun trustedDependencies is idempotent and preserves existing entries", async () => {
+      const dir = await tmp();
+      try {
+        await writeFile(
+          join(dir, "package.json"),
+          JSON.stringify({ name: "app", trustedDependencies: ["sharp"], packageManager: "bun@1.1.0" }, null, 2) + "\n"
+        );
+        ensureBuildableFromClean(dir);
+        let pkg = JSON.parse(await readFile(join(dir, "package.json"), "utf8"));
+        expect(pkg.trustedDependencies).toContain("sharp");
+        expect(pkg.trustedDependencies).toContain("esbuild");
+        const afterFirst = await readFile(join(dir, "package.json"), "utf8");
+        ensureBuildableFromClean(dir);
+        const afterSecond = await readFile(join(dir, "package.json"), "utf8");
+        expect(afterSecond).toBe(afterFirst);
+        pkg = JSON.parse(afterSecond);
+        expect(pkg.trustedDependencies.filter((d: string) => d === "esbuild").length).toBe(1);
       } finally {
         await rm(dir, { recursive: true, force: true });
       }

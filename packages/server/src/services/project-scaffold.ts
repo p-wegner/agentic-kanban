@@ -549,27 +549,34 @@ export function ensureVerifyGateRunner(repoPath: string): void {
       writeFileSync(destConfig, VERIFY_GATE_CONFIG_STUB, "utf8");
     }
 
-    // Part of the quality gate: a scaffolded pnpm project must actually build on a clean
-    // checkout. Approve esbuild's native build so `pnpm install && pnpm build` doesn't fail
-    // with ERR_PNPM_IGNORED_BUILDS (and never leave the broken placeholder). (#777)
-    ensurePnpmBuildApproval(repoPath);
+    // Part of the quality gate: a scaffolded project must actually build on a clean checkout
+    // regardless of its package manager (#789). For pnpm this approves esbuild's native build
+    // so `pnpm install && pnpm build` doesn't fail with ERR_PNPM_IGNORED_BUILDS (#777); for
+    // bun it trusts the same native deps; for npm/yarn/bun it pins the engine so the lockfile
+    // resolves under the right manager. Non-Node stacks (cargo/go/python) build clean already.
+    ensureBuildableFromClean(repoPath);
   } catch {
     /* non-fatal: scaffolding must never block registration */
   }
 }
 
 // ---------------------------------------------------------------------------
-// pnpm build-approval scaffold (#777)
+// "Buildable from clean" scaffold — per-package-manager (#777, #783, #789)
 // ---------------------------------------------------------------------------
 
 /**
- * Native deps whose postinstall build step pnpm 11 blocks by default until approved.
- * A scaffolded Vite/React/TS project pulls in esbuild (Vite's bundler); without an
- * approval `pnpm install` / `pnpm build` fail on a clean checkout with
- * `ERR_PNPM_IGNORED_BUILDS` (exit 1). Keep this list aligned with the board's own
- * root package.json `pnpm.onlyBuiltDependencies`.
+ * Native deps whose postinstall build step a strict package manager blocks by default until
+ * approved. A scaffolded Vite/React/TS project pulls in esbuild (Vite's bundler); under pnpm
+ * a missing approval fails `pnpm install` / `pnpm build` on a clean checkout with
+ * `ERR_PNPM_IGNORED_BUILDS` (exit 1), and bun likewise refuses to run an untrusted package's
+ * lifecycle scripts. Keep this list aligned with the board's own root package.json
+ * `pnpm.onlyBuiltDependencies`. Used for BOTH pnpm `onlyBuiltDependencies` and bun
+ * `trustedDependencies`.
  */
 export const PNPM_BUILD_APPROVED_DEPS = ["esbuild", "@swc/core"];
+
+/** Alias: the same approved native-build deps, named generically for non-pnpm callers. */
+export const NATIVE_BUILD_APPROVED_DEPS = PNPM_BUILD_APPROVED_DEPS;
 
 /**
  * A pnpm version that HONORS `pnpm.onlyBuiltDependencies`. The global pnpm 11.0.8 ignores
@@ -580,31 +587,77 @@ export const PNPM_BUILD_APPROVED_DEPS = ["esbuild", "@swc/core"];
  */
 export const PNPM_PACKAGE_MANAGER_PIN = "pnpm@10.12.1";
 
+/**
+ * `packageManager` corepack pins for the other Node managers (#789). A clean
+ * `corepack <pm> install` resolves the project's lockfile under a deterministic manager
+ * version instead of "whatever is global", which is what makes a fresh clone build the same
+ * way the builder's worktree did. Versions chosen to match the lockfile formats the detector
+ * already understands (yarn berry, the current npm/bun lines).
+ */
+export const PACKAGE_MANAGER_PINS: Record<"pnpm" | "npm" | "yarn" | "bun", string> = {
+  pnpm: PNPM_PACKAGE_MANAGER_PIN,
+  npm: "npm@10.9.2",
+  yarn: "yarn@4.5.3",
+  bun: "bun@1.1.38",
+};
+
 /** The literal placeholder a buggy scaffold once emitted — must NEVER appear in output. */
 const PNPM_PLACEHOLDER_MARKER = "set this to true or false";
 
+/** Which Node package manager a repo uses, inferred from lockfiles + existing manifest config. */
+type NodePm = "pnpm" | "npm" | "yarn" | "bun";
+
+interface PmDetection {
+  /** The detected package manager. Defaults to "pnpm" for a bare package.json (the board's
+   *  default, and what the original #777/#783 logic assumed). */
+  pm: NodePm;
+  /** True only when a concrete signal (explicit pin or a lockfile) identified the manager —
+   *  the gate for PINNING `packageManager`. A bare package.json has `pinnable: false` so we
+   *  don't stamp a manager onto a repo that hasn't chosen one (matches the #783 test). */
+  pinnable: boolean;
+}
+
+function detectNodePmForApproval(repoPath: string, pkg: Record<string, unknown>): PmDetection {
+  const pm = typeof pkg.packageManager === "string" ? (pkg.packageManager as string) : "";
+  // An explicit packageManager pin is authoritative (it's already pinned, so pinnable is moot).
+  if (pm.startsWith("pnpm@")) return { pm: "pnpm", pinnable: true };
+  if (pm.startsWith("yarn@")) return { pm: "yarn", pinnable: true };
+  if (pm.startsWith("bun@")) return { pm: "bun", pinnable: true };
+  if (pm.startsWith("npm@")) return { pm: "npm", pinnable: true };
+  // Otherwise infer from lockfiles / pnpm config.
+  if (
+    pkg.pnpm !== undefined ||
+    existsSync(join(repoPath, "pnpm-lock.yaml")) ||
+    existsSync(join(repoPath, "pnpm-workspace.yaml"))
+  )
+    return { pm: "pnpm", pinnable: true };
+  if (existsSync(join(repoPath, "bun.lockb")) || existsSync(join(repoPath, "bun.lock")))
+    return { pm: "bun", pinnable: true };
+  if (existsSync(join(repoPath, "yarn.lock"))) return { pm: "yarn", pinnable: true };
+  if (existsSync(join(repoPath, "package-lock.json"))) return { pm: "npm", pinnable: true };
+  // Bare package.json, no lockfile yet: assume pnpm (the board default) for the build-script
+  // approval, but DON'T pin a manager onto a repo that hasn't chosen one.
+  return { pm: "pnpm", pinnable: false };
+}
+
 /**
- * Ensure a scaffolded project approves the native build steps it needs (esbuild for Vite)
- * AND pins a pnpm version that honors that approval, so a fresh `pnpm install && pnpm build`
- * of master is green. Returns true if it changed any file (so callers can commit the repair).
+ * Generalized "buildable from clean" scaffold (#789).
  *
- * pnpm 11 ignores unapproved postinstall builds by default, so a fresh build of a scaffolded
- * Vite app fails with `ERR_PNPM_IGNORED_BUILDS`. This writes a valid approval and, critically,
- * NEVER emits the placeholder string `esbuild: "set this to true or false"` (the #777
- * false-pass that left master unbuildable).
+ * Make a freshly-cloned project's build pass with NO manual approval prompts, whatever its
+ * package manager:
+ *  - **pnpm** — approve native build scripts (`pnpm.onlyBuiltDependencies`) + pin a pnpm version
+ *    that honors them (#777/#783) + repair a broken `pnpm-workspace.yaml` placeholder.
+ *  - **bun** — declare the same native deps as `trustedDependencies` (bun refuses untrusted
+ *    postinstall scripts on a clean install) + pin `packageManager`.
+ *  - **npm / yarn** — pin `packageManager` so the lockfile resolves under the right manager
+ *    (npm/classic-yarn already run lifecycle scripts on a clean install, so no extra approval).
+ *  - **cargo / go / python / java** — a clean clone builds without any approval gate; no-op.
  *
- * Behavior (clobber-safe, idempotent, non-fatal):
- * - If a `package.json` exists: ensure `pnpm.onlyBuiltDependencies` includes the approved
- *   deps (preserving any the project already declared) AND — for a clearly-pnpm project with
- *   no `packageManager` yet — pin `packageManager` so the approval is honored (#783). The
- *   registration scaffold runs before the builder creates package.json; the verify gate runs
- *   this again post-build when the file exists and commits the result.
- * - If a `pnpm-workspace.yaml` exists and contains the broken placeholder OR a bogus
- *   `allowBuilds:` block (not a real pnpm key — the previous repair left `allowBuilds:
- *   esbuild: true`, a no-op), replace it with a VALID `onlyBuiltDependencies:` list.
- * - No package.json and no workspace file ⇒ no-op (nothing to approve yet).
+ * Returns true if it changed any file (so callers can commit the repair). Clobber-safe,
+ * idempotent, non-fatal. Never clobbers a deliberate `packageManager` choice the project
+ * already made.
  */
-export function ensurePnpmBuildApproval(repoPath: string): boolean {
+export function ensureBuildableFromClean(repoPath: string): boolean {
   let changed = false;
   try {
     const pkgJsonPath = join(repoPath, "package.json");
@@ -618,38 +671,28 @@ export function ensurePnpmBuildApproval(repoPath: string): boolean {
       }
       let pkgChanged = false;
 
-      // Capture the pnpm signal from the ORIGINAL manifest (before we add the pnpm field
-      // below) so we never flip a non-pnpm repo to pnpm just because we wrote a (harmless)
-      // pnpm.onlyBuiltDependencies key.
-      const hadPnpmConfig =
-        pkg.pnpm !== undefined ||
-        (typeof pkg.packageManager === "string" && (pkg.packageManager as string).startsWith("pnpm@"));
+      const { pm, pinnable } = detectNodePmForApproval(repoPath, pkg);
 
-      // 1. Approve native build scripts (the canonical pnpm mechanism).
-      const pnpmCfg = (pkg.pnpm ?? {}) as Record<string, unknown>;
-      const existing = Array.isArray(pnpmCfg.onlyBuiltDependencies)
-        ? (pnpmCfg.onlyBuiltDependencies as unknown[]).filter((d): d is string => typeof d === "string")
-        : [];
-      const merged = [...existing];
-      for (const dep of PNPM_BUILD_APPROVED_DEPS) {
-        if (!merged.includes(dep)) merged.push(dep);
+      // 1. Approve native build scripts under the strict managers that block them by default.
+      if (pm === "pnpm") {
+        // pnpm: `pnpm.onlyBuiltDependencies` is the canonical approval mechanism.
+        const pnpmCfg = (pkg.pnpm ?? {}) as Record<string, unknown>;
+        if (mergeApprovedDeps(pnpmCfg, "onlyBuiltDependencies")) {
+          pkg.pnpm = pnpmCfg;
+          pkgChanged = true;
+        }
+      } else if (pm === "bun") {
+        // bun: `trustedDependencies` whitelists packages allowed to run lifecycle scripts.
+        if (mergeApprovedDeps(pkg, "trustedDependencies")) pkgChanged = true;
       }
-      if (merged.length !== existing.length || !existing.every((d, i) => d === merged[i])) {
-        pnpmCfg.onlyBuiltDependencies = merged;
-        pkg.pnpm = pnpmCfg;
-        pkgChanged = true;
-      }
+      // npm / yarn run lifecycle scripts on a clean install by default — nothing to approve.
 
-      // 2. Pin a pnpm version that HONORS the approval (#783). Only when the project has no
-      //    packageManager yet (never clobber a deliberate npm/yarn/pnpm@X choice) and is
-      //    clearly a pnpm project (a pnpm lockfile exists, or it declares a pnpm config) — so
-      //    we don't pin pnpm onto a non-pnpm repo.
-      const isPnpmProject =
-        existsSync(join(repoPath, "pnpm-lock.yaml")) ||
-        existsSync(join(repoPath, "pnpm-workspace.yaml")) ||
-        hadPnpmConfig;
-      if (pkg.packageManager === undefined && isPnpmProject) {
-        pkg.packageManager = PNPM_PACKAGE_MANAGER_PIN;
+      // 2. Pin a packageManager version so a clean clone resolves the lockfile deterministically
+      //    (and, for pnpm, so the approval above is actually honored — #783). Only when the
+      //    project has no packageManager yet (never clobber a deliberate choice) and we could
+      //    identify the manager from a real signal — so we don't pin onto a bare package.json.
+      if (pkg.packageManager === undefined && pinnable) {
+        pkg.packageManager = PACKAGE_MANAGER_PINS[pm];
         pkgChanged = true;
       }
 
@@ -683,6 +726,34 @@ export function ensurePnpmBuildApproval(repoPath: string): boolean {
     /* non-fatal: scaffolding must never block registration */
   }
   return changed;
+}
+
+/**
+ * Merge the approved native-build deps into `obj[key]` (an array of package names), preserving
+ * any the project already declared and never duplicating. Returns true if the array changed.
+ */
+function mergeApprovedDeps(obj: Record<string, unknown>, key: string): boolean {
+  const existing = Array.isArray(obj[key])
+    ? (obj[key] as unknown[]).filter((d): d is string => typeof d === "string")
+    : [];
+  const merged = [...existing];
+  for (const dep of PNPM_BUILD_APPROVED_DEPS) {
+    if (!merged.includes(dep)) merged.push(dep);
+  }
+  if (merged.length === existing.length && existing.every((d, i) => d === merged[i])) return false;
+  obj[key] = merged;
+  return true;
+}
+
+/**
+ * Backward-compatible alias for {@link ensureBuildableFromClean}.
+ *
+ * The original #777/#783 entry point was pnpm-only; #789 generalized it across package
+ * managers. Kept so existing callers/tests that import `ensurePnpmBuildApproval` keep working —
+ * behavior is identical for pnpm projects.
+ */
+export function ensurePnpmBuildApproval(repoPath: string): boolean {
+  return ensureBuildableFromClean(repoPath);
 }
 
 /**

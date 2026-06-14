@@ -9,7 +9,7 @@ import { db as defaultDb } from "../db/index.js";
 import { MOCK_AGENT_COMMAND, isMockProfile, toExecutorProvider } from "../services/agent-settings.service.js";
 import { createBoardEvents } from "../services/board-events.js";
 import { emitButlerSystemEvent } from "../services/butler-event-feed.js";
-import { ensurePnpmBuildApproval } from "../services/project-scaffold.js";
+import { ensureBuildableFromClean } from "../services/project-scaffold.js";
 import * as gitService from "../services/git.service.js";
 import { createSessionManager } from "../services/session.manager.js";
 import { applyWorkspaceProfileToPrefs, buildReviewArgs, buildReviewPrompt, getEffectiveProfile, parseProviderPref } from "./review-helpers.js";
@@ -452,7 +452,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
           // (the warm pnpm store hides it). Repair the manifest and COMMIT it onto the branch
           // BEFORE the verify build, so the fix merges to master and clones build clean.
           try {
-            const approvalChanged = ensurePnpmBuildApproval(workspace.workingDir);
+            const approvalChanged = ensureBuildableFromClean(workspace.workingDir);
             if (approvalChanged) {
               // Only stage files that actually exist — `git add -- <missing>` fails the WHOLE
               // command on a missing pathspec (e.g. a single-package app has no
