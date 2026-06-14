@@ -24,6 +24,8 @@ import { isClaudeUsageLimitStats } from "../services/claude-rate-limit.js";
 import { rotateClaudeSubscription } from "../services/claude-subscription-ring.js";
 import { buildLearningStepPrompt } from "../services/merge-helpers.service.js";
 import { isFoundationalBlocker } from "../services/foundational-merge.service.js";
+import { isColdCloneCheckEnabled, runColdCloneBuildCheckForProject } from "../services/cold-clone-build-check.service.js";
+import type { ColdCloneCheckResult } from "../services/cold-clone-build-check.service.js";
 
 type WorkspaceRow = typeof workspaces.$inferSelect;
 
@@ -513,6 +515,33 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
           } catch (smokeErr) {
             // Non-fatal: a harness error must not block an otherwise-passing review. Log and proceed.
             console.warn(`[workflow] smoke check errored (non-fatal) for workspace ${workspaceId}:`, smokeErr instanceof Error ? smokeErr.message : String(smokeErr));
+          }
+        }
+        // #792 cold-clone build check: the in-worktree verify gate above runs in a
+        // dependency-symlinked worktree with a warm pnpm store, so it can pass even
+        // when a FRESH clone of the branch would not build (the #783 class: unapproved
+        // native build scripts, an unpinned package manager, an uncommitted generated
+        // file). Opt-in per project via `cold_clone_check_<projectId>` — a pure no-op
+        // when unset. Runs AFTER the verify block so it picks up any pnpm-approval
+        // repair just committed onto the branch. A non-zero clean-build exit WITHHOLDS
+        // readyForMerge so the #783 class is caught at review, not after merge.
+        if (await isColdCloneCheckEnabled(projectId, db)) {
+          const repoRows = await db.select({ repoPath: projects.repoPath }).from(projects).where(eq(projects.id, projectId)).limit(1);
+          const repoPath = repoRows[0]?.repoPath;
+          if (repoPath && workspace.branch) {
+            const coldResult: ColdCloneCheckResult = await runColdCloneBuildCheckForProject(
+              projectId,
+              { repoPath, branch: workspace.branch },
+              db,
+            ).catch((e) => ({ ok: false, reason: "build-failed" as const, output: e instanceof Error ? e.message : String(e) }));
+            if (!coldResult.ok) {
+              const detail = coldResult.failedCommand ? `${coldResult.failedCommand} (exit ${coldResult.exitCode})` : coldResult.reason;
+              console.log(`[workflow] cold-clone build check failed (${coldResult.reason}) for workspace ${workspaceId} — withholding readyForMerge (#792)`);
+              boardEvents.broadcast(projectId, "workflow_error");
+              emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Cold-clone build check failed for workspace ${workspaceId}: ${detail}. Builds in the worktree but not on a fresh clone (the #783 class); not approved for merge. ${(coldResult.output || "").slice(0, 300)}` });
+              return;
+            }
+            console.log(`[workflow] cold-clone build check passed for workspace ${workspaceId} (#792)`);
           }
         }
         // #629 Guard: re-verify the branch still has committed changes ahead of base.
