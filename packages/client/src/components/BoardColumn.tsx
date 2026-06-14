@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
@@ -267,6 +267,13 @@ export function BoardColumn({
 
   const virtualIssueItems = shouldVirtualizeIssues ? issueVirtualizer.getVirtualItems() : [];
   const virtualIssuesHeight = shouldVirtualizeIssues ? issueVirtualizer.getTotalSize() : 0;
+
+  useEffect(() => {
+    if (!shouldVirtualizeIssues || !keyboardCursorIssueId) return;
+    const issueIndex = displayedIssues.findIndex((issue) => issue.id === keyboardCursorIssueId);
+    if (issueIndex === -1) return;
+    issueVirtualizer.scrollToIndex(issueIndex, { align: "auto" });
+  }, [displayedIssues, issueVirtualizer, keyboardCursorIssueId, shouldVirtualizeIssues]);
 
   // Single source of truth for the IssueCard prop binding shared by the flat list
   // and both swimlane modes. The aging-heatmap props are only forwarded in the flat
