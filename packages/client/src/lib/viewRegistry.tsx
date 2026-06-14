@@ -684,11 +684,10 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     id: "calendar",
     toolbarLabel: "Calendar",
     label: "Calendar",
-    tooltip: "Calendar — issues by due date on a monthly grid",
+    tooltip: "Calendar - issues by created, updated, or status-change date",
     icon: ICON.calendar,
     paletteIcon: "Cal",
-    paletteDescription: "Show issues on a monthly calendar by due date",
-    shortcut: "a",
+    paletteDescription: "Show issues on a monthly calendar by board timestamps",
     group: "secondary",
   },
 ];
