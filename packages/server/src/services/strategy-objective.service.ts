@@ -256,6 +256,14 @@ export function updateObjectiveWithStrategy(objectiveText: string, config: Strat
  * Render the Strategy Bullseye into the repo's `objective.md` generated block.
  * Returns `true` if the file existed and was actually rewritten (content changed),
  * so callers can decide whether a follow-up auto-commit is warranted.
+ *
+ * NB: `objective.md` exists ONLY in the agentic-kanban repo (the Conductor's
+ * hand-authored, agentic-kanban-only control plane — see docs/decisions/006,
+ * "Driven projects"). For every *driven* project there is no objective.md, so this
+ * returns `false` and writes nothing: the Strategy Bullseye still takes effect for
+ * those projects through `resolveMonitorTunables`, which reads the
+ * `board_strategy_<projectId>` preference directly. This no-op is the mechanism that
+ * lets a non-agentic-kanban project drive hands-off with no objective.md (#802).
  */
 export function writeStrategyObjective(repoPath: string, rawConfig: string): boolean {
   const config = parseStrategyBullseyeConfig(rawConfig);

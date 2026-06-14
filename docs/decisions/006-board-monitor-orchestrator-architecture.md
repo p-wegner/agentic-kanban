@@ -51,11 +51,38 @@ inspect the branch) and appends exactly one line summarizing the cycle.
    fragile *for us* precisely because the board is both the tool and the subject; that's why
    `auto_monitor` is off for this repo.
 
+## Driven projects: the Conductor is retired for them (objective.md is agentic-kanban-only)
+
+A "driven project" is any *other* repo the board runs hands-off (per-project autodrive). For those,
+**the Conductor (approach B) and its `objective.md` are formally NOT used.** This is the resolution of
+[#802](#) — rather than template-substitute `objective.md` from the stack profile + Strategy Bullseye,
+we keep it agentic-kanban-only and drive other projects entirely on the in-process engine.
+
+- **`scripts/board-monitor/objective.md` is hand-authored for agentic-kanban and stays that way.**
+  Its concrete values (project name, cwd, API port 3001, board skill names) are deliberately not
+  generalized — generalizing them would resurrect approach C's blast-radius problem for the one repo
+  that has it (we develop the board *with* the board) while adding nothing for projects that don't.
+- **The supported driver for every other project is the in-process engine** — `runMonitorCycle`
+  (auto-start/relaunch) + auto-review + auto-merge + the stranded-review reconciler — NOT the
+  Conductor and NOT the Monitor Butler. Enable it per project with the `board_autodrive_<projectId>`
+  preference (opts a project into auto-start/relaunch even while the global `auto_monitor` is off).
+- **Strategy reaches the in-process engine without any `objective.md`.** `resolveMonitorTunables`
+  reads the project's `board_strategy_<projectId>` Strategy Bullseye preference directly; there is no
+  file to render. `writeStrategyObjective()` is a no-op when `objective.md` is absent, so saving a
+  driven project's Bullseye never tries to author one. Legacy fallback when no Bullseye is set:
+  `activeAgentsTarget` ← `nudge_wip_limit`, `backlogFloor = 3`, `maxNewStartsPerCycle = 3`.
+- **New-project scaffold writes no `objective.md`.** `project-scaffold.ts` is deliberately generic and
+  never emits one (see its module comment) — a fresh driven project is hands-off-ready without it.
+- **Acceptance (the #802 contract):** a non-agentic-kanban project drives hands-off with no
+  hand-authored `objective.md`. Set `board_autodrive_<projectId> = "true"`, optionally tune via the
+  Strategy Bullseye, and the in-process engine starts/relaunches/reviews/merges with no Conductor and
+  no objective file.
+
 ## Consequences
 - **This is our dev-board choice, not the app's default.** Approach C (the in-process monitor) ships
   in the app and is the right default for *other* projects developed with agentic-kanban — they are
   not modifying the board's own source, so C's blast radius doesn't apply. B is the dogfooding
-  control plane for *this* repo.
+  control plane for *this* repo. (See the "Driven projects" section above for the formal scope split.)
 - **The loop must survive its own hooks.** It runs with hooks enabled
   (`--dangerously-bypass-hook-trust`) so the PreToolUse safety guards and the Stop commit-discipline
   guard fire. The orchestrator **must commit any main-checkout fix immediately** — uncommitted
