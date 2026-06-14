@@ -3,7 +3,7 @@ import { apiFetch } from "../lib/api.js";
 import { invalidateSettings } from "../lib/settingsStore.js";
 import { showToast } from "./Toast.js";
 import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
-import { CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, DEFAULT_SETTINGS, TABS, uniqueProfiles, type AgentProfileHealth, type McpHealth, type MonitorTunables, type ProjectSettingsState, type ScheduledRun, type Settings, type SettingsPanelProps, type SkillSetting, type Tab, type TagSetting } from "./SettingsPanel.shared.js";
+import { CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, DEFAULT_SETTINGS, PI_DEFAULT_PROFILE, TABS, uniqueProfiles, type AgentProfileHealth, type McpHealth, type MonitorTunables, type ProjectSettingsState, type ScheduledRun, type Settings, type SettingsPanelProps, type SkillSetting, type Tab, type TagSetting } from "./SettingsPanel.shared.js";
 import { AgentSettings } from "./settings/AgentSettings.js";
 import { WorkflowSettings } from "./settings/WorkflowSettings.js";
 import { SkillsSettings } from "./settings/SkillsSettings.js";
@@ -20,6 +20,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
   const [profiles, setProfiles] = useState<string[]>([]);
   const [codexProfiles, setCodexProfiles] = useState<string[]>([CODEX_DEFAULT_PROFILE]);
   const [copilotProfiles, setCopilotProfiles] = useState<string[]>([COPILOT_DEFAULT_PROFILE]);
+  const [piProfiles, setPiProfiles] = useState<string[]>([PI_DEFAULT_PROFILE]);
   const [profileHealth, setProfileHealth] = useState<AgentProfileHealth[]>([]);
   const [preflightingProfileId, setPreflightingProfileId] = useState<string | null>(null);
   const [mcpHealth, setMcpHealth] = useState<McpHealth | null>(null);
@@ -211,6 +212,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
           claudeProfiles: string[];
           codexProfiles: string[];
           copilotProfiles: string[];
+          piProfiles: string[];
           skills: { id: string; name: string; description: string; prompt: string; model: string | null; projectId: string | null; isBuiltin: boolean }[];
           tags: { id: string; name: string; color: string | null; isBuiltin: boolean }[];
         }>("/api/preferences/settings-bootstrap");
@@ -220,6 +222,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
         setProfiles(boot.claudeProfiles);
         setCodexProfiles(uniqueProfiles(boot.codexProfiles, CODEX_DEFAULT_PROFILE));
         setCopilotProfiles(uniqueProfiles(boot.copilotProfiles?.length ? boot.copilotProfiles : [COPILOT_DEFAULT_PROFILE], COPILOT_DEFAULT_PROFILE));
+        setPiProfiles(uniqueProfiles(boot.piProfiles?.length ? boot.piProfiles : [PI_DEFAULT_PROFILE], PI_DEFAULT_PROFILE));
         setSkills(boot.skills);
         setTagsList(boot.tags);
 
@@ -495,6 +498,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
                   profiles={profiles}
                   codexProfiles={codexProfiles}
                   copilotProfiles={copilotProfiles}
+                  piProfiles={piProfiles}
                   profileHealth={profileHealth}
                   preflightingProfileId={preflightingProfileId}
                   onProfilePreflight={handleProfilePreflight}

@@ -54,10 +54,11 @@ export function createPreferencesRoute(database: Database = db) {
   // ~1.2s). The heavy/secondary probes — agent-profile health (~600ms), mcp health,
   // install-status, branches — stay separate and are loaded deferred by the client.
   router.get("/settings-bootstrap", async (c) => {
-    const [settings, claudeProfiles, codexProfiles, skills, tags] = await Promise.all([
+    const [settings, claudeProfiles, codexProfiles, piProfiles, skills, tags] = await Promise.all([
       preferenceService.getSettings(),
       preferenceService.listClaudeProfiles(),
       preferenceService.listCodexProfiles(),
+      preferenceService.listPiProfiles(),
       agentSkillService.listSkills(undefined, false),
       tagService.listTags(),
     ]);
@@ -66,6 +67,7 @@ export function createPreferencesRoute(database: Database = db) {
       claudeProfiles,
       codexProfiles,
       copilotProfiles: preferenceService.listCopilotProfiles(),
+      piProfiles,
       skills,
       tags,
     });
@@ -91,6 +93,11 @@ export function createPreferencesRoute(database: Database = db) {
   // GET /api/preferences/copilot-profiles
   router.get("/copilot-profiles", (_c) => {
     return _c.json({ profiles: preferenceService.listCopilotProfiles() });
+  });
+
+  // GET /api/preferences/pi-profiles
+  router.get("/pi-profiles", async (c) => {
+    return c.json({ profiles: await preferenceService.listPiProfiles() });
   });
 
   // GET /api/preferences/home-dir — so the client can infer a Codex license's
@@ -154,6 +161,7 @@ export function createPreferencesRoute(database: Database = db) {
         claudeProfiles: await preferenceService.listClaudeProfiles(),
         codexProfiles: await preferenceService.listCodexProfiles(),
         copilotProfiles: preferenceService.listCopilotProfiles(),
+        piProfiles: await preferenceService.listPiProfiles(),
       }),
     });
   });

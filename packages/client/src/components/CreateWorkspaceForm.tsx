@@ -48,6 +48,7 @@ type AgentProvider = ProfileSelection["provider"];
 
 const COPILOT_DEFAULT_PROFILE = "default";
 const CODEX_DEFAULT_PROFILE = "default";
+const PI_DEFAULT_PROFILE = "default";
 
 function uniqueProfiles(profiles: string[], fallback?: string): string[] {
   const all = fallback ? [fallback, ...profiles] : profiles;
@@ -57,6 +58,7 @@ function uniqueProfiles(profiles: string[], fallback?: string): string[] {
 function defaultProfileLabel(prefs: Record<string, string>): string {
   if (prefs.provider === "codex") return `codex:${prefs.codex_profile || CODEX_DEFAULT_PROFILE}`;
   if (prefs.provider === "copilot") return `copilot:${prefs.copilot_profile || COPILOT_DEFAULT_PROFILE}`;
+  if (prefs.provider === "pi") return `pi:${prefs.pi_profile || PI_DEFAULT_PROFILE}`;
   return `claude:${prefs.claude_profile || "default"}`;
 }
 
@@ -69,6 +71,7 @@ function defaultProfileLabel(prefs: Record<string, string>): string {
 function resolveDefaultProfile(prefs: Record<string, string>): { provider: AgentProvider; name: string } | undefined {
   if (prefs.provider === "codex") return { provider: "codex", name: prefs.codex_profile || CODEX_DEFAULT_PROFILE };
   if (prefs.provider === "copilot") return { provider: "copilot", name: prefs.copilot_profile || COPILOT_DEFAULT_PROFILE };
+  if (prefs.provider === "pi") return { provider: "pi", name: prefs.pi_profile || PI_DEFAULT_PROFILE };
   if (prefs.claude_profile) return { provider: "claude", name: prefs.claude_profile };
   return undefined; // No explicit default — let server/strategy decide
 }
@@ -103,6 +106,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
   const [claudeProfiles, setClaudeProfiles] = useState<string[]>([]);
   const [codexProfiles, setCodexProfiles] = useState<string[]>([CODEX_DEFAULT_PROFILE]);
   const [copilotProfiles, setCopilotProfiles] = useState<string[]>([COPILOT_DEFAULT_PROFILE]);
+  const [piProfiles, setPiProfiles] = useState<string[]>([PI_DEFAULT_PROFILE]);
   // selectedProfile format: "<provider>:<name>" e.g. "claude:myprofile", "codex:myprofile", "copilot:default", or "" for default
   const [selectedProfile, setSelectedProfile] = useState<string>("");
   const [selectedModel, setSelectedModel] = useState<string>("");
@@ -134,17 +138,21 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
       apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles").catch(() => ({ profiles: [] as string[] })),
       apiFetch<{ profiles: string[] }>("/api/preferences/codex-profiles").catch(() => ({ profiles: [CODEX_DEFAULT_PROFILE] as string[] })),
       apiFetch<{ profiles: string[] }>("/api/preferences/copilot-profiles").catch(() => ({ profiles: [COPILOT_DEFAULT_PROFILE] })),
+      apiFetch<{ profiles: string[] }>("/api/preferences/pi-profiles").catch(() => ({ profiles: [PI_DEFAULT_PROFILE] })),
       getSettings().catch(() => ({} as Record<string, string>)),
-    ]).then(([claudeData, codexData, copilotData, settings]) => {
+    ]).then(([claudeData, codexData, copilotData, piData, settings]) => {
       setClaudeProfiles(claudeData.profiles);
       setCodexProfiles(uniqueProfiles(codexData.profiles, CODEX_DEFAULT_PROFILE));
       setCopilotProfiles(uniqueProfiles(copilotData.profiles, COPILOT_DEFAULT_PROFILE));
+      setPiProfiles(uniqueProfiles(piData.profiles, PI_DEFAULT_PROFILE));
       // Set default selection from global settings
       const globalProvider = settings.provider || "claude";
       if (globalProvider === "codex") {
         setSelectedProfile(`codex:${settings.codex_profile || CODEX_DEFAULT_PROFILE}`);
       } else if (globalProvider === "copilot") {
         setSelectedProfile(`copilot:${settings.copilot_profile || COPILOT_DEFAULT_PROFILE}`);
+      } else if (globalProvider === "pi") {
+        setSelectedProfile(`pi:${settings.pi_profile || PI_DEFAULT_PROFILE}`);
       } else if (settings.claude_profile) {
         setSelectedProfile(`claude:${settings.claude_profile}`);
       } else {
@@ -206,7 +214,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
       if (colonIdx !== -1) {
         const provider = selectedProfile.slice(0, colonIdx) as AgentProvider;
         const name = selectedProfile.slice(colonIdx + 1);
-        if ((provider === "claude" || provider === "codex" || provider === "copilot") && name) body.profile = { provider, name };
+        if ((provider === "claude" || provider === "codex" || provider === "copilot" || provider === "pi") && name) body.profile = { provider, name };
       }
     } else {
       // "Default" selected — resolve to the explicit global default so the
@@ -296,7 +304,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
     if (!preset) return;
     setSelectedProfile(presetProfileToken(preset));
     // Model only applies to Claude/Codex; clear otherwise so the field isn't stale.
-    setSelectedModel(preset.provider === "copilot" ? "" : preset.model ?? "");
+    setSelectedModel(preset.provider === "copilot" || preset.provider === "pi" ? "" : preset.model ?? "");
   }
 
   function handleApplyTemplate(templateId: string) {
@@ -351,7 +359,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
 
   const isLoading = actionLoading || localLoading || preflightLoading;
   const isClaudeSelected = selectedProfile === ""
-    ? (prefs.provider !== "codex" && prefs.provider !== "copilot")
+    ? (prefs.provider !== "codex" && prefs.provider !== "copilot" && prefs.provider !== "pi")
     : selectedProfile.startsWith("claude:");
   const isCodexSelected = selectedProfile === ""
     ? prefs.provider === "codex"
@@ -587,7 +595,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
           </p>
         </div>
       )}
-      {(claudeProfiles.length > 0 || codexProfiles.length > 0 || copilotProfiles.length > 0) && (
+      {(claudeProfiles.length > 0 || codexProfiles.length > 0 || copilotProfiles.length > 0 || piProfiles.length > 0) && (
         <div>
           <div className="flex items-center justify-between mb-1">
             <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Agent Profile</label>
@@ -624,6 +632,11 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
             <optgroup label="Copilot">
               {copilotProfiles.map((p) => (
                 <option key={`copilot:${p}`} value={`copilot:${p}`}>{profileOptionLabel("copilot", p)}</option>
+              ))}
+            </optgroup>
+            <optgroup label="Pi">
+              {piProfiles.map((p) => (
+                <option key={`pi:${p}`} value={`pi:${p}`}>{profileOptionLabel("pi", p)}</option>
               ))}
             </optgroup>
           </select>

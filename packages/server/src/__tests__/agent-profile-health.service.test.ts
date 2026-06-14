@@ -19,6 +19,7 @@ describe("agent profile health service", () => {
       claudeProfiles: [],
       codexProfiles: ["default", "fast"],
       copilotProfiles: ["default"],
+      piProfiles: ["default"],
     });
 
     const fast = rows.find((row) => row.id === "codex:fast");
@@ -35,31 +36,31 @@ describe("agent profile health service", () => {
     expect(fast?.latestFailure?.summary).not.toContain("abc123");
   });
 
-  it("includes a default Pi profile and stubs launch preflight until provider implementation", async () => {
+  it("includes a default Pi profile and runs Pi launch preflight", async () => {
     const { db } = createTestDb();
     const rows = await listAgentProfileHealth(db, {
       claudeProfiles: [],
       codexProfiles: ["default"],
       copilotProfiles: ["default"],
+      piProfiles: ["default"],
     });
 
     const pi = rows.find((row) => row.id === "pi:default");
     expect(pi).toMatchObject({
       provider: "pi",
       profileName: "default",
-      command: "pi",
     });
-    expect(pi?.preflight.warnings).toContain("Pi launch preflight is pending provider implementation.");
+    expect(pi?.command).toMatch(/^pi(\.|$)/);
+    expect(pi?.preflight.warnings).not.toContain("Pi launch preflight is pending provider implementation.");
   });
 
   it("applies pi_profile for Pi preflight selections", () => {
     const result = preflightAgentProfile(new Map([["pi_profile", "local"]]), "pi", "local");
     expect(result).toMatchObject({
-      ok: true,
-      status: "warning",
       provider: "pi",
       profileName: "local",
-      command: "pi",
     });
+    expect(result.command).toMatch(/^pi(\.|$)/);
+    expect(result.errors.some((error) => error.includes("Pi profile 'local' requires PI_CODING_AGENT_DIR"))).toBe(true);
   });
 });

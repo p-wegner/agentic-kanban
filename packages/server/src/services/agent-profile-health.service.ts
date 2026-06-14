@@ -1,12 +1,13 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, basename } from "node:path";
+import { basename, delimiter, join } from "node:path";
 import { preferences } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { setPreference } from "../repositories/preferences.repository.js";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { buildAgentLaunchConfig, type ProviderName } from "./agent-provider.js";
+import { resolvePiExecutable, splitArgs } from "./agent-provider/helpers.js";
 import { parseCodexLicenseRing, codexHomeHasAuth, resolveCodexHomeForProfile } from "./codex-license-ring.js";
 import { parseClaudeSubscriptionRing, claudeConfigDirHasAuth, resolveClaudeConfigDirForProfile } from "./claude-subscription-ring.js";
 
@@ -47,6 +48,15 @@ export interface AgentProfileHealthRow {
 const DEFAULT_PROFILE = "default";
 const FAILURE_PREFIX = "agent_profile_launch_failure.";
 const SECRET_FLAG_PATTERN = /(?:key|token|secret|password|credential)/i;
+const PI_API_KEY_ENV_KEYS = [
+  "ANTHROPIC_API_KEY",
+  "OPENAI_API_KEY",
+  "GOOGLE_API_KEY",
+  "GEMINI_API_KEY",
+  "GROQ_API_KEY",
+  "MISTRAL_API_KEY",
+  "OPENROUTER_API_KEY",
+];
 
 function profileKey(provider: ProviderName, profileName?: string | null): string {
   const name = profileName?.trim() || DEFAULT_PROFILE;
@@ -106,6 +116,33 @@ function sanitizeCommand(command: string | undefined): string {
   if (trimmed.includes("mock-agent")) return "mock-agent";
   if (/[\\/]/.test(trimmed)) return basename(trimmed.replace(/^"|"$/g, ""));
   return trimmed.split(/\s+/)[0];
+}
+
+function commandExists(command: string): boolean {
+  const first = splitArgs(command)[0] ?? command.trim();
+  if (!first) return false;
+  const unquoted = first.replace(/^"|"$/g, "");
+  if (/[\\/]/.test(unquoted)) return existsSync(unquoted);
+
+  const extensions = process.platform === "win32"
+    ? (process.env.PATHEXT?.split(";").filter(Boolean) ?? [".EXE", ".CMD", ".BAT", ".PS1"])
+    : [""];
+  const names = extensions.includes("") ? [unquoted] : [unquoted, ...extensions.map((ext) => `${unquoted}${ext.toLowerCase()}`), ...extensions.map((ext) => `${unquoted}${ext.toUpperCase()}`)];
+  for (const dir of (process.env.PATH ?? "").split(delimiter).filter(Boolean)) {
+    for (const name of names) {
+      if (existsSync(join(dir, name))) return true;
+    }
+  }
+  return false;
+}
+
+function piCodingAgentDirForProfile(profileName: string): string | undefined {
+  if (profileName === DEFAULT_PROFILE) return process.env.PI_CODING_AGENT_DIR;
+  return join(homedir(), `.pi-${profileName}`);
+}
+
+function hasPiApiKey(): boolean {
+  return PI_API_KEY_ENV_KEYS.some((key) => !!process.env[key]);
 }
 
 function sanitizeFlags(args: string[]): string[] {
@@ -187,24 +224,48 @@ export function preflightAgentProfile(
   let flags: string[] = [];
   let command = sanitizeCommand(settings.agentCommand) || provider;
   if (provider === "pi") {
-    command = sanitizeCommand(settings.agentCommand) || "pi";
-    warnings.push("Pi launch preflight is pending provider implementation.");
-  } else {
-    try {
-      const launchConfig = buildAgentLaunchConfig({
-        agentCommand: settings.agentCommand,
-        agentArgs: settings.agentArgs,
-        claudeProfile: settings.claudeProfile,
-        profile: profileName === DEFAULT_PROFILE ? undefined : { provider, name: profileName },
-        provider: toExecutorProvider(provider),
-        permissionPromptTool: settings.permissionPromptTool,
-        prompt: "preflight",
-      });
-      command = sanitizeCommand(launchConfig.command) || command;
-      flags = sanitizeFlags(launchConfig.args);
-    } catch (err) {
-      errors.push(sanitizeErrorMessage(err instanceof Error ? err.message : String(err)));
+    const launchCommand = settings.agentCommand || "pi";
+    const resolvedCommand = !settings.agentCommand ? resolvePiExecutable(launchCommand) : undefined;
+    command = sanitizeCommand(resolvedCommand || launchCommand) || "pi";
+    if (!resolvedCommand && !commandExists(launchCommand)) {
+      errors.push(`Pi command not found on PATH: ${sanitizeCommand(launchCommand) || "pi"}. Install @mariozechner/pi-coding-agent or set Agent Command to the Pi binary path.`);
     }
+
+    const codingAgentDir = piCodingAgentDirForProfile(profileName);
+    if (profileName !== DEFAULT_PROFILE) {
+      if (!codingAgentDir || !existsSync(codingAgentDir)) {
+        errors.push(`Pi profile '${profileName}' requires PI_CODING_AGENT_DIR ${codingAgentDir ?? "(not resolved)"} to exist.`);
+      } else {
+        flags.push(`PI_CODING_AGENT_DIR ${codingAgentDir}`);
+      }
+    } else if (codingAgentDir) {
+      if (!existsSync(codingAgentDir)) {
+        errors.push(`PI_CODING_AGENT_DIR does not exist: ${codingAgentDir}`);
+      } else {
+        flags.push(`PI_CODING_AGENT_DIR ${codingAgentDir}`);
+      }
+    }
+
+    if (!hasPiApiKey() && !codingAgentDir) {
+      errors.push(`Pi auth is not configured: set one of ${PI_API_KEY_ENV_KEYS.join(", ")} or select a Pi profile with an existing PI_CODING_AGENT_DIR.`);
+    } else if (!hasPiApiKey() && codingAgentDir && existsSync(codingAgentDir)) {
+      warnings.push("No Pi provider API key is set in the server environment; assuming auth is configured in PI_CODING_AGENT_DIR.");
+    }
+  }
+  try {
+    const launchConfig = buildAgentLaunchConfig({
+      agentCommand: settings.agentCommand,
+      agentArgs: settings.agentArgs,
+      claudeProfile: settings.claudeProfile,
+      profile: profileName === DEFAULT_PROFILE ? undefined : { provider, name: profileName },
+      provider: toExecutorProvider(provider),
+      permissionPromptTool: settings.permissionPromptTool,
+      prompt: "preflight",
+    });
+    command = sanitizeCommand(launchConfig.command) || command;
+    flags = [...new Set([...flags, ...sanitizeFlags(launchConfig.args)])];
+  } catch (err) {
+    errors.push(sanitizeErrorMessage(err instanceof Error ? err.message : String(err)));
   }
 
   return {
@@ -225,6 +286,7 @@ export async function listAgentProfileHealth(
     claudeProfiles: string[];
     codexProfiles: string[];
     copilotProfiles: string[];
+    piProfiles: string[];
   },
 ): Promise<AgentProfileHealthRow[]> {
   const prefRows = await database.select().from(preferences);
@@ -246,6 +308,7 @@ export async function listAgentProfileHealth(
     { provider: "copilot", profileName: DEFAULT_PROFILE },
     ...profileLists.copilotProfiles.filter((name) => name !== DEFAULT_PROFILE).map((name) => ({ provider: "copilot" as const, profileName: name })),
     { provider: "pi", profileName: DEFAULT_PROFILE },
+    ...profileLists.piProfiles.filter((name) => name !== DEFAULT_PROFILE).map((name) => ({ provider: "pi" as const, profileName: name })),
   ];
 
   const seen = new Set<string>();

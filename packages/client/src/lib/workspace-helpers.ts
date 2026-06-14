@@ -4,6 +4,7 @@ export type AgentProvider = ProfileSelection["provider"];
 
 export const COPILOT_DEFAULT_PROFILE = "default";
 export const CODEX_DEFAULT_PROFILE = "default";
+export const PI_DEFAULT_PROFILE = "default";
 
 export type ProfileOption = {
   provider: AgentProvider;
@@ -65,6 +66,7 @@ export function uniqueProfileOptions(options: ProfileOption[]): ProfileOption[] 
 export function providerLabel(provider?: string | null): string {
   if (provider === "codex") return "Codex";
   if (provider === "copilot") return "Copilot";
+  if (provider === "pi") return "Pi";
   return "Claude";
 }
 
@@ -73,13 +75,14 @@ export function profileSelectionFromValue(value: string): ProfileSelection | und
   if (colonIdx === -1) return undefined;
   const provider = value.slice(0, colonIdx) as AgentProvider;
   const name = value.slice(colonIdx + 1);
-  if ((provider !== "claude" && provider !== "codex" && provider !== "copilot") || !name) return undefined;
+  if ((provider !== "claude" && provider !== "codex" && provider !== "copilot" && provider !== "pi") || !name) return undefined;
   return { provider, name };
 }
 
 export function defaultSelectedProfile(settings: Record<string, string>): string {
   if (settings.provider === "codex") return `codex:${settings.codex_profile || CODEX_DEFAULT_PROFILE}`;
   if (settings.provider === "copilot") return `copilot:${settings.copilot_profile || COPILOT_DEFAULT_PROFILE}`;
+  if (settings.provider === "pi") return `pi:${settings.pi_profile || PI_DEFAULT_PROFILE}`;
   if (settings.claude_profile) return `claude:${settings.claude_profile}`;
   return "";
 }
@@ -93,6 +96,7 @@ export function defaultSelectedProfile(settings: Record<string, string>): string
 export function resolveQuickLaunchDefault(prefs: Record<string, string>): { provider: AgentProvider; name: string } | undefined {
   if (prefs.provider === "codex") return { provider: "codex", name: prefs.codex_profile || CODEX_DEFAULT_PROFILE };
   if (prefs.provider === "copilot") return { provider: "copilot", name: prefs.copilot_profile || COPILOT_DEFAULT_PROFILE };
+  if (prefs.provider === "pi") return { provider: "pi", name: prefs.pi_profile || PI_DEFAULT_PROFILE };
   if (prefs.claude_profile) return { provider: "claude", name: prefs.claude_profile };
   return undefined;
 }

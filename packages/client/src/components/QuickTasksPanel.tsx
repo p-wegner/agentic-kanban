@@ -21,13 +21,14 @@ interface QuickTasksPanelProps {
 }
 
 type ProfileOption = {
-  provider: "claude" | "codex" | "copilot";
+  provider: "claude" | "codex" | "copilot" | "pi";
   name: string;
 };
 
 const CODEX_DEFAULT_PROFILE = "default";
 const CODEX_DEFAULT_MODEL = "gpt-5.3-codex-spark";
 const COPILOT_DEFAULT_PROFILE = "default";
+const PI_DEFAULT_PROFILE = "default";
 
 function profileOptionValue(option: ProfileOption): string {
   return `${option.provider}:${option.name}`;
@@ -46,29 +47,31 @@ function uniqueProfileOptions(options: ProfileOption[]): ProfileOption[] {
 function providerLabel(provider?: string | null): string {
   if (provider === "codex") return "Codex";
   if (provider === "copilot") return "Copilot";
+  if (provider === "pi") return "Pi";
   return "Claude";
 }
 
-function profileSelectionFromValue(value: string): { provider: "claude" | "codex" | "copilot"; name: string } | undefined {
+function profileSelectionFromValue(value: string): { provider: "claude" | "codex" | "copilot" | "pi"; name: string } | undefined {
   const colonIdx = value.indexOf(":");
   if (colonIdx === -1) return undefined;
-  const provider = value.slice(0, colonIdx) as "claude" | "codex" | "copilot";
+  const provider = value.slice(0, colonIdx) as "claude" | "codex" | "copilot" | "pi";
   const name = value.slice(colonIdx + 1);
-  if ((provider !== "claude" && provider !== "codex" && provider !== "copilot") || !name) return undefined;
+  if ((provider !== "claude" && provider !== "codex" && provider !== "copilot" && provider !== "pi") || !name) return undefined;
   return { provider, name };
 }
 
 function defaultSelectedProfile(settings: Record<string, string>): string {
   if (settings.provider === "codex") return `codex:${settings.codex_profile || CODEX_DEFAULT_PROFILE}`;
   if (settings.provider === "copilot") return `copilot:${settings.copilot_profile || COPILOT_DEFAULT_PROFILE}`;
+  if (settings.provider === "pi") return `pi:${settings.pi_profile || PI_DEFAULT_PROFILE}`;
   if (settings.claude_profile) return `claude:${settings.claude_profile}`;
   return "";
 }
 
 function resolveProviderFromProfile(
   profileValue: string,
-  fallbackProvider: "claude" | "codex" | "copilot",
-): "claude" | "codex" | "copilot" {
+  fallbackProvider: "claude" | "codex" | "copilot" | "pi",
+): "claude" | "codex" | "copilot" | "pi" {
   const profile = profileSelectionFromValue(profileValue);
   return profile?.provider ?? fallbackProvider;
 }
@@ -83,10 +86,11 @@ export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPa
   const [showContext, setShowContext] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
-  const [defaultProfileProvider, setDefaultProfileProvider] = useState<"claude" | "codex" | "copilot">("claude");
+  const [defaultProfileProvider, setDefaultProfileProvider] = useState<"claude" | "codex" | "copilot" | "pi">("claude");
   const [availableProfileOptions, setAvailableProfileOptions] = useState<ProfileOption[]>([
     { provider: "codex", name: CODEX_DEFAULT_PROFILE },
     { provider: "copilot", name: COPILOT_DEFAULT_PROFILE },
+    { provider: "pi", name: PI_DEFAULT_PROFILE },
   ]);
 
   useEffect(() => {
@@ -99,9 +103,10 @@ export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPa
       apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles").catch(() => ({ profiles: [] as string[] })),
       apiFetch<{ profiles: string[] }>("/api/preferences/codex-profiles").catch(() => ({ profiles: [CODEX_DEFAULT_PROFILE] as string[] })),
       apiFetch<{ profiles: string[] }>("/api/preferences/copilot-profiles").catch(() => ({ profiles: [COPILOT_DEFAULT_PROFILE] })),
-    ]).then(([settingsData, claudeData, codexData, copilotData]) => {
+      apiFetch<{ profiles: string[] }>("/api/preferences/pi-profiles").catch(() => ({ profiles: [PI_DEFAULT_PROFILE] })),
+    ]).then(([settingsData, claudeData, codexData, copilotData, piData]) => {
       const selectedProfile = defaultSelectedProfile(settingsData);
-      const profileProvider = resolveProviderFromProfile(selectedProfile, settingsData.provider === "copilot" ? "copilot" : settingsData.provider === "codex" ? "codex" : "claude");
+      const profileProvider = resolveProviderFromProfile(selectedProfile, settingsData.provider === "pi" ? "pi" : settingsData.provider === "copilot" ? "copilot" : settingsData.provider === "codex" ? "codex" : "claude");
       setSelectedProfile(selectedProfile);
       setDefaultProfileProvider(profileProvider);
       setSelectedModel(profileProvider === "codex" ? CODEX_DEFAULT_MODEL : "");
@@ -111,6 +116,8 @@ export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPa
         ...codexData.profiles.map((name) => ({ provider: "codex" as const, name })),
         { provider: "copilot" as const, name: COPILOT_DEFAULT_PROFILE },
         ...copilotData.profiles.map((name) => ({ provider: "copilot" as const, name })),
+        { provider: "pi" as const, name: PI_DEFAULT_PROFILE },
+        ...piData.profiles.map((name) => ({ provider: "pi" as const, name })),
       ]));
     }).catch(() => {});
   }, [projectId]);
@@ -194,7 +201,7 @@ export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPa
                 <option value="">Default</option>
                 {availableProfileOptions.map((option) => (
                   <option key={profileOptionValue(option)} value={profileOptionValue(option)}>
-                    {providerLabel(option.provider)}: {(option.provider === "copilot" && option.name === COPILOT_DEFAULT_PROFILE) || (option.provider === "codex" && option.name === CODEX_DEFAULT_PROFILE) ? "Default" : option.name}
+                    {providerLabel(option.provider)}: {(option.provider === "copilot" && option.name === COPILOT_DEFAULT_PROFILE) || (option.provider === "codex" && option.name === CODEX_DEFAULT_PROFILE) || (option.provider === "pi" && option.name === PI_DEFAULT_PROFILE) ? "Default" : option.name}
                   </option>
                 ))}
               </select>

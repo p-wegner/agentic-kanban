@@ -1,6 +1,6 @@
 import type { Dispatch, SetStateAction } from "react";
 import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
-import { CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, CapabilityMatrixTable, Field, defaultHarnessLabel, formatHealthTime, profileOptionLabel, providerDisplayName, settingsProfileValue, statusClasses, type AgentProfileHealth, type Settings, type SettingsTextSetter } from "../SettingsPanel.shared.js";
+import { CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, PI_DEFAULT_PROFILE, CapabilityMatrixTable, Field, defaultHarnessLabel, formatHealthTime, profileOptionLabel, providerDisplayName, settingsProfileValue, statusClasses, type AgentProfileHealth, type Settings, type SettingsTextSetter } from "../SettingsPanel.shared.js";
 import { CodexLicenseRingEditor } from "./CodexLicenseRingEditor.js";
 import { ClaudeSubscriptionRingEditor } from "./ClaudeSubscriptionRingEditor.js";
 import { AgentPresetsEditor } from "./AgentPresetsEditor.js";
@@ -21,6 +21,7 @@ type AgentSettingsProps = {
   profiles: string[];
   codexProfiles: string[];
   copilotProfiles: string[];
+  piProfiles: string[];
   profileHealth: AgentProfileHealth[];
   preflightingProfileId: string | null;
   onProfilePreflight: (profile: AgentProfileHealth) => void;
@@ -28,7 +29,7 @@ type AgentSettingsProps = {
   providerDivergence?: ProviderDivergence | null;
 };
 
-export function AgentSettings({ settings, set, setSettings, profiles, codexProfiles, copilotProfiles, profileHealth, preflightingProfileId, onProfilePreflight: handleProfilePreflight, activeProjectId, providerDivergence }: AgentSettingsProps) {
+export function AgentSettings({ settings, set, setSettings, profiles, codexProfiles, copilotProfiles, piProfiles, profileHealth, preflightingProfileId, onProfilePreflight: handleProfilePreflight, activeProjectId, providerDivergence }: AgentSettingsProps) {
   return (
 <>
                   <Field label="Agent Command" hint="Binary name or path. Leave empty for default (claude). Examples: claude, claude-glm, /usr/local/bin/claude">
@@ -48,21 +49,23 @@ export function AgentSettings({ settings, set, setSettings, profiles, codexProfi
                       {" "}Use <span className="font-mono">set-provider-default</span> to sync all sources, or update the Strategy Bullseye in the Workflow tab.
                     </div>
                   )}
-                  <Field label="Agent Profile" hint="Selects agent provider and profile. Claude uses ~/.claude/settings_*.json, Codex uses ~/.codex/<name>.config.toml, Copilot uses the CLI default or configured model profile.">
+                  <Field label="Agent Profile" hint="Selects agent provider and profile. Claude uses ~/.claude/settings_*.json, Codex uses ~/.codex/<name>.config.toml, Copilot uses the CLI default or configured model profile, and Pi uses PI_CODING_AGENT_DIR profile roots.">
                     <select
                       value={settingsProfileValue(settings)}
                       onChange={(e) => {
                         const val = e.target.value;
                         if (val === "") {
-                          setSettings((s) => ({ ...s, provider: "claude", claude_profile: "", codex_profile: s.codex_profile, copilot_profile: s.copilot_profile }));
+                          setSettings((s) => ({ ...s, provider: "claude", claude_profile: "", codex_profile: s.codex_profile, copilot_profile: s.copilot_profile, pi_profile: s.pi_profile }));
                         } else {
                           const [prov, name] = val.split(":");
                           if (prov === "codex") {
-                            setSettings((s) => ({ ...s, provider: "codex", codex_profile: name === CODEX_DEFAULT_PROFILE ? "" : name, claude_profile: s.claude_profile, copilot_profile: s.copilot_profile }));
+                            setSettings((s) => ({ ...s, provider: "codex", codex_profile: name === CODEX_DEFAULT_PROFILE ? "" : name, claude_profile: s.claude_profile, copilot_profile: s.copilot_profile, pi_profile: s.pi_profile }));
                           } else if (prov === "copilot") {
-                            setSettings((s) => ({ ...s, provider: "copilot", copilot_profile: name === COPILOT_DEFAULT_PROFILE ? "" : name, claude_profile: s.claude_profile, codex_profile: s.codex_profile }));
+                            setSettings((s) => ({ ...s, provider: "copilot", copilot_profile: name === COPILOT_DEFAULT_PROFILE ? "" : name, claude_profile: s.claude_profile, codex_profile: s.codex_profile, pi_profile: s.pi_profile }));
+                          } else if (prov === "pi") {
+                            setSettings((s) => ({ ...s, provider: "pi", pi_profile: name === PI_DEFAULT_PROFILE ? "" : name, claude_profile: s.claude_profile, codex_profile: s.codex_profile, copilot_profile: s.copilot_profile }));
                           } else {
-                            setSettings((s) => ({ ...s, provider: "claude", claude_profile: name, codex_profile: s.codex_profile, copilot_profile: s.copilot_profile }));
+                            setSettings((s) => ({ ...s, provider: "claude", claude_profile: name, codex_profile: s.codex_profile, copilot_profile: s.copilot_profile, pi_profile: s.pi_profile }));
                           }
                         }
                       }}
@@ -84,8 +87,18 @@ export function AgentSettings({ settings, set, setSettings, profiles, codexProfi
                           <option key={`copilot:${p}`} value={`copilot:${p}`}>{profileOptionLabel("copilot", p)}</option>
                         ))}
                       </optgroup>
+                      <optgroup label="Pi">
+                        {piProfiles.map((p) => (
+                          <option key={`pi:${p}`} value={`pi:${p}`}>{profileOptionLabel("pi", p)}</option>
+                        ))}
+                      </optgroup>
                     </select>
                   </Field>
+                  {settings.provider === "pi" && (
+                    <div className="px-3 py-2.5 rounded-md bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-xs text-gray-600 dark:text-gray-400">
+                      Pi profiles resolve to isolated <span className="font-mono">PI_CODING_AGENT_DIR</span> roots. Non-default profile <span className="font-mono">local</span> maps to <span className="font-mono">~/.pi-local</span>; provider/model can also be selected with profile names like <span className="font-mono">anthropic/claude-sonnet-4-6</span>.
+                    </div>
+                  )}
                   <ClaudeSubscriptionRingEditor settings={settings} set={set} />
                   <CodexLicenseRingEditor settings={settings} set={set} />
                   <AgentPresetsEditor
@@ -93,6 +106,7 @@ export function AgentSettings({ settings, set, setSettings, profiles, codexProfi
                     profiles={profiles}
                     codexProfiles={codexProfiles}
                     copilotProfiles={copilotProfiles}
+                    piProfiles={piProfiles}
                   />
                   <Field label="Default Model" hint="Default model for new workspaces (passed via --model). Options follow the selected provider (Claude or Codex). Per-workspace selection overrides this. Ignored for Claude profiles with a custom endpoint (e.g. z.ai) and for Copilot.">
                     <select
