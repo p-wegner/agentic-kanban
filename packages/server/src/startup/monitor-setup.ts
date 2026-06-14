@@ -12,6 +12,7 @@ import { buildMonitorNudgePrompt } from "./review-helpers.js";
 import { snapshotAndCleanStaleDevProcesses, type BoardMonitorResourceSnapshot } from "../services/stale-dev-processes.js";
 import { resolveStartPolicy } from "../services/start-policy.service.js";
 import { scanDirtyMainCheckouts, type DirtyMainCheckoutWarning } from "../services/dirty-main-checkout.js";
+import { scanAutodriveStallWarnings, type AutodriveStallWarning } from "../services/autodrive-stall-warning.service.js";
 import { resolveMergeStrategy } from "./merge-strategy.js";
 
 /**
@@ -43,9 +44,11 @@ export interface MonitorState {
   currentIntervalMin: number | null;
   recentActions: MonitorAction[];
   lastResourceSnapshot: BoardMonitorResourceSnapshot | null;
-  warnings: DirtyMainCheckoutWarning[];
+  warnings: MonitorWarning[];
   lastHealthCheckAt: string | null;
 }
+
+export type MonitorWarning = DirtyMainCheckoutWarning | AutodriveStallWarning;
 
 export interface MonitorResourceSummary {
   processCount: number;
@@ -121,16 +124,26 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
     }, EVENT_TRIGGER_DEBOUNCE_MS);
     (triggerTimer as NodeJS.Timeout).unref?.();
   }
-  async function refreshDirtyMainCheckoutWarnings() {
-    const warnings = await scanDirtyMainCheckouts(db);
+  async function refreshMonitorWarnings(prefMap?: Map<string, string>) {
+    const prefs = prefMap ?? new Map((await db.select().from(preferences)).map((r) => [r.key, r.value]));
+    const warnings: MonitorWarning[] = [
+      ...await scanDirtyMainCheckouts(db),
+      ...await scanAutodriveStallWarnings(db, prefs),
+    ];
     monitorState.warnings = warnings;
     monitorState.lastHealthCheckAt = new Date().toISOString();
     const warningFingerprint = warnings
-      .map((warning) => `${warning.projectId}:${warning.files.join("|")}`)
+      .map((warning) => {
+        if ("type" in warning && warning.type === "autodrive_stall") {
+          return `${warning.type}:${warning.projectId}:${warning.cause}:${warning.lastProgressAt}:${warning.workspaceIds.join("|")}`;
+        }
+        return `dirty_main:${warning.projectId}:${warning.files.join("|")}`;
+      })
       .join(";");
     if (warningFingerprint && warningFingerprint !== lastWarningFingerprint) {
       for (const warning of warnings) {
-        console.warn(`[monitor] ${warning.message} (${warning.repoPath})`);
+        const suffix = "repoPath" in warning ? ` (${warning.repoPath})` : "";
+        console.warn(`[monitor] ${warning.message}${suffix}`);
       }
     }
     lastWarningFingerprint = warningFingerprint;
@@ -171,13 +184,13 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       const shouldAutoStartProject = (projectId: string) => resolveStartPolicy(prefMap, projectId).autoStartUnblocked;
       const allowBacklogRefill = (projectId: string) => resolveStartPolicy(prefMap, projectId).backlogRefill;
       if (isInMaintenanceWindow(prefMap)) {
-        warningCount = (await refreshDirtyMainCheckoutWarnings()).length;
+        warningCount = (await refreshMonitorWarnings(prefMap)).length;
         const endTime = prefMap.get("monitor_maintenance_window_end");
         console.log(`[monitor] Maintenance window active — skipping disruptive actions${endTime ? ` until ${endTime}` : ""}`);
         return;
       }
       const mergeStrategy = resolveMergeStrategy(prefMap);
-      warningCount = (await refreshDirtyMainCheckoutWarnings()).length;
+      warningCount = (await refreshMonitorWarnings(prefMap)).length;
       const resourceSnapshot = await snapshotAndCleanStaleDevProcesses(db);
       monitorState.lastResourceSnapshot = resourceSnapshot;
       resourceSummary = {
@@ -253,9 +266,9 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
   }
 
   async function syncMonitorState() {
-    await refreshDirtyMainCheckoutWarnings().catch((err) => console.warn("[monitor] Dirty main-checkout health check failed:", err));
     const prefRows = await db.select().from(preferences).catch(() => []);
     const prefMap = new Map(prefRows.map((r: { key: string; value: string }) => [r.key, r.value]));
+    await refreshMonitorWarnings(prefMap).catch((err) => console.warn("[monitor] Monitor warning health check failed:", err));
     if (stopped) return;
     const enabled = monitorShouldRun(prefMap);
     const intervalMin = parseInt(prefMap.get("auto_monitor_interval") || "4", 10);
