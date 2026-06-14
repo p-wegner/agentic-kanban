@@ -43,7 +43,6 @@ All git ops in `packages/shared/src/lib/git-service.ts`; `server/src/services/gi
 
 ### PowerShell (worst-failing tool, ~17% of calls)
 - **Never name a variable `$pid`/`$host`/`$home`/`$true`/`$null`/`$pshome`** — read-only automatics; assigning throws and silently keeps the built-in (REST hits the WRONG id). Use `$procId`/`$projectId`. (Blocked by `validate-command-safety`.)
-- **Never use PowerShell to read files (`Get-Content`, `Get-ChildItem`) or search content (`rg`, `Select-String`)** — use the Read and Grep tools instead. `git show HEAD:file | Select-String` fails with German-locale quoting errors; use Grep with a file path.
 - **Don't pipe native-exe stderr with `2>&1`** — PS 5.1 wraps lines as ErrorRecords and flips `$?`/exit to failure on success. stderr is already captured.
 - **Prefer `try { ... -ErrorAction Stop } catch {}`** over blanket `$ErrorActionPreference='SilentlyContinue'` (latter hides the error but still exits 1).
 - **API/preference *writes*: use `curl` (Bash) or an MCP tool, NOT `Invoke-RestMethod -Method Put`** — the PS body/JSON round-trip silently no-ops. Reads via `Invoke-RestMethod` are fine.
