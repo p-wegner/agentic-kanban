@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { preferences } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
@@ -69,6 +69,8 @@ export interface MonitorTunables {
 }
 
 const STRATEGY_RELATIVE_PATH = "scripts/board-monitor/objective.md";
+export const PROJECT_CONDUCTOR_OBJECTIVE_RELATIVE_PATH = ".kanban/objective.md";
+export const PROJECT_CONDUCTOR_STATE_RELATIVE_DIR = ".kanban/conductor";
 const GENERATED_START = "<!-- STRATEGY_BULLSEYE_GENERATED_START -->";
 const GENERATED_END = "<!-- STRATEGY_BULLSEYE_GENERATED_END -->";
 
@@ -252,6 +254,40 @@ export function updateObjectiveWithStrategy(objectiveText: string, config: Strat
   return `${objectiveText.trimEnd()}\n\n${block}\n`;
 }
 
+export function renderProjectConductorObjective(project: { id: string; name?: string | null; repoPath: string; defaultBranch?: string | null }): string {
+  return [
+    `# Project Conductor Objective - ${project.name || project.id}`,
+    "",
+    `You are the out-of-process Conductor for board project \`${project.id}\`. Drive only this project.`,
+    "",
+    "## Project",
+    `- Project ID: \`${project.id}\``,
+    project.name ? `- Project name: \`${project.name}\`` : null,
+    `- Repo path: \`${project.repoPath}\``,
+    project.defaultBranch ? `- Default branch: \`${project.defaultBranch}\`` : null,
+    "",
+    "## Operating Rules",
+    "- Read the board state for this project before acting.",
+    "- Merge, unstick, nudge, start, and refill only this project's tickets and workspaces.",
+    "- Do not change global provider settings; use this project's Strategy Bullseye provider policy for new launches.",
+    "- Prefer board MCP tools, then the board CLI or API when MCP is unavailable.",
+    "- Keep changes bounded to board orchestration; do not implement product code unless a ticket workspace agent is explicitly launched for it.",
+    "- Append one concise cycle summary to `.kanban/conductor/state.md` before exiting.",
+    "",
+    "## TUNABLE TARGETS - generated from Strategy Bullseye",
+    GENERATED_START,
+    "> This block is replaced whenever the Strategy Bullseye preference is saved.",
+    "- **ACTIVE_AGENTS_TARGET = 4** - keep this many workspaces actively In Progress at all times.",
+    "- **BACKLOG_FLOOR = 10** - never let the backlog drop below this; refill before it does.",
+    "- **MAX_NEW_STARTS_PER_CYCLE = 2** - cap on how many NEW workspaces to launch in a single cycle.",
+    "- **REFILL_FOCUS = balanced** - derived from work-type marker weights.",
+    "",
+    "## STRATEGY WEIGHTS (generated - do not hand-edit)",
+    "- No bullseye markers configured yet.",
+    GENERATED_END,
+  ].filter((line): line is string => line !== null).join("\n");
+}
+
 /**
  * Render the Strategy Bullseye into the repo's `objective.md` generated block.
  * Returns `true` if the file existed and was actually rewritten (content changed),
@@ -265,10 +301,19 @@ export function updateObjectiveWithStrategy(objectiveText: string, config: Strat
  * `board_strategy_<projectId>` preference directly. This no-op is the mechanism that
  * lets a non-agentic-kanban project drive hands-off with no objective.md (#802).
  */
-export function writeStrategyObjective(repoPath: string, rawConfig: string): boolean {
+export function writeStrategyObjective(
+  repoPath: string,
+  rawConfig: string,
+  options: { objectiveRelativePath?: string; createIfMissing?: boolean; project?: { id: string; name?: string | null; repoPath: string; defaultBranch?: string | null } } = {},
+): boolean {
   const config = parseStrategyBullseyeConfig(rawConfig);
-  const objectivePath = join(repoPath, STRATEGY_RELATIVE_PATH);
-  if (!existsSync(objectivePath)) return false;
+  const objectiveRelativePath = options.objectiveRelativePath ?? STRATEGY_RELATIVE_PATH;
+  const objectivePath = join(repoPath, objectiveRelativePath);
+  if (!existsSync(objectivePath)) {
+    if (!options.createIfMissing || !options.project) return false;
+    mkdirSync(join(repoPath, ".kanban"), { recursive: true });
+    writeFileSync(objectivePath, renderProjectConductorObjective(options.project), "utf8");
+  }
   const current = readFileSync(objectivePath, "utf8");
   const next = updateObjectiveWithStrategy(current, config);
   if (next !== current) {

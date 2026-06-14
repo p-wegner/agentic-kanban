@@ -67,7 +67,7 @@ Shared vocabulary; each maps to one mechanism — don't conflate.
 
 | Name | Role | Mechanism | Trigger |
 |---|---|---|---|
-| **Conductor** | Out-of-process orchestrator driving THIS board (merge/unstick/start/refill) | `scripts/board-monitor/loop.sh` + `objective.md`; fresh session each ~30-min cycle | `nohup bash scripts/board-monitor/loop.sh` |
+| **Conductor** | Out-of-process orchestrator driving an opted-in project (merge/unstick/start/refill) | `scripts/board-monitor/loop.sh` + a project objective; fresh session each ~30-min cycle | Dev board: `nohup bash scripts/board-monitor/loop.sh`; other projects: Start Mode `conductor` |
 | **Autopilot** | In-process deterministic monitor (default for *other* projects; off here) | `runMonitorCycle`, `auto_monitor` pref | Settings → Workflow → Board Monitoring |
 | **Steward** | In-process LLM monitor (off by default; reads `objective.md`) | `monitor-butler.ts`, `monitor_butler_enabled` | the `monitor_butler_enabled` pref |
 | **Builder** | Per-ticket implementer in a worktree | `POST /api/workspaces` → agent in a worktree | New Workspace / Conductor |
@@ -86,7 +86,7 @@ The control plane for THIS board is the out-of-process loop `scripts/board-monit
 **The single control for how a project's tickets get auto-started is its per-project Start Mode** (`start_mode_<projectId>` ∈ `manual | monitor | conductor`), resolved by `resolveStartPolicy()` (`start-policy.service.ts`) — the one decision EVERY auto-start path consults (in-process monitor, the post-merge dependency cascade, backlog refill, scheduled crons). See decision 008. Set/observe it in the **Monitor view → Start Mode** control.
 - **`manual`** — nothing auto-starts; only explicit `POST /api/workspaces` / relaunch. A true kill-switch (incl. the post-merge cascade, which previously leaked past every "drive" switch).
 - **`monitor`** — the **in-process engine** (`runMonitorCycle` + auto-review/auto-merge + stranded-review reconciler) auto-starts unblocked backlog up to WIP. This is the supported hands-off driver for any project (NOT the Conductor / Monitor Butler — decision 006).
-- **`conductor`** — the out-of-process loop is the sole driver; in-process stands down. Agentic-kanban only (the loop is hard-coded here). Start/stop it from the Monitor view (Conductor mode) — `conductor-control.service.ts` / `POST /api/projects/:id/conductor`.
+- **`conductor`** — the out-of-process loop is the sole driver; in-process stands down. The server supervisor launches `scripts/board-monitor/loop.sh` with that project's `repoPath`, `.kanban/objective.md`, and `.kanban/conductor/` state directory. Start/stop it from the Monitor view (Conductor mode) — `conductor-control.service.ts` / `POST /api/projects/:id/conductor`.
 - **Back-compat / setDriveEnabled**: `board_autodrive_<projectId>="true"` (the legacy keystone) still works — Start Mode DERIVES `monitor` from it when `start_mode_<id>` is unset, and `setDriveEnabled` (the one-switch) writes `start_mode` (on=monitor/off=manual) so they never drift. Per-project Start Mode supersedes the global `auto_monitor`.
 - Strategy Bullseye still feeds tunables via `resolveMonitorTunables` (no `objective.md` needed; `writeStrategyObjective` no-ops for non-Conductor repos). Legacy fallback: WIP = `nudge_wip_limit`, `backlogFloor=3`, `maxNewStartsPerCycle=3`.
 - Tag an issue `no-auto-start` to keep the monitor from launching it.

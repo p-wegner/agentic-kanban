@@ -29,6 +29,7 @@ A new project drives hands-off only if ALL of these hold. Read `GET /api/prefere
 | **Tickets use an eligible issueType** | epic tickets are `task`/`bug` (NOT `feature`/`enhancement`) and titles don't start `feature:`/`enhancement:` | monitor auto-start skips feature/enhancement-typed issues (#773) → the whole epic is invisible. Seed as `task` (or convert via `PATCH /api/issues/<id> {"issueType":"task"}`). |
 | **Verify gate set** | `verify_script_<projectId>` is a real build/test cmd | `PUT {"verify_script_<projectId>":"pnpm install && pnpm build"}` — the #531 quality gate runs it in the worktree post-session and WITHHOLDS merge on non-zero. This is how the dev-board's verify-before-merge ports to the toy stack ([[project_timetracker_drive_and_autonomy_obstacles]]). |
 | Per-project autodrive ON | `board_autodrive_<projectId> == "true"` | PUT `{"board_autodrive_<projectId>":"true"}` |
+| Optional per-project Conductor ON | `board_conductor_<projectId> == "true"` or JSON config | PUT `{"board_conductor_<projectId>":"{\"enabled\":true,\"agent\":\"codex\",\"cadenceSeconds\":1800}"}` |
 | Auto-merge ON + monitor strategy | `auto_merge == "true"`, strategy resolves to `monitor`, `auto_merge_in_review == "true"` | PUT settings accordingly |
 | WIP target ≥ 2 (real parallelism) | `board_strategy_<projectId>` (`activeAgentsTarget`) or legacy `nudge_wip_limit` | set `board_strategy_<projectId>` `{activeAgentsTarget:3, maxNewStartsPerCycle:3, backlogFloor:0}` |
 | Profile ≠ mock | `claude_profile` / codex profile is real | restore ([[pitfall_mock_profile_from_e2e_pollution]]) |
@@ -68,7 +69,7 @@ Spell out ownership in each ticket body ("edit ONLY `test/invaders.test.js`") so
 
 ## Step 4 — Leave a resident watch (REQUIRED)
 
-The Conductor (`scripts/board-monitor/`) is hard-wired to *this* board and won't drive your project. For another project: in-process autodrive does the driving, and you leave a lightweight watch that polls completion and recovers stalls. Set one up before you stop — the new-project analogue of the `sentinel` skill:
+Default path: in-process autodrive does the driving, and you leave a lightweight watch that polls completion and recovers stalls. If the project opts into `board_conductor_<projectId>`, the server supervisor launches the external Conductor with that project's `.kanban/objective.md` and `.kanban/conductor/` state, so a parent watch is no longer required for routine stall recovery. For autodrive-only projects, set up the watch before you stop — the new-project analogue of the `sentinel` skill:
 
 ```
 /loop 10m  poll project <projectId>: list issues; if all children of epic #<n> are Done -> run Step 6 close-out
@@ -108,4 +109,4 @@ Only when `GET /api/issues?projectId=` shows all children Done/Cancelled and `gi
 - ❌ Pre-wiring only the *obvious* entry file (`index.html`) while leaving another shared/append-only file (a `test/smoke.test.js`, a registry, `package.json`) for every wave ticket — pre-resolve EVERY shared file.
 - ❌ Trusting `/board` over `/api/issues` + git to judge progress.
 - ❌ Enabling autodrive without verifying `auto_merge`, WIP target, and profile≠mock first.
-- ❌ Assuming the Conductor will drive a non-agentic-kanban project. It won't.
+- ❌ Assuming the Conductor will drive a non-agentic-kanban project without `board_conductor_<projectId>` enabled. Autodrive-only projects still need the lightweight watch.
