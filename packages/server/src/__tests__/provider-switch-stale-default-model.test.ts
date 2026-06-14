@@ -63,11 +63,11 @@ describe("modelBelongsToProvider — stale default_model guard", () => {
     expect(modelBelongsToProvider("claude-sonnet-4-6", "copilot")).toBe(true);
   });
 
-  it("rejects non-empty Pi models until Pi model families are finalized", () => {
+  it("accepts Pi models because Pi profiles select the concrete upstream provider", () => {
     expect(modelBelongsToProvider("", "pi")).toBe(true);
     expect(modelBelongsToProvider(undefined, "pi")).toBe(true);
-    expect(modelBelongsToProvider("gpt-5.5", "pi")).toBe(false);
-    expect(modelBelongsToProvider("claude-sonnet-4-6", "pi")).toBe(false);
+    expect(modelBelongsToProvider("gpt-5.5", "pi")).toBe(true);
+    expect(modelBelongsToProvider("claude-sonnet-4-6", "pi")).toBe(true);
   });
 });
 
