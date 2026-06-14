@@ -1,4 +1,4 @@
-﻿import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { StackProfile } from "@agentic-kanban/shared";
 import { projects } from "@agentic-kanban/shared/schema";
@@ -33,13 +33,13 @@ function readJson<T>(path: string): T | null {
  *
  * pnpm/yarn/npm/bun all install every workspace from a single root invocation
  * (pnpm is recursive by default; npm 7+/yarn/bun resolve the whole workspace graph),
- * so the command shape is the same â€” but we surface `-r` for pnpm monorepos to make the
+ * so the command shape is the same — but we surface `-r` for pnpm monorepos to make the
  * "install ALL workspaces" intent explicit and robust against a non-root cwd.
  */
 function nodeInstallCommand(pm: string, isMonorepo: boolean): string {
   if (pm === "pnpm") return isMonorepo ? "pnpm install -r" : "pnpm install";
   if (pm === "npm") return "npm install";
-  return `${pm} install`; // yarn / bun â€” workspace-aware from the root
+  return `${pm} install`; // yarn / bun — workspace-aware from the root
 }
 
 /** Detect the package manager from lock files, falling back to npm for a bare package.json. */
@@ -116,7 +116,7 @@ function detectNodeProfile(repoPath: string, markers: Set<string>): Partial<Stac
   const pkg = readJson<NodePkgJson>(join(repoPath, "package.json"));
   const scripts = pkg?.scripts ?? {};
 
-  // Workspaces â†’ monorepo.
+  // Workspaces → monorepo.
   let workspaces: string[] = readPnpmWorkspaces(repoPath);
   if (workspaces.length === 0 && pkg?.workspaces) {
     workspaces = Array.isArray(pkg.workspaces) ? pkg.workspaces : (pkg.workspaces.packages ?? []);
@@ -245,7 +245,7 @@ const EMPTY_PROFILE: Omit<StackProfile, "source" | "detectedMarkers" | "updatedA
 
 /**
  * Rule-based detection of a project's stack profile from marker files on disk. Pure and
- * synchronous â€” no DB, no LLM. Returns a fully-populated descriptor (nullable fields where
+ * synchronous — no DB, no LLM. Returns a fully-populated descriptor (nullable fields where
  * a fact can't be derived). `source` is "detected" even when sparse; the LLM fallback
  * (see populateStackProfile) fills gaps and flips source to "llm".
  */
@@ -312,7 +312,7 @@ export async function populateStackProfile(
         return enriched;
       }
     } catch {
-      // LLM enrichment is best-effort â€” fall through and persist the rule-based profile.
+      // LLM enrichment is best-effort — fall through and persist the rule-based profile.
     }
   }
 
@@ -452,7 +452,7 @@ function sourcePatternsForStack(stack: string | null): string[] {
 }
 
 /**
- * Build the generated edit-time feedback rules from a stack profile. Pure â€” no I/O.
+ * Build the generated edit-time feedback rules from a stack profile. Pure — no I/O.
  *
  * Prefers the cheapest signal available: typecheck (fastest), else quick test, else the full
  * test command. Each non-null command becomes a rule that fires when a source file for the
@@ -463,7 +463,7 @@ export function buildSmartHooksRules(profile: StackProfile): SmartHooksRulesFile
   const patterns = sourcePatternsForStack(profile.stack);
   const rules: SmartHooksRule[] = [];
 
-  // Typecheck is the cheapest correctness signal â€” run it per-edit when present.
+  // Typecheck is the cheapest correctness signal — run it per-edit when present.
   if (profile.typecheckCommand) {
     rules.push({
       name: "Typecheck",
@@ -504,7 +504,7 @@ export function smartHooksRulesPath(repoPath: string): string {
 /**
  * Generate and write `.claude/smart-hooks-rules.json` for a project from its stack profile.
  * The generic `smart-hooks-runner.js` reads this file to give a driven project's builder the
- * same incremental PostToolUse/Stop feedback board builders get. Non-fatal on any error â€”
+ * same incremental PostToolUse/Stop feedback board builders get. Non-fatal on any error —
  * profile persistence must never fail because rule generation did.
  */
 export function writeSmartHooksRules(repoPath: string, profile: StackProfile): void {
@@ -528,12 +528,12 @@ export function writeSmartHooksRules(repoPath: string, profile: StackProfile): v
  * agentic-kanban's `packages/e2e/tests` + Playwright layout (C-rated); for a *driven* project
  * that means no runnable scaffold in its real layout. This produces one in the project's actual
  * test dir, written in the syntax its detected runner expects (pytest, cargo test, vitest,
- * go test, â€¦), so a freshly-registered project gets a green, runnable test from ticket #1.
+ * go test, …), so a freshly-registered project gets a green, runnable test from ticket #1.
  */
 export interface TestScaffold {
   /** Repo-relative path for the scaffold file, using forward slashes. */
   path: string;
-  /** The file contents â€” a trivially-passing but real test in the runner's syntax. */
+  /** The file contents — a trivially-passing but real test in the runner's syntax. */
   content: string;
 }
 
@@ -560,7 +560,7 @@ function resolveRunnerKey(profile: StackProfile): string | null {
   if (runner.includes("go")) return "go";
   if (runner === "gradle" || runner === "maven") return "junit";
 
-  // No (or unrecognized) runner â€” fall back to the stack family's conventional runner.
+  // No (or unrecognized) runner — fall back to the stack family's conventional runner.
   switch (profile.stack) {
     case "node": return "vitest";
     case "python": return "pytest";
@@ -733,7 +733,7 @@ export function deriveTestScaffold(profile: StackProfile | null, isTypeScript?: 
  *
  * Clobber-safe and idempotent: never overwrites an existing file at the target path (so a real
  * test the project already has is preserved, and a second run is a no-op). Creates the test
- * directory if absent. Non-fatal on any error â€” scaffolding must never block profile persistence
+ * directory if absent. Non-fatal on any error — scaffolding must never block profile persistence
  * (same contract as writeSmartHooksRules). Returns the repo-relative path written, or null when
  * nothing was written (no derivable scaffold, file already present, or an error).
  */
@@ -778,7 +778,7 @@ export function verifyScriptPrefKey(projectId: string): string {
  * readyForMerge on a non-zero exit), so a freshly-registered project needs it live.
  * Source of truth = the persisted #786 stack profile (`testCommand` &&/|| `buildCommand`);
  * falls back to the rule-based marker derivation when no profile is available yet.
- * Returns "" when nothing can be derived â€” callers must treat that as a safe no-op.
+ * Returns "" when nothing can be derived — callers must treat that as a safe no-op.
  */
 export function deriveVerifyScriptFromProfile(profile: StackProfile | null, repoPath: string): string {
   if (profile) {
@@ -787,7 +787,7 @@ export function deriveVerifyScriptFromProfile(profile: StackProfile | null, repo
     if (profile.buildCommand) parts.push(profile.buildCommand);
     if (parts.length > 0) return parts.join(" && ");
   }
-  // No profile (or a profile with neither test nor build) â€” fall back to marker rules.
+  // No profile (or a profile with neither test nor build) — fall back to marker rules.
   return deriveVerifyScript(repoPath, detectProjectMarkers(repoPath));
 }
 
@@ -795,7 +795,7 @@ export function deriveVerifyScriptFromProfile(profile: StackProfile | null, repo
  * Persist the derived verify gate to `verify_script_<projectId>` at registration (#788).
  *
  * Idempotent and non-destructive: a no-op when the key is already set (never clobbers a
- * user override) and when detection yields nothing (no empty value written). Best-effort â€”
+ * user override) and when detection yields nothing (no empty value written). Best-effort —
  * callers run it fire-and-forget so it never slows or fails registration.
  *
  * Reuses an already-computed stack profile when passed; otherwise reads the persisted one.
@@ -807,11 +807,11 @@ export async function populateVerifyScript(
   profile?: StackProfile | null,
 ): Promise<string | null> {
   const existing = await getPreference(verifyScriptPrefKey(projectId), database);
-  if (existing && existing.trim()) return existing; // already configured â€” don't overwrite
+  if (existing && existing.trim()) return existing; // already configured — don't overwrite
 
   const resolvedProfile = profile ?? (await getStackProfile(projectId, database));
   const verify = deriveVerifyScriptFromProfile(resolvedProfile, repoPath).trim();
-  if (!verify) return null; // nothing to gate on â€” leave unset (pure no-op)
+  if (!verify) return null; // nothing to gate on — leave unset (pure no-op)
 
   await setPreference(verifyScriptPrefKey(projectId), verify, database);
   return verify;
@@ -832,7 +832,7 @@ function deriveInstallFromMarkers(repoPath: string): string {
         : markers.has("bun.lockb") || markers.has("bun.lock")
           ? "bun"
           : "npm";
-    // pnpm-workspace.yaml or a package.json `workspaces` field â‡’ monorepo â‡’ recursive install.
+    // pnpm-workspace.yaml or a package.json `workspaces` field ⇒ monorepo ⇒ recursive install.
     // (pnpm-workspace.yaml is not in PROJECT_MARKER_FILES, so check disk directly.)
     const pkg = readJson<NodePkgJson>(join(repoPath, "package.json"));
     const isMonorepo = existsSync(join(repoPath, "pnpm-workspace.yaml")) || Boolean(pkg?.workspaces);
@@ -859,7 +859,7 @@ function deriveInstallFromMarkers(repoPath: string): string {
  *
  * The setup script runs once in a fresh worktree BEFORE the first build so deps are
  * ready. It must be monorepo-aware: for a monorepo the install must materialize ALL
- * workspaces/modules' deps, not just the root package â€” `installCommand` already
+ * workspaces/modules' deps, not just the root package — `installCommand` already
  * encodes that (e.g. pnpm `-r`, gradle multi-module `assemble`). Source of truth =
  * the persisted #786 stack profile's `installCommand`; falls back to marker rules when
  * no profile is available yet. Returns "" when nothing can be derived (safe no-op).
@@ -876,7 +876,7 @@ export function deriveSetupScriptFromProfile(profile: StackProfile | null, repoP
  *
  * Idempotent and non-destructive: a no-op when the column is already set (never clobbers a
  * user/AI-generated script) and when detection yields nothing (no empty value written).
- * Best-effort â€” callers run it fire-and-forget so it never slows or fails registration.
+ * Best-effort — callers run it fire-and-forget so it never slows or fails registration.
  *
  * Reuses an already-computed stack profile when passed; otherwise reads the persisted one.
  */
@@ -895,7 +895,7 @@ export async function populateSetupScript(
 
   const resolvedProfile = profile ?? (await getStackProfile(projectId, database));
   const setup = deriveSetupScriptFromProfile(resolvedProfile, repoPath).trim();
-  if (!setup) return null; // nothing to install â€” leave unset (pure no-op)
+  if (!setup) return null; // nothing to install — leave unset (pure no-op)
 
   await database
     .update(projects)
