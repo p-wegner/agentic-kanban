@@ -78,6 +78,8 @@ export const workspaces = sqliteTable("workspaces", {
   latestSymlinkSkipped: text("latest_symlink_skipped"),
   latestSymlinkFailed: text("latest_symlink_failed"),
   latestSymlinkError: text("latest_symlink_error"),
+  /** Latest pre-session agent launch failure, e.g. safety-policy preflight refusal. */
+  latestLaunchError: text("latest_launch_error"),
   /** Context primer assembled by the context-packer at workspace creation. Injected into CLAUDE.local.md. */
   contextPrimer: text("context_primer"),
   /** Set when worktree removal fails post-merge (e.g. EBUSY). Cleared on successful retry cleanup. */

@@ -945,8 +945,24 @@ exit 1
           .then(() => timing("agent-launch", t))
           .catch((err: unknown) => {
             const errorMsg = err instanceof Error ? err.message : String(err);
+            const staleSafetyPolicy =
+              err instanceof WorkspaceError && err.data?.code === "STALE_SAFETY_POLICY";
+            const persistedError = staleSafetyPolicy ? `STALE_SAFETY_POLICY: ${errorMsg}` : errorMsg;
+            const nextStatus = staleSafetyPolicy ? "error" : "idle";
             console.error(`[workspaces] deferred agent launch failed for workspace ${id}: ${errorMsg}`);
-            database.update(workspaces).set({ status: "idle", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, id))
+            if (staleSafetyPolicy) {
+              emitButlerSystemEvent({
+                projectId: issue.projectId,
+                kind: "workspace_error",
+                workspaceId: id,
+                text: `Workspace launch blocked by stale safety policy for ${id}: ${errorMsg.slice(0, 200)}`,
+              });
+            }
+            database.update(workspaces).set({
+              status: nextStatus,
+              latestLaunchError: persistedError,
+              updatedAt: new Date().toISOString(),
+            }).where(eq(workspaces.id, id))
               .catch((dbErr: unknown) => console.warn(`[workspaces] failed to update workspace status after deferred launch failure: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`));
           });
       });
