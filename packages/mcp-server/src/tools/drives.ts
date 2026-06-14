@@ -3,6 +3,7 @@ import { z } from "zod";
 import { eq, desc } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { DRIVE_STATUSES } from "@agentic-kanban/shared";
+import { generateDriveRetro } from "@agentic-kanban/shared/lib/drive-retro";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { requireEntity } from "../db-utils.js";
 
@@ -105,7 +106,21 @@ export function registerFinishDrive(server: McpServer, deps: ToolDeps = prodDeps
         .set({ status: finalStatus, finishedAt })
         .where(eq(schema.drives.id, driveId));
       notifyBoard(r.value.projectId, "drive_finished");
-      return { content: [{ type: "text" as const, text: JSON.stringify({ ...r.value, status: finalStatus, finishedAt }, null, 2) }] };
+
+      // #804: completing a drive auto-writes its retro from the event log. Best-effort
+      // and non-fatal — a generation failure must not break finish_drive. Only on
+      // "completed" (an abandoned drive has nothing to retro).
+      let retroPath: string | null = null;
+      if (finalStatus === "completed") {
+        try {
+          const retro = await generateDriveRetro({ ...r.value, status: finalStatus, finishedAt }, db);
+          retroPath = retro?.path ?? null;
+        } catch {
+          // swallow — the drive is finished regardless of retro generation
+        }
+      }
+
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ...r.value, status: finalStatus, finishedAt, retroPath }, null, 2) }] };
     },
   );
 }
