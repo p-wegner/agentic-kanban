@@ -944,7 +944,7 @@ export interface BoardStatusResponse {
   issues: BoardStatusIssue[];
 }
 
-export type LaunchFailureCategory = "zero-output" | "rate-limited" | "setup-failed" | "missing-worktree" | "session-error";
+export type LaunchFailureCategory = "zero-output" | "rate-limited" | "setup-failed" | "preflight-failed" | "missing-worktree" | "session-error";
 
 export interface WorkspaceLaunchFailure {
   workspaceId: string;

@@ -9,6 +9,7 @@ import {
   ensureStarterAgentsMd,
   ensureHookScaffold,
   ensureVerifyGateRunner,
+  commitProjectScaffoldArtifacts,
   ensurePnpmBuildApproval,
   ensureBuildableFromClean,
   stackBuildArtifactGitignore,
@@ -339,6 +340,37 @@ describe("project-scaffold", () => {
         expect(stopRunner).toBeTruthy();
         expect(postRunner).toContain("$CLAUDE_PROJECT_DIR");
         expect(postRunner).not.toMatch(/^node [A-Z]:/i);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("commits durable hook scaffold files even when the target repo ignores .claude/", async () => {
+      const dir = await tmp();
+      try {
+        await gitInit(dir);
+        await writeFile(join(dir, ".gitignore"), ".claude/\n", "utf8");
+        execFileSync("git", ["add", ".gitignore"], { cwd: dir, windowsHide: true });
+        execFileSync("git", ["commit", "-m", "ignore claude", "-q"], { cwd: dir, windowsHide: true });
+
+        ensureHookScaffold(dir, { includeWorktreeGuard: false });
+        ensureVerifyGateRunner(dir);
+        await writeFile(join(dir, ".claude", "hooks", ".smart-hooks-state.json"), "{}", "utf8");
+
+        await commitProjectScaffoldArtifacts(dir);
+
+        const tracked = execFileSync("git", ["ls-files"], { cwd: dir, encoding: "utf8", windowsHide: true });
+        expect(tracked).toContain(".claude/hooks/smart-hooks-runner.js");
+        expect(tracked).toContain(".claude/hooks/verify-gate-runner.js");
+        expect(tracked).toContain(".claude/settings.json");
+        expect(tracked).not.toContain(".claude/hooks/.smart-hooks-state.json");
+
+        const status = execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], {
+          cwd: dir,
+          encoding: "utf8",
+          windowsHide: true,
+        });
+        expect(status).toBe("");
       } finally {
         await rm(dir, { recursive: true, force: true });
       }

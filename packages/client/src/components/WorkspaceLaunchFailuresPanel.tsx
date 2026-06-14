@@ -13,6 +13,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   "rate-limited": "Rate limited",
   "zero-output": "Launch failed",
   "setup-failed": "Setup failed",
+  "preflight-failed": "Preflight failed",
   "missing-worktree": "Missing worktree",
   "session-error": "Session error",
 };
@@ -21,6 +22,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   "rate-limited": "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
   "zero-output": "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300",
   "setup-failed": "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
+  "preflight-failed": "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
   "missing-worktree": "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300",
   "session-error": "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
 };
@@ -196,6 +198,7 @@ export function WorkspaceLaunchFailuresPanel({ projectId, onClose, onIssueClick 
     "rate-limited": failures.filter(f => f.failureCategory === "rate-limited"),
     "zero-output": failures.filter(f => f.failureCategory === "zero-output"),
     "setup-failed": failures.filter(f => f.failureCategory === "setup-failed"),
+    "preflight-failed": failures.filter(f => f.failureCategory === "preflight-failed"),
     "missing-worktree": failures.filter(f => f.failureCategory === "missing-worktree"),
     "session-error": failures.filter(f => f.failureCategory === "session-error"),
   };
@@ -260,7 +263,7 @@ export function WorkspaceLaunchFailuresPanel({ projectId, onClose, onIssueClick 
             </div>
           )}
 
-          {(["rate-limited", "zero-output", "setup-failed", "missing-worktree", "session-error"] as const).map((cat) => {
+          {(["rate-limited", "zero-output", "setup-failed", "preflight-failed", "missing-worktree", "session-error"] as const).map((cat) => {
             const items = byCategory[cat];
             if (items.length === 0) return null;
             return (

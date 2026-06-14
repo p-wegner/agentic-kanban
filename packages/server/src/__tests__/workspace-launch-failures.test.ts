@@ -211,6 +211,31 @@ describe("getWorkspaceLaunchFailures", () => {
     expect(result.failures[0].lastMessage).toContain("npm install failed");
   });
 
+  it("detects preflight launch failures that happen before a session exists", async () => {
+    const { db } = createTestDb();
+    const now = new Date().toISOString();
+
+    const projectId = randomUUID();
+    const statusId = randomUUID();
+    const issueId = randomUUID();
+    const wsId = randomUUID();
+
+    await db.insert(projects).values(baseProject(projectId, now));
+    await db.insert(projectStatuses).values(baseStatus(statusId, projectId, "In Progress", now));
+    await db.insert(issues).values(baseIssue(issueId, projectId, statusId, now));
+    await db.insert(workspaces).values(baseWorkspace(wsId, issueId, now, {
+      status: "error",
+      latestLaunchError: "STALE_SAFETY_POLICY: Workspace safety policy is stale after update-base",
+    }));
+
+    const result = await getWorkspaceLaunchFailures(projectId, db);
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0].failureCategory).toBe("preflight-failed");
+    expect(result.failures[0].sessionId).toBeNull();
+    expect(result.failures[0].lastMessage).toContain("STALE_SAFETY_POLICY");
+    expect(result.failures[0].workspaceStatus).toBe("error");
+  });
+
   it("detects missing worktree (workingDir null on non-direct workspace)", async () => {
     const { db } = createTestDb();
     const now = new Date().toISOString();
