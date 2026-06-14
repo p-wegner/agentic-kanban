@@ -8,6 +8,7 @@ export interface BoardFilterOptions {
   activeTagIds: Set<string>;
   milestoneFilterId: string | null;
   issueTypeFilter: string | null;
+  priorityFilter: string | null;
   showBlocked: boolean;
   showStaleOnly: boolean;
   searchQuery: string;
@@ -18,12 +19,13 @@ export function matchesBoardFilters(
   issue: IssueWithStatus,
   options: BoardFilterOptions,
 ): boolean {
-  const { focusMode, statusFilterId, activeTagIds, milestoneFilterId, issueTypeFilter, showBlocked, showStaleOnly, searchQuery } = options;
+  const { focusMode, statusFilterId, activeTagIds, milestoneFilterId, issueTypeFilter, priorityFilter, showBlocked, showStaleOnly, searchQuery } = options;
   if (focusMode && !isIssueInFlight(issue.workspaceSummary)) return false;
   if (statusFilterId && issue.statusId !== statusFilterId) return false;
   if (activeTagIds.size > 0 && !issue.tags?.some((tag) => activeTagIds.has(tag.id))) return false;
   if (milestoneFilterId && issue.milestoneId !== milestoneFilterId) return false;
   if (issueTypeFilter && issue.issueType !== issueTypeFilter) return false;
+  if (priorityFilter && issue.priority !== priorityFilter) return false;
   if (showBlocked && !(issue as IssueWithStatus & { isBlocked?: boolean }).isBlocked) return false;
   if (showStaleOnly && !issue.isStale) return false;
   if (searchQuery) {
