@@ -9,6 +9,7 @@ import { buildStrandedBatch, pickIntegrationWorkspace } from "../services/reconc
 import type { SessionManager } from "../services/session.manager.js";
 import { resolveMergeStrategy } from "./merge-strategy.js";
 import { reconcileCompletionStates } from "./completion-state-reconciler.js";
+import { reconcileDriveCompletion } from "./drive-completion-reconciler.js";
 
 const DEFAULT_INTERVAL_MS = 30_000;
 const MERGEABLE_STATUS_NAMES = ["In Review", "AI Reviewed"] as const;
@@ -230,6 +231,16 @@ export function createAutoMergeOrchestrator(deps: {
       const reconciled = await reconcileCompletionStates(database);
       if (reconciled > 0) {
         console.log(`[auto-merge] reconcileCompletionStates: unblocked ${reconciled} stuck workspace(s)`);
+      }
+
+      // Enforce the drive completion contract (#801): keep each active drive's meta in
+      // In Progress until all its children are Done, then drive the meta itself to Done.
+      const driveChanges = await reconcileDriveCompletion(database, { boardEvents }).catch((err) => {
+        console.warn("[auto-merge] reconcileDriveCompletion failed (non-fatal):", err instanceof Error ? err.message : String(err));
+        return 0;
+      });
+      if (driveChanges > 0) {
+        console.log(`[auto-merge] reconcileDriveCompletion: applied ${driveChanges} drive completion-contract change(s)`);
       }
 
       const workspaceIds = await findCompletedWorkspaceIds();
