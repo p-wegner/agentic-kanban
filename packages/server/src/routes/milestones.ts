@@ -13,6 +13,12 @@ export function createMilestonesRoute(database: Database = db) {
     return c.json(await service.list(c.req.param("projectId")));
   });
 
+  // GET /api/projects/:projectId/milestones/summary
+  router.get("/:projectId/milestones/summary", async (c) => {
+    const daysRaw = parseInt(c.req.query("days") ?? "30", 10);
+    return c.json(await service.summary(c.req.param("projectId"), daysRaw));
+  });
+
   // POST /api/projects/:projectId/milestones
   router.post("/:projectId/milestones", async (c) => {
     const body = await parseJsonBody(c);
