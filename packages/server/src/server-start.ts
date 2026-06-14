@@ -15,6 +15,7 @@ import { startStrandedReviewReconciler, stopStrandedReviewReconciler } from "./s
 import { startZombieFixSessionReconciler, stopZombieFixSessionReconciler } from "./startup/zombie-fix-session-reconciler.js";
 import { startAncestorBranchReconciler, stopAncestorBranchReconciler } from "./startup/ancestor-branch-reconciler.js";
 import { startDoneUnmergedScanner, stopDoneUnmergedScanner } from "./startup/done-unmerged-invariant-scanner.js";
+import { startTerminalWorkspaceReaper, stopTerminalWorkspaceReaper } from "./startup/terminal-workspace-reaper.js";
 import { createMonitorSetup } from "./startup/monitor-setup.js";
 import { setupProcessHandlers } from "./startup/process-handlers.js";
 import { setupRoutes } from "./startup/route-setup.js";
@@ -185,6 +186,10 @@ export async function startServer(port?: number, hostname?: string) {
   // 0-ahead candidates remain log-only. Never reopens an issue.
   startDoneUnmergedScanner();
   cleanupCallbacks.push(stopDoneUnmergedScanner);
+  // Keeps terminal issue workspace rows from inflating WIP/merge-queue counts after
+  // git proves the branch has no unmerged ahead work.
+  startTerminalWorkspaceReaper();
+  cleanupCallbacks.push(stopTerminalWorkspaceReaper);
   // Autonomous Monitor Butler — cron-driven board-health agent (gated by the
   // monitor_butler_enabled preference; off by default). See services/monitor-butler.ts.
   startMonitorButler();

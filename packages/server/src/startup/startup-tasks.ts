@@ -10,6 +10,7 @@ import type { Database } from "../db/index.js";
 import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
 import { reconcileAncestorBranchWorkspaces } from "./ancestor-branch-reconciler.js";
 import { scanDoneUnmergedWorkspaces } from "./done-unmerged-invariant-scanner.js";
+import { reapTerminalWorkspaces } from "./terminal-workspace-reaper.js";
 import { finalizeMergeCleanup, reconcileMergedIssue } from "../services/merge-cleanup.service.js";
 
 /** Kill orphaned tsx server processes from previous hot-reload cycles (Windows only). */
@@ -417,6 +418,11 @@ export async function runStartupTasks(sessionManager: SessionManager, _deps?: { 
     await scanDoneUnmergedWorkspaces({ reopenToInReview: false });
   } catch (err) {
     console.warn("[startup] scanDoneUnmergedWorkspaces failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  }
+  try {
+    await reapTerminalWorkspaces();
+  } catch (err) {
+    console.warn("[startup] reapTerminalWorkspaces failed (non-fatal):", err instanceof Error ? err.message : String(err));
   }
   await pruneStaleWorktrees();
   await checkMainCheckoutHeads();
