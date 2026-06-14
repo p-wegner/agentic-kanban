@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { eq } from "drizzle-orm";
 import { agentSkills } from "@agentic-kanban/shared/schema";
-import { commitPaths, getCurrentBranch } from "@agentic-kanban/shared/lib/git-service";
+import { getCurrentBranch } from "@agentic-kanban/shared/lib/git-service";
 import { db, type Database } from "../db/index.js";
 
 /**
@@ -38,6 +38,18 @@ export const GENERIC_AGENT_GITIGNORE = [
 const AGENT_GITIGNORE_HEADER = "# AI agent artifacts (written during a workspace session; not project source)";
 const STACK_BUILD_GITIGNORE_HEADER = "# Build output (per-stack; generated, not source — keeps a fresh worktree's main clean for auto-merge)";
 const SCAFFOLD_COMMIT_MESSAGE = "chore: scaffold agent guards and onboarding";
+const DURABLE_CLAUDE_SCAFFOLD_PATHS = [
+  ".claude/settings.json",
+  ".claude/hooks/README.md",
+  ".claude/hooks/smart-hooks-runner.js",
+  ".claude/hooks/vital-file-guard.js",
+  ".claude/hooks/vital-files.json",
+  ".claude/hooks/prevent-cross-worktree-writes.js",
+  ".claude/hooks/smart-hooks-config.json",
+  ".claude/hooks/verify-gate-runner.js",
+  ".claude/hooks/verify-gate.config.json",
+  ".claude/smart-hooks-rules.json",
+];
 
 /**
  * Per-stack build/compile output that a builder agent inevitably produces in a worktree but that
@@ -111,11 +123,46 @@ export async function commitProjectScaffoldArtifacts(repoPath: string): Promise<
       if (pathName === ".gitignore") pathsToCommit.add(".gitignore");
       if (pathName === "CLAUDE.md") pathsToCommit.add("CLAUDE.md");
       if (pathName === "AGENTS.md") pathsToCommit.add("AGENTS.md");
-      if (pathName === ".claude" || pathName.startsWith(".claude/")) pathsToCommit.add(".claude");
+    }
+
+    for (const pathName of DURABLE_CLAUDE_SCAFFOLD_PATHS) {
+      if (existsSync(join(repoPath, ...pathName.split("/")))) pathsToCommit.add(pathName);
     }
 
     if (pathsToCommit.size === 0) return;
-    await commitPaths(repoPath, [...pathsToCommit], SCAFFOLD_COMMIT_MESSAGE);
+    const paths = [...pathsToCommit];
+    const regularPaths = paths.filter((pathName) => !pathName.startsWith(".claude/"));
+    const claudePaths = paths.filter((pathName) => pathName.startsWith(".claude/"));
+
+    if (regularPaths.length > 0) {
+      execFileSync("git", ["add", "-A", "--", ...regularPaths], {
+        cwd: repoPath,
+        stdio: ["ignore", "ignore", "ignore"],
+        windowsHide: true,
+      });
+    }
+    if (claudePaths.length > 0) {
+      execFileSync("git", ["add", "-f", "--", ...claudePaths], {
+        cwd: repoPath,
+        stdio: ["ignore", "ignore", "ignore"],
+        windowsHide: true,
+      });
+    }
+
+    try {
+      execFileSync("git", ["diff", "--cached", "--quiet", "--", ...paths], {
+        cwd: repoPath,
+        stdio: ["ignore", "ignore", "ignore"],
+        windowsHide: true,
+      });
+      return;
+    } catch {
+      execFileSync("git", ["commit", "-m", SCAFFOLD_COMMIT_MESSAGE, "--", ...paths], {
+        cwd: repoPath,
+        stdio: ["ignore", "ignore", "ignore"],
+        windowsHide: true,
+      });
+    }
   } catch {
     /* non-fatal: registration must never fail because of scaffold commit */
   }
