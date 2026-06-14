@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  computeBlockerReadiness,
   isTerminalStatusView,
   isTerminalStatusIdView,
   isResolvedDependencyStatusView,
@@ -47,5 +48,44 @@ describe("status-view terminal/resolved checks (#537)", () => {
     const aiReviewed = { currentNodeId: null, currentNodeType: null, statusName: "AI Reviewed", statusId: "air-id" };
     expect(isResolvedDependencyStatusView(aiReviewed)).toBe(true);
     expect(isTerminalStatusView(aiReviewed)).toBe(false);
+  });
+});
+
+// The ONE shared dependency-readiness predicate used by both runAutoStart and the
+// dependency-wave planner (#798). Covers the #782 fan-in and #784 closed-but-unmerged cases.
+describe("computeBlockerReadiness (#798)", () => {
+  it("is not ready when the blocker is non-terminal, regardless of workspaces", () => {
+    expect(computeBlockerReadiness({ isTerminal: false, workspaces: [] })).toBe(false);
+    expect(computeBlockerReadiness({ isTerminal: false, workspaces: [{ mergedAt: "2026-01-01", isDirect: false }] })).toBe(false);
+  });
+
+  it("treats a terminal blocker with no workspace as landed (resolved manually)", () => {
+    expect(computeBlockerReadiness({ isTerminal: true, workspaces: [] })).toBe(true);
+  });
+
+  it("is ready when a terminal blocker has a merged workspace", () => {
+    expect(computeBlockerReadiness({ isTerminal: true, workspaces: [{ mergedAt: "2026-01-01T00:00:00Z", isDirect: false }] })).toBe(true);
+  });
+
+  it("is ready when a terminal blocker committed directly (isDirect, no merge step)", () => {
+    expect(computeBlockerReadiness({ isTerminal: true, workspaces: [{ mergedAt: null, isDirect: true }] })).toBe(true);
+  });
+
+  // #784: a blocker can be at a terminal/closed STATUS while its branch→base merge is
+  // still queued for the async orchestrator — mergedAt unset, not direct. NOT landed.
+  it("is NOT ready when a terminal blocker's only workspace is closed-but-unmerged (#784)", () => {
+    expect(computeBlockerReadiness({ isTerminal: true, workspaces: [{ mergedAt: null, isDirect: false }] })).toBe(false);
+  });
+
+  // #782: a fan-in dependent has multiple blockers; it must stay blocked until ALL of
+  // them land. computeBlockerReadiness is per-blocker — callers AND it across blockers,
+  // so any single un-landed blocker keeps the dependent blocked.
+  it("keeps a fan-in dependent blocked until every blocker lands (#782)", () => {
+    const landed = { isTerminal: true, workspaces: [{ mergedAt: "2026-01-01T00:00:00Z", isDirect: false }] };
+    const unmerged = { isTerminal: true, workspaces: [{ mergedAt: null, isDirect: false }] };
+    // One landed + one still-unmerged ⇒ the dependent's AND-over-blockers is false.
+    expect([landed, unmerged].every(computeBlockerReadiness)).toBe(false);
+    // Once the second blocker lands too, the fan-in dependent is ready.
+    expect([landed, landed].every(computeBlockerReadiness)).toBe(true);
   });
 });
