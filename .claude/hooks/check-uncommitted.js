@@ -38,18 +38,50 @@ function gitPorcelain(cwd) {
   }
 }
 
-// Tracked (not "??") changes to source files, as relative paths.
+// Tracked (not "??") changes to source files, classified by whether each is a
+// DELETION (file removed from the working tree) or an EDIT/ADD. A working tree
+// that is dominated by deletions is a desync to RESTORE, never a set of changes
+// to commit (#771): a board merge whose working-tree sync regressed can leave
+// 100+ tracked source files showing as `D` while HEAD still contains them.
+// Committing them would DELETE packages/shared from the branch — so the hook must
+// tell the agent to investigate/restore, not "commit before stopping".
 function trackedSourceChanges(cwd) {
-  const files = [];
+  const edited = [];
+  const deleted = [];
   for (const line of gitPorcelain(cwd).split(/\r?\n/)) {
     if (!line.trim()) continue;
-    if (line.slice(0, 2) === "??") continue; // untracked — ignore
+    const xy = line.slice(0, 2);
+    if (xy === "??") continue; // untracked — ignore
     let p = line.slice(3).trim();
     if (p.includes(" -> ")) p = p.split(" -> ")[1].trim(); // rename
     p = p.replace(/\\/g, "/").replace(/^"|"$/g, "");
-    if (SOURCE_RE.test(p)) files.push(p);
+    if (!SOURCE_RE.test(p)) continue;
+    // Porcelain status: a deletion is `D` in either the staged (X) or unstaged (Y)
+    // column (" D", "D ", "AD", etc.). Anything else is an edit/add/rename target.
+    if (xy.includes("D")) deleted.push(p);
+    else edited.push(p);
   }
-  return files;
+  return { edited, deleted, all: [...edited, ...deleted] };
+}
+
+// Decide what the Stop hook should report for a non-workspace (main-checkout)
+// session, given the classified tracked source changes. Pure + side-effect-free so
+// the deletion-vs-edit logic is unit-testable without spawning git (#771).
+//   - { action: "ok" }       → nothing stranded, let the session stop.
+//   - { action: "restore" }  → deletion-dominant desync; tell the agent to RESTORE.
+//   - { action: "commit" }   → genuine stranded edits; tell the agent to COMMIT.
+function classifyStranded({ edited, deleted, all }) {
+  if (all.length === 0) return { action: "ok" };
+  // Deletion-dominant working tree: more (or equal) tracked source files DELETED
+  // than edited — the signature of a merge working-tree desync, not stranded fixes.
+  if (deleted.length > 0 && deleted.length >= edited.length) {
+    return { action: "restore", edited, deleted };
+  }
+  return { action: "commit", files: all };
+}
+
+if (require.main !== module) {
+  module.exports = { trackedSourceChanges, classifyStranded, SOURCE_RE };
 }
 
 function lookupWorkspace(sessionId) {
@@ -112,15 +144,36 @@ async function main() {
 
   // Case 2: non-workspace session — check the MAIN checkout for stranded source fixes.
   const mainCheckout = resolve(__dirname, "..", "..");
-  const stranded = trackedSourceChanges(mainCheckout);
-  if (stranded.length > 0) {
-    console.error("WARNING: Uncommitted source changes in the MAIN checkout:");
-    for (const f of stranded) console.error(`  - ${f}`);
+  const verdict = classifyStranded(trackedSourceChanges(mainCheckout));
+
+  if (verdict.action === "ok") process.exit(0);
+
+  if (verdict.action === "restore") {
+    // Deletion-dominant working tree (#771): a merge working-tree desync, NOT stranded
+    // fixes. Committing here would remove those files from the branch (e.g. wipe
+    // packages/shared). Tell the agent to investigate/restore, never to commit.
+    const { deleted, edited } = verdict;
     console.error(
-      "Commit them before stopping — stranded fixes here block auto-merge and can be lost."
+      `WARNING: ${deleted.length} tracked source file(s) are DELETED from the MAIN checkout working tree` +
+        (edited.length > 0 ? ` (alongside ${edited.length} edit(s))` : "") + ":"
+    );
+    for (const f of deleted.slice(0, 10)) console.error(`  - D ${f}`);
+    if (deleted.length > 10) console.error(`  - ... and ${deleted.length - 10} more`);
+    console.error(
+      "This looks like a working-tree DESYNC (e.g. a board merge that regressed the working tree), " +
+        "NOT stranded fixes. Do NOT commit — committing would delete these files from the branch. " +
+        "Investigate and restore with `git restore <paths>` (or `git restore packages/shared`), then verify the backend is up."
     );
     process.exit(1);
   }
+
+  // verdict.action === "commit": genuine stranded edits.
+  console.error("WARNING: Uncommitted source changes in the MAIN checkout:");
+  for (const f of verdict.files) console.error(`  - ${f}`);
+  console.error(
+    "Commit them before stopping — stranded fixes here block auto-merge and can be lost."
+  );
+  process.exit(1);
 }
 
 main().catch(() => process.exit(0));
