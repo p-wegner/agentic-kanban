@@ -1,5 +1,7 @@
 import { isSpecPlanningStageName, syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
+import { runSmokeCheck } from "@agentic-kanban/shared/lib/smoke-check";
+import { buildSmokeCheck, getStackProfile } from "../services/stack-profile.service.js";
 import { issues, preferences, projectStatuses, projects, scheduledRunHistory, scheduledRuns, sessions, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { desc, eq } from "drizzle-orm";
 import { execFile } from "node:child_process";
@@ -487,6 +489,31 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
             return;
           }
           console.log(`[workflow] verify_script passed for workspace ${workspaceId}`);
+        }
+        // #791 run/smoke gate: for a web/service project, boot the dev server and confirm it
+        // responds (HTTP-200 + render). Derived entirely from the project's stack profile, so a
+        // library/CLI project (no `isWeb`/dev command/health URL) yields no SmokeCheck and this is
+        // a clean no-op. A failed boot/response WITHHOLDS readyForMerge — the diff-only LLM review
+        // can't catch "compiles but doesn't boot". Generalizes the old `frontend-smoke.ps1`.
+        if (workspace.workingDir) {
+          try {
+            const profile = await getStackProfile(projectId, db);
+            const smokeCheck = buildSmokeCheck(profile);
+            if (smokeCheck) {
+              console.log(`[workflow] running smoke check for workspace ${workspaceId}: ${smokeCheck.devCommand} -> ${smokeCheck.healthUrl}`);
+              const smoke = await runSmokeCheck(workspace.workingDir, smokeCheck);
+              if (!smoke.passed) {
+                console.log(`[workflow] smoke check failed for workspace ${workspaceId} — withholding readyForMerge: ${smoke.message}`);
+                boardEvents.broadcast(projectId, "workflow_error");
+                emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Smoke check failed for workspace ${workspaceId}; not approved for merge. ${smoke.message}` });
+                return;
+              }
+              console.log(`[workflow] smoke check passed for workspace ${workspaceId}: ${smoke.message}`);
+            }
+          } catch (smokeErr) {
+            // Non-fatal: a harness error must not block an otherwise-passing review. Log and proceed.
+            console.warn(`[workflow] smoke check errored (non-fatal) for workspace ${workspaceId}:`, smokeErr instanceof Error ? smokeErr.message : String(smokeErr));
+          }
         }
         // #629 Guard: re-verify the branch still has committed changes ahead of base.
         // A race (e.g. branch reset/rebased to equal base between review start and exit)
