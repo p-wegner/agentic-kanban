@@ -8,6 +8,7 @@ import { getCurrentBranch } from "../../services/git.service.js";
 import { initializeProjectStatuses, DEFAULT_STATUSES } from "../../repositories/issue.repository.js";
 import { runMigrations, logDefaultBranch } from "../shared.js";
 import { getDefaultSkillId, ensureAgentGitignore, ensureStarterClaudeMd, ensureStarterAgentsMd, ensureHookScaffold, ensureVerifyGateRunner, commitProjectScaffoldArtifacts } from "../../services/project-scaffold.js";
+import { detectStackProfile } from "../../services/stack-profile.service.js";
 
 /** Fall back to the repo's checked-out branch when main/master isn't detected, so the project is never left undriveable (#772). */
 async function resolveCliDefaultBranch(repoPath: string, detected: string | null): Promise<string | null> {
@@ -81,7 +82,9 @@ Examples:
           });
 
         // Scaffold (clobber-safe): keep agent scratch out of history + drop a starter CLAUDE.md + hooks + verify-gate runner.
-        ensureAgentGitignore(repoInfo.repoPath);
+        // Per-stack build-output ignores (target/, __pycache__/, *.class, …) keep a non-Node toy project's
+        // build artifacts from making main dirty and blocking auto-merge (#811).
+        ensureAgentGitignore(repoInfo.repoPath, undefined, detectStackProfile(repoInfo.repoPath).stack);
         ensureStarterClaudeMd(repoInfo.repoPath);
         ensureStarterAgentsMd(repoInfo.repoPath);
         ensureHookScaffold(repoInfo.repoPath);
