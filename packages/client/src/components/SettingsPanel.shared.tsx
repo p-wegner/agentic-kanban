@@ -23,6 +23,7 @@ export interface Settings {
   claude_profile?: string;
   codex_profile?: string;
   copilot_profile?: string;
+  pi_profile?: string;
   codex_license_ring?: string;
   codex_license_rotation?: string;
   claude_subscription_ring?: string;
@@ -80,6 +81,7 @@ export const DEFAULT_SETTINGS: Settings = {
   claude_profile: "",
   codex_profile: "",
   copilot_profile: "",
+  pi_profile: "",
   codex_license_ring: "",
   codex_license_rotation: "true",
   claude_subscription_ring: "",
@@ -145,10 +147,11 @@ export const TABS: { id: Tab; label: string }[] = [
   { id: "advanced", label: "Advanced" },
 ];
 
-export type AgentProvider = "claude" | "codex" | "copilot";
+export type AgentProvider = "claude" | "codex" | "copilot" | "pi";
 
 export const COPILOT_DEFAULT_PROFILE = "default";
 export const CODEX_DEFAULT_PROFILE = "default";
+export const PI_DEFAULT_PROFILE = "default";
 
 export type AgentProfileHealth = {
   id: string;
@@ -205,14 +208,16 @@ export function settingsProfileValue(settings: Settings): string {
   const provider = (settings.provider || "claude") as AgentProvider;
   if (provider === "codex") return `codex:${settings.codex_profile || CODEX_DEFAULT_PROFILE}`;
   if (provider === "copilot") return `copilot:${settings.copilot_profile || COPILOT_DEFAULT_PROFILE}`;
+  if (provider === "pi") return `pi:${settings.pi_profile || PI_DEFAULT_PROFILE}`;
   return `claude:${settings.claude_profile || ""}`;
 }
 
 export function profileOptionLabel(provider: AgentProvider, name: string): string {
   const isDefault = (provider === "copilot" && name === COPILOT_DEFAULT_PROFILE) ||
-    (provider === "codex" && name === CODEX_DEFAULT_PROFILE);
+    (provider === "codex" && name === CODEX_DEFAULT_PROFILE) ||
+    (provider === "pi" && name === PI_DEFAULT_PROFILE);
   const displayName = isDefault ? "Default" : name;
-  const providerLabel = provider === "codex" ? "Codex" : provider === "copilot" ? "Copilot" : "Claude";
+  const providerLabel = providerDisplayName(provider);
   return `${providerLabel}: ${displayName}`;
 }
 
@@ -220,12 +225,14 @@ export function defaultHarnessLabel(settings: Settings): string {
   const provider = (settings.provider || "claude") as AgentProvider;
   if (provider === "codex") return "Codex";
   if (provider === "copilot") return "Copilot";
+  if (provider === "pi") return "Pi";
   return "Claude";
 }
 
 export function providerDisplayName(provider: AgentProvider): string {
   if (provider === "codex") return "Codex";
   if (provider === "copilot") return "Copilot";
+  if (provider === "pi") return "Pi";
   return "Claude";
 }
 
@@ -256,6 +263,9 @@ export function getProviderCapabilities(provider: AgentProvider, profileName: st
     return { planMode: true, resume: true, mcpTools: true, visualVerify: true, permissionPrompts: false };
   }
   if (provider === "copilot") {
+    return { planMode: true, resume: true, mcpTools: true, visualVerify: true, permissionPrompts: false };
+  }
+  if (provider === "pi") {
     return { planMode: true, resume: true, mcpTools: true, visualVerify: true, permissionPrompts: false };
   }
   // claude
