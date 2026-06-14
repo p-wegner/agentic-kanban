@@ -15,6 +15,7 @@ import { registerWorkspaceCommand } from "./commands/workspace.js";
 import { registerWorkflowCommand } from "./commands/workflow.js";
 import { registerSkillCommand } from "./commands/skill.js";
 import { registerSessionCommand } from "./commands/session.js";
+import { registerDriveCommand } from "./commands/drive.js";
 import { registerButlerCommand } from "./commands/butler.js";
 import { registerSystemCommands } from "./commands/system.js";
 import { runMigrations, logDefaultBranch } from "./shared.js";
@@ -48,6 +49,7 @@ registerWorkspaceCommand(program);
 registerWorkflowCommand(program);
 registerSkillCommand(program);
 registerSessionCommand(program);
+registerDriveCommand(program);
 registerButlerCommand(program);
 registerSystemCommands(program);
 
