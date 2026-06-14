@@ -28,24 +28,43 @@ export interface MergeDeps {
   learningSessionIds: Set<string>;
 }
 
+/**
+ * Decide whether a set of changed files warrants visual verification.
+ *
+ * Framework frontend files (.jsx/.tsx/.js/.html/.css/.vue/.svelte/…) always count — they work for
+ * any project regardless of directory layout. Plain `.ts` is excluded (it would tag every server
+ * change on a TS monorepo). For a WEB project, server-rendered UI authored in `.kt`/`.java` also
+ * counts — gated on `isWebProject` so a pure-backend or library JVM project is NOT tagged on every
+ * source change. Pure — no git/DB — so it's unit-testable. The tag is a non-blocking nudge, so
+ * erring toward more extensions is safe. (#531)
+ */
+export function hasVisuallyVerifiableChanges(changedFiles: string[], isWebProject: boolean): boolean {
+  const FRONTEND_RE = /\.(jsx|tsx|js|mjs|cjs|html|htm|css|scss|less|sass|vue|svelte)$/;
+  // `.kt` source only — NOT `.kts` (that's Gradle build scripts, not UI).
+  const WEB_SOURCE_RE = /\.(kt|java)$/;
+  return changedFiles.some((f) => FRONTEND_RE.test(f) || (isWebProject && WEB_SOURCE_RE.test(f)));
+}
+
 /** Tag the issue with "needs-visual-verification" when in after_merge mode and client files changed. */
-export async function tagIfNeedsVisualVerification(repoPath: string, branch: string, baseBranch: string | null, issueId: string, now: string): Promise<void> {
+export async function tagIfNeedsVisualVerification(repoPath: string, branch: string, baseBranch: string | null, issueId: string, now: string, projectId?: string): Promise<void> {
   try {
     const prefRows = await db.select({ key: preferences.key, value: preferences.value }).from(preferences);
     const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
     if (prefMap.get("visual_verification_mode") !== "after_merge") return;
 
+    // Is this a web/service project? Read it from the persisted stack profile (already in prefMap).
+    // For a web project authored in a server-rendered-UI language (Ktor/Spring with kotlinx.html,
+    // JSP, Compose-for-Web, etc.), the UI lives in .kt/.java — which the framework-extension list
+    // below misses, so a Kotlin UI change would never be flagged for visual verification.
+    let isWebProject = false;
+    if (projectId) {
+      try { isWebProject = JSON.parse(prefMap.get(`project_stack_profile_${projectId}`) ?? "{}")?.isWeb === true; } catch { /* no profile */ }
+    }
+
     const base = baseBranch || "main";
     const { stdout } = await execFileAsync("git", ["diff", "--name-only", `${base}...${branch}`], { cwd: repoPath });
     const changedFiles = stdout.split("\n").map((f) => f.trim()).filter(Boolean);
-    // Detect frontend file changes regardless of directory structure so the feature works
-    // for any project managed by this board, not just the agentic-kanban monorepo.
-    // Includes plain .js/.mjs/.cjs + .html/.htm so a vanilla browser app (e.g. an HTML5
-    // Canvas game) is flagged for visual verification too — not just framework projects.
-    // Plain .ts is intentionally excluded: on a TS monorepo it would tag every server-only
-    // change. The tag is a non-blocking nudge, so erring toward more frontend extensions is safe. (#531)
-    const hasClientChanges = changedFiles.some((f) => /\.(jsx|tsx|js|mjs|cjs|html|htm|css|scss|less|sass|vue|svelte)$/.test(f));
-    if (!hasClientChanges) return;
+    if (!hasVisuallyVerifiableChanges(changedFiles, isWebProject)) return;
 
     const TAG_NAME = "needs-visual-verification";
     const TAG_COLOR = "#F59E0B";
@@ -144,7 +163,7 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
                   try { await runScript(teardownScript, workspace.workingDir, `teardown:${workspace.id}`); } catch {}
                 }
               }
-              await tagIfNeedsVisualVerification(repoPath, workspace.branch, workspace.baseBranch, issueId, now);
+              await tagIfNeedsVisualVerification(repoPath, workspace.branch, workspace.baseBranch, issueId, now, projectId);
               // Mandatory pre-merge backup. Non-fatal: must not block a legit auto-merge.
               try {
                 await createBackup("pre-merge");
