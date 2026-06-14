@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { StackProfile } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
@@ -287,7 +287,7 @@ export async function populateStackProfile(
     try {
       const enriched = await enrichWithLlm(profile, repoPath, database);
       if (enriched) {
-        await saveStackProfile(projectId, enriched, database);
+        await saveStackProfile(projectId, enriched, database, repoPath);
         return enriched;
       }
     } catch {
@@ -295,7 +295,7 @@ export async function populateStackProfile(
     }
   }
 
-  await saveStackProfile(projectId, profile, database);
+  await saveStackProfile(projectId, profile, database, repoPath);
   return profile;
 }
 
@@ -364,13 +364,134 @@ function parseLlmJson(raw: string): LlmProfileShape | null {
   }
 }
 
-/** Persist a stack profile JSON to the project's preference key. */
+/**
+ * Persist a stack profile JSON to the project's preference key. When `repoPath` is given,
+ * also (re)generate the project's `.claude/smart-hooks-rules.json` so an edit-time feedback
+ * harness stays in sync with the latest profile (#787). Rule generation is non-fatal.
+ */
 export async function saveStackProfile(
   projectId: string,
   profile: StackProfile,
   database: Database,
+  repoPath?: string,
 ): Promise<void> {
   await setPreference(stackProfilePrefKey(projectId), JSON.stringify(profile), database);
+  if (repoPath) writeSmartHooksRules(repoPath, profile);
+}
+
+// ---------------------------------------------------------------------------
+// Edit-time feedback rules generated from the stack profile (#787)
+// ---------------------------------------------------------------------------
+
+/** One file-pattern -> quick-check entry in the generated smart-hooks-rules.json. */
+export interface SmartHooksRule {
+  /** Human label shown when the check fails. */
+  name: string;
+  /** Quick build/test/typecheck command to run (from the stack profile). */
+  command: string;
+  /** Glob-ish patterns (smart-hooks-runner.js dialect) that trigger this rule. */
+  filePatterns: string[];
+  /** Block the agent on failure. Quick incremental checks block; reminders don't. */
+  blocking: boolean;
+  /** Seconds before the check is killed. */
+  timeout: number;
+}
+
+export interface SmartHooksRulesFile {
+  version: "1.0.0";
+  /** Marks the file as machine-generated so humans/tools know not to hand-edit it. */
+  generated: true;
+  /** The stack the rules were derived from, for debuggability. */
+  stack: string | null;
+  /** When the rules were generated. */
+  generatedAt: string;
+  /** Rules evaluated on PostToolUse (per-edit) and Stop (end-of-session). */
+  rules: SmartHooksRule[];
+}
+
+/** Per-stack source-file glob patterns that should trigger an edit-time quick check. */
+const STACK_SOURCE_PATTERNS: Record<string, string[]> = {
+  node: ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx", "**/*.mjs", "**/*.cjs"],
+  rust: ["**/*.rs"],
+  go: ["**/*.go"],
+  python: ["**/*.py"],
+  java: ["**/*.java", "**/*.kt"],
+  ruby: ["**/*.rb"],
+  elixir: ["**/*.ex", "**/*.exs"],
+};
+
+/** Source patterns for a profile's stack, falling back to a broad set when the stack is unknown. */
+function sourcePatternsForStack(stack: string | null): string[] {
+  if (stack && STACK_SOURCE_PATTERNS[stack]) return STACK_SOURCE_PATTERNS[stack];
+  // Unknown stack: union of all known source extensions so SOME feedback still fires.
+  return [...new Set(Object.values(STACK_SOURCE_PATTERNS).flat())];
+}
+
+/**
+ * Build the generated edit-time feedback rules from a stack profile. Pure — no I/O.
+ *
+ * Prefers the cheapest signal available: typecheck (fastest), else quick test, else the full
+ * test command. Each non-null command becomes a rule that fires when a source file for the
+ * stack is edited. Project-agnostic: every command comes from the profile, nothing hard-coded
+ * to a particular repo. Returns an empty `rules` list when the profile has no usable command.
+ */
+export function buildSmartHooksRules(profile: StackProfile): SmartHooksRulesFile {
+  const patterns = sourcePatternsForStack(profile.stack);
+  const rules: SmartHooksRule[] = [];
+
+  // Typecheck is the cheapest correctness signal — run it per-edit when present.
+  if (profile.typecheckCommand) {
+    rules.push({
+      name: "Typecheck",
+      command: profile.typecheckCommand,
+      filePatterns: patterns,
+      blocking: true,
+      timeout: 120,
+    });
+  }
+
+  // Quick/affected tests give behavioral feedback. Fall back to the full test command only
+  // when there is no quick variant (and no typecheck already covering the edit).
+  const testCommand = profile.quickTestCommand ?? profile.testCommand;
+  if (testCommand) {
+    rules.push({
+      name: profile.quickTestCommand ? "Quick tests" : "Tests",
+      command: testCommand,
+      filePatterns: patterns,
+      blocking: true,
+      timeout: 180,
+    });
+  }
+
+  return {
+    version: "1.0.0",
+    generated: true,
+    stack: profile.stack,
+    generatedAt: new Date().toISOString(),
+    rules,
+  };
+}
+
+/** Repo-relative path of the generated edit-time feedback rules file. */
+export function smartHooksRulesPath(repoPath: string): string {
+  return join(repoPath, ".claude", "smart-hooks-rules.json");
+}
+
+/**
+ * Generate and write `.claude/smart-hooks-rules.json` for a project from its stack profile.
+ * The generic `smart-hooks-runner.js` reads this file to give a driven project's builder the
+ * same incremental PostToolUse/Stop feedback board builders get. Non-fatal on any error —
+ * profile persistence must never fail because rule generation did.
+ */
+export function writeSmartHooksRules(repoPath: string, profile: StackProfile): void {
+  try {
+    const rulesFile = buildSmartHooksRules(profile);
+    const outPath = smartHooksRulesPath(repoPath);
+    mkdirSync(join(repoPath, ".claude"), { recursive: true });
+    writeFileSync(outPath, JSON.stringify(rulesFile, null, 2) + "\n", "utf8");
+  } catch {
+    /* non-fatal: rule generation must never block profile persistence */
+  }
 }
 
 /** Read a project's persisted stack profile, or null if none has been computed. */
