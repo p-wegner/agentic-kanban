@@ -62,6 +62,13 @@ describe("modelBelongsToProvider — stale default_model guard", () => {
     expect(modelBelongsToProvider("gpt-5.5", "copilot")).toBe(true);
     expect(modelBelongsToProvider("claude-sonnet-4-6", "copilot")).toBe(true);
   });
+
+  it("rejects non-empty Pi models until Pi model families are finalized", () => {
+    expect(modelBelongsToProvider("", "pi")).toBe(true);
+    expect(modelBelongsToProvider(undefined, "pi")).toBe(true);
+    expect(modelBelongsToProvider("gpt-5.5", "pi")).toBe(false);
+    expect(modelBelongsToProvider("claude-sonnet-4-6", "pi")).toBe(false);
+  });
 });
 
 describe("POST /api/workspaces/preview — stale Codex default_model is dropped for Claude provider", () => {

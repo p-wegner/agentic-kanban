@@ -13,7 +13,7 @@ export interface StrategyBullseyeSegment {
   label: string;
   kind?: StrategySegmentKind;
   weight?: number;
-  provider?: "claude" | "codex" | "copilot" | "";
+  provider?: "claude" | "codex" | "copilot" | "pi" | "";
   keywords?: string;
 }
 
@@ -33,7 +33,7 @@ export type ProviderPolicyMode = "fill" | "throttle" | "fallback-only";
 export interface ProviderProfilePolicy {
   /** Unique key: "{provider}:{profileName}" — e.g. "claude:work", "codex:default" */
   id: string;
-  provider: "claude" | "codex" | "copilot";
+  provider: "claude" | "codex" | "copilot" | "pi";
   profileName: string;
   /** Human-readable label, e.g. "Claude (andrena gateway)" */
   label: string;
@@ -122,7 +122,7 @@ function parseProviderPolicies(raw: unknown): ProviderProfilePolicy[] {
     .filter((p) => p && typeof p === "object" && typeof p.id === "string" && typeof p.provider === "string")
     .map((p) => ({
       id: p.id as string,
-      provider: (["claude", "codex", "copilot"].includes(p.provider) ? p.provider : "claude") as "claude" | "codex" | "copilot",
+      provider: (["claude", "codex", "copilot", "pi"].includes(p.provider) ? p.provider : "claude") as "claude" | "codex" | "copilot" | "pi",
       profileName: typeof p.profileName === "string" ? p.profileName : "",
       label: typeof p.label === "string" ? p.label : p.id as string,
       mode: (VALID_MODES.includes(p.mode) ? p.mode : "throttle") as ProviderPolicyMode,
@@ -420,7 +420,7 @@ export function isPolicyBlockedByQuota(
 export function selectProviderFromStrategy(
   config: StrategyBullseyeConfig,
   options: { allowFallback?: boolean; quota?: QuotaUsageResult | null } = {},
-): { provider: "claude" | "codex" | "copilot"; profileName: string; policy: ProviderProfilePolicy } | null {
+): { provider: "claude" | "codex" | "copilot" | "pi"; profileName: string; policy: ProviderProfilePolicy } | null {
   const policies = config.providerPolicies ?? [];
   if (policies.length === 0) return null;
 
@@ -453,11 +453,14 @@ export function selectProviderFromStrategy(
  */
 export function applyProviderSelectionToPrefMap(
   prefMap: Map<string, string>,
-  selected: { provider: "claude" | "codex" | "copilot"; profileName: string },
+  selected: { provider: "claude" | "codex" | "copilot" | "pi"; profileName: string },
 ): void {
   if (selected.provider === "codex") {
     if (selected.profileName) prefMap.set("codex_profile", selected.profileName);
     prefMap.set("provider", "codex");
+  } else if (selected.provider === "pi") {
+    if (selected.profileName) prefMap.set("pi_profile", selected.profileName);
+    prefMap.set("provider", "pi");
   } else if (selected.provider === "copilot") {
     if (selected.profileName) prefMap.set("copilot_profile", selected.profileName);
     prefMap.set("provider", "copilot");
@@ -484,7 +487,7 @@ export function applyProviderSelectionToPrefMap(
 export async function resolveStrategyProviderSelection(
   database: Database,
   projectId: string | null | undefined,
-): Promise<{ provider: "claude" | "codex" | "copilot"; profileName: string } | null> {
+): Promise<{ provider: "claude" | "codex" | "copilot" | "pi"; profileName: string } | null> {
   if (!projectId) return null;
   const prefRows = await database.select().from(preferences);
   const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));

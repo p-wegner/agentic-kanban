@@ -9,7 +9,7 @@ import type { ProviderName } from "./agent-provider/types.js";
  * existing installations keep their previous toggle until the user re-saves.
  */
 
-export const HARNESS_IDS: readonly ProviderName[] = ["claude", "codex", "copilot"] as const;
+export const HARNESS_IDS: readonly ProviderName[] = ["claude", "codex", "copilot", "pi"] as const;
 
 export type HarnessSettingKey = "plan_auto_continue";
 
@@ -25,7 +25,7 @@ interface HarnessSettingDef {
 const DEFS: Record<HarnessSettingKey, HarnessSettingDef> = {
   plan_auto_continue: {
     legacyKey: "plan_auto_continue",
-    defaults: { codex: true, copilot: true, claude: true },
+    defaults: { codex: true, copilot: true, claude: true, pi: true },
     fallbackDefault: true,
   },
 };

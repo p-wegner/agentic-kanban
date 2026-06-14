@@ -14,6 +14,7 @@ vi.mock("node:fs", () => ({
 }));
 
 import { ClaudeProvider, CodexProvider, CopilotProvider, getProvider, buildAgentLaunchConfig } from "../services/agent-provider.js";
+import type { ProviderId, ProviderName } from "../services/agent-provider.js";
 import { execSync as execSyncMock } from "node:child_process";
 import { existsSync as existsSyncMock, readFileSync as readFileSyncMock } from "node:fs";
 
@@ -477,6 +478,14 @@ describe("ClaudeProvider", () => {
 });
 
 describe("provider registry", () => {
+  it("includes pi in provider type unions without registering it yet", () => {
+    const providerName: ProviderName = "pi";
+    const providerId: ProviderId = "pi";
+    expect(providerName).toBe("pi");
+    expect(providerId).toBe("pi");
+    expect(() => getProvider("pi")).toThrow("Unknown agent provider");
+  });
+
   it("getProvider returns ClaudeProvider by default", () => {
     const p = getProvider();
     expect(p.name).toBe("claude");
