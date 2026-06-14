@@ -11,7 +11,7 @@ This is a FRESH session every run — you have NO memory of previous runs. The k
 <!-- STRATEGY_BULLSEYE_GENERATED_START -->
 > The loop re-reads this file at the START of every iteration, so changes here take effect on the next cycle with **NO restart**. This block is generated from the Strategy Bullseye preference; edit the bullseye in the board UI instead of hand-editing these values.
 - **ACTIVE_AGENTS_TARGET = 2** - keep this many workspaces actively In Progress at all times.
-- **BACKLOG_FLOOR = 12** - never let the backlog drop below this; refill before it does.
+- **BACKLOG_FLOOR = 0** - never let the backlog drop below this; refill before it does.
 - **MAX_NEW_STARTS_PER_CYCLE = 2** - cap on how many NEW workspaces to launch in a single cycle.
 - **REFILL_FOCUS = balanced** - derived from work-type marker weights; `bugfix-only` emphasizes reproducible bugs, `balanced` allows feature/quality mix.
 
@@ -26,18 +26,15 @@ When selecting a provider for a new workspace, apply these rules in priority ord
 - **policy-claude-anth** [claude:anth]: FILL — use aggressively, keep busy at all times (Primary harness - all new workspaces launch on claude:anth. Single source of truth (set-provider-default skill).)
 <!-- STRATEGY_BULLSEYE_GENERATED_END -->
 
-## FOCUS POLICY (operator directive 2026-06-09 — authoritative; overrides the REFILL_FOCUS wording above)
-**Focus on BUG IDENTIFICATION/FIXING and PERFORMANCE. NO new features.**
-1. **Bug identification and fixing** — find, reproduce, and fix bugs. Priority: server crashes, merge pipeline failures, data-corruption bugs, then UX breakage.
-2. **Performance — no UI interaction without feedback within 500ms.** Every user-facing action (click, drag, submit, tab switch) MUST produce visible feedback within 500ms. Solve the **root cause** (slow endpoint, missing index, redundant render, N+1 query, large payload). UX workarounds (spinners, loading bars, skeletons) are a LAST RESORT — only when the root cause is genuinely async by nature (e.g. waiting on an agent subprocess). NEVER paper over a slow API with a spinner; fix the API.
-- **Starting work (priority 3):** pull bugfix tickets first, then performance tickets, then quality/architecture in service of those two goals. **SKIP every Feature/enhancement ticket** — leave it in the backlog. Never start a feature.
-- **Refill (priority 4):** create ONLY bugfix, performance, and supporting quality tickets. Priority order for new tickets:
-  1. **Bugs** — from merged diffs, server logs, failing tests, user-reported symptoms
-  2. **Performance** — slow API endpoints, large payloads, missing indexes, unnecessary re-renders, N+1 queries
-  3. **Quality** — tests that lock in bug fixes and perf improvements so they don't regress
-  4. **Architecture** — only when it directly enables the above (e.g. extracting a slow service for targeted optimization)
-  **NEVER create feature or enhancement tickets**, regardless of the REFILL_FOCUS value above.
-- **WIP limit = 3** concurrent agents. **Provider/profile = Claude Code, `zai`** (use claude/zai for ALL new workspaces — never codex; the codex account is credit-exhausted).
+## FOCUS POLICY (operator directive 2026-06-14 — authoritative; overrides the REFILL_FOCUS wording above)
+**EPIC-FIRST: build the `[project-driver]` epic #785 (turn the board into a turnkey autonomous multi-stack project driver). Keep the board healthy; do NOT refill.**
+
+The `[project-driver]` epic (#785 + children #786–#812) generalizes the board's own dev harness into a per-stack agent feedback loop so the board can autonomously build arbitrary projects. **For this focus period these epic tickets ARE the work — build them even though they are feature/enhancement-typed.** (The old "no new features" directive is suspended for the epic.)
+
+1. **Starting work (priority 3): pull `[project-driver]` tickets in dependency order.** The foundation **#786 (Stack profile)** unblocks most of the harness tier — start it FIRST and let it merge before pulling its dependents (a dependent must not start until its `depends_on` blocker is actually MERGED to master, not merely Done — the cascade gate enforces this post-#784). After #786 merges, pull its now-unblocked children (#787/#788/#789/#790/#794/#810/#811/#812, then the rest). Respect each ticket's `depends_on` edges; never start a ticket whose blocker hasn't merged. Tickets with no open `[project-driver]` work to pull → fall back to any high-priority bug that threatens board health, else idle.
+2. **Keep the board healthy (still priority 1–2 below):** server alive, unblock/merge in-flight work, unstick stale/failed sessions — exactly as the global priorities say. A green moving board is the precondition for the epic landing.
+3. **Do NOT refill the backlog this period.** The epic is the backlog. Skip the BACKLOG_FLOOR refill (priority 4) — do not create new bug/perf/quality tickets while the epic is in flight. (If the epic fully drains and the board is healthy, stop and report rather than inventing work.)
+- **WIP limit = 2** concurrent agents (ACTIVE_AGENTS_TARGET = 2; MAX_NEW_STARTS_PER_CYCLE = 2). **Provider/profile = Claude Code, `anth`** (single source of truth — matches the generated PROVIDER POLICY block above; never codex — the codex account is credit-exhausted).
 
 ## REFILL STRATEGY BULLSEYE (agent-metrics-derived, 2026-06-05)
 Based on state.md recurring failure patterns from recent agent cycles, prioritize tickets in these areas:
