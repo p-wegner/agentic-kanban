@@ -21,6 +21,7 @@ import { rotateCodexLicense } from "../services/codex-license-ring.js";
 import { isClaudeUsageLimitStats } from "../services/claude-rate-limit.js";
 import { rotateClaudeSubscription } from "../services/claude-subscription-ring.js";
 import { buildLearningStepPrompt } from "../services/merge-helpers.service.js";
+import { isFoundationalBlocker } from "../services/foundational-merge.service.js";
 
 type WorkspaceRow = typeof workspaces.$inferSelect;
 
@@ -500,8 +501,21 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
         boardEvents.broadcast(projectId, "workspace_ready_for_merge");
         const learningAfterReview = prefMap.get("learning_step_after_review") === "true" && workspace.workingDir ? launchLearningStep(db, sessionManager, learningSessionIds, workspace, prefMap, "after review", true) : Promise.resolve();
         if (autoMergeEnabled) {
-          console.log(`[workflow] review session ${sessionId} completed  queued for scheduled auto-merge`);
           await learningAfterReview;
+          // #797 synchronous foundational merge. A no-dependency scaffold/shell ticket that
+          // gates open tier-1 work must land PROMPTLY — not sit Done-but-unmerged until the
+          // next 30s auto-merge-orchestrator tick — or a dependent could be cut from the
+          // pre-merge (empty) base on the very first cascade cycle. #784's read-side mergedAt
+          // gate makes dependents WAIT; this makes the foundational merge land NOW so the wait
+          // is short. Non-foundational tickets keep deferring to the scheduled orchestrator
+          // (its batch/cluster reconciliation handles overlap/conflict residue).
+          const autoMergeDisabledHere = autoMergeDisabledProjectIds.has(projectId);
+          if (!autoMergeDisabledHere && await isFoundationalBlocker(db, issueId)) {
+            console.log(`[workflow] review session ${sessionId} completed  foundational blocker — merging synchronously (#797)`);
+            await autoMerge(workspace, projectId, issueId, findStatus("Done")?.id ?? null, now);
+          } else {
+            console.log(`[workflow] review session ${sessionId} completed  queued for scheduled auto-merge`);
+          }
         } else {
           await db.update(workspaces).set({ readyForMerge: true, updatedAt: now }).where(eq(workspaces.id, workspaceId));
           boardEvents.broadcast(projectId, "workspace_ready_for_merge");
