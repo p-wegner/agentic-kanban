@@ -104,6 +104,17 @@ export async function buildReviewPrompt(
     skillModel = globalSkill[0]?.model ?? null;
   }
 
+  // When a workspaceId is available, signal approval via mark_ready_for_merge with the
+  // literal id (NOT the {{workspaceId}} placeholder — if the id were ever empty the
+  // placeholder collapses to "workspaceId=" and the agent has no actionable tool call).
+  // When it is missing (e.g. direct/in-place review), fall back to the issue-status path
+  // so the approval branch is always actionable.
+  const approvalInstruction = workspaceId
+    ? `1. Use the mark_ready_for_merge MCP tool with workspaceId=${workspaceId} to signal the workspace is approved
+2. Exit normally (the scheduled merge orchestrator will merge it)`
+    : `1. Use the move_issue MCP tool to move issue ${issueId} to 'AI Reviewed' to signal approval
+2. Exit normally (the scheduled merge orchestrator will merge it)`;
+
   const autoFixInstructions = autoFix
     ? `If you find CRITICAL or MAJOR issues:
 1. Use the move_issue MCP tool to move issue ${issueId} to 'In Progress' (so the board shows the issue needs fixes)
@@ -112,16 +123,14 @@ export async function buildReviewPrompt(
 4. Exit normally (the system will handle merging)
 
 If only MINOR issues or no issues:
-1. Use the mark_ready_for_merge MCP tool with workspaceId={{workspaceId}} to signal the workspace is approved
-2. Exit normally (the scheduled merge orchestrator will merge it)`
+${approvalInstruction}`
     : `If you find CRITICAL or MAJOR issues:
 1. Use the move_issue MCP tool to move issue ${issueId} to 'In Progress'
 2. Describe each issue clearly so the developer knows what to fix
 3. Do NOT edit any files — report only
 
 If only MINOR issues or no issues:
-1. Use the mark_ready_for_merge MCP tool with workspaceId={{workspaceId}} to signal the workspace is approved
-2. Exit normally (the scheduled merge orchestrator will merge it)`;
+${approvalInstruction}`;
 
   const localBaseBranch = (baseBranch ?? "HEAD").replace(/^origin\//, "");
 
