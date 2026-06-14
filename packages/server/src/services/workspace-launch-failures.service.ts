@@ -8,6 +8,7 @@ export type LaunchFailureCategory =
   | "zero-output"   // session exited in <=1s or had zero tokens
   | "rate-limited"  // provider quota/usage limit blocked launch
   | "setup-failed"  // workspace setup script failed (non-zero exit)
+  | "preflight-failed" // launch preflight refused before a session row existed
   | "missing-worktree" // workingDir is null or missing
   | "session-error"; // session exited with non-zero exit code
 
@@ -160,6 +161,30 @@ export async function getWorkspaceLaunchFailures(
 
     const issueStatusName = statusNameById.get(issue.statusId) ?? "Unknown";
     const latestSession = latestSessionByWs.get(ws.id) ?? null;
+
+    if (ws.latestLaunchError) {
+      failures.push({
+        workspaceId: ws.id,
+        workspaceBranch: ws.branch,
+        workspaceStatus: ws.status,
+        workingDir: ws.workingDir,
+        issueId: issue.id,
+        issueNumber: issue.issueNumber,
+        issueTitle: issue.title,
+        issueStatusName,
+        provider: ws.provider ?? null,
+        profile: ws.claudeProfile ?? null,
+        sessionId: latestSession?.id ?? null,
+        sessionStatus: latestSession?.status ?? null,
+        sessionStartedAt: latestSession?.startedAt ?? null,
+        sessionEndedAt: latestSession?.endedAt ?? null,
+        failureCategory: "preflight-failed",
+        lastMessage: ws.latestLaunchError,
+        failedAt: ws.updatedAt,
+        recentFailureCount: countRecentFailures(ws.id),
+      });
+      continue;
+    }
 
     // Check: missing worktree path
     if (!ws.isDirect && !ws.workingDir) {

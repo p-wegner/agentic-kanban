@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceCrudService } from "../services/workspace-crud.service.js";
+import { WorkspaceError } from "../services/workspace-internals.js";
 
 /**
  * Regression tests for POST /api/workspaces connection-drop hardening.
@@ -173,6 +174,51 @@ describe("workspace creation hardening (AK-501 / AK-587)", () => {
     const { eq } = await import("drizzle-orm");
     const [row] = await db.select({ status: workspaces.status }).from(workspaces).where(eq(workspaces.id, result.id));
     expect(row?.status).toBe("idle");
+  });
+
+  it("marks stale safety-policy preflight launch failures as workspace errors", async () => {
+    const { issueId } = await seedIssue(db);
+
+    const failingSessionManager = {
+      startSession: vi.fn(async () => {
+        throw new WorkspaceError("Workspace safety policy is stale; checkpoint/commit first.", "CONFLICT", {
+          code: "STALE_SAFETY_POLICY",
+          staleFiles: [".claude/hooks/smart-hooks-runner.js"],
+        });
+      }),
+      stopSession: vi.fn(async () => true),
+      subscribe: vi.fn(),
+      unsubscribe: vi.fn(),
+    };
+
+    const svc = createWorkspaceCrudService({
+      database: db,
+      getSessionManager: () => failingSessionManager as never,
+      gitService: makeGitService() as never,
+    });
+
+    const result = await svc.createWorkspace({
+      issueId,
+      branch: "feature/ak-1-test",
+      isDirect: false,
+      requiresReview: false,
+      thoroughReview: false,
+      planMode: false,
+      tddMode: false,
+      includeVisualProof: false,
+      skipSetup: true,
+      skipContextPacker: true,
+    });
+
+    await vi.runAllTimersAsync();
+
+    const [row] = await db
+      .select({ status: workspaces.status, latestLaunchError: workspaces.latestLaunchError })
+      .from(workspaces)
+      .where(eq(workspaces.id, result.id));
+    expect(row?.status).toBe("error");
+    expect(row?.latestLaunchError).toContain("STALE_SAFETY_POLICY");
+    expect(row?.latestLaunchError).toContain("Workspace safety policy is stale");
   });
 
   it("returns a well-formed response when worktree creation itself fails (pre-insert)", async () => {
