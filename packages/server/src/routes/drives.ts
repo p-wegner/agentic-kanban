@@ -1,6 +1,7 @@
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createDriveService, DriveError } from "../services/drive.service.js";
+import { buildDriveDashboard } from "../services/drive-dashboard.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody, parseOptionalJsonBody } from "../middleware/parse-body.js";
 import {
@@ -63,6 +64,21 @@ export function createDrivesRoute(database: Database = db) {
         },
         ...report,
       });
+    } catch (err) {
+      if (err instanceof DriveError) return c.json({ error: err.message }, errorStatus(err));
+      throw err;
+    }
+  });
+
+  // GET /api/projects/:projectId/drives/:id/dashboard — aggregated drive view (#800)
+  router.get("/:projectId/drives/:id/dashboard", async (c) => {
+    try {
+      const dashboard = await buildDriveDashboard(
+        database,
+        c.req.param("projectId"),
+        c.req.param("id"),
+      );
+      return c.json(dashboard);
     } catch (err) {
       if (err instanceof DriveError) return c.json({ error: err.message }, errorStatus(err));
       throw err;
