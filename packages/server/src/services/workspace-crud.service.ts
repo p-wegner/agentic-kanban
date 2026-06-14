@@ -5,7 +5,7 @@ import { eq, inArray, and, isNotNull, ne } from "drizzle-orm";
 import { existsSync } from "node:fs";
 import { resolve as pathResolve, dirname, parse as pathParse, relative, sep } from "node:path";
 import {
-  issues, projects, preferences, workspaces, sessions, sessionMessages, diffComments, agentSkills, projectStatuses,
+  issues, projects, preferences, workspaces, sessions, agentSkills, projectStatuses,
   issueDependencies, workflowNodes,
 } from "@agentic-kanban/shared/schema";
 import { isResolvedDependencyStatusView } from "@agentic-kanban/shared/lib/status-view";
@@ -15,6 +15,7 @@ import { branchHash, BASE_SERVER_PORT, BASE_CLIENT_PORT } from "./worktree-ports
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
+import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
 
 export interface StaleWorktreeEntry {
   id: string;
@@ -1034,13 +1035,7 @@ exit 1
     const repoPath = wsRow[0]?.repoPath;
     const deletedProjectId = wsRow[0]?.projectId;
 
-    await database.delete(diffComments).where(eq(diffComments.workspaceId, workspaceId));
-    if (wsSessions.length > 0) {
-      const sessionIds = wsSessions.map(s => s.id);
-      await database.delete(sessionMessages).where(inArray(sessionMessages.sessionId, sessionIds));
-    }
-    await database.delete(sessions).where(eq(sessions.workspaceId, workspaceId));
-    await database.delete(workspaces).where(eq(workspaces.id, workspaceId));
+    await deleteWorkspaceCascade(workspaceId, database);
 
     // A shared-worktree fork child reuses its parent's workingDir. Never remove the
     // directory while another (e.g. the parent) workspace still points at it — this
