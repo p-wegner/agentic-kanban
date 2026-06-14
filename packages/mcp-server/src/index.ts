@@ -70,6 +70,12 @@ import {
 } from "./tools/openspec.js";
 import { registerGetBoardRiskDigest } from "./tools/get-board-risk-digest.js";
 import { registerExportHandoffBundle } from "./tools/export-handoff-bundle.js";
+import {
+  registerStartDrive,
+  registerListDrives,
+  registerGetDrive,
+  registerFinishDrive,
+} from "./tools/drives.js";
 
 const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   get_context: registerGetContext,
@@ -134,6 +140,10 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   validate_change: registerValidateChange,
   get_board_risk_digest: registerGetBoardRiskDigest,
   export_handoff_bundle: registerExportHandoffBundle,
+  start_drive: registerStartDrive,
+  list_drives: registerListDrives,
+  get_drive: registerGetDrive,
+  finish_drive: registerFinishDrive,
 };
 
 async function getDisabledTools(): Promise<Set<string>> {

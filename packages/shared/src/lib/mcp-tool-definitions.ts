@@ -7,7 +7,8 @@ export type McpToolCategory =
   | "review"
   | "dependencies"
   | "skills"
-  | "specs";
+  | "specs"
+  | "drives";
 
 export interface McpToolDefinition {
   name: string;
@@ -25,6 +26,7 @@ export const MCP_TOOL_CATEGORIES: { id: McpToolCategory; label: string }[] = [
   { id: "dependencies", label: "Dependencies" },
   { id: "skills", label: "Agent Skills" },
   { id: "specs", label: "Living Specs" },
+  { id: "drives", label: "Drives" },
 ];
 
 export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
@@ -69,4 +71,9 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
   { name: "openspec_list_specs", description: "List living OpenSpec domain specs for a project", category: "specs" },
   { name: "show_spec", description: "Show a living OpenSpec domain spec for a project", category: "specs" },
   { name: "validate_change", description: "Validate OpenSpec change deltas and warn about same-domain collisions", category: "specs" },
+  // drives
+  { name: "start_drive", description: "Start a Drive: a first-class record of an autonomous epic push toward a target under a completion contract", category: "drives" },
+  { name: "list_drives", description: "List all Drives for a project (target, completion contract, status, start/finish times)", category: "drives" },
+  { name: "get_drive", description: "Get a single Drive by ID", category: "drives" },
+  { name: "finish_drive", description: "Finish a Drive: set a terminal status (completed/abandoned) and stamp finishedAt", category: "drives" },
 ];
