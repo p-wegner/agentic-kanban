@@ -331,4 +331,49 @@ describe("workspaceLaunchPreflight", () => {
     expect(calls).toContainEqual(["checkout", "feature/test"]);
     expect(calls).toContainEqual(["rebase", "main"]);
   });
+
+  it("repairs configured dependency symlinks before launch", async () => {
+    const calls: Array<{ source: string; worktree: string; dirs: string[] }> = [];
+    const files = new Map<string, string>([
+      ["main:.codex/hooks.json", "hooks"],
+      ["worktree:.codex/hooks.json", "hooks"],
+      ["main:.claude/hooks/smart-hooks-runner.js", "runner"],
+      ["worktree:.claude/hooks/smart-hooks-runner.js", "runner"],
+      ["main:.claude/hooks/validate-command-safety.js", "validator"],
+      ["worktree:.claude/hooks/validate-command-safety.js", "validator"],
+      ["main:.claude/hooks/prevent-cross-worktree-writes.js", "cross-worktree"],
+      ["worktree:.claude/hooks/prevent-cross-worktree-writes.js", "cross-worktree"],
+      ["main:CLAUDE.md", "guidance"],
+      ["worktree:CLAUDE.md", "guidance"],
+    ]);
+
+    const result = await workspaceLaunchPreflight({
+      repoPath: "main",
+      worktreePath: "worktree",
+      baseBranch: null,
+      branch: "feature/test",
+      isDirect: false,
+      symlinkDirs: ["node_modules"],
+      bootstrapSymlinks: async (source, worktree, dirs) => {
+        calls.push({ source, worktree, dirs });
+        return {
+          linked: ["node_modules", "packages/server/node_modules"],
+          skipped: [],
+          failed: [],
+        };
+      },
+      execGit: async (args) => {
+        if (args[0] === "status") return "";
+        if (args[0] === "rev-parse") return "feature/test\n";
+        return "";
+      },
+      readFile: async (root, path) => files.get(`${root}:${path}`) ?? "",
+      exists: async (root, path) => files.has(`${root}:${path}`),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.refreshed).toBe(true);
+    expect(result.repairedSymlinks).toEqual(["node_modules", "packages/server/node_modules"]);
+    expect(calls).toEqual([{ source: "main", worktree: "worktree", dirs: ["node_modules"] }]);
+  });
 });
