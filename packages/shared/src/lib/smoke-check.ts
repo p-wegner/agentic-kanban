@@ -52,6 +52,28 @@ const SIGNAL_NOOP: SmokeCheckResult = {
   bodySnippet: "",
 };
 
+/**
+ * Serialize smoke checks process-wide. A smoke check boots the project's dev server on a fixed
+ * port (from the stack profile) and tears it down afterward. When several reviews finish close
+ * together (WIP > 1), running their smoke checks concurrently makes the 2nd+ server fail to bind
+ * the port — a false negative that withholds merge. Rather than assume every stack honors a PORT
+ * env override (Ktor does, Spring uses SERVER_PORT, Vite uses a flag, …), we serialize: one dev
+ * server up at a time, the port freed before the next starts. Slower under load, but correct on
+ * any stack. The chain never rejects (each link swallows its own errors), so a hung/erroring smoke
+ * can't wedge the queue.
+ */
+let smokeChain: Promise<void> = Promise.resolve();
+function runSerialized<T>(task: () => Promise<T>): Promise<T> {
+  const result = smokeChain.then(task);
+  // Advance the chain regardless of this task's outcome; add a tiny settle delay so the killed
+  // server's port is actually released before the next boot.
+  smokeChain = result.then(
+    () => new Promise((r) => setTimeout(r, 500)),
+    () => new Promise((r) => setTimeout(r, 500)),
+  );
+  return result;
+}
+
 /** Stop a spawned dev server and its child process tree, cross-platform. */
 function killTree(pid: number): void {
   try {
@@ -116,7 +138,15 @@ export async function runSmokeCheck(
   options?: RunSmokeCheckOptions,
 ): Promise<SmokeCheckResult> {
   if (!check) return SIGNAL_NOOP;
+  // Serialize the actual boot/poll/teardown so concurrent reviews don't fight over the dev port.
+  return runSerialized(() => runSmokeCheckInner(worktreePath, check, options));
+}
 
+async function runSmokeCheckInner(
+  worktreePath: string,
+  check: SmokeCheck,
+  options?: RunSmokeCheckOptions,
+): Promise<SmokeCheckResult> {
   const timeoutSeconds = options?.timeoutSeconds ?? 60;
   const pollIntervalSeconds = options?.pollIntervalSeconds ?? 2;
   const requestTimeoutMs = options?.requestTimeoutMs ?? 4000;
