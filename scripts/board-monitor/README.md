@@ -41,13 +41,27 @@ Steer everything (priorities + the TUNABLE TARGETS block) by editing `objective.
 
 ## Operate
 
+**Preferred: from the board UI.** This loop is the `conductor` Start Mode. Open the **Monitor
+view → Start Mode** and pick **Conductor** to start it / **Manual|Monitor** to stop it. Behind
+that, `conductor-control.service.ts` spawns/kills the loop and `POST /api/projects/:id/conductor
+{action: start|stop}` is the API. Stop tree-kills EVERY `loop.sh` process (not just the recorded
+PID) so repeated start/stop can't orphan an earlier loop.
+
+> Liveness in the UI is loop.log-freshness based (`readOrchestratorStatus`, 11-min window), NOT a
+> process check — so after a stop it shows "running" and refuses a restart for ~11 min. To verify
+> the loop is *really* dead, scan for the `bash … loop.sh` process and confirm `loop.log` mtime
+> stops advancing.
+
+Manual control (equivalent):
+
 ```bash
 # Start (detached, no window, survives shell exit):
 nohup bash scripts/board-monitor/loop.sh > /dev/null 2>&1 & disown
 
 # Stop gracefully (exits after the current iteration finishes):
 touch scripts/board-monitor/STOP
-# ...or, if it's only sleeping between iterations, kill the driver:
+# ...or kill the driver. NB: an in-flight cycle's agent can finish (start tickets) after the
+# loop dies — for a hard stop, tree-kill every loop.sh process:
 kill "$(cat scripts/board-monitor/loop.pid)"
 ```
 
