@@ -95,6 +95,58 @@ describe("runAutoStart dependency resolution (blocker must be MERGED, not just t
     expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces", expect.any(Object));
   });
 
+  // #782/#798 fan-in: a dependent with TWO Done blockers must stay blocked until BOTH
+  // have landed on the base branch. One merged + one closed-but-unmerged ⇒ no start.
+  it("does NOT start a fan-in dependent while one of its two blockers is still unmerged (#782)", async () => {
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]) as ReturnType<typeof db.select>) // inProgressStatuses
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop1 activeWip
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // loop1 inProgressIssues (none)
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop2 inProgressCount
+      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]) as ReturnType<typeof db.select>) // todoStatus
+      .mockReturnValueOnce(makeSelectChain([{ id: "issue-1", title: "Fan-in", projectId: "proj-1", issueNumber: 42 }]) as ReturnType<typeof db.select>) // todoIssues
+      .mockReturnValueOnce(makeSelectChain([{ id: "done-1" }]) as ReturnType<typeof db.select>) // doneStatuses
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // existingWs (none)
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // no-auto-start tag (none)
+      .mockReturnValueOnce(makeSelectChain([{ dependsOnId: "blocker-a" }, { dependsOnId: "blocker-b" }]) as ReturnType<typeof db.select>) // deps (two)
+      .mockReturnValueOnce(makeSelectChain([
+        { id: "blocker-a", statusId: "done-1", currentNodeId: null, currentNodeType: null },
+        { id: "blocker-b", statusId: "done-1", currentNodeId: null, currentNodeType: null },
+      ]) as ReturnType<typeof db.select>) // blockerIssues (both terminal)
+      .mockReturnValueOnce(makeSelectChain([
+        { issueId: "blocker-a", mergedAt: "2026-06-14T10:00:00.000Z", isDirect: false },
+        { issueId: "blocker-b", mergedAt: null, isDirect: false },
+      ]) as ReturnType<typeof db.select>); // blocker-workspaces: A merged, B unmerged
+    await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "5"]]), makeDeps());
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  // #782/#798 fan-in: once BOTH blockers land, the dependent starts.
+  it("starts a fan-in dependent once both of its blockers have landed (#782)", async () => {
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]) as ReturnType<typeof db.select>) // inProgressStatuses
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop1 activeWip
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // loop1 inProgressIssues (none)
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop2 inProgressCount
+      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]) as ReturnType<typeof db.select>) // todoStatus
+      .mockReturnValueOnce(makeSelectChain([{ id: "issue-1", title: "Fan-in", projectId: "proj-1", issueNumber: 42 }]) as ReturnType<typeof db.select>) // todoIssues
+      .mockReturnValueOnce(makeSelectChain([{ id: "done-1" }]) as ReturnType<typeof db.select>) // doneStatuses
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // existingWs (none)
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // no-auto-start tag (none)
+      .mockReturnValueOnce(makeSelectChain([{ dependsOnId: "blocker-a" }, { dependsOnId: "blocker-b" }]) as ReturnType<typeof db.select>) // deps (two)
+      .mockReturnValueOnce(makeSelectChain([
+        { id: "blocker-a", statusId: "done-1", currentNodeId: null, currentNodeType: null },
+        { id: "blocker-b", statusId: "done-1", currentNodeId: null, currentNodeType: null },
+      ]) as ReturnType<typeof db.select>) // blockerIssues (both terminal)
+      .mockReturnValueOnce(makeSelectChain([
+        { issueId: "blocker-a", mergedAt: "2026-06-14T10:00:00.000Z", isDirect: false },
+        { issueId: "blocker-b", mergedAt: null, isDirect: true },
+      ]) as ReturnType<typeof db.select>); // blocker-workspaces: A merged, B direct
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ id: "ws-new" }) } as Response);
+    await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "5"]]), makeDeps());
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces", expect.any(Object));
+  });
+
   it("does not start a dependent whose workflow blocker is on a non-end node and non-terminal status", async () => {
     mockUpToDepCheck({ id: "blocker-1", statusId: "inprog-1", currentNodeId: "node-build", currentNodeType: "normal" }, []);
     await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "5"]]), makeDeps());
