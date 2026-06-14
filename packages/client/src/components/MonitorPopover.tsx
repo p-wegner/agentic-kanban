@@ -12,9 +12,28 @@ type MonitorTunables = {
   refillFocus: string;
 };
 
+type StartMode = "manual" | "monitor" | "conductor";
+
+type StartPolicy = {
+  mode: StartMode;
+  autoStartUnblocked: boolean;
+  postMergeCascade: boolean;
+  backlogRefill: boolean;
+  scheduledRuns: boolean;
+  source: "start_mode" | "derived";
+};
+
 type ResolvedTunables = {
   tunables: MonitorTunables;
   source: "strategy" | "prefs";
+  startPolicy?: StartPolicy;
+};
+
+const START_MODE_LABEL: Record<StartMode, string> = { manual: "Manual", monitor: "Monitor", conductor: "Conductor" };
+const START_MODE_HINT: Record<StartMode, string> = {
+  manual: "Nothing auto-starts. Only you / agents start workspaces explicitly.",
+  monitor: "The in-process monitor auto-starts unblocked backlog tickets up to the WIP target.",
+  conductor: "The out-of-process board-monitor loop is the sole driver; the in-process monitor stands down.",
 };
 
 export type MonitorAction = {
@@ -143,6 +162,7 @@ export function MonitorPopover({
   const [healthEventsError, setHealthEventsError] = useState<string | null>(null);
   const [replayTarget, setReplayTarget] = useState<ReplayTarget | null>(null);
   const [resolvedTunables, setResolvedTunables] = useState<ResolvedTunables | null>(null);
+  const [startModeSaving, setStartModeSaving] = useState(false);
 
   async function loadHealthEvents() {
     if (!projectId) {
@@ -184,10 +204,26 @@ export function MonitorPopover({
 
   useEffect(() => {
     if (!projectId) { setResolvedTunables(null); return; }
+    loadTunables();
+  }, [projectId]);
+
+  function loadTunables() {
+    if (!projectId) { setResolvedTunables(null); return; }
     apiFetch<ResolvedTunables>(`/api/projects/${projectId}/monitor-tunables`)
       .then((data) => setResolvedTunables(data))
       .catch(() => setResolvedTunables(null));
-  }, [projectId]);
+  }
+
+  // Start Mode + its sub-toggles write straight to preferences, then refetch the resolved
+  // policy so the read-out reflects the new live decision.
+  async function putSettings(patch: Record<string, string>) {
+    setStartModeSaving(true);
+    try {
+      await apiFetch(`/api/preferences/settings`, { method: "PUT", body: JSON.stringify(patch) });
+      loadTunables();
+    } catch { /* surfaced by the unchanged read-out */ }
+    finally { setStartModeSaving(false); }
+  }
 
   useEffect(() => {
     function handler(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
@@ -290,6 +326,58 @@ export function MonitorPopover({
               <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${autoMonitor ? "translate-x-[1.125rem]" : "translate-x-0.5"}`} />
             </button>
           </div>
+
+          {/* Start Mode — the single per-project decision for how new tickets get started */}
+          {projectId && (
+            <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-medium text-gray-700 dark:text-gray-300">Start Mode</span>
+                {resolvedTunables?.startPolicy && (
+                  <span
+                    className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${resolvedTunables.startPolicy.source === "start_mode" ? "bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300" : "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400"}`}
+                    title={resolvedTunables.startPolicy.source === "start_mode" ? "Set explicitly for this project" : "Derived from legacy auto-monitor / autodrive settings"}
+                  >
+                    {resolvedTunables.startPolicy.source === "start_mode" ? "Per-project" : "Derived"}
+                  </span>
+                )}
+              </div>
+              <div className="flex rounded-md border border-gray-200 dark:border-gray-700 overflow-hidden">
+                {(["manual", "monitor", ...(orchestrator?.available ? (["conductor"] as StartMode[]) : [])] as StartMode[]).map((m) => {
+                  const active = resolvedTunables?.startPolicy?.mode === m;
+                  return (
+                    <button
+                      key={m}
+                      disabled={startModeSaving}
+                      onClick={() => putSettings({ [`start_mode_${projectId}`]: m })}
+                      title={START_MODE_HINT[m]}
+                      className={`flex-1 px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-50 ${active ? "bg-emerald-600 text-white" : "bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"}`}
+                    >
+                      {START_MODE_LABEL[m]}
+                    </button>
+                  );
+                })}
+              </div>
+              {resolvedTunables?.startPolicy && (
+                <p className="text-[10px] text-gray-400 dark:text-gray-500 leading-snug">{START_MODE_HINT[resolvedTunables.startPolicy.mode]}</p>
+              )}
+              {resolvedTunables?.startPolicy?.mode === "monitor" && (
+                <div className="space-y-1.5 pt-0.5">
+                  <SubToggle label="Continue chains after merge" checked={resolvedTunables.startPolicy.postMergeCascade} disabled={startModeSaving} onChange={(v) => putSettings({ dependency_auto_chain: v ? "true" : "false" })} />
+                  <SubToggle label="Refill empty backlog" checked={resolvedTunables.startPolicy.backlogRefill} disabled={startModeSaving} onChange={(v) => putSettings({ backlog_empty_strategy: v ? "generate_tickets" : "skip" })} />
+                </div>
+              )}
+              {resolvedTunables?.startPolicy && (
+                <div className="rounded-md bg-gray-50 dark:bg-gray-950 px-2 py-1.5 space-y-1">
+                  <div className="text-[9px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">What starts a ticket now</div>
+                  <PolicyRow label="Auto-start unblocked todos" on={resolvedTunables.startPolicy.autoStartUnblocked} />
+                  <PolicyRow label="Continue chains after merge" on={resolvedTunables.startPolicy.postMergeCascade} />
+                  <PolicyRow label="Refill empty backlog" on={resolvedTunables.startPolicy.backlogRefill} />
+                  <PolicyRow label="Scheduled (cron) runs" on={resolvedTunables.startPolicy.scheduledRuns} />
+                </div>
+              )}
+              <p className="text-[9px] text-gray-400 dark:text-gray-500 leading-snug">A set Start Mode supersedes the global Auto-monitor toggle for this project.</p>
+            </div>
+          )}
 
           {/* Active agents */}
           {activeWs.length > 0 && (
@@ -566,6 +654,32 @@ function parseCycleLine(line: string): { age: string | null; text: string } {
     return { age, text: parts.slice(1).join(" · ") };
   }
   return { age: null, text: line };
+}
+
+function SubToggle({ label, checked, disabled, onChange }: { label: string; checked: boolean; disabled?: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-[11px] text-gray-600 dark:text-gray-300">{label}</span>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onChange(!checked)}
+        className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors disabled:opacity-50 ${checked ? "bg-emerald-500" : "bg-gray-200 dark:bg-gray-600"}`}
+        title={checked ? "On" : "Off"}
+      >
+        <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${checked ? "translate-x-[0.875rem]" : "translate-x-0.5"}`} />
+      </button>
+    </div>
+  );
+}
+
+function PolicyRow({ label, on }: { label: string; on: boolean }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className={on ? "text-emerald-600 dark:text-emerald-400" : "text-gray-300 dark:text-gray-600"}>{on ? "✓" : "✕"}</span>
+      <span className={`text-[10px] ${on ? "text-gray-600 dark:text-gray-300" : "text-gray-400 dark:text-gray-500"}`}>{label}</span>
+    </div>
+  );
 }
 
 function MonitorStatusDots({ autoMonitor, butlerEnabled }: { autoMonitor: boolean; butlerEnabled: boolean }) {

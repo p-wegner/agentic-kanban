@@ -14,6 +14,8 @@ import {
   updateScheduledRunHistory,
 } from "../repositories/scheduled-run.repository.js";
 import type { CreateWorkspaceInput, CreateWorkspaceResult } from "./workspace-internals.js";
+import { getAllPreferences } from "../repositories/preferences.repository.js";
+import { resolveStartPolicy } from "./start-policy.service.js";
 
 export class ScheduledRunError extends Error {
   constructor(
@@ -138,6 +140,15 @@ export function createScheduledRunService(deps: {
   async function run(id: string, triggeredBy = "manual") {
     const run = await getScheduledRunById(id, database);
     if (!run) throw new ScheduledRunError("Not found", "NOT_FOUND");
+    // Cron (automatic) triggers respect the project's Start Mode — `manual` mode halts them so
+    // "nothing auto-starts" holds. An explicit user "run now" (triggeredBy=manual) always runs.
+    if (triggeredBy !== "manual") {
+      const prefRows = await getAllPreferences(database);
+      const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
+      if (!resolveStartPolicy(prefMap, run.projectId).scheduledRuns) {
+        return { skipped: true as const, reason: "start-mode-manual" as const };
+      }
+    }
     const startedAt = new Date().toISOString();
     let historyId: string | null = null;
 

@@ -10,6 +10,7 @@ import { getRecentAgentExcerpts, logMonitorAction, shouldSkipNudge, type Monitor
 import { processWorkspaceCandidates } from "./monitor-cycle.js";
 import { buildMonitorNudgePrompt } from "./review-helpers.js";
 import { snapshotAndCleanStaleDevProcesses, type BoardMonitorResourceSnapshot } from "../services/stale-dev-processes.js";
+import { resolveStartPolicy } from "../services/start-policy.service.js";
 import { scanDirtyMainCheckouts, type DirtyMainCheckoutWarning } from "../services/dirty-main-checkout.js";
 import { resolveMergeStrategy } from "./merge-strategy.js";
 
@@ -163,10 +164,12 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       const globalOn = prefMap.get("auto_monitor") === "true";
       const driveIds = autoDriveProjectIds(prefMap);
       const allowProject = (projectId: string) => globalOn || driveIds.has(projectId);
-      const nudgeStart = prefMap.get("nudge_auto_start") === "true";
-      // Auto-start is opt-in: under the global monitor it still requires nudge_auto_start;
-      // an auto-driven project auto-starts unconditionally (that is the point of the mode).
-      const shouldAutoStartProject = (projectId: string) => driveIds.has(projectId) || (globalOn && nudgeStart);
+      // Auto-start, backlog refill, and backlog-pull eligibility all consult the project's
+      // resolved Start Mode (the single source of truth) — NOT the raw flags above. The mode
+      // supersedes the global toggle per-project; `manual` is a true stop. (`allowProject`
+      // above still scopes mechanism-2 relaunch/merge of already-in-progress work.)
+      const shouldAutoStartProject = (projectId: string) => resolveStartPolicy(prefMap, projectId).autoStartUnblocked;
+      const allowBacklogRefill = (projectId: string) => resolveStartPolicy(prefMap, projectId).backlogRefill;
       if (isInMaintenanceWindow(prefMap)) {
         warningCount = (await refreshDirtyMainCheckoutWarnings()).length;
         const endTime = prefMap.get("monitor_maintenance_window_end");
@@ -223,8 +226,8 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
           return Number.isFinite(minutes) && minutes > 0 ? minutes * 60 * 1000 : undefined;
         })(),
       }));
-      await runAutoStart(prefMap, { serverPort, boardEvents, allowProject: shouldAutoStartProject, isAutoDrivenProject: (projectId) => driveIds.has(projectId), logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
-      await runBacklogEmptyStrategy(prefMap, { serverPort, boardEvents, allowProject, logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
+      await runAutoStart(prefMap, { serverPort, boardEvents, allowProject: shouldAutoStartProject, isAutoDrivenProject: (projectId) => resolveStartPolicy(prefMap, projectId).mode !== "manual", logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
+      await runBacklogEmptyStrategy(prefMap, { serverPort, boardEvents, allowProject: allowBacklogRefill, logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
     } catch (err) {
       console.warn("[monitor] Cycle error:", err);
     } finally {

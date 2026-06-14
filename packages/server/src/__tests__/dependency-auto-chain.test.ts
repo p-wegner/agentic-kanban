@@ -216,6 +216,7 @@ describe("dependency auto-chain candidate decision", () => {
       projectId,
       completedIssueId: completed,
       prefMap: new Map([
+        [`start_mode_${projectId}`, "monitor"],
         ["dependency_auto_chain", "true"],
         ["nudge_wip_limit", "5"],
       ]),
@@ -226,8 +227,34 @@ describe("dependency auto-chain candidate decision", () => {
       expect.objectContaining({ id: child, issueNumber: 2 }),
       "feature/ak-2-child-task",
     );
+    const startedComments = await db.select().from(issueComments).where(eq(issueComments.issueId, child));
+    expect(startedComments).toHaveLength(1);
+    expect(startedComments[0].body).toContain("Auto-started after dependency");
+  });
+
+  it("does NOT cascade when Start Mode is manual, even with dependency_auto_chain=true (incident regression-lock)", async () => {
+    const { db } = createTestDb();
+    const { projectId, statusIds } = await seedProject(db);
+    const completed = await insertIssue(db, { projectId, statusId: statusIds.Done, title: "Complete API", issueNumber: 1 });
+    const child = await insertIssue(db, { projectId, statusId: statusIds.Todo, title: "Child task", issueNumber: 2 });
+    await insertDependency(db, child, completed, "child_of");
+
+    const createWorkspace = vi.fn(async () => ({ id: "workspace-child" }));
+    await autoStartUnblockedDependencyIssue({
+      database: db,
+      projectId,
+      completedIssueId: completed,
+      // dependency_auto_chain ON but no monitor-mode signal ⇒ derives `manual` ⇒ cascade gated OFF.
+      prefMap: new Map([
+        ["dependency_auto_chain", "true"],
+        ["nudge_wip_limit", "5"],
+      ]),
+      createWorkspace,
+    });
+
+    expect(createWorkspace).not.toHaveBeenCalled();
+    // Gated at the very top before any audit comment — manual mode is a clean no-op.
     const comments = await db.select().from(issueComments).where(eq(issueComments.issueId, child));
-    expect(comments).toHaveLength(1);
-    expect(comments[0].body).toContain("Auto-started after dependency");
+    expect(comments).toHaveLength(0);
   });
 });
