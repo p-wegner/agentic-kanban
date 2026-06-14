@@ -82,6 +82,7 @@ import {
   type GitService,
 } from "./workspace-internals.js";
 import { buildContextPrimer } from "./context-packer.service.js";
+import { getStackProfile } from "./stack-profile.service.js";
 import { auditProcessEvent, guardProcessKill } from "./process-guard.js";
 
 export function createWorkspaceCrudService(deps: {
@@ -838,11 +839,20 @@ exit 1
       // block workspace creation. Skipped for direct workspaces.
       let ticketContextPath: string | null = null;
       if (!isDirect && worktreePath) {
+        // Inject the project's detected stack profile so the builder runs the real
+        // build/test/dev commands from turn 1 instead of guessing them (best-effort).
+        let stackProfile = null;
+        try {
+          stackProfile = await getStackProfile(issue.projectId, database);
+        } catch (err) {
+          console.warn(`[workspaces] stack-profile read failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+        }
         ticketContextPath = await writeTicketContextFile(worktreePath, {
           issueNumber: issue.issueNumber,
           title: issue.title,
           description: issue.description,
           contextPrimer,
+          stackProfile,
         });
       }
 
