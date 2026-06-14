@@ -2,7 +2,14 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { detectStackProfile } from "../services/stack-profile.service.js";
+import { readFile } from "node:fs/promises";
+import type { StackProfile } from "@agentic-kanban/shared";
+import {
+  detectStackProfile,
+  buildSmartHooksRules,
+  writeSmartHooksRules,
+  smartHooksRulesPath,
+} from "../services/stack-profile.service.js";
 
 async function tmp(): Promise<string> {
   return mkdtemp(join(tmpdir(), "kanban-stack-"));
@@ -123,5 +130,85 @@ describe("detectStackProfile", () => {
     await mkdir(join(dir, "src", "__tests__"), { recursive: true });
     const p = detectStackProfile(dir);
     expect(p.testDir).toBe("src/__tests__");
+  });
+});
+
+function profile(overrides: Partial<StackProfile>): StackProfile {
+  return {
+    stack: null, packageManager: null, isMonorepo: false, workspaces: [],
+    installCommand: null, buildCommand: null, testCommand: null, quickTestCommand: null,
+    lintCommand: null, typecheckCommand: null, devCommand: null, isWeb: false,
+    devHealthUrl: null, devPort: null, testDir: null, testRunner: null,
+    source: "detected", detectedMarkers: [], updatedAt: "2026-06-14T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("buildSmartHooksRules", () => {
+  it("emits a typecheck + quick-test rule for a node project, scoped to JS/TS source patterns", () => {
+    const out = buildSmartHooksRules(
+      profile({ stack: "node", typecheckCommand: "pnpm tsc --noEmit", quickTestCommand: "pnpm test:mine", testCommand: "pnpm test" }),
+    );
+    expect(out.generated).toBe(true);
+    expect(out.stack).toBe("node");
+    const names = out.rules.map((r) => r.name);
+    expect(names).toContain("Typecheck");
+    expect(names).toContain("Quick tests");
+    const tc = out.rules.find((r) => r.name === "Typecheck")!;
+    expect(tc.command).toBe("pnpm tsc --noEmit");
+    expect(tc.filePatterns).toContain("**/*.ts");
+    expect(tc.filePatterns).toContain("**/*.tsx");
+    // No Rust/Go patterns leak into a node project.
+    expect(tc.filePatterns).not.toContain("**/*.rs");
+  });
+
+  it("derives a non-TS stack's quick check from its profile (rust → cargo, .rs patterns)", () => {
+    const out = buildSmartHooksRules(
+      profile({ stack: "rust", typecheckCommand: "cargo check", testCommand: "cargo test", quickTestCommand: "cargo test" }),
+    );
+    const tc = out.rules.find((r) => r.name === "Typecheck")!;
+    expect(tc.command).toBe("cargo check");
+    expect(tc.filePatterns).toEqual(["**/*.rs"]);
+  });
+
+  it("falls back to the full test command when no quick variant exists", () => {
+    const out = buildSmartHooksRules(profile({ stack: "go", testCommand: "go test ./...", typecheckCommand: null }));
+    expect(out.rules.map((r) => r.name)).toEqual(["Tests"]);
+    expect(out.rules[0].command).toBe("go test ./...");
+  });
+
+  it("produces no rules when the profile has no usable command", () => {
+    const out = buildSmartHooksRules(profile({ stack: "python" }));
+    expect(out.rules).toEqual([]);
+  });
+
+  it("uses a broad source pattern union for an unknown stack", () => {
+    const out = buildSmartHooksRules(profile({ stack: null, typecheckCommand: "make check" }));
+    const tc = out.rules[0];
+    expect(tc.filePatterns).toContain("**/*.ts");
+    expect(tc.filePatterns).toContain("**/*.rs");
+    expect(tc.filePatterns).toContain("**/*.py");
+  });
+});
+
+describe("writeSmartHooksRules", () => {
+  let dir: string;
+  beforeEach(async () => { dir = await tmp(); });
+  afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
+
+  it("writes .claude/smart-hooks-rules.json derived from the profile", async () => {
+    writeSmartHooksRules(dir, profile({ stack: "go", testCommand: "go test ./...", typecheckCommand: "go build ./..." }));
+    const written = JSON.parse(await readFile(smartHooksRulesPath(dir), "utf8"));
+    expect(written.generated).toBe(true);
+    expect(written.stack).toBe("go");
+    expect(written.rules.some((r: { command: string }) => r.command === "go test ./...")).toBe(true);
+  });
+
+  it("regenerates (overwrites) the file when the profile changes", async () => {
+    writeSmartHooksRules(dir, profile({ stack: "node", typecheckCommand: "tsc --noEmit" }));
+    writeSmartHooksRules(dir, profile({ stack: "rust", typecheckCommand: "cargo check" }));
+    const written = JSON.parse(await readFile(smartHooksRulesPath(dir), "utf8"));
+    expect(written.stack).toBe("rust");
+    expect(written.rules[0].command).toBe("cargo check");
   });
 });

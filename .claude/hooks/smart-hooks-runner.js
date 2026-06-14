@@ -55,6 +55,46 @@ function loadConfig(projectDir) {
   }
 }
 
+// --- Generated edit-time feedback rules (#787) ---
+// A per-project `.claude/smart-hooks-rules.json` is generated from the stack profile
+// (see stack-profile.service.ts). It maps source-file patterns to quick build/test/
+// typecheck commands so a driven project's builder gets the same incremental feedback
+// board builders get. The runner stays project-agnostic — every command comes from the file.
+
+function getRulesPath(projectDir = getProjectDir()) {
+  return path.join(projectDir, ".claude", "smart-hooks-rules.json");
+}
+
+function loadGeneratedRules(projectDir) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(getRulesPath(projectDir), "utf8"));
+    return Array.isArray(parsed.rules) ? parsed.rules : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Normalize a generated rule into a runner check. Generated rules are always enabled and
+ * carry their own filePatterns; they run from the project dir (the driven repo/worktree),
+ * never a hard-coded cwd.
+ */
+function generatedRuleToCheck(rule) {
+  return {
+    name: rule.name || "Quick check",
+    command: rule.command,
+    filePatterns: Array.isArray(rule.filePatterns) ? rule.filePatterns : [],
+    enabled: true,
+    blocking: rule.blocking !== false,
+    timeout: typeof rule.timeout === "number" ? rule.timeout : 120,
+  };
+}
+
+/** Generated rules apply to both PostToolUse (per-edit) and Stop (end-of-session). */
+function generatedChecks(projectDir) {
+  return loadGeneratedRules(projectDir).filter((r) => r && r.command).map(generatedRuleToCheck);
+}
+
 function loadState() {
   try {
     return JSON.parse(fs.readFileSync(getStatePath(), "utf8"));
@@ -183,7 +223,7 @@ function handlePostToolUse(input) {
   }
 
   const config = loadConfig();
-  const checks = config.hooks?.PostToolUse || [];
+  const checks = [...(config.hooks?.PostToolUse || []), ...generatedChecks()];
 
   for (const check of checks) {
     if (!check.enabled) continue;
@@ -213,7 +253,7 @@ function handlePostToolUse(input) {
 function handleStop(input) {
   const state = loadState();
   const config = loadConfig();
-  const checks = config.hooks?.Stop || [];
+  const checks = [...(config.hooks?.Stop || []), ...generatedChecks()];
   if (checks.length === 0) {
     clearState();
     process.exit(0);
