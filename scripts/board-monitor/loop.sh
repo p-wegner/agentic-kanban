@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Detached board-monitor loop for agentic-kanban.
+# Detached board-monitor loop.
 #
 # Each iteration starts a FRESH agent session with the board-monitor objective
 # (no resume — the board + git are the durable state, so a fresh session avoids
@@ -15,6 +15,8 @@
 #
 # Launch detached (no window, survives shell exit):
 #   nohup bash scripts/board-monitor/loop.sh > /dev/null 2>&1 & disown
+#   # drive a registered non-agentic-kanban project:
+#   nohup bash scripts/board-monitor/loop.sh --project <id> --repo <path> --objective <path> > /dev/null 2>&1 & disown
 #   # to run the codex harness instead of Claude Code:
 #   MONITOR_AGENT=codex nohup bash scripts/board-monitor/loop.sh > /dev/null 2>&1 & disown
 # Stop gracefully: `touch scripts/board-monitor/STOP` (exits after the current
@@ -25,11 +27,49 @@
 # (default 500), MONITOR_ITER_TIMEOUT (default 1800s per iteration).
 
 set -u
-REPO="C:/andrena/agentic-kanban"
-DIR="$REPO/scripts/board-monitor"
+
+PROJECT_ID="${MONITOR_PROJECT_ID:-agentic-kanban}"
+REPO="${MONITOR_REPO:-C:/andrena/agentic-kanban}"
+OBJECTIVE="${MONITOR_OBJECTIVE:-}"
+STATE_DIR="${MONITOR_STATE_DIR:-}"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --project)
+      PROJECT_ID="${2:-}"; shift 2 ;;
+    --repo)
+      REPO="${2:-}"; shift 2 ;;
+    --objective)
+      OBJECTIVE="${2:-}"; shift 2 ;;
+    --state-dir)
+      STATE_DIR="${2:-}"; shift 2 ;;
+    --agent)
+      MONITOR_AGENT="${2:-}"; shift 2 ;;
+    --sleep)
+      MONITOR_SLEEP="${2:-}"; shift 2 ;;
+    --)
+      shift; break ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      exit 64 ;;
+  esac
+done
+
+if [ -z "$OBJECTIVE" ]; then
+  OBJECTIVE="$REPO/scripts/board-monitor/objective.md"
+fi
+if [ -z "$STATE_DIR" ]; then
+  if [ "$OBJECTIVE" = "$REPO/scripts/board-monitor/objective.md" ]; then
+    STATE_DIR="$REPO/scripts/board-monitor"
+  else
+    STATE_DIR="$REPO/.kanban/conductor"
+  fi
+fi
+
+DIR="$STATE_DIR"
 LOG="$DIR/loop.log"
 STOP="$DIR/STOP"
 STATE="$DIR/state.md"
+LOCK="$DIR/loop.lock"
 AGENT="${MONITOR_AGENT:-codex}"
 SLEEP="${MONITOR_SLEEP:-1800}"
 MAX="${MONITOR_MAX_ITERS:-500}"
@@ -41,6 +81,38 @@ STATE_KEEP="${MONITOR_STATE_KEEP:-40}"
 
 ts() { date -Iseconds; }
 log() { echo "[$(ts)] $*" >> "$LOG"; }
+
+mkdir -p "$DIR"
+
+acquire_lock() {
+  if mkdir "$LOCK" 2>/dev/null; then
+    echo "$$" > "$LOCK/pid"
+    return 0
+  fi
+  owner="$(cat "$LOCK/pid" 2>/dev/null || true)"
+  if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then
+    log "another conductor already owns project ${PROJECT_ID} (pid ${owner}); exiting"
+    exit 2
+  fi
+  rm -rf "$LOCK"
+  if mkdir "$LOCK" 2>/dev/null; then
+    echo "$$" > "$LOCK/pid"
+    return 0
+  fi
+  log "failed to acquire conductor lock for project ${PROJECT_ID}; exiting"
+  exit 2
+}
+
+cleanup_lock() {
+  rm -rf "$LOCK"
+}
+
+if [ ! -f "$OBJECTIVE" ]; then
+  log "FATAL: objective file not found: $OBJECTIVE"
+  exit 1
+fi
+acquire_lock
+trap cleanup_lock EXIT
 
 # Clear any stale STOP from a previous run.
 rm -f "$STOP"
@@ -55,7 +127,7 @@ echo "$$" > "$DIR/loop.pid"
 # Run from the repo so the Claude Code harness (no -C flag) uses $REPO as cwd.
 # All file refs above are absolute, so this cd is safe; codex passes -C explicitly.
 cd "$REPO" || { log "FATAL: cannot cd to $REPO"; exit 1; }
-log "board-monitor loop START (pid $$, agent ${AGENT}, sleep ${SLEEP}s, max ${MAX}, iter-timeout ${ITER_TIMEOUT}s, state-keep ${STATE_KEEP})"
+log "board-monitor loop START (project ${PROJECT_ID}, repo ${REPO}, objective ${OBJECTIVE}, state-dir ${DIR}, pid $$, agent ${AGENT}, sleep ${SLEEP}s, max ${MAX}, iter-timeout ${ITER_TIMEOUT}s, state-keep ${STATE_KEEP})"
 
 short_streak=0
 for (( i=1; i<=MAX; i++ )); do
@@ -64,7 +136,7 @@ for (( i=1; i<=MAX; i++ )); do
   log "--- iteration $i START ---"
   # Re-read the objective every iteration so it can be steered LIVE (edit
   # objective.md and the next cycle picks it up — no loop restart needed).
-  OBJ="$(cat "$DIR/objective.md")"
+  OBJ="$(cat "$OBJECTIVE")"
   start=$(date +%s)
   case "$AGENT" in
     codex)

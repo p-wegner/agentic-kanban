@@ -14,13 +14,13 @@ target) and exits. Durable memory lives outside the model — in the board, git,
 set `MONITOR_AGENT=codex` for `codex exec`). Both harnesses read the same `objective.md` and fire the
 repo's hooks (PreToolUse safety + Stop commit-discipline); only the launch command differs.
 
-> **Scope: this control plane is agentic-kanban-only.** `objective.md` is hand-authored for THIS
-> dogfooding board (its project name, cwd, port 3001, and board skill names are not generalized) and
-> is **not** a template for other repos. Any *other* project the board drives hands-off runs on the
-> in-process engine instead (`runMonitorCycle` + auto-review/auto-merge + the stranded-review
-> reconciler), steered by the Strategy Bullseye via `resolveMonitorTunables` — no `objective.md`
-> required. Enable a project with `board_autodrive_<projectId> = "true"`. See decision 006's
-> "Driven projects" section for the formal split.
+> **Scope:** this directory still contains the dogfood control plane for agentic-kanban, but
+> `loop.sh` can also be launched by the server supervisor for another registered project with
+> explicit `--project`, `--repo`, `--objective`, and `--state-dir` arguments. Non-agentic-kanban
+> projects opt in with `board_conductor_<projectId>` and use `<repo>/.kanban/objective.md` plus
+> `<repo>/.kanban/conductor/` runtime state. Projects that do not opt in continue to use the
+> in-process engine (`runMonitorCycle` + auto-review/auto-merge + the stranded-review reconciler),
+> steered by the Strategy Bullseye via `resolveMonitorTunables`.
 
 **`objective.md` is the single source of truth for monitor policy.** Both this codex loop and the
 in-process **Monitor Butler** (`packages/server/src/services/monitor-butler.ts`, off by default)
@@ -57,6 +57,14 @@ Manual control (equivalent):
 ```bash
 # Start (detached, no window, survives shell exit):
 nohup bash scripts/board-monitor/loop.sh > /dev/null 2>&1 & disown
+
+# Start for a registered external project (normally done by the server supervisor):
+nohup bash scripts/board-monitor/loop.sh \
+  --project "<project-id>" \
+  --repo "C:/path/to/project" \
+  --objective "C:/path/to/project/.kanban/objective.md" \
+  --state-dir "C:/path/to/project/.kanban/conductor" \
+  > /dev/null 2>&1 & disown
 
 # Stop gracefully (exits after the current iteration finishes):
 touch scripts/board-monitor/STOP
