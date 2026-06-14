@@ -59,9 +59,9 @@ export function modelBelongsToProvider(
     return !isClaudeModel;
   }
   if (provider === "pi") {
-    // Pi's concrete model families are finalized with the provider implementation.
-    // Until then, only an empty provider default is considered safe.
-    return false;
+    // Pi routes through provider-scoped profiles (for example openai/* or anthropic/*),
+    // so both known Claude/Codex model families and custom ids are valid here.
+    return true;
   }
   // copilot has no model flag; nothing to validate.
   return true;
