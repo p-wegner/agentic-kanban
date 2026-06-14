@@ -1,5 +1,6 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { StackProfile } from "../types/api.js";
 
 export type TicketContext = {
   issueNumber?: number | null;
@@ -7,7 +8,55 @@ export type TicketContext = {
   description?: string | null;
   /** Optional context primer from the context-packer service. Appended after the description. */
   contextPrimer?: string | null;
+  /**
+   * Optional detected stack profile for the driven project. When present, its exact
+   * build/test/dev commands are rendered so the agent runs the project's real feedback
+   * commands from turn 1 instead of guessing them.
+   */
+  stackProfile?: StackProfile | null;
 };
+
+/**
+ * Render the stack profile's exact feedback commands as a markdown section, or null
+ * when the profile carries nothing actionable. Driven-project builders otherwise guess
+ * their build/test/dev commands; this hands them the detected ones up front.
+ */
+export function buildStackProfileSection(profile: StackProfile | null | undefined): string | null {
+  if (!profile) return null;
+  const rows: Array<[string, string | null]> = [
+    ["Quick test (fast feedback)", profile.quickTestCommand],
+    ["Full test", profile.testCommand],
+    ["Build", profile.buildCommand],
+    ["Typecheck", profile.typecheckCommand],
+    ["Lint", profile.lintCommand],
+    ["Dev server", profile.devCommand],
+    ["Install deps", profile.installCommand],
+  ];
+  const present = rows.filter((r): r is [string, string] => Boolean(r[1]?.trim()));
+  if (present.length === 0) return null;
+
+  const lines = [
+    "## Stack & Feedback Commands",
+    "",
+    "This project's stack was auto-detected. Run THESE exact commands for build/test/dev",
+    "feedback — do not invent or guess commands for another stack.",
+    "",
+  ];
+  const meta: string[] = [];
+  if (profile.stack) meta.push(`**Stack:** ${profile.stack}`);
+  if (profile.packageManager) meta.push(`**Package manager:** ${profile.packageManager}`);
+  if (profile.isMonorepo) meta.push("**Monorepo:** yes");
+  if (meta.length) {
+    lines.push(meta.join(" · "), "");
+  }
+  for (const [label, cmd] of present) {
+    lines.push(`- **${label}:** \`${cmd}\``);
+  }
+  if (profile.isWeb && profile.devHealthUrl) {
+    lines.push(`- **Dev health URL:** ${profile.devHealthUrl}`);
+  }
+  return lines.join("\n");
+}
 
 /**
  * Filename written into the worktree root. Claude Code auto-loads `CLAUDE.local.md`
@@ -36,6 +85,11 @@ export function buildTicketContextMarkdown(ctx: TicketContext): string {
     ctx.description?.trim() ? ctx.description.trim() : "_(No description provided.)_",
     "",
   ];
+  const stackSection = buildStackProfileSection(ctx.stackProfile);
+  if (stackSection) {
+    lines.push(stackSection);
+    lines.push("");
+  }
   if (ctx.contextPrimer?.trim()) {
     lines.push(ctx.contextPrimer.trim());
     lines.push("");
