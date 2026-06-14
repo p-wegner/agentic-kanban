@@ -849,6 +849,12 @@ export function deriveTestScaffold(
  * directory if absent. Non-fatal on any error — scaffolding must never block profile persistence
  * (same contract as writeSmartHooksRules). Returns the repo-relative path written, or null when
  * nothing was written (no derivable scaffold, file already present, or an error).
+ *
+ * The scaffold exists only to give a project with NO tests a runnable starting point. If the
+ * project's test directory already contains tests, writing a redundant `ScaffoldTest` there just
+ * dirties the worktree — and because saveStackProfile re-runs this on every profile refresh, that
+ * stray untracked file reappears and can block future auto-merges on `dirty_main`. So skip when the
+ * detected test dir already has content (observed on the kmp-toolkit drive).
  */
 export function writeTestScaffold(repoPath: string, profile: StackProfile): string | null {
   try {
@@ -856,6 +862,9 @@ export function writeTestScaffold(repoPath: string, profile: StackProfile): stri
     const isKotlin = profile.stack === "java" && isKotlinGradle(repoPath);
     const scaffold = deriveTestScaffold(profile, isTypeScript, isKotlin);
     if (!scaffold) return null;
+    // Don't scaffold into a test dir that already has tests — the project doesn't need a starter,
+    // and a redundant file would be regenerated on every profile refresh and dirty main.
+    if (testDirHasContent(repoPath, profile.testDir)) return null;
     const outPath = join(repoPath, scaffold.path);
     if (existsSync(outPath)) return null; // never clobber an existing test
     mkdirSync(join(outPath, ".."), { recursive: true });
@@ -863,6 +872,17 @@ export function writeTestScaffold(repoPath: string, profile: StackProfile): stri
     return scaffold.path;
   } catch {
     return null; // non-fatal: must never block profile persistence
+  }
+}
+
+/** True when the profile's detected test directory exists and already contains at least one entry. */
+function testDirHasContent(repoPath: string, testDir: string | null): boolean {
+  if (!testDir) return false;
+  try {
+    const dir = join(repoPath, testDir);
+    return existsSync(dir) && readdirSync(dir).length > 0;
+  } catch {
+    return false;
   }
 }
 

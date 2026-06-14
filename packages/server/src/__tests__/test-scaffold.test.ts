@@ -123,4 +123,15 @@ describe("writeTestScaffold", () => {
     expect(written).toBeNull();
     expect(await exists(join(dir, "tests"))).toBe(false);
   });
+
+  it("skips when the test dir already has tests under a different name (no redundant scaffold)", async () => {
+    // The kmp-toolkit case: commonTest already has real tests (in a package subdir), so a
+    // ScaffoldTest with a different path must NOT be written — it would reappear on every profile
+    // refresh and dirty main, blocking auto-merge.
+    await mkdir(join(dir, "tests", "pkg"), { recursive: true });
+    await writeFile(join(dir, "tests", "pkg", "test_real.py"), "def test_real():\n    assert True\n");
+    const written = writeTestScaffold(dir, profile({ stack: "python", testRunner: "pytest", testDir: "tests" }));
+    expect(written).toBeNull();
+    expect(await exists(join(dir, "tests", "test_scaffold.py"))).toBe(false);
+  });
 });
