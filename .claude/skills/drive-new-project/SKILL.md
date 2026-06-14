@@ -9,6 +9,8 @@ You are the **epic orchestrator** for a brand-new project. You are NOT done when
 
 ## The completion contract (non-negotiable)
 
+> **The engine now enforces this contract (#801).** When a first-class **Drive** record (#799) has a `metaIssueId`, the autodrive engine's `reconcileDriveCompletion` (runs each auto-merge tick) keeps the meta in **In Progress** while any child is open — pulling it back if it drifts to In Review/Done — and drives the meta itself to **Done** (then marks the drive `completed`) at N/N children Done. The steps below are still the playbook for setting that up and for driving a project *without* a Drive record; the engine is the deterministic backstop against the #664 "exit at Review" failure.
+
 1. The meta-ticket stays **In Progress** until every child is **Done/Cancelled** AND the target project's `master` actually contains the work (verify with git, not the board snapshot — [[pitfall_silent_merge_loss]]).
 2. You MUST leave a **resident watch** running (Step 4) before you stop. Setup-then-exit is a failed run even if the board looks healthy.
 3. After N/N Done + a clean integration pass, drive the meta-ticket all the way to **Done** (the terminal column), **not** Review, then write the run doc. Ending with the meta in Review has NOT met the contract (Space Invaders run #1 left all 10 children Done but the meta stuck in Review — the blind spot Step 6 closes).
