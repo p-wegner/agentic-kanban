@@ -5,9 +5,11 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  applyDeferredWorkingTreeSync,
   detectConflicts,
   detectConflictsByBranch,
   ensureOnBranch,
+  extractPendingWorkingTreeSync,
   getCurrentBranch,
   getCommitCountAhead,
   getWorkingTreeDiff,
@@ -242,6 +244,69 @@ describe("git-service integration", () => {
       expect(existsSync(join(temp.repo, ...path.split("/")))).toBe(true);
       expect(trimmedContent(await fileContent(temp.repo, path))).toBe(trimmedContent(content));
     }
+  }, 30000);
+
+  it("a stale deferred working-tree sync never deletes files a concurrent merge added (#771)", async () => {
+    // #771: the board defers the working-tree sync past the HTTP response, so two
+    // event-driven auto-merges can interleave: merge A advances the checked-out branch
+    // and queues `applyDeferredWorkingTreeSync(<commitA>)`; merge B then advances the
+    // branch again (now containing B's new files) BEFORE A's deferred sync fires. If
+    // A's deferred sync blindly `git reset --hard <commitA>`, it rewinds the working
+    // tree to commitA's tree and DELETES every file B added — observed as the entire
+    // packages/shared tree vanishing off disk. The sync must only ever move forward.
+    const sharedFiles = {
+      "packages/shared/a.ts": "export const a = 1;\n",
+      "packages/shared/b.ts": "export const b = 2;\n",
+      "packages/shared/drizzle/0001_init.sql": "CREATE TABLE a(id);\n",
+    };
+    for (const [path, content] of Object.entries(sharedFiles)) {
+      await writeRepoFile(temp.repo, path, content);
+    }
+    await git(temp.repo, ["add", "-A"]);
+    await git(temp.repo, ["commit", "-m", "seed packages/shared"]);
+    const branchBase = await revParse(temp.repo, "main");
+
+    // Two independent feature branches off the same base, touching distinct files
+    // (so neither conflicts with the other on merge).
+    await commitFiles(temp.repo, "feature/ak-a", { "feat-a.ts": "export const x = 1;\n" }, "feat A", branchBase);
+    await commitFiles(temp.repo, "feature/ak-b", { "feat-b.ts": "export const y = 2;\n" }, "feat B", branchBase);
+    await git(temp.repo, ["checkout", "main"]);
+
+    // Merge A with the sync DEFERRED — advances main, captures a pending-sync SHA
+    // (commitA) but leaves the working tree at the OLD commit for now.
+    const resultA = await mergeBranch(temp.repo, "feature/ak-a", "main", { deferWorkingTreeSync: true });
+    const pendingA = extractPendingWorkingTreeSync(resultA);
+    expect(pendingA).toBeTruthy();
+
+    // A's deferred sync runs in post-merge cleanup (after the HTTP response), bringing
+    // the working tree forward to commitA — the normal case.
+    await applyDeferredWorkingTreeSync(temp.repo, pendingA!);
+    expect(existsSync(join(temp.repo, "feat-a.ts"))).toBe(true);
+
+    // Merge B lands next on the now-clean checkout and advances main to commitB.
+    const resultB = await mergeBranch(temp.repo, "feature/ak-b", "main", { deferWorkingTreeSync: true });
+    const pendingB = extractPendingWorkingTreeSync(resultB);
+    expect(pendingB).toBeTruthy();
+    await applyDeferredWorkingTreeSync(temp.repo, pendingB!);
+    expect(existsSync(join(temp.repo, "feat-b.ts"))).toBe(true);
+
+    // THE RACE (#771): A's deferred sync was queued but a slow/duplicated callback fires
+    // LATE — after B already advanced + synced the branch to commitB. A blanket
+    // `git reset --hard commitA` here rewinds the working tree to commitA's tree and
+    // DELETES feat-b.ts (plus, in the real incident, the whole packages/shared tree
+    // added after commitA). The fix must detect commitA is a stale ancestor of HEAD and
+    // sync to HEAD instead, so nothing is deleted.
+    await applyDeferredWorkingTreeSync(temp.repo, pendingA!);
+
+    expect(existsSync(join(temp.repo, "feat-a.ts"))).toBe(true);
+    expect(existsSync(join(temp.repo, "feat-b.ts"))).toBe(true);
+    for (const path of Object.keys(sharedFiles)) {
+      expect(existsSync(join(temp.repo, ...path.split("/")))).toBe(true);
+    }
+    // No spurious deletions relative to HEAD, and the working tree stays clean.
+    const deleted = (await git(temp.repo, ["diff", "--name-only", "--diff-filter=D", "HEAD"])).trim();
+    expect(deleted).toBe("");
+    expect((await git(temp.repo, ["status", "--porcelain"])).trim()).toBe("");
   }, 30000);
 
   it("detectConflicts reports conflicts without touching HEAD, index, or working tree", async () => {

@@ -870,21 +870,71 @@ export async function applyDeferredWorkingTreeSync(repoPath: string, commitSha: 
  * main checkout and the monitor had to `git restore` them from HEAD before the
  * server would start.
  *
- * This wrapper self-heals that state: after the reset it asks git for any tracked
- * paths deleted from the working tree (`diff --diff-filter=D` against HEAD) and
- * restores just those from the index, leaving any legitimate post-reset state
- * intact. If the reset itself throws, we still attempt the restore so the caller
- * never observes a checkout with tracked files missing — then re-raise so the
- * merge is reported as failed rather than silently half-applied.
+ * #771 — `commitSha` MUST descend from the checkout's current HEAD. A blanket
+ * `git reset --hard <sha>` rewrites the ENTIRE working tree to `<sha>`'s tree,
+ * deleting any tracked path absent there. When `<sha>` is STALE or REGRESSIVE
+ * relative to HEAD — a deferred sync whose SHA was computed before a concurrent
+ * merge advanced the branch, or a feature tip cut from an old base — that wipes
+ * unrelated paths off disk (observed: the entire `packages/shared` source tree,
+ * 100-154 files, gone → backend crash). So before resetting we verify `commitSha`
+ * is a descendant of the current HEAD; if it is not, we DON'T reset to it (that
+ * would discard committed history on disk). Instead we sync forward to HEAD (the
+ * authoritative branch tip), which can only ever ADD the merge's new files, never
+ * delete an unrelated tree. The reset then only ever touches the genuine
+ * HEAD..disk delta.
+ *
+ * After the reset we still self-heal any leftover deletion (the #692 interrupted
+ * case) by restoring tracked paths that are deleted relative to HEAD. If the reset
+ * itself throws, we attempt the restore anyway so the caller never observes a
+ * checkout with tracked files missing — then re-raise so the merge is reported as
+ * failed rather than silently half-applied.
  */
 async function syncWorkingTreeHard(repoPath: string, commitSha: string): Promise<void> {
+  const syncTarget = await resolveSafeSyncTarget(repoPath, commitSha);
   try {
-    await execGit(["reset", "--hard", commitSha], repoPath);
+    await execGit(["reset", "--hard", syncTarget], repoPath);
   } catch (err) {
     await restoreDeletedTrackedFiles(repoPath);
     throw err;
   }
   await restoreDeletedTrackedFiles(repoPath);
+}
+
+/**
+ * Pick a working-tree sync target that can never delete unrelated tracked paths (#771).
+ *
+ * The safe target is whichever of `commitSha` / the checked-out HEAD is a DESCENDANT
+ * of the other (the strictly newer commit reachable on the branch). Resetting to an
+ * ancestor of HEAD would roll the working tree backward and delete every file added
+ * since — the mass-deletion failure. So:
+ *   - `commitSha` is HEAD or a descendant of HEAD → use it (normal forward merge).
+ *   - HEAD descends from `commitSha` (a stale deferred SHA; a concurrent merge already
+ *     advanced the branch past it) → use HEAD instead; it already contains commitSha's
+ *     tree plus the concurrent merge, so the working tree only moves forward.
+ *   - neither descends from the other (divergent/garbage SHA) → refuse to reset to
+ *     commitSha and fall back to HEAD, the authoritative checked-out tip.
+ * Best-effort: any rev-parse failure falls back to commitSha (the prior behavior).
+ */
+async function resolveSafeSyncTarget(repoPath: string, commitSha: string): Promise<string> {
+  let headSha: string;
+  try {
+    headSha = (await execGit(["rev-parse", "HEAD"], repoPath)).trim();
+  } catch {
+    return commitSha;
+  }
+  if (!headSha || headSha === commitSha) return commitSha;
+
+  // commitSha already contains HEAD's history (forward merge) → safe to reset to it.
+  if (await isAncestor(repoPath, headSha, commitSha)) return commitSha;
+
+  // HEAD is newer than commitSha (stale/deferred SHA) or the two diverged — reset to
+  // commitSha would drop files only present on HEAD. Sync to HEAD, never backward.
+  console.warn(
+    `[git] working-tree sync target ${commitSha.slice(0, 12)} is not a descendant of the ` +
+      `checked-out HEAD ${headSha.slice(0, 12)} in ${repoPath}; syncing to HEAD instead to ` +
+      `avoid deleting tracked files added since ${commitSha.slice(0, 12)}.`,
+  );
+  return headSha;
 }
 
 /**
