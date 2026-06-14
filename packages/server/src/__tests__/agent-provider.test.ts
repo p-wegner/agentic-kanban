@@ -572,7 +572,7 @@ describe("buildAgentLaunchConfig (backward compat)", () => {
     expect(config.command).toBe("pi");
     expect(config.args).toContain("--mode");
     expect(config.args).toContain("json");
-    expect(config.args).toContain("--approve");
+    expect(config.args).not.toContain("--approve");
   });
 });
 
@@ -911,16 +911,17 @@ describe("CopilotProvider", () => {
 describe("PiProvider", () => {
   const provider = new PiProvider();
 
-  it("builds default Pi launch config with structured mode and approve trust flag", () => {
+  it("builds default Pi launch config with structured mode", () => {
     const config = provider.buildLaunchConfig({ prompt: "Fix the bug" });
     expect(config.command).toBe("pi");
-    expect(config.args).toEqual(expect.arrayContaining(["--mode", "json", "--approve", "-p", "Fix the bug"]));
+    expect(config.args).toEqual(expect.arrayContaining(["--mode", "json", "-p", "Fix the bug"]));
+    expect(config.args).not.toContain("--approve");
     expect(config.args).not.toContain("--mcp-config");
     expect(config.args).not.toContain("--additional-mcp-config");
     expect(config.suppressStdinPrompt).toBe(true);
   });
 
-  it("always includes --approve when model, profile, resume, and extra args are set", () => {
+  it("preserves model, profile, resume, and extra args without the unsupported approve flag", () => {
     const config = provider.buildLaunchConfig({
       prompt: "Continue",
       providerSessionId: "019ec69d-bed7-75ad-9b25-2b19161227d5",
@@ -928,7 +929,7 @@ describe("PiProvider", () => {
       model: "gpt-5.1",
       agentArgs: "--skill C:/repo/.claude/skills/review/SKILL.md",
     });
-    expect(config.args).toContain("--approve");
+    expect(config.args).not.toContain("--approve");
     expect(config.args).toContain("--provider");
     expect(config.args[config.args.indexOf("--provider") + 1]).toBe("openai");
     expect(config.args).toContain("--model");
@@ -937,6 +938,28 @@ describe("PiProvider", () => {
     expect(config.args[config.args.indexOf("--session") + 1]).toBe("019ec69d-bed7-75ad-9b25-2b19161227d5");
     expect(config.args).toContain("--skill");
     expect(config.args).toContain("C:/repo/.claude/skills/review/SKILL.md");
+  });
+
+  it("passes materialized skills and hook adapter extension to Pi before user args", () => {
+    const config = provider.buildLaunchConfig({
+      prompt: "Run",
+      piExtensionPaths: ["C:/repo/.pi/plugin/agentic-kanban-hooks.ts"],
+      piSkillPaths: [
+        "C:/repo/.claude/skills/kanban-workflow/SKILL.md",
+        "C:/repo/.claude/skills/code-review/SKILL.md",
+      ],
+      agentArgs: "--provider openai",
+    });
+
+    expect(config.args).toEqual(expect.arrayContaining([
+      "--extension",
+      "C:/repo/.pi/plugin/agentic-kanban-hooks.ts",
+      "--skill",
+      "C:/repo/.claude/skills/kanban-workflow/SKILL.md",
+      "C:/repo/.claude/skills/code-review/SKILL.md",
+    ]));
+    expect(config.args.indexOf("--extension")).toBeLessThan(config.args.indexOf("--provider"));
+    expect(config.args.indexOf("--skill")).toBeLessThan(config.args.indexOf("--provider"));
   });
 
   it("uses explicit provider/model from a Pi profile when no model override is set", () => {
