@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import { detectRepoInfo } from "./git-info.service.js";
 import { initializeProjectStatuses } from "../repositories/issue.repository.js";
 import { getCurrentBranch } from "./git.service.js";
-import { populateStackProfile, getStackProfile, populateVerifyScript, verifyScriptPrefKey } from "./stack-profile.service.js";
+import { populateStackProfile, getStackProfile, populateVerifyScript, verifyScriptPrefKey, populateSetupScript } from "./stack-profile.service.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 
 const execFileAsync = promisify(execFile);
@@ -201,10 +201,14 @@ export async function registerProject(path: string, options?: { name?: string })
 
   // Durable stack profile (#786): the ONE descriptor the feedback harness reads.
   // Best-effort & non-blocking — the optional LLM gap-fill must not slow or fail registration.
-  // Once it lands, auto-populate & activate the verify (merge-gate) command (#788) from the
-  // same profile so the keystone auto-merge gate is live from ticket #1.
+  // Once it lands, auto-populate & activate the verify (merge-gate) command (#788) and the
+  // monorepo-aware setup/install script (#810) from the SAME profile, so the keystone
+  // auto-merge gate is live AND deps are installed before the first build from ticket #1.
   void populateStackProfile(projectId, repoInfo.repoPath, db)
-    .then((profile) => populateVerifyScript(projectId, repoInfo.repoPath, db, profile))
+    .then(async (profile) => {
+      await populateVerifyScript(projectId, repoInfo.repoPath, db, profile);
+      await populateSetupScript(projectId, repoInfo.repoPath, db, profile);
+    })
     .catch(() => { /* non-fatal */ });
 
   const project = {
@@ -234,7 +238,7 @@ export async function registerProject(path: string, options?: { name?: string })
  */
 export async function repairProjectRegistration(
   projectId: string,
-): Promise<{ seededStatuses: boolean; setDefaultBranch: string | null; populatedStackProfile: boolean; populatedVerifyScript: boolean }> {
+): Promise<{ seededStatuses: boolean; setDefaultBranch: string | null; populatedStackProfile: boolean; populatedVerifyScript: boolean; populatedSetupScript: boolean }> {
   const [project] = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
   if (!project) throw new Error(`Project not found: ${projectId}`);
 
@@ -243,6 +247,7 @@ export async function repairProjectRegistration(
   let setDefaultBranch: string | null = null;
   let populatedStackProfile = false;
   let populatedVerifyScript = false;
+  let populatedSetupScript = false;
 
   const existingStatuses = await db
     .select({ id: projectStatuses.id })
@@ -289,5 +294,17 @@ export async function repairProjectRegistration(
     }
   }
 
-  return { seededStatuses, setDefaultBranch, populatedStackProfile, populatedVerifyScript };
+  // Backfill the monorepo-aware setup/install script (#810) onto a project registered
+  // before #810. Idempotent: populateSetupScript no-ops when setup_script is already set
+  // or detection is empty.
+  if (!project.setupScript || !project.setupScript.trim()) {
+    try {
+      const written = await populateSetupScript(projectId, project.repoPath, db);
+      populatedSetupScript = Boolean(written);
+    } catch {
+      // non-fatal — a later repair/registration can retry.
+    }
+  }
+
+  return { seededStatuses, setDefaultBranch, populatedStackProfile, populatedVerifyScript, populatedSetupScript };
 }
