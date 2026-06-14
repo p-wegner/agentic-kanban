@@ -1104,6 +1104,21 @@ exit 1
       if (!removed && !dirRemoved) {
         console.warn(`[workspaces] failed to fully clean up worktree at ${workingDir} — manual cleanup may be required`);
       }
+
+      // Drop the feature branch too (#781). Removing only the worktree leaves the
+      // branch behind; if a dependent issue is later recreated, createWorktree's
+      // reuse path keeps that existing branch as-is and never re-cuts it from an
+      // up-to-date base — reproducing the #778 "built against a pre-merge base"
+      // symptom. Deleting the branch here forces the next create onto the
+      // fresh-branch path (cut from the resolved base). Best-effort: a failure to
+      // delete must never block workspace deletion. Only for non-direct workspaces
+      // (direct ones run on the project's own branch, e.g. master — never delete it).
+      const branchToDelete = wsRow[0]?.branch;
+      if (branchToDelete) {
+        await gitService.deleteBranch(repoPath, branchToDelete, { force: true }).catch((err) => {
+          console.warn(`[workspaces] could not delete branch ${branchToDelete} after worktree removal (non-fatal)`, err);
+        });
+      }
     }
 
     if (deletedProjectId) boardEvents?.broadcast(deletedProjectId, "workspace_closed");

@@ -118,11 +118,35 @@ export async function createWorktree(
   }
 
   // Check if branch exists; if not, create it from baseBranch (or HEAD)
+  let branchExists = true;
   try {
     await execGit(["rev-parse", "--verify", branch], repoPath);
   } catch {
+    branchExists = false;
     const branchArgs = baseBranch ? ["branch", branch, baseBranch] : ["branch", branch];
     await execGit(branchArgs, repoPath);
+  }
+
+  // Reuse path (#781): the branch already existed but no live worktree did (a prior
+  // failed/manual start, or a delete that dropped the worktree but not the branch).
+  // If it carries NO unique commits beyond the resolved base — i.e. it was cut and
+  // never built on — refresh it onto the up-to-date base so the next agent builds
+  // against current master instead of the stale pre-merge base it was originally cut
+  // from (the #778 symptom). If it has its own commits we leave it alone — never
+  // discard real work; that branch is reused as-is.
+  if (branchExists && baseBranch) {
+    try {
+      const ahead = (
+        await execGit(["rev-list", "--count", `${baseBranch}..${branch}`], repoPath)
+      ).trim();
+      if (ahead === "0") {
+        // Safe: branch is an ancestor of base (no unique commits). Hard-reset the
+        // ref to base so reuse starts from the refreshed base.
+        await execGit(["branch", "-f", branch, baseBranch], repoPath);
+      }
+    } catch {
+      // Best-effort refresh — never block worktree creation on it.
+    }
   }
 
   await execGit(
@@ -361,17 +385,27 @@ export async function listBranches(
   return { local, remote };
 }
 
-/** Delete a local branch. */
+/**
+ * Delete a local branch.
+ *
+ * Defaults to a SAFE delete (`-d`), which refuses to drop a branch that is not
+ * fully merged into its upstream/HEAD — appropriate for post-merge cleanup where
+ * the work has already landed. Pass `force: true` for `-D` to discard an
+ * unmerged/abandoned branch (e.g. tearing down a workspace whose work is being
+ * thrown away, so a recreated dependent re-cuts a fresh branch — #781).
+ */
 export async function deleteBranch(
   repoPath: string,
   branch: string,
+  options?: { force?: boolean },
 ): Promise<void> {
+  const flag = options?.force ? "-D" : "-d";
   try {
-    await execGit(["branch", "-d", branch], repoPath);
+    await execGit(["branch", flag, branch], repoPath);
   } catch (err) {
     if (!isBranchCheckedOutElsewhereError(err)) throw err;
     await pruneWorktrees(repoPath);
-    await execGit(["branch", "-d", branch], repoPath);
+    await execGit(["branch", flag, branch], repoPath);
   }
 }
 
