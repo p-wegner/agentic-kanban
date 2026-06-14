@@ -9,6 +9,7 @@ const VIEW_ROUTE_PATHS: Record<ViewMode, string> = {
   timeline: "/timeline",
   metrics: "/metrics",
   "quality-metrics": "/quality-metrics",
+  milestones: "/milestones",
   butler: "/butler",
   workflows: "/workflows",
   "workflow-analytics": "/workflow-analytics",
@@ -17,6 +18,7 @@ const VIEW_ROUTE_PATHS: Record<ViewMode, string> = {
   "flaky-tests": "/flaky-tests",
   "monitor-history": "/monitor-history",
   "health-events": "/health-events",
+  drive: "/drive",
   digest: "/digest",
   strategy: "/strategy",
   focus: "/focus",
@@ -32,6 +34,7 @@ const VIEW_ROUTE_PATHS: Record<ViewMode, string> = {
   "lead-time": "/lead-time",
   "scorecard-distribution": "/scorecard-distribution",
   "provider-cost": "/provider-cost",
+  "agent-throughput": "/agent-throughput",
   calendar: "/calendar",
   burndown: "/burndown",
 };

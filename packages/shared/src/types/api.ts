@@ -512,6 +512,19 @@ export interface MilestoneResponse {
   createdAt: string;
 }
 
+export interface MilestoneSummaryResponse extends MilestoneResponse {
+  totalIssues: number;
+  openIssues: number;
+  closedIssues: number;
+  progressPercent: number;
+  burndown: Array<{
+    date: string;
+    remaining: number;
+    opened: number;
+    closed: number;
+  }>;
+}
+
 export interface StatusWithIssues {
   id: string;
   name: string;

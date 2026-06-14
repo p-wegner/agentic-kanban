@@ -7,6 +7,7 @@ describe("appRoutes", () => {
     expect(getViewRoutePath("butler")).toBe("/butler");
     expect(getViewRoutePath("workflows")).toBe("/workflows");
     expect(getViewRoutePath("agents")).toBe("/agents");
+    expect(getViewRoutePath("milestones")).toBe("/milestones");
     expect(getViewRoutePath("fireworks")).toBe("/fireworks");
   });
 
@@ -16,6 +17,7 @@ describe("appRoutes", () => {
     expect(getAppRouteView("/workflows")).toBe("workflows");
     expect(getAppRouteView("/butler")).toBe("butler");
     expect(getAppRouteView("/quality-metrics?project=abc")).toBe("quality-metrics");
+    expect(getAppRouteView("/milestones")).toBe("milestones");
     expect(getAppRouteView("/fireworks")).toBe("fireworks");
   });
 
