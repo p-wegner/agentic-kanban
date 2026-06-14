@@ -225,6 +225,22 @@ export function MonitorPopover({
     finally { setStartModeSaving(false); }
   }
 
+  // Selecting a Start Mode also drives the out-of-process Conductor loop: picking
+  // "conductor" starts it; switching to manual/monitor stops it. (Only the dogfood board
+  // has a loop — orchestrator.available — elsewhere this is a no-op write.)
+  async function selectStartMode(m: StartMode) {
+    if (!projectId) return;
+    setStartModeSaving(true);
+    try {
+      await apiFetch(`/api/preferences/settings`, { method: "PUT", body: JSON.stringify({ [`start_mode_${projectId}`]: m }) });
+      if (orchestrator?.available) {
+        await apiFetch(`/api/projects/${projectId}/conductor`, { method: "POST", body: JSON.stringify({ action: m === "conductor" ? "start" : "stop" }) }).catch(() => {});
+      }
+      loadTunables();
+    } catch { /* surfaced by the read-out */ }
+    finally { setStartModeSaving(false); }
+  }
+
   useEffect(() => {
     function handler(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
     document.addEventListener("keydown", handler);
@@ -348,7 +364,7 @@ export function MonitorPopover({
                     <button
                       key={m}
                       disabled={startModeSaving}
-                      onClick={() => putSettings({ [`start_mode_${projectId}`]: m })}
+                      onClick={() => selectStartMode(m)}
                       title={START_MODE_HINT[m]}
                       className={`flex-1 px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-50 ${active ? "bg-emerald-600 text-white" : "bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"}`}
                     >
@@ -359,6 +375,23 @@ export function MonitorPopover({
               </div>
               {resolvedTunables?.startPolicy && (
                 <p className="text-[10px] text-gray-400 dark:text-gray-500 leading-snug">{START_MODE_HINT[resolvedTunables.startPolicy.mode]}</p>
+              )}
+              {resolvedTunables?.startPolicy?.mode === "conductor" && orchestrator?.available && (
+                <div className="flex items-center justify-between rounded-md bg-gray-50 dark:bg-gray-950 px-2 py-1.5">
+                  <span className="flex items-center gap-1.5 text-[11px] text-gray-600 dark:text-gray-300">
+                    <span className={`w-1.5 h-1.5 rounded-full ${orchestrator.alive ? "bg-emerald-500 animate-pulse" : "bg-gray-300 dark:bg-gray-600"}`} />
+                    Loop {orchestrator.alive ? "running" : "stopped"}{orchestrator.iteration != null ? ` · cycle ${orchestrator.iteration}` : ""}
+                  </span>
+                  {!orchestrator.alive && (
+                    <button
+                      disabled={startModeSaving}
+                      onClick={() => selectStartMode("conductor")}
+                      className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                    >
+                      Start loop
+                    </button>
+                  )}
+                </div>
               )}
               {resolvedTunables?.startPolicy?.mode === "monitor" && (
                 <div className="space-y-1.5 pt-0.5">
