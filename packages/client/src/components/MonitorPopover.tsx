@@ -29,6 +29,37 @@ type ResolvedTunables = {
   startPolicy?: StartPolicy;
 };
 
+type DirtyMainCheckoutWarning = {
+  projectId: string;
+  projectName: string;
+  repoPath: string;
+  detectedAt: string;
+  fileCount: number;
+  files: string[];
+  message: string;
+};
+
+type AutodriveStallWarning = {
+  type: "autodrive_stall";
+  projectId: string;
+  projectName: string;
+  detectedAt: string;
+  thresholdMin: number;
+  stalledForMin: number;
+  lastProgressAt: string;
+  activeIssueCount: number;
+  workspaceIds: string[];
+  issueNumbers: number[];
+  cause: string;
+  message: string;
+};
+
+type MonitorWarning = DirtyMainCheckoutWarning | AutodriveStallWarning;
+
+function isAutodriveStallWarning(warning: MonitorWarning): warning is AutodriveStallWarning {
+  return "type" in warning && warning.type === "autodrive_stall";
+}
+
 const START_MODE_LABEL: Record<StartMode, string> = { manual: "Manual", monitor: "Monitor", conductor: "Conductor" };
 const START_MODE_HINT: Record<StartMode, string> = {
   manual: "Nothing auto-starts. Only you / agents start workspaces explicitly.",
@@ -72,15 +103,7 @@ export type MonitorStatus = {
   } | null;
   nextRunAt: string | null;
   recentActions: MonitorAction[];
-  warnings?: Array<{
-    projectId: string;
-    projectName: string;
-    repoPath: string;
-    detectedAt: string;
-    fileCount: number;
-    files: string[];
-    message: string;
-  }>;
+  warnings?: MonitorWarning[];
   lastHealthCheckAt?: string | null;
   resourceSnapshot?: {
     at: string;
@@ -490,15 +513,31 @@ export function MonitorPopover({
                 )}
               </div>
               <div className="space-y-2">
-                {warnings.map((warning) => (
-                  <div key={warning.projectId} className="text-[11px] text-red-800 dark:text-red-200 leading-snug">
-                    <div className="font-semibold">{warning.projectName}: dirty main checkout</div>
-                    <div>{warning.fileCount} tracked source change{warning.fileCount === 1 ? "" : "s"} must be committed or reverted.</div>
-                    <div className="mt-1 font-mono text-[10px] text-red-600 dark:text-red-300 truncate" title={warning.files.join(", ")}>
-                      {warning.files.slice(0, 3).join(", ")}{warning.files.length > 3 ? `, +${warning.files.length - 3}` : ""}
+                {warnings.map((warning) => {
+                  if (isAutodriveStallWarning(warning)) {
+                    return (
+                      <div key={`autodrive-${warning.projectId}`} className="text-[11px] text-red-800 dark:text-red-200 leading-snug">
+                        <div className="font-semibold">{warning.projectName}: autodrive stalled</div>
+                        <div>{warning.message}</div>
+                        {warning.issueNumbers.length > 0 && (
+                          <div className="mt-1 font-mono text-[10px] text-red-600 dark:text-red-300 truncate">
+                            {warning.issueNumbers.slice(0, 5).map((n) => `#${n}`).join(", ")}
+                            {warning.issueNumbers.length > 5 ? `, +${warning.issueNumbers.length - 5}` : ""}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+                  return (
+                    <div key={`dirty-${warning.projectId}`} className="text-[11px] text-red-800 dark:text-red-200 leading-snug">
+                      <div className="font-semibold">{warning.projectName}: dirty main checkout</div>
+                      <div>{warning.fileCount} tracked source change{warning.fileCount === 1 ? "" : "s"} must be committed or reverted.</div>
+                      <div className="mt-1 font-mono text-[10px] text-red-600 dark:text-red-300 truncate" title={warning.files.join(", ")}>
+                        {warning.files.slice(0, 3).join(", ")}{warning.files.length > 3 ? `, +${warning.files.length - 3}` : ""}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
