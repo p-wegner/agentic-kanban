@@ -29,8 +29,12 @@
  *
  * Override: set ALLOW_WRITE_WITHOUT_READ=1.
  *
- * Codex parity: handles Codex's `tool_name` / `tool_input` field names and its read/
- * write tool aliases too, so the same guard fires under the Codex harness.
+ * Codex: registered for the Claude harness only — the "File has not been read yet"
+ * constraint is Claude-Code-specific. The input parsing below still tolerates Codex's
+ * `tool_name` / `tool_input` field names and read/write tool aliases, so the script is
+ * safe to wire into `.codex/hooks.json` later if Codex grows the same constraint, but it
+ * is intentionally NOT registered there yet (a harness whose write tools don't require a
+ * prior read would only get false blocks).
  */
 
 const fs = require("fs");
@@ -157,9 +161,13 @@ async function main() {
 
   // isWrite:
   // Creating a NEW file never triggers the tool's read-first guard — only overwrites do.
+  // Resolve against `cwd` (CLAUDE_PROJECT_DIR), same base as the read-history lookup, so a
+  // relative file_path is checked at the same location it was tracked — not against
+  // process.cwd(), which can differ.
+  const absTarget = path.isAbsolute(rawTarget) ? rawTarget : path.join(cwd, rawTarget);
   let exists = false;
   try {
-    exists = fs.existsSync(path.resolve(rawTarget));
+    exists = fs.existsSync(absTarget);
   } catch {
     exists = false;
   }

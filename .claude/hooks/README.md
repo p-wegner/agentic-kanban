@@ -50,6 +50,9 @@ It tracks the paths Read in each session (`.read-tracking-state.json`, keyed by
 read** in this session — the exact case the tool itself rejects, so it never blocks a
 legitimate new-file Write. Best-effort: any state/IO error falls through to ALLOW.
 
+Registered for the Claude harness only — the "File has not been read yet" constraint is
+Claude-Code-specific, so it is intentionally **not** wired into `.codex/hooks.json`.
+
 ### Bypass
 
 Set `ALLOW_WRITE_WITHOUT_READ=1`.
