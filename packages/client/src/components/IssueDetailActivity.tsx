@@ -54,7 +54,13 @@ export function IssueDetailActivity({
       />
 
       {/* Activity feed */}
-      <IssueActivitySection events={activityEvents} loading={activityLoading} />
+      <IssueActivitySection
+        events={activityEvents}
+        loading={activityLoading}
+        issueTitle={issue.title}
+        issueNumber={issue.issueNumber}
+        currentStatusName={issue.statusName}
+      />
 
       {/* Workspace Files section — browses the latest workspace's working directory */}
       <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
