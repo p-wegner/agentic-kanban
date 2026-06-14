@@ -1,4 +1,4 @@
-import { ACTIVE_WORKSPACE_STATUSES, computeBlockerReadiness, isTerminalStatusIdView, type BlockerWorkspaceLanding } from "@agentic-kanban/shared";
+import { computeBlockerReadiness, isTerminalStatusIdView, type BlockerWorkspaceLanding } from "@agentic-kanban/shared";
 import { issueDependencies, issues, issueTags, projectStatuses, tags, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { and, eq, sql, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
@@ -13,16 +13,21 @@ const SKIP_AUTO_START_TAG = "no-auto-start";
 /**
  * SQL predicate matching workspaces that occupy ACTIVE agent capacity.
  *
- * A workspace counts toward WIP only when it is genuinely running an agent
- * (the canonical ACTIVE_WORKSPACE_STATUSES set). The old `status != 'closed'`
+ * A workspace counts toward WIP only when it is genuinely running build/review/fix
+ * work. The old `status != 'closed'`
  * check over-counted launch failures: a provider usage-limit launch lands the
  * workspace in `blocked`, and a zero-output launch failure lands it in `idle`
  * — neither has a live agent, yet both held WIP indefinitely, so the board
  * looked full while nothing was working (#690). Counting only active statuses
- * frees that capacity for auto-start. This matches the capacity count used by
- * the sprint-capacity planner.
+ * frees that capacity for auto-start.
  */
-const activeWipPredicate = sql`${workspaces.status} IN (${sql.join([...ACTIVE_WORKSPACE_STATUSES].map((s) => sql`${s}`), sql`, `)})`;
+const AUTO_START_WIP_STATUSES = ["active", "reviewing", "fixing"] as const;
+const activeWipPredicate = sql`${workspaces.status} IN (${sql.join(AUTO_START_WIP_STATUSES.map((s) => sql`${s}`), sql`, `)})`;
+
+export interface WipCapacitySnapshot {
+  active: number;
+  inactiveStale: number;
+}
 
 /**
  * Count distinct In-Progress issues whose workspace is ACTIVELY running an agent
@@ -36,10 +41,31 @@ export async function countActiveWip(
   database: Pick<typeof db, "select">,
   inProgressStatusId: string,
 ): Promise<number> {
-  const rows = await database.select({ count: sql<number>`count(distinct ${issues.id})` }).from(issues)
+  return (await countWipCapacity(database, inProgressStatusId)).active;
+}
+
+/**
+ * Capacity diagnostics for the auto-start gate.
+ *
+ * `active` is the only value that consumes WIP slots. `inactiveStale` is reported
+ * separately so lingering idle/closed/merged rows remain visible without blocking
+ * the next unblocked ticket.
+ */
+export async function countWipCapacity(
+  database: Pick<typeof db, "select">,
+  inProgressStatusId: string,
+): Promise<WipCapacitySnapshot> {
+  const rows = await database.select({
+    active: sql<number>`count(distinct CASE WHEN ${activeWipPredicate} THEN ${issues.id} END)`,
+    inactiveStale: sql<number>`count(distinct CASE WHEN NOT (${activeWipPredicate}) THEN ${workspaces.id} END)`,
+  }).from(issues)
     .innerJoin(workspaces, eq(workspaces.issueId, issues.id))
-    .where(sql`${issues.statusId} = ${inProgressStatusId} AND ${activeWipPredicate}`);
-  return Number(rows[0]?.count ?? 0);
+    .where(sql`${issues.statusId} = ${inProgressStatusId}`);
+  const legacyCount = (rows[0] as { count?: number } | undefined)?.count;
+  return {
+    active: Number(rows[0]?.active ?? legacyCount ?? 0),
+    inactiveStale: Number(rows[0]?.inactiveStale ?? 0),
+  };
 }
 
 async function hasSkipAutoStartTag(issueId: string): Promise<boolean> {
@@ -95,7 +121,11 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
   for (const inProgressSt of inProgressStatuses) {
     const allowFeatureTypes = isAutoDrivenProject(inProgressSt.projectId);
     const wipLimit = tunablesFor(inProgressSt.projectId).activeAgentsTarget;
-    let currentWip = await countActiveWip(db, inProgressSt.id);
+    const capacity = await countWipCapacity(db, inProgressSt.id);
+    let currentWip = capacity.active;
+    if (capacity.inactiveStale > 0) {
+      console.log(`[monitor] Auto-start capacity for project ${inProgressSt.projectId}: active=${capacity.active}/${wipLimit} inactiveStale=${capacity.inactiveStale}`);
+    }
     if (currentWip >= wipLimit) continue;
 
     const inProgressIssues = await db.select({ id: issues.id, title: issues.title, description: issues.description, issueType: issues.issueType, issueNumber: issues.issueNumber }).from(issues)
@@ -139,7 +169,11 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
   for (const inProgressSt of inProgressStatuses) {
     const allowFeatureTypes = isAutoDrivenProject(inProgressSt.projectId);
     const wipLimit = tunablesFor(inProgressSt.projectId).activeAgentsTarget;
-    const currentWip = await countActiveWip(db, inProgressSt.id);
+    const capacity = await countWipCapacity(db, inProgressSt.id);
+    const currentWip = capacity.active;
+    if (capacity.inactiveStale > 0) {
+      console.log(`[monitor] Auto-start pull capacity for project ${inProgressSt.projectId}: active=${capacity.active}/${wipLimit} inactiveStale=${capacity.inactiveStale}`);
+    }
     if (currentWip >= wipLimit) continue;
 
     const todoStatus = await db.select({ id: projectStatuses.id }).from(projectStatuses)
