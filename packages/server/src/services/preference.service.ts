@@ -5,7 +5,7 @@ import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getPreference, setPreference, getAllPreferences, setPreferences } from "../repositories/preferences.repository.js";
 import { allHarnessSettingKeys } from "./harness-settings.js";
-import { commitObjectiveFile, isBoardStrategyKey, parseStrategyBullseyeConfig, projectIdFromBoardStrategyKey, selectProviderFromStrategy, writeStrategyObjective } from "./strategy-objective.service.js";
+import { commitObjectiveFile, isBoardStrategyKey, parseStrategyBullseyeConfig, PROJECT_CONDUCTOR_OBJECTIVE_RELATIVE_PATH, projectIdFromBoardStrategyKey, selectProviderFromStrategy, writeStrategyObjective } from "./strategy-objective.service.js";
 import { projects } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { PREF_BUILDER_GUARDRAILS, PREF_MERGE_STRATEGY, PREF_PI_PROFILE, PREF_CODEX_LICENSE_RING, PREF_CODEX_LICENSE_ROTATION, PREF_CLAUDE_SUBSCRIPTION_RING, PREF_CLAUDE_SUBSCRIPTION_ROTATION } from "../constants/preference-keys.js";
@@ -60,6 +60,7 @@ function isAllowedDynamicKey(key: string): boolean {
     /^outbound_webhook_url_[0-9a-f-]+$/.test(key) ||
     /^board_autodrive_[0-9a-f-]+$/.test(key) ||
     /^start_mode_[0-9a-f-]+$/.test(key) ||
+    /^board_conductor_[0-9a-f-]+$/.test(key) ||
     /^verify_script_[0-9a-f-]+$/.test(key) ||
     /^cold_clone_check_[0-9a-f-]+$/.test(key) ||
     /^project_stack_profile_[0-9a-f-]+$/.test(key) ||
@@ -67,6 +68,17 @@ function isAllowedDynamicKey(key: string): boolean {
     /^codex_cooldown_.+$/.test(key) ||
     /^claude_cooldown_.+$/.test(key) ||
     isBoardStrategyKey(key);
+}
+
+function isConductorEnabledPreference(value: string | null | undefined): boolean {
+  if (!value) return false;
+  if (value === "true") return true;
+  try {
+    const parsed = JSON.parse(value) as { enabled?: unknown };
+    return parsed?.enabled === true;
+  } catch {
+    return false;
+  }
 }
 
 export function createPreferenceService({ database }: { database: Database }) {
@@ -107,14 +119,22 @@ export function createPreferenceService({ database }: { database: Database }) {
       const projectId = projectIdFromBoardStrategyKey(entry.key);
       if (!projectId) continue;
       const projectRows = await database
-        .select({ repoPath: projects.repoPath })
+        .select({ id: projects.id, name: projects.name, repoPath: projects.repoPath, defaultBranch: projects.defaultBranch })
         .from(projects)
         .where(eq(projects.id, projectId))
         .limit(1);
-      const repoPath = projectRows[0]?.repoPath;
+      const project = projectRows[0];
+      const repoPath = project?.repoPath;
       if (!repoPath) continue;
-      const changed = writeStrategyObjective(repoPath, entry.value);
-      if (changed && autoCommit) commitObjectiveFile(repoPath);
+      const conductorEnabled = isConductorEnabledPreference(await getPreference(`board_conductor_${projectId}`, database));
+      const changed = conductorEnabled
+        ? writeStrategyObjective(repoPath, entry.value, {
+            objectiveRelativePath: PROJECT_CONDUCTOR_OBJECTIVE_RELATIVE_PATH,
+            createIfMissing: true,
+            project,
+          })
+        : writeStrategyObjective(repoPath, entry.value);
+      if (changed && autoCommit && !conductorEnabled) commitObjectiveFile(repoPath);
     }
   }
 

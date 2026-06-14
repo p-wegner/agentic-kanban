@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   commitObjectiveFile,
   deriveMonitorTunables,
+  PROJECT_CONDUCTOR_OBJECTIVE_RELATIVE_PATH,
   parseStrategyBullseyeConfig,
   resolveMonitorTunables,
   updateObjectiveWithStrategy,
@@ -119,6 +120,24 @@ describe("writeStrategyObjective + commitObjectiveFile — auto-commit hook", ()
     }
   });
 
+  it("creates a per-project conductor objective when opted in", () => {
+    const empty = mkdtempSync(join(tmpdir(), "strategy-conductor-"));
+    try {
+      const changed = writeStrategyObjective(empty, config, {
+        objectiveRelativePath: PROJECT_CONDUCTOR_OBJECTIVE_RELATIVE_PATH,
+        createIfMissing: true,
+        project: { id: "proj-1", name: "Splitpy", repoPath: empty, defaultBranch: "main" },
+      });
+      expect(changed).toBe(true);
+      const text = readFileSync(join(empty, PROJECT_CONDUCTOR_OBJECTIVE_RELATIVE_PATH), "utf8");
+      expect(text).toContain("Project Conductor Objective - Splitpy");
+      expect(text).toContain("Drive only this project");
+      expect(text).toContain("REST API Performance: weight 5/5");
+    } finally {
+      rmSync(empty, { recursive: true, force: true });
+    }
+  });
+
   it("commits ONLY objective.md, leaving an unrelated dirty file untracked", () => {
     writeStrategyObjective(repo, config);
     // an unrelated working-tree change that must NOT be swept into the commit
@@ -157,13 +176,13 @@ describe("resolveMonitorTunables — in-process monitor wiring", () => {
     expect(tunables).toEqual({ activeAgentsTarget: 6, backlogFloor: 12, maxNewStartsPerCycle: 3, refillFocus: "bugfix-only" });
   });
 
-  it("falls back to legacy nudge prefs (floor 1, no per-cycle cap) when no strategy exists", () => {
+  it("falls back to staggered legacy nudge prefs when no strategy exists", () => {
     const prefMap = new Map<string, string>([["nudge_wip_limit", "5"]]);
     const { tunables, source } = resolveMonitorTunables(prefMap, "proj-1");
     expect(source).toBe("prefs");
     expect(tunables.activeAgentsTarget).toBe(5);
-    expect(tunables.backlogFloor).toBe(1);
-    expect(tunables.maxNewStartsPerCycle).toBe(Number.POSITIVE_INFINITY);
+    expect(tunables.backlogFloor).toBe(3);
+    expect(tunables.maxNewStartsPerCycle).toBe(3);
     expect(tunables.refillFocus).toBe("balanced");
   });
 
