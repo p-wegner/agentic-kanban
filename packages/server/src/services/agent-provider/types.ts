@@ -40,6 +40,10 @@ export interface ProviderLaunchOptions {
   prompt?: string;
   /** Provider-readable files to attach or otherwise expose to the initial turn. */
   contextFiles?: string[];
+  /** Pi extension package paths loaded with repeated `--extension` flags. */
+  piExtensionPaths?: string[];
+  /** Pi skill `SKILL.md` paths loaded with repeated `--skill` flags. */
+  piSkillPaths?: string[];
   /** Skip permission prompts (use Copilot --allow-all, Claude system setting). */
   skipPermissions?: boolean;
 }

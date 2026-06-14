@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { openSync, closeSync, readSync, statSync, unlinkSync, existsSync, writeFileSync, readFileSync, appendFileSync } from "node:fs";
+import { openSync, closeSync, readSync, statSync, unlinkSync, existsSync, writeFileSync, readFileSync, appendFileSync, readdirSync, type Dirent } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildAgentLaunchConfig, type ProviderId, type ProviderName } from "./agent-provider.js";
@@ -64,6 +64,26 @@ function appendContextFilesToPrompt(prompt: string, contextFiles: string[] | und
 
   if (sections.length === 0) return prompt;
   return `${prompt}\n\n[Attached context files]\n\n${sections.join("\n\n---\n\n")}`;
+}
+
+function materializedSkillFiles(worktreePath: string): string[] {
+  const skillsDir = join(worktreePath, ".claude", "skills");
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(skillsDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  return entries
+    .filter((entry) => entry.isDirectory() && !/[\\/]/.test(entry.name) && entry.name !== "." && entry.name !== "..")
+    .map((entry) => join(skillsDir, entry.name, "SKILL.md"))
+    .filter((skillPath) => existsSync(skillPath));
+}
+
+function piExtensionFiles(worktreePath: string): string[] {
+  const extensionPath = join(worktreePath, ".pi", "plugin", "agentic-kanban-hooks.ts");
+  return existsSync(extensionPath) ? [extensionPath] : [];
 }
 
 /** Get the output file path for a session. */
@@ -234,6 +254,8 @@ export function launch(
     provider,
     prompt: effectivePrompt,
     contextFiles,
+    piExtensionPaths: provider === "pi" ? piExtensionFiles(worktreePath) : undefined,
+    piSkillPaths: provider === "pi" ? materializedSkillFiles(worktreePath) : undefined,
     skipPermissions,
   });
   const { command, args, useShell, isMockAgent, env: spawnEnv, promptPrefix, suppressStdinPrompt } = launchConfig;
