@@ -36,6 +36,27 @@ more than one worktree at scaffold time.
 
 Set `ALLOW_CROSS_WORKTREE_WRITE=1`.
 
+## require-read-before-write.js
+
+PreToolUse hook on the `Read` and `Write` tools. The Write tool refuses to overwrite an
+*existing* file that wasn't `Read` first ("File has not been read yet. Read it first
+before writing to it."). Agents still attempt it (branching a file, context reset,
+inferring a path) — costing a failed Write + a Read + a retry. This hook fires
+mechanically *before* the Write reaches the tool, so the agent gets the "read it first"
+guidance one turn earlier instead of as a wasted tool call (ticket #760).
+
+It tracks the paths Read in each session (`.read-tracking-state.json`, keyed by
+`session_id`) and BLOCKS a Write only when the target **exists on disk** and **wasn't
+read** in this session — the exact case the tool itself rejects, so it never blocks a
+legitimate new-file Write. Best-effort: any state/IO error falls through to ALLOW.
+
+Registered for the Claude harness only — the "File has not been read yet" constraint is
+Claude-Code-specific, so it is intentionally **not** wired into `.codex/hooks.json`.
+
+### Bypass
+
+Set `ALLOW_WRITE_WITHOUT_READ=1`.
+
 ## smart-hooks-config.json
 
 Config file for the smart-hooks-runner pattern (if you add it later). Currently empty —
