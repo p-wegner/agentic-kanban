@@ -220,7 +220,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       const deps = await db.select({ dependsOnId: issueDependencies.dependsOnId }).from(issueDependencies)
         .where(sql`${issueDependencies.issueId} = ${issue.id} AND (${issueDependencies.type} = 'depends_on' OR ${issueDependencies.type} = 'blocked_by')`);
       if (deps.length > 0) {
-        const blockerIds = deps.map((d) => d.dependsOnId);
+        const blockerIds = [...new Set(deps.map((d) => d.dependsOnId))];
         const blockerIssues = await db
           .select({
             id: issues.id,
@@ -231,6 +231,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
           .from(issues)
           .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
           .where(inArray(issues.id, blockerIds));
+        if (blockerIssues.length !== blockerIds.length) continue;
 
         // Dependency readiness is decided by the ONE shared `computeBlockerReadiness`
         // helper (also used by the dependency-wave planner) so the whole #535/#537/#782/#784
