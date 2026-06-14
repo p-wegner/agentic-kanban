@@ -24,6 +24,18 @@
             "statusMessage": "Checking worktree write scope"
           }
         ]
+      },
+      {
+        "matcher": "Read|read_file|view|view_file|Write|write_file|create_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/require-read-before-write.js\"",
+            "commandWindows": "node C:/andrena/agentic-kanban/.claude/hooks/require-read-before-write.js",
+            "timeout": 10,
+            "statusMessage": "Checking read-before-write"
+          }
+        ]
       }
     ],
     "Stop": [

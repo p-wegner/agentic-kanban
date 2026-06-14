@@ -58,6 +58,15 @@
             "command": "node $CLAUDE_PROJECT_DIR/.claude/hooks/prevent-cross-worktree-writes.js"
           }
         ]
+      },
+      {
+        "matcher": "Read|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node C:/andrena/agentic-kanban/.claude/hooks/require-read-before-write.js"
+          }
+        ]
       }
     ],
     "PostToolUse": [
