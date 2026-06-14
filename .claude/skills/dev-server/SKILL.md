@@ -5,7 +5,18 @@ description: Start/stop/health-check the dev server safely — worktree ports, p
 
 # dev-server
 
-Safely start, stop, and health-check the agentic-kanban dev server. This encodes the project's exact (easy-to-get-wrong) process and port logic — follow it verbatim. The failure modes below are dangerous on Windows and to other agents.
+Safely start, stop, and health-check a project's dev server. The HARD CONSTRAINTS and the agentic-kanban-specific recipe below are the default; for **any other driven project**, the start command + health URL + port come from the project's stack profile (see "Driving any project").
+
+## Driving any project (per-stack, #790)
+
+The board derives a **dev-server plan** for any project from its stack profile (#786) — `devCommand` → start command, `devHealthUrl` → what to poll, `devPort` → which port to free on teardown — with per-project `dev_command_<projectId>` / `health_url_<projectId>` preference overrides taking precedence. The code lives in `packages/server/src/services/dev-server.service.ts`:
+
+- `resolveProjectDevServerPlan(projectId, db, { workingDir })` → `{ command, healthUrl, port, isWeb }` (or null when nothing can boot). Precedence: `dev_command`/`health_url` prefs → stack profile → (for this app's own worktrees only) the 3001+N/5173+N convention.
+- `startDevServer(plan, cwd)` — spawns through the platform shell with **`detached: true` + `windowsHide: true`**, stdio redirected to `tmpdir()/kanban-<label>.log`. Never `Start-Process`.
+- `healthCheckDevServer(url)` — in-process HTTP poll (any status < 500 = up; a 404 still proves the port bound). NOT a `netstat`/`Get-NetTCPConnection` loop.
+- `stopDevServer(plan)` — kills **only** the listener on the resolved port via `killProcessesOnPorts` (exact port, guard-protected) — never all node, never a range.
+
+So a node web app, a python service, a go server, etc. can each be booted + health-checked headlessly. The hard constraints below apply to every project; the PowerShell recipe in Steps 1–5 is the agentic-kanban-specific instance of it.
 
 ## HARD CONSTRAINTS (read first)
 
