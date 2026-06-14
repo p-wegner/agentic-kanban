@@ -14,7 +14,7 @@ import { listBranches, listWorktrees, getDiffShortstat, removeWorktree } from ".
 import { buildWorkspaceSummaryMap, buildBlockedMap, buildTagMap, buildGraphEdges } from "./board-aggregation.service.js";
 import { getProjectById, getProjectByRepoPath, getAllProjects, insertProject, deleteProjectCascade, setProjectArchived, getProjectStats, getProjectStatuses, createProjectStatus, deleteProjectStatus, updateProjectStatusSortOrder } from "../repositories/project.repository.js";
 import { generateSetupScript as generateSetupScriptAI, generateTeardownScript as generateTeardownScriptAI, generateVerifyScript as generateVerifyScriptAI } from "./project-setup.service.js";
-import { populateStackProfile, populateVerifyScript } from "./stack-profile.service.js";
+import { populateStackProfile, populateVerifyScript, detectStackProfile } from "./stack-profile.service.js";
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
 import type { WorkspaceSummaryCache } from "./workspace-summary-cache.service.js";
 import type { WorkspaceSummary } from "./workspace-summary.service.js";
@@ -166,8 +166,11 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     // Scaffold (clobber-safe for imports): ensure the generic agent-artifact ignores are present
     // (append-if-missing; seeds the chosen language template only when no .gitignore exists), and
     // drop a starter CLAUDE.md when the repo has none â€” keeps agent scratch out of the project's
-    // history and gives agents a baseline working agreement.
-    ensureAgentGitignore(repoInfo.repoPath, body.gitignoreTemplate ? GITIGNORE_TEMPLATES[body.gitignoreTemplate] : undefined);
+    // history and gives agents a baseline working agreement. The synchronous rule-based stack
+    // detection also feeds per-stack build-output ignores (target/, __pycache__/, *.class, …) so a
+    // non-Node project's build artifacts never make main dirty and block auto-merge (#811).
+    const detectedStack = detectStackProfile(repoInfo.repoPath).stack;
+    ensureAgentGitignore(repoInfo.repoPath, body.gitignoreTemplate ? GITIGNORE_TEMPLATES[body.gitignoreTemplate] : undefined, detectedStack);
     ensureStarterClaudeMd(repoInfo.repoPath);
     ensureStarterAgentsMd(repoInfo.repoPath);
     ensureHookScaffold(repoInfo.repoPath);
@@ -292,7 +295,10 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       defaultSkillId: await getDefaultSkillId(database),
     }, database);
     // Scaffold the fresh repo with the generic agent-artifact ignores + a starter CLAUDE.md + hooks.
-    ensureAgentGitignore(repoInfo.repoPath, body.gitignoreTemplate ? GITIGNORE_TEMPLATES[body.gitignoreTemplate] : undefined);
+    // A just-`git init`-ed repo usually has no stack markers yet (stack === null ⇒ no per-stack
+    // block); detect anyway so a pre-seeded directory still gets its build-output ignores (#811).
+    const freshStack = detectStackProfile(repoInfo.repoPath).stack;
+    ensureAgentGitignore(repoInfo.repoPath, body.gitignoreTemplate ? GITIGNORE_TEMPLATES[body.gitignoreTemplate] : undefined, freshStack);
     ensureStarterClaudeMd(repoInfo.repoPath);
     ensureStarterAgentsMd(repoInfo.repoPath);
     ensureHookScaffold(repoInfo.repoPath);
