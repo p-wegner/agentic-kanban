@@ -6,6 +6,7 @@ import { showToast } from "../Toast.js";
 import {
   CODEX_DEFAULT_PROFILE,
   COPILOT_DEFAULT_PROFILE,
+  PI_DEFAULT_PROFILE,
   CollapsibleSection,
   Field,
   type AgentProvider,
@@ -23,11 +24,12 @@ type AgentPresetsEditorProps = {
   profiles: string[];
   codexProfiles: string[];
   copilotProfiles: string[];
+  piProfiles: string[];
 };
 
 const EMPTY_DRAFT = { name: "", provider: "claude" as AgentProvider, profile: "", model: "" };
 
-export function AgentPresetsEditor({ activeProjectId, profiles, codexProfiles, copilotProfiles }: AgentPresetsEditorProps) {
+export function AgentPresetsEditor({ activeProjectId, profiles, codexProfiles, copilotProfiles, piProfiles }: AgentPresetsEditorProps) {
   const [presets, setPresets] = useState<AgentPreset[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -58,6 +60,8 @@ export function AgentPresetsEditor({ activeProjectId, profiles, codexProfiles, c
       ? codexProfiles.length ? codexProfiles : [CODEX_DEFAULT_PROFILE]
       : draft.provider === "copilot"
       ? copilotProfiles.length ? copilotProfiles : [COPILOT_DEFAULT_PROFILE]
+      : draft.provider === "pi"
+      ? piProfiles.length ? piProfiles : [PI_DEFAULT_PROFILE]
       : profiles;
   const modelOptions = draft.provider === "codex" ? CODEX_MODEL_OPTIONS : CLAUDE_MODEL_OPTIONS;
   const supportsModel = draft.provider === "claude" || draft.provider === "codex";
@@ -124,7 +128,7 @@ export function AgentPresetsEditor({ activeProjectId, profiles, codexProfiles, c
   }
 
   function presetSummary(preset: AgentPreset): string {
-    const providerLabel = preset.provider === "codex" ? "Codex" : preset.provider === "copilot" ? "Copilot" : "Claude";
+    const providerLabel = preset.provider === "codex" ? "Codex" : preset.provider === "copilot" ? "Copilot" : preset.provider === "pi" ? "Pi" : "Claude";
     const parts = [providerLabel];
     if (preset.profile) parts.push(preset.profile);
     if (preset.model) parts.push(preset.model);
@@ -194,6 +198,7 @@ export function AgentPresetsEditor({ activeProjectId, profiles, codexProfiles, c
             <option value="claude">Claude</option>
             <option value="codex">Codex</option>
             <option value="copilot">Copilot</option>
+            <option value="pi">Pi</option>
           </select>
         </Field>
         <Field label="Profile">

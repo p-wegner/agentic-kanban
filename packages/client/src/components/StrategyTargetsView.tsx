@@ -6,7 +6,7 @@ import { invalidateSettings } from "../lib/settingsStore.js";
 import { showToast } from "./Toast.js";
 
 type SegmentKind = "work-type" | "provider" | "area" | "custom";
-type Provider = "" | "claude" | "codex" | "copilot";
+type Provider = "" | "claude" | "codex" | "copilot" | "pi";
 type ProviderPolicyMode = "fill" | "throttle" | "fallback-only";
 
 interface StrategySegment {
@@ -22,7 +22,7 @@ interface StrategySegment {
 
 interface ProviderProfilePolicy {
   id: string;
-  provider: "claude" | "codex" | "copilot";
+  provider: "claude" | "codex" | "copilot" | "pi";
   profileName: string;
   label: string;
   mode: ProviderPolicyMode;
@@ -129,7 +129,7 @@ function normalizeSegment(segment: Partial<StrategySegment>, index: number): Str
 }
 
 function normalizeProviderPolicy(p: Partial<ProviderProfilePolicy>, index: number): ProviderProfilePolicy {
-  const provider = (["claude", "codex", "copilot"].includes(p.provider ?? "") ? p.provider : "claude") as "claude" | "codex" | "copilot";
+  const provider = (["claude", "codex", "copilot", "pi"].includes(p.provider ?? "") ? p.provider : "claude") as "claude" | "codex" | "copilot" | "pi";
   const profileName = typeof p.profileName === "string" ? p.profileName : "";
   const id = p.id || `policy-${provider}-${profileName || index}`;
   const validModes: ProviderPolicyMode[] = ["fill", "throttle", "fallback-only"];
@@ -889,6 +889,7 @@ export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQu
                       <option value="claude">Claude</option>
                       <option value="codex">Codex</option>
                       <option value="copilot">Copilot</option>
+                      <option value="pi">Pi</option>
                     </select>
                   </label>
                 </div>
@@ -928,12 +929,13 @@ export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQu
                             <span className="mb-1 block text-[11px] font-medium text-gray-500 dark:text-gray-400">Provider</span>
                             <select
                               value={policy.provider}
-                              onChange={(event) => updateProviderPolicy(policy.id, { provider: event.target.value as "claude" | "codex" | "copilot" })}
+                              onChange={(event) => updateProviderPolicy(policy.id, { provider: event.target.value as "claude" | "codex" | "copilot" | "pi" })}
                               className="w-full rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                             >
                               <option value="claude">Claude</option>
                               <option value="codex">Codex</option>
                               <option value="copilot">Copilot</option>
+                              <option value="pi">Pi</option>
                             </select>
                           </label>
                           <label className="block">
