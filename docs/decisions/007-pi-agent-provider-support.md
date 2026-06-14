@@ -55,10 +55,11 @@ the launch plumbing.
   `~/.pi/agent/sessions/`. ID surfaced via the `/session` command — **the exact
   field/event that carries the session id in `--mode json` must be captured from a
   real run before wiring resume** (same caution Codex had).
-- **Trust / headless:** non-interactive modes show **no** trust prompt and
-  **ignore project-local inputs (incl. `.pi/` extensions, skills, hooks) unless
-  `-a/--approve` is passed**. This is the single most important headless gotcha (see
-  Consequences). Trust DB: `~/.pi/agent/trust.json`.
+- **Trust / headless:** phase-1 verification on Pi 0.73.1 found `--approve` is not
+  a valid option and explicit `--extension <path>` / `--skill <path>` inputs load
+  in `--mode json -p` runs. Trust behavior may differ in other Pi versions, so keep
+  the version-specific finding in `docs/pi-cli-findings.md` as the launch contract.
+  Trust DB: `~/.pi/agent/trust.json`.
 - **Working dir:** not an explicit flag in the docs — spawn with `cwd` set to the
   worktree (we already do this for every provider) and verify.
 - **Extensions:** `-e/--extension <path|npm|git>`, `--skill <path>`,
@@ -113,7 +114,7 @@ board ticket; keep Claude as default and change no existing provider's flags.
    `CODEX_HOME`).
 3. **#726 — Provider implementation** — `agent-provider/pi-provider.ts` implementing
    `buildLaunchConfig` (resolve the `pi` binary on Windows; build
-   `--mode json --provider … --model … --approve` + cwd + resume + `--skill` flags)
+   `--mode json --provider … --model …` + cwd + resume + `--skill` flags)
    and `parseStreamEvent` (map Pi JSON events → `ParsedStreamEvent`: stats, tool
    activity, live model/context, rate-limit, session id). Register in `registry.ts`.
 4. **#727 — Client output parser** — `packages/client/src/lib/pi-output-parser.ts` +
@@ -148,18 +149,15 @@ board ticket; keep Claude as default and change no existing provider's flags.
 
 ## Consequences / risks
 
-- **Trust gating is the headline risk.** In non-interactive mode Pi **ignores all
-  project-local `.pi/` inputs (extensions, skills, hooks) unless `-a/--approve` is
-  passed.** A Pi provider that forgets `--approve` will silently run with **no hooks
-  and no skills** — the DB-safety and cross-worktree guards would not fire. The
-  provider MUST pass `--approve` (and/or pre-seed `~/.pi/agent/trust.json`), and
-  phase-7 validation MUST assert a guard actually blocks. This is the Pi analog of
-  the "POST /api/workspaces defaults to codex" silent-misconfig class.
-- **Hooks can only *soft-block* if Pi has no pre-tool veto.** Confirm in phase 1
-  whether a Pi hook can abort a tool call (Claude `PreToolUse` semantics) or is
-  after-the-fact only (the OpenCode `Stop` caveat). If the latter, the cross-worktree
-  write guard degrades to a nudge and we lean on the existing main-checkout commit
-  guards instead.
+- **Pi 0.73.1 does not accept `--approve`.** The phase-1 CLI findings captured on
+  2026-06-14 showed `--approve` fails fast with `Error: Unknown option:
+  --approve`, while explicit `--extension <path>` and `--skill <path>` inputs load
+  in non-interactive `--mode json -p` runs. The provider must not pass `--approve`
+  for this version; it wires explicit extension and skill paths instead.
+- **Pi hooks are hard gates for tool calls.** The phase-1 CLI findings confirmed
+  `pi.on("tool_call", ...)` runs before execution and can return `{ block: true,
+  reason }`. The Pi adapter therefore maps DB-safety and cross-worktree write checks
+  to hard pre-tool blocks by delegating to the existing `.claude/hooks/*.js` scripts.
 - **`default_model` cross-provider drift.** A global `default_model` is applied to
   every provider; a Pi model id handed to claude.exe (or vice-versa) breaks launches
   (the documented multi-cycle stall). Adding Pi widens this footgun — keep using the
@@ -171,19 +169,24 @@ board ticket; keep Claude as default and change no existing provider's flags.
 - Pi is added to all provider unions/branches; any future provider-listing code must
   account for four, not three.
 
-## Open questions (carry into Consult User / phase 1)
+## Open questions (phase-1 answers captured where known)
 
-- [ ] Exact `--mode json` event schema, and which field carries the **resume/session
-  id**.
-- [ ] Does Pi support **MCP**, and in what config shape? (Determines whether the
-  board MCP server is reachable from Pi task agents.)
-- [ ] Can a Pi **hook veto a tool call pre-execution**, or only observe after?
-  (Determines whether guards are hard gates or soft nudges.)
+- [x] Exact `--mode json` event schema, and which field carries the **resume/session
+  id**: phase-1 findings use the first `session.id` JSONL event as the provider
+  resume id.
+- [x] Does Pi support **MCP**, and in what config shape? Pi 0.73.1 has no
+  Claude-style MCP config support; board MCP access would require a Pi extension
+  or tool package.
+- [x] Can a Pi **hook veto a tool call pre-execution**, or only observe after?
+  Pi 0.73.1 can hard-veto via `pi.on("tool_call", ...)` returning `{ block: true,
+  reason }`.
 - [ ] **Auth/profile shape** — what does a "Pi profile" select (LLM provider, key,
   `PI_CODING_AGENT_DIR`)?
-- [ ] **Working-directory** mechanism in headless mode (cwd vs a flag).
-- [ ] Is there a **rate-limit / usage-limit** event to map to `rateLimitInfo` (needed
-  for the monitor's credit-exhaustion handling)?
+- [x] **Working-directory** mechanism in headless mode: spawn `cwd` is sufficient
+  in Pi 0.73.1.
+- [x] Is there a **rate-limit / usage-limit** event to map to `rateLimitInfo`:
+  no separate event was observed; provider errors surface in assistant messages
+  with `stopReason: "error"` and `errorMessage`.
 
 ## References
 

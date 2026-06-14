@@ -73,7 +73,7 @@ export class PiProvider implements AgentProvider {
   }
 
   buildLaunchConfig(options: ProviderLaunchOptions): AgentLaunchConfig {
-    const { agentArgs, agentCommand, keepAlive, model, planMode, profile, providerSessionId, prompt, systemInstructions } = options;
+    const { agentArgs, agentCommand, keepAlive, model, piExtensionPaths, piSkillPaths, planMode, profile, providerSessionId, prompt, systemInstructions } = options;
     const isWindows = process.platform === "win32";
     const isMockAgent = !!process.env.AGENT_COMMAND || (agentCommand?.includes("mock-agent") ?? false);
     let command = process.env.AGENT_COMMAND || agentCommand || "pi";
@@ -96,7 +96,7 @@ export class PiProvider implements AgentProvider {
         }
       }
 
-      args.push("--mode", "json", "--approve");
+      args.push("--mode", "json");
 
       const piProfile = extractPiProfile(profile);
       if (piProfile.provider) {
@@ -110,6 +110,14 @@ export class PiProvider implements AgentProvider {
 
       if (providerSessionId) {
         args.push("--session", providerSessionId);
+      }
+
+      for (const extensionPath of piExtensionPaths ?? []) {
+        if (extensionPath) args.push("--extension", extensionPath);
+      }
+
+      for (const skillPath of piSkillPaths ?? []) {
+        if (skillPath) args.push("--skill", skillPath);
       }
 
       if (agentArgs) {
