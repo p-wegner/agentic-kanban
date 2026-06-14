@@ -34,7 +34,38 @@ export const GENERIC_AGENT_GITIGNORE = [
 ];
 
 const AGENT_GITIGNORE_HEADER = "# AI agent artifacts (written during a workspace session; not project source)";
+const STACK_BUILD_GITIGNORE_HEADER = "# Build output (per-stack; generated, not source — keeps a fresh worktree's main clean for auto-merge)";
 const SCAFFOLD_COMMIT_MESSAGE = "chore: scaffold agent guards and onboarding";
+
+/**
+ * Per-stack build/compile output that a builder agent inevitably produces in a worktree but that
+ * is NOT project source. Without these ignored, a cargo/python/java toy-project leaves `target/`,
+ * `__pycache__/`, `dist/`, `*.class` etc. untracked after the first build, which makes the main
+ * checkout dirty and blocks auto-merge (`dirty_main`) — a recurring obstacle on fresh non-Node
+ * projects (#811). The generic Node/TS case was already covered ad-hoc by language templates; this
+ * extends the same protection to every stack the profile detector recognizes.
+ *
+ * Keyed by the coarse `StackProfile.stack` family. Lines are .gitignore patterns, deduped against
+ * whatever the repo already ignores, so this never clobbers a hand-written .gitignore.
+ */
+export const STACK_BUILD_ARTIFACT_GITIGNORE: Record<string, string[]> = {
+  node: ["node_modules/", "dist/", "build/", "*.tsbuildinfo", ".next/", "coverage/"],
+  rust: ["target/", "**/*.rs.bk"],
+  go: ["bin/", "*.exe", "*.test", "*.out"],
+  python: ["__pycache__/", "*.py[cod]", "*.egg-info/", ".pytest_cache/", ".mypy_cache/", ".ruff_cache/", "build/", "dist/", ".venv/"],
+  java: ["target/", "build/", "*.class", ".gradle/", "out/"],
+  ruby: ["*.gem", ".bundle/", "vendor/bundle/", "tmp/"],
+  elixir: ["_build/", "deps/", "*.beam", "cover/"],
+};
+
+/**
+ * Build-artifact .gitignore lines for a stack family, or [] for an unknown/null stack.
+ * Pure — callers feed the result into `ensureAgentGitignore` so per-stack output stays untracked.
+ */
+export function stackBuildArtifactGitignore(stack: string | null | undefined): string[] {
+  if (!stack) return [];
+  return STACK_BUILD_ARTIFACT_GITIGNORE[stack] ?? [];
+}
 
 function statusLineToPath(line: string): string {
   const raw = line.slice(3).trim();
@@ -89,25 +120,48 @@ export async function commitProjectScaffoldArtifacts(repoPath: string): Promise<
 }
 
 /**
- * Ensure the generic agent-artifact ignore lines are present in the repo's .gitignore.
- * - No .gitignore: write the optional language template followed by the agent block.
- * - Existing .gitignore: append only the lines that aren't already present (idempotent).
- * Clobber-safe — never rewrites or removes existing entries. Non-fatal on any error.
+ * Ensure the generic agent-artifact ignore lines (and, when a stack is known, that stack's
+ * build-output lines) are present in the repo's .gitignore.
+ * - No .gitignore: write the optional language template, then the agent block, then the
+ *   per-stack build-artifact block (when a stack is given).
+ * - Existing .gitignore: append only the lines (from either block) that aren't already present.
+ * Clobber-safe and idempotent — never rewrites or removes existing entries; a second run with
+ * the same stack is a no-op. Non-fatal on any error.
+ *
+ * @param stack the coarse `StackProfile.stack` family (e.g. "rust", "python", "java"). When given,
+ *   the matching build-output patterns are added so a non-Node stack's build output never makes
+ *   the main checkout dirty and blocks auto-merge (#811). Omit (or pass null) to skip — e.g. when
+ *   the stack is not yet known.
  */
-export function ensureAgentGitignore(repoPath: string, languageTemplate?: string): void {
+export function ensureAgentGitignore(repoPath: string, languageTemplate?: string, stack?: string | null): void {
   try {
     const gitignorePath = join(repoPath, ".gitignore");
+    const stackLines = stackBuildArtifactGitignore(stack);
+    const stackBlock = stackLines.length
+      ? `\n${STACK_BUILD_GITIGNORE_HEADER}\n${stackLines.join("\n")}\n`
+      : "";
+
     if (!existsSync(gitignorePath)) {
       const base = languageTemplate ? languageTemplate.replace(/\s*$/, "") + "\n\n" : "";
-      writeFileSync(gitignorePath, `${base}${AGENT_GITIGNORE_HEADER}\n${GENERIC_AGENT_GITIGNORE.join("\n")}\n`, "utf8");
+      writeFileSync(
+        gitignorePath,
+        `${base}${AGENT_GITIGNORE_HEADER}\n${GENERIC_AGENT_GITIGNORE.join("\n")}\n${stackBlock}`,
+        "utf8",
+      );
       return;
     }
+
     const existing = readFileSync(gitignorePath, "utf8");
     const present = new Set(existing.split(/\r?\n/).map((line) => line.trim()));
-    const missing = GENERIC_AGENT_GITIGNORE.filter((line) => !present.has(line));
-    if (missing.length === 0) return;
+    const missingAgent = GENERIC_AGENT_GITIGNORE.filter((line) => !present.has(line));
+    const missingStack = stackLines.filter((line) => !present.has(line));
+    if (missingAgent.length === 0 && missingStack.length === 0) return;
+
     const sep = existing.endsWith("\n") ? "" : "\n";
-    appendFileSync(gitignorePath, `${sep}\n${AGENT_GITIGNORE_HEADER}\n${missing.join("\n")}\n`);
+    let appended = sep;
+    if (missingAgent.length) appended += `\n${AGENT_GITIGNORE_HEADER}\n${missingAgent.join("\n")}\n`;
+    if (missingStack.length) appended += `\n${STACK_BUILD_GITIGNORE_HEADER}\n${missingStack.join("\n")}\n`;
+    appendFileSync(gitignorePath, appended);
   } catch {
     /* non-fatal: scaffolding must never block registration */
   }

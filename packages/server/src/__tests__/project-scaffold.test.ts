@@ -11,9 +11,11 @@ import {
   ensureVerifyGateRunner,
   ensurePnpmBuildApproval,
   ensureBuildableFromClean,
+  stackBuildArtifactGitignore,
   PNPM_BUILD_APPROVED_DEPS,
   PACKAGE_MANAGER_PINS,
   GENERIC_AGENT_GITIGNORE,
+  STACK_BUILD_ARTIFACT_GITIGNORE,
   STARTER_CLAUDE_MD,
   STARTER_AGENTS_MD,
 } from "../services/project-scaffold.js";
@@ -59,6 +61,85 @@ describe("project-scaffold", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  describe("per-stack build-artifact .gitignore (#811)", () => {
+    it("stackBuildArtifactGitignore returns the stack's lines, [] for unknown/null", () => {
+      expect(stackBuildArtifactGitignore("rust")).toContain("target/");
+      expect(stackBuildArtifactGitignore("python")).toContain("__pycache__/");
+      expect(stackBuildArtifactGitignore("java")).toContain("*.class");
+      expect(stackBuildArtifactGitignore("totally-unknown")).toEqual([]);
+      expect(stackBuildArtifactGitignore(null)).toEqual([]);
+      expect(stackBuildArtifactGitignore(undefined)).toEqual([]);
+    });
+
+    // The acceptance criterion: a cargo/python/java project's build output is ignored, so it
+    // never makes the main checkout dirty and blocks an auto-merge via dirty_main.
+    for (const stack of ["rust", "python", "java"] as const) {
+      it(`ignores ${stack} build output when no .gitignore exists`, async () => {
+        const dir = await tmp();
+        try {
+          ensureAgentGitignore(dir, undefined, stack);
+          const gi = await readFile(join(dir, ".gitignore"), "utf8");
+          for (const line of STACK_BUILD_ARTIFACT_GITIGNORE[stack]) expect(gi).toContain(line);
+          // generic agent block is still present alongside the per-stack block
+          for (const line of GENERIC_AGENT_GITIGNORE) expect(gi).toContain(line);
+        } finally {
+          await rm(dir, { recursive: true, force: true });
+        }
+      });
+
+      it(`appends only the missing ${stack} build lines to an existing .gitignore (idempotent, no clobber)`, async () => {
+        const dir = await tmp();
+        try {
+          const [firstLine, ...restLines] = STACK_BUILD_ARTIFACT_GITIGNORE[stack];
+          // pre-existing .gitignore already ignores one of the stack lines + a custom entry
+          await writeFile(join(dir, ".gitignore"), `my-custom-thing/\n${firstLine}\n`);
+          ensureAgentGitignore(dir, undefined, stack);
+          let gi = await readFile(join(dir, ".gitignore"), "utf8");
+          expect(gi).toContain("my-custom-thing/"); // existing entry preserved
+          for (const line of restLines) expect(gi).toContain(line); // missing stack lines appended
+          // the already-present stack line is not duplicated
+          expect(gi.split(/\r?\n/).filter((l) => l.trim() === firstLine).length).toBe(1);
+          // idempotent: a second run with the same stack is a no-op
+          const before = gi;
+          ensureAgentGitignore(dir, undefined, stack);
+          gi = await readFile(join(dir, ".gitignore"), "utf8");
+          expect(gi).toBe(before);
+        } finally {
+          await rm(dir, { recursive: true, force: true });
+        }
+      });
+    }
+
+    it("adds the per-stack block on a later run after the stack becomes known", async () => {
+      const dir = await tmp();
+      try {
+        // first run with no known stack — only the generic agent block lands
+        ensureAgentGitignore(dir);
+        let gi = await readFile(join(dir, ".gitignore"), "utf8");
+        expect(gi).not.toContain("target/");
+        // a later run once the stack is detected appends the per-stack block
+        ensureAgentGitignore(dir, undefined, "rust");
+        gi = await readFile(join(dir, ".gitignore"), "utf8");
+        expect(gi).toContain("target/");
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("a null/unknown stack adds no per-stack block (pure generic behavior)", async () => {
+      const dir = await tmp();
+      try {
+        ensureAgentGitignore(dir, undefined, null);
+        const gi = await readFile(join(dir, ".gitignore"), "utf8");
+        for (const line of GENERIC_AGENT_GITIGNORE) expect(gi).toContain(line);
+        // no stack header was written
+        expect(gi).not.toContain("Build output (per-stack");
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
   });
 
   it("writes a starter CLAUDE.md only when absent (never clobbers an existing one)", async () => {
