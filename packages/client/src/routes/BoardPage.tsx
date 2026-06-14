@@ -47,6 +47,7 @@ import { RecentlyMergedStrip } from "../components/RecentlyMergedStrip.js";
 import { BoardStats } from "../components/BoardStats.js";
 import { BoardToolbar } from "../components/BoardToolbar.js";
 import { BoardFilterMenu } from "../components/BoardFilterMenu.js";
+import { SavedBoardViews } from "../components/SavedBoardViews.js";
 import { ExportImportMenu } from "../components/ExportImportMenu.js";
 import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
 // Lazy: opened on user action (issue click / workspace open), and they pull in
@@ -270,6 +271,7 @@ export function BoardPage() {
   const [milestoneFilterId, setMilestoneFilterId] = useState<string | null>(null);
   const [milestones, setMilestones] = useState<MilestoneResponse[]>([]);
   const [issueTypeFilter, setIssueTypeFilter] = useState<string | null>(null);
+  const [priorityFilter, setPriorityFilter] = useState<string | null>(null);
   const [swimlaneDimension, setSwimlaneDimension] = useState<"none" | "priority" | "tag">(() => {
     try { return (localStorage.getItem("kanban-swimlane") as "none" | "priority" | "tag") ?? "none"; } catch { return "none"; }
   });
@@ -747,6 +749,31 @@ export function BoardPage() {
   useEffect(() => {
     if (!activeProjectId) return;
     try {
+      const stored = localStorage.getItem(`board-priority-filter-${activeProjectId}`);
+      setPriorityFilter(stored || null);
+    } catch {
+      // ignore
+    }
+  }, [activeProjectId]);
+
+  const handlePriorityFilterChange = useCallback((priority: string | null) => {
+    setPriorityFilter(priority);
+    if (activeProjectId) {
+      try {
+        if (priority) {
+          localStorage.setItem(`board-priority-filter-${activeProjectId}`, priority);
+        } else {
+          localStorage.removeItem(`board-priority-filter-${activeProjectId}`);
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }, [activeProjectId]);
+
+  useEffect(() => {
+    if (!activeProjectId) return;
+    try {
       const stored = localStorage.getItem(`board-tag-filter-${activeProjectId}`);
       setActiveTagIds(stored ? new Set(stored.split(",").filter(Boolean)) : new Set());
     } catch {
@@ -782,6 +809,22 @@ export function BoardPage() {
     if (activeProjectId) {
       try {
         localStorage.removeItem(`board-tag-filter-${activeProjectId}`);
+      } catch {
+        // ignore
+      }
+    }
+  }, [activeProjectId]);
+
+  const handleSetTagFilterIds = useCallback((tagIds: string[]) => {
+    const next = new Set(tagIds);
+    setActiveTagIds(next);
+    if (activeProjectId) {
+      try {
+        if (next.size > 0) {
+          localStorage.setItem(`board-tag-filter-${activeProjectId}`, [...next].join(","));
+        } else {
+          localStorage.removeItem(`board-tag-filter-${activeProjectId}`);
+        }
       } catch {
         // ignore
       }
@@ -1281,25 +1324,18 @@ export function BoardPage() {
   const [showBlocked, setShowBlocked] = useState(false);
   const [showStaleOnly, setShowStaleOnly] = useState(false);
 
-  const statusFilter = useMemo(
-    () => columns.find((col) => col.id === statusFilterId) ?? null,
-    [columns, statusFilterId],
-  );
   const boardViewState: BoardViewState = useMemo(() => {
-    const firstTagId = activeTagIds.size === 1 ? [...activeTagIds][0] : null;
-    const firstTag = firstTagId ? allTags.find((t) => t.id === firstTagId) ?? null : null;
+    const tagIds = [...activeTagIds].sort((a, b) => a.localeCompare(b));
+    const tagNames = tagIds
+      .map((tagId) => allTags.find((tag) => tag.id === tagId)?.name)
+      .filter((name): name is string => !!name);
     return {
-      searchQuery,
-      showBlocked,
-      showStaleOnly,
-      statusId: statusFilter?.id ?? null,
-      statusName: statusFilter?.name ?? null,
-      tagId: firstTag?.id ?? null,
-      tagName: firstTag?.name ?? null,
-      sortMode: "rank",
-      viewMode,
+      tagIds,
+      tagNames,
+      issueType: issueTypeFilter,
+      priority: priorityFilter,
     };
-  }, [activeTagIds, allTags, searchQuery, showBlocked, showStaleOnly, statusFilter, viewMode]);
+  }, [activeTagIds, allTags, issueTypeFilter, priorityFilter]);
   const boardStatusOptions = useMemo(
     () => columns.map((col) => ({ id: col.id, name: col.name })),
     [columns],
@@ -1308,6 +1344,13 @@ export function BoardPage() {
     () => allTags.map((tag) => ({ id: tag.id, name: tag.name })),
     [allTags],
   );
+  const loadSavedViewTags = useCallback(async (): Promise<SavedViewReference[]> => {
+    if (tagsLoaded) return boardTagOptions;
+    const tags = await apiFetch<Tag[]>("/api/tags");
+    setAllTags(tags);
+    setTagsLoaded(true);
+    return tags.map((tag) => ({ id: tag.id, name: tag.name }));
+  }, [boardTagOptions, tagsLoaded]);
 
   useEffect(() => {
     if (statusFilterId && columns.length > 0 && !columns.some((col) => col.id === statusFilterId)) {
@@ -1343,13 +1386,10 @@ export function BoardPage() {
   }, [activeProjectId]);
 
   const applyBoardViewState = useCallback((state: BoardViewState) => {
-    setSearchQuery(state.searchQuery);
-    setShowBlocked(state.showBlocked);
-    setShowStaleOnly(state.showStaleOnly);
-    setStatusFilterId(state.statusId);
-    setActiveTagIds(state.tagId ? new Set([state.tagId]) : new Set());
-    handleViewModeChange(state.viewMode);
-  }, [handleViewModeChange]);
+    handleSetTagFilterIds(state.tagIds);
+    handleIssueTypeFilterChange(state.issueType);
+    handlePriorityFilterChange(state.priority);
+  }, [handleIssueTypeFilterChange, handlePriorityFilterChange, handleSetTagFilterIds]);
 
   const filterOptions = useMemo(() => ({
     focusMode,
@@ -1357,10 +1397,11 @@ export function BoardPage() {
     activeTagIds,
     milestoneFilterId,
     issueTypeFilter,
+    priorityFilter,
     showBlocked,
     showStaleOnly,
     searchQuery,
-  }), [focusMode, statusFilterId, activeTagIds, milestoneFilterId, issueTypeFilter, showBlocked, showStaleOnly, searchQuery]);
+  }), [focusMode, statusFilterId, activeTagIds, milestoneFilterId, issueTypeFilter, priorityFilter, showBlocked, showStaleOnly, searchQuery]);
 
   const filteredColumns = useMemo(
     () =>
@@ -2218,12 +2259,23 @@ export function BoardPage() {
         setSelectedIssue={setSelectedIssue}
         settingsBoardTools={
           <>
+            {activeProjectId && (
+              <SavedBoardViews
+                projectId={activeProjectId}
+                currentState={boardViewState}
+                tags={boardTagOptions}
+                onApply={applyBoardViewState}
+                onLoadTags={loadSavedViewTags}
+              />
+            )}
             <BoardFilterMenu
               statuses={boardStatusOptions}
               statusFilterId={statusFilterId}
               onStatusFilterChange={setStatusFilterId}
               issueTypeFilter={issueTypeFilter}
               onIssueTypeFilterChange={handleIssueTypeFilterChange}
+              priorityFilter={priorityFilter}
+              onPriorityFilterChange={handlePriorityFilterChange}
               milestones={milestones}
               milestoneFilterId={milestoneFilterId}
               onMilestoneFilterChange={setMilestoneFilterId}

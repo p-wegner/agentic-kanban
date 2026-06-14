@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  boardViewStatesEqual,
   deleteSavedBoardView,
   renameSavedBoardView,
   resolveBoardViewState,
@@ -10,15 +11,10 @@ import {
 } from "./boardSavedViews.js";
 
 const baseState: BoardViewState = {
-  searchQuery: "review",
-  showBlocked: true,
-  showStaleOnly: false,
-  statusId: "status-review",
-  statusName: "In Review",
-  tagId: "tag-visual",
-  tagName: "visual-verification",
-  sortMode: "rank",
-  viewMode: "kanban",
+  tagIds: ["tag-visual", "tag-review"],
+  tagNames: ["visual-verification", "review"],
+  issueType: "feature",
+  priority: "high",
 };
 
 function savedView(overrides: Partial<SavedBoardView> = {}): SavedBoardView {
@@ -42,30 +38,39 @@ describe("board saved views", () => {
     expect(views[0].createdAt).toBe("2026-06-01T01:00:00.000Z");
   });
 
-  it("applies saved views and remaps status and tag references by name", () => {
+  it("applies saved views and remaps tag references by name", () => {
     const resolved = resolveBoardViewState(
       savedView({
         state: {
           ...baseState,
-          statusId: "deleted-status",
-          tagId: "deleted-tag",
+          tagIds: ["deleted-tag"],
         },
       }).state,
-      [{ id: "status-review-new", name: "In Review" }],
-      [{ id: "tag-visual-new", name: "visual-verification" }],
+      [
+        { id: "tag-visual-new", name: "visual-verification" },
+        { id: "tag-review-new", name: "review" },
+      ],
     );
 
     expect(resolved.dropped).toEqual([]);
-    expect(resolved.state.statusId).toBe("status-review-new");
-    expect(resolved.state.tagId).toBe("tag-visual-new");
+    expect(resolved.state.tagIds).toEqual(["tag-visual-new", "tag-review-new"]);
   });
 
-  it("drops stale status and tag filters when neither id nor name exists", () => {
-    const resolved = resolveBoardViewState(baseState, [], []);
+  it("drops stale tag filters when neither id nor name exists", () => {
+    const resolved = resolveBoardViewState(baseState, []);
 
-    expect(resolved.dropped).toEqual(["status", "tag"]);
-    expect(resolved.state.statusId).toBeNull();
-    expect(resolved.state.tagId).toBeNull();
+    expect(resolved.dropped).toEqual(["tag"]);
+    expect(resolved.state.tagIds).toEqual([]);
+  });
+
+  it("keeps valid tags and reports partial stale tag filters", () => {
+    const resolved = resolveBoardViewState(baseState, [
+      { id: "tag-visual", name: "visual-verification" },
+    ]);
+
+    expect(resolved.dropped).toEqual(["tag"]);
+    expect(resolved.state.tagIds).toEqual(["tag-visual"]);
+    expect(resolved.state.tagNames).toEqual(["visual-verification"]);
   });
 
   it("renames and deletes saved views", () => {
@@ -81,6 +86,15 @@ describe("board saved views", () => {
 
     expect(parsed).toHaveLength(1);
     expect(parsed[0].name).toBe("Review queue");
-    expect(parsed[0].state.searchQuery).toBe("review");
+    expect(parsed[0].state.priority).toBe("high");
+  });
+
+  it("matches saved view state independent of tag order", () => {
+    expect(boardViewStatesEqual(baseState, {
+      tagIds: ["tag-review", "tag-visual"],
+      tagNames: [],
+      issueType: "feature",
+      priority: "high",
+    })).toBe(true);
   });
 });
