@@ -10,7 +10,7 @@ Use the **agentic-kanban MCP** tools (prefix `mcp__agentic-kanban__`) to keep th
 
 ## Tool selection
 
-Builder sessions should use dedicated tools for file inspection: Read for file contents and Grep for content search. Never use PowerShell to read files (`Get-Content`, `Get-ChildItem`) or search content (`rg`, `Select-String`); `git show HEAD:file | Select-String` fails with German-locale quoting errors, so use Grep with a file path instead.
+Builder sessions should use the harness-native file inspection tools where available: Claude `Read` for file contents and `Grep` for content search; Codex `rg`/shell inspection is acceptable when those tools are not available. Avoid fragile PowerShell text pipelines for review/search work (`git show HEAD:file | Select-String` fails with German-locale quoting errors); prefer searching a real file path with the harness-native search tool.
 
 ## Available MCP Tools
 
