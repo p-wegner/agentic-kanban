@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { detectRepoInfo } from "./git-info.service.js";
 import { initializeProjectStatuses } from "../repositories/issue.repository.js";
 import { getCurrentBranch } from "./git.service.js";
+import { populateStackProfile, getStackProfile } from "./stack-profile.service.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -197,6 +198,10 @@ export async function registerProject(path: string, options?: { name?: string })
       set: { value: projectId, updatedAt: now },
     });
 
+  // Durable stack profile (#786): the ONE descriptor the feedback harness reads.
+  // Best-effort & non-blocking — the optional LLM gap-fill must not slow or fail registration.
+  void populateStackProfile(projectId, repoInfo.repoPath, db).catch(() => { /* non-fatal */ });
+
   const project = {
     id: projectId,
     name: projectName,
@@ -224,13 +229,14 @@ export async function registerProject(path: string, options?: { name?: string })
  */
 export async function repairProjectRegistration(
   projectId: string,
-): Promise<{ seededStatuses: boolean; setDefaultBranch: string | null }> {
+): Promise<{ seededStatuses: boolean; setDefaultBranch: string | null; populatedStackProfile: boolean }> {
   const [project] = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
   if (!project) throw new Error(`Project not found: ${projectId}`);
 
   const now = new Date().toISOString();
   let seededStatuses = false;
   let setDefaultBranch: string | null = null;
+  let populatedStackProfile = false;
 
   const existingStatuses = await db
     .select({ id: projectStatuses.id })
@@ -253,5 +259,17 @@ export async function repairProjectRegistration(
     }
   }
 
-  return { seededStatuses, setDefaultBranch };
+  // Backfill the stack profile (#786) onto a project registered before profiles existed.
+  // Idempotent: only computes when none is persisted yet.
+  const existingProfile = await getStackProfile(projectId, db);
+  if (!existingProfile) {
+    try {
+      await populateStackProfile(projectId, project.repoPath, db);
+      populatedStackProfile = true;
+    } catch {
+      // non-fatal — leave unpopulated, a later repair/registration can retry.
+    }
+  }
+
+  return { seededStatuses, setDefaultBranch, populatedStackProfile };
 }

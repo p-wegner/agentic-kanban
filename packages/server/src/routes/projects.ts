@@ -19,8 +19,10 @@ import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 import { createHash } from "node:crypto";
 import { createWorkspaceSummaryCache } from "../services/workspace-summary-cache.service.js";
-import { issues, projectStatuses, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses, workspaces, projects } from "@agentic-kanban/shared/schema";
 import { and, eq, gte } from "drizzle-orm";
+import { getStackProfile, populateStackProfile, saveStackProfile } from "../services/stack-profile.service.js";
+import type { StackProfile } from "@agentic-kanban/shared";
 
 function parseBoardHealthEventsLimit(raw: string | undefined): number {
   const parsed = Number.parseInt(raw ?? "", 10);
@@ -585,6 +587,57 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
     const overallMedianLeadTimeMs = percentile(sortedAll, 50);
 
     return c.json({ providers, window: `${days}d`, overallMedianLeadTimeMs });
+  });
+
+  // GET /api/projects/:id/stack-profile — the durable per-project stack descriptor (#786).
+  // Returns the persisted profile; computes+persists one on demand if absent (?refresh=true
+  // forces a recompute). The feedback harness reads this ONE descriptor.
+  router.get("/:id/stack-profile", async (c) => {
+    const projectId = c.req.param("id");
+    const refresh = c.req.query("refresh") === "true";
+
+    const [project] = await database
+      .select({ repoPath: projects.repoPath })
+      .from(projects)
+      .where(eq(projects.id, projectId))
+      .limit(1);
+    if (!project) return c.json({ error: "Project not found" }, 404);
+
+    let profile = refresh ? null : await getStackProfile(projectId, database);
+    if (!profile) {
+      profile = await populateStackProfile(projectId, project.repoPath, database);
+    }
+    return c.json({ projectId, profile });
+  });
+
+  // PUT /api/projects/:id/stack-profile — override the stack profile from the UI.
+  // Marks the saved profile source="manual" so a later auto-detect won't silently clobber it.
+  router.put("/:id/stack-profile", async (c) => {
+    const projectId = c.req.param("id");
+    const [project] = await database
+      .select({ repoPath: projects.repoPath })
+      .from(projects)
+      .where(eq(projects.id, projectId))
+      .limit(1);
+    if (!project) return c.json({ error: "Project not found" }, 404);
+
+    const body = await parseJsonBody<Partial<StackProfile>>(c);
+    const existing = (await getStackProfile(projectId, database)) ?? {
+      stack: null, packageManager: null, isMonorepo: false, workspaces: [],
+      installCommand: null, buildCommand: null, testCommand: null, quickTestCommand: null,
+      lintCommand: null, typecheckCommand: null, devCommand: null, isWeb: false,
+      devHealthUrl: null, devPort: null, testDir: null, testRunner: null,
+      source: "manual" as const, detectedMarkers: [], updatedAt: new Date().toISOString(),
+    };
+
+    const merged: StackProfile = {
+      ...existing,
+      ...body,
+      source: "manual",
+      updatedAt: new Date().toISOString(),
+    };
+    await saveStackProfile(projectId, merged, database);
+    return c.json({ projectId, profile: merged });
   });
 
   return router;
