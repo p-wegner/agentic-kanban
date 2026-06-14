@@ -10,7 +10,6 @@ import {
 } from "@agentic-kanban/shared/schema";
 import { isResolvedDependencyStatusView } from "@agentic-kanban/shared/lib/status-view";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
-import { modelBelongsToProvider } from "@agentic-kanban/shared";
 import { branchHash, BASE_SERVER_PORT, BASE_CLIENT_PORT } from "./worktree-ports.js";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
@@ -63,8 +62,9 @@ import {
   initWorkspaceWorkflow,
   buildTransitionBlock,
 } from "@agentic-kanban/shared/lib/workflow-engine";
-import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
-import { resolveStrategyProviderSelection, applyProviderSelectionToPrefMap } from "./strategy-objective.service.js";
+import { toExecutorProvider } from "./agent-settings.service.js";
+import { resolveStrategyProviderSelection } from "./strategy-objective.service.js";
+import { resolveProviderConfig } from "./provider-config-resolution.js";
 import { preflightAgentProfile } from "./agent-profile-health.service.js";
 import { emitButlerSystemEvent } from "./butler-event-feed.js";
 import { DEFAULT_BUILDER_GUARDRAILS, PREF_BUILDER_GUARDRAILS } from "../constants/preference-keys.js";
@@ -459,63 +459,34 @@ export function createWorkspaceCrudService(deps: {
     const prefRows = await database.select().from(preferences);
     const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
 
-    const profileOverride = input.profile;
-    const legacyProfileOverride = input.claudeProfile;
-    if (profileOverride?.name) {
-      if (profileOverride.provider === "codex") {
-        prefMap.set("codex_profile", profileOverride.name);
-        prefMap.set("provider", "codex");
-      } else if (profileOverride.provider === "copilot") {
-        prefMap.set("copilot_profile", profileOverride.name);
-        prefMap.set("provider", "copilot");
-      } else {
-        prefMap.set("claude_profile", profileOverride.name);
-        prefMap.set("provider", "claude");
-      }
-    } else if (legacyProfileOverride) {
-      prefMap.set("claude_profile", legacyProfileOverride);
-      prefMap.set("provider", "claude");
-    } else if (projectId) {
-      // No explicit profile — consult the project's strategy config for provider policy.
-      const selected = await resolveStrategyProviderSelection(database, projectId);
-      if (selected) {
-        applyProviderSelectionToPrefMap(prefMap, selected);
-        console.log(`[workspaces] strategy provider selection: ${selected.provider}:${selected.profileName}`);
-      }
-    }
+    // Impure inputs: an explicit profile/claudeProfile override takes precedence;
+    // otherwise consult the project's strategy config (DB + live quota) for the
+    // provider policy. The pure decision below consumes the resolved selection.
+    const hasOverride = Boolean(input.profile?.name) || Boolean(input.claudeProfile);
+    const strategySelection = !hasOverride && projectId
+      ? await resolveStrategyProviderSelection(database, projectId)
+      : null;
 
-    const { agentCommand, agentArgs, claudeProfile: resolvedProfile, profile: resolvedProfileSelection, provider, permissionPromptTool } = resolveAgentSettings(prefMap);
-    const selectedProfile = provider === "claude"
-      ? (resolvedProfile || legacyProfileOverride || prefMap.get("claude_profile") || undefined)
-      : resolvedProfileSelection?.name;
-
-    const requestedModel = typeof input.model === "string" ? input.model.trim() : "";
-    // Both Claude and Codex honor the `default_model` preference (overridable per
-    // workspace via input.model). Codex passes it through as `--model`. Copilot has
-    // no model flag, so it stays undefined.
-    //
-    // `default_model` is a single, provider-agnostic preference, so a leftover model id
-    // from the other provider (e.g. a Codex `gpt-5.5` surviving a switch to Claude) would
-    // otherwise be passed as `--model gpt-5.5` to claude.exe — which exits in ~5s with an
-    // invalid-model error and silently fails every launch (#696). Drop a model id that
-    // doesn't belong to the active provider's family rather than launch a doomed agent.
-    let model = (provider === "claude" || provider === "codex")
-      ? ((requestedModel || prefMap.get("default_model")) || undefined)
-      : undefined;
-    if (model && !modelBelongsToProvider(model, provider)) {
-      console.warn(`[workspaces] ignoring default_model "${model}" — not a ${provider} model; using provider default`);
-      model = undefined;
+    const resolved = resolveProviderConfig({
+      prefMap,
+      profileOverride: input.profile,
+      legacyProfileOverride: input.claudeProfile,
+      strategySelection,
+      requestedModel: input.model,
+    });
+    for (const note of resolved.notes) {
+      console.log(`[workspaces] ${note}`);
     }
 
     return {
-      agentCommand,
-      agentArgs,
-      claudeProfile: selectedProfile,
-      resolvedProfile: selectedProfile,
-      resolvedProvider: provider,
-      resolvedProfileSelection,
-      permissionPromptTool,
-      model,
+      agentCommand: resolved.agentCommand,
+      agentArgs: resolved.agentArgs,
+      claudeProfile: resolved.profileName,
+      resolvedProfile: resolved.profileName,
+      resolvedProvider: resolved.provider,
+      resolvedProfileSelection: resolved.profileSelection,
+      permissionPromptTool: resolved.permissionPromptTool,
+      model: resolved.model,
       systemInstructions: prefMap.get(PREF_BUILDER_GUARDRAILS) ?? DEFAULT_BUILDER_GUARDRAILS,
     };
   }
