@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { IssueCard, type ProjectTag, type QuickUpdateCallbacks } from "./IssueCard.js";
@@ -80,6 +81,12 @@ interface BoardColumnProps {
 }
 
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
+const VIRTUALIZE_ISSUE_THRESHOLD = 15;
+const ESTIMATED_CARD_HEIGHT = 145;
+const CARD_GAP_PX = {
+  compact: 4,
+  comfortable: 6,
+} satisfies Record<CardDensity, number>;
 
 export function BoardColumn({
   column,
@@ -247,6 +254,26 @@ export function BoardColumn({
   const displayedIssues = sortIssues(column.issues, sortMode);
   const wipStatus = evaluateWipLimit(column.issues.length, wipLimit ?? null);
   const estimateRollup = computeColumnEstimate(column.issues);
+  const shouldVirtualizeIssues =
+    !stacked && swimlaneDimension === "none" && displayedIssues.length > VIRTUALIZE_ISSUE_THRESHOLD;
+  const cardGapPx = CARD_GAP_PX[cardDensity];
+
+  const issueVirtualizer = useVirtualizer({
+    count: displayedIssues.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: useCallback(() => ESTIMATED_CARD_HEIGHT, []),
+    overscan: 5,
+  });
+
+  const virtualIssueItems = shouldVirtualizeIssues ? issueVirtualizer.getVirtualItems() : [];
+  const virtualIssuesHeight = shouldVirtualizeIssues ? issueVirtualizer.getTotalSize() : 0;
+
+  useEffect(() => {
+    if (!shouldVirtualizeIssues || !keyboardCursorIssueId) return;
+    const issueIndex = displayedIssues.findIndex((issue) => issue.id === keyboardCursorIssueId);
+    if (issueIndex === -1) return;
+    issueVirtualizer.scrollToIndex(issueIndex, { align: "auto" });
+  }, [displayedIssues, issueVirtualizer, keyboardCursorIssueId, shouldVirtualizeIssues]);
 
   // Single source of truth for the IssueCard prop binding shared by the flat list
   // and both swimlane modes. The aging-heatmap props are only forwarded in the flat
@@ -399,19 +426,49 @@ export function BoardColumn({
         <div
           ref={scrollRef}
           onScroll={stacked ? undefined : updateScrollState}
-          className={`${cardDensity === "compact" ? "space-y-1" : "space-y-1.5"} column-scroll-container ${stacked ? "" : "h-full overflow-y-auto pb-6"}`}
+          className={`${shouldVirtualizeIssues ? "" : cardDensity === "compact" ? "space-y-1" : "space-y-1.5"} column-scroll-container ${stacked ? "" : "h-full overflow-y-auto pb-6"}`}
         >
           {swimlaneDimension === "none" && (
             <>
-              {displayedIssues.map((issue: IssueWithStatus, idx: number) => (
-                <div key={issue.id}>
-                  <DropGap
-                    visible={dragOver}
-                    onDrop={(e) => handleDropGap(e, computeGapSortOrder(idx))}
-                  />
-                  {renderCard(issue, true)}
+              {shouldVirtualizeIssues ? (
+                <div style={{ height: virtualIssuesHeight, position: "relative" }}>
+                  {virtualIssueItems.map((virtualIssue) => {
+                    const issue = displayedIssues[virtualIssue.index];
+                    if (!issue) return null;
+                    return (
+                      <div
+                        key={issue.id}
+                        data-index={virtualIssue.index}
+                        ref={issueVirtualizer.measureElement}
+                        style={{
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          transform: `translateY(${virtualIssue.start}px)`,
+                          paddingBottom: cardGapPx,
+                        }}
+                      >
+                        <DropGap
+                          visible={dragOver}
+                          onDrop={(e) => handleDropGap(e, computeGapSortOrder(virtualIssue.index))}
+                        />
+                        {renderCard(issue, true)}
+                      </div>
+                    );
+                  })}
                 </div>
-              ))}
+              ) : (
+                displayedIssues.map((issue: IssueWithStatus, idx: number) => (
+                  <div key={issue.id}>
+                    <DropGap
+                      visible={dragOver}
+                      onDrop={(e) => handleDropGap(e, computeGapSortOrder(idx))}
+                    />
+                    {renderCard(issue, true)}
+                  </div>
+                ))
+              )}
               {dragOver && displayedIssues.length > 0 && (
                 <DropGap
                   visible={true}
