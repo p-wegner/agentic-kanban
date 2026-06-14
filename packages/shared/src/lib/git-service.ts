@@ -167,6 +167,36 @@ export async function pruneWorktrees(repoPath: string): Promise<void> {
 }
 
 /**
+ * Clone a single branch of a local repo into a fresh destination directory (#792).
+ *
+ * Unlike a worktree, this is a genuinely independent checkout: no junctioned
+ * `node_modules`, no shared `.git`, no untracked artifacts — the same clean state a
+ * teammate gets from `git clone`. Used by the cold-clone build check to catch
+ * branches that build in the dependency-symlinked worktree but break on a fresh
+ * clone (the #783 class). `--single-branch` keeps it cheap; `--no-hardlinks` is NOT
+ * used so the local clone stays fast (object hardlinks are fine — they don't leak
+ * the warm dependency store the way a worktree junction does).
+ */
+export async function cloneBranchTo(
+  repoPath: string,
+  branch: string,
+  dest: string,
+  timeoutMs = 5 * 60 * 1000,
+): Promise<void> {
+  await new Promise<void>((resolveClone, reject) => {
+    execFile(
+      "git",
+      ["clone", "--quiet", "--single-branch", "--branch", branch, repoPath, dest],
+      { maxBuffer: 10 * 1024 * 1024, timeout: timeoutMs },
+      (err, _stdout, stderr) => {
+        if (err) reject(new Error(`git clone (branch ${branch}) failed: ${stderr || err.message}`));
+        else resolveClone();
+      },
+    );
+  });
+}
+
+/**
  * Recursively break every symlink/junction inside a directory WITHOUT recursing
  * INTO any link, so neither `git worktree remove` nor `fs.rm({ recursive })` can
  * traverse a Windows junction into the main checkout and delete the shared store
