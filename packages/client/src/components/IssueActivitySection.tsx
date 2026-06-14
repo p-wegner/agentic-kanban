@@ -1,5 +1,6 @@
 import React from "react";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
+import { showToast } from "./Toast.js";
 
 export type ActivityEventType =
   | "issue_created"
@@ -28,6 +29,72 @@ export interface ActivityEvent {
 interface Props {
   events: ActivityEvent[];
   loading: boolean;
+  issueTitle?: string;
+  issueNumber?: number | null;
+  currentStatusName?: string | null;
+}
+
+function markdownEscape(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/([`*_\[\]])/g, "\\$1");
+}
+
+function safeFileSegment(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+}
+
+export function issueActivityMarkdownFilename(issueTitle: string, issueNumber?: number | null): string {
+  const prefix = issueNumber != null ? `issue-${issueNumber}` : "issue-activity";
+  const titleSegment = safeFileSegment(issueTitle);
+  return titleSegment ? `${prefix}-${titleSegment}-activity.md` : `${prefix}-activity.md`;
+}
+
+export function buildIssueActivityMarkdown(
+  issueTitle: string,
+  currentStatusName: string,
+  events: ActivityEvent[],
+): string {
+  const lines = [
+    `# ${markdownEscape(issueTitle)}`,
+    "",
+    `Current status: ${markdownEscape(currentStatusName)}`,
+    "",
+    "## Activity",
+    "",
+  ];
+
+  const chronologicalEvents = [...events].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+
+  if (chronologicalEvents.length === 0) {
+    lines.push("_No activity recorded._");
+  } else {
+    for (const event of chronologicalEvents) {
+      const timestamp = new Date(event.timestamp).toLocaleString();
+      const actor = event.actor ? ` by ${markdownEscape(event.actor)}` : "";
+      lines.push(`- **${markdownEscape(timestamp)}** - ${markdownEscape(event.summary)}${actor}`);
+    }
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+export function downloadIssueActivityMarkdown(
+  issueTitle: string,
+  currentStatusName: string,
+  issueNumber: number | null | undefined,
+  events: ActivityEvent[],
+): void {
+  const markdown = buildIssueActivityMarkdown(issueTitle, currentStatusName, events);
+  const blob = new Blob([markdown], { type: "text/markdown" });
+  const anchor = document.createElement("a");
+  anchor.href = URL.createObjectURL(blob);
+  anchor.download = issueActivityMarkdownFilename(issueTitle, issueNumber);
+  anchor.click();
+  URL.revokeObjectURL(anchor.href);
 }
 
 const EVENT_ICONS: Record<ActivityEventType, React.ReactNode> = {
@@ -103,12 +170,33 @@ const EVENT_ICON_COLORS: Record<ActivityEventType, string> = {
   comment: "text-gray-400 dark:text-gray-500",
 };
 
-export function IssueActivitySection({ events, loading }: Props) {
+export function IssueActivitySection({ events, loading, issueTitle, issueNumber, currentStatusName }: Props) {
+  const canExportMarkdown = Boolean(issueTitle && currentStatusName);
+
+  function handleExportMarkdown() {
+    if (!issueTitle || !currentStatusName) return;
+    downloadIssueActivityMarkdown(issueTitle, currentStatusName, issueNumber, events);
+    showToast("Activity Markdown downloaded", "success");
+  }
+
   return (
     <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
-      <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-2">
-        Activity
-      </label>
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
+          Activity
+        </label>
+        {canExportMarkdown && (
+          <button
+            type="button"
+            onClick={handleExportMarkdown}
+            disabled={loading}
+            className="text-[11px] text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300 disabled:opacity-50"
+            title="Download this issue's activity history as Markdown"
+          >
+            Export activity as Markdown
+          </button>
+        )}
+      </div>
       {loading ? (
         <p className="text-xs text-gray-400 dark:text-gray-500">Loading activity...</p>
       ) : events.length === 0 ? (

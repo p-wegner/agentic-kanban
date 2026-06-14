@@ -2163,7 +2163,13 @@ export function IssueDetailPanel({
 
           {/* Activity feed */}
           {!editing && (
-            <IssueActivitySection events={activityEvents} loading={activityLoading} />
+            <IssueActivitySection
+              events={activityEvents}
+              loading={activityLoading}
+              issueTitle={issue.title}
+              issueNumber={issue.issueNumber}
+              currentStatusName={issue.statusName}
+            />
           )}
 
           {/* Merged commits that landed on the default branch for this issue */}
