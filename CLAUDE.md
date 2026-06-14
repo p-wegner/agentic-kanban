@@ -18,21 +18,7 @@ Active project is "agentic-kanban" — use it for all monitor/workspace/MCP oper
 Change only what the task requires. Don't fix unrelated issues, rename/reformat out of scope, or add features while refactoring. File a kanban ticket (`mcp__agentic-kanban__create_issue`) for unrelated issues instead of fixing inline. Run `scope-guard` before committing (creep signal: >3–4 files for a small task, or files unrelated to the ticket).
 
 ## Agent Providers
-Pi runs as `pi --mode json -p <prompt>` from the workspace `cwd`. The provider
-resolves the Windows binary (`pi`, `pi.cmd`, or `pi.ps1`) and passes explicit
-`--extension <worktree>/.pi/plugin/agentic-kanban-hooks.ts` plus repeated
-`--skill <worktree>/.claude/skills/<name>/SKILL.md` flags for materialized
-skills. A Pi profile named `provider/model` (or `provider:model`) maps to
-`--provider` and `--model`; `default` uses Pi's own configured defaults under
-`PI_CODING_AGENT_DIR` / `~/.pi/agent`. Pi 0.73.1 rejects `--approve`; do not add
-it.
-
-Pi safety hooks are hard pre-tool gates via Pi's `tool_call` event. The
-`.pi/plugin/agentic-kanban-hooks.ts` adapter delegates to the existing
-`.claude/hooks/*.js` scripts, so DB-safety and cross-worktree write blocking stay
-in one place. Current limitation: Pi has no Claude-style hard `Stop` hook in the
-board's one-shot launch mode, so the uncommitted-changes Stop check is not a Pi
-session gate yet. Review/merge dirty-worktree guards still apply before landing.
+Pi runs as `pi --mode json` with explicit `--extension <worktree>/.pi/plugin/agentic-kanban-hooks.ts` and repeated `--skill <worktree>/.claude/skills/<name>/SKILL.md` flags for the skills materialized into the workspace. Pi 0.73.1 rejects `--approve`; do not add it. Safety hooks are hard pre-tool gates via Pi's `tool_call` event, and the adapter delegates to the existing `.claude/hooks/*.js` scripts instead of reimplementing DB-safety or cross-worktree write logic.
 
 Claude Code, Codex, Copilot — selectable via Settings → Agent. Claude reads `~/.claude/settings_*.json`, Codex `~/.codex/<name>.config.toml`, Copilot the CLI default or a configured model profile.
 
