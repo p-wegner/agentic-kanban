@@ -33,7 +33,8 @@ type ButlerEvent =
   | { type: "turn-start" }
   | { type: "user"; text: string }
   | { type: "text"; text: string }
-  | { type: "tool"; name: string }
+  | { type: "tool"; name: string; toolId?: string; input?: Record<string, unknown> }
+  | { type: "tool-result"; toolId?: string; output?: string; isError?: boolean }
   | { type: "result"; text?: string; isError?: boolean }
   | { type: "usage"; contextTokens: number }
   | { type: "meta"; model?: string; contextWindow?: number; mcpConnected?: boolean }
@@ -44,11 +45,19 @@ function formatWindow(n: number): string {
   return n >= 1_000_000 ? `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M` : `${Math.round(n / 1000)}k`;
 }
 
+interface ToolCall {
+  name: string;
+  input?: Record<string, unknown>;
+  output?: string;
+  status: "pending" | "done" | "error";
+}
+
 interface ChatMessage {
   id: string;
-  role: "user" | "assistant" | "activity";
+  role: "user" | "assistant" | "activity" | "tool";
   text: string;
   ts: number;
+  tool?: ToolCall;
 }
 
 interface ButlerSessionSummary {
@@ -92,7 +101,91 @@ function formatToolLabel(name: string): string {
   if (name === "WebSearch" || name === "WebFetch") return "Searching the web";
   if (name.includes("list_issues")) return "Listing board issues";
   if (name.includes("get_board_status")) return "Checking board status";
-  return `[tool] ${name.replace(/^mcp__[^_]+__/, "").replace(/_/g, " ")}`;
+  return name.replace(/^mcp__[^_]+__/, "").replace(/_/g, " ");
+}
+
+/** A short, single-line hint pulled from the most salient input field, shown on the
+ *  collapsed tool row so the call is identifiable without expanding it. */
+function toolHint(name: string, input?: Record<string, unknown>): string {
+  if (!input) return "";
+  const str = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : JSON.stringify(v));
+  const base = (p: string) => p.replace(/\\/g, "/").split("/").pop() || p;
+  if (name === "Read" || name === "Write" || name === "Edit") return base(str(input.file_path));
+  if (name === "Bash") return str(input.command);
+  if (name === "Glob" || name === "Grep") return str(input.pattern);
+  if (name === "WebSearch") return str(input.query);
+  if (name === "WebFetch") return str(input.url);
+  // Fall back to the first short-ish string value (e.g. an issue id or title).
+  for (const v of Object.values(input)) {
+    if (typeof v === "string" && v.length <= 80) return v;
+  }
+  return "";
+}
+
+const toolIcon = (status: ToolCall["status"]) => {
+  if (status === "pending") {
+    return (
+      <svg className="w-3 h-3 animate-spin shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none">
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+      </svg>
+    );
+  }
+  if (status === "error") {
+    return (
+      <svg className="w-3 h-3 shrink-0 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
+    );
+  }
+  return (
+    <svg className="w-3 h-3 shrink-0 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+  );
+};
+
+/** A collapsible tool-call row. Minimal by default (icon + label + hint + chevron);
+ *  expands to reveal the full input and output for deeper inspection. */
+function ToolCallCard({ tool }: { tool: ToolCall }) {
+  const [open, setOpen] = useState(false);
+  const hint = toolHint(tool.name, tool.input);
+  const hasDetail = (tool.input && Object.keys(tool.input).length > 0) || tool.output != null;
+  const inputJson = tool.input && Object.keys(tool.input).length > 0
+    ? JSON.stringify(tool.input, null, 2)
+    : "";
+
+  return (
+    <div className="flex justify-center mb-1.5">
+      <div className="w-full max-w-[80%]">
+        <button
+          type="button"
+          onClick={() => hasDetail && setOpen((o) => !o)}
+          disabled={!hasDetail}
+          className={`group flex items-center gap-1.5 w-full text-left px-2.5 py-1 rounded-md border border-gray-200 dark:border-gray-700/70 bg-gray-50 dark:bg-gray-800/50 text-[11px] text-gray-500 dark:text-gray-400 ${hasDetail ? "hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer" : "cursor-default"}`}
+        >
+          {toolIcon(tool.status)}
+          <span className="font-medium text-gray-600 dark:text-gray-300 shrink-0">{formatToolLabel(tool.name)}</span>
+          {hint && <span className="truncate font-mono text-gray-400 dark:text-gray-500">{hint}</span>}
+          {hasDetail && (
+            <svg className={`w-3 h-3 ml-auto shrink-0 text-gray-400 transition-transform ${open ? "rotate-90" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
+          )}
+        </button>
+        {open && (
+          <div className="mt-1 space-y-1.5 rounded-md border border-gray-200 dark:border-gray-700/70 bg-white dark:bg-gray-900/60 p-2">
+            {inputJson && (
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-0.5">Input</div>
+                <pre className="text-[11px] font-mono text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words max-h-48 overflow-y-auto">{inputJson}</pre>
+              </div>
+            )}
+            {tool.output != null && (
+              <div>
+                <div className={`text-[10px] uppercase tracking-wide mb-0.5 ${tool.status === "error" ? "text-red-500" : "text-gray-400 dark:text-gray-500"}`}>{tool.status === "error" ? "Error" : "Output"}</div>
+                <pre className={`text-[11px] font-mono whitespace-pre-wrap break-words max-h-64 overflow-y-auto ${tool.status === "error" ? "text-red-600 dark:text-red-400" : "text-gray-700 dark:text-gray-300"}`}>{tool.output || "(empty)"}</pre>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function ActivityStrip({ columns, liveActivity, liveStats, onIssueClick }: Omit<ButlerViewProps, "projectId">) {
@@ -152,6 +245,10 @@ function ChatBubble({ msg }: { msg: ChatMessage }) {
         </div>
       </div>
     );
+  }
+
+  if (msg.role === "tool" && msg.tool) {
+    return <ToolCallCard tool={msg.tool} />;
   }
 
   if (msg.role === "activity") {
