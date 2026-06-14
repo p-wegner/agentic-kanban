@@ -2,6 +2,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { apiFetch } from "../../lib/api.js";
 import { ProjectScriptsSettingsSection } from "../ProjectScriptsSettingsSection.js";
 import { StackProfileSettingsSection } from "../StackProfileSettingsSection.js";
+import { DriveSettingsSection } from "../DriveSettingsSection.js";
 import { showToast } from "../Toast.js";
 import { ArchiveDoneSection, CollapsibleSection, Field, Toggle, type ProjectSettingsState, type Settings, type SkillSetting } from "../SettingsPanel.shared.js";
 
@@ -58,6 +59,19 @@ export function ProjectSettings({ activeProjectId, settings, setSettings, projec
                     <p className="text-sm text-gray-500">No active project selected.</p>
                   ) : (
                     <div className="space-y-3">
+                      <DriveSettingsSection
+                        projectId={activeProjectId}
+                        onChanged={async () => {
+                          // Drive flips global auto_review/auto_merge — refetch so the
+                          // Workflow section's mirrors don't show stale values.
+                          try {
+                            const fresh = await apiFetch<Settings>("/api/preferences/settings");
+                            setSettings((s) => ({ ...s, ...fresh }));
+                          } catch {
+                            // best-effort UI refresh; the server state is already correct.
+                          }
+                        }}
+                      />
                       <Field label="Default Branch" hint="Used as the base branch for new worktrees. Leave empty only if you do not want worktrees created until this is set.">
                         <input
                           type="text"
