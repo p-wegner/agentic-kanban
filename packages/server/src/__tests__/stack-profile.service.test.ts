@@ -60,6 +60,25 @@ describe("detectStackProfile", () => {
     expect(p.isMonorepo).toBe(true);
     expect(p.workspaces).toEqual(["packages/*", "apps/*"]);
     expect(p.quickTestCommand).toBe("pnpm test:mine");
+    // Monorepo install must materialize ALL workspaces' deps (#810).
+    expect(p.installCommand).toBe("pnpm install -r");
+  });
+
+  it("uses a non-recursive install for a single-package pnpm project (#810)", async () => {
+    await writeFile(join(dir, "package.json"), JSON.stringify({ scripts: { test: "vitest" } }));
+    await writeFile(join(dir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+    const p = detectStackProfile(dir);
+    expect(p.isMonorepo).toBe(false);
+    expect(p.installCommand).toBe("pnpm install");
+  });
+
+  it("uses gradle assemble for a multi-module project (#810)", async () => {
+    await writeFile(join(dir, "build.gradle"), "plugins { id 'java' }\n");
+    await writeFile(join(dir, "settings.gradle"), "include 'app', 'lib'\n");
+    const p = detectStackProfile(dir);
+    expect(p.stack).toBe("java");
+    expect(p.isMonorepo).toBe(true);
+    expect(p.installCommand).toBe("gradle assemble");
   });
 
   it("detects an npm project and uses npm run prefix", async () => {

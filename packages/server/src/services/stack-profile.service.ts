@@ -1,6 +1,8 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { StackProfile } from "@agentic-kanban/shared";
+import { projects } from "@agentic-kanban/shared/schema";
+import { eq } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { getPreference, setPreference } from "../repositories/preferences.repository.js";
 import { detectProjectMarkers, deriveVerifyScript } from "./project-setup.service.js";
@@ -24,6 +26,20 @@ function readJson<T>(path: string): T | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Monorepo-aware install command for a Node package manager.
+ *
+ * pnpm/yarn/npm/bun all install every workspace from a single root invocation
+ * (pnpm is recursive by default; npm 7+/yarn/bun resolve the whole workspace graph),
+ * so the command shape is the same — but we surface `-r` for pnpm monorepos to make the
+ * "install ALL workspaces" intent explicit and robust against a non-root cwd.
+ */
+function nodeInstallCommand(pm: string, isMonorepo: boolean): string {
+  if (pm === "pnpm") return isMonorepo ? "pnpm install -r" : "pnpm install";
+  if (pm === "npm") return "npm install";
+  return `${pm} install`; // yarn / bun — workspace-aware from the root
 }
 
 /** Detect the package manager from lock files, falling back to npm for a bare package.json. */
@@ -133,7 +149,7 @@ function detectNodeProfile(repoPath: string, markers: Set<string>): Partial<Stac
     packageManager: pm,
     isMonorepo,
     workspaces,
-    installCommand: pm === "npm" ? "npm install" : `${pm} install`,
+    installCommand: nodeInstallCommand(pm, isMonorepo),
     buildCommand,
     testCommand,
     quickTestCommand: quickScript ? run(quickScript) : testCommand,
@@ -173,9 +189,14 @@ function detectOtherProfile(repoPath: string, markers: Set<string>): Partial<Sta
   }
   if (markers.has("build.gradle") || markers.has("build.gradle.kts")) {
     const wrapper = existsSync(join(repoPath, "gradlew")) ? "./gradlew" : "gradle";
+    const isMultiModule = existsSync(join(repoPath, "settings.gradle")) || existsSync(join(repoPath, "settings.gradle.kts"));
+    // `gradle dependencies` resolves only the ROOT project's deps; a multi-module build
+    // needs every subproject's deps materialized before the first build. `assemble` builds
+    // all subproject artifacts, which downloads/resolves every module's dependencies.
+    const install = isMultiModule ? `${wrapper} assemble` : `${wrapper} dependencies`;
     return {
-      stack: "java", packageManager: "gradle", isMonorepo: existsSync(join(repoPath, "settings.gradle")) || existsSync(join(repoPath, "settings.gradle.kts")),
-      workspaces: [], installCommand: `${wrapper} dependencies`, buildCommand: `${wrapper} build`,
+      stack: "java", packageManager: "gradle", isMonorepo: isMultiModule,
+      workspaces: [], installCommand: install, buildCommand: `${wrapper} build`,
       testCommand: `${wrapper} test`, quickTestCommand: `${wrapper} test`, lintCommand: `${wrapper} check`,
       typecheckCommand: `${wrapper} compileJava`, devCommand: `${wrapper} bootRun`,
       isWeb: existsSync(join(repoPath, "src", "main", "resources", "application.properties")) || existsSync(join(repoPath, "src", "main", "resources", "application.yml")),
@@ -557,4 +578,91 @@ export async function populateVerifyScript(
 
   await setPreference(verifyScriptPrefKey(projectId), verify, database);
   return verify;
+}
+
+// ---------------------------------------------------------------------------
+// Setup (install) script derived from the stack profile (#810)
+// ---------------------------------------------------------------------------
+
+/** Marker-rule fallback install command when no stack profile is available yet. */
+function deriveInstallFromMarkers(repoPath: string): string {
+  const markers = new Set(detectProjectMarkers(repoPath));
+  if (markers.has("package.json")) {
+    const pm = markers.has("pnpm-lock.yaml")
+      ? "pnpm"
+      : markers.has("yarn.lock")
+        ? "yarn"
+        : markers.has("bun.lockb") || markers.has("bun.lock")
+          ? "bun"
+          : "npm";
+    // pnpm-workspace.yaml or a package.json `workspaces` field ⇒ monorepo ⇒ recursive install.
+    // (pnpm-workspace.yaml is not in PROJECT_MARKER_FILES, so check disk directly.)
+    const pkg = readJson<NodePkgJson>(join(repoPath, "package.json"));
+    const isMonorepo = existsSync(join(repoPath, "pnpm-workspace.yaml")) || Boolean(pkg?.workspaces);
+    return nodeInstallCommand(pm, isMonorepo);
+  }
+  if (markers.has("Cargo.toml")) return "cargo fetch";
+  if (markers.has("go.mod")) return "go mod download";
+  if (markers.has("build.gradle") || markers.has("build.gradle.kts")) {
+    const wrapper = existsSync(join(repoPath, "gradlew")) ? "./gradlew" : "gradle";
+    const isMultiModule = existsSync(join(repoPath, "settings.gradle")) || existsSync(join(repoPath, "settings.gradle.kts"));
+    return isMultiModule ? `${wrapper} assemble` : `${wrapper} dependencies`;
+  }
+  if (markers.has("pom.xml")) return "mvn install -DskipTests";
+  if (markers.has("pyproject.toml")) {
+    return /\[tool\.poetry\]/.test(readFileSafe(join(repoPath, "pyproject.toml"))) ? "poetry install" : "pip install -e .";
+  }
+  if (markers.has("Pipfile")) return "pipenv install --dev";
+  if (markers.has("requirements.txt")) return "pip install -r requirements.txt";
+  return "";
+}
+
+/**
+ * Derive the setup (install) command for a project from its stack profile (#810).
+ *
+ * The setup script runs once in a fresh worktree BEFORE the first build so deps are
+ * ready. It must be monorepo-aware: for a monorepo the install must materialize ALL
+ * workspaces/modules' deps, not just the root package — `installCommand` already
+ * encodes that (e.g. pnpm `-r`, gradle multi-module `assemble`). Source of truth =
+ * the persisted #786 stack profile's `installCommand`; falls back to marker rules when
+ * no profile is available yet. Returns "" when nothing can be derived (safe no-op).
+ */
+export function deriveSetupScriptFromProfile(profile: StackProfile | null, repoPath: string): string {
+  if (profile?.installCommand && profile.installCommand.trim()) {
+    return profile.installCommand.trim();
+  }
+  return deriveInstallFromMarkers(repoPath).trim();
+}
+
+/**
+ * Persist the derived setup (install) command to the project's `setup_script` column (#810).
+ *
+ * Idempotent and non-destructive: a no-op when the column is already set (never clobbers a
+ * user/AI-generated script) and when detection yields nothing (no empty value written).
+ * Best-effort — callers run it fire-and-forget so it never slows or fails registration.
+ *
+ * Reuses an already-computed stack profile when passed; otherwise reads the persisted one.
+ */
+export async function populateSetupScript(
+  projectId: string,
+  repoPath: string,
+  database: Database,
+  profile?: StackProfile | null,
+): Promise<string | null> {
+  const [project] = await database
+    .select({ setupScript: projects.setupScript })
+    .from(projects)
+    .where(eq(projects.id, projectId))
+    .limit(1);
+  if (project?.setupScript && project.setupScript.trim()) return project.setupScript; // already configured
+
+  const resolvedProfile = profile ?? (await getStackProfile(projectId, database));
+  const setup = deriveSetupScriptFromProfile(resolvedProfile, repoPath).trim();
+  if (!setup) return null; // nothing to install — leave unset (pure no-op)
+
+  await database
+    .update(projects)
+    .set({ setupScript: setup, updatedAt: new Date().toISOString() })
+    .where(eq(projects.id, projectId));
+  return setup;
 }
