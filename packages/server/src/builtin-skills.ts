@@ -236,6 +236,13 @@ Workspace ID: {{workspaceId}}`,
 
 Use whichever is available. The workflow rules and status names are the same either way.
 
+## Session constraints
+
+Builder sessions are headless - there is no human at the terminal.
+**Never** invoke \`ExitPlanMode\`, \`EnterPlanMode\`, or \`AskUserQuestion\`.
+For task tracking, use \`TaskCreate\` / \`TaskUpdate\` instead of plan mode.
+For clarification needs, make a reasonable assumption, document it in the commit message, and proceed.
+
 ## Status Names (exact strings)
 Todo → In Progress → In Review → AI Reviewed → Done / Cancelled
 
