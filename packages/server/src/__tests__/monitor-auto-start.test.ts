@@ -188,6 +188,32 @@ describe("runAutoStart URL construction", () => {
 });
 
 describe("runAutoStart Backlog promotion for auto-driven projects", () => {
+  it("starts an unblocked Backlog issue even when stale idle workspaces exceed the WIP target (#815)", async () => {
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]) as ReturnType<typeof db.select>) // inProgressStatuses
+      .mockReturnValueOnce(makeSelectChain([{ active: 0, inactiveStale: 19 }]) as ReturnType<typeof db.select>) // loop1 capacity
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // loop1 inProgressIssues (none)
+      .mockReturnValueOnce(makeSelectChain([{ active: 0, inactiveStale: 19 }]) as ReturnType<typeof db.select>) // loop2 capacity
+      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]) as ReturnType<typeof db.select>) // todoStatus
+      .mockReturnValueOnce(makeSelectChain([{ id: "backlog-1" }]) as ReturnType<typeof db.select>) // backlogStatus (auto-driven)
+      .mockReturnValueOnce(makeSelectChain([{ id: "issue-1", title: "Integration Gate", projectId: "proj-1", issueNumber: 16 }]) as ReturnType<typeof db.select>) // todoIssues
+      .mockReturnValueOnce(makeSelectChain([{ id: "done-1" }]) as ReturnType<typeof db.select>) // doneStatuses
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // existingWs (none)
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // no-auto-start tag (none)
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>); // deps (none)
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ id: "ws-new" }) } as Response);
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await runAutoStart(
+      new Map([["board_strategy_proj-1", JSON.stringify({ version: 1, activeAgentsTarget: 4, maxNewStartsPerCycle: 1 })]]),
+      makeDeps({ isAutoDrivenProject: () => true }),
+    );
+
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces", expect.any(Object));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("inactiveStale=19"));
+    logSpy.mockRestore();
+  });
+
   it("starts a Backlog issue for an auto-driven project (no manual Backlog→Todo move needed)", async () => {
     vi.mocked(db.select)
       .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]) as ReturnType<typeof db.select>) // inProgressStatuses

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { issues, projects, projectStatuses, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
-import { countActiveWip } from "../startup/monitor-auto-start.js";
+import { countActiveWip, countWipCapacity } from "../startup/monitor-auto-start.js";
 
 /**
  * Regression for #690: provider usage-limit / zero-output launch failures must
@@ -136,6 +136,24 @@ describe("countActiveWip — launch failures do not occupy WIP (#690)", () => {
     await addWorkspace(db, issueId, "active", now);
 
     expect(await countActiveWip(db, inProgressId)).toBe(1);
+  });
+
+  it("reports inactive stale workspaces separately from active WIP", async () => {
+    const { db } = createTestDb();
+    const { projectId, inProgressId, now } = await seed(db);
+
+    const activeIssue = await addIssue(db, projectId, inProgressId, now);
+    await addWorkspace(db, activeIssue, "active", now);
+
+    for (const status of ["idle", "closed", "blocked"]) {
+      const staleIssue = await addIssue(db, projectId, inProgressId, now);
+      await addWorkspace(db, staleIssue, status, now);
+    }
+
+    await expect(countWipCapacity(db, inProgressId)).resolves.toEqual({
+      active: 1,
+      inactiveStale: 3,
+    });
   });
 
   it("frees capacity: a blocked + an active issue count as 1, not 2", async () => {
