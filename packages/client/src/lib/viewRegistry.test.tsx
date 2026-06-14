@@ -81,14 +81,14 @@ describe("VIEW_REGISTRY", () => {
 
     // Primary views (no `group` or group === "primary") stay one click away.
     expect([...primaryIds].sort()).toEqual(
-      ["agents", "backlog", "butler", "drive", "graph", "insights", "kanban", "monitor-history", "strategy", "table", "timeline", "workflows"].sort(),
+      ["agents", "backlog", "butler", "calendar", "drive", "graph", "insights", "kanban", "monitor-history", "strategy", "table", "timeline", "workflows"].sort(),
     );
     // Analytics/secondary views live behind the "More" overflow dropdown.
     expect([...secondaryIds].sort()).toEqual(
       [
         "digest", "flaky-tests", "focus", "metrics", "quality-metrics", "swimlane", "workflow-analytics",
         "health-events", "runbooks", "capacity", "constellation", "momentum", "activity", "stale-work", "throughput",
-        "provider-mix", "lead-time", "scorecard-distribution", "provider-cost", "agent-throughput", "fireworks", "calendar", "burndown",
+        "provider-mix", "lead-time", "scorecard-distribution", "provider-cost", "agent-throughput", "fireworks", "burndown",
       ].sort(),
     );
   });
