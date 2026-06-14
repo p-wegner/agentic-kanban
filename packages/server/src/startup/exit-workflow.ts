@@ -450,38 +450,51 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
         // (the diff-only LLM review can't catch that on its own).
         const verifyScript = prefMap.get(`verify_script_${projectId}`);
         if (verifyScript && verifyScript.trim() && workspace.workingDir) {
-          // #783: a builder that created package.json may not have approved native build
-          // scripts (esbuild) or pinned a pnpm version that honors the approval — so a fresh
-          // clone of master fails `pnpm install` even though the per-worktree gate passes
-          // (the warm pnpm store hides it). Repair the manifest and COMMIT it onto the branch
-          // BEFORE the verify build, so the fix merges to master and clones build clean.
+          // #783/#789/#812: a builder that created the build manifest may not have approved
+          // native build scripts or pinned a package-manager version that honors the approval —
+          // so a fresh clone of master can fail to install even though the per-worktree gate
+          // passes (the warm store hides it). `ensureBuildableFromClean` dispatches per stack
+          // (#812): pnpm → onlyBuiltDependencies, bun → trustedDependencies, npm/yarn → pin only,
+          // and cargo/go/python/java → a clean no-op. Repair and COMMIT onto the branch BEFORE
+          // the verify build, so the fix merges to master and clones build clean.
+          //
+          // BUILD_APPROVAL_REPAIR_PATHS is the complete set of files the repair can ever touch
+          // (any stack); we stage/revert only the ones that actually exist, so a non-pnpm project
+          // (no pnpm-workspace.yaml) or a non-Node project (no package.json) is a clean no-op
+          // rather than failing on a missing pathspec.
+          const BUILD_APPROVAL_REPAIR_PATHS = ["package.json", "pnpm-workspace.yaml"];
           try {
             const approvalChanged = ensureBuildableFromClean(workspace.workingDir);
             if (approvalChanged) {
               // Only stage files that actually exist — `git add -- <missing>` fails the WHOLE
               // command on a missing pathspec (e.g. a single-package app has no
               // pnpm-workspace.yaml), which would otherwise throw and leave the manifest dirty.
-              const candidatePaths = ["package.json", "pnpm-workspace.yaml"].filter((p) =>
+              const candidatePaths = BUILD_APPROVAL_REPAIR_PATHS.filter((p) =>
                 existsSync(join(workspace.workingDir!, p)),
               );
               const committed = candidatePaths.length
                 ? await gitService.commitPaths(
                     workspace.workingDir,
                     candidatePaths,
-                    "chore: pin pnpm + approve native build scripts (verify gate #783)",
+                    "chore: make project buildable from a clean clone (verify gate #812)",
                   )
                 : false;
-              if (committed) console.log(`[workflow] committed pnpm build-approval repair for workspace ${workspaceId} (#783)`);
+              if (committed) console.log(`[workflow] committed build-approval repair for workspace ${workspaceId} (#812)`);
             }
           } catch (e) {
             // Never let a repair failure leave the worktree dirty — an uncommitted manifest
             // change would block the auto-merge (silent merge loss). Revert and continue.
-            console.warn(`[workflow] pnpm build-approval repair failed for workspace ${workspaceId}: ${e instanceof Error ? e.message : String(e)}`);
-            try {
-              await new Promise<void>((resolve) =>
-                execFile("git", ["checkout", "--", "package.json", "pnpm-workspace.yaml"], { cwd: workspace.workingDir! }, () => resolve()),
-              );
-            } catch { /* best-effort cleanup */ }
+            console.warn(`[workflow] build-approval repair failed for workspace ${workspaceId}: ${e instanceof Error ? e.message : String(e)}`);
+            const revertPaths = BUILD_APPROVAL_REPAIR_PATHS.filter((p) =>
+              existsSync(join(workspace.workingDir!, p)),
+            );
+            if (revertPaths.length) {
+              try {
+                await new Promise<void>((resolve) =>
+                  execFile("git", ["checkout", "--", ...revertPaths], { cwd: workspace.workingDir! }, () => resolve()),
+                );
+              } catch { /* best-effort cleanup */ }
+            }
           }
           const result = await runSetupScript(workspace.workingDir, verifyScript).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e) }));
           if (result.exitCode !== 0) {
