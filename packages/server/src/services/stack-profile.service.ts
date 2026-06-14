@@ -196,10 +196,12 @@ function detectOtherProfile(repoPath: string, markers: Set<string>): Partial<Sta
     const install = isMultiModule ? `${wrapper} assemble` : `${wrapper} dependencies`;
     const kotlin = isKotlinGradle(repoPath);
     const spring = isSpringBootGradle(repoPath);
+    // Kotlin Multiplatform has no aggregate `test` task — use `allTests` (jvmTest + jsNodeTest + …).
+    const testTask = isKotlinMultiplatformGradle(repoPath) ? "allTests" : "test";
     return {
       stack: "java", packageManager: "gradle", isMonorepo: isMultiModule,
       workspaces: [], installCommand: install, buildCommand: `${wrapper} build`,
-      testCommand: `${wrapper} test`, quickTestCommand: `${wrapper} test`, lintCommand: `${wrapper} check`,
+      testCommand: `${wrapper} ${testTask}`, quickTestCommand: `${wrapper} ${testTask}`, lintCommand: `${wrapper} check`,
       // `compileJava` only exists when the java plugin is applied. A Kotlin (incl. Kotlin
       // Multiplatform) project has no `compileJava` task — running it fails "task not found",
       // which would brick a per-edit blocking typecheck hook. KMP also has no single compile-only
@@ -285,6 +287,17 @@ function isKotlinGradle(repoPath: string): boolean {
   const text = gradleBuildText(repoPath).toLowerCase();
   if (/kotlin\(|org\.jetbrains\.kotlin|kotlin-gradle-plugin|kotlin\("multiplatform"\)/.test(text)) return true;
   return repoHasKotlinSources(repoPath);
+}
+
+/**
+ * A Gradle project is Kotlin Multiplatform when it applies the `multiplatform` plugin. KMP has NO
+ * aggregate `test` task (that's a Java-plugin convention) — it exposes `allTests` (which fans out to
+ * `jvmTest`/`jsNodeTest`/…). Running `./gradlew test` against a KMP build fails "Task 'test' not
+ * found", so the test/verify command must target `allTests` instead.
+ */
+function isKotlinMultiplatformGradle(repoPath: string): boolean {
+  const text = gradleBuildText(repoPath).toLowerCase();
+  return /kotlin\(\s*["']multiplatform["']\s*\)|org\.jetbrains\.kotlin\.multiplatform|kotlin-multiplatform/.test(text);
 }
 
 /** A Gradle project is a Spring Boot app when the boot plugin/dependency is present. */
