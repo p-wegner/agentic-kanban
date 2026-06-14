@@ -2,6 +2,8 @@ import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { bootstrapSymlinks } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
+import type { SymlinkBootstrapResult } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
 
 export interface PreflightResult {
   ok: boolean;
@@ -27,12 +29,15 @@ interface WorkspaceLaunchPreflightOptions {
   execGit?: (args: string[], cwd: string) => Promise<string>;
   readFile?: (root: string, relativePath: string) => Promise<string>;
   exists?: (root: string, relativePath: string) => Promise<boolean>;
+  symlinkDirs?: string[];
+  bootstrapSymlinks?: (sourceDir: string, worktreeDir: string, dirNames: string[]) => Promise<SymlinkBootstrapResult>;
 }
 
 export interface WorkspaceLaunchPreflightResult extends PreflightResult {
   staleFiles: string[];
   refreshed: boolean;
   dirtyFiles: string[];
+  repairedSymlinks: string[];
 }
 
 function execGit(args: string[], cwd: string): Promise<string> {
@@ -115,7 +120,7 @@ export async function workspaceLaunchPreflight(
   options: WorkspaceLaunchPreflightOptions,
 ): Promise<WorkspaceLaunchPreflightResult> {
   if (options.isDirect) {
-    return { ok: true, errors: [], staleFiles: [], refreshed: false, dirtyFiles: [] };
+    return { ok: true, errors: [], staleFiles: [], refreshed: false, dirtyFiles: [], repairedSymlinks: [] };
   }
 
   const readPolicyFile = options.readFile ?? defaultReadFile;
@@ -124,6 +129,7 @@ export async function workspaceLaunchPreflight(
   const errors: string[] = [];
   const expectedBranch = options.branch.trim();
   let dirtyFiles = parsePorcelainFiles(await git(["status", "--porcelain"], options.worktreePath));
+  let repairedSymlinks: string[] = [];
 
   if (expectedBranch) {
     const currentBranch = await getCurrentBranch(git, options.worktreePath);
@@ -133,7 +139,7 @@ export async function workspaceLaunchPreflight(
           `Workspace is not attached to branch ${expectedBranch} and has uncommitted changes. ` +
             "checkpoint/commit the workspace first, then reattach the worktree before relaunching the agent.",
         );
-        return { ok: false, errors, staleFiles: [], refreshed: false, dirtyFiles };
+        return { ok: false, errors, staleFiles: [], refreshed: false, dirtyFiles, repairedSymlinks };
       }
 
       try {
@@ -143,7 +149,7 @@ export async function workspaceLaunchPreflight(
           `Workspace is not attached to branch ${expectedBranch} and could not be reattached before launch. ` +
             `${err instanceof Error ? err.message : String(err)}`,
         );
-        return { ok: false, errors, staleFiles: [], refreshed: false, dirtyFiles };
+        return { ok: false, errors, staleFiles: [], refreshed: false, dirtyFiles, repairedSymlinks };
       }
       dirtyFiles = parsePorcelainFiles(await git(["status", "--porcelain"], options.worktreePath));
     }
@@ -161,10 +167,28 @@ export async function workspaceLaunchPreflight(
       `Workspace safety policy is stale (${staleBefore.join(", ")}) and the worktree has uncommitted changes. ` +
         "checkpoint/commit the workspace first, then update-base/rebase before relaunching the agent.",
     );
-    return { ok: false, errors, staleFiles: staleBefore, refreshed: false, dirtyFiles };
+    return { ok: false, errors, staleFiles: staleBefore, refreshed: false, dirtyFiles, repairedSymlinks };
   }
 
   let refreshed = false;
+  const symlinkDirs = options.symlinkDirs ?? [];
+  if (symlinkDirs.length > 0) {
+    const linkDeps = options.bootstrapSymlinks ?? bootstrapSymlinks;
+    try {
+      const symlinkResult = await linkDeps(options.repoPath, options.worktreePath, symlinkDirs);
+      repairedSymlinks = symlinkResult.linked;
+      if (symlinkResult.linked.length > 0) {
+        refreshed = true;
+        console.log(`[preflight] repaired worktree symlinks: ${symlinkResult.linked.join(", ")}`);
+      }
+      if (symlinkResult.failed.length > 0) {
+        console.warn(`[preflight] worktree symlink repair skipped failures: ${symlinkResult.failed.map(f => `${f.dir}: ${f.error}`).join(", ")}`);
+      }
+    } catch (err) {
+      console.warn(`[preflight] worktree symlink repair error (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   const baseBranch = options.baseBranch?.trim();
   if (dirtyFiles.length === 0 && baseBranch) {
     try {
@@ -177,7 +201,7 @@ export async function workspaceLaunchPreflight(
         `Workspace update-base preflight failed before agent launch. ` +
           `Checkpoint/commit if needed, then resolve the rebase manually. ${err instanceof Error ? err.message : String(err)}`,
       );
-      return { ok: false, errors, staleFiles: staleBefore, refreshed, dirtyFiles };
+      return { ok: false, errors, staleFiles: staleBefore, refreshed, dirtyFiles, repairedSymlinks };
     }
   }
 
@@ -188,7 +212,7 @@ export async function workspaceLaunchPreflight(
         `Workspace is not attached to branch ${expectedBranch} after update-base. ` +
           "Do not launch the agent from a detached or wrong-branch worktree.",
       );
-      return { ok: false, errors, staleFiles: staleBefore, refreshed, dirtyFiles };
+      return { ok: false, errors, staleFiles: staleBefore, refreshed, dirtyFiles, repairedSymlinks };
     }
   }
 
@@ -227,7 +251,7 @@ export async function workspaceLaunchPreflight(
           "Refresh these files from the main checkout manually before relaunching.",
       );
     }
-    return { ok: errors.length === 0, errors, staleFiles: failed, refreshed: refreshed || reconciled.length > 0, dirtyFiles };
+    return { ok: errors.length === 0, errors, staleFiles: failed, refreshed: refreshed || reconciled.length > 0, dirtyFiles, repairedSymlinks };
   }
 
   if (staleAfter.length > 0) {
@@ -237,7 +261,7 @@ export async function workspaceLaunchPreflight(
     );
   }
 
-  return { ok: errors.length === 0, errors, staleFiles: staleAfter, refreshed, dirtyFiles };
+  return { ok: errors.length === 0, errors, staleFiles: staleAfter, refreshed, dirtyFiles, repairedSymlinks };
 }
 
 /**

@@ -28,4 +28,5 @@ export const PREF_DONE_UNMERGED_SCANNER_ENABLED = "done_unmerged_scanner_enabled
 export const DEFAULT_BUILDER_GUARDRAILS =
   "The board owns all visual verification and screenshots. Do NOT run npx playwright install or install any browser/runtime/global package. " +
   "Treat any mention of screenshots / visual verification in the ticket as context, not a task. " +
+  "Run tests FROM YOUR WORKTREE ROOT with pnpm test:mine -- --changed HEAD (or pnpm exec vitest from the package dir). Never run tests from the main checkout - your new test files only exist on your branch. If vitest cannot resolve imports, report it and continue; do NOT run pnpm install. " +
   "When the implementation logic is complete and self-reviewed, COMMIT and finish -- do not loop on environment setup.";
