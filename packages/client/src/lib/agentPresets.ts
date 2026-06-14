@@ -1,6 +1,6 @@
 export const AGENT_PRESETS_PREFIX = "agent_presets_";
 
-export type PresetProvider = "claude" | "codex" | "copilot";
+export type PresetProvider = "claude" | "codex" | "copilot" | "pi";
 
 export interface AgentPreset {
   id: string;
@@ -27,7 +27,7 @@ function normalizeName(name: string) {
 }
 
 function normalizeProvider(value: unknown): PresetProvider {
-  return value === "codex" || value === "copilot" ? value : "claude";
+  return value === "codex" || value === "copilot" || value === "pi" ? value : "claude";
 }
 
 export function agentPresetsKey(projectId: string) {
@@ -100,5 +100,6 @@ export function deleteAgentPreset(presets: AgentPreset[], presetId: string): Age
 export function presetProfileToken(preset: AgentPreset): string {
   if (preset.provider === "codex") return `codex:${preset.profile || "default"}`;
   if (preset.provider === "copilot") return `copilot:${preset.profile || "default"}`;
+  if (preset.provider === "pi") return `pi:${preset.profile || "default"}`;
   return preset.profile ? `claude:${preset.profile}` : "";
 }

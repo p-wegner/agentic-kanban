@@ -1,4 +1,4 @@
-import { readdirSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { db } from "../db/index.js";
@@ -188,6 +188,25 @@ export function createPreferenceService({ database }: { database: Database }) {
     return ["default"];
   }
 
+  async function listPiProfiles(): Promise<string[]> {
+    const profiles: string[] = ["default"];
+    try {
+      const files = readdirSync(homedir());
+      for (const file of files) {
+        const match = file.match(/^\.pi-(.+)$/);
+        if (!match || match[1] === "agent" || match[1] === "default") continue;
+        try {
+          if (statSync(join(homedir(), file)).isDirectory()) profiles.push(match[1]);
+        } catch {}
+      }
+    } catch {}
+    try {
+      const selected = await getPreference(PREF_PI_PROFILE, database);
+      if (selected?.trim()) profiles.push(selected.trim());
+    } catch {}
+    return [...new Set(profiles)].sort();
+  }
+
   /**
    * Detect drift between the global provider/profile settings prefs and the
    * project's Strategy Bullseye (the single authoritative source).
@@ -248,7 +267,7 @@ export function createPreferenceService({ database }: { database: Database }) {
     return { hasBullseye: true, bullseyeProvider, bullseyeProfile, settingsProvider, settingsProfile, diverged };
   }
 
-  return { getActiveProjectId, setActiveProjectId, getSettings, updateSettings, getProviderDivergence, listClaudeProfiles, listCodexProfiles, listCopilotProfiles };
+  return { getActiveProjectId, setActiveProjectId, getSettings, updateSettings, getProviderDivergence, listClaudeProfiles, listCodexProfiles, listCopilotProfiles, listPiProfiles };
 }
 
 export const preferenceService = createPreferenceService({ database: db });

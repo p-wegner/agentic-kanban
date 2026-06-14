@@ -37,6 +37,7 @@ type AgentProvider = ProfileSelection["provider"];
 
 const COPILOT_DEFAULT_PROFILE = "default";
 const CODEX_DEFAULT_PROFILE = "default";
+const PI_DEFAULT_PROFILE = "default";
 
 function uniqueProfiles(profiles: string[], fallback?: string): string[] {
   const all = fallback ? [fallback, ...profiles] : profiles;
@@ -46,14 +47,16 @@ function uniqueProfiles(profiles: string[], fallback?: string): string[] {
 function defaultProfileLabel(settings: Record<string, string>): string {
   if (settings.provider === "codex") return `codex:${settings.codex_profile || CODEX_DEFAULT_PROFILE}`;
   if (settings.provider === "copilot") return `copilot:${settings.copilot_profile || COPILOT_DEFAULT_PROFILE}`;
+  if (settings.provider === "pi") return `pi:${settings.pi_profile || PI_DEFAULT_PROFILE}`;
   return `claude:${settings.claude_profile || "none"}`;
 }
 
 function profileOptionLabel(provider: AgentProvider, name: string): string {
   const isDefault = (provider === "copilot" && name === COPILOT_DEFAULT_PROFILE) ||
-    (provider === "codex" && name === CODEX_DEFAULT_PROFILE);
+    (provider === "codex" && name === CODEX_DEFAULT_PROFILE) ||
+    (provider === "pi" && name === PI_DEFAULT_PROFILE);
   const displayName = isDefault ? "Default" : name;
-  const providerLabel = provider === "codex" ? "Codex" : provider === "copilot" ? "Copilot" : "Claude";
+  const providerLabel = provider === "codex" ? "Codex" : provider === "copilot" ? "Copilot" : provider === "pi" ? "Pi" : "Claude";
   return `${providerLabel}: ${displayName}`;
 }
 
@@ -81,6 +84,7 @@ export function CreateIssuePanel({
   const [claudeProfiles, setClaudeProfiles] = useState<string[]>([]);
   const [codexProfiles, setCodexProfiles] = useState<string[]>([CODEX_DEFAULT_PROFILE]);
   const [copilotProfiles, setCopilotProfiles] = useState<string[]>([COPILOT_DEFAULT_PROFILE]);
+  const [piProfiles, setPiProfiles] = useState<string[]>([PI_DEFAULT_PROFILE]);
   const [isDirect, setIsDirect] = useState(false);
   const [skillId, setSkillId] = useState<string>(initialState?.skillId ?? "");
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -130,12 +134,14 @@ export function CreateIssuePanel({
       apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles").catch(() => ({ profiles: [] as string[] })),
       apiFetch<{ profiles: string[] }>("/api/preferences/codex-profiles").catch(() => ({ profiles: [CODEX_DEFAULT_PROFILE] as string[] })),
       apiFetch<{ profiles: string[] }>("/api/preferences/copilot-profiles").catch(() => ({ profiles: [COPILOT_DEFAULT_PROFILE] })),
-    ]).then(([skillsData, settingsData, claudeData, codexData, copilotData]) => {
+      apiFetch<{ profiles: string[] }>("/api/preferences/pi-profiles").catch(() => ({ profiles: [PI_DEFAULT_PROFILE] })),
+    ]).then(([skillsData, settingsData, claudeData, codexData, copilotData, piData]) => {
       setSkills(skillsData);
       setSettings(settingsData);
       setClaudeProfiles(claudeData.profiles);
       setCodexProfiles(uniqueProfiles(codexData.profiles, CODEX_DEFAULT_PROFILE));
       setCopilotProfiles(uniqueProfiles(copilotData.profiles, COPILOT_DEFAULT_PROFILE));
+      setPiProfiles(uniqueProfiles(piData.profiles, PI_DEFAULT_PROFILE));
       setSelectedModel(settingsData.default_model || "");
     });
   }, [startWorkspace, projectId]);
@@ -146,19 +152,20 @@ export function CreateIssuePanel({
       if (colonIdx === -1) return undefined;
       const provider = selectedProfile.slice(0, colonIdx) as AgentProvider;
       const name = selectedProfile.slice(colonIdx + 1);
-      if ((provider !== "claude" && provider !== "codex" && provider !== "copilot") || !name) return undefined;
+      if ((provider !== "claude" && provider !== "codex" && provider !== "copilot" && provider !== "pi") || !name) return undefined;
       return { provider, name };
     }
     // "Default" selected — resolve to explicit global default so the displayed
     // label matches what actually runs (avoids Strategy Bullseye mismatch).
     if (settings.provider === "codex") return { provider: "codex", name: settings.codex_profile || CODEX_DEFAULT_PROFILE };
     if (settings.provider === "copilot") return { provider: "copilot", name: settings.copilot_profile || COPILOT_DEFAULT_PROFILE };
+    if (settings.provider === "pi") return { provider: "pi", name: settings.pi_profile || PI_DEFAULT_PROFILE };
     if (settings.claude_profile) return { provider: "claude", name: settings.claude_profile };
     return undefined;
   }
 
   const isClaudeSelected = selectedProfile === ""
-    ? (settings.provider !== "codex" && settings.provider !== "copilot")
+    ? (settings.provider !== "codex" && settings.provider !== "copilot" && settings.provider !== "pi")
     : selectedProfile.startsWith("claude:");
   const isCodexSelected = selectedProfile === ""
     ? settings.provider === "codex"
@@ -373,7 +380,7 @@ export function CreateIssuePanel({
                     />
                     Skip auto AI code review
                   </label>
-                  {(claudeProfiles.length > 0 || codexProfiles.length > 0 || copilotProfiles.length > 0) && (
+                  {(claudeProfiles.length > 0 || codexProfiles.length > 0 || copilotProfiles.length > 0 || piProfiles.length > 0) && (
                     <div className="flex items-center gap-2">
                       <label className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">Profile override</label>
                       <select
@@ -397,6 +404,11 @@ export function CreateIssuePanel({
                         <optgroup label="Copilot">
                           {copilotProfiles.map((p) => (
                             <option key={`copilot:${p}`} value={`copilot:${p}`}>{profileOptionLabel("copilot", p)}</option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="Pi">
+                          {piProfiles.map((p) => (
+                            <option key={`pi:${p}`} value={`pi:${p}`}>{profileOptionLabel("pi", p)}</option>
                           ))}
                         </optgroup>
                       </select>
