@@ -83,6 +83,20 @@ export function createAutoMergeOrchestrator(deps: {
         .map(([key]) => key.replace("auto_merge_disabled_", "")),
     );
 
+    // Projects with an automatic pre-merge gate — a verify_script (build/test) and/or a web smoke
+    // check (isWeb stack profile). For these, `auto_merge_in_review` must NOT bypass `readyForMerge`:
+    // the gate runs on review exit and sets readyForMerge on pass, so merging un-ready In-Review work
+    // here would race/skip the gate (#821). Both signals already live in prefMap.
+    const gatedProjectIds = new Set<string>();
+    for (const [key, value] of prefMap) {
+      const verifyMatch = key.match(/^verify_script_([0-9a-f-]+)$/);
+      if (verifyMatch && value && value.trim()) { gatedProjectIds.add(verifyMatch[1]); continue; }
+      const profileMatch = key.match(/^project_stack_profile_([0-9a-f-]+)$/);
+      if (profileMatch && value) {
+        try { if (JSON.parse(value)?.isWeb === true) gatedProjectIds.add(profileMatch[1]); } catch { /* not JSON */ }
+      }
+    }
+
     const statusNames = autoMergeInReview
       ? MERGEABLE_STATUS_NAMES
       : (["AI Reviewed"] as const);
@@ -126,7 +140,10 @@ export function createAutoMergeOrchestrator(deps: {
         currentNodeType: row.issueCurrentNodeType,
         statusName: row.issueStatusName,
       }))
-      .filter((row) => row.readyForMerge || row.issueStatusName === "AI Reviewed" || autoMergeInReview)
+      // auto_merge_in_review lands committed In-Review work without an explicit readyForMerge — but
+      // NOT for a gated project, where readyForMerge means "the verify/smoke gate passed". Gated
+      // un-ready In-Review work waits for its review's gate instead of being merged unverified (#821).
+      .filter((row) => row.readyForMerge || row.issueStatusName === "AI Reviewed" || (autoMergeInReview && !gatedProjectIds.has(row.projectId)))
       .map((row) => row.workspaceId);
   }
 
