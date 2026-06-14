@@ -17,6 +17,7 @@ import type { SessionManagerOptions, SessionState, StartSessionOptions } from ".
 import { workspaceLaunchPreflight } from "../preflight-check.js";
 import { WorkspaceError } from "../workspace-internals.js";
 import { DEFAULT_BUILDER_GUARDRAILS, PREF_BUILDER_GUARDRAILS } from "../../constants/preference-keys.js";
+import { parseSymlinkDirs } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
 import { detectCodexUsageLimitMessages } from "../codex-rate-limit.js";
 import { detectClaudeUsageLimitMessages } from "../claude-rate-limit.js";
 import { loadCodexLicenseRing, resolveCodexHomeForProfile } from "../codex-license-ring.js";
@@ -198,7 +199,12 @@ export function createSessionLifecycle(
 
     if (!skipLaunchPreflight && !workspace.isDirect && !workingDirOverride && projectId) {
       const projectRows = await db
-        .select({ repoPath: projects.repoPath, defaultBranch: projects.defaultBranch })
+        .select({
+          repoPath: projects.repoPath,
+          defaultBranch: projects.defaultBranch,
+          symlinkEnabled: projects.symlinkEnabled,
+          symlinkDirs: projects.symlinkDirs,
+        })
         .from(projects)
         .where(eq(projects.id, projectId))
         .limit(1);
@@ -210,6 +216,7 @@ export function createSessionLifecycle(
           baseBranch: workspace.baseBranch || project.defaultBranch,
           branch: workspace.branch,
           isDirect: workspace.isDirect ?? false,
+          symlinkDirs: project.symlinkEnabled ? parseSymlinkDirs(project.symlinkDirs) : [],
         });
         if (!preflight.ok) {
           throw new WorkspaceError(preflight.errors.join("\n"), "CONFLICT", {
