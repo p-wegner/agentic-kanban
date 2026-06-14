@@ -44,8 +44,33 @@ Routes receiving `{ boardEvents }` via options and `getSessionManager` via argum
 ## Session resume chain
 Claude's internal `session_id` captured from `system/init` stream-json events in `session.manager.ts broadcast()`, stored in `sessions.claudeSessionId`. On relaunch, `resumeFromId` passes `--resume <id>` to agent.
 
+Pi's provider resume id is the first `{"type":"session","id":"..."}` JSONL
+header. It is stored in the same legacy `sessions.claudeSessionId` column and
+relaunched as `pi --session <id> --mode json -p <prompt>`. Do not rename the DB
+column only for Pi; treat it as the provider-session-id slot until a broad schema
+migration is justified.
+
 ## Re-chat and agent stdout
 On Windows, `claude.exe` buffers stdout until stdin closed. Always use `stdin.end(prompt)` (never `stdin.write()` with stdin left open). Each re-chat spawns new process with `--resume <claudeSessionId>`. Graceful stop: `closeStdin()` → 2s wait → `kill()`. `stoppedByUser` set prevents exit handler from overwriting DB status.
+
+## Pi task agents
+Pi task workspaces are CLI subprocesses, not SDK sessions. `pi-provider.ts`
+resolves `pi`/`pi.cmd`/`pi.ps1`, runs with `--mode json`, supplies the prompt via
+`-p`, and loads board material with explicit `--extension` and `--skill` flags.
+Pi 0.73.1 fails on `--approve`; never add that flag to server launch args.
+
+Pi profiles are lightweight launch hints: `default` means Pi's own configured
+defaults, while `provider/model` or `provider:model` is split into `--provider`
+and `--model`. Auth remains Pi-native: provider env vars, Pi settings, and
+`PI_CODING_AGENT_DIR` select the credential/config root.
+
+The `.pi/plugin/agentic-kanban-hooks.ts` extension maps Pi `tool_call` events to
+the existing `.claude/hooks` scripts. Bash commands flow through
+`smart-hooks-runner.js PreToolUse`; write/edit tools flow through
+`prevent-cross-worktree-writes.js`. Those are hard pre-execution blocks. Pi does
+not currently provide a hard Claude-style Stop hook for the board's one-shot task
+launches, so `check-uncommitted.js` does not gate Pi session exit. Server review
+and merge preparation still detect dirty worktrees before landing.
 
 ## Branch suggestion/listing
 `suggestBranchName()` format: `feature/ak-<issue-number>-<sanitized-title>`. Base branch uses `<select>` from `GET /api/projects/:id/branches`, falls back to text input on failure.
