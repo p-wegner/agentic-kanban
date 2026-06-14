@@ -564,6 +564,19 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     });
   }
 
+  // Mark any tool cards still spinning as done — used when a turn ends so a missing
+  // tool-result (interrupt, provider that doesn't emit one) doesn't leave a spinner.
+  function settlePendingTools() {
+    setChatMessages((prev) => {
+      if (!prev.some((m) => m.role === "tool" && m.tool?.status === "pending")) return prev;
+      return prev.map((m) =>
+        m.role === "tool" && m.tool?.status === "pending"
+          ? { ...m, tool: { ...m.tool, status: "done" } }
+          : m,
+      );
+    });
+  }
+
   function handleButlerEvent(e: ButlerEvent) {
     switch (e.type) {
       case "session":
@@ -596,16 +609,51 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
       case "text":
         appendAssistantText(e.text);
         break;
-      case "tool":
+      case "tool": {
         // A tool call ends the current text run. Reset the streaming buffer + bubble
         // id so any text that streams AFTER the tool starts a fresh bubble with an
         // empty buffer. Without this, the next text run keeps appending to the prior
-        // run's accumulated text and â€” because `last` is now this activity bubble, not
+        // run's accumulated text and â€” because `last` is now this tool card, not
         // the assistant bubble â€” spawns a NEW bubble that repeats the earlier text.
         assistantBufRef.current = "";
         assistantMsgIdRef.current = null;
-        setChatMessages((prev) => [...prev, { id: `act-${Date.now()}-${Math.random()}`, role: "activity", text: formatToolLabel(e.name), ts: Date.now() }]);
+        // Key the message on the tool id so its result can find it later. Fall back to
+        // a synthetic id when the provider doesn't supply one (result then pairs by
+        // "last pending tool").
+        const id = e.toolId ? `tool-${e.toolId}` : `tool-${Date.now()}-${Math.random()}`;
+        setChatMessages((prev) => [...prev, {
+          id,
+          role: "tool",
+          text: formatToolLabel(e.name),
+          ts: Date.now(),
+          tool: { name: e.name, input: e.input, status: "pending" },
+        }]);
         break;
+      }
+      case "tool-result": {
+        const targetId = e.toolId ? `tool-${e.toolId}` : undefined;
+        setChatMessages((prev) => {
+          // Find the matching tool card: by id when correlated, else the last one
+          // still pending (covers providers that omit tool ids).
+          let idx = -1;
+          if (targetId) {
+            idx = prev.findIndex((m) => m.id === targetId);
+          } else {
+            for (let i = prev.length - 1; i >= 0; i--) {
+              if (prev[i].role === "tool" && prev[i].tool?.status === "pending") { idx = i; break; }
+            }
+          }
+          if (idx === -1) return prev;
+          const msg = prev[idx];
+          const next = [...prev];
+          next[idx] = {
+            ...msg,
+            tool: { ...msg.tool!, output: e.output, status: e.isError ? "error" : "done" },
+          };
+          return next;
+        });
+        break;
+      }
       case "result":
         if (e.text && !assistantTextSeenRef.current) {
           if (e.isError) {
@@ -617,10 +665,12 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
         assistantBufRef.current = "";
         assistantMsgIdRef.current = null;
         assistantTextSeenRef.current = false;
+        settlePendingTools();
         setSending(false);
         break;
       case "error":
         setChatMessages((prev) => [...prev, { id: `err-${Date.now()}`, role: "activity", text: `Error: ${e.message}`, ts: Date.now() }]);
+        settlePendingTools();
         setSending(false);
         break;
       case "ready":
