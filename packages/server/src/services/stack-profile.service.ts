@@ -188,7 +188,7 @@ function detectOtherProfile(repoPath: string, markers: Set<string>): Partial<Sta
     };
   }
   if (markers.has("build.gradle") || markers.has("build.gradle.kts")) {
-    const wrapper = existsSync(join(repoPath, "gradlew")) ? "./gradlew" : "gradle";
+    const wrapper = gradleWrapper(repoPath);
     const isMultiModule = existsSync(join(repoPath, "settings.gradle")) || existsSync(join(repoPath, "settings.gradle.kts"));
     // `gradle dependencies` resolves only the ROOT project's deps; a multi-module build
     // needs every subproject's deps materialized before the first build. `assemble` builds
@@ -261,6 +261,22 @@ function repoHasKotlinSources(repoPath: string): boolean {
     if (existsSync(join(repoPath, dir))) return true;
   }
   return false;
+}
+
+/**
+ * The runnable Gradle wrapper invocation for THIS platform.
+ *
+ * The board's verify gate and setup runner execute commands through `cmd.exe /c` on Windows
+ * (see setup-script.ts / verify-gate-runner.js). Under cmd.exe, `./gradlew` is a parse error
+ * ("'.' is not recognized") and a bare `gradlew.bat` is not found from the cwd — only the
+ * explicit `.\gradlew.bat` resolves. On POSIX shells `./gradlew` is correct. Emitting the
+ * platform-correct wrapper is what makes a Gradle project's merge gate actually pass on Windows.
+ */
+function gradleWrapper(repoPath: string): string {
+  if (process.platform === "win32") {
+    return existsSync(join(repoPath, "gradlew.bat")) ? ".\\gradlew.bat" : "gradle";
+  }
+  return existsSync(join(repoPath, "gradlew")) ? "./gradlew" : "gradle";
 }
 
 /** A Gradle project is Kotlin when it uses the Kotlin DSL or applies a Kotlin plugin / has .kt sources. */
@@ -978,7 +994,7 @@ function deriveInstallFromMarkers(repoPath: string): string {
   if (markers.has("Cargo.toml")) return "cargo fetch";
   if (markers.has("go.mod")) return "go mod download";
   if (markers.has("build.gradle") || markers.has("build.gradle.kts")) {
-    const wrapper = existsSync(join(repoPath, "gradlew")) ? "./gradlew" : "gradle";
+    const wrapper = gradleWrapper(repoPath);
     const isMultiModule = existsSync(join(repoPath, "settings.gradle")) || existsSync(join(repoPath, "settings.gradle.kts"));
     return isMultiModule ? `${wrapper} assemble` : `${wrapper} dependencies`;
   }

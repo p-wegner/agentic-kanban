@@ -126,14 +126,18 @@ describe("detectStackProfile", () => {
     expect(p.testCommand).toBe("poetry run python -m pytest");
   });
 
-  it("populates java/gradle profile with wrapper", async () => {
+  it("populates java/gradle profile with the platform-correct wrapper", async () => {
     await writeFile(join(dir, "build.gradle"), "plugins { id 'java' }\n");
     await writeFile(join(dir, "gradlew"), "#!/bin/sh\n");
+    await writeFile(join(dir, "gradlew.bat"), "@echo off\n");
     const p = detectStackProfile(dir);
     expect(p.stack).toBe("java");
     expect(p.packageManager).toBe("gradle");
-    expect(p.testCommand).toBe("./gradlew test");
-    expect(p.buildCommand).toBe("./gradlew build");
+    // The verify gate / setup runner execute through cmd.exe on Windows, where only `.\gradlew.bat`
+    // resolves; POSIX shells use `./gradlew`. Detection must emit the platform-correct form.
+    const w = process.platform === "win32" ? ".\\gradlew.bat" : "./gradlew";
+    expect(p.testCommand).toBe(`${w} test`);
+    expect(p.buildCommand).toBe(`${w} build`);
   });
 
   it("a Kotlin Multiplatform gradle project has no compileJava typecheck and no bootRun dev command", async () => {
@@ -155,15 +159,19 @@ describe("detectStackProfile", () => {
   it("a Java (non-Kotlin) gradle project still gets compileJava typecheck", async () => {
     await writeFile(join(dir, "build.gradle"), "plugins { id 'java' }\n");
     await writeFile(join(dir, "gradlew"), "#!/bin/sh\n");
+    await writeFile(join(dir, "gradlew.bat"), "@echo off\n");
     const p = detectStackProfile(dir);
-    expect(p.typecheckCommand).toBe("./gradlew compileJava");
+    const w = process.platform === "win32" ? ".\\gradlew.bat" : "./gradlew";
+    expect(p.typecheckCommand).toBe(`${w} compileJava`);
   });
 
   it("a Spring Boot gradle project keeps bootRun + isWeb", async () => {
     await writeFile(join(dir, "build.gradle"), "plugins { id 'org.springframework.boot' }\n");
     await writeFile(join(dir, "gradlew"), "#!/bin/sh\n");
+    await writeFile(join(dir, "gradlew.bat"), "@echo off\n");
     const p = detectStackProfile(dir);
-    expect(p.devCommand).toBe("./gradlew bootRun");
+    const w = process.platform === "win32" ? ".\\gradlew.bat" : "./gradlew";
+    expect(p.devCommand).toBe(`${w} bootRun`);
     expect(p.isWeb).toBe(true);
   });
 
