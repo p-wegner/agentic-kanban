@@ -142,6 +142,60 @@ describe("Drives API", () => {
     expect(res.status).toBe(403);
   });
 
+  it("reports per-drive review effectiveness (reviews run, bounced, merged-without-review)", async () => {
+    // A drive with a meta-issue + one child that gets built, reviewed, bounced, merged.
+    const now = new Date().toISOString();
+    const meta = randomUUID();
+    const child = randomUUID();
+    const statusId = randomUUID();
+    await db.insert(schema.projectStatuses).values({
+      id: statusId, projectId, name: "In Progress", sortOrder: 1, isDefault: true,
+    });
+
+    for (const [id, num, title] of [[meta, 100, "Epic"], [child, 101, "Child"]] as const) {
+      await db.insert(schema.issues).values({
+        id, issueNumber: num, title, statusId, projectId, createdAt: now, updatedAt: now,
+      });
+    }
+    await db.insert(schema.issueDependencies).values({
+      id: randomUUID(), issueId: meta, dependsOnId: child, type: "parent_of", createdAt: now,
+    });
+
+    // Create the drive first so we can seed sessions strictly inside its window
+    // (the window opens at drive.startedAt; sessions before that are excluded).
+    const drive = await (await app.request(`/api/projects/${projectId}/drives`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ target: "Drive epic", metaIssueId: meta }),
+    })).json() as any;
+
+    const buildAt = new Date(new Date(drive.startedAt).getTime() + 1_000).toISOString();
+    const reviewAt = new Date(new Date(drive.startedAt).getTime() + 2_000).toISOString();
+
+    const ws = randomUUID();
+    await db.insert(schema.workspaces).values({
+      id: ws, issueId: child, branch: "feature/child", status: "merged",
+      provider: "claude", readyForMerge: true, mergedAt: reviewAt, scorecardScore: 77, createdAt: now, updatedAt: now,
+    });
+    await db.insert(schema.sessions).values([
+      { id: randomUUID(), workspaceId: ws, executor: "claude-code", status: "stopped", startedAt: buildAt, endedAt: buildAt, triggerType: "agent" },
+      { id: randomUUID(), workspaceId: ws, executor: "claude-code", status: "stopped", startedAt: reviewAt, endedAt: reviewAt, triggerType: "review" },
+    ]);
+
+    const res = await app.request(`/api/projects/${projectId}/drives/${drive.id}/review-effectiveness`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.drive.id).toBe(drive.id);
+    expect(body.drive.scope).toBe("meta-issue-subtree");
+    expect(body.totals.reviewRuns).toBe(1);
+    expect(body.reviewCoverage.attemptsReviewed).toBe(1);
+  });
+
+  it("returns 404 review-effectiveness for an unknown drive", async () => {
+    const res = await app.request(`/api/projects/${projectId}/drives/${randomUUID()}/review-effectiveness`);
+    expect(res.status).toBe(404);
+  });
+
   it("deletes a drive", async () => {
     const created = await (await app.request(`/api/projects/${projectId}/drives`, {
       method: "POST",
