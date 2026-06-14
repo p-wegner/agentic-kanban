@@ -408,8 +408,9 @@ export function createWorkspaceCrudService(deps: {
     if (input.clarifications?.trim()) {
       prompt = `${input.clarifications.trim()}\n\n${prompt}`;
     }
+    prompt = neutralizeBuildTimeVisualVerification(prompt);
     if (input.includeVisualProof) {
-      prompt += `\n\n## Visual Verification Required\n\nAfter completing the implementation, you MUST visually verify the result and attach proof:\n1. Start the dev server if not already running\n2. Use the \`playwright-cli\` skill to open the app in a browser\n3. Navigate to the feature and take a screenshot showing it working\n4. Encode the screenshot as a base64 data URL\n5. Call the MCP tool \`attach_artifact\` with:\n   - workspaceId: (your current workspace ID, available in CLAUDE.local.md)\n   - type: "image"\n   - mimeType: "image/png"\n   - content: the base64 data URL (e.g. "data:image/png;base64,...")\n   - caption: "visual-proof: <brief description of what is shown>"\n\nThis visual proof is required — do not skip it.`;
+      prompt += `\n\n## Board-Owned Visual Verification\n\nThis workspace is marked for visual proof, but visual verification is a board step, not a builder step. Do not run Playwright, install browsers, take screenshots, or attach visual artifacts during implementation. Finish the code change, run the relevant non-visual tests, commit, and let the board handle visual verification according to \`visual_verification_mode\` and \`after_merge_verify_agent\`.`;
     }
     // Claude Code treats prompts that start with `/` as slash-command invocations
     // (e.g. ticket title "/merge endpoint ..." → "Unknown command: /merge", agent exits in 3s).
@@ -418,6 +419,27 @@ export function createWorkspaceCrudService(deps: {
       prompt = " " + prompt;
     }
     return prompt;
+  }
+
+  function neutralizeBuildTimeVisualVerification(prompt: string): string {
+    const lines = prompt.split(/\r?\n/);
+    const kept = lines.filter(line => !isBuildTimeVisualVerificationInstruction(line));
+    if (kept.length === lines.length) return prompt;
+    return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  }
+
+  function isBuildTimeVisualVerificationInstruction(line: string): boolean {
+    const normalized = line.trim().toLowerCase();
+    if (!normalized) return false;
+    if (/\bnpx\s+playwright\s+install\b/.test(normalized)) return true;
+    if (/\bplaywright\s+install\b/.test(normalized)) return true;
+    if (/\binstall\b.*\b(browser|browsers|runtime|runtimes|global package|playwright)\b/.test(normalized)) return true;
+
+    const mentionsVisualTool =
+      /\b(playwright-cli|run playwright|playwright directly|visual verification|visually verify|screenshot|screenshots|visual proof)\b/.test(normalized);
+    if (!mentionsVisualTool) return false;
+
+    return /\b(must|should|required|after completing|before finishing|verify|attach|proof|take|capture|use|run|open the app|navigate)\b/.test(normalized);
   }
 
   async function resolveSkillFile(

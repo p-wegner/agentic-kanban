@@ -244,6 +244,9 @@ orchestrates them). Edit freely to fit this project's stack and conventions.
   \`npm test && npm run build\`, \`pytest\`, or \`cargo test\`. The board runs it in your worktree
   after a session and withholds the merge if it fails — so broken code can't be auto-approved.
 - Keep the app runnable and prefer adding/maintaining tests for what you change.
+- Visual verification is board-owned. Configure it in Project Settings with
+  \`visual_verification_mode\` and \`after_merge_verify_agent\`; builders should not install browsers,
+  run Playwright, take screenshots, or attach visual proof during implementation.
 
 ## Agent artifacts
 Agents may write local scratch files during a session (\`CLAUDE.local.md\`, \`HANDOFF.md\`,
@@ -284,6 +287,9 @@ Edit freely to fit this project's stack and conventions.
 ## Safety
 - **Never run destructive git** (\`git reset --hard\`, \`git push --force\`, history rewrites) and
   don't delete files you didn't create. Prefer additive, reversible changes.
+- Visual verification is board-owned. Configure it with \`visual_verification_mode\` and
+  \`after_merge_verify_agent\`; builders should not install browsers, run Playwright, take
+  screenshots, or attach visual proof during implementation.
 
 ## Use the right tool, not the shell
 Reach for a dedicated tool before a shell command — it's faster and doesn't fail on quoting.

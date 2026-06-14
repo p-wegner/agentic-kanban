@@ -81,7 +81,7 @@ export const BUILTIN_WORKFLOWS: BuiltinTemplateDef[] = [
         name: "Implement",
         nodeType: "start",
         statusName: "In Progress",
-        guidance: "Implement the change described in the ticket, then commit. When done, propose a transition to Review.",
+        guidance: "Implement the change described in the ticket, then commit. Do not run screenshot/browser-install/visual-verification steps as part of implementation; the board owns visual verification via visual_verification_mode. When done, propose a transition to Review.",
       },
       {
         key: "review",
@@ -227,7 +227,7 @@ export const BUILTIN_WORKFLOWS: BuiltinTemplateDef[] = [
         name: "Implement",
         nodeType: "start",
         statusName: "In Progress",
-        guidance: "Implement the change described in the ticket and commit. Then advance to Split Reviews.",
+        guidance: "Implement the change described in the ticket and commit. Do not run screenshot/browser-install/visual-verification steps as part of implementation; the board owns visual verification via visual_verification_mode. Then advance to Split Reviews.",
       },
       {
         key: "fork",
@@ -387,7 +387,7 @@ export const BUILTIN_WORKFLOWS: BuiltinTemplateDef[] = [
         nodeType: "normal",
         statusName: "In Progress",
         guidance:
-          "Implement the approved task plan. Keep commits focused, run relevant tests, and commit before proposing Review.",
+          "Implement the approved task plan. Keep commits focused, run relevant non-visual tests, and commit before proposing Review. Do not run screenshot/browser-install/visual-verification steps as part of implementation; the board owns visual verification via visual_verification_mode.",
       },
       {
         key: "review",
@@ -434,9 +434,7 @@ export async function ensureBuiltinWorkflows(database: Database = db): Promise<v
   let added = 0;
   for (const tpl of BUILTIN_WORKFLOWS) {
     if (existingKeys.has(tpl.builtinKey)) {
-      if (tpl.builtinKey === "spec-driven-phased-planning") {
-        await syncBuiltinWorkflowGraph(database, tpl, skillIdByName, now);
-      }
+      await syncBuiltinWorkflowGraph(database, tpl, skillIdByName, now);
       continue;
     }
 

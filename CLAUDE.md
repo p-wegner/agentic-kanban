@@ -107,7 +107,7 @@ Prompt templates in the `agent_skills` table, written to `.claude/skills/<name>/
 | DB migration/lock/WAL issues | `db-doctor` |
 | Flaky vs real test failure | `flaky-test-triage` |
 | New Playwright E2E test | `e2e-author` |
-| Visually verify a UI change | `playwright-cli` |
+| Board-owned visual verification | `playwright-cli` |
 | Scope-creep check before commit | `scope-guard` |
 | Board via MCP / reflect progress | `board-navigator`, `kanban-workflow` |
 | Per-cycle board health | `board-monitor` |
@@ -120,6 +120,9 @@ Prompt templates in the `agent_skills` table, written to `.claude/skills/<name>/
 - `pnpm dev` — server + client (worktree ports: main 3001/5173, `feature/<N>-…` = `3001+N`/`5173+N`). `pnpm dev:desktop` adds Tauri. Safe headless launch: `dev-server` skill.
 - `pnpm test:mine` — fast loop (green unit suites; skips known-flaky). Takes `-- --changed HEAD` and patterns. Full `pnpm --filter agentic-kanban test` only before mark-ready / cross-cutting changes.
 - `pnpm test:e2e` — Playwright E2E. `pnpm db:migrate && pnpm db:seed` — init DB. `pnpm cli -- register <path>`/`list`/`cleanup` — project & worktree management.
+
+## Visual Verification
+Visual verification is board-owned. Configure it with `visual_verification_mode` (`none` or `after_merge`) and `after_merge_verify_agent` (`none`, `dedicated`, or `reviewer`). Builders should not install browsers, run Playwright, take screenshots, or attach visual proof during implementation; the board tags and runs any after-merge verification.
 
 ## Workspace Flow
 `POST /api/workspaces` creates DB record + worktree + auto-launches the agent. Then: `/turn` (follow-up; takes `content` not `message`; 409 if busy), `GET /diff` (vs `baseBranch`), `/merge` (into `defaultBranch`), `DELETE` (cascades sessions + messages). Loop: register repo → create issue → new workspace → diff → merge.

@@ -23,6 +23,7 @@ export async function enhanceIssue(
   const prompt = `You are helping enhance a kanban issue ticket for an AI coding agent.
 Given a title and optional description, return an improved version that is clear, actionable, and well-structured.
 Keep the title concise (under 80 chars). Expand the description with context, acceptance criteria, and agent instructions if helpful.
+Do not add build-time screenshot, browser automation, Playwright, or browser-install instructions. If visual confirmation is relevant, mention only that it is board-owned after-merge verification configured via visual_verification_mode / after_merge_verify_agent, not a builder task.
 Also identify any open questions — unresolved decisions, assumptions, or clarifications needed before work begins.
 Respond ONLY with valid JSON — no markdown, no explanation:
 {"title": "...", "description": "...", "openQuestions": ["question 1", "question 2"]}
