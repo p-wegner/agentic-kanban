@@ -636,7 +636,7 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
       source: "manual",
       updatedAt: new Date().toISOString(),
     };
-    await saveStackProfile(projectId, merged, database);
+    await saveStackProfile(projectId, merged, database, project.repoPath);
     return c.json({ projectId, profile: merged });
   });
 

@@ -43,16 +43,57 @@ function getConfigPath(projectDir = getProjectDir()) {
   return path.join(projectDir, ".claude", "hooks", "smart-hooks-config.json");
 }
 
+function getRulesPath(projectDir = getProjectDir()) {
+  return path.join(projectDir, ".claude", "smart-hooks-rules.json");
+}
+
 function getStatePath() {
   return path.join(getProjectDir(), ".claude", "hooks", ".smart-hooks-state.json");
 }
 
-function loadConfig(projectDir) {
+/**
+ * Load the generated per-project edit-time feedback rules (#787) and convert each into a
+ * runner "check". The rules file is machine-generated from the stack profile and uses a flat
+ * `{ rules: [...] }` shape; the runner's check shape needs an `enabled` flag (rules are always
+ * active). Generated rules run on both PostToolUse (per-edit) and Stop (end-of-session).
+ */
+function loadGeneratedRules(projectDir) {
+  let rules;
   try {
-    return JSON.parse(fs.readFileSync(getConfigPath(projectDir), "utf8"));
+    rules = JSON.parse(fs.readFileSync(getRulesPath(projectDir), "utf8")).rules;
   } catch {
-    return { hooks: {} };
+    return [];
   }
+  if (!Array.isArray(rules)) return [];
+  return rules
+    .filter((r) => r && r.command)
+    .map((r) => ({
+      enabled: true,
+      name: r.name || "Check",
+      command: r.command,
+      filePatterns: Array.isArray(r.filePatterns) ? r.filePatterns : [],
+      blocking: r.blocking !== false,
+      timeout: typeof r.timeout === "number" ? r.timeout : 120,
+    }));
+}
+
+function loadConfig(projectDir = getProjectDir()) {
+  let config;
+  try {
+    config = JSON.parse(fs.readFileSync(getConfigPath(projectDir), "utf8"));
+  } catch {
+    config = { hooks: {} };
+  }
+  if (!config.hooks) config.hooks = {};
+
+  // Merge the generated stack-profile rules into the PostToolUse + Stop checks so a driven
+  // project gets incremental edit-time feedback without any hand-authored config (#787).
+  const generated = loadGeneratedRules(projectDir);
+  if (generated.length > 0) {
+    config.hooks.PostToolUse = [...(config.hooks.PostToolUse || []), ...generated];
+    config.hooks.Stop = [...(config.hooks.Stop || []), ...generated];
+  }
+  return config;
 }
 
 function loadState() {

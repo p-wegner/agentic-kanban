@@ -234,6 +234,33 @@ describe("project-scaffold", () => {
       }
     });
 
+    it("delivers smart-hooks-runner.js and wires PostToolUse + Stop with $CLAUDE_PROJECT_DIR paths (#787)", async () => {
+      const dir = await tmp();
+      try {
+        await gitInit(dir);
+        ensureHookScaffold(dir, { includeWorktreeGuard: false });
+
+        const { existsSync } = await import("node:fs");
+        expect(existsSync(join(dir, ".claude", "hooks", "smart-hooks-runner.js"))).toBe(true);
+
+        const settings = JSON.parse(await readFile(join(dir, ".claude", "settings.json"), "utf8"));
+        const postCmds = (settings.hooks?.PostToolUse ?? []).flatMap(
+          (e: { hooks?: { command: string }[] }) => (e.hooks ?? []).map((h: { command: string }) => h.command)
+        );
+        const stopCmds = (settings.hooks?.Stop ?? []).flatMap(
+          (e: { hooks?: { command: string }[] }) => (e.hooks ?? []).map((h: { command: string }) => h.command)
+        );
+        const postRunner = postCmds.find((c: string) => c.includes("smart-hooks-runner.js PostToolUse"));
+        const stopRunner = stopCmds.find((c: string) => c.includes("smart-hooks-runner.js Stop"));
+        expect(postRunner).toBeTruthy();
+        expect(stopRunner).toBeTruthy();
+        expect(postRunner).toContain("$CLAUDE_PROJECT_DIR");
+        expect(postRunner).not.toMatch(/^node [A-Z]:/i);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
     it("does not clobber an existing vital-files.json", async () => {
       const dir = await tmp();
       try {
