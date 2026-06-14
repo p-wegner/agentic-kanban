@@ -1,6 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import { apiFetch } from "../../lib/api.js";
 import { ProjectScriptsSettingsSection } from "../ProjectScriptsSettingsSection.js";
+import { StackProfileSettingsSection } from "../StackProfileSettingsSection.js";
 import { showToast } from "../Toast.js";
 import { ArchiveDoneSection, CollapsibleSection, Field, Toggle, type ProjectSettingsState, type Settings, type SkillSetting } from "../SettingsPanel.shared.js";
 
@@ -110,6 +111,7 @@ export function ProjectSettings({ activeProjectId, settings, setSettings, projec
                         </p>
                       </Field>
                       <ProjectScriptsSettingsSection projectId={activeProjectId} />
+                      <StackProfileSettingsSection projectId={activeProjectId} />
                       <CollapsibleSection
                         title="Setup Script"
                         configured={!!projectSettings.setupScript}
