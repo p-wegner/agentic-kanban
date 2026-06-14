@@ -96,10 +96,22 @@ describe("commit-checkpoint rule (#90)", () => {
     expect(skill).toBeDefined();
     const prompt = skill!.prompt;
     // Not generic "commit early often" advice — it must name the concrete gates.
-    expect(prompt).toMatch(/commit checkpoint/i);
+    expect(prompt).toMatch(/green checkpoint/i);
     expect(prompt).toContain("tsc -b --noEmit");
     expect(prompt).toMatch(/--related/);
     expect(prompt).toMatch(/follow-up commit/i);
+  });
+
+  it("the built-in skill forbids interactive plan/question tools in builder sessions", () => {
+    const skill = BUILTIN_SKILLS.find((s) => s.name === "kanban-workflow");
+    expect(skill).toBeDefined();
+    const prompt = skill!.prompt;
+    expect(prompt).toMatch(/Builder sessions are headless/i);
+    expect(prompt).toContain("ExitPlanMode");
+    expect(prompt).toContain("EnterPlanMode");
+    expect(prompt).toContain("AskUserQuestion");
+    expect(prompt).toMatch(/TaskCreate.*TaskUpdate/s);
+    expect(prompt).toMatch(/document it in the commit message/i);
   });
 
   it("the monitor-nudge skill carries the commit-checkpoint hint", () => {
@@ -115,9 +127,14 @@ describe("commit-checkpoint rule (#90)", () => {
       "../../../../.claude/skills/kanban-workflow/SKILL.md",
     );
     const text = await readFile(skillPath, "utf-8");
-    expect(text).toMatch(/commit checkpoint/i);
+    expect(text).toMatch(/core is green/i);
     expect(text).toContain("tsc -b --noEmit");
     expect(text).toMatch(/follow-up commit/i);
+    expect(text).toMatch(/Builder sessions are headless/i);
+    expect(text).toContain("ExitPlanMode");
+    expect(text).toContain("EnterPlanMode");
+    expect(text).toContain("AskUserQuestion");
+    expect(text).toMatch(/TaskCreate.*TaskUpdate/s);
   });
 
   describe("a stubbed agent on a meaningful-work branch", () => {
