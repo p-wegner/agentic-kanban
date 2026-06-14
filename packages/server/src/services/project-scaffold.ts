@@ -30,6 +30,8 @@ export const GENERIC_AGENT_GITIGNORE = [
   ".claude/settings.local.json",
   ".claude/hooks/.edited-files.json",
   ".claude/hooks/.smart-hooks-state.json",
+  ".claude/hooks/.verify-gate-state.json",
+  ".claude/hooks/.verify-gate-escalation.json",
   ".claude/scheduled_tasks.lock",
 ];
 
@@ -574,7 +576,8 @@ export function ensureHookScaffold(repoPath: string, options: HookScaffoldOption
 // Verify-gate runner scaffold
 // ---------------------------------------------------------------------------
 
-const VERIFY_GATE_CONFIG_STUB = JSON.stringify({ command: "" }, null, 2) + "\n";
+const VERIFY_GATE_CONFIG_STUB =
+  JSON.stringify({ command: "", maxRepairAttempts: 3 }, null, 2) + "\n";
 
 /**
  * Copy the generic verify-gate runner and its config stub into .claude/hooks/.
