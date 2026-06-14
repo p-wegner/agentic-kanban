@@ -83,9 +83,12 @@ The control plane for THIS board is the out-of-process loop `scripts/board-monit
 > Caveat: this board's `objective.md` targets are hand-authored (no generated markers) — saving the Bullseye would clobber them. Edit one or the other deliberately.
 
 ### Driving a different project hands-off
-For another project, the supported driver is the **in-process engine** (`runMonitorCycle` + auto-review/auto-merge + stranded-review reconciler) — NOT the Conductor (hard-coded to agentic-kanban) or Monitor Butler (decision 006).
-- **Enable per project**: set `board_autodrive_<projectId>` = `"true"`. Opts into auto-start/relaunch even when global `auto_monitor` is off (force-disabled on boot; separate key so the reset doesn't clobber it). Scope: global on ⇒ all projects; else only auto-driven ones.
-- Strategy Bullseye takes effect via the `resolveMonitorTunables` pref read, no `objective.md` needed (`writeStrategyObjective` no-ops for non-Conductor repos). Legacy fallback: WIP = `nudge_wip_limit`, `backlogFloor=3`, `maxNewStartsPerCycle=3` (staggered batches).
+**The single control for how a project's tickets get auto-started is its per-project Start Mode** (`start_mode_<projectId>` ∈ `manual | monitor | conductor`), resolved by `resolveStartPolicy()` (`start-policy.service.ts`) — the one decision EVERY auto-start path consults (in-process monitor, the post-merge dependency cascade, backlog refill, scheduled crons). See decision 008. Set/observe it in the **Monitor view → Start Mode** control.
+- **`manual`** — nothing auto-starts; only explicit `POST /api/workspaces` / relaunch. A true kill-switch (incl. the post-merge cascade, which previously leaked past every "drive" switch).
+- **`monitor`** — the **in-process engine** (`runMonitorCycle` + auto-review/auto-merge + stranded-review reconciler) auto-starts unblocked backlog up to WIP. This is the supported hands-off driver for any project (NOT the Conductor / Monitor Butler — decision 006).
+- **`conductor`** — the out-of-process loop is the sole driver; in-process stands down. Agentic-kanban only (the loop is hard-coded here). Start/stop it from the Monitor view (Conductor mode) — `conductor-control.service.ts` / `POST /api/projects/:id/conductor`.
+- **Back-compat / setDriveEnabled**: `board_autodrive_<projectId>="true"` (the legacy keystone) still works — Start Mode DERIVES `monitor` from it when `start_mode_<id>` is unset, and `setDriveEnabled` (the one-switch) writes `start_mode` (on=monitor/off=manual) so they never drift. Per-project Start Mode supersedes the global `auto_monitor`.
+- Strategy Bullseye still feeds tunables via `resolveMonitorTunables` (no `objective.md` needed; `writeStrategyObjective` no-ops for non-Conductor repos). Legacy fallback: WIP = `nudge_wip_limit`, `backlogFloor=3`, `maxNewStartsPerCycle=3`.
 - Tag an issue `no-auto-start` to keep the monitor from launching it.
 
 ## Server Resilience
@@ -124,7 +127,7 @@ Prompt templates in the `agent_skills` table, written to `.claude/skills/<name>/
 ## Documentation Map
 - `.llm/workflows.md` — clean-start, DB reset, registration, migration diagnosis
 - `docs/prd/` — `00` vision, `05` MVP scope/stages, `03` data model, `04` agent integration, `06` testability
-- `docs/decisions/` — numbered decision records (`003` Butler, `006` board-monitor)
+- `docs/decisions/` — numbered decision records (`003` Butler, `006` board-monitor, `008` Start Mode)
 - `docs/state.md` — progress
 - `packages/server/CLAUDE.md` — server-package detail (incl. Butler ops)
 - `scripts/board-monitor/README.md` — run/stop/observe the loop
