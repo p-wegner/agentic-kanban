@@ -8,6 +8,14 @@ argument-hint: "[feature or flow to test]"
 
 Scaffold a new Playwright E2E test under `packages/e2e/tests/` for the feature in `$ARGUMENTS`, following ALL the project's hard-won anti-flake rules so it never reintroduces the flakiness documented in CLAUDE.md.
 
+> **Driving a different project?** The Playwright/`packages/e2e` layout below is agentic-kanban-specific.
+> For a *driven* project the board derives a runnable test scaffold from that project's detected
+> **stack profile** (`testDir` + `testRunner`) — see `deriveTestScaffold`/`writeTestScaffold` in
+> `packages/server/src/services/stack-profile.service.ts` (#793). It writes a green starter test in
+> the project's *real* test dir and runner (pytest, cargo test, vitest, go test, JUnit, …), refreshed
+> whenever the stack profile is (re)computed. So don't hand-port these agentic-kanban rules into another
+> repo — build on the scaffold the board already placed there, in that project's own conventions.
+
 ## Where tests live
 - UI: `packages/e2e/tests/ui/<name>.test.ts` · API: `packages/e2e/tests/api/<name>.test.ts`
 - Helpers (`packages/e2e/tests/helpers/`): `port.ts` exports `SERVER_URL`/`CLIENT_URL`/`SERVER_PORT`/`CLIENT_PORT` (all on `127.0.0.1`); `e2e-project.ts` exports `getE2EProject(request)` / `getE2EProjectId(request)`.

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from "node:fs";
+﻿import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { StackProfile } from "@agentic-kanban/shared";
 import { projects } from "@agentic-kanban/shared/schema";
@@ -33,13 +33,13 @@ function readJson<T>(path: string): T | null {
  *
  * pnpm/yarn/npm/bun all install every workspace from a single root invocation
  * (pnpm is recursive by default; npm 7+/yarn/bun resolve the whole workspace graph),
- * so the command shape is the same — but we surface `-r` for pnpm monorepos to make the
+ * so the command shape is the same â€” but we surface `-r` for pnpm monorepos to make the
  * "install ALL workspaces" intent explicit and robust against a non-root cwd.
  */
 function nodeInstallCommand(pm: string, isMonorepo: boolean): string {
   if (pm === "pnpm") return isMonorepo ? "pnpm install -r" : "pnpm install";
   if (pm === "npm") return "npm install";
-  return `${pm} install`; // yarn / bun — workspace-aware from the root
+  return `${pm} install`; // yarn / bun â€” workspace-aware from the root
 }
 
 /** Detect the package manager from lock files, falling back to npm for a bare package.json. */
@@ -116,7 +116,7 @@ function detectNodeProfile(repoPath: string, markers: Set<string>): Partial<Stac
   const pkg = readJson<NodePkgJson>(join(repoPath, "package.json"));
   const scripts = pkg?.scripts ?? {};
 
-  // Workspaces → monorepo.
+  // Workspaces â†’ monorepo.
   let workspaces: string[] = readPnpmWorkspaces(repoPath);
   if (workspaces.length === 0 && pkg?.workspaces) {
     workspaces = Array.isArray(pkg.workspaces) ? pkg.workspaces : (pkg.workspaces.packages ?? []);
@@ -245,7 +245,7 @@ const EMPTY_PROFILE: Omit<StackProfile, "source" | "detectedMarkers" | "updatedA
 
 /**
  * Rule-based detection of a project's stack profile from marker files on disk. Pure and
- * synchronous — no DB, no LLM. Returns a fully-populated descriptor (nullable fields where
+ * synchronous â€” no DB, no LLM. Returns a fully-populated descriptor (nullable fields where
  * a fact can't be derived). `source` is "detected" even when sparse; the LLM fallback
  * (see populateStackProfile) fills gaps and flips source to "llm".
  */
@@ -312,7 +312,7 @@ export async function populateStackProfile(
         return enriched;
       }
     } catch {
-      // LLM enrichment is best-effort — fall through and persist the rule-based profile.
+      // LLM enrichment is best-effort â€” fall through and persist the rule-based profile.
     }
   }
 
@@ -397,7 +397,10 @@ export async function saveStackProfile(
   repoPath?: string,
 ): Promise<void> {
   await setPreference(stackProfilePrefKey(projectId), JSON.stringify(profile), database);
-  if (repoPath) writeSmartHooksRules(repoPath, profile);
+  if (repoPath) {
+    writeSmartHooksRules(repoPath, profile);
+    writeTestScaffold(repoPath, profile);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -449,7 +452,7 @@ function sourcePatternsForStack(stack: string | null): string[] {
 }
 
 /**
- * Build the generated edit-time feedback rules from a stack profile. Pure — no I/O.
+ * Build the generated edit-time feedback rules from a stack profile. Pure â€” no I/O.
  *
  * Prefers the cheapest signal available: typecheck (fastest), else quick test, else the full
  * test command. Each non-null command becomes a rule that fires when a source file for the
@@ -460,7 +463,7 @@ export function buildSmartHooksRules(profile: StackProfile): SmartHooksRulesFile
   const patterns = sourcePatternsForStack(profile.stack);
   const rules: SmartHooksRule[] = [];
 
-  // Typecheck is the cheapest correctness signal — run it per-edit when present.
+  // Typecheck is the cheapest correctness signal â€” run it per-edit when present.
   if (profile.typecheckCommand) {
     rules.push({
       name: "Typecheck",
@@ -501,7 +504,7 @@ export function smartHooksRulesPath(repoPath: string): string {
 /**
  * Generate and write `.claude/smart-hooks-rules.json` for a project from its stack profile.
  * The generic `smart-hooks-runner.js` reads this file to give a driven project's builder the
- * same incremental PostToolUse/Stop feedback board builders get. Non-fatal on any error —
+ * same incremental PostToolUse/Stop feedback board builders get. Non-fatal on any error â€”
  * profile persistence must never fail because rule generation did.
  */
 export function writeSmartHooksRules(repoPath: string, profile: StackProfile): void {
@@ -512,6 +515,240 @@ export function writeSmartHooksRules(repoPath: string, profile: StackProfile): v
     writeFileSync(outPath, JSON.stringify(rulesFile, null, 2) + "\n", "utf8");
   } catch {
     /* non-fatal: rule generation must never block profile persistence */
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Stack-aware test scaffold derived from the stack profile (#793)
+// ---------------------------------------------------------------------------
+
+/**
+ * A single runnable test file derived from a stack profile: where it goes (repo-relative,
+ * forward-slashed) and what it contains. The board's `e2e-author` skill is hard-coded to
+ * agentic-kanban's `packages/e2e/tests` + Playwright layout (C-rated); for a *driven* project
+ * that means no runnable scaffold in its real layout. This produces one in the project's actual
+ * test dir, written in the syntax its detected runner expects (pytest, cargo test, vitest,
+ * go test, â€¦), so a freshly-registered project gets a green, runnable test from ticket #1.
+ */
+export interface TestScaffold {
+  /** Repo-relative path for the scaffold file, using forward slashes. */
+  path: string;
+  /** The file contents â€” a trivially-passing but real test in the runner's syntax. */
+  content: string;
+}
+
+/** Default test directory for a stack family when the profile didn't detect one. */
+const STACK_DEFAULT_TEST_DIR: Record<string, string> = {
+  node: "tests",
+  rust: "tests",
+  go: ".",
+  python: "tests",
+  java: "src/test/java",
+  ruby: "test",
+  elixir: "test",
+};
+
+/** Map a (possibly null) testRunner + stack to the canonical runner key we generate for. */
+function resolveRunnerKey(profile: StackProfile): string | null {
+  const runner = (profile.testRunner ?? "").toLowerCase();
+  if (runner.includes("pytest")) return "pytest";
+  if (runner.includes("vitest")) return "vitest";
+  if (runner.includes("jest")) return "jest";
+  if (runner.includes("mocha")) return "mocha";
+  if (runner.includes("playwright")) return "playwright";
+  if (runner.includes("cargo")) return "cargo";
+  if (runner.includes("go")) return "go";
+  if (runner === "gradle" || runner === "maven") return "junit";
+
+  // No (or unrecognized) runner â€” fall back to the stack family's conventional runner.
+  switch (profile.stack) {
+    case "node": return "vitest";
+    case "python": return "pytest";
+    case "rust": return "cargo";
+    case "go": return "go";
+    case "java": return "junit";
+    default: return null;
+  }
+}
+
+/** Whether a node test file should be `.ts` (TS project) or `.js`. */
+function nodeTestExtension(profile: StackProfile, isTypeScript?: boolean): "ts" | "js" {
+  if (isTypeScript) return "ts";
+  // testCommand referencing tsc / a `.ts` path is a decent secondary signal; default to `.js`,
+  // which runs under every Node runner regardless of TS setup.
+  const cmd = `${profile.testCommand ?? ""} ${profile.typecheckCommand ?? ""}`;
+  if (/\btsc\b|\.ts\b/.test(cmd)) return "ts";
+  return "js";
+}
+
+/** Build the runnable scaffold (path + content) for a given runner key. Pure. */
+function scaffoldForRunner(runner: string, profile: StackProfile, isTypeScript?: boolean): TestScaffold | null {
+  const dir = (profile.testDir ?? STACK_DEFAULT_TEST_DIR[profile.stack ?? ""] ?? "tests").replace(/\\/g, "/").replace(/\/+$/, "");
+  const join2 = (d: string, f: string) => (d === "." || d === "" ? f : `${d}/${f}`);
+
+  switch (runner) {
+    case "vitest": {
+      const ext = nodeTestExtension(profile, isTypeScript);
+      return {
+        path: join2(dir, `scaffold.test.${ext}`),
+        content: `import { describe, it, expect } from "vitest";
+
+// Stack-aware scaffold (agentic-kanban): a runnable starting point in this project's real test
+// dir + runner. Replace with a real test for the feature you're building.
+describe("scaffold", () => {
+  it("runs", () => {
+    expect(1 + 1).toBe(2);
+  });
+});
+`,
+      };
+    }
+    case "jest":
+    case "mocha": {
+      const ext = nodeTestExtension(profile, isTypeScript);
+      // jest + mocha share the BDD describe/it globals; mocha pairs with node:assert.
+      const body =
+        runner === "jest"
+          ? `describe("scaffold", () => {
+  it("runs", () => {
+    expect(1 + 1).toBe(2);
+  });
+});
+`
+          : `import assert from "node:assert";
+
+describe("scaffold", () => {
+  it("runs", () => {
+    assert.strictEqual(1 + 1, 2);
+  });
+});
+`;
+      return {
+        path: join2(dir, `scaffold.test.${ext}`),
+        content: `// Stack-aware scaffold (agentic-kanban): a runnable starting point in this project's real test
+// dir + runner. Replace with a real test for the feature you're building.
+${body}`,
+      };
+    }
+    case "playwright": {
+      const ext = nodeTestExtension(profile, isTypeScript);
+      return {
+        path: join2(dir, `scaffold.spec.${ext}`),
+        content: `import { test, expect } from "@playwright/test";
+
+// Stack-aware scaffold (agentic-kanban): a runnable starting point in this project's real test
+// dir + runner. Replace with a real test for the feature you're building.
+test("scaffold runs", async () => {
+  expect(1 + 1).toBe(2);
+});
+`,
+      };
+    }
+    case "pytest": {
+      return {
+        path: join2(dir, "test_scaffold.py"),
+        content: `"""Stack-aware scaffold (agentic-kanban): a runnable starting point in this project's real
+test dir + runner. Replace with a real test for the feature you're building."""
+
+
+def test_scaffold_runs():
+    assert 1 + 1 == 2
+`,
+      };
+    }
+    case "cargo": {
+      // Cargo integration tests live as files directly under tests/ and need #[test] fns.
+      return {
+        path: join2(dir, "scaffold.rs"),
+        content: `// Stack-aware scaffold (agentic-kanban): a runnable starting point in this project's real test
+// dir + runner. Replace with a real test for the feature you're building.
+#[test]
+fn scaffold_runs() {
+    assert_eq!(1 + 1, 2);
+}
+`,
+      };
+    }
+    case "go": {
+      // Go test files live alongside source (package main is the safest default for a fresh repo).
+      return {
+        path: join2(dir, "scaffold_test.go"),
+        content: `package main
+
+// Stack-aware scaffold (agentic-kanban): a runnable starting point in this project's real test
+// dir + runner. Replace with a real test for the feature you're building.
+import "testing"
+
+func TestScaffoldRuns(t *testing.T) {
+	if 1+1 != 2 {
+		t.Fatal("math is broken")
+	}
+}
+`,
+      };
+    }
+    case "junit": {
+      return {
+        path: join2(dir, "ScaffoldTest.java"),
+        content: `import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+// Stack-aware scaffold (agentic-kanban): a runnable starting point in this project's real test
+// dir + runner. Replace with a real test for the feature you're building.
+class ScaffoldTest {
+    @Test
+    void scaffoldRuns() {
+        assertEquals(2, 1 + 1);
+    }
+}
+`,
+      };
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * Derive a runnable test scaffold (path + content) from a stack profile (#793).
+ *
+ * Source of truth = the persisted #786 stack profile's `testRunner` + `testDir`. The file is
+ * placed in the project's REAL test directory and written in the syntax the detected runner
+ * expects, so the generated test actually runs under the project's own `testCommand`. Returns
+ * null when the stack/runner is unknown (no scaffold we could confidently make runnable) — callers
+ * treat that as a safe no-op. Pure — no I/O.
+ *
+ * @param isTypeScript hint that a Node project is TypeScript (so the scaffold gets a `.ts`
+ *   extension); writeTestScaffold derives it from a tsconfig.json on disk. Ignored for non-Node.
+ */
+export function deriveTestScaffold(profile: StackProfile | null, isTypeScript?: boolean): TestScaffold | null {
+  if (!profile) return null;
+  const runner = resolveRunnerKey(profile);
+  if (!runner) return null;
+  return scaffoldForRunner(runner, profile, isTypeScript);
+}
+
+/**
+ * Write the derived test scaffold into the project's worktree (#793).
+ *
+ * Clobber-safe and idempotent: never overwrites an existing file at the target path (so a real
+ * test the project already has is preserved, and a second run is a no-op). Creates the test
+ * directory if absent. Non-fatal on any error â€” scaffolding must never block profile persistence
+ * (same contract as writeSmartHooksRules). Returns the repo-relative path written, or null when
+ * nothing was written (no derivable scaffold, file already present, or an error).
+ */
+export function writeTestScaffold(repoPath: string, profile: StackProfile): string | null {
+  try {
+    const isTypeScript = existsSync(join(repoPath, "tsconfig.json"));
+    const scaffold = deriveTestScaffold(profile, isTypeScript);
+    if (!scaffold) return null;
+    const outPath = join(repoPath, scaffold.path);
+    if (existsSync(outPath)) return null; // never clobber an existing test
+    mkdirSync(join(outPath, ".."), { recursive: true });
+    writeFileSync(outPath, scaffold.content, "utf8");
+    return scaffold.path;
+  } catch {
+    return null; // non-fatal: must never block profile persistence
   }
 }
 
@@ -541,7 +778,7 @@ export function verifyScriptPrefKey(projectId: string): string {
  * readyForMerge on a non-zero exit), so a freshly-registered project needs it live.
  * Source of truth = the persisted #786 stack profile (`testCommand` &&/|| `buildCommand`);
  * falls back to the rule-based marker derivation when no profile is available yet.
- * Returns "" when nothing can be derived — callers must treat that as a safe no-op.
+ * Returns "" when nothing can be derived â€” callers must treat that as a safe no-op.
  */
 export function deriveVerifyScriptFromProfile(profile: StackProfile | null, repoPath: string): string {
   if (profile) {
@@ -550,7 +787,7 @@ export function deriveVerifyScriptFromProfile(profile: StackProfile | null, repo
     if (profile.buildCommand) parts.push(profile.buildCommand);
     if (parts.length > 0) return parts.join(" && ");
   }
-  // No profile (or a profile with neither test nor build) — fall back to marker rules.
+  // No profile (or a profile with neither test nor build) â€” fall back to marker rules.
   return deriveVerifyScript(repoPath, detectProjectMarkers(repoPath));
 }
 
@@ -558,7 +795,7 @@ export function deriveVerifyScriptFromProfile(profile: StackProfile | null, repo
  * Persist the derived verify gate to `verify_script_<projectId>` at registration (#788).
  *
  * Idempotent and non-destructive: a no-op when the key is already set (never clobbers a
- * user override) and when detection yields nothing (no empty value written). Best-effort —
+ * user override) and when detection yields nothing (no empty value written). Best-effort â€”
  * callers run it fire-and-forget so it never slows or fails registration.
  *
  * Reuses an already-computed stack profile when passed; otherwise reads the persisted one.
@@ -570,11 +807,11 @@ export async function populateVerifyScript(
   profile?: StackProfile | null,
 ): Promise<string | null> {
   const existing = await getPreference(verifyScriptPrefKey(projectId), database);
-  if (existing && existing.trim()) return existing; // already configured — don't overwrite
+  if (existing && existing.trim()) return existing; // already configured â€” don't overwrite
 
   const resolvedProfile = profile ?? (await getStackProfile(projectId, database));
   const verify = deriveVerifyScriptFromProfile(resolvedProfile, repoPath).trim();
-  if (!verify) return null; // nothing to gate on — leave unset (pure no-op)
+  if (!verify) return null; // nothing to gate on â€” leave unset (pure no-op)
 
   await setPreference(verifyScriptPrefKey(projectId), verify, database);
   return verify;
@@ -595,7 +832,7 @@ function deriveInstallFromMarkers(repoPath: string): string {
         : markers.has("bun.lockb") || markers.has("bun.lock")
           ? "bun"
           : "npm";
-    // pnpm-workspace.yaml or a package.json `workspaces` field ⇒ monorepo ⇒ recursive install.
+    // pnpm-workspace.yaml or a package.json `workspaces` field â‡’ monorepo â‡’ recursive install.
     // (pnpm-workspace.yaml is not in PROJECT_MARKER_FILES, so check disk directly.)
     const pkg = readJson<NodePkgJson>(join(repoPath, "package.json"));
     const isMonorepo = existsSync(join(repoPath, "pnpm-workspace.yaml")) || Boolean(pkg?.workspaces);
@@ -622,7 +859,7 @@ function deriveInstallFromMarkers(repoPath: string): string {
  *
  * The setup script runs once in a fresh worktree BEFORE the first build so deps are
  * ready. It must be monorepo-aware: for a monorepo the install must materialize ALL
- * workspaces/modules' deps, not just the root package — `installCommand` already
+ * workspaces/modules' deps, not just the root package â€” `installCommand` already
  * encodes that (e.g. pnpm `-r`, gradle multi-module `assemble`). Source of truth =
  * the persisted #786 stack profile's `installCommand`; falls back to marker rules when
  * no profile is available yet. Returns "" when nothing can be derived (safe no-op).
@@ -639,7 +876,7 @@ export function deriveSetupScriptFromProfile(profile: StackProfile | null, repoP
  *
  * Idempotent and non-destructive: a no-op when the column is already set (never clobbers a
  * user/AI-generated script) and when detection yields nothing (no empty value written).
- * Best-effort — callers run it fire-and-forget so it never slows or fails registration.
+ * Best-effort â€” callers run it fire-and-forget so it never slows or fails registration.
  *
  * Reuses an already-computed stack profile when passed; otherwise reads the persisted one.
  */
@@ -658,7 +895,7 @@ export async function populateSetupScript(
 
   const resolvedProfile = profile ?? (await getStackProfile(projectId, database));
   const setup = deriveSetupScriptFromProfile(resolvedProfile, repoPath).trim();
-  if (!setup) return null; // nothing to install — leave unset (pure no-op)
+  if (!setup) return null; // nothing to install â€” leave unset (pure no-op)
 
   await database
     .update(projects)
