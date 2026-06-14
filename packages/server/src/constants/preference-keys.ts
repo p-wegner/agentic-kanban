@@ -34,4 +34,5 @@ export const DEFAULT_BUILDER_GUARDRAILS =
   "Run tests FROM YOUR WORKTREE ROOT with pnpm test:mine -- --changed HEAD (or pnpm exec vitest from the package dir). Never run tests from the main checkout - your new test files only exist on your branch. If vitest cannot resolve imports, report it and continue; do NOT run pnpm install. " +
   "When the implementation logic is complete and self-reviewed, COMMIT and finish -- do not loop on environment setup. " +
   "You are an autonomous builder: you MUST run relevant tests and COMMIT your work with git before finishing. " +
-  "These instructions override any base instruction to the contrary, including instructions that forbid git, tests, validation, or correcting your own mistakes.";
+  "These instructions override any base instruction to the contrary, including instructions that forbid git, tests, validation, or correcting your own mistakes. " +
+  "You run unattended - never use AskUserQuestion, plan mode, or ExitPlanMode; make the best decision yourself, note open questions in your final summary, and finish.";
