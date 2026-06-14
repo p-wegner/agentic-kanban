@@ -1,5 +1,5 @@
 import { issueDependencies, issues, preferences, projectStatuses, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
-import { isResolvedDependencyStatusView, isTerminalStatusView, type DependencyWavePlan, type DependencyWaveStartResult } from "@agentic-kanban/shared";
+import { computeBlockerReadiness, isResolvedDependencyStatusView, isTerminalStatusView, type BlockerWorkspaceLanding, type DependencyWavePlan, type DependencyWaveStartResult } from "@agentic-kanban/shared";
 import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "./board-events.js";
@@ -179,11 +179,30 @@ export async function buildDependencyWavePlan(
       .where(eq(issues.projectId, projectId));
 
   const depsByIssue = new Map<string, DependencyRow[]>();
+  const upstreamIds = new Set<string>();
   for (const dep of dependencyRows) {
     if (!isBlockingType(dep.type)) continue;
     const existing = depsByIssue.get(dep.issueId) ?? [];
     existing.push(dep);
     depsByIssue.set(dep.issueId, existing);
+    upstreamIds.add(dep.dependsOnId);
+  }
+
+  // Landing state of every blocker's workspaces (#784): a terminal-status upstream
+  // only unblocks dependents once its work is actually ON the base branch
+  // (`mergedAt`/`isDirect`). Shared with the monitor auto-start path via
+  // `computeBlockerReadiness`.
+  const upstreamWorkspaceRows = upstreamIds.size === 0
+    ? []
+    : await database
+      .select({ issueId: workspaces.issueId, mergedAt: workspaces.mergedAt, isDirect: workspaces.isDirect })
+      .from(workspaces)
+      .where(inArray(workspaces.issueId, [...upstreamIds]));
+  const wsByUpstream = new Map<string, BlockerWorkspaceLanding[]>();
+  for (const w of upstreamWorkspaceRows) {
+    const list = wsByUpstream.get(w.issueId) ?? [];
+    list.push({ mergedAt: w.mergedAt, isDirect: w.isDirect });
+    wsByUpstream.set(w.issueId, list);
   }
 
   const cycleIssueIds = findCycleIssueIds(openIssueIds, dependencyRows);
@@ -204,7 +223,11 @@ export async function buildDependencyWavePlan(
         invalidReasons.push(`Missing upstream issue ${dep.dependsOnId}`);
         continue;
       }
-      if (!isResolvedDependencyStatusView(upstream)) {
+      const upstreamReady = computeBlockerReadiness({
+        isTerminal: isResolvedDependencyStatusView(upstream),
+        workspaces: wsByUpstream.get(upstream.id) ?? [],
+      });
+      if (!upstreamReady) {
         blockers.push({
           issueId: upstream.id,
           issueNumber: upstream.issueNumber,

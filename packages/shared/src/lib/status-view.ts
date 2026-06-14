@@ -44,3 +44,48 @@ export function isTerminalStatusIdView(
 export function isResolvedDependencyStatusView(issue: StatusViewIssue): boolean {
   return isTerminalStatusView(issue, LEGACY_RESOLVED_DEPENDENCY_STATUS_NAMES);
 }
+
+/**
+ * The landing signal for a single blocker's workspace: did its branch actually
+ * reach the base branch? `mergedAt` is stamped ONLY after the git merge succeeds
+ * and post-merge ancestry is verified; a `isDirect` workspace commits straight to
+ * the branch with no merge step, so it counts as landed.
+ */
+export interface BlockerWorkspaceLanding {
+  mergedAt?: string | null;
+  isDirect?: boolean | null;
+}
+
+/**
+ * The shared dependency-readiness predicate used by BOTH the monitor auto-start
+ * path (`runAutoStart`) and the dependency-wave planner (`startNextDependencyWave`).
+ *
+ * A blocker only unblocks its dependents when BOTH hold:
+ *
+ *  1. Terminal status — the blocker reached a Done/Cancelled/Archived status (or an
+ *     `end` workflow node). Status-only resolution (#535/#537).
+ *  2. Landed on base — the blocker's work is actually ON the base branch, not merely
+ *     in a terminal status. A workspace can be closed at the Done transition while the
+ *     branch→base merge is still QUEUED for the async auto-merge orchestrator (it
+ *     drains on a timer). So "Done" — and even "closed" — does not imply "on master"
+ *     (#784): a dependent cut from the PRE-merge base (an empty scaffold) re-scaffolds
+ *     the app and the blocker's merge is silently lost.
+ *
+ * Landed-on-base is true iff the blocker has NO workspace (resolved manually — nothing
+ * to merge) OR at least one workspace that reached the branch (`mergedAt` set, or a
+ * direct commit). An open review / closed-but-unmerged workspace contributes nothing,
+ * so a blocker whose only work is still un-merged stays blocked until the orchestrator
+ * lands it on a later cycle (the #782 fan-in case resolves once ALL its blockers land).
+ *
+ * Pure: callers query the blocker's terminal status and its workspaces, then pass the
+ * results in. `isTerminal` lets each caller use whichever terminal predicate it already
+ * computed (status-name vs status-id view) — the landing logic is identical for both.
+ */
+export function computeBlockerReadiness(input: {
+  isTerminal: boolean;
+  workspaces: ReadonlyArray<BlockerWorkspaceLanding>;
+}): boolean {
+  if (!input.isTerminal) return false;
+  if (input.workspaces.length === 0) return true;
+  return input.workspaces.some((w) => w.mergedAt != null || w.isDirect === true);
+}
