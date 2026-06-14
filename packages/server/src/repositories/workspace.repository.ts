@@ -1,6 +1,20 @@
-import { workspaces, issues, projects, sessions, sessionMessages, diffComments, projectStatuses, agentSkills } from "@agentic-kanban/shared/schema";
+import {
+  workspaces,
+  issues,
+  projects,
+  sessions,
+  sessionMessages,
+  diffComments,
+  projectStatuses,
+  agentSkills,
+  issueArtifacts,
+  issueComments,
+  repos,
+  testRetryDecisions,
+  workflowTransitions,
+} from "@agentic-kanban/shared/schema";
 import type { WorkspaceSetupRun, WorkspaceSymlinkRun } from "@agentic-kanban/shared";
-import { desc, eq, inArray } from "drizzle-orm";
+import { desc, eq, inArray, sql } from "drizzle-orm";
 
 type Project = typeof projects.$inferSelect;
 import { db } from "../db/index.js";
@@ -186,22 +200,42 @@ export async function moveIssueToInProgress(
   }
 }
 
-/** Cascade delete a workspace: diff comments → session messages → sessions → workspace record. */
-export async function deleteWorkspaceCascade(
+async function deleteWorkspaceCascadeRows(
   workspaceId: string,
-  database: Database = db,
+  database: Database,
 ): Promise<void> {
   const wsSessions = await database
     .select({ id: sessions.id })
     .from(sessions)
     .where(eq(sessions.workspaceId, workspaceId));
+  const sessionIds = wsSessions.map(s => s.id);
 
+  await database.delete(workflowTransitions).where(eq(workflowTransitions.workspaceId, workspaceId));
+  await database.delete(testRetryDecisions).where(eq(testRetryDecisions.workspaceId, workspaceId));
   await database.delete(diffComments).where(eq(diffComments.workspaceId, workspaceId));
-  if (wsSessions.length > 0) {
-    await database.delete(sessionMessages).where(inArray(sessionMessages.sessionId, wsSessions.map(s => s.id)));
+  await database.delete(issueArtifacts).where(eq(issueArtifacts.workspaceId, workspaceId));
+  await database.delete(issueComments).where(eq(issueComments.workspaceId, workspaceId));
+  await database.delete(repos).where(eq(repos.workspaceId, workspaceId));
+  if (sessionIds.length > 0) {
+    await database.delete(sessionMessages).where(inArray(sessionMessages.sessionId, sessionIds));
   }
   await database.delete(sessions).where(eq(sessions.workspaceId, workspaceId));
   await database.delete(workspaces).where(eq(workspaces.id, workspaceId));
+}
+
+/** Cascade delete a workspace and every table that directly FK-references it. */
+export async function deleteWorkspaceCascade(
+  workspaceId: string,
+  database: Database = db,
+): Promise<void> {
+  await database.run(sql.raw("begin immediate"));
+  try {
+    await deleteWorkspaceCascadeRows(workspaceId, database);
+    await database.run(sql.raw("commit"));
+  } catch (err) {
+    await database.run(sql.raw("rollback")).catch(() => {});
+    throw err;
+  }
 }
 
 export interface WorkspaceDetails {

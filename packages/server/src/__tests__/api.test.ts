@@ -2088,6 +2088,107 @@ describe("Workspaces API", () => {
     const getRes = await app.request(`/api/workspaces/${id}`);
     expect(getRes.status).toBe(404);
   });
+
+  it("DELETE /api/workspaces/:id deletes all workspace FK children", async () => {
+    const createRes = await app.request("/api/workspaces", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ issueId, branch: "feature/delete-fk-children" }),
+    });
+    const { id } = await createRes.json();
+    const now = new Date().toISOString();
+    const sessionId = randomUUID();
+
+    await database.insert(schema.sessions).values({
+      id: sessionId,
+      workspaceId: id,
+      executor: "codex",
+      status: "stopped",
+      startedAt: now,
+      endedAt: now,
+    });
+    await database.insert(schema.sessionMessages).values({
+      sessionId,
+      type: "stdout",
+      data: "done",
+      createdAt: now,
+    });
+    await database.insert(schema.diffComments).values({
+      id: randomUUID(),
+      workspaceId: id,
+      filePath: "src/index.ts",
+      side: "new",
+      body: "delete me",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await database.insert(schema.issueArtifacts).values({
+      id: randomUUID(),
+      issueId,
+      workspaceId: id,
+      type: "text",
+      content: "proof",
+      createdAt: now,
+    });
+    await database.insert(schema.issueComments).values({
+      id: randomUUID(),
+      issueId,
+      workspaceId: id,
+      kind: "note",
+      author: "agent",
+      body: "delete me",
+      createdAt: now,
+    });
+    await database.insert(schema.repos).values({
+      id: randomUUID(),
+      workspaceId: id,
+      path: "/tmp/delete-fk-children",
+      name: "delete-fk-children",
+      createdAt: now,
+    });
+    await database.insert(schema.testRetryDecisions).values({
+      id: randomUUID(),
+      sessionId,
+      workspaceId: id,
+      testName: "flaky test",
+      decision: "flake",
+      confidence: 0.9,
+      retryCount: 1,
+      finalOutcome: "pending",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await database.insert(schema.workflowTransitions).values({
+      id: randomUUID(),
+      workspaceId: id,
+      toNodeId: randomUUID(),
+      summary: "delete me",
+      triggeredBy: "agent",
+      createdAt: now,
+    });
+
+    const res = await app.request(`/api/workspaces/${id}`, { method: "DELETE" });
+    expect(res.status).toBe(200);
+
+    const workspaceRows = await database.select().from(schema.workspaces).where(eq(schema.workspaces.id, id));
+    const sessionRows = await database.select().from(schema.sessions).where(eq(schema.sessions.workspaceId, id));
+    const messageRows = await database.select().from(schema.sessionMessages).where(eq(schema.sessionMessages.sessionId, sessionId));
+    const diffCommentRows = await database.select().from(schema.diffComments).where(eq(schema.diffComments.workspaceId, id));
+    const retryRows = await database.select().from(schema.testRetryDecisions).where(eq(schema.testRetryDecisions.workspaceId, id));
+    const artifactRows = await database.select().from(schema.issueArtifacts).where(eq(schema.issueArtifacts.workspaceId, id));
+    const commentRows = await database.select().from(schema.issueComments).where(eq(schema.issueComments.workspaceId, id));
+    const repoRows = await database.select().from(schema.repos).where(eq(schema.repos.workspaceId, id));
+    const transitionRows = await database.select().from(schema.workflowTransitions).where(eq(schema.workflowTransitions.workspaceId, id));
+    expect(workspaceRows).toHaveLength(0);
+    expect(sessionRows).toHaveLength(0);
+    expect(messageRows).toHaveLength(0);
+    expect(diffCommentRows).toHaveLength(0);
+    expect(retryRows).toHaveLength(0);
+    expect(artifactRows).toHaveLength(0);
+    expect(commentRows).toHaveLength(0);
+    expect(repoRows).toHaveLength(0);
+    expect(transitionRows).toHaveLength(0);
+  });
 });
 
 describe("Diff Comments API", () => {
