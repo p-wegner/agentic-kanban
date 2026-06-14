@@ -45,6 +45,11 @@ across registration → build → review → merge:
 - **Drive top-down.** Start at the lowest rung not yet proven hands-off. A rung is "passed"
   when the board takes it from a bare repo to a clean-building `master` with no manual
   intervention beyond *register → set prefs → seed epic* (the budget-pilot bar).
+- **Grade each rung against [acceptance.md](./acceptance.md).** That file gives the
+  *checkable* pass/fail definition of "built it hands-off" per rung — the six-criteria
+  scorecard (cold build clean / boots / smoke passes / N/N done / zero manual recovery / zero
+  human code edits) and which criteria are active per rung. A rung's Status cell flips to ✅
+  only when every applicable criterion is PASS/N/A.
 - **Each rung writes a `docs/board-runs/<project>.md` retro** (per `#804`) recording what was
   hands-off, what needed a manual kick, and which `[drive-autonomy]` obstacles it surfaced.
   The rung's row above links to that retro.
