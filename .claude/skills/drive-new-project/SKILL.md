@@ -17,6 +17,8 @@ You are the **epic orchestrator** for a brand-new project. You are NOT done when
 
 A new project drives hands-off only if ALL of these hold. Read `GET /api/preferences/settings`; fix wrong ones via **`PUT /api/preferences/settings` with `curl` (Bash)** — never `Invoke-RestMethod -Put` (silently no-ops; see CLAUDE.md PowerShell rules).
 
+> **The machine-checkable half of this checklist is now an API gate (#807).** Run `GET /api/projects/<id>/drive/preflight` for a verdict — a list of named checks (each `ok`/`warn`/`block`, with `autoRepairable`) plus an overall `ready`. `POST .../drive/preflight {"autoRepair":true}` flips Drive on to fix the one-switch-fixable blockers (stack profile, verify gate, incoherent autodrive prefs) and re-evaluates. It reports — never silently works around — the human-only blockers below (no statuses, null `defaultBranch`, dirty main, credit-exhausted/`mock` provider, WIP target of 1). Use it as the fast first pass; the rows below are the manual fixes for whatever it still flags `block`.
+
 | Prereq | Check | Fix |
 |---|---|---|
 | Project registered | `pnpm cli -- list` shows it; resolve its **full** `projectId` (UUID, never a truncated prefix) | `pnpm cli -- register <path>` or `POST /api/projects/create` |
