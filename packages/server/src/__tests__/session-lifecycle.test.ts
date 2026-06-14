@@ -143,6 +143,53 @@ describe("session-lifecycle", () => {
     expect(rows[0].skillName).toBeNull();
   });
 
+  it("launches Codex builders with a safe explicit model, counter-instructions, and launch diagnostics", async () => {
+    const workspaceId = await seedWorkspace(db);
+    const { service: agentService } = createFakeAgentService();
+
+    const lifecycle = createSessionLifecycle(createSessionState(), undefined, vi.fn(), { db, agentService, preflight: okPreflight() });
+    const sessionId = await lifecycle.startSession({
+      workspaceId,
+      prompt: "do it",
+      provider: "codex",
+      triggerType: "agent",
+      systemInstructions: "Base guardrails.",
+    });
+
+    const launchArgs = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(launchArgs[15]).toBe("gpt-5.5");
+    expect(launchArgs[17]).toContain("Base guardrails.");
+    expect(launchArgs[17]).toContain("MUST run relevant tests and COMMIT");
+
+    const rows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
+    const stats = JSON.parse(rows[0].stats!);
+    expect(stats.launch.resolvedModel).toBe("gpt-5.5");
+    expect(stats.launch.provider).toBe("codex");
+    expect(stats.launch.systemInstructionsFingerprint).toMatch(/^[a-f0-9]{16}$/);
+  });
+
+  it("blocks Codex builder launches that resolve to gpt-5.3-codex-spark", async () => {
+    const workspaceId = await seedWorkspace(db);
+    const { service: agentService } = createFakeAgentService();
+
+    const lifecycle = createSessionLifecycle(createSessionState(), undefined, vi.fn(), { db, agentService, preflight: okPreflight() });
+
+    await expect(lifecycle.startSession({
+      workspaceId,
+      prompt: "do it",
+      provider: "codex",
+      triggerType: "agent",
+      model: "gpt-5.3-codex-spark",
+    })).rejects.toMatchObject({
+      code: "CONFLICT",
+      data: { code: "UNSAFE_CODEX_MODEL", model: "gpt-5.3-codex-spark" },
+    });
+
+    expect(agentService.launch).not.toHaveBeenCalled();
+    const rows = await db.select().from(sessions).where(eq(sessions.workspaceId, workspaceId));
+    expect(rows).toHaveLength(0);
+  });
+
   it("marks the session completed and fires onSessionExit when the process exits cleanly", async () => {
     const workspaceId = await seedWorkspace(db);
     const { service: agentService, getOnOutput } = createFakeAgentService();
