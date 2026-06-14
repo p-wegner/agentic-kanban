@@ -193,11 +193,17 @@ export async function gatherDriveTelemetry(
     .filter((e) => e.eventType === "error")
     .map((e) => ({ issueNumber: e.issueNumber, summary: e.summary }));
 
-  // The cold-build signal is the latest smoke_check event in the window.
+  // The cold-build signal is the latest smoke_check event in the window. A smoke
+  // failure is recorded EITHER as an `error` event OR as an `observation` whose
+  // summary describes a failure (it can render the board yet still time out) — mirror
+  // the canonical classifier (monitor-cycle-health.service `classifyCycleFailures`)
+  // so a failed cold build is never reported as "passed".
   const smoke = [...eventRows].reverse().find((e) => e.category === "smoke_check");
-  const coldBuild = smoke
-    ? { result: smoke.eventType === "error" ? "FAILED" : "passed", summary: smoke.summary }
-    : null;
+  const smokeFailed =
+    smoke != null &&
+    (smoke.eventType === "error" ||
+      /timed out|timeout|failed|unavailable|unreachable/i.test(smoke.summary ?? ""));
+  const coldBuild = smoke ? { result: smokeFailed ? "FAILED" : "passed", summary: smoke.summary } : null;
 
   const cascadeEvents = eventRows
     .filter((e) => (e.category === "launch" || e.category === "merge") && e.eventType !== "error")

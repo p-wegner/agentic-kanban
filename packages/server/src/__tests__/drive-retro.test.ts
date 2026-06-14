@@ -121,6 +121,22 @@ describe("drive retro telemetry", () => {
     expect(t.cascadeEvents.map((e) => e.category).sort()).toEqual(["launch", "merge"]);
   });
 
+  it("reports cold build FAILED when the latest smoke_check is an observation describing failure", async () => {
+    const { drive } = await seed(db);
+    // A smoke failure can render the board yet still time out — recorded as an
+    // `observation`, not an `error`. It must NOT be classified as "passed".
+    await db.insert(schema.boardHealthEvents).values({
+      id: randomUUID(), projectId: drive.projectId, cycleId: "c1", eventType: "observation",
+      category: "smoke_check", summary: "Board content rendered but request timed out after 30s",
+      createdAt: "2026-06-14T01:30:00.000Z",
+    });
+    const t = await gatherDriveTelemetry(drive, db);
+    expect(t!.coldBuild).toEqual({
+      result: "FAILED",
+      summary: "Board content rendered but request timed out after 30s",
+    });
+  });
+
   it("renders markdown with every telemetry section", async () => {
     const { drive } = await seed(db);
     const t = await gatherDriveTelemetry(drive, db);
