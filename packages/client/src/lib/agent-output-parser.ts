@@ -1,5 +1,6 @@
 import { ClaudeOutputParser, type DisplayEvent } from "./claude-output-parser.js";
 import { CodexOutputParser } from "./codex-output-parser.js";
+import { PiOutputParser } from "./pi-output-parser.js";
 import type {
   ParsedAssistantEvent,
   ParsedInitEvent,
@@ -27,7 +28,7 @@ import {
 
 export type { DisplayEvent } from "./claude-output-parser.js";
 
-export type AgentOutputFormat = "claude-stream-json" | "codex-jsonl" | "copilot-jsonl" | "raw";
+export type AgentOutputFormat = "claude-stream-json" | "codex-jsonl" | "copilot-jsonl" | "pi-jsonl" | "raw";
 
 export interface AgentOutputParser {
   readonly format: AgentOutputFormat;
@@ -352,11 +353,13 @@ export class CopilotOutputParser implements AgentOutputParser {
 const CLAUDE_COMMANDS = ["claude", "claude.exe"];
 const CODEX_COMMANDS = ["codex"];
 const COPILOT_COMMANDS = ["copilot"];
+const PI_COMMANDS = ["pi"];
 
 export function getOutputFormatForProvider(provider?: string | null): AgentOutputFormat {
   if (!provider || provider === "claude") return "claude-stream-json";
   if (provider === "codex") return "codex-jsonl";
   if (provider === "copilot") return "copilot-jsonl";
+  if (provider === "pi") return "pi-jsonl";
   return "raw";
 }
 
@@ -366,6 +369,7 @@ export function getOutputFormatForAgent(agentCommand?: string): AgentOutputForma
   if (CLAUDE_COMMANDS.includes(base) || base.includes("mock-agent")) return "claude-stream-json";
   if (CODEX_COMMANDS.includes(base)) return "codex-jsonl";
   if (COPILOT_COMMANDS.includes(base)) return "copilot-jsonl";
+  if (PI_COMMANDS.includes(base)) return "pi-jsonl";
   return "raw";
 }
 
@@ -377,6 +381,8 @@ export function createAgentOutputParser(format: AgentOutputFormat = "claude-stre
       return new CodexOutputParser();
     case "copilot-jsonl":
       return new CopilotOutputParser();
+    case "pi-jsonl":
+      return new PiOutputParser();
     case "claude-stream-json":
     default:
       return new ClaudeOutputParser();
