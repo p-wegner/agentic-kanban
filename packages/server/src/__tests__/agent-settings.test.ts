@@ -78,6 +78,17 @@ describe("resolveAgentSettings - provider/profile wiring", () => {
     expect(settings.profile).toEqual({ provider: "copilot", name: "gpt-5.2" });
   });
 
+  it("uses pi_profile for Pi provider", () => {
+    const settings = resolveAgentSettings(prefs({
+      provider: "pi",
+      claude_profile: "work",
+      pi_profile: "local",
+    }));
+    expect(settings.provider).toBe("pi");
+    expect(settings.claudeProfile).toBe("work");
+    expect(settings.profile).toEqual({ provider: "pi", name: "local" });
+  });
+
   it("does not append Claude skip-permissions flag for Copilot", () => {
     const settings = resolveAgentSettings(prefs({
       provider: "copilot",

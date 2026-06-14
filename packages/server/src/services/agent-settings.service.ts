@@ -8,6 +8,7 @@ import {
   PREF_SKIP_PERMISSIONS,
   PREF_CLAUDE_PROFILE,
   PREF_CODEX_PROFILE,
+  PREF_PI_PROFILE,
   PREF_COPILOT_PROFILE,
   PREF_PROVIDER,
   PREF_MOCK_AGENT_PROFILE,
@@ -110,6 +111,8 @@ export function resolveAgentSettings(
   const effectiveProfileName =
     provider === "codex"
       ? (prefMap.get(PREF_CODEX_PROFILE) || undefined)
+      : provider === "pi"
+        ? (prefMap.get(PREF_PI_PROFILE) || undefined)
       : provider === "copilot"
         ? (prefMap.get(PREF_COPILOT_PROFILE) || undefined)
         : resolvedProfile;
@@ -119,6 +122,6 @@ export function resolveAgentSettings(
 }
 
 function parseProviderName(provider: string | undefined): ProviderName {
-  if (provider === "codex" || provider === "copilot") return provider;
+  if (provider === "codex" || provider === "copilot" || provider === "pi") return provider;
   return "claude";
 }

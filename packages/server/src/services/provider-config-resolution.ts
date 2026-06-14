@@ -64,6 +64,9 @@ export function resolveProviderConfig(input: ProviderConfigInput): ResolvedProvi
     if (profileOverride.provider === "codex") {
       prefMap.set("codex_profile", profileOverride.name);
       prefMap.set("provider", "codex");
+    } else if (profileOverride.provider === "pi") {
+      prefMap.set("pi_profile", profileOverride.name);
+      prefMap.set("provider", "pi");
     } else if (profileOverride.provider === "copilot") {
       prefMap.set("copilot_profile", profileOverride.name);
       prefMap.set("provider", "copilot");
@@ -95,8 +98,8 @@ export function resolveProviderConfig(input: ProviderConfigInput): ResolvedProvi
     : profileSelection?.name;
 
   const requestedModel = typeof input.requestedModel === "string" ? input.requestedModel.trim() : "";
-  // Both Claude and Codex honor the `default_model` preference (overridable per
-  // workspace via requestedModel). Codex passes it through as `--model`. Copilot has
+  // Claude, Codex, and Pi honor the `default_model` preference (overridable per
+  // workspace via requestedModel). Codex/Pi pass it through as `--model`. Copilot has
   // no model flag, so it stays undefined.
   //
   // `default_model` is a single, provider-agnostic preference, so a leftover model id
@@ -104,7 +107,7 @@ export function resolveProviderConfig(input: ProviderConfigInput): ResolvedProvi
   // otherwise be passed as `--model gpt-5.5` to claude.exe — which exits in ~5s with an
   // invalid-model error and silently fails every launch (#696). Drop a model id that
   // doesn't belong to the active provider's family rather than launch a doomed agent.
-  let model = (provider === "claude" || provider === "codex")
+  let model = (provider === "claude" || provider === "codex" || provider === "pi")
     ? ((requestedModel || prefMap.get("default_model")) || undefined)
     : undefined;
   if (model && !modelBelongsToProvider(model, provider)) {

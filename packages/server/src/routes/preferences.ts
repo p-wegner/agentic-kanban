@@ -208,6 +208,6 @@ export function createPreferencesRoute(database: Database = db) {
 }
 
 function parseProvider(provider: string | undefined): ProviderName | null {
-  if (provider === "claude" || provider === "codex" || provider === "copilot") return provider;
+  if (provider === "claude" || provider === "codex" || provider === "copilot" || provider === "pi") return provider;
   return null;
 }

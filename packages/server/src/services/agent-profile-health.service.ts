@@ -64,6 +64,8 @@ function applyProfileSelection(prefMap: Map<string, string>, provider: ProviderN
     next.set("claude_profile", profileName === DEFAULT_PROFILE ? "" : profileName);
   } else if (provider === "codex") {
     next.set("codex_profile", profileName === DEFAULT_PROFILE ? "" : profileName);
+  } else if (provider === "pi") {
+    next.set("pi_profile", profileName === DEFAULT_PROFILE ? "" : profileName);
   } else {
     next.set("copilot_profile", profileName === DEFAULT_PROFILE ? "" : profileName);
   }
@@ -72,6 +74,7 @@ function applyProfileSelection(prefMap: Map<string, string>, provider: ProviderN
 
 function selectedProfileName(prefMap: Map<string, string>, provider: ProviderName): string {
   if (provider === "codex") return prefMap.get("codex_profile") || DEFAULT_PROFILE;
+  if (provider === "pi") return prefMap.get("pi_profile") || DEFAULT_PROFILE;
   if (provider === "copilot") return prefMap.get("copilot_profile") || DEFAULT_PROFILE;
   return prefMap.get("claude_profile") || DEFAULT_PROFILE;
 }
@@ -177,23 +180,31 @@ export function preflightAgentProfile(
   if (!settings.agentCommand && provider === "copilot") {
     warnings.push("Using default Copilot command from PATH.");
   }
+  if (!settings.agentCommand && provider === "pi") {
+    warnings.push("Using default Pi command from PATH.");
+  }
 
   let flags: string[] = [];
   let command = sanitizeCommand(settings.agentCommand) || provider;
-  try {
-    const launchConfig = buildAgentLaunchConfig({
-      agentCommand: settings.agentCommand,
-      agentArgs: settings.agentArgs,
-      claudeProfile: settings.claudeProfile,
-      profile: profileName === DEFAULT_PROFILE ? undefined : { provider, name: profileName },
-      provider: toExecutorProvider(provider),
-      permissionPromptTool: settings.permissionPromptTool,
-      prompt: "preflight",
-    });
-    command = sanitizeCommand(launchConfig.command) || command;
-    flags = sanitizeFlags(launchConfig.args);
-  } catch (err) {
-    errors.push(sanitizeErrorMessage(err instanceof Error ? err.message : String(err)));
+  if (provider === "pi") {
+    command = sanitizeCommand(settings.agentCommand) || "pi";
+    warnings.push("Pi launch preflight is pending provider implementation.");
+  } else {
+    try {
+      const launchConfig = buildAgentLaunchConfig({
+        agentCommand: settings.agentCommand,
+        agentArgs: settings.agentArgs,
+        claudeProfile: settings.claudeProfile,
+        profile: profileName === DEFAULT_PROFILE ? undefined : { provider, name: profileName },
+        provider: toExecutorProvider(provider),
+        permissionPromptTool: settings.permissionPromptTool,
+        prompt: "preflight",
+      });
+      command = sanitizeCommand(launchConfig.command) || command;
+      flags = sanitizeFlags(launchConfig.args);
+    } catch (err) {
+      errors.push(sanitizeErrorMessage(err instanceof Error ? err.message : String(err)));
+    }
   }
 
   return {
@@ -223,7 +234,7 @@ export async function listAgentProfileHealth(
       .filter((row) => row.key.startsWith(FAILURE_PREFIX))
       .map((row) => [row.key, row.value]),
   );
-  const selectedProvider = (prefMap.get("provider") === "codex" || prefMap.get("provider") === "copilot")
+  const selectedProvider = (prefMap.get("provider") === "codex" || prefMap.get("provider") === "copilot" || prefMap.get("provider") === "pi")
     ? prefMap.get("provider") as ProviderName
     : "claude";
 
@@ -234,6 +245,7 @@ export async function listAgentProfileHealth(
     ...profileLists.codexProfiles.filter((name) => name !== DEFAULT_PROFILE).map((name) => ({ provider: "codex" as const, profileName: name })),
     { provider: "copilot", profileName: DEFAULT_PROFILE },
     ...profileLists.copilotProfiles.filter((name) => name !== DEFAULT_PROFILE).map((name) => ({ provider: "copilot" as const, profileName: name })),
+    { provider: "pi", profileName: DEFAULT_PROFILE },
   ];
 
   const seen = new Set<string>();

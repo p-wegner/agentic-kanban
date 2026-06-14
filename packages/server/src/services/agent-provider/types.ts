@@ -2,8 +2,8 @@
 export const PLAN_BEGIN_MARKER = "===PLAN BEGIN===";
 export const PLAN_END_MARKER = "===PLAN END===";
 
-export type ProviderName = "claude" | "codex" | "copilot";
-export type ProviderId = "claude-code" | "codex" | "copilot";
+export type ProviderName = "claude" | "codex" | "copilot" | "pi";
+export type ProviderId = "claude-code" | "codex" | "copilot" | "pi";
 
 export interface AgentLaunchConfig {
   command: string;

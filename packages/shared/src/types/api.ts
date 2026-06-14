@@ -2,7 +2,7 @@
 
 /** Tagged profile selection — provider-aware replacement for the bare claudeProfile string. */
 export interface ProfileSelection {
-  provider: "claude" | "codex" | "copilot";
+  provider: "claude" | "codex" | "copilot" | "pi";
   name: string;
 }
 
@@ -45,7 +45,7 @@ export const CODEX_MODEL_OPTIONS: ReadonlyArray<{ value: string; label: string }
  */
 export function modelBelongsToProvider(
   model: string | undefined | null,
-  provider: "claude" | "codex" | "copilot",
+  provider: "claude" | "codex" | "copilot" | "pi",
 ): boolean {
   const id = (model ?? "").trim().toLowerCase();
   if (!id) return true;
@@ -57,6 +57,11 @@ export function modelBelongsToProvider(
   }
   if (provider === "codex") {
     return !isClaudeModel;
+  }
+  if (provider === "pi") {
+    // Pi's concrete model families are finalized with the provider implementation.
+    // Until then, only an empty provider default is considered safe.
+    return false;
   }
   // copilot has no model flag; nothing to validate.
   return true;
