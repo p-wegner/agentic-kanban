@@ -167,7 +167,7 @@ describe("detectStackProfile", () => {
     const p = detectStackProfile(dir);
     const w = process.platform === "win32" ? ".\\gradlew.bat" : "./gradlew";
     expect(p.testCommand).toBe(`${w} test`); // kotlin-jvm DOES have a `test` task
-    expect(p.typecheckCommand).toBeNull(); // still Kotlin → no compileJava
+    expect(p.typecheckCommand).toBe(`${w} compileKotlin`); // kotlin-jvm has a single compile task (not compileJava)
   });
 
   it("a Java (non-Kotlin) gradle project still gets compileJava typecheck", async () => {
@@ -177,6 +177,40 @@ describe("detectStackProfile", () => {
     const p = detectStackProfile(dir);
     const w = process.platform === "win32" ? ".\\gradlew.bat" : "./gradlew";
     expect(p.typecheckCommand).toBe(`${w} compileJava`);
+  });
+
+  it("a Ktor gradle app is web with a `run` dev command, default port, and compileKotlin typecheck", async () => {
+    await writeFile(join(dir, "build.gradle.kts"), `plugins { kotlin("jvm") version "2.0.21"; application }\ndependencies { implementation("io.ktor:ktor-server-netty:2.3.12") }\n`);
+    await writeFile(join(dir, "gradlew"), "#!/bin/sh\n");
+    await writeFile(join(dir, "gradlew.bat"), "@echo off\n");
+    const p = detectStackProfile(dir);
+    const w = process.platform === "win32" ? ".\\gradlew.bat" : "./gradlew";
+    expect(p.isWeb).toBe(true); // Ktor serves HTTP → smoke check + UI verification engage
+    expect(p.devCommand).toBe(`${w} run`); // application plugin's run task, NOT bootRun
+    expect(p.devPort).toBe(8080); // Ktor default when no literal is found
+    expect(p.typecheckCommand).toBe(`${w} compileKotlin`); // kotlin-jvm has a single compile task
+  });
+
+  it("detects a non-default Ktor port from an embeddedServer literal in source", async () => {
+    await writeFile(join(dir, "build.gradle.kts"), `plugins { application }\ndependencies { implementation("io.ktor:ktor-server-core:2.3.12") }\n`);
+    await writeFile(join(dir, "gradlew"), "#!/bin/sh\n");
+    await mkdir(join(dir, "src", "main", "kotlin"), { recursive: true });
+    await writeFile(join(dir, "src", "main", "kotlin", "App.kt"), `fun main(){ embeddedServer(Netty, port = 9137, host="0.0.0.0").start(true) }\n`);
+    const p = detectStackProfile(dir);
+    expect(p.isWeb).toBe(true);
+    expect(p.devPort).toBe(9137);
+  });
+
+  it("a plain kotlin-jvm library (no application plugin, not web) has no dev command and compileKotlin typecheck", async () => {
+    await writeFile(join(dir, "build.gradle.kts"), `plugins { kotlin("jvm") version "2.0.21" }\n`);
+    await writeFile(join(dir, "gradlew"), "#!/bin/sh\n");
+    await writeFile(join(dir, "gradlew.bat"), "@echo off\n");
+    const p = detectStackProfile(dir);
+    const w = process.platform === "win32" ? ".\\gradlew.bat" : "./gradlew";
+    expect(p.isWeb).toBe(false);
+    expect(p.devCommand).toBeNull();
+    expect(p.devPort).toBeNull();
+    expect(p.typecheckCommand).toBe(`${w} compileKotlin`);
   });
 
   it("a Spring Boot gradle project keeps bootRun + isWeb", async () => {

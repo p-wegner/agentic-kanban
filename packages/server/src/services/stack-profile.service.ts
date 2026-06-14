@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { StackProfile, SmokeCheck } from "@agentic-kanban/shared";
 import { projects } from "@agentic-kanban/shared/schema";
@@ -195,24 +195,35 @@ function detectOtherProfile(repoPath: string, markers: Set<string>): Partial<Sta
     // all subproject artifacts, which downloads/resolves every module's dependencies.
     const install = isMultiModule ? `${wrapper} assemble` : `${wrapper} dependencies`;
     const kotlin = isKotlinGradle(repoPath);
+    const multiplatform = isKotlinMultiplatformGradle(repoPath);
     const spring = isSpringBootGradle(repoPath);
+    const ktor = isKtorGradle(repoPath);
+    const hasApp = hasGradleApplicationPlugin(repoPath);
+    // A web/service project = serves HTTP. Spring Boot OR Ktor both do; this gates the #791 smoke
+    // check (boot the dev server + assert it responds) and the board's after-merge UI verification.
+    const web = spring || ktor;
+    const devPort = web ? detectGradleDevPort(repoPath) : null;
     // Kotlin Multiplatform has no aggregate `test` task — use `allTests` (jvmTest + jsNodeTest + …).
-    const testTask = isKotlinMultiplatformGradle(repoPath) ? "allTests" : "test";
+    const testTask = multiplatform ? "allTests" : "test";
+    // Typecheck (cheapest per-edit correctness signal):
+    //  - Java (java plugin) → `compileJava`.
+    //  - Kotlin Multiplatform → null (no single compile-only task: `compileKotlinJvm`/`…Js`/`…Metadata`).
+    //  - plain kotlin-jvm → `compileKotlin` EXISTS (single JVM target), so use it for edit-time feedback.
+    const typecheck = !kotlin
+      ? `${wrapper} compileJava`
+      : multiplatform
+        ? null
+        : `${wrapper} compileKotlin`;
+    // Dev/run command: Spring → `bootRun`; the gradle `application` plugin (Ktor, CLI apps) → `run`.
+    const dev = spring ? `${wrapper} bootRun` : hasApp ? `${wrapper} run` : null;
     return {
       stack: "java", packageManager: "gradle", isMonorepo: isMultiModule,
       workspaces: [], installCommand: install, buildCommand: `${wrapper} build`,
       testCommand: `${wrapper} ${testTask}`, quickTestCommand: `${wrapper} ${testTask}`, lintCommand: `${wrapper} check`,
-      // `compileJava` only exists when the java plugin is applied. A Kotlin (incl. Kotlin
-      // Multiplatform) project has no `compileJava` task — running it fails "task not found",
-      // which would brick a per-edit blocking typecheck hook. KMP also has no single compile-only
-      // task name (`compileKotlin` for kotlin-jvm vs per-target `compileKotlinJvm`/`compileKotlinJs`
-      // /`compileKotlinMetadata` for multiplatform), so for Kotlin we skip a standalone typecheck
-      // and let the build/test command cover compilation. Java keeps `compileJava`.
-      typecheckCommand: kotlin ? null : `${wrapper} compileJava`,
-      // `bootRun` is a Spring Boot plugin task; a plain library/app without it has no such task.
-      devCommand: spring ? `${wrapper} bootRun` : null,
-      isWeb: spring,
-      devHealthUrl: null, devPort: null,
+      typecheckCommand: typecheck,
+      devCommand: dev,
+      isWeb: web,
+      devHealthUrl: null, devPort,
       testDir: firstExistingDir(repoPath, ["src/commonTest/kotlin", "src/test/kotlin", "src/test/java", "src/test"]),
       testRunner: "gradle",
     };
@@ -308,6 +319,85 @@ function isSpringBootGradle(repoPath: string): boolean {
     existsSync(join(repoPath, "src", "main", "resources", "application.properties")) ||
     existsSync(join(repoPath, "src", "main", "resources", "application.yml"))
   );
+}
+
+/** A Gradle project is a Ktor (HTTP server) app when a ktor-server dependency/plugin is present. */
+function isKtorGradle(repoPath: string): boolean {
+  return /io\.ktor|ktor-server|ktor\b/.test(gradleBuildText(repoPath).toLowerCase());
+}
+
+/**
+ * True when the Gradle `application` plugin is applied — it contributes the `run` task that boots
+ * the app's main class. Used to derive a dev/run command for non-Spring JVM apps (e.g. Ktor).
+ */
+function hasGradleApplicationPlugin(repoPath: string): boolean {
+  const text = gradleBuildText(repoPath).toLowerCase();
+  // `application` in the plugins block, the legacy `apply plugin: "application"`, or a `mainClass`
+  // declaration all indicate the application plugin / a runnable main.
+  return /\bapplication\b|["']application["']|mainclass/.test(text);
+}
+
+/** Common dev-server port literals an HTTP framework binds, in source or config. */
+const GRADLE_DEV_PORT_RE = /(?:port\s*[=:(]\s*|:)(\d{4,5})\b/;
+
+/**
+ * Best-effort dev-server port for a JVM web app. Scans the main Kotlin/Java source and common
+ * config files for a `port = NNNN` / `:NNNN` literal; falls back to 8080 (the Ktor/Spring default)
+ * since the smoke check needs a concrete health URL to poll.
+ */
+function detectGradleDevPort(repoPath: string): number {
+  const candidates = [
+    "src/main/resources/application.conf",
+    "src/main/resources/application.properties",
+    "src/main/resources/application.yml",
+  ];
+  for (const rel of candidates) {
+    const m = readFileSafe(join(repoPath, rel)).match(GRADLE_DEV_PORT_RE);
+    if (m) {
+      const port = Number.parseInt(m[1], 10);
+      if (port > 0 && port < 65536) return port;
+    }
+  }
+  // Scan a shallow set of main source files for an embeddedServer(..., port = NNNN) literal.
+  const srcRoots = ["src/main/kotlin", "src/main/java"];
+  for (const root of srcRoots) {
+    const dir = join(repoPath, root);
+    if (!existsSync(dir)) continue;
+    for (const file of walkSourceFiles(dir, 40)) {
+      const m = readFileSafe(file).match(/embeddedServer[\s\S]{0,80}?port\s*=\s*(?:[^\d]*?)(\d{4,5})/);
+      if (m) {
+        const port = Number.parseInt(m[1], 10);
+        if (port > 0 && port < 65536) return port;
+      }
+    }
+  }
+  return 8080;
+}
+
+/** Shallow recursive walk yielding up to `limit` source files (.kt/.java) under a directory. */
+function walkSourceFiles(dir: string, limit: number): string[] {
+  const out: string[] = [];
+  const stack = [dir];
+  while (stack.length > 0 && out.length < limit) {
+    const current = stack.pop()!;
+    let entries: string[] = [];
+    try {
+      entries = readdirSync(current);
+    } catch {
+      continue;
+    }
+    for (const name of entries) {
+      const full = join(current, name);
+      try {
+        if (statSync(full).isDirectory()) stack.push(full);
+        else if (/\.(kt|java)$/.test(name)) out.push(full);
+      } catch {
+        /* skip unreadable entry */
+      }
+      if (out.length >= limit) break;
+    }
+  }
+  return out;
 }
 
 const EMPTY_PROFILE: Omit<StackProfile, "source" | "detectedMarkers" | "updatedAt"> = {
