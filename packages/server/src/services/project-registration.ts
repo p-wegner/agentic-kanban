@@ -8,7 +8,8 @@ import { promisify } from "node:util";
 import { detectRepoInfo } from "./git-info.service.js";
 import { initializeProjectStatuses } from "../repositories/issue.repository.js";
 import { getCurrentBranch } from "./git.service.js";
-import { populateStackProfile, getStackProfile } from "./stack-profile.service.js";
+import { populateStackProfile, getStackProfile, populateVerifyScript, verifyScriptPrefKey } from "./stack-profile.service.js";
+import { getPreference } from "../repositories/preferences.repository.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -200,7 +201,11 @@ export async function registerProject(path: string, options?: { name?: string })
 
   // Durable stack profile (#786): the ONE descriptor the feedback harness reads.
   // Best-effort & non-blocking — the optional LLM gap-fill must not slow or fail registration.
-  void populateStackProfile(projectId, repoInfo.repoPath, db).catch(() => { /* non-fatal */ });
+  // Once it lands, auto-populate & activate the verify (merge-gate) command (#788) from the
+  // same profile so the keystone auto-merge gate is live from ticket #1.
+  void populateStackProfile(projectId, repoInfo.repoPath, db)
+    .then((profile) => populateVerifyScript(projectId, repoInfo.repoPath, db, profile))
+    .catch(() => { /* non-fatal */ });
 
   const project = {
     id: projectId,
@@ -229,7 +234,7 @@ export async function registerProject(path: string, options?: { name?: string })
  */
 export async function repairProjectRegistration(
   projectId: string,
-): Promise<{ seededStatuses: boolean; setDefaultBranch: string | null; populatedStackProfile: boolean }> {
+): Promise<{ seededStatuses: boolean; setDefaultBranch: string | null; populatedStackProfile: boolean; populatedVerifyScript: boolean }> {
   const [project] = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
   if (!project) throw new Error(`Project not found: ${projectId}`);
 
@@ -237,6 +242,7 @@ export async function repairProjectRegistration(
   let seededStatuses = false;
   let setDefaultBranch: string | null = null;
   let populatedStackProfile = false;
+  let populatedVerifyScript = false;
 
   const existingStatuses = await db
     .select({ id: projectStatuses.id })
@@ -271,5 +277,17 @@ export async function repairProjectRegistration(
     }
   }
 
-  return { seededStatuses, setDefaultBranch, populatedStackProfile };
+  // Backfill the verify (merge-gate) command (#788) onto a project registered before #788.
+  // Idempotent: populateVerifyScript no-ops when the key is already set or detection is empty.
+  const existingVerify = await getPreference(verifyScriptPrefKey(projectId), db);
+  if (!existingVerify || !existingVerify.trim()) {
+    try {
+      const written = await populateVerifyScript(projectId, project.repoPath, db);
+      populatedVerifyScript = Boolean(written);
+    } catch {
+      // non-fatal — a later repair/registration can retry.
+    }
+  }
+
+  return { seededStatuses, setDefaultBranch, populatedStackProfile, populatedVerifyScript };
 }
