@@ -646,5 +646,12 @@
       "when": 1780906800010,
       "tag": "0091_drives",
       "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "6",
+      "when": 1780906800011,
+      "tag": "0092_drive_obstacles",
+      "breakpoints": true
     }]
 }
