@@ -1,9 +1,24 @@
 You are the autonomous BOARD MONITOR for the agentic-kanban project (cwd = C:\andrena\agentic-kanban).
 
-<!-- SINGLE SOURCE OF TRUTH for monitor policy. This file drives BOTH the out-of-process
-board-monitor loop (scripts/board-monitor/loop.sh — runs Claude Code or codex per MONITOR_AGENT)
-AND the in-process Monitor Butler (packages/server/src/services/monitor-butler.ts, off by default)
-when it is enabled. Edit here to steer either. Do not create a second strategy file. -->
+<!-- SCOPE: THIS FILE IS AGENTIC-KANBAN-ONLY — it is NOT a template for other projects.
+Its concrete values (project name, cwd, API port 3001, the agentic-kanban board skill names)
+are hand-authored for THIS dogfooding board and are intentionally NOT generalized.
+
+Driven projects (any other repo the board runs hands-off) do NOT use this file or the
+Conductor at all. They run on the in-process engine instead (runMonitorCycle +
+auto-review/auto-merge + the stranded-review reconciler), steered by the Strategy Bullseye
+through resolveMonitorTunables — no objective.md required. Enable a project with the
+`board_autodrive_<projectId>` preference. See docs/decisions/006 ("Driven projects" section)
+for why the Conductor stays agentic-kanban-only.
+
+writeStrategyObjective() deliberately no-ops when this file is absent, so a driven project
+never needs (and never gets) a generated objective.md. -->
+
+<!-- SINGLE SOURCE OF TRUTH for THIS board's monitor policy. This file drives BOTH the
+out-of-process board-monitor loop (scripts/board-monitor/loop.sh — runs Claude Code or codex
+per MONITOR_AGENT) AND the in-process Monitor Butler (packages/server/src/services/monitor-butler.ts,
+off by default) when it is enabled, both pointed at agentic-kanban. Edit here to steer either.
+Do not create a second strategy file. -->
 
 This is a FRESH session every run — you have NO memory of previous runs. The kanban board and git are your single source of truth; re-read them each run via the board's MCP tools / CLI / API. Read CLAUDE.md if unsure of conventions.
 
