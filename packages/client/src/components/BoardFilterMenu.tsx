@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { MilestoneResponse } from "@agentic-kanban/shared";
+import { PRIORITY_META } from "../lib/chartColors.js";
 
 interface BoardFilterMenuProps {
   statuses: { id: string; name: string }[];
@@ -7,6 +8,8 @@ interface BoardFilterMenuProps {
   onStatusFilterChange: (id: string | null) => void;
   issueTypeFilter: string | null;
   onIssueTypeFilterChange: (type: string | null) => void;
+  priorityFilter: string | null;
+  onPriorityFilterChange: (priority: string | null) => void;
   milestones: MilestoneResponse[];
   milestoneFilterId: string | null;
   onMilestoneFilterChange: (id: string | null) => void;
@@ -33,6 +36,8 @@ export function BoardFilterMenu({
   onStatusFilterChange,
   issueTypeFilter,
   onIssueTypeFilterChange,
+  priorityFilter,
+  onPriorityFilterChange,
   milestones,
   milestoneFilterId,
   onMilestoneFilterChange,
@@ -67,6 +72,7 @@ export function BoardFilterMenu({
   const activeCount =
     (statusFilterId ? 1 : 0) +
     (issueTypeFilter ? 1 : 0) +
+    (priorityFilter ? 1 : 0) +
     (milestoneFilterId ? 1 : 0) +
     (showBlocked ? 1 : 0) +
     (showStaleOnly ? 1 : 0) +
@@ -75,6 +81,7 @@ export function BoardFilterMenu({
   function clearAll() {
     if (statusFilterId) onStatusFilterChange(null);
     if (issueTypeFilter) onIssueTypeFilterChange(null);
+    if (priorityFilter) onPriorityFilterChange(null);
     if (milestoneFilterId) onMilestoneFilterChange(null);
     if (showBlocked) onToggleBlocked();
     if (showStaleOnly) onToggleStaleOnly();
@@ -144,6 +151,21 @@ export function BoardFilterMenu({
                 );
               })}
             </div>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] font-semibold uppercase tracking-wide text-ink-faint dark:text-gray-500">Priority</label>
+            <select
+              value={priorityFilter ?? ""}
+              onChange={(e) => onPriorityFilterChange(e.target.value || null)}
+              className="w-full rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+              aria-label="Filter by priority"
+            >
+              <option value="">All priorities</option>
+              {PRIORITY_META.map((priority) => (
+                <option key={priority.key} value={priority.key}>{priority.label}</option>
+              ))}
+            </select>
           </div>
 
           {milestones.length > 0 && (

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   boardSavedViewsKey,
+  boardViewStatesEqual,
   deleteSavedBoardView,
   renameSavedBoardView,
   resolveBoardViewState,
@@ -17,7 +18,6 @@ import { showToast } from "./Toast.js";
 interface SavedBoardViewsProps {
   projectId: string;
   currentState: BoardViewState;
-  statuses: SavedViewReference[];
   tags: SavedViewReference[];
   onApply: (state: BoardViewState) => void;
   onLoadTags: () => Promise<SavedViewReference[]>;
@@ -32,7 +32,6 @@ interface SavedBoardViewsProps {
 export function SavedBoardViews({
   projectId,
   currentState,
-  statuses,
   tags,
   onApply,
   onLoadTags,
@@ -52,7 +51,10 @@ export function SavedBoardViews({
         if (cancelled) return;
         const loaded = sanitizeSavedBoardViews(settings[settingsKey]);
         setViews(loaded);
-        setSelectedViewId((current) => loaded.some((view) => view.id === current) ? current : "");
+        setSelectedViewId((current) => {
+          if (loaded.some((view) => view.id === current)) return current;
+          return loaded.find((view) => boardViewStatesEqual(view.state, currentState))?.id ?? "";
+        });
       })
       .catch(() => {
         if (!cancelled) setViews([]);
@@ -60,7 +62,12 @@ export function SavedBoardViews({
     return () => {
       cancelled = true;
     };
-  }, [settingsKey]);
+  }, [currentState, settingsKey]);
+
+  useEffect(() => {
+    const active = views.find((view) => boardViewStatesEqual(view.state, currentState));
+    setSelectedViewId(active?.id ?? "");
+  }, [currentState, views]);
 
   async function persist(nextViews: SavedBoardView[], message: string) {
     setSaving(true);
@@ -96,11 +103,11 @@ export function SavedBoardViews({
     setSelectedViewId(viewId);
     const view = views.find((candidate) => candidate.id === viewId);
     if (!view) return;
-    const availableTags = view.state.tagId || view.state.tagName ? await onLoadTags() : tags;
-    const resolved = resolveBoardViewState(view.state, statuses, availableTags);
+    const availableTags = view.state.tagIds.length > 0 || view.state.tagNames.length > 0 ? await onLoadTags() : tags;
+    const resolved = resolveBoardViewState(view.state, availableTags);
     onApply(resolved.state);
     if (resolved.dropped.length > 0) {
-      showToast(`Applied "${view.name}" without missing ${resolved.dropped.join(" and ")} filter`, "error");
+      showToast(`Applied "${view.name}" without missing tag filter`, "error");
     }
   }
 
@@ -117,6 +124,7 @@ export function SavedBoardViews({
   }
 
   const hasViews = views.length > 0;
+  const selectedView = views.find((view) => view.id === selectedViewId);
 
   useEffect(() => {
     if (!open) return;
@@ -147,8 +155,8 @@ export function SavedBoardViews({
         <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M5 5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16l-7-4-7 4V5z" />
         </svg>
-        <span className="hidden sm:inline">Views</span>
-        {hasViews && (
+        <span className="hidden sm:inline max-w-[9rem] truncate">{selectedView?.name ?? "Views"}</span>
+        {hasViews && !selectedView && (
           <span className="inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-violet-100 px-1 text-[10px] font-semibold leading-none text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">
             {views.length}
           </span>

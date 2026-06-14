@@ -1,19 +1,10 @@
-import { VIEW_IDS, type ViewMode } from "./viewRegistry.js";
-
 export const BOARD_SAVED_VIEWS_PREFIX = "board_saved_views_";
 
-export type BoardSortMode = "rank";
-
 export interface BoardViewState {
-  searchQuery: string;
-  showBlocked: boolean;
-  showStaleOnly: boolean;
-  statusId: string | null;
-  statusName: string | null;
-  tagId: string | null;
-  tagName: string | null;
-  sortMode: BoardSortMode;
-  viewMode: ViewMode;
+  tagIds: string[];
+  tagNames: string[];
+  issueType: string | null;
+  priority: string | null;
 }
 
 export interface SavedBoardView {
@@ -31,7 +22,7 @@ export interface SavedViewReference {
 
 export interface ResolvedBoardViewState {
   state: BoardViewState;
-  dropped: Array<"status" | "tag">;
+  dropped: Array<"tag">;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -46,8 +37,10 @@ function normalizeName(name: string) {
   return name.trim().toLowerCase();
 }
 
-function isViewMode(value: unknown): value is ViewMode {
-  return typeof value === "string" && VIEW_IDS.includes(value as ViewMode);
+function optionalStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    .map((item) => item.trim());
 }
 
 export function boardSavedViewsKey(projectId: string) {
@@ -65,19 +58,20 @@ export function sanitizeSavedBoardViews(raw: string | undefined): SavedBoardView
       const name = optionalString(item.name);
       if (!id || !name) return [];
       const state = item.state;
+      const legacyTagId = optionalString(state.tagId);
+      const legacyTagName = optionalString(state.tagName);
       return [{
         id,
         name: name.trim(),
         state: {
-          searchQuery: typeof state.searchQuery === "string" ? state.searchQuery : "",
-          showBlocked: state.showBlocked === true,
-          showStaleOnly: state.showStaleOnly === true,
-          statusId: optionalString(state.statusId),
-          statusName: optionalString(state.statusName),
-          tagId: optionalString(state.tagId),
-          tagName: optionalString(state.tagName),
-          sortMode: "rank",
-          viewMode: isViewMode(state.viewMode) ? state.viewMode : "kanban",
+          tagIds: optionalStringArray(state.tagIds).length > 0
+            ? optionalStringArray(state.tagIds)
+            : legacyTagId ? [legacyTagId] : [],
+          tagNames: optionalStringArray(state.tagNames).length > 0
+            ? optionalStringArray(state.tagNames)
+            : legacyTagName ? [legacyTagName] : [],
+          issueType: optionalString(state.issueType),
+          priority: optionalString(state.priority),
         },
         createdAt: typeof item.createdAt === "string" ? item.createdAt : "",
         updatedAt: typeof item.updatedAt === "string" ? item.updatedAt : "",
@@ -127,37 +121,50 @@ export function deleteSavedBoardView(views: SavedBoardView[], viewId: string): S
 
 export function resolveBoardViewState(
   saved: BoardViewState,
-  statuses: SavedViewReference[],
   tags: SavedViewReference[],
 ): ResolvedBoardViewState {
-  const dropped: Array<"status" | "tag"> = [];
+  const dropped: Array<"tag"> = [];
   const state: BoardViewState = { ...saved };
 
-  if (saved.statusId || saved.statusName) {
-    const status = statuses.find((candidate) => candidate.id === saved.statusId)
-      ?? statuses.find((candidate) => saved.statusName && candidate.name.toLowerCase() === saved.statusName.toLowerCase());
-    if (status) {
-      state.statusId = status.id;
-      state.statusName = status.name;
-    } else {
-      state.statusId = null;
-      state.statusName = null;
-      dropped.push("status");
-    }
-  }
+  if (saved.tagIds.length > 0 || saved.tagNames.length > 0) {
+    const resolvedTags: SavedViewReference[] = [];
+    const seenTagIds = new Set<string>();
+    let missingTags = false;
+    const tagCount = Math.max(saved.tagIds.length, saved.tagNames.length);
 
-  if (saved.tagId || saved.tagName) {
-    const tag = tags.find((candidate) => candidate.id === saved.tagId)
-      ?? tags.find((candidate) => saved.tagName && candidate.name.toLowerCase() === saved.tagName.toLowerCase());
-    if (tag) {
-      state.tagId = tag.id;
-      state.tagName = tag.name;
-    } else {
-      state.tagId = null;
-      state.tagName = null;
+    for (let i = 0; i < tagCount; i += 1) {
+      const savedId = saved.tagIds[i];
+      const savedName = saved.tagNames[i]?.toLowerCase();
+      const tag = tags.find((candidate) => candidate.id === savedId)
+        ?? tags.find((candidate) => !!savedName && candidate.name.toLowerCase() === savedName);
+      if (!tag) {
+        missingTags = true;
+        continue;
+      }
+      if (!seenTagIds.has(tag.id)) {
+        resolvedTags.push(tag);
+        seenTagIds.add(tag.id);
+      }
+    }
+
+    state.tagIds = resolvedTags.map((tag) => tag.id);
+    state.tagNames = resolvedTags.map((tag) => tag.name);
+    if (missingTags) {
       dropped.push("tag");
     }
   }
 
   return { state, dropped };
+}
+
+export function boardViewStatesEqual(a: BoardViewState, b: BoardViewState): boolean {
+  return (
+    sorted(a.tagIds).join("\0") === sorted(b.tagIds).join("\0") &&
+    (a.issueType ?? "") === (b.issueType ?? "") &&
+    (a.priority ?? "") === (b.priority ?? "")
+  );
+}
+
+function sorted(values: string[]) {
+  return [...values].sort((a, b) => a.localeCompare(b));
 }
