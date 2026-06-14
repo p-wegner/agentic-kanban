@@ -5,6 +5,7 @@ import { getAllPreferences } from "../repositories/preferences.repository.js";
 import { readOrchestratorStatus } from "../services/orchestrator-monitor.service.js";
 import { resolveMonitorTunables } from "../services/strategy-objective.service.js";
 import { resolveStartPolicy } from "../services/start-policy.service.js";
+import { startConductor, stopConductor } from "../services/conductor-control.service.js";
 
 /**
  * Read-only observability for the detached board-monitor orchestrator loop
@@ -41,6 +42,25 @@ export function createBoardMonitorRoute(database: Database) {
     const { tunables, source } = resolveMonitorTunables(prefMap, projectId);
     const startPolicy = resolveStartPolicy(prefMap, projectId);
     return c.json({ tunables, source, startPolicy });
+  });
+
+  // Start/stop the out-of-process Conductor loop (dogfood board only). The Start Mode UI
+  // calls this when the user picks "conductor" (start) vs manual/monitor (stop).
+  router.post("/:id/conductor", async (c) => {
+    const projectId = c.req.param("id");
+    const project = await getProjectById(projectId, database);
+    if (!project) return c.json({ error: "project not found" }, 404);
+    const body = await c.req.json<{ action?: "start" | "stop"; agent?: "claude" | "codex" }>().catch(() => ({}));
+    const repoPath = project.repoPath || "";
+    if (body.action === "start") {
+      const result = startConductor(repoPath, body.agent === "codex" ? "codex" : "claude");
+      return c.json({ ...result, status: readOrchestratorStatus(repoPath) }, result.ok ? 200 : 409);
+    }
+    if (body.action === "stop") {
+      const result = stopConductor(repoPath);
+      return c.json({ ...result, status: readOrchestratorStatus(repoPath) });
+    }
+    return c.json({ error: "action must be 'start' or 'stop'" }, 400);
   });
 
   return router;
