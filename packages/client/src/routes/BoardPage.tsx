@@ -12,6 +12,7 @@ const AgentGrid = lazy(() => import("../components/AgentGrid.js").then((m) => ({
 const TimelineView = lazy(() => import("../components/TimelineView.js").then((m) => ({ default: m.TimelineView })));
 const MetricsView = lazy(() => import("../components/MetricsView.js").then((m) => ({ default: m.MetricsView })));
 const QualityMetricsView = lazy(() => import("../components/QualityMetricsView.js").then((m) => ({ default: m.QualityMetricsView })));
+const MilestonesOverview = lazy(() => import("../components/MilestonesOverview.js").then((m) => ({ default: m.MilestonesOverview })));
 const ButlerView = lazy(() => import("../components/ButlerView.js").then((m) => ({ default: m.ButlerView })));
 const WorkflowsView = lazy(() => import("../components/WorkflowsView.js").then((m) => ({ default: m.WorkflowsView })));
 const WorkflowAnalyticsDashboard = lazy(() => import("../components/WorkflowAnalyticsDashboard.js").then((m) => ({ default: m.WorkflowAnalyticsDashboard })));
@@ -1391,6 +1392,11 @@ export function BoardPage() {
     handlePriorityFilterChange(state.priority);
   }, [handleIssueTypeFilterChange, handlePriorityFilterChange, handleSetTagFilterIds]);
 
+  const handleMilestoneOverviewClick = useCallback((milestoneId: string) => {
+    setMilestoneFilterId(milestoneId);
+    handleViewModeChange("kanban");
+  }, [handleViewModeChange]);
+
   const filterOptions = useMemo(() => ({
     focusMode,
     statusFilterId,
@@ -1827,6 +1833,14 @@ export function BoardPage() {
         {viewMode === "quality-metrics" && activeProjectId && (
           <BoardErrorBoundary columnName="Quality Metrics View">
             <QualityMetricsView projectId={activeProjectId} />
+          </BoardErrorBoundary>
+        )}
+        {viewMode === "milestones" && activeProjectId && (
+          <BoardErrorBoundary columnName="Milestones View">
+            <MilestonesOverview
+              projectId={activeProjectId}
+              onMilestoneClick={handleMilestoneOverviewClick}
+            />
           </BoardErrorBoundary>
         )}
         {viewMode === "butler" && activeProjectId && (

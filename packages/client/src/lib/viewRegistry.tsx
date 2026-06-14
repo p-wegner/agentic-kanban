@@ -21,6 +21,7 @@ export type ViewMode =
   | "timeline"
   | "metrics"
   | "quality-metrics"
+  | "milestones"
   | "butler"
   | "workflows"
   | "workflow-analytics"
@@ -135,6 +136,12 @@ const ICON = {
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M4 19V5m0 14h16M8 16l3-5 3 2 4-7" />
       <path strokeLinecap="round" strokeLinejoin="round" d="M8 19v-3m6 3v-6m4 6V6" />
+    </svg>
+  ),
+  milestones: (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h10M4 12h16M4 18h8" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M16 4v5l4-2.5L16 4z" />
     </svg>
   ),
   digest: (
@@ -398,6 +405,17 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteIcon: "QM",
     paletteDescription: "Show collected code quality metrics",
     shortcut: "y",
+    activeClass: "bg-emerald-600 text-white",
+    group: "secondary",
+  },
+  {
+    id: "milestones",
+    toolbarLabel: "Milestones",
+    label: "Milestones",
+    tooltip: "Milestones - progress, counts, and mini-burndown",
+    icon: ICON.milestones,
+    paletteIcon: "MS",
+    paletteDescription: "Show per-milestone progress, open counts, and burndown",
     activeClass: "bg-emerald-600 text-white",
     group: "secondary",
   },
