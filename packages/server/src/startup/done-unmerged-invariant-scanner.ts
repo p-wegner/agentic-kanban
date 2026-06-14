@@ -10,6 +10,7 @@ import {
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
+import { recordDriveObstacle } from "../services/drive-obstacles.service.js";
 import { PREF_DONE_UNMERGED_SCANNER_ENABLED } from "../constants/preference-keys.js";
 
 /** Issue status names that count as "terminal Done" — these are the ones we scan. */
@@ -240,6 +241,18 @@ export async function scanDoneUnmergedWorkspaces(
         details: { workspaceId: c.wsId, branchSha: result.branchSha, baseSha: result.baseSha, uniqueCommitCount: uniqueCommits, detectedAt: now },
       }, database);
     } catch { /* health event logging is non-fatal */ }
+
+    // Structured drive-obstacle telemetry (#803): emit a typed silent_merge_loss event so
+    // this friction is queryable + dashboard-feedable, not just in the free-text health log.
+    // recordDriveObstacle is non-throwing, so no try/catch needed.
+    await recordDriveObstacle({
+      projectId: c.projectId,
+      kind: "silent_merge_loss",
+      severity: "critical",
+      issueNumber: c.issueNumber ?? null,
+      summary: `Silent merge loss: issue #${c.issueNumber ?? "?"} is '${c.statusName}' but branch '${c.branch}' has ${uniqueCommits} unmerged commit(s) not on ${c.baseBranch}.`,
+      details: { workspaceId: c.wsId, branch: c.branch, baseBranch: c.baseBranch, branchSha: result.branchSha, baseSha: result.baseSha, uniqueCommitCount: uniqueCommits },
+    }, { database });
 
     // --- SAFE FORWARD-ONLY AUTO-RECOVERY ---
     // Skip if rate limit reached or already attempted this cycle.

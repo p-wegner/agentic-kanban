@@ -30,6 +30,7 @@ import type { WSContext } from "hono/ws";
  * | workflow_template_saved   | workflows route                             |
  * | workflow_template_deleted | workflows route                             |
  * | workflow_transition       | workflows route                             |
+ * | drive_obstacle            | drive-obstacles.service (friction telemetry)|
  * | internal_notify           | routes/index internal endpoint              |
  * | projects_changed          | projects route emits a separate WS message  |
  */
@@ -55,6 +56,7 @@ export type BoardEventType =
   | "workflow_template_saved"
   | "workflow_template_deleted"
   | "workflow_transition"
+  | "drive_obstacle"
   | "internal_notify";
 
 export type ProjectEventType =
