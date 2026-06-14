@@ -45,4 +45,10 @@ describe("modelBelongsToProvider", () => {
     expect(modelBelongsToProvider("gpt-5.5", "copilot")).toBe(true);
     expect(modelBelongsToProvider("opus", "copilot")).toBe(true);
   });
+
+  it("never strips for pi because profiles select the concrete upstream provider", () => {
+    expect(modelBelongsToProvider("gpt-5.5", "pi")).toBe(true);
+    expect(modelBelongsToProvider("claude-sonnet-4-6", "pi")).toBe(true);
+    expect(modelBelongsToProvider("custom-pi-model", "pi")).toBe(true);
+  });
 });
