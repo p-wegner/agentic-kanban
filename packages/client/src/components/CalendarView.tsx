@@ -20,6 +20,13 @@ interface CalendarViewProps {
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MAX_VISIBLE_CHIPS = 3;
+type CalendarDateField = "createdAt" | "updatedAt" | "statusChangedAt";
+
+const DATE_FIELD_OPTIONS: Array<{ value: CalendarDateField; label: string }> = [
+  { value: "createdAt", label: "Created" },
+  { value: "updatedAt", label: "Updated" },
+  { value: "statusChangedAt", label: "Status changed" },
+];
 
 function getDaysInMonth(year: number, month: number): number {
   return new Date(year, month + 1, 0).getDate();
@@ -34,14 +41,17 @@ function isToday(year: number, month: number, day: number): boolean {
   return now.getFullYear() === year && now.getMonth() === month && now.getDate() === day;
 }
 
-function isOverdue(dueDateStr: string): boolean {
-  const todayKey = getLocalDateKey(new Date());
-  const dueKey = getLocalDateKey(dueDateStr);
-  return dueKey < todayKey;
-}
-
 function escapeHandler(e: KeyboardEvent<HTMLDivElement>) {
   if (e.key === "Escape") e.stopPropagation();
+}
+
+function colorWithAlpha(hex: string, alpha: number): string {
+  const normalized = hex.replace("#", "");
+  if (normalized.length !== 6) return hex;
+  const r = parseInt(normalized.slice(0, 2), 16);
+  const g = parseInt(normalized.slice(2, 4), 16);
+  const b = parseInt(normalized.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
 // ---------------------------------------------------------------------------
@@ -53,18 +63,18 @@ function CalendarHeader({
   onPrev,
   onNext,
   onToday,
-  showCompleted,
-  onToggleCompleted,
+  dateField,
+  onDateFieldChange,
 }: {
   monthLabel: string;
   onPrev: () => void;
   onNext: () => void;
   onToday: () => void;
-  showCompleted: boolean;
-  onToggleCompleted: () => void;
+  dateField: CalendarDateField;
+  onDateFieldChange: (field: CalendarDateField) => void;
 }) {
   return (
-    <div className="flex items-center justify-between mb-3 px-1">
+    <div className="flex items-center justify-between gap-3 mb-3 px-1 flex-wrap">
       <div className="flex items-center gap-2">
         <button
           onClick={onPrev}
@@ -94,15 +104,22 @@ function CalendarHeader({
 
       <h2 className="text-sm font-semibold text-ink">{monthLabel}</h2>
 
-      <label className="flex items-center gap-1.5 text-xs text-ink-faint cursor-pointer select-none">
-        <input
-          type="checkbox"
-          checked={showCompleted}
-          onChange={onToggleCompleted}
-          className="rounded border-ink-faint/30 accent-brand-500"
-        />
-        Show completed
-      </label>
+      <div className="flex items-center gap-1 rounded-md border border-ink-faint/15 bg-surface-raised dark:bg-surface-raised-dark p-0.5" aria-label="Calendar date field">
+        {DATE_FIELD_OPTIONS.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => onDateFieldChange(option.value)}
+            className={`rounded px-2 py-0.5 text-xs font-medium transition-colors ${
+              dateField === option.value
+                ? "bg-brand-600 text-white"
+                : "text-ink-faint hover:bg-ink-faint/10 hover:text-ink"
+            }`}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -115,7 +132,6 @@ function CalendarIssueChip({
   onClick: () => void;
 }) {
   const color = STATUS_COLORS[issue.statusName] ?? "#8a8175";
-  const overdue = !!issue.dueDate && isOverdue(issue.dueDate);
   const label = issue.issueNumber != null ? `#${issue.issueNumber} ${issue.title}` : issue.title;
 
   return (
@@ -125,9 +141,9 @@ function CalendarIssueChip({
       className={`
         w-full text-left px-1.5 py-0.5 rounded text-[11px] leading-tight truncate cursor-pointer
         border-l-[3px] transition-colors hover:bg-ink-faint/5
-        ${overdue ? "bg-red-50 dark:bg-red-950/20 text-red-700 dark:text-red-400" : "text-ink/80 dark:text-ink/70"}
+        text-ink/80 dark:text-ink/70
       `}
-      style={{ borderLeftColor: color }}
+      style={{ borderLeftColor: color, backgroundColor: colorWithAlpha(color, 0.08) }}
     >
       {label}
     </button>
@@ -218,43 +234,41 @@ function CalendarDayCell({
 // Main component
 // ---------------------------------------------------------------------------
 
-const COMPLETED_STATUS_NAMES = new Set(["Done", "Cancelled"]);
-
 export function CalendarView({ columns, onIssueClick, searchQuery = "" }: CalendarViewProps) {
   const [currentDate, setCurrentDate] = useState(() => new Date());
-  const [showCompleted, setShowCompleted] = useState(false);
+  const [dateField, setDateField] = useState<CalendarDateField>("createdAt");
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
 
-  // Flatten & filter issues
-  const { dated, undated } = useMemo(() => {
+  // Flatten, filter, and place issues by the selected board timestamp.
+  const dated = useMemo(() => {
     const query = searchQuery.toLowerCase();
     const all: IssueWithStatus[] = [];
     for (const col of columns) {
       for (const issue of col.issues) {
-        if (!showCompleted && COMPLETED_STATUS_NAMES.has(issue.statusName)) continue;
         if (query && !issue.title.toLowerCase().includes(query) && !(issue.issueNumber != null && String(issue.issueNumber).includes(query))) continue;
         all.push(issue);
       }
     }
 
     const datedMap = new Map<string, IssueWithStatus[]>();
-    const undatedList: IssueWithStatus[] = [];
 
     for (const issue of all) {
-      if (issue.dueDate) {
-        const key = getLocalDateKey(issue.dueDate);
-        const arr = datedMap.get(key);
-        if (arr) arr.push(issue);
-        else datedMap.set(key, [issue]);
-      } else {
-        undatedList.push(issue);
-      }
+      const rawDate = issue[dateField];
+      if (!rawDate) continue;
+      const key = getLocalDateKey(rawDate);
+      const arr = datedMap.get(key);
+      if (arr) arr.push(issue);
+      else datedMap.set(key, [issue]);
     }
 
-    return { dated: datedMap, undated: undatedList };
-  }, [columns, searchQuery, showCompleted]);
+    for (const issues of datedMap.values()) {
+      issues.sort((a, b) => a.sortOrder - b.sortOrder || a.title.localeCompare(b.title));
+    }
+
+    return datedMap;
+  }, [columns, dateField, searchQuery]);
 
   // Grid calculations
   const daysInMonth = getDaysInMonth(year, month);
@@ -308,8 +322,8 @@ export function CalendarView({ columns, onIssueClick, searchQuery = "" }: Calend
         onPrev={goToPrevMonth}
         onNext={goToNextMonth}
         onToday={goToToday}
-        showCompleted={showCompleted}
-        onToggleCompleted={() => setShowCompleted((v) => !v)}
+        dateField={dateField}
+        onDateFieldChange={setDateField}
       />
 
       {/* Day-of-week headers */}
@@ -329,29 +343,11 @@ export function CalendarView({ columns, onIssueClick, searchQuery = "" }: Calend
             day={cell.day}
             isOutsideMonth={cell.isOutsideMonth}
             isCurrentDay={!cell.isOutsideMonth && isToday(year, month, cell.day)}
-            issues={dated.get(cell.dateKey) ?? []}
+            issues={cell.isOutsideMonth ? [] : dated.get(cell.dateKey) ?? []}
             onIssueClick={onIssueClick}
           />
         ))}
       </div>
-
-      {/* Undated issues */}
-      {undated.length > 0 && (
-        <details className="border-t border-ink-faint/10 mt-auto">
-          <summary className="px-2 py-1.5 text-xs text-ink-faint cursor-pointer hover:text-ink select-none">
-            {undated.length} issue{undated.length !== 1 ? "s" : ""} without due dates
-          </summary>
-          <div className="px-2 pb-2 space-y-0.5 max-h-40 overflow-auto">
-            {undated.map((issue) => (
-              <CalendarIssueChip
-                key={issue.id}
-                issue={issue}
-                onClick={() => onIssueClick(issue)}
-              />
-            ))}
-          </div>
-        </details>
-      )}
     </div>
   );
 }

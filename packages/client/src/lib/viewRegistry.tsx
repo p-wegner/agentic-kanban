@@ -319,6 +319,15 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     shortcut: "b",
   },
   {
+    id: "calendar",
+    toolbarLabel: "Calendar",
+    label: "Calendar",
+    tooltip: "Calendar - issues by created, updated, or status-change date",
+    icon: ICON.calendar,
+    paletteIcon: "Cal",
+    paletteDescription: "Show issues on a monthly calendar by board timestamps",
+  },
+  {
     id: "backlog",
     toolbarLabel: "Backlog",
     label: "Backlog",
@@ -678,17 +687,6 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteIcon: "BD",
     paletteDescription: "Burndown chart of remaining open issues per day with an ideal target trend line",
     activeClass: "bg-emerald-600 text-white",
-    group: "secondary",
-  },
-  {
-    id: "calendar",
-    toolbarLabel: "Calendar",
-    label: "Calendar",
-    tooltip: "Calendar — issues by due date on a monthly grid",
-    icon: ICON.calendar,
-    paletteIcon: "Cal",
-    paletteDescription: "Show issues on a monthly calendar by due date",
-    shortcut: "a",
     group: "secondary",
   },
 ];
