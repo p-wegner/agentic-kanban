@@ -13,7 +13,7 @@ vi.mock("node:fs", () => ({
   readFileSync: vi.fn(),
 }));
 
-import { ClaudeProvider, CodexProvider, CopilotProvider, getProvider, buildAgentLaunchConfig } from "../services/agent-provider.js";
+import { ClaudeProvider, CodexProvider, CopilotProvider, PiProvider, getProvider, buildAgentLaunchConfig } from "../services/agent-provider.js";
 import type { ProviderId, ProviderName } from "../services/agent-provider.js";
 import { execSync as execSyncMock } from "node:child_process";
 import { existsSync as existsSyncMock, readFileSync as readFileSyncMock } from "node:fs";
@@ -478,12 +478,12 @@ describe("ClaudeProvider", () => {
 });
 
 describe("provider registry", () => {
-  it("includes pi in provider type unions without registering it yet", () => {
+  it("includes pi in provider type unions and registry", () => {
     const providerName: ProviderName = "pi";
     const providerId: ProviderId = "pi";
     expect(providerName).toBe("pi");
     expect(providerId).toBe("pi");
-    expect(() => getProvider("pi")).toThrow("Unknown agent provider");
+    expect(getProvider("pi")).toBeInstanceOf(PiProvider);
   });
 
   it("getProvider returns ClaudeProvider by default", () => {
@@ -565,6 +565,14 @@ describe("buildAgentLaunchConfig (backward compat)", () => {
     const config = buildAgentLaunchConfig({ provider: "claude-code" });
     expect(config.args).toContain("--output-format");
     expect(config.args).toContain("stream-json");
+  });
+
+  it("routes to PiProvider when provider is 'pi'", () => {
+    const config = buildAgentLaunchConfig({ provider: "pi", prompt: "Run" });
+    expect(config.command).toBe("pi");
+    expect(config.args).toContain("--mode");
+    expect(config.args).toContain("json");
+    expect(config.args).toContain("--approve");
   });
 });
 
@@ -897,5 +905,136 @@ describe("CopilotProvider", () => {
       agentSummary: "Finished",
     });
     expect(doneEvt?.liveStats?.contextTokens).toBe(12);
+  });
+});
+
+describe("PiProvider", () => {
+  const provider = new PiProvider();
+
+  it("builds default Pi launch config with structured mode and approve trust flag", () => {
+    const config = provider.buildLaunchConfig({ prompt: "Fix the bug" });
+    expect(config.command).toBe("pi");
+    expect(config.args).toEqual(expect.arrayContaining(["--mode", "json", "--approve", "-p", "Fix the bug"]));
+    expect(config.args).not.toContain("--mcp-config");
+    expect(config.args).not.toContain("--additional-mcp-config");
+    expect(config.suppressStdinPrompt).toBe(true);
+  });
+
+  it("always includes --approve when model, profile, resume, and extra args are set", () => {
+    const config = provider.buildLaunchConfig({
+      prompt: "Continue",
+      providerSessionId: "019ec69d-bed7-75ad-9b25-2b19161227d5",
+      profile: { provider: "pi", name: "openai/gpt-5" },
+      model: "gpt-5.1",
+      agentArgs: "--skill C:/repo/.claude/skills/review/SKILL.md",
+    });
+    expect(config.args).toContain("--approve");
+    expect(config.args).toContain("--provider");
+    expect(config.args[config.args.indexOf("--provider") + 1]).toBe("openai");
+    expect(config.args).toContain("--model");
+    expect(config.args[config.args.indexOf("--model") + 1]).toBe("gpt-5.1");
+    expect(config.args).toContain("--session");
+    expect(config.args[config.args.indexOf("--session") + 1]).toBe("019ec69d-bed7-75ad-9b25-2b19161227d5");
+    expect(config.args).toContain("--skill");
+    expect(config.args).toContain("C:/repo/.claude/skills/review/SKILL.md");
+  });
+
+  it("uses explicit provider/model from a Pi profile when no model override is set", () => {
+    const config = provider.buildLaunchConfig({
+      prompt: "Run",
+      profile: { provider: "pi", name: "anthropic/claude-sonnet-4-6" },
+    });
+    expect(config.args).toContain("--provider");
+    expect(config.args[config.args.indexOf("--provider") + 1]).toBe("anthropic");
+    expect(config.args).toContain("--model");
+    expect(config.args[config.args.indexOf("--model") + 1]).toBe("claude-sonnet-4-6");
+  });
+
+  it("folds plan-mode instructions into the Pi -p prompt argument", () => {
+    const config = provider.buildLaunchConfig({ prompt: "Plan it", planMode: true });
+    const promptArg = config.args[config.args.indexOf("-p") + 1];
+    expect(promptArg).toContain("PLAN-ONLY");
+    expect(promptArg).toContain("===PLAN BEGIN===");
+    expect(promptArg).toContain("Plan it");
+    expect(config.promptPrefix).toBeUndefined();
+  });
+
+  it("resolves the Pi executable from common Windows locations", () => {
+    const originalPlatform = process.platform;
+    const originalAppData = process.env.APPDATA;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    process.env.APPDATA = "C:\\Users\\test\\AppData\\Roaming";
+    const fs = {
+      existsSync: (path: string) => path === "C:\\Users\\test\\AppData\\Roaming\\npm\\pi.cmd",
+      readFileSync: vi.fn(),
+      writeFileSync: vi.fn(),
+    };
+
+    const config = new PiProvider(fs).buildLaunchConfig({ prompt: "Run" });
+    expect(config.command).toBe("C:\\Users\\test\\AppData\\Roaming\\npm\\pi.cmd");
+    expect(config.useShell).toBe(true);
+
+    Object.defineProperty(process, "platform", { value: originalPlatform });
+    if (originalAppData !== undefined) process.env.APPDATA = originalAppData;
+    else delete process.env.APPDATA;
+  });
+
+  it("parses session id from the raw Pi JSONL session header sample", () => {
+    const evt = provider.parseStreamEvent(
+      `{"type":"session","version":3,"id":"019ec69d-bed7-75ad-9b25-2b19161227d5","timestamp":"2026-06-14T14:51:27.320Z","cwd":"C:\\\\Users\\\\pwegner\\\\AppData\\\\Local\\\\Temp\\\\ak-pi-cli-findings\\\\work"}`
+    );
+    expect(evt?.providerSessionId).toBe("019ec69d-bed7-75ad-9b25-2b19161227d5");
+  });
+
+  it("parses assistant text and live stats from the raw Pi text_delta sample", () => {
+    const evt = provider.parseStreamEvent(
+      `{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"one-shot-ok","partial":{"role":"assistant","content":[{"type":"text","text":"one-shot-ok"}],"api":"ak-faux-api","provider":"ak-faux","model":"ak-faux-1","usage":{"input":1329,"output":3,"cacheRead":0,"cacheWrite":1329,"totalTokens":2661,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"stop","timestamp":1781448687453}},"message":{"role":"assistant","content":[{"type":"text","text":"one-shot-ok"}],"api":"ak-faux-api","provider":"ak-faux","model":"ak-faux-1","usage":{"input":1329,"output":3,"cacheRead":0,"cacheWrite":1329,"totalTokens":2661,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"stop","timestamp":1781448687453}}`
+    );
+    expect(evt?.assistantText).toBe("one-shot-ok");
+    expect(evt?.liveStats).toEqual({ model: "ak-faux-1", contextTokens: 1329 });
+  });
+
+  it("parses tool activity from the raw Pi tool_execution_start sample", () => {
+    const evt = provider.parseStreamEvent(
+      `{"type":"tool_execution_start","toolCallId":"tool-call-read-sample","toolName":"read","args":{"path":"sample.txt"}}`
+    );
+    expect(evt?.toolActivity).toEqual({
+      name: "read",
+      input: { path: "sample.txt" },
+      toolUseId: "tool-call-read-sample",
+    });
+  });
+
+  it("parses tool result text from the raw Pi tool_execution_end sample", () => {
+    const evt = provider.parseStreamEvent(
+      `{"type":"tool_execution_end","toolCallId":"tool-call-read-sample","toolName":"read","result":{"content":[{"type":"text","text":"pi scratch sample file\\r\\n"}]},"isError":false}`
+    );
+    expect(evt?.toolResult).toEqual({
+      toolUseId: "tool-call-read-sample",
+      agentResultText: "pi scratch sample file\r\n",
+    });
+  });
+
+  it("parses completion stats from the raw Pi turn_end sample", () => {
+    const evt = provider.parseStreamEvent(
+      `{"type":"turn_end","message":{"role":"assistant","content":[{"type":"text","text":"resume-ok"}],"api":"ak-faux-api","provider":"ak-faux","model":"ak-faux-1","usage":{"input":1341,"output":3,"cacheRead":0,"cacheWrite":1341,"totalTokens":2685,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"stop","timestamp":1781448703091},"toolResults":[]}`
+    );
+    expect(evt?.turnComplete).toBe(true);
+    expect(evt?.stats).toMatchObject({
+      durationMs: 0,
+      totalCostUsd: 0,
+      inputTokens: 1341,
+      outputTokens: 3,
+      contextTokens: 1341,
+      numTurns: 1,
+      model: "ak-faux-1",
+      success: true,
+      agentSummary: "resume-ok",
+    });
+  });
+
+  it("returns undefined for unrecognized and non-JSON lines", () => {
+    expect(provider.parseStreamEvent("AK diagnostic stderr")).toBeUndefined();
+    expect(provider.parseStreamEvent(JSON.stringify({ type: "agent_start" }))).toBeUndefined();
   });
 });

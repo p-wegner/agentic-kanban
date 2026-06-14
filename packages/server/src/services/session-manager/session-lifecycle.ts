@@ -157,8 +157,8 @@ function buildClaudeUsageLimitStats(executor: string, durationMs: number, exitCo
 }
 
 function lifecycleProviderName(provider: string | undefined, profile?: { provider?: string; name?: string }): ProviderName {
-  if (profile?.provider === "codex" || profile?.provider === "copilot" || profile?.provider === "claude") return profile.provider;
-  if (provider === "codex" || provider === "copilot") return provider;
+  if (profile?.provider === "codex" || profile?.provider === "copilot" || profile?.provider === "claude" || profile?.provider === "pi") return profile.provider;
+  if (provider === "codex" || provider === "copilot" || provider === "pi") return provider;
   return "claude";
 }
 
