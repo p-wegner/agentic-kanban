@@ -132,7 +132,12 @@ describe("merge-flap scenario A: drop after mergedAt stamped", () => {
     });
 
     const mergeBranch = vi.fn(async () => "Merge made by the 'ort' strategy.");
-    const git = makeGit({ mergeBranch });
+    // The merge genuinely landed (mergedAt stamped), so the branch tip IS an ancestor of base —
+    // the #820 trust-but-verify guard confirms this before honoring the flag.
+    const git = makeGit({
+      mergeBranch,
+      checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: true, branchSha: "feature-sha", baseSha: "master-sha" })),
+    });
 
     const svc = createWorkspaceMergeService({
       database: db,
@@ -173,7 +178,8 @@ describe("merge-flap scenario A: drop after mergedAt stamped", () => {
     const [issueBefore] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
     expect(issueBefore.statusId).toBe(inReviewStatusId);
 
-    const git = makeGit();
+    // Branch genuinely landed → it's an ancestor of base (#820 guard verifies before honoring mergedAt).
+    const git = makeGit({ checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: true, branchSha: "feature-sha", baseSha: "master-sha" })) });
     const svc = createWorkspaceMergeService({
       database: db,
       gitService: git as never,
@@ -194,7 +200,8 @@ describe("merge-flap scenario A: drop after mergedAt stamped", () => {
       readyForMerge: false,
     });
 
-    const git = makeGit();
+    // Branch genuinely landed → ancestor of base (#820 guard verifies before honoring mergedAt).
+    const git = makeGit({ checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: true, branchSha: "feature-sha", baseSha: "master-sha" })) });
     const svc = createWorkspaceMergeService({
       database: db,
       gitService: git as never,
