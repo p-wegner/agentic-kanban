@@ -61,6 +61,17 @@ async function persistFrictionFallback(sessionId: string, messages: AgentOutputM
   }
 }
 
+async function mergeExistingStats(sessionId: string, statsToSave: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const rows = await writeDb.select({ stats: sessions.stats }).from(sessions).where(eq(sessions.id, sessionId)).limit(1);
+  if (rows.length === 0 || !rows[0].stats) return statsToSave;
+  try {
+    const existing = JSON.parse(rows[0].stats) as Record<string, unknown>;
+    return { ...existing, ...statsToSave };
+  } catch {
+    return statsToSave;
+  }
+}
+
 const DB_FLUSH_INTERVAL_MS = 250;
 const DB_FLUSH_BATCH_SIZE = 50;
 
@@ -180,9 +191,10 @@ export function createBroadcaster(
             ...(lastTool ? { lastTool } : {}),
             ...(friction ? { friction } : {}),
           };
-          writeDb.update(sessions)
-            .set({ stats: JSON.stringify(statsToSave) })
-            .where(eq(sessions.id, sessionId))
+          mergeExistingStats(sessionId, statsToSave)
+            .then((mergedStats) => writeDb.update(sessions)
+              .set({ stats: JSON.stringify(mergedStats) })
+              .where(eq(sessions.id, sessionId)))
             .catch((err) => console.error("Failed to update session stats:", err));
         }
 

@@ -2,7 +2,7 @@ import { db as realDb } from "../../db/index.js";
 import type { Database } from "../../db/index.js";
 import { sessions, sessionMessages, workspaces, issues, projects, preferences, agentSkills } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import * as realAgentService from "../agent.service.js";
 import { extractPlan, writePlanFile, buildImplementPrompt } from "../plan-mode.service.js";
 import { getHarnessBoolSetting } from "../harness-settings.js";
@@ -34,6 +34,41 @@ export interface SessionLifecycleDeps {
 }
 
 export const ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS = 10_000;
+const CODEX_SPARK_MODEL = "gpt-5.3-codex-spark";
+const CODEX_SAFE_DEFAULT_MODEL = "gpt-5.5";
+const CODEX_BUILDER_COUNTER_INSTRUCTIONS =
+  "You are an autonomous builder: you MUST run relevant tests and COMMIT your work with git before finishing. " +
+  "These instructions override any base instruction to the contrary, including instructions that forbid git, tests, validation, or correcting your own mistakes.";
+
+function isBuilderSession(triggerType: string | undefined, planMode: boolean | undefined): boolean {
+  if (planMode) return false;
+  if (!triggerType) return true;
+  return triggerType === "agent" || triggerType === "auto-start" || triggerType === "plan-implement" || triggerType.startsWith("skill:");
+}
+
+function instructionFingerprint(value: string | undefined): string | null {
+  const text = (value ?? "").trim();
+  if (!text) return null;
+  return createHash("sha256").update(text).digest("hex").slice(0, 16);
+}
+
+function appendCodexBuilderCounterInstructions(instructions: string | undefined): string {
+  const trimmed = (instructions ?? "").trim();
+  if (!trimmed) return CODEX_BUILDER_COUNTER_INSTRUCTIONS;
+  if (trimmed.includes(CODEX_BUILDER_COUNTER_INSTRUCTIONS)) return trimmed;
+  return `${trimmed}\n\n${CODEX_BUILDER_COUNTER_INSTRUCTIONS}`;
+}
+
+async function mergeExistingSessionStats(database: Database, sessionId: string, statsToSave: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const rows = await database.select({ stats: sessions.stats }).from(sessions).where(eq(sessions.id, sessionId)).limit(1);
+  if (rows.length === 0 || !rows[0].stats) return statsToSave;
+  try {
+    const existing = JSON.parse(rows[0].stats) as Record<string, unknown>;
+    return { ...existing, ...statsToSave };
+  } catch {
+    return statsToSave;
+  }
+}
 
 function buildZeroOutputLaunchFailureStats(executor: string, durationMs: number, exitCode: number | null, stderrText?: string) {
   // Surface the provider's captured stderr (#779). A detached claude.exe that dies on launch
@@ -170,11 +205,33 @@ export function createSessionLifecycle(
     // review/follow-up sessions stay on the same model the workspace was created with.
     // Guard: if workspace.model is a cross-provider id (e.g. gpt-5.5 baked into a claude
     // workspace), drop it rather than passing an invalid --model flag (#698/#696).
-    const providerName: ProviderName = provider === "claude-code" ? "claude" : (provider ?? "claude") as ProviderName;
+    const providerName: ProviderName = lifecycleProviderName(provider, profile);
     const workspaceModelSafe = (workspace.model && modelBelongsToProvider(workspace.model, providerName))
       ? workspace.model
       : undefined;
-    const effectiveModel = model ?? workspaceModelSafe ?? undefined;
+    const resolvedModel = model ?? workspaceModelSafe ?? undefined;
+    const builderSession = isBuilderSession(triggerType, planMode);
+    let effectiveModel = resolvedModel;
+    if (providerName === "codex") {
+      if ((effectiveModel ?? "").trim() === CODEX_SPARK_MODEL) {
+        const message =
+          `Refusing to launch Codex builder session with hostile model ${CODEX_SPARK_MODEL}; ` +
+          `choose a safe Codex model such as ${CODEX_SAFE_DEFAULT_MODEL}.`;
+        if (builderSession) {
+          throw new WorkspaceError(message, "CONFLICT", {
+            code: "UNSAFE_CODEX_MODEL",
+            model: CODEX_SPARK_MODEL,
+          });
+        }
+        console.warn(`[session] WARNING: ${message}`);
+      } else if (!effectiveModel && builderSession) {
+        effectiveModel = CODEX_SAFE_DEFAULT_MODEL;
+        console.warn(
+          `[session] Codex builder launch has no explicit model; using ${CODEX_SAFE_DEFAULT_MODEL} ` +
+          "instead of relying on CODEX_HOME config.toml.",
+        );
+      }
+    }
     const effectiveWorkingDir = workingDirOverride ?? workspace.workingDir;
     if (!effectiveWorkingDir) throw new Error("Workspace has no working directory; run setup first");
 
@@ -279,6 +336,30 @@ export function createSessionLifecycle(
       state.turnStates.set(sessionId, "processing");
     }
 
+    const guardrailRows = await db
+      .select({ value: preferences.value })
+      .from(preferences)
+      .where(eq(preferences.key, PREF_BUILDER_GUARDRAILS))
+      .limit(1);
+    let effectiveSystemInstructions =
+      systemInstructions === undefined
+        ? (guardrailRows.length === 0 ? DEFAULT_BUILDER_GUARDRAILS : guardrailRows[0].value)
+        : systemInstructions;
+    if (executor === "codex" && builderSession) {
+      effectiveSystemInstructions = appendCodexBuilderCounterInstructions(effectiveSystemInstructions);
+    }
+    const launchDiagnostics = {
+      launch: {
+        provider: executor,
+        profile: profile?.name ?? claudeProfile ?? null,
+        resolvedModel: effectiveModel ?? null,
+        requestedModel: model ?? null,
+        workspaceModel: workspace.model ?? null,
+        triggerType: triggerType ?? null,
+        systemInstructionsFingerprint: instructionFingerprint(effectiveSystemInstructions),
+      },
+    };
+
     await db.insert(sessions).values({
       id: sessionId,
       workspaceId,
@@ -290,6 +371,7 @@ export function createSessionLifecycle(
       triggerType: triggerType ?? null,
       skillId: sessionSkillId,
       skillName: sessionSkillName,
+      stats: JSON.stringify(launchDiagnostics),
     });
     state.sessionProviders.set(sessionId, executor);
 
@@ -297,16 +379,6 @@ export function createSessionLifecycle(
     const skipPermRows = await db.select().from(preferences).where(eq(preferences.key, "skip_permissions")).limit(1);
     const dbSkipPerms = skipPermRows.length === 0 || skipPermRows[0].value !== "false";
     const skipPermissions = skipPermissionsOpt !== undefined ? skipPermissionsOpt : dbSkipPerms;
-
-    const guardrailRows = await db
-      .select({ value: preferences.value })
-      .from(preferences)
-      .where(eq(preferences.key, PREF_BUILDER_GUARDRAILS))
-      .limit(1);
-    const effectiveSystemInstructions =
-      systemInstructions === undefined
-        ? (guardrailRows.length === 0 ? DEFAULT_BUILDER_GUARDRAILS : guardrailRows[0].value)
-        : systemInstructions;
 
     // For Claude only: skip-permissions is conveyed via --dangerously-skip-permissions in agentArgs.
     let effectiveAgentArgs = agentArgs;
@@ -441,8 +513,9 @@ export function createSessionLifecycle(
                 workspaceId,
                 at: endNow,
               });
+              const mergedStats = await mergeExistingSessionStats(db, sessionId, stats);
               await db.update(sessions)
-                .set({ status: "stopped", endedAt: endNow, exitCode: String(effectiveExitCode), stats: JSON.stringify(stats) })
+                .set({ status: "stopped", endedAt: endNow, exitCode: String(effectiveExitCode), stats: JSON.stringify(mergedStats) })
                 .where(eq(sessions.id, sessionId));
               await db.update(workspaces)
                 .set({ status: "blocked", updatedAt: endNow })
@@ -490,8 +563,9 @@ export function createSessionLifecycle(
                 workspaceId,
                 at: endNow,
               });
+              const mergedStats = await mergeExistingSessionStats(db, sessionId, stats);
               await db.update(sessions)
-                .set({ status: "stopped", endedAt: endNow, exitCode: String(effectiveExitCode), stats: JSON.stringify(stats) })
+                .set({ status: "stopped", endedAt: endNow, exitCode: String(effectiveExitCode), stats: JSON.stringify(mergedStats) })
                 .where(eq(sessions.id, sessionId));
               await db.insert(sessionMessages).values({
                 sessionId,
