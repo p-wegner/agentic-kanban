@@ -38,6 +38,7 @@ const ProviderCostOverTimeChart = lazy(() => import("../components/ProviderCostO
 const CalendarView = lazy(() => import("../components/CalendarView.js").then((m) => ({ default: m.CalendarView })));
 const AgentThroughputLeaderboard = lazy(() => import("../components/AgentThroughputLeaderboard.js").then((m) => ({ default: m.AgentThroughputLeaderboard })));
 const BurndownChart = lazy(() => import("../components/BurndownChart.js").then((m) => ({ default: m.BurndownChart })));
+const DriveDashboard = lazy(() => import("../components/DriveDashboard.js").then((m) => ({ default: m.DriveDashboard })));
 import { useAgentQuestionsCount } from "../components/AgentQuestionsPanel.js";
 import { BoardErrorBoundary } from "../components/BoardErrorBoundary.js";
 import { BacklogView } from "../components/BacklogView.js";
@@ -1950,6 +1951,20 @@ export function BoardPage() {
               projectId={activeProjectId}
               onOpenIssue={(issueNumber) => {
                 const issue = columns.flatMap(c => c.issues).find(i => i.issueNumber === issueNumber);
+                if (issue) {
+                  handleViewModeChange("kanban");
+                  handleIssueClick(issue);
+                }
+              }}
+            />
+          </BoardErrorBoundary>
+        )}
+        {viewMode === "drive" && activeProjectId && (
+          <BoardErrorBoundary columnName="Drive Dashboard">
+            <DriveDashboard
+              projectId={activeProjectId}
+              onIssueClick={(issueId) => {
+                const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
                 if (issue) {
                   handleViewModeChange("kanban");
                   handleIssueClick(issue);

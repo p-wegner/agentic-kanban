@@ -29,6 +29,7 @@ export type ViewMode =
   | "flaky-tests"
   | "monitor-history"
   | "health-events"
+  | "drive"
   | "digest"
   | "strategy"
   | "focus"
@@ -296,6 +297,11 @@ const ICON = {
       <path strokeLinecap="round" d="M16 2v4M8 2v4M3 10h18" />
     </svg>
   ),
+  drive: (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+    </svg>
+  ),
 } as const;
 
 /**
@@ -507,6 +513,16 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteDescription: "Notification center for monitor health events with category filters",
     activeClass: "bg-indigo-500 text-white",
     group: "secondary",
+  },
+  {
+    id: "drive",
+    toolbarLabel: "Drive",
+    label: "Drive Dashboard",
+    tooltip: "Drive Dashboard — per-drive progress, tier graph, stalls, and build-clean status",
+    icon: ICON.drive,
+    paletteIcon: "⚡",
+    paletteDescription: "At-a-glance view of a running drive: N/N progress, dependency tiers, stalls, last cascade, build-clean status",
+    activeClass: "bg-brand-600 text-white",
   },
   {
     id: "runbooks",
