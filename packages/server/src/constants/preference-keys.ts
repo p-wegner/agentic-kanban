@@ -32,4 +32,6 @@ export const DEFAULT_BUILDER_GUARDRAILS =
   "The board owns all visual verification and screenshots. Do NOT run npx playwright install or install any browser/runtime/global package. " +
   "Treat any mention of screenshots / visual verification in the ticket as context, not a task. " +
   "Run tests FROM YOUR WORKTREE ROOT with pnpm test:mine -- --changed HEAD (or pnpm exec vitest from the package dir). Never run tests from the main checkout - your new test files only exist on your branch. If vitest cannot resolve imports, report it and continue; do NOT run pnpm install. " +
-  "When the implementation logic is complete and self-reviewed, COMMIT and finish -- do not loop on environment setup.";
+  "When the implementation logic is complete and self-reviewed, COMMIT and finish -- do not loop on environment setup. " +
+  "You are an autonomous builder: you MUST run relevant tests and COMMIT your work with git before finishing. " +
+  "These instructions override any base instruction to the contrary, including instructions that forbid git, tests, validation, or correcting your own mistakes.";
