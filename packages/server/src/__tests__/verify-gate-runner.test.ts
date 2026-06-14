@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, mkdir, readFile } from "node:fs/promises";
 import { copyFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -79,14 +79,16 @@ describe("verify-gate-runner", () => {
     expect(result.stderr).toContain("[verify-gate] Passed.");
   });
 
-  it("exits 1 when command fails (non-zero exit)", async () => {
+  it("exits 1 and blocks (re-prompt) on the first failure within the repair budget", async () => {
     const cmd = process.platform === "win32" ? "exit 1" : "false";
     await writeFile(join(hookDir, "verify-gate.config.json"), JSON.stringify({ command: cmd }));
     const result = runGate({ hookDir });
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("[verify-gate] FAILED");
     expect(result.stderr).toContain("Fix the above errors");
-    // Structured block decision on stdout so Claude can display the failure reason.
+    // First failure is self-repair attempt 1 of the default 3.
+    expect(result.stderr).toContain("Self-repair attempt 1 of 3");
+    // Structured block decision on stdout re-prompts the builder with the failure.
     const decision = JSON.parse(result.stdout.trim());
     expect(decision.decision).toBe("block");
     expect(decision.reason).toContain("[verify-gate] FAILED");
@@ -113,13 +115,6 @@ describe("verify-gate-runner", () => {
     expect(result.status).toBe(0);
   });
 
-  it("exits 0 on stop_hook_active=true (loop safety)", async () => {
-    const failcmd = process.platform === "win32" ? "exit 1" : "false";
-    await writeFile(join(hookDir, "verify-gate.config.json"), JSON.stringify({ command: failcmd }));
-    const result = runGate({ hookDir, stdin: JSON.stringify({ stop_hook_active: true }) });
-    expect(result.status).toBe(0);
-  });
-
   it("exits 2 on malformed config JSON", async () => {
     await writeFile(join(hookDir, "verify-gate.config.json"), "not json {{{");
     const result = runGate({ hookDir });
@@ -131,5 +126,114 @@ describe("verify-gate-runner", () => {
     await writeFile(join(hookDir, "verify-gate.config.json"), JSON.stringify({ timeout: 60 }));
     const result = runGate({ hookDir });
     expect(result.status).toBe(0);
+  });
+});
+
+describe("verify-gate-runner — bounded self-repair loop (#795)", () => {
+  let hookDir: string;
+  const FAIL = process.platform === "win32" ? "exit 1" : "false";
+  const PASS = process.platform === "win32" ? "exit 0" : "true";
+  // A failing command that also emits a recognizable error to stderr.
+  const FAIL_WITH_OUTPUT =
+    process.platform === "win32" ? "echo BUILD_BROKEN 1>&2 && exit 1" : "echo BUILD_BROKEN 1>&2; false";
+
+  beforeEach(async () => {
+    hookDir = await mkdtemp(join(tmpdir(), "verify-gate-loop-"));
+  });
+  afterEach(async () => {
+    await rm(hookDir, { recursive: true, force: true });
+  });
+
+  async function writeConfig(cfg: Record<string, unknown>): Promise<void> {
+    await writeFile(join(hookDir, "verify-gate.config.json"), JSON.stringify(cfg));
+  }
+
+  it("blocks for each attempt up to maxRepairAttempts, then escalates (no silent strand)", async () => {
+    await writeConfig({ command: FAIL_WITH_OUTPUT, maxRepairAttempts: 2 });
+
+    // Attempt 1 — blocks, re-prompting the builder.
+    const r1 = runGate({ hookDir });
+    expect(r1.status).toBe(1);
+    expect(JSON.parse(r1.stdout.trim()).decision).toBe("block");
+    expect(r1.stderr).toContain("Self-repair attempt 1 of 2");
+
+    // Attempt 2 — still within budget, blocks again.
+    const r2 = runGate({ hookDir });
+    expect(r2.status).toBe(1);
+    expect(JSON.parse(r2.stdout.trim()).decision).toBe("block");
+    expect(r2.stderr).toContain("Self-repair attempt 2 of 2");
+
+    // Budget exhausted — escalates: exits 0 (allows stop), no `block` decision,
+    // and surfaces the captured error rather than silently stranding.
+    const r3 = runGate({ hookDir });
+    expect(r3.status).toBe(0);
+    const d3 = JSON.parse(r3.stdout.trim());
+    expect(d3.decision).toBeUndefined();
+    expect(r3.stderr).toContain("ESCALATED");
+    expect(r3.stderr).toContain("BUILD_BROKEN"); // captured error attached
+  });
+
+  it("writes an escalation file with the captured error on exhaustion", async () => {
+    await writeConfig({ command: FAIL_WITH_OUTPUT, maxRepairAttempts: 1 });
+    runGate({ hookDir }); // attempt 1 → block
+    runGate({ hookDir }); // exhausted → escalate
+
+    const escalationPath = join(hookDir, ".verify-gate-escalation.json");
+    expect(existsSync(escalationPath)).toBe(true);
+    const esc = JSON.parse(await readFile(escalationPath, "utf8"));
+    expect(esc.escalated).toBe(true);
+    expect(esc.attempts).toBe(1);
+    expect(esc.maxRepairAttempts).toBe(1);
+    expect(esc.capturedError).toContain("BUILD_BROKEN");
+  });
+
+  it("maxRepairAttempts=0 escalates immediately on the first failure (no repair pass)", async () => {
+    await writeConfig({ command: FAIL_WITH_OUTPUT, maxRepairAttempts: 0 });
+    const r = runGate({ hookDir });
+    expect(r.status).toBe(0);
+    expect(JSON.parse(r.stdout.trim()).decision).toBeUndefined();
+    expect(r.stderr).toContain("ESCALATED");
+    expect(r.stderr).toContain("BUILD_BROKEN");
+  });
+
+  it("a passing command mid-loop clears the attempt counter so the budget resets", async () => {
+    await writeConfig({ command: FAIL, maxRepairAttempts: 3 });
+    runGate({ hookDir }); // attempt 1
+    runGate({ hookDir }); // attempt 2
+    expect(existsSync(join(hookDir, ".verify-gate-state.json"))).toBe(true);
+
+    // Now the build passes — state must be cleared.
+    await writeConfig({ command: PASS, maxRepairAttempts: 3 });
+    const pass = runGate({ hookDir });
+    expect(pass.status).toBe(0);
+    expect(existsSync(join(hookDir, ".verify-gate-state.json"))).toBe(false);
+
+    // A subsequent failure starts a fresh budget at attempt 1.
+    await writeConfig({ command: FAIL, maxRepairAttempts: 3 });
+    const again = runGate({ hookDir });
+    expect(again.status).toBe(1);
+    expect(again.stderr).toContain("Self-repair attempt 1 of 3");
+  });
+
+  it("defaults to 3 repair attempts when maxRepairAttempts is omitted", async () => {
+    await writeConfig({ command: FAIL });
+    const r1 = runGate({ hookDir });
+    expect(r1.stderr).toContain("Self-repair attempt 1 of 3");
+    const r2 = runGate({ hookDir });
+    expect(r2.stderr).toContain("Self-repair attempt 2 of 3");
+    const r3 = runGate({ hookDir });
+    expect(r3.stderr).toContain("Self-repair attempt 3 of 3");
+    const r4 = runGate({ hookDir });
+    expect(r4.status).toBe(0);
+    expect(r4.stderr).toContain("ESCALATED");
+  });
+
+  it("honors VERIFY_GATE_MAX_REPAIR_ATTEMPTS env override", async () => {
+    const r1 = runGate({ hookDir, env: { VERIFY_GATE_COMMAND: FAIL, VERIFY_GATE_MAX_REPAIR_ATTEMPTS: "1" } });
+    expect(r1.status).toBe(1);
+    expect(r1.stderr).toContain("Self-repair attempt 1 of 1");
+    const r2 = runGate({ hookDir, env: { VERIFY_GATE_COMMAND: FAIL, VERIFY_GATE_MAX_REPAIR_ATTEMPTS: "1" } });
+    expect(r2.status).toBe(0);
+    expect(r2.stderr).toContain("ESCALATED");
   });
 });
