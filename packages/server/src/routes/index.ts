@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { createProjectsRoute } from "./projects.js";
 import { createProjectScriptsRoute } from "./project-scripts.js";
+import { createDriveRoute } from "./drive.js";
 import { createIssuesRoute } from "./issues.js";
 import { createWorkspacesRoute } from "./workspaces.js";
 import { createWorkspaceActionsRoute } from "./workspace-actions.js";
@@ -58,6 +59,7 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
 
   routes.route("/projects", createProjectsRoute(database, { ...options, getSessionManager }));
   routes.route("/projects", createProjectScriptsRoute(database));
+  routes.route("/projects", createDriveRoute(database));
   routes.route("/projects", createButlerRoute(database, getSessionManager, options));
   routes.route("/butler-definitions", createButlerDefinitionsRoute(database));
   routes.route("/projects", createAgentQuestionsRoute(database, getSessionManager, options));
