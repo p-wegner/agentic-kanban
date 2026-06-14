@@ -42,6 +42,34 @@ describe("parseStrategyBullseyeConfig - providerPolicies", () => {
     expect(config.providerPolicies![1].mode).toBe("fill");
   });
 
+  it("parses an optional per-policy model and exposes it on the selected policy (#818)", () => {
+    const raw = JSON.stringify({
+      version: 1,
+      segments: [],
+      providerPolicies: [
+        { id: "p1", provider: "claude", profileName: "anth", label: "Claude anth", mode: "fill", headroomPct: 0, notes: "", model: "sonnet" },
+      ],
+    });
+    const config = parseStrategyBullseyeConfig(raw);
+    expect(config.providerPolicies![0].model).toBe("sonnet");
+    const selected = selectProviderFromStrategy(config);
+    expect(selected?.policy.model).toBe("sonnet");
+  });
+
+  it("leaves model undefined when absent or blank (#818)", () => {
+    const raw = JSON.stringify({
+      version: 1,
+      segments: [],
+      providerPolicies: [
+        { id: "p1", provider: "claude", profileName: "anth", label: "x", mode: "fill", headroomPct: 0, notes: "" },
+        { id: "p2", provider: "codex", profileName: "default", label: "y", mode: "throttle", headroomPct: 0, notes: "", model: "   " },
+      ],
+    });
+    const config = parseStrategyBullseyeConfig(raw);
+    expect(config.providerPolicies![0].model).toBeUndefined();
+    expect(config.providerPolicies![1].model).toBeUndefined();
+  });
+
   it("clamps headroomPct to 0-100", () => {
     const raw = JSON.stringify({
       version: 1,

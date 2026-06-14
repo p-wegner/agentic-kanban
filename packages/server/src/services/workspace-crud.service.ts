@@ -509,7 +509,11 @@ export function createWorkspaceCrudService(deps: {
       profileOverride: input.profile,
       legacyProfileOverride: input.claudeProfile,
       strategySelection,
-      requestedModel: input.model,
+      // Precedence: an explicit per-workspace model wins; otherwise honor the strategy policy's
+      // pinned model (#818) so a project can run e.g. claude/sonnet without the global
+      // default_model footgun. resolveProviderConfig still falls back to default_model when both
+      // are unset, and drops a model that doesn't belong to the resolved provider.
+      requestedModel: input.model ?? strategySelection?.model,
     });
     for (const note of resolved.notes) {
       console.log(`[workspaces] ${note}`);

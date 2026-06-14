@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { preferences } from "@agentic-kanban/shared/schema";
+import { modelBelongsToProvider } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
 import { fetchLiveQuotaUsage } from "./quota-usage.service.js";
 import type { QuotaUsageResult } from "./quota-usage.service.js";
@@ -49,6 +50,14 @@ export interface ProviderProfilePolicy {
    * selecting this policy. Leave blank to skip usage-based gating for this policy.
    */
   quotaProviderId?: string;
+  /**
+   * Optional model id this policy launches with (e.g. "sonnet" for claude, "gpt-5.5" for codex).
+   * Lets a project pin a model WITHOUT the global `default_model` preference, which applies to
+   * every provider and every project (the #696 cross-provider footgun). When set, it is threaded
+   * into new-workspace creation as the `requestedModel` for this policy's provider; an explicit
+   * per-workspace model still wins, and a model that doesn't belong to the provider is dropped.
+   */
+  model?: string;
 }
 
 export interface StrategyBullseyeConfig {
@@ -131,6 +140,7 @@ function parseProviderPolicies(raw: unknown): ProviderProfilePolicy[] {
       headroomPct: clampInt(p.headroomPct, 20, 0, 100),
       notes: typeof p.notes === "string" ? p.notes : "",
       quotaProviderId: typeof p.quotaProviderId === "string" && p.quotaProviderId.trim() ? p.quotaProviderId.trim() : undefined,
+      model: typeof p.model === "string" && p.model.trim() ? p.model.trim() : undefined,
     }));
 }
 
@@ -532,7 +542,7 @@ export function applyProviderSelectionToPrefMap(
 export async function resolveStrategyProviderSelection(
   database: Database,
   projectId: string | null | undefined,
-): Promise<{ provider: "claude" | "codex" | "copilot" | "pi"; profileName: string } | null> {
+): Promise<{ provider: "claude" | "codex" | "copilot" | "pi"; profileName: string; model?: string } | null> {
   if (!projectId) return null;
   const prefRows = await database.select().from(preferences);
   const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
@@ -551,7 +561,13 @@ export async function resolveStrategyProviderSelection(
     }
     const selected = selectProviderFromStrategy(strategyConfig, { quota });
     if (!selected) return null;
-    return { provider: selected.provider, profileName: selected.profileName };
+    // Carry the policy's optional model, but only when it belongs to the selected provider's
+    // family — a mismatched id (e.g. a codex "gpt-5.5" on a claude policy) would otherwise be
+    // passed as --model and kill the launch (#696). Mismatches are dropped here so the provider
+    // default is used instead.
+    const policyModel = selected.policy.model;
+    const model = policyModel && modelBelongsToProvider(policyModel, selected.provider) ? policyModel : undefined;
+    return { provider: selected.provider, profileName: selected.profileName, model };
   } catch {
     return null;
   }
