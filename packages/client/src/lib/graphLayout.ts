@@ -29,6 +29,24 @@ export interface Node {
   issue: IssueWithStatus;
 }
 
+/** Workspace statuses that count as "an agent is actively working this issue". */
+const ACTIVE_WORKSPACE_STATUSES = new Set(["active", "reviewing", "fixing"]);
+
+/**
+ * True when an issue is currently being worked on — it has at least one active
+ * workspace (an agent running, reviewing, or resolving conflicts). Drives the
+ * animated progress indication in the graph (pulsing node + flowing unblock edges).
+ */
+export function isActivelyWorked(issue: IssueWithStatus): boolean {
+  const ws = issue.workspaceSummary;
+  if (!ws) return false;
+  if (ws.active > 0) return true;
+  return ws.main ? ACTIVE_WORKSPACE_STATUSES.has(ws.main.status) : false;
+}
+
+/** Brand terracotta glow used for the active-progress halo. */
+export const ACTIVE_GLOW_COLOR = "#c25f36";
+
 // Ordered workflow columns for status-based layout
 export const STATUS_ORDER = ["Backlog", "Todo", "In Progress", "In Review", "AI Reviewed", "Done", "Cancelled"];
 
