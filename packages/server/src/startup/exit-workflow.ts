@@ -2,6 +2,7 @@ import { isSpecPlanningStageName, syncCurrentNodeToStatus } from "@agentic-kanba
 import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import { runSmokeCheck } from "@agentic-kanban/shared/lib/smoke-check";
 import { buildSmokeCheck, getStackProfile } from "../services/stack-profile.service.js";
+import { runUnderBuildGate } from "../services/jvm-build-gate.js";
 import { issues, preferences, projectStatuses, projects, scheduledRunHistory, scheduledRuns, sessions, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { desc, eq } from "drizzle-orm";
 import { execFile } from "node:child_process";
@@ -496,7 +497,11 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
               } catch { /* best-effort cleanup */ }
             }
           }
-          const result = await runSetupScript(workspace.workingDir, verifyScript).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e) }));
+          // Run under the build-concurrency gate (#823): parallel reviews on a JVM stack would
+          // otherwise spawn many gradle daemons at once and starve the host / crash the backend.
+          const result = await runUnderBuildGate(() =>
+            runSetupScript(workspace.workingDir!, verifyScript).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e) })),
+          );
           if (result.exitCode !== 0) {
             console.log(`[workflow] verify_script failed (exit ${result.exitCode}) for workspace ${workspaceId} — withholding readyForMerge`);
             boardEvents.broadcast(projectId, "workflow_error");
@@ -516,7 +521,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
             const smokeCheck = buildSmokeCheck(profile);
             if (smokeCheck) {
               console.log(`[workflow] running smoke check for workspace ${workspaceId}: ${smokeCheck.devCommand} -> ${smokeCheck.healthUrl}`);
-              const smoke = await runSmokeCheck(workspace.workingDir, smokeCheck);
+              const smoke = await runUnderBuildGate(() => runSmokeCheck(workspace.workingDir!, smokeCheck));
               if (!smoke.passed) {
                 console.log(`[workflow] smoke check failed for workspace ${workspaceId} — withholding readyForMerge: ${smoke.message}`);
                 boardEvents.broadcast(projectId, "workflow_error");
@@ -542,11 +547,13 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
           const repoRows = await db.select({ repoPath: projects.repoPath }).from(projects).where(eq(projects.id, projectId)).limit(1);
           const repoPath = repoRows[0]?.repoPath;
           if (repoPath && workspace.branch) {
-            const coldResult: ColdCloneCheckResult = await runColdCloneBuildCheckForProject(
-              projectId,
-              { repoPath, branch: workspace.branch },
-              db,
-            ).catch((e) => ({ ok: false, reason: "build-failed" as const, output: e instanceof Error ? e.message : String(e) }));
+            const coldResult: ColdCloneCheckResult = await runUnderBuildGate(() =>
+              runColdCloneBuildCheckForProject(
+                projectId,
+                { repoPath, branch: workspace.branch },
+                db,
+              ).catch((e) => ({ ok: false, reason: "build-failed" as const, output: e instanceof Error ? e.message : String(e) })),
+            );
             if (!coldResult.ok) {
               const detail = coldResult.failedCommand ? `${coldResult.failedCommand} (exit ${coldResult.exitCode})` : coldResult.reason;
               console.log(`[workflow] cold-clone build check failed (${coldResult.reason}) for workspace ${workspaceId} — withholding readyForMerge (#792)`);
