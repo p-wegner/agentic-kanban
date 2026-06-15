@@ -33,6 +33,18 @@ export const GENERIC_AGENT_GITIGNORE = [
   ".claude/hooks/.verify-gate-state.json",
   ".claude/hooks/.verify-gate-escalation.json",
   ".claude/scheduled_tasks.lock",
+  // App-run capture logs the board's smoke/visual-verification (agent-launched `gradlew run`
+  // / dev-server) leaves in the repo ROOT (#825). Root-anchored (leading "/") so a project's
+  // own logs/ dir is unaffected — these are the specific names seen littering the checkout.
+  "/app-out.log",
+  "/app-err.log",
+  "/app-review.log",
+  "/app-err-review.log",
+  "/server-out.log",
+  "/server-err.log",
+  "/run-out.log",
+  "/run-err.log",
+  "/classpath.txt",
 ];
 
 const AGENT_GITIGNORE_HEADER = "# AI agent artifacts (written during a workspace session; not project source)";
