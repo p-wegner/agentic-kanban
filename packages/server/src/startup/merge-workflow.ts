@@ -228,6 +228,9 @@ Your task: visually verify that the UI changes look correct in the browser.
 3. Check the relevant UI sections based on the changed files from branch '${workspace.branch}'
 4. Take a screenshot confirming the UI renders correctly and report your findings
 
+Write ANY screenshots, log files, or scratch output into a \`.verify/\` directory (it is
+gitignored) — never the repo root. Don't leave \`*.log\` / \`*.png\` artifacts in the checkout.
+
 If the dev server is not responding, wait 10 seconds and retry once.
 
 Issue ID: ${issueId}

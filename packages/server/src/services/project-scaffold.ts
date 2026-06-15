@@ -40,6 +40,8 @@ export const GENERIC_AGENT_GITIGNORE = [
   // unaffected; root-level .log files in a checkout are virtually always runtime/agent artifacts.
   "/*.log",
   "/classpath.txt",
+  ".verify/", // the directory visual-verification is told to write screenshots/logs into
+  "/*-review.png", // reviewer screenshots that miss the verify-*.png pattern
 ];
 
 const AGENT_GITIGNORE_HEADER = "# AI agent artifacts (written during a workspace session; not project source)";
