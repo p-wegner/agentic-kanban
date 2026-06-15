@@ -203,6 +203,8 @@ After completing your code review and fixing any CRITICAL/MAJOR issues:
    - Navigate to http://localhost:${clientPort}
    - Check the relevant UI sections for the changed files on branch '${branch}'
    - Take a screenshot to confirm the UI renders correctly
+   - Write ANY screenshots, log files, or scratch output into a \`.verify/\` directory (it is
+     gitignored) — never the repo root. Don't leave \`*.log\` / \`*.png\` artifacts in the checkout.
 
 3. **Report** your verification result.
 
