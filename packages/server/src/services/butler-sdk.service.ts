@@ -372,9 +372,12 @@ function buildProviderTurnPrompt(session: ButlerSession, content: string): strin
   ].join("\n");
 }
 
-function runProviderTurn(session: ButlerSession, content: string): void {
+function runProviderTurn(session: ButlerSession, content: string, isRetry = false): void {
   const provider = getProvider("codex");
   const prompt = buildProviderTurnPrompt(session, content);
+  // The thread id we are about to resume (if any) — used to recover when its
+  // rollout is gone (see isStaleCodexResumeError).
+  const resumedSessionId = session.sessionId;
   const config = provider.buildLaunchConfig({
     provider: "codex" satisfies ProviderId,
     providerSessionId: session.sessionId,
@@ -442,9 +445,13 @@ function runProviderTurn(session: ButlerSession, content: string): void {
     }
   });
 
+  let stderrText = "";
   proc.stderr?.on("data", (chunk: Buffer) => {
     const text = chunk.toString().trim();
-    if (text) console.warn(`[butler-provider] codex stderr: ${text}`);
+    if (text) {
+      stderrText += `${text}\n`;
+      console.warn(`[butler-provider] codex stderr: ${text}`);
+    }
   });
 
   proc.on("error", (err) => {
@@ -462,6 +469,19 @@ function runProviderTurn(session: ButlerSession, content: string): void {
         assistantText += evt.assistantText;
         broadcast(session, { type: "text", text: evt.assistantText });
       }
+    }
+    // The resumed thread's rollout is gone (pruned / different CODEX_HOME). Drop the
+    // dead resume id and retry the SAME turn on a fresh thread, exactly like the Claude
+    // butler's stale-resume recovery. Without this the persisted id bricks every turn.
+    // Only the resume attempt failed — the user's message must not be silently dropped.
+    if (code !== 0 && !isRetry && resumedSessionId && isStaleCodexResumeError(stderrText)) {
+      console.warn(`[butler-provider] codex resume ${resumedSessionId} stale (no rollout), starting fresh: project=${session.projectId} butler=${session.butlerId}`);
+      session.sessionId = undefined;
+      // A fresh `codex exec` (no resume) emits a new thread.started, whose id is
+      // broadcast as a {type:"session"} event → the route overwrites the persisted
+      // (now-dead) resume pref with the new good id.
+      runProviderTurn(session, content, true);
+      return;
     }
     finish(code !== 0, code === 0 ? undefined : `Codex Butler exited with code ${code ?? "unknown"}`);
   });
@@ -515,6 +535,19 @@ async function broadcastContextUsage(session: ButlerSession, q: Query): Promise<
  */
 function isStaleResumeError(message: string): boolean {
   return /no conversation found/i.test(message);
+}
+
+/**
+ * Codex analogue of {@link isStaleResumeError}. When a codex butler resumes a
+ * thread whose on-disk rollout is gone (pruned, or created under a different
+ * CODEX_HOME/license), `codex exec ... resume <id>` writes to STDERR and exits
+ * non-zero with no stdout events:
+ *   "Error: thread/resume: thread/resume failed: no rollout found for thread id <id> (code -32600)"
+ * The persisted thread id then bricks the butler — every turn re-resumes the same
+ * dead id and exits 1. Detecting this lets us drop the resume and retry fresh.
+ */
+export function isStaleCodexResumeError(message: string): boolean {
+  return /no rollout found for thread|thread\/resume failed/i.test(message);
 }
 
 /**
