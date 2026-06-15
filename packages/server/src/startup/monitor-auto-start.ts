@@ -1,5 +1,5 @@
 import { computeBlockerReadiness, isTerminalStatusIdView, type BlockerWorkspaceLanding } from "@agentic-kanban/shared";
-import { issueDependencies, issues, issueTags, projectStatuses, tags, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
+import { drives, issueDependencies, issues, issueTags, projectStatuses, tags, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { and, eq, sql, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { createBoardEvents } from "../services/board-events.js";
@@ -74,6 +74,38 @@ async function hasSkipAutoStartTag(issueId: string): Promise<boolean> {
     .where(and(eq(issueTags.issueId, issueId), eq(tags.name, SKIP_AUTO_START_TAG)))
     .limit(1);
   return rows.length > 0;
+}
+
+/**
+ * A drive/epic META issue must NOT be auto-started as a builder (#824, #664). You don't *build* the
+ * meta — its children are the buildable leaves; the meta is driven to Done by the drive lifecycle
+ * once the children land. Auto-starting it spawns a stray builder workspace that drifts to In
+ * Review and inflates WIP (starving real leaves). Two robust signals: (1) it's a first-class Drive
+ * record's metaIssueId (#799), or (2) it is a parent of other issues via a parent_of/child_of edge.
+ * (REST-seeded epics with neither still rely on the `no-auto-start` tag the drive skill applies.)
+ */
+export async function isDriveOrEpicMeta(issueId: string, database = db): Promise<boolean> {
+  try {
+    const driveRows = await database.select({ id: drives.id }).from(drives)
+      .where(eq(drives.metaIssueId, issueId)).limit(1);
+    if (driveRows.length > 0) return true;
+    const childEdges = await database.select({ id: issueDependencies.id }).from(issueDependencies)
+      .where(sql`(${issueDependencies.issueId} = ${issueId} AND ${issueDependencies.type} = 'parent_of') OR (${issueDependencies.dependsOnId} = ${issueId} AND ${issueDependencies.type} = 'child_of')`)
+      .limit(1);
+    return childEdges.length > 0;
+  } catch {
+    return false; // best-effort: a detection error must never block auto-start
+  }
+}
+
+/**
+ * SQL predicate that EXCLUDES drive/epic metas from the auto-start candidate query (#824). This is
+ * the in-query enforcement of the same rule {@link isDriveOrEpicMeta} documents — applied as a WHERE
+ * condition so a meta is never even a candidate (no per-issue query, no stray builder workspace).
+ */
+export function notDriveOrEpicMetaSql() {
+  return sql`NOT EXISTS (SELECT 1 FROM ${drives} WHERE ${drives.metaIssueId} = ${issues.id})
+    AND NOT EXISTS (SELECT 1 FROM ${issueDependencies} WHERE (${issueDependencies.issueId} = ${issues.id} AND ${issueDependencies.type} = 'parent_of') OR (${issueDependencies.dependsOnId} = ${issues.id} AND ${issueDependencies.type} = 'child_of'))`;
 }
 
 export interface AutoStartDeps {
@@ -201,7 +233,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
     // how many actually launch this cycle.
     // #773: skip the feature/enhancement type-exclusion for auto-driven projects.
     const todoIssues = await db.select({ id: issues.id, title: issues.title, description: issues.description, issueType: issues.issueType, projectId: issues.projectId, issueNumber: issues.issueNumber }).from(issues)
-      .where(and(inArray(issues.statusId, candidateStatusIds), monitorEligibleIssueSql(allowFeatureTypes)))
+      .where(and(inArray(issues.statusId, candidateStatusIds), monitorEligibleIssueSql(allowFeatureTypes), notDriveOrEpicMetaSql()))
       .orderBy(issues.issueNumber);
     const doneStatuses = await db.select({ id: projectStatuses.id }).from(projectStatuses)
       .where(sql`${projectStatuses.name} IN ('Done', 'Cancelled')`);
