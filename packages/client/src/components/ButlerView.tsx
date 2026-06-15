@@ -807,7 +807,9 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     try {
       const [cmdData, profData] = await Promise.all([
         apiFetch<{ commands: ButlerCommand[] }>(butlerUrl(butlerId, "/commands")),
-        apiFetch<{ provider?: "claude" | "codex"; profiles: string[]; selected: string; globalDefault: string }>(`/api/projects/${projectId}/butler/profiles`),
+        // Must scope to THIS butler — an unscoped /profiles returns the default butler's
+        // provider and would clobber a codex tab's backend back to claude (#829).
+        apiFetch<{ provider?: "claude" | "codex"; profiles: string[]; selected: string; globalDefault: string }>(butlerUrl(butlerId, "/profiles")),
       ]);
       updateTab(butlerId, {
         commands: cmdData.commands,
@@ -871,8 +873,12 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
           }
         } catch { /* no history */ }
         openStream(butlerId);
-        void loadCapabilities(butlerId);
       }
+      // Always load provider-aware capabilities (backend, profiles, slash commands) so a
+      // focused tab shows the correct provider's label/model/profile options even when the
+      // butler is cold. Previously gated on state.active, which left a codex butler tab
+      // stuck on the Claude label + Claude dropdowns until it was started (#829).
+      void loadCapabilities(butlerId);
     } catch {
       updateTab(butlerId, { butlerState: { active: false, sessionId: null } });
     }

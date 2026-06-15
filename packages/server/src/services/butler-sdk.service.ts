@@ -120,6 +120,9 @@ interface ButlerSession {
   profile?: { provider: ProviderName; name: string };
   agentCommand?: string;
   agentArgs?: string;
+  /** For a codex butler running under an OAuth license: the CODEX_HOME dir to spawn
+   *  under (its own auth.json + rollouts). Set when `profile` was reduced to "default". */
+  codexHome?: string;
 }
 
 /**
@@ -295,6 +298,8 @@ export function ensureButlerSession(opts: {
   profile?: { provider: ProviderName; name: string };
   agentCommand?: string;
   agentArgs?: string;
+  /** CODEX_HOME for a codex OAuth-license butler (caller drops `--profile` to "default"). */
+  codexHome?: string;
   resumeSessionId?: string;
   /** Model alias/id for the session (e.g. "opus", "sonnet"). Empty/omitted = profile/CLI default. */
   model?: string;
@@ -328,6 +333,7 @@ export function ensureButlerSession(opts: {
     profile: opts.profile,
     agentCommand: opts.agentCommand,
     agentArgs: opts.agentArgs,
+    codexHome: opts.codexHome,
   };
   sessions.set(key, session);
 
@@ -392,7 +398,14 @@ function runProviderTurn(session: ButlerSession, content: string, isRetry = fals
     cwd: session.repoPath,
     shell: config.useShell,
     windowsHide: true,
-    env: { ...config.env, FORCE_COLOR: "0", NO_COLOR: "1" },
+    // CODEX_HOME points a license butler at its own auth.json + rollouts. Applied last
+    // so it overrides any inherited CODEX_HOME from the parent process env.
+    env: {
+      ...config.env,
+      ...(session.codexHome ? { CODEX_HOME: session.codexHome } : {}),
+      FORCE_COLOR: "0",
+      NO_COLOR: "1",
+    },
     stdio: ["pipe", "pipe", "pipe"],
   });
   session.process = proc;
