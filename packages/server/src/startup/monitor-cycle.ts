@@ -13,6 +13,7 @@ import { startManualReview } from "../services/review.service.js";
 import { isCodexUsageLimitStats } from "../services/codex-rate-limit.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { getStackProfile, verifyScriptPrefKey } from "../services/stack-profile.service.js";
+import { runPreMergeGate } from "../services/pre-merge-gate.service.js";
 import {
   MAX_SESSIONS,
   NON_TRIVIAL_WORKTREE_DIFF_CHARS,
@@ -229,11 +230,27 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
     deps.boardEvents.broadcast(ws.projectId, "board_changed");
   } else if (ws.issueStatusName === "In Review") {
     if (deps.autoMergeEnabled && deps.autoMergeInReview && !deps.autoMergeDisabledProjectIds?.has(ws.projectId)) {
-      // Don't bypass the readyForMerge gate for a project that has a verify/smoke gate — the review's
-      // exit-workflow gate sets readyForMerge on pass; merging un-ready work here races and skips it.
-      if (!ws.readyForMerge && await projectHasMergeGate(ws.projectId)) {
-        console.log(`[monitor] Holding idle In-Review workspace ${ws.wsId}  project has a verify/smoke gate; waiting for the review to set readyForMerge (not bypassing the quality gate)`);
-        return;
+      // #821: the auto_merge_in_review path merges idle In-Review workspaces that are NOT
+      // readyForMerge. The verify_script + smoke quality gate lived ONLY in the review-exit handler,
+      // so this path bypassed it entirely — unverified/un-rendered code merged on hands-off projects.
+      // Run the shared pre-merge gate HERE before merging un-ready work; on failure, WITHHOLD the
+      // merge (leave In Review + log) rather than silently land it. (Work the review already approved
+      // — readyForMerge=true — has passed the gate at review-exit, so skip the re-run for it.)
+      if (!ws.readyForMerge) {
+        const gate = await runPreMergeGate({ id: ws.wsId, workingDir: ws.workingDir }, ws.projectId, db);
+        if (!gate.passed) {
+          console.log(`[monitor] Withholding auto_merge_in_review for idle In-Review workspace ${ws.wsId}  pre-merge gate failed (${gate.stage}): ${gate.message}`);
+          emitButlerSystemEvent({
+            projectId: ws.projectId,
+            kind: "merge_failed",
+            workspaceId: ws.wsId,
+            issueNumber: ws.issueNumber ?? undefined,
+            text: `Held idle In-Review workspace ${ws.wsId} (issue #${ws.issueNumber ?? "?"}): pre-merge gate failed (${gate.stage}). ${gate.message.slice(0, 300)}`,
+          });
+          deps.boardEvents.broadcast(ws.projectId, "workflow_error");
+          return;
+        }
+        if (!gate.skipped) console.log(`[monitor] Pre-merge gate passed for idle In-Review workspace ${ws.wsId} (${gate.stage}); proceeding with auto_merge_in_review`);
       }
       if (!canStartMerge(ws)) return;
       await mergeWorkspaceWithFixFallback(ws, deps.serverPort, logAction, {
@@ -289,11 +306,23 @@ async function handleReviewingWorkspace(ws: WorkspaceCandidate, sess: LatestSess
       return;
     }
     // A reviewing workspace whose review session STOPPED should be readyForMerge if its gate passed.
-    // If it isn't ready and the project has a verify/smoke gate, the gate failed/withheld (or didn't
-    // run) — do NOT auto-merge unverified work; leave it In Review for re-review/fix.
-    if (!ws.readyForMerge && await projectHasMergeGate(ws.projectId)) {
-      console.log(`[monitor] Holding reviewing+stopped workspace ${ws.wsId}  not readyForMerge and project has a verify/smoke gate (review did not approve; not auto-merging unverified work)`);
-      return;
+    // If it isn't ready, run the shared pre-merge gate (#821) before landing — a non-zero verify or a
+    // failed boot/render smoke WITHHOLDS the merge (leave In Review for re-review/fix). Work already
+    // approved (readyForMerge=true) passed the gate at review-exit, so skip the re-run for it.
+    if (!ws.readyForMerge) {
+      const gate = await runPreMergeGate({ id: ws.wsId, workingDir: ws.workingDir }, ws.projectId, db);
+      if (!gate.passed) {
+        console.log(`[monitor] Withholding merge for reviewing+stopped workspace ${ws.wsId}  pre-merge gate failed (${gate.stage}): ${gate.message}`);
+        emitButlerSystemEvent({
+          projectId: ws.projectId,
+          kind: "merge_failed",
+          workspaceId: ws.wsId,
+          issueNumber: ws.issueNumber ?? undefined,
+          text: `Held reviewing+stopped workspace ${ws.wsId} (issue #${ws.issueNumber ?? "?"}): pre-merge gate failed (${gate.stage}). ${gate.message.slice(0, 300)}`,
+        });
+        deps.boardEvents.broadcast(ws.projectId, "workflow_error");
+        return;
+      }
     }
     if (!canStartMerge(ws)) return;
     // Deliberately NO fix-and-merge fallback on this path: a reviewing
