@@ -34,16 +34,11 @@ export const GENERIC_AGENT_GITIGNORE = [
   ".claude/hooks/.verify-gate-escalation.json",
   ".claude/scheduled_tasks.lock",
   // App-run capture logs the board's smoke/visual-verification (agent-launched `gradlew run`
-  // / dev-server) leaves in the repo ROOT (#825). Root-anchored (leading "/") so a project's
-  // own logs/ dir is unaffected — these are the specific names seen littering the checkout.
-  "/app-out.log",
-  "/app-err.log",
-  "/app-review.log",
-  "/app-err-review.log",
-  "/server-out.log",
-  "/server-err.log",
-  "/run-out.log",
-  "/run-err.log",
+  // / dev-server) leaves in the repo ROOT (#825). The reviewer invents arbitrary names
+  // (app.log, app2.log, final-run.log, gallery-stderr.log, install3.log, …), so the only robust
+  // catch is a ROOT-level `*.log` ignore. Anchored with "/" so a project's own logs/*.log is
+  // unaffected; root-level .log files in a checkout are virtually always runtime/agent artifacts.
+  "/*.log",
   "/classpath.txt",
 ];
 
