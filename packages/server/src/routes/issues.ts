@@ -88,12 +88,12 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
   // POST /api/issues/:id/decompose/confirm — confirm epic decomposition and create child issues
   router.post("/:id/decompose/confirm", async (c) => {
     const issueId = c.req.param("id");
-    const body = await parseJsonBody<{ projectId: string; children: any[]; dependencies: any[] }>(c);
+    const body = await parseJsonBody<{ projectId: string; children: any[]; dependencies: any[]; driveTarget?: string }>(c);
     if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
     if (!Array.isArray(body.children)) return c.json({ error: "children must be an array" }, 400);
     if (!Array.isArray(body.dependencies)) return c.json({ error: "dependencies must be an array" }, 400);
     const result = await confirmEpicDecomposition(
-      { issueId, projectId: body.projectId, children: body.children, dependencies: body.dependencies },
+      { issueId, projectId: body.projectId, children: body.children, dependencies: body.dependencies, driveTarget: body.driveTarget },
       database,
     );
     options?.boardEvents?.broadcast(body.projectId, "issue_created");
@@ -101,13 +101,17 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
   });
 
   // POST /api/issues/batch — create N issues atomically
+  // Optional: parentIssueId wires child_of edges; driveTarget (requires parentIssueId) auto-creates a Drive record.
   router.post("/batch", async (c) => {
-    const body = await parseJsonBody<{ projectId: string; issues: any[] }>(c);
+    const body = await parseJsonBody<{ projectId: string; issues: any[]; parentIssueId?: string; driveTarget?: string }>(c);
     if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
     if (!Array.isArray(body.issues)) return c.json({ error: "issues must be an array" }, 400);
     try {
-      const result = await issueService.createIssuesBatch(body.projectId, body.issues);
-      return c.json({ issues: result }, 201);
+      const result = await issueService.createIssuesBatch(body.projectId, body.issues, {
+        parentIssueId: body.parentIssueId,
+        driveTarget: body.driveTarget,
+      });
+      return c.json(result, 201);
     } catch (err: any) {
       if (err.code === "BAD_REQUEST") {
         const payload: any = { error: err.message };

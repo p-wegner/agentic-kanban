@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { issues, issueTags, issueDependencies, issueArtifacts, issueComments, showdowns, workspaces, projectStatuses, workflowTemplates, workflowNodes, sessions } from "@agentic-kanban/shared/schema";
 import { eq, and, or, sql, inArray, desc } from "drizzle-orm";
+import { createDrive } from "../repositories/drive.repository.js";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "./board-events.js";
 import type { WebhookIssueStatusPayload } from "@agentic-kanban/shared/lib";
@@ -179,8 +180,14 @@ export function createIssueService(deps: {
   async function createIssuesBatch(
     projectId: string,
     inputs: Omit<CreateIssueInput, "projectId">[],
-  ): Promise<CreateIssueResult[]> {
-    if (inputs.length === 0) return [];
+    opts?: {
+      /** When set, each created issue gets a child_of edge pointing at this parent. */
+      parentIssueId?: string;
+      /** When set (requires parentIssueId), a Drive record is created with metaIssueId=parentIssueId. */
+      driveTarget?: string;
+    },
+  ): Promise<{ issues: CreateIssueResult[]; driveId?: string }> {
+    if (inputs.length === 0) return { issues: [] };
 
     for (let i = 0; i < inputs.length; i++) {
       if (!inputs[i].title || !inputs[i].title.trim()) {
@@ -228,6 +235,15 @@ export function createIssueService(deps: {
           createdAt: now,
           updatedAt: now,
         });
+        if (opts?.parentIssueId) {
+          await tx.insert(issueDependencies).values({
+            id: randomUUID(),
+            issueId: id,
+            dependsOnId: opts.parentIssueId,
+            type: "child_of",
+            createdAt: now,
+          });
+        }
         insertedIds.push(id);
       }
       return insertedIds;
@@ -238,7 +254,17 @@ export function createIssueService(deps: {
       out.push((await getIssueDescription(id, database))!);
     }
     boardEvents?.broadcast(projectId, "issue_created");
-    return out;
+
+    let driveId: string | undefined;
+    if (opts?.parentIssueId && opts.driveTarget) {
+      const drive = await createDrive(
+        { projectId, metaIssueId: opts.parentIssueId, target: opts.driveTarget },
+        database,
+      );
+      driveId = drive.id;
+    }
+
+    return { issues: out, driveId };
   }
 
   async function updateIssue(
