@@ -34,6 +34,7 @@ import { loadAgentSettings } from "../services/agent-settings.service.js";
 import type { ProviderName } from "../services/agent-provider.js";
 import { parseStrategyBullseyeConfig, selectProviderFromStrategy } from "../services/strategy-objective.service.js";
 import { getAllPreferences } from "../repositories/preferences.repository.js";
+import { loadCodexLicenseRing, resolveCodexHomeForProfile } from "../services/codex-license-ring.js";
 
 /** Suffix per-butler pref keys for named butlers; the "default" butler keeps the
  *  legacy unsuffixed keys so existing resume ids / history carry over unchanged. */
@@ -227,6 +228,9 @@ export function createButlerRoute(
     profile?: { provider: ProviderName; name: string };
     agentCommand?: string;
     agentArgs?: string;
+    /** When a codex OAuth-license profile resolves to a separate CODEX_HOME dir,
+     *  the launcher must set CODEX_HOME and drop `--profile` (mirrors the builder). */
+    codexHome?: string;
   }> {
     const prefRows = await getAllPreferences(database);
     const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
@@ -277,14 +281,39 @@ export function createButlerRoute(
     // exits with code 2. Only forward when the providers match; otherwise let the
     // butler's provider use its own defaults.
     const matchesGlobalProvider = provider === globalProvider;
+
+    // Codex OAuth licenses: a ChatGPT-plan license is a separate CODEX_HOME directory
+    // with its own auth.json (an auto-discovered `~/.codex-<name>` dir or a ring entry).
+    // Point CODEX_HOME at it and DROP the profile name from the launch — a separate home
+    // has no `[profiles.<name>]`, so `--profile` makes codex exit code 2. This mirrors the
+    // builder path in session-lifecycle.ts so the butler authenticates under the right
+    // account and its rollouts land in the right home (fixes 'no rollout found' resumes).
+    let codexHome: string | undefined;
+    let launchProfileName = selectedProfile;
+    if (provider === "codex" && selectedProfile && selectedProfile !== "default") {
+      try {
+        const ring = await loadCodexLicenseRing(database);
+        const resolved = resolveCodexHomeForProfile(selectedProfile, ring);
+        if (resolved) {
+          codexHome = resolved;
+          launchProfileName = "default";
+        }
+      } catch {
+        // non-fatal: fall back to passing --profile under the default home
+      }
+    }
+
     return {
       provider,
+      // selectedProfile drives the UI dropdown — keep the real license name there.
       selectedProfile,
       globalProfile,
       claudeProfile: provider === "claude" ? selectedProfile : undefined,
-      profile: selectedProfile ? { provider, name: selectedProfile } : undefined,
+      // profile drives the spawn args — "default" suppresses `--profile` when CODEX_HOME is set.
+      profile: launchProfileName ? { provider, name: launchProfileName } : undefined,
       agentCommand: matchesGlobalProvider ? settings.agentCommand : undefined,
       agentArgs: matchesGlobalProvider ? settings.agentArgs : undefined,
+      codexHome,
     };
   }
 
@@ -308,6 +337,7 @@ export function createButlerRoute(
       profile: backend.profile,
       agentCommand: backend.agentCommand,
       agentArgs: backend.agentArgs,
+      codexHome: backend.codexHome,
       model,
       resumeSessionId,
       systemPromptAppend,
