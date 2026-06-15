@@ -52,6 +52,7 @@ import { registerButlerSetModel } from "./tools/butler-set-model.js";
 import { registerButlerSetProfile } from "./tools/butler-set-profile.js";
 import { registerButlerState } from "./tools/butler-state.js";
 import { registerProposeTransition } from "./tools/propose-transition.js";
+import { registerMarkReadyForMerge } from "./tools/mark-ready-for-merge.js";
 import { registerClarifyOrPropose } from "./tools/clarify-or-propose.js";
 import { registerAnalyzeTouchedFiles } from "./tools/analyze-touched-files.js";
 import { registerCheckIssueOverlap } from "./tools/check-issue-overlap.js";
@@ -126,6 +127,7 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   butler_set_profile: registerButlerSetProfile,
   butler_state: registerButlerState,
   propose_transition: registerProposeTransition,
+  mark_ready_for_merge: registerMarkReadyForMerge,
   clarify_or_propose: registerClarifyOrPropose,
   analyze_touched_files: registerAnalyzeTouchedFiles,
   check_issue_overlap: registerCheckIssueOverlap,

@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { migrationFilesInOrder } from "./helpers/test-db.js";
+import { MCP_TOOL_DEFINITIONS } from "@agentic-kanban/shared/lib";
 
 const MONOREPO_ROOT = resolve(import.meta.dirname, "../../../..");
 const SHARED_DRIZZLE = resolve(MONOREPO_ROOT, "packages/shared/drizzle");
@@ -121,6 +122,21 @@ describe("MCP Server Tools", () => {
   afterAll(() => {
     if (proc) proc.kill();
     try { rmSync(tmpDir, { recursive: true }); } catch { /* ignore */ }
+  });
+
+  it("tools/list registers every advertised MCP_TOOL_DEFINITIONS tool", async () => {
+    // Regression: mark_ready_for_merge was advertised in MCP_TOOL_DEFINITIONS (and the
+    // review prompt told reviewers to call it) but was never wired into TOOL_REGISTRARS,
+    // so every worktree review stranded its issue in "In Review" — the approval signal
+    // referenced a tool that didn't exist over MCP. Assert the advertised list and the
+    // actually-registered list can never drift again.
+    const resp = await sendAndReceive(proc, makeRequest("tools/list"));
+    const registered = new Set<string>((resp.result.tools as { name: string }[]).map((t) => t.name));
+
+    const advertised = MCP_TOOL_DEFINITIONS.map((d) => d.name);
+    const missing = advertised.filter((name) => !registered.has(name));
+    expect(missing, `advertised but not registered: ${missing.join(", ")}`).toEqual([]);
+    expect(registered.has("mark_ready_for_merge")).toBe(true);
   });
 
   it("get_context returns project info", async () => {
