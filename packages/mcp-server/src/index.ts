@@ -77,6 +77,28 @@ import {
   registerGetDrive,
   registerFinishDrive,
 } from "./tools/drives.js";
+import { registerRegisterProject } from "./tools/register-project.js";
+import { registerCreateProject } from "./tools/create-project.js";
+import { registerListProjects } from "./tools/list-projects.js";
+import { registerUnregisterProject } from "./tools/unregister-project.js";
+import { registerCleanupProject } from "./tools/cleanup-project.js";
+import { registerGetPreference } from "./tools/get-preference.js";
+import { registerSetPreference } from "./tools/set-preference.js";
+import { registerInstallSkill } from "./tools/install-skill.js";
+import { registerInitProject } from "./tools/init-project.js";
+import { registerSessionHistory } from "./tools/session-history.js";
+import { registerAnalyzeSession } from "./tools/analyze-session.js";
+import { registerRecentSessions } from "./tools/recent-sessions.js";
+import { registerBackfillFriction } from "./tools/backfill-friction.js";
+import { registerSessionReviewEffectiveness } from "./tools/session-review-effectiveness.js";
+import { registerReviewerFixes } from "./tools/reviewer-fixes.js";
+import { registerButlerEnsure } from "./tools/butler-ensure.js";
+import { registerButlerStop } from "./tools/butler-stop.js";
+import { registerButlerList } from "./tools/butler-list.js";
+import { registerGetButlerSkill, registerSetButlerSkill } from "./tools/butler-skill.js";
+import { registerLaunchWorkspace } from "./tools/launch-workspace.js";
+import { registerWaitWorkspace } from "./tools/wait-workspace.js";
+import { registerDriveReviewEffectiveness } from "./tools/drive-review-effectiveness.js";
 
 const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   get_context: registerGetContext,
@@ -146,6 +168,29 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   list_drives: registerListDrives,
   get_drive: registerGetDrive,
   finish_drive: registerFinishDrive,
+  drive_review_effectiveness: registerDriveReviewEffectiveness,
+  register_project: registerRegisterProject,
+  create_project: registerCreateProject,
+  list_projects: registerListProjects,
+  unregister_project: registerUnregisterProject,
+  cleanup_project: registerCleanupProject,
+  get_preference: registerGetPreference,
+  set_preference: registerSetPreference,
+  install_skill: registerInstallSkill,
+  init_project: registerInitProject,
+  session_history: registerSessionHistory,
+  analyze_session: registerAnalyzeSession,
+  recent_sessions: registerRecentSessions,
+  backfill_friction: registerBackfillFriction,
+  session_review_effectiveness: registerSessionReviewEffectiveness,
+  reviewer_fixes: registerReviewerFixes,
+  butler_ensure: registerButlerEnsure,
+  butler_stop: registerButlerStop,
+  butler_list: registerButlerList,
+  get_butler_skill: registerGetButlerSkill,
+  set_butler_skill: registerSetButlerSkill,
+  launch_workspace: registerLaunchWorkspace,
+  wait_workspace: registerWaitWorkspace,
 };
 
 async function getDisabledTools(): Promise<Set<string>> {
