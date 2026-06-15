@@ -3,6 +3,7 @@ import { db } from "../../db/index.js";
 import { issues, projectStatuses, workspaces, sessions, sessionMessages, issueDependencies, DEPENDENCY_TYPES, projects } from "@agentic-kanban/shared/schema";
 import { eq, inArray, sql, and, desc } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { parseSessionSummary, formatDurationStr } from "@agentic-kanban/shared";
 import { runMigrations, getActiveProjectId } from "../shared.js";
 import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
@@ -10,7 +11,7 @@ import { isAnalyticsNoise } from "../../services/session-filter.js";
 import { getWorkspaceDiffStats, type WorkspaceDiffStats } from "../../services/workspace-diff-stats.js";
 
 export function registerIssueCommand(program: Command) {
-  const issueCmd = program.command("issue").description("Manage issues on the board.\n\nSubcommands: list, create, move, summary, dependency");
+  const issueCmd = program.command("issue").description("Manage issues on the board.\n\nSubcommands: list, create, update, move, summary, dependency");
 
   issueCmd
     .command("list")
@@ -201,6 +202,100 @@ Examples:
 
         console.log(`Created issue #${issueNumber}: ${title}`);
         console.log(`  id: ${id}`);
+        process.exit(0);
+      } catch (err) {
+        console.error("Error:", err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+    });
+
+  issueCmd
+    .command("update <issue>")
+    .description("Update an existing issue's fields.\n\nAccepts an issue number (resolved in the active project) or a full issue ID. Only the flags you pass are changed; every other field is left untouched. Use --description-file to set a multi-line / markdown description from a file — this avoids shell quoting and newline mangling that can truncate an inline -d value.")
+    .option("--title <title>", "New title")
+    .option("-d, --description <description>", "New description (markdown supported)")
+    .option("--description-file <path>", "Read the new description from a UTF-8 file (overrides -d)")
+    .option("-p, --priority <priority>", "Priority: low, medium, high, critical")
+    .option("-t, --type <type>", "Issue type: task, bug, feature, chore")
+    .addHelpText("after", `
+Examples:
+  $ agentic-kanban issue update 42 --title "Clearer title"
+  $ agentic-kanban issue update 42 -p high -t bug
+  $ agentic-kanban issue update 42 --description-file ./desc.md
+  $ agentic-kanban issue update 42 -d "Short inline description"
+
+Tip: to change an issue's STATUS, use 'issue move' instead.
+`)
+    .action(async (issueArg: string, options: { title?: string; description?: string; descriptionFile?: string; priority?: string; type?: string }) => {
+      try {
+        await runMigrations();
+
+        // Resolve by issue number (active project) or by full ID, like 'issue move'.
+        const isNumeric = /^\d+$/.test(issueArg);
+        const projectId = isNumeric ? await getActiveProjectId() : undefined;
+        const whereClause = isNumeric
+          ? and(eq(issues.issueNumber, Number(issueArg)), eq(issues.projectId, projectId!))
+          : eq(issues.id, issueArg);
+
+        const issueRows = await db.select().from(issues).where(whereClause).limit(1);
+        if (issueRows.length === 0) {
+          console.error(`Issue '${issueArg}' not found.`);
+          process.exit(1);
+        }
+        const issue = issueRows[0];
+
+        // Build the update set from provided flags only — untouched flags stay as-is.
+        const updates: Record<string, unknown> = {};
+
+        if (options.title !== undefined) {
+          const title = options.title.trim();
+          if (!title) {
+            console.error("Title cannot be empty.");
+            process.exit(1);
+          }
+          updates.title = title;
+        }
+
+        let description = options.description;
+        if (options.descriptionFile !== undefined) {
+          try {
+            description = readFileSync(options.descriptionFile, "utf8");
+          } catch (err) {
+            console.error(`Could not read description file '${options.descriptionFile}': ${err instanceof Error ? err.message : String(err)}`);
+            process.exit(1);
+          }
+        }
+        if (description !== undefined) updates.description = description;
+
+        if (options.priority !== undefined) {
+          const validPriorities = ["low", "medium", "high", "critical"];
+          if (!validPriorities.includes(options.priority)) {
+            console.error(`Invalid priority '${options.priority}'. Valid: ${validPriorities.join(", ")}`);
+            process.exit(1);
+          }
+          updates.priority = options.priority;
+        }
+
+        if (options.type !== undefined) {
+          const validTypes = ["task", "bug", "feature", "chore"];
+          if (!validTypes.includes(options.type)) {
+            console.error(`Invalid type '${options.type}'. Valid: ${validTypes.join(", ")}`);
+            process.exit(1);
+          }
+          updates.issueType = options.type;
+        }
+
+        if (Object.keys(updates).length === 0) {
+          console.error("Nothing to update. Pass at least one of --title, -d/--description, --description-file, -p/--priority, -t/--type.");
+          process.exit(1);
+        }
+
+        updates.updatedAt = new Date().toISOString();
+        await db.update(issues).set(updates).where(eq(issues.id, issue.id));
+
+        const changed = Object.keys(updates).filter((k) => k !== "updatedAt");
+        const num = issue.issueNumber != null ? `#${issue.issueNumber}` : issue.id;
+        console.log(`Updated issue ${num} (${changed.join(", ")}).`);
         process.exit(0);
       } catch (err) {
         console.error("Error:", err instanceof Error ? err.message : String(err));
