@@ -1,6 +1,6 @@
 import type { Command } from "commander";
 import { db } from "../../db/index.js";
-import { issues, projectStatuses, workspaces, sessions, sessionMessages, issueDependencies, DEPENDENCY_TYPES, projects } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses, workspaces, sessions, sessionMessages, issueDependencies, DEPENDENCY_TYPES, projects, diffComments, issueArtifacts, issueTags, tags } from "@agentic-kanban/shared/schema";
 import { eq, inArray, sql, and, desc } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -891,6 +891,871 @@ Example:
         }
 
         console.log(`Removed dependency '${dependencyId}'.`);
+        process.exit(0);
+      } catch (err) {
+        console.error("Error:", err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+    });
+
+  depCmd
+    .command("analyze <issue-number>")
+    .description("Analyze dependencies for an issue against the current board.\n\nCalls the server's dependency-analysis endpoint to infer and create dependency edges. Requires the dev server to be running.")
+    .option("--json", "Output raw JSON instead of formatted text")
+    .addHelpText("after", `
+Examples:
+  $ agentic-kanban issue dependency analyze 42
+  $ agentic-kanban issue dependency analyze 42 --json
+`)
+    .action(async (issueNumberArg: string, options: { json?: boolean }) => {
+      try {
+        await runMigrations();
+        const projectId = await getActiveProjectId();
+
+        const num = Number(issueNumberArg);
+        if (!Number.isInteger(num) || num <= 0) {
+          console.error(`Invalid issue number: ${issueNumberArg}`);
+          process.exit(1);
+        }
+
+        const issueRows = await db
+          .select({ id: issues.id })
+          .from(issues)
+          .where(and(eq(issues.issueNumber, num), eq(issues.projectId, projectId)))
+          .limit(1);
+
+        if (issueRows.length === 0) {
+          console.error(`Issue #${num} not found in active project.`);
+          process.exit(1);
+        }
+
+        const issueId = issueRows[0].id;
+        const port = process.env.KANBAN_SERVER_PORT ?? "3001";
+        const res = await fetch(`http://127.0.0.1:${port}/api/issues/analyze-dependencies`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ issueId, projectId }),
+        });
+        const text = await res.text();
+        if (!res.ok) {
+          console.error(`Dependency analysis failed (${res.status}): ${text}`);
+          process.exit(1);
+        }
+
+        if (options.json) {
+          console.log(text);
+        } else {
+          try {
+            const parsed = JSON.parse(text);
+            console.log(JSON.stringify(parsed, null, 2));
+          } catch {
+            console.log(text);
+          }
+        }
+        process.exit(0);
+      } catch (err) {
+        console.error("Error:", err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+    });
+
+  depCmd
+    .command("update-batch <jsonFile>")
+    .description("Add or remove multiple dependency edges atomically from a JSON file.\n\nReads a JSON file containing an array of edge operations. Idempotent: existing adds and missing removes are skipped. Cycle detection is applied; rolls back on cycle.")
+    .option("--json", "Output raw JSON instead of formatted text")
+    .addHelpText("after", `
+Examples:
+  $ agentic-kanban issue dependency update-batch edges.json
+  $ agentic-kanban issue dependency update-batch edges.json --json
+
+JSON file format:
+  [
+    { "issueId": "<uuid>", "dependsOnId": "<uuid>", "type": "depends_on", "action": "add" },
+    { "issueId": "<uuid>", "dependsOnId": "<uuid>", "type": "blocked_by", "action": "remove" }
+  ]
+
+Valid types: depends_on, blocked_by, related_to, duplicates, parent_of, child_of
+Valid actions: add, remove
+`)
+    .action(async (jsonFile: string, options: { json?: boolean }) => {
+      try {
+        await runMigrations();
+
+        let fileContent: string;
+        try {
+          fileContent = readFileSync(jsonFile, "utf8");
+        } catch (err) {
+          console.error(`Could not read file '${jsonFile}': ${err instanceof Error ? err.message : String(err)}`);
+          process.exit(1);
+        }
+
+        let edges: Array<{ issueId: string; dependsOnId: string; type?: string; action: "add" | "remove" }>;
+        try {
+          edges = JSON.parse(fileContent);
+        } catch {
+          console.error("Invalid JSON in file.");
+          process.exit(1);
+        }
+
+        if (!Array.isArray(edges)) {
+          console.error("JSON file must contain an array of edge operations.");
+          process.exit(1);
+        }
+
+        const VALID_TYPES = ["depends_on", "blocked_by", "related_to", "duplicates", "parent_of", "child_of"] as const;
+        const DIRECTIONAL = new Set<string>(["depends_on", "blocked_by", "parent_of", "child_of"]);
+
+        for (let i = 0; i < edges.length; i++) {
+          const e = edges[i];
+          if (!e.issueId || !e.dependsOnId || !e.action) {
+            console.error(`edges[${i}]: missing required fields (issueId, dependsOnId, action).`);
+            process.exit(1);
+          }
+          if (!["add", "remove"].includes(e.action)) {
+            console.error(`edges[${i}]: action must be 'add' or 'remove'.`);
+            process.exit(1);
+          }
+          if (e.type && !(VALID_TYPES as readonly string[]).includes(e.type)) {
+            console.error(`edges[${i}]: invalid type '${e.type}'. Valid: ${VALID_TYPES.join(", ")}`);
+            process.exit(1);
+          }
+          if (e.action === "add" && e.issueId === e.dependsOnId) {
+            console.error(`edges[${i}]: an issue cannot depend on itself.`);
+            process.exit(1);
+          }
+        }
+
+        const issueIds = [...new Set(edges.flatMap((e) => [e.issueId, e.dependsOnId]))];
+        const issueRows = issueIds.length === 0 ? [] : await db
+          .select({ id: issues.id, projectId: issues.projectId })
+          .from(issues)
+          .where(inArray(issues.id, issueIds));
+        const projectByIssue = new Map(issueRows.map((r) => [r.id, r.projectId]));
+
+        const projectIds = [...new Set(issueRows.map((r) => r.projectId))];
+        const allDepRows = projectIds.length === 0 ? [] : await db
+          .select({
+            id: issueDependencies.id,
+            issueId: issueDependencies.issueId,
+            dependsOnId: issueDependencies.dependsOnId,
+            type: issueDependencies.type,
+            projectId: issues.projectId,
+          })
+          .from(issueDependencies)
+          .innerJoin(issues, eq(issueDependencies.issueId, issues.id))
+          .where(inArray(issues.projectId, projectIds));
+
+        const adjByProject = new Map<string, Map<string, Set<string>>>();
+        const edgeKeyToRow = new Map<string, { id: string; projectId: string }>();
+        for (const dep of allDepRows) {
+          if (DIRECTIONAL.has(dep.type)) {
+            let adj = adjByProject.get(dep.projectId);
+            if (!adj) { adj = new Map(); adjByProject.set(dep.projectId, adj); }
+            let set = adj.get(dep.issueId);
+            if (!set) { set = new Set(); adj.set(dep.issueId, set); }
+            set.add(dep.dependsOnId);
+          }
+          edgeKeyToRow.set(`${dep.issueId}|${dep.dependsOnId}|${dep.type}`, { id: dep.id, projectId: dep.projectId });
+        }
+
+        const hasPath = (adj: Map<string, Set<string>>, from: string, to: string): boolean => {
+          const visited = new Set<string>();
+          const stack = [from];
+          while (stack.length) {
+            const cur = stack.pop()!;
+            if (cur === to) return true;
+            if (visited.has(cur)) continue;
+            visited.add(cur);
+            const ns = adj.get(cur);
+            if (ns) for (const n of ns) stack.push(n);
+          }
+          return false;
+        };
+
+        const skipped: { edge: typeof edges[number]; reason: string }[] = [];
+        let added = 0;
+        let removed = 0;
+        let cycleError: string | null = null;
+
+        await db.transaction(async (tx) => {
+          for (let i = 0; i < edges.length; i++) {
+            const e = edges[i];
+            const type = (e.type ?? "depends_on") as typeof VALID_TYPES[number];
+            const srcProj = projectByIssue.get(e.issueId);
+            const tgtProj = projectByIssue.get(e.dependsOnId);
+
+            if (e.action === "add") {
+              if (!srcProj) { skipped.push({ edge: e, reason: "source issue not found" }); continue; }
+              if (!tgtProj) { skipped.push({ edge: e, reason: "target issue not found" }); continue; }
+              if (srcProj !== tgtProj) { skipped.push({ edge: e, reason: "cross-project dependency" }); continue; }
+
+              const key = `${e.issueId}|${e.dependsOnId}|${type}`;
+              if (edgeKeyToRow.has(key)) { skipped.push({ edge: e, reason: "already exists" }); continue; }
+
+              if (DIRECTIONAL.has(type)) {
+                let adj = adjByProject.get(srcProj);
+                if (!adj) { adj = new Map(); adjByProject.set(srcProj, adj); }
+                if (hasPath(adj, e.dependsOnId, e.issueId)) {
+                  cycleError = `edges[${i}]: would create a cycle (${e.issueId} -> ${e.dependsOnId})`;
+                  throw new Error(cycleError);
+                }
+                let set = adj.get(e.issueId);
+                if (!set) { set = new Set(); adj.set(e.issueId, set); }
+                set.add(e.dependsOnId);
+              }
+
+              const id = randomUUID();
+              await tx.insert(issueDependencies).values({
+                id,
+                issueId: e.issueId,
+                dependsOnId: e.dependsOnId,
+                type,
+                createdAt: new Date().toISOString(),
+              });
+              edgeKeyToRow.set(`${e.issueId}|${e.dependsOnId}|${type}`, { id, projectId: srcProj });
+              added++;
+            } else {
+              const key = `${e.issueId}|${e.dependsOnId}|${type}`;
+              const row = edgeKeyToRow.get(key);
+              if (!row) { skipped.push({ edge: e, reason: "dependency does not exist" }); continue; }
+              await tx.delete(issueDependencies).where(eq(issueDependencies.id, row.id));
+              edgeKeyToRow.delete(key);
+              if (DIRECTIONAL.has(type)) {
+                const adj = adjByProject.get(row.projectId);
+                adj?.get(e.issueId)?.delete(e.dependsOnId);
+              }
+              removed++;
+            }
+          }
+        }).catch((err) => {
+          if (cycleError) return;
+          throw err;
+        });
+
+        if (cycleError) {
+          console.error(`Error: ${cycleError}`);
+          process.exit(1);
+        }
+
+        const result = { added, removed, skipped };
+        if (options.json) {
+          console.log(JSON.stringify(result, null, 2));
+        } else {
+          console.log(`Added: ${added}, Removed: ${removed}, Skipped: ${skipped.length}`);
+          if (skipped.length > 0) {
+            for (const s of skipped) {
+              console.log(`  Skipped: ${s.edge.issueId} -> ${s.edge.dependsOnId} (${s.reason})`);
+            }
+          }
+        }
+        process.exit(0);
+      } catch (err) {
+        console.error("Error:", err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+    });
+
+  issueCmd
+    .command("create-sub <parent-number> <title>")
+    .description("Create a child issue linked to a parent with a child_of dependency.\n\nThe child issue is created in the same project as the parent and linked via a child_of dependency in the same transaction.")
+    .option("-d, --description <description>", "Child issue description")
+    .option("-p, --priority <priority>", "Priority: low, medium, high, critical (default: medium)")
+    .option("-t, --type <type>", "Issue type: task, bug, feature, chore (default: task)")
+    .option("-s, --status <status>", "Status name for the new child issue (default: first project status)")
+    .option("--json", "Output raw JSON instead of formatted text")
+    .addHelpText("after", `
+Examples:
+  $ agentic-kanban issue create-sub 10 "Sub-task: write tests"
+  $ agentic-kanban issue create-sub 10 "Fix edge case" -t bug -p high
+  $ agentic-kanban issue create-sub 10 "Design UI" --status "In Progress" --json
+`)
+    .action(async (parentNumberArg: string, title: string, options: { description?: string; priority?: string; type?: string; status?: string; json?: boolean }) => {
+      try {
+        await runMigrations();
+        const projectId = await getActiveProjectId();
+
+        if (!title.trim()) {
+          console.error("Title cannot be empty.");
+          process.exit(1);
+        }
+
+        const parentNum = Number(parentNumberArg);
+        if (!Number.isInteger(parentNum) || parentNum <= 0) {
+          console.error(`Invalid parent issue number: ${parentNumberArg}`);
+          process.exit(1);
+        }
+
+        const parentRows = await db
+          .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, projectId: issues.projectId })
+          .from(issues)
+          .where(and(eq(issues.issueNumber, parentNum), eq(issues.projectId, projectId)))
+          .limit(1);
+
+        if (parentRows.length === 0) {
+          console.error(`Parent issue #${parentNum} not found in active project.`);
+          process.exit(1);
+        }
+
+        const parent = parentRows[0];
+
+        const statuses = await db
+          .select()
+          .from(projectStatuses)
+          .where(eq(projectStatuses.projectId, parent.projectId))
+          .orderBy(projectStatuses.sortOrder);
+
+        if (statuses.length === 0) {
+          console.error("No statuses configured for project.");
+          process.exit(1);
+        }
+
+        let statusId = statuses[0].id;
+        if (options.status) {
+          const found = statuses.find((s) => s.name === options.status);
+          if (!found) {
+            console.error(`Status '${options.status}' not found. Available: ${statuses.map((s) => s.name).join(", ")}`);
+            process.exit(1);
+          }
+          statusId = found.id;
+        }
+
+        const maxResult = await db
+          .select({ maxNum: sql<number | null>`max(${issues.issueNumber})` })
+          .from(issues)
+          .where(eq(issues.projectId, parent.projectId));
+        const issueNumber = (maxResult[0]?.maxNum ?? 0) + 1;
+
+        const id = randomUUID();
+        const dependencyId = randomUUID();
+        const now = new Date().toISOString();
+
+        await db.transaction(async (tx) => {
+          await tx.insert(issues).values({
+            id,
+            issueNumber,
+            title,
+            description: options.description ?? null,
+            priority: (options.priority as "low" | "medium" | "high" | "critical") ?? "medium",
+            issueType: (options.type as "task" | "bug" | "feature" | "chore") ?? "task",
+            sortOrder: 0,
+            statusId,
+            projectId: parent.projectId,
+            createdAt: now,
+            updatedAt: now,
+          });
+          await tx.insert(issueDependencies).values({
+            id: dependencyId,
+            issueId: id,
+            dependsOnId: parent.id,
+            type: "child_of",
+            createdAt: now,
+          });
+        });
+
+        const result = {
+          id,
+          issueNumber,
+          title,
+          parentIssueId: parent.id,
+          parentIssueNumber: parent.issueNumber,
+          dependencyId,
+          dependencyType: "child_of",
+          statusId,
+          priority: options.priority ?? "medium",
+        };
+
+        if (options.json) {
+          console.log(JSON.stringify(result, null, 2));
+        } else {
+          console.log(`Created child issue #${issueNumber}: ${title}`);
+          console.log(`  id: ${id}`);
+          console.log(`  parent: #${parent.issueNumber} (${parent.title})`);
+          console.log(`  dependency: ${dependencyId} (child_of)`);
+        }
+        process.exit(0);
+      } catch (err) {
+        console.error("Error:", err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+    });
+
+  issueCmd
+    .command("delete <issue-number>")
+    .description("Delete an issue and all its associated data.\n\nCascade-deletes workspaces, sessions, messages, tags, and artifacts. This cannot be undone. Pass --force to skip the confirmation note.")
+    .option("--force", "Skip the confirmation warning (for scripting)")
+    .option("--json", "Output raw JSON instead of formatted text")
+    .addHelpText("after", `
+Examples:
+  $ agentic-kanban issue delete 42             # prompts about permanence
+  $ agentic-kanban issue delete 42 --force     # no warning output
+  $ agentic-kanban issue delete 42 --json
+
+Note: deletion is permanent. There is no undo. The issue number will not be reused.
+`)
+    .action(async (issueNumberArg: string, options: { force?: boolean; json?: boolean }) => {
+      try {
+        await runMigrations();
+        const projectId = await getActiveProjectId();
+
+        const num = Number(issueNumberArg);
+        if (!Number.isInteger(num) || num <= 0) {
+          console.error(`Invalid issue number: ${issueNumberArg}`);
+          process.exit(1);
+        }
+
+        const issueRows = await db
+          .select({ id: issues.id, title: issues.title, projectId: issues.projectId })
+          .from(issues)
+          .where(and(eq(issues.issueNumber, num), eq(issues.projectId, projectId)))
+          .limit(1);
+
+        if (issueRows.length === 0) {
+          console.error(`Issue #${num} not found in active project.`);
+          process.exit(1);
+        }
+
+        const issue = issueRows[0];
+
+        if (!options.force) {
+          console.log(`Warning: This will permanently delete issue #${num} "${issue.title}" and ALL associated workspaces, sessions, and messages. Use --force to suppress this message.`);
+        }
+
+        // Cascade: workspaces → sessions → messages → diff_comments
+        const wsRows = await db
+          .select({ id: workspaces.id })
+          .from(workspaces)
+          .where(eq(workspaces.issueId, issue.id));
+
+        for (const ws of wsRows) {
+          const wsSessions = await db
+            .select({ id: sessions.id })
+            .from(sessions)
+            .where(eq(sessions.workspaceId, ws.id));
+
+          await db.delete(diffComments).where(eq(diffComments.workspaceId, ws.id));
+          if (wsSessions.length > 0) {
+            await db.delete(sessionMessages).where(inArray(sessionMessages.sessionId, wsSessions.map((s) => s.id)));
+          }
+          await db.delete(sessions).where(eq(sessions.workspaceId, ws.id));
+          await db.delete(workspaces).where(eq(workspaces.id, ws.id));
+        }
+
+        await db.delete(issueTags).where(eq(issueTags.issueId, issue.id));
+        await db.delete(issues).where(eq(issues.id, issue.id));
+
+        const result = { id: issue.id, issueNumber: num, title: issue.title, deleted: true };
+        if (options.json) {
+          console.log(JSON.stringify(result, null, 2));
+        } else {
+          console.log(`Deleted issue #${num}: ${issue.title}`);
+        }
+        process.exit(0);
+      } catch (err) {
+        console.error("Error:", err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+    });
+
+  issueCmd
+    .command("attach-artifact <issue-number>")
+    .description("Attach a text, link, or image artifact to an issue.\n\nArtifacts are visible in the issue detail panel. Use --workspace to additionally associate the artifact with a specific workspace.")
+    .option("--type <type>", "Artifact type: text, link, or image (required)")
+    .option("--content <content>", "Text content, URL, or base64/data URL image content (required)")
+    .option("--mime-type <mimeType>", "Optional MIME type, e.g. text/markdown or image/png")
+    .option("--caption <caption>", "Optional short caption")
+    .option("--workspace <workspaceId>", "Optional workspace ID to associate the artifact with")
+    .option("--json", "Output raw JSON instead of formatted text")
+    .addHelpText("after", `
+Examples:
+  $ agentic-kanban issue attach-artifact 42 --type link --content "https://example.com/docs" --caption "Design doc"
+  $ agentic-kanban issue attach-artifact 42 --type text --content "# Notes" --mime-type text/markdown
+  $ agentic-kanban issue attach-artifact 42 --type image --content "data:image/png;base64,..." --caption "Screenshot"
+
+Valid types: text, link, image
+`)
+    .action(async (issueNumberArg: string, options: { type?: string; content?: string; mimeType?: string; caption?: string; workspace?: string; json?: boolean }) => {
+      try {
+        await runMigrations();
+        const projectId = await getActiveProjectId();
+
+        const num = Number(issueNumberArg);
+        if (!Number.isInteger(num) || num <= 0) {
+          console.error(`Invalid issue number: ${issueNumberArg}`);
+          process.exit(1);
+        }
+
+        if (!options.type) {
+          console.error("--type is required. Valid: text, link, image");
+          process.exit(1);
+        }
+        const ARTIFACT_TYPES = ["text", "link", "image"] as const;
+        if (!(ARTIFACT_TYPES as readonly string[]).includes(options.type)) {
+          console.error(`Invalid type '${options.type}'. Valid: ${ARTIFACT_TYPES.join(", ")}`);
+          process.exit(1);
+        }
+        if (!options.content || !options.content.trim()) {
+          console.error("--content is required and cannot be empty.");
+          process.exit(1);
+        }
+
+        const issueRows = await db
+          .select({ id: issues.id, projectId: issues.projectId })
+          .from(issues)
+          .where(and(eq(issues.issueNumber, num), eq(issues.projectId, projectId)))
+          .limit(1);
+
+        if (issueRows.length === 0) {
+          console.error(`Issue #${num} not found in active project.`);
+          process.exit(1);
+        }
+
+        const issue = issueRows[0];
+
+        if (options.workspace) {
+          const wsRows = await db
+            .select({ id: workspaces.id })
+            .from(workspaces)
+            .where(and(eq(workspaces.id, options.workspace), eq(workspaces.issueId, issue.id)))
+            .limit(1);
+          if (wsRows.length === 0) {
+            console.error(`Workspace '${options.workspace}' not found or does not belong to issue #${num}.`);
+            process.exit(1);
+          }
+        }
+
+        const id = randomUUID();
+        await db.insert(issueArtifacts).values({
+          id,
+          issueId: issue.id,
+          workspaceId: options.workspace ?? null,
+          type: options.type as typeof ARTIFACT_TYPES[number],
+          mimeType: options.mimeType ?? null,
+          content: options.content,
+          caption: options.caption ?? null,
+        });
+
+        const result = {
+          id,
+          issueId: issue.id,
+          workspaceId: options.workspace ?? null,
+          type: options.type,
+          mimeType: options.mimeType ?? null,
+          caption: options.caption ?? null,
+        };
+
+        if (options.json) {
+          console.log(JSON.stringify(result, null, 2));
+        } else {
+          console.log(`Attached ${options.type} artifact to issue #${num}.`);
+          console.log(`  id: ${id}`);
+          if (options.caption) console.log(`  caption: ${options.caption}`);
+        }
+        process.exit(0);
+      } catch (err) {
+        console.error("Error:", err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+    });
+
+  issueCmd
+    .command("create-batch <jsonFile>")
+    .description("Create multiple issues atomically from a JSON file.\n\nReads a JSON file containing an array of issue payloads and creates them all in a single transaction, optionally with dependency edges between them. All-or-nothing: any failure rolls back.")
+    .option("--parent <issueNumber>", "Parent issue number — all created issues will be linked to it with child_of")
+    .option("--json", "Output raw JSON instead of formatted text")
+    .addHelpText("after", `
+Examples:
+  $ agentic-kanban issue create-batch issues.json
+  $ agentic-kanban issue create-batch issues.json --parent 10
+  $ agentic-kanban issue create-batch issues.json --json
+
+JSON file format:
+  {
+    "issues": [
+      { "title": "Task one", "priority": "high", "issueType": "task" },
+      { "title": "Task two", "description": "Details...", "statusName": "In Progress" }
+    ],
+    "dependencies": [
+      { "issueIndex": 1, "dependsOnIndex": 0, "type": "depends_on" }
+    ]
+  }
+
+Each issue: title (required), description, priority, issueType, estimate, sortOrder, statusName, tags
+Each dependency: issueIndex, dependsOnIndex (0-based indices), type (optional, default: depends_on)
+`)
+    .action(async (jsonFile: string, options: { parent?: string; json?: boolean }) => {
+      try {
+        await runMigrations();
+        const projectId = await getActiveProjectId();
+
+        let fileContent: string;
+        try {
+          fileContent = readFileSync(jsonFile, "utf8");
+        } catch (err) {
+          console.error(`Could not read file '${jsonFile}': ${err instanceof Error ? err.message : String(err)}`);
+          process.exit(1);
+        }
+
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(fileContent);
+        } catch {
+          console.error("Invalid JSON in file.");
+          process.exit(1);
+        }
+
+        // Accept either { issues: [...], dependencies: [...] } or bare array
+        let issueInputs: Array<{
+          title: string;
+          description?: string;
+          priority?: "low" | "medium" | "high" | "critical";
+          issueType?: string;
+          estimate?: string | null;
+          sortOrder?: number;
+          statusName?: string;
+          tags?: string[];
+        }>;
+        let dependencyInputs: Array<{ issueIndex: number; dependsOnIndex: number; type?: string }> = [];
+
+        if (Array.isArray(parsed)) {
+          issueInputs = parsed as typeof issueInputs;
+        } else if (parsed && typeof parsed === "object" && "issues" in parsed && Array.isArray((parsed as { issues: unknown }).issues)) {
+          const p = parsed as { issues: typeof issueInputs; dependencies?: typeof dependencyInputs };
+          issueInputs = p.issues;
+          dependencyInputs = p.dependencies ?? [];
+        } else {
+          console.error("JSON must be an array of issues or an object with an 'issues' array.");
+          process.exit(1);
+        }
+
+        const statuses = await db
+          .select()
+          .from(projectStatuses)
+          .where(eq(projectStatuses.projectId, projectId))
+          .orderBy(projectStatuses.sortOrder);
+
+        if (statuses.length === 0) {
+          console.error("No statuses configured for project.");
+          process.exit(1);
+        }
+
+        for (let i = 0; i < issueInputs.length; i++) {
+          if (!issueInputs[i].title?.trim()) {
+            console.error(`issues[${i}].title is required.`);
+            process.exit(1);
+          }
+          if (issueInputs[i].statusName && !statuses.find((s) => s.name === issueInputs[i].statusName)) {
+            console.error(`issues[${i}].statusName '${issueInputs[i].statusName}' not found. Available: ${statuses.map((s) => s.name).join(", ")}`);
+            process.exit(1);
+          }
+        }
+
+        let parentIssueId: string | undefined;
+        if (options.parent) {
+          const parentNum = Number(options.parent);
+          if (!Number.isInteger(parentNum) || parentNum <= 0) {
+            console.error(`Invalid parent issue number: ${options.parent}`);
+            process.exit(1);
+          }
+          const parentRows = await db
+            .select({ id: issues.id, projectId: issues.projectId })
+            .from(issues)
+            .where(and(eq(issues.issueNumber, parentNum), eq(issues.projectId, projectId)))
+            .limit(1);
+          if (parentRows.length === 0) {
+            console.error(`Parent issue #${parentNum} not found in active project.`);
+            process.exit(1);
+          }
+          parentIssueId = parentRows[0].id;
+        }
+
+        const maxResult = await db
+          .select({ maxNum: sql<number | null>`max(${issues.issueNumber})` })
+          .from(issues)
+          .where(eq(issues.projectId, projectId));
+        let nextNumber = (maxResult[0]?.maxNum ?? 0) + 1;
+
+        const now = new Date().toISOString();
+        const created: { id: string; issueNumber: number; title: string }[] = [];
+
+        await db.transaction(async (tx) => {
+          const tagIdByName = new Map<string, string>();
+          const resolveTagId = async (name: string): Promise<string> => {
+            const key = name.toLowerCase();
+            const cached = tagIdByName.get(key);
+            if (cached) return cached;
+            const existing = await tx.select({ id: tags.id }).from(tags)
+              .where(sql`lower(${tags.name}) = lower(${name})`)
+              .limit(1);
+            let tagId: string;
+            if (existing.length > 0) {
+              tagId = existing[0].id;
+            } else {
+              tagId = randomUUID();
+              await tx.insert(tags).values({ id: tagId, name, color: null, createdAt: now });
+            }
+            tagIdByName.set(key, tagId);
+            return tagId;
+          };
+
+          const idByIndex: string[] = [];
+          for (const input of issueInputs) {
+            const id = randomUUID();
+            const statusId = input.statusName
+              ? statuses.find((s) => s.name === input.statusName)!.id
+              : statuses[0].id;
+            const issueNumber = nextNumber++;
+            await tx.insert(issues).values({
+              id,
+              issueNumber,
+              title: input.title,
+              description: input.description ?? null,
+              priority: input.priority ?? "medium",
+              issueType: input.issueType ?? "task",
+              sortOrder: input.sortOrder ?? 0,
+              estimate: input.estimate ?? null,
+              statusId,
+              projectId,
+              createdAt: now,
+              updatedAt: now,
+            });
+            if (parentIssueId) {
+              await tx.insert(issueDependencies).values({
+                id: randomUUID(),
+                issueId: id,
+                dependsOnId: parentIssueId,
+                type: "child_of",
+                createdAt: now,
+              });
+            }
+            if (input.tags && input.tags.length > 0) {
+              const seenTagIds = new Set<string>();
+              for (const tagName of input.tags) {
+                const trimmed = tagName.trim();
+                if (!trimmed) continue;
+                const tagId = await resolveTagId(trimmed);
+                if (seenTagIds.has(tagId)) continue;
+                seenTagIds.add(tagId);
+                await tx.insert(issueTags).values({ id: randomUUID(), issueId: id, tagId });
+              }
+            }
+            idByIndex.push(id);
+            created.push({ id, issueNumber, title: input.title });
+          }
+
+          for (const e of dependencyInputs) {
+            if (e.issueIndex < 0 || e.issueIndex >= issueInputs.length) {
+              throw new Error(`dependencies: issueIndex ${e.issueIndex} out of range (0..${issueInputs.length - 1})`);
+            }
+            if (e.dependsOnIndex < 0 || e.dependsOnIndex >= issueInputs.length) {
+              throw new Error(`dependencies: dependsOnIndex ${e.dependsOnIndex} out of range (0..${issueInputs.length - 1})`);
+            }
+            await tx.insert(issueDependencies).values({
+              id: randomUUID(),
+              issueId: idByIndex[e.issueIndex],
+              dependsOnId: idByIndex[e.dependsOnIndex],
+              type: (e.type ?? "depends_on") as typeof DEPENDENCY_TYPES[number],
+              createdAt: now,
+            });
+          }
+        });
+
+        const result = { issues: created, dependenciesCreated: dependencyInputs.length };
+        if (options.json) {
+          console.log(JSON.stringify(result, null, 2));
+        } else {
+          console.log(`Created ${created.length} issue(s)${dependencyInputs.length > 0 ? ` with ${dependencyInputs.length} dependency edge(s)` : ""}.`);
+          for (const c of created) {
+            console.log(`  #${c.issueNumber} ${c.title} (${c.id})`);
+          }
+        }
+        process.exit(0);
+      } catch (err) {
+        console.error("Error:", err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+    });
+
+  issueCmd
+    .command("check-overlap <issueNumbers...>")
+    .description("Check which files overlap between a set of issues based on their cached touched-file predictions.\n\nReturns a map of filePath → [issueNumbers] for files touched by more than one issue. Run analyze_touched_files on each issue first to populate the cache.")
+    .option("--json", "Output raw JSON instead of formatted text")
+    .addHelpText("after", `
+Examples:
+  $ agentic-kanban issue check-overlap 10 11 12
+  $ agentic-kanban issue check-overlap 10 11 --json
+
+Note: run 'analyze_touched_files' (via MCP) on each issue first to populate the prediction cache.
+At least 2 issue numbers are required.
+`)
+    .action(async (issueNumberArgs: string[], options: { json?: boolean }) => {
+      try {
+        await runMigrations();
+        const projectId = await getActiveProjectId();
+
+        if (issueNumberArgs.length < 2) {
+          console.error("At least 2 issue numbers are required.");
+          process.exit(1);
+        }
+
+        const nums = issueNumberArgs.map((a) => Number(a));
+        for (const n of nums) {
+          if (!Number.isInteger(n) || n <= 0) {
+            console.error(`Invalid issue number: ${n}`);
+            process.exit(1);
+          }
+        }
+
+        const issueRows = await db
+          .select({ id: issues.id, issueNumber: issues.issueNumber, touchedFilesJson: issues.touchedFilesJson })
+          .from(issues)
+          .where(and(inArray(issues.issueNumber, nums), eq(issues.projectId, projectId)));
+
+        const foundNums = new Set(issueRows.map((r) => r.issueNumber));
+        for (const n of nums) {
+          if (!foundNums.has(n)) {
+            console.error(`Issue #${n} not found in active project.`);
+            process.exit(1);
+          }
+        }
+
+        const overlap: Record<string, number[]> = {};
+        for (const row of issueRows) {
+          if (!row.touchedFilesJson) continue;
+          let files: { path: string }[];
+          try { files = JSON.parse(row.touchedFilesJson); } catch { continue; }
+          for (const f of files) {
+            if (!f.path) continue;
+            if (!overlap[f.path]) overlap[f.path] = [];
+            if (row.issueNumber != null && !overlap[f.path].includes(row.issueNumber)) overlap[f.path].push(row.issueNumber);
+          }
+        }
+        for (const path of Object.keys(overlap)) {
+          if (overlap[path].length < 2) delete overlap[path];
+        }
+
+        const issuesWithoutCache = issueRows.filter((r) => !r.touchedFilesJson).map((r) => r.issueNumber);
+
+        const result: Record<string, unknown> = { overlap };
+        if (issuesWithoutCache.length > 0) {
+          result.warning = `${issuesWithoutCache.length} issue(s) have no cached prediction yet: #${issuesWithoutCache.join(", #")}`;
+        }
+
+        if (options.json) {
+          console.log(JSON.stringify(result, null, 2));
+        } else {
+          const paths = Object.keys(overlap);
+          if (paths.length === 0) {
+            console.log("No file overlaps detected.");
+          } else {
+            console.log(`File overlaps (${paths.length} file(s)):`);
+            for (const p of paths) {
+              console.log(`  ${p}: issues #${overlap[p].join(", #")}`);
+            }
+          }
+          if (result.warning) {
+            console.log(`Warning: ${result.warning}`);
+          }
+        }
         process.exit(0);
       } catch (err) {
         console.error("Error:", err instanceof Error ? err.message : String(err));
