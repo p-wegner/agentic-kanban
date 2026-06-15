@@ -1,15 +1,19 @@
 import type { Command } from "commander";
 import { db } from "../../db/index.js";
-import { issues, projectStatuses, workspaces, sessions, projects } from "@agentic-kanban/shared/schema";
-import { eq, desc, gte, isNotNull, and } from "drizzle-orm";
-import { parseSessionSummary, computeFrictionStats } from "@agentic-kanban/shared";
+import { issues, projectStatuses, workspaces, sessions, projects, sessionMessages, agentSkills, failurePatterns, preferences } from "@agentic-kanban/shared/schema";
+import { eq, desc, gte, isNotNull, and, sql } from "drizzle-orm";
+import { parseSessionSummary, computeFrictionStats, extractKeywords } from "@agentic-kanban/shared";
+import type { SessionFrictionStats } from "@agentic-kanban/shared";
 import { getCommitsForBranch } from "@agentic-kanban/shared/lib/git-service";
 import { runMigrations, getActiveProjectId } from "../shared.js";
 import { getSessionMessageRows } from "../../repositories/session.repository.js";
 import { computeReviewEffectiveness, renderReviewEffectivenessReport } from "../../services/review-effectiveness.service.js";
 
+const DEFAULT_PORT = process.env.KANBAN_SERVER_PORT ?? "3001";
+const BASE_URL = `http://127.0.0.1:${DEFAULT_PORT}`;
+
 export function registerSessionCommand(program: Command) {
-  const sessionCmd = program.command("session").description("Inspect agent sessions.\n\nSubcommands: analyze, recent, backfill-friction, review-effectiveness");
+  const sessionCmd = program.command("session").description("Inspect agent sessions.\n\nSubcommands: analyze, recent, backfill-friction, review-effectiveness, transcript, search, stats, friction, find-similar");
 
   sessionCmd
     .command("analyze <session-id>")
@@ -319,7 +323,7 @@ export function registerSessionCommand(program: Command) {
           if (!ws) {
             ws = {
               workspaceId: r.workspaceId,
-              issueNumber: r.issueNumber,
+              issueNumber: r.issueNumber ?? 0,
               issueTitle: r.issueTitle,
               provider: r.provider,
               wsStatus: r.wsStatus,
@@ -554,6 +558,505 @@ export function registerSessionCommand(program: Command) {
         }
         L.push("");
         console.log(L.join("\n"));
+        process.exit(0);
+      } catch (err) {
+        console.error("Error:", err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+    });
+  // ── transcript ──────────────────────────────────────────────────────────────
+  sessionCmd
+    .command("transcript <session-id>")
+    .description("Retrieve a session transcript: metadata, workspace, issue, and ordered messages.")
+    .option("--limit <n>", "Maximum messages to return (newest selected, returned in chrono order)", "200")
+    .option("--json", "Emit raw JSON (default)")
+    .addHelpText("after", `
+Examples:
+  pnpm cli -- session transcript abc123
+  pnpm cli -- session transcript abc123 --limit 50`)
+    .action(async (sessionId: string, options: { limit?: string; json?: boolean }) => {
+      try {
+        const limit = Math.min(parseInt(options.limit ?? "200", 10) || 200, 1000);
+        const res = await fetch(`${BASE_URL}/api/sessions/${encodeURIComponent(sessionId)}/output`);
+        if (!res.ok) {
+          console.error(`Server returned ${res.status}: ${await res.text()}`);
+          process.exit(1);
+        }
+        // /output returns the session messages; also fetch summary for metadata
+        const outputData = await res.json() as unknown;
+
+        // Fetch session metadata from DB for project/issue/workspace context
+        await runMigrations();
+        const sessionRows = await db
+          .select({
+            sessionId: sessions.id,
+            providerSessionId: sessions.providerSessionId,
+            executor: sessions.executor,
+            sessionStatus: sessions.status,
+            startedAt: sessions.startedAt,
+            endedAt: sessions.endedAt,
+            exitCode: sessions.exitCode,
+            triggerType: sessions.triggerType,
+            skillId: sessions.skillId,
+            skillName: sessions.skillName,
+            workspaceId: workspaces.id,
+            branch: workspaces.branch,
+            workspaceStatus: workspaces.status,
+            issueId: issues.id,
+            issueNumber: issues.issueNumber,
+            issueTitle: issues.title,
+            projectId: projects.id,
+            projectName: projects.name,
+          })
+          .from(sessions)
+          .innerJoin(workspaces, eq(sessions.workspaceId, workspaces.id))
+          .innerJoin(issues, eq(workspaces.issueId, issues.id))
+          .innerJoin(projects, eq(issues.projectId, projects.id))
+          .where(eq(sessions.id, sessionId))
+          .limit(1);
+
+        if (sessionRows.length === 0) {
+          console.error(`Session '${sessionId}' not found.`);
+          process.exit(1);
+        }
+
+        const meta = sessionRows[0];
+
+        // Fetch messages from DB (capped to limit)
+        const newestMessages = await db
+          .select({
+            id: sessionMessages.id,
+            type: sessionMessages.type,
+            data: sessionMessages.data,
+            exitCode: sessionMessages.exitCode,
+            createdAt: sessionMessages.createdAt,
+          })
+          .from(sessionMessages)
+          .where(eq(sessionMessages.sessionId, sessionId))
+          .orderBy(desc(sessionMessages.id))
+          .limit(limit);
+        const msgs = newestMessages.reverse();
+
+        console.log(JSON.stringify({ ...meta, messages: msgs, _serverOutput: outputData }, null, 2));
+        process.exit(0);
+      } catch (err) {
+        console.error("Error:", err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+    });
+
+  // ── search ───────────────────────────────────────────────────────────────────
+  sessionCmd
+    .command("search <query>")
+    .description("Search agent session transcripts globally or within a project/issue.")
+    .option("--project <id>", "Restrict to a project ID")
+    .option("--issue <n>", "Restrict to an issue number")
+    .option("--provider <name>", "Filter by executor/provider (e.g. claude-code, codex)")
+    .option("--status <name>", "Filter by issue status name (e.g. Done)")
+    .option("--limit <n>", "Maximum results to return", "25")
+    .option("--json", "Emit raw JSON (default)")
+    .addHelpText("after", `
+Examples:
+  pnpm cli -- session search "ReferenceError"
+  pnpm cli -- session search "pnpm install" --project <projectId> --limit 10
+  pnpm cli -- session search "migration" --issue 42`)
+    .action(async (query: string, options: { project?: string; issue?: string; provider?: string; status?: string; limit?: string; json?: boolean }) => {
+      try {
+        await runMigrations();
+
+        const q = query.trim();
+        if (q.length < 2) {
+          console.log(JSON.stringify({ results: [], totalMatches: 0 }, null, 2));
+          process.exit(0);
+        }
+
+        const limit = Math.min(Math.max(1, parseInt(options.limit ?? "25", 10) || 25), 100);
+        const issueNumber = options.issue ? parseInt(options.issue, 10) : undefined;
+
+        const conditions = [
+          sql`${sessionMessages.data} IS NOT NULL`,
+          sql`${sessionMessages.data} LIKE ${"%" + q + "%"}`,
+          sql`${sessionMessages.type} != 'exit'`,
+        ];
+        if (options.project) conditions.push(eq(issues.projectId, options.project));
+        if (issueNumber && !isNaN(issueNumber)) conditions.push(eq(issues.issueNumber, issueNumber));
+        if (options.provider) conditions.push(eq(sessions.executor, options.provider));
+        if (options.status) conditions.push(eq(projectStatuses.name, options.status));
+
+        const SNIPPET_RADIUS = 80;
+        const makeSnippet = (text: string, matchIdx: number): string => {
+          const start = Math.max(0, matchIdx - SNIPPET_RADIUS);
+          const end = Math.min(text.length, matchIdx + SNIPPET_RADIUS);
+          let snippet = text.slice(start, end);
+          if (start > 0) snippet = "..." + snippet;
+          if (end < text.length) snippet += "...";
+          return snippet;
+        };
+
+        const rows = await db
+          .select({
+            messageId: sessionMessages.id,
+            messageData: sessionMessages.data,
+            messageCreatedAt: sessionMessages.createdAt,
+            sessionId: sessions.id,
+            providerSessionId: sessions.providerSessionId,
+            sessionStartedAt: sessions.startedAt,
+            sessionStatus: sessions.status,
+            executor: sessions.executor,
+            workspaceId: workspaces.id,
+            branch: workspaces.branch,
+            issueId: issues.id,
+            issueNumber: issues.issueNumber,
+            issueTitle: issues.title,
+            issueStatusName: projectStatuses.name,
+            projectId: projects.id,
+            projectName: projects.name,
+          })
+          .from(sessionMessages)
+          .innerJoin(sessions, eq(sessionMessages.sessionId, sessions.id))
+          .innerJoin(workspaces, eq(sessions.workspaceId, workspaces.id))
+          .innerJoin(issues, eq(workspaces.issueId, issues.id))
+          .innerJoin(projects, eq(issues.projectId, projects.id))
+          .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+          .where(and(...conditions))
+          .orderBy(desc(sessionMessages.id))
+          .limit(limit);
+
+        const results = rows.map((row) => {
+          const data = row.messageData ?? "";
+          const matchOffset = data.toLowerCase().indexOf(q.toLowerCase());
+          return {
+            messageId: row.messageId,
+            sessionId: row.sessionId,
+            providerSessionId: row.providerSessionId,
+            snippet: makeSnippet(data, matchOffset >= 0 ? matchOffset : 0),
+            matchOffset,
+            messageCreatedAt: row.messageCreatedAt,
+            projectId: row.projectId,
+            projectName: row.projectName,
+            issueId: row.issueId,
+            issueNumber: row.issueNumber,
+            issueTitle: row.issueTitle,
+            issueStatusName: row.issueStatusName,
+            workspaceId: row.workspaceId,
+            branch: row.branch,
+            sessionStartedAt: row.sessionStartedAt,
+            sessionStatus: row.sessionStatus,
+            executor: row.executor,
+          };
+        });
+
+        console.log(JSON.stringify({ results, totalMatches: results.length }, null, 2));
+        process.exit(0);
+      } catch (err) {
+        console.error("Error:", err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+    });
+
+  // ── stats ────────────────────────────────────────────────────────────────────
+  sessionCmd
+    .command("stats [session-id]")
+    .description("Get token usage, cost, and duration stats for a session.")
+    .option("--workspace <id>", "Workspace ID — returns stats for the latest session in this workspace")
+    .option("--json", "Emit raw JSON (default)")
+    .addHelpText("after", `
+Examples:
+  pnpm cli -- session stats abc123
+  pnpm cli -- session stats --workspace <workspaceId>`)
+    .action(async (sessionId: string | undefined, options: { workspace?: string; json?: boolean }) => {
+      try {
+        await runMigrations();
+
+        let targetSessionId = sessionId;
+
+        if (!targetSessionId && options.workspace) {
+          const wsSessions = await db
+            .select({ id: sessions.id })
+            .from(sessions)
+            .where(eq(sessions.workspaceId, options.workspace))
+            .orderBy(desc(sessions.startedAt))
+            .limit(1);
+          if (wsSessions.length === 0) {
+            console.error("No sessions found for this workspace.");
+            process.exit(1);
+          }
+          targetSessionId = wsSessions[0].id;
+        }
+
+        if (!targetSessionId) {
+          console.error("Provide a session-id argument or --workspace <id>.");
+          process.exit(1);
+        }
+
+        const rows = await db
+          .select({
+            id: sessions.id,
+            status: sessions.status,
+            stats: sessions.stats,
+            startedAt: sessions.startedAt,
+            endedAt: sessions.endedAt,
+          })
+          .from(sessions)
+          .where(eq(sessions.id, targetSessionId))
+          .limit(1);
+
+        if (rows.length === 0) {
+          console.error(`Session '${targetSessionId}' not found.`);
+          process.exit(1);
+        }
+
+        const session = rows[0];
+        if (!session.stats) {
+          console.error(`No stats available for session ${targetSessionId} (session may still be running or stats were not captured).`);
+          process.exit(1);
+        }
+
+        let stats: Record<string, unknown>;
+        try {
+          stats = JSON.parse(session.stats);
+        } catch {
+          console.error(`Invalid stats data for session ${targetSessionId}.`);
+          process.exit(1);
+        }
+
+        console.log(JSON.stringify({
+          sessionId: session.id,
+          status: session.status,
+          startedAt: session.startedAt,
+          endedAt: session.endedAt,
+          ...stats,
+        }, null, 2));
+        process.exit(0);
+      } catch (err) {
+        console.error("Error:", err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+    });
+
+  // ── friction ─────────────────────────────────────────────────────────────────
+  sessionCmd
+    .command("friction")
+    .description(
+      "Aggregate agent-session friction (failed tool calls, repeated commands, error counts) across all sessions in a recent time window.\n" +
+        "Reads persisted friction stats; run `session backfill-friction` first if coverage is low.",
+    )
+    .option("--project <id>", "Project ID (defaults to active project)")
+    .option("--hours <n>", "Look-back window in hours", "48")
+    .option("--json", "Emit raw JSON instead of a formatted report")
+    .addHelpText("after", `
+Examples:
+  pnpm cli -- session friction
+  pnpm cli -- session friction --hours 24 --json
+  pnpm cli -- session friction --project <projectId>`)
+    .action(async (options: { project?: string; hours?: string; json?: boolean }) => {
+      try {
+        await runMigrations();
+
+        const windowHours = Math.max(1, parseInt(options.hours ?? "48", 10) || 48);
+        let projectId = options.project ?? (await getActiveProjectId());
+
+        const sinceIso = new Date(Date.now() - windowHours * 60 * 60 * 1000).toISOString();
+
+        const rows = await db
+          .select({
+            stats: sessions.stats,
+            exitCode: sessions.exitCode,
+            skillName: sessions.skillName,
+            wsSkillName: agentSkills.name,
+          })
+          .from(sessions)
+          .innerJoin(workspaces, eq(sessions.workspaceId, workspaces.id))
+          .innerJoin(issues, eq(workspaces.issueId, issues.id))
+          .leftJoin(agentSkills, eq(workspaces.skillId, agentSkills.id))
+          .where(and(eq(issues.projectId, projectId), gte(sessions.startedAt, sinceIso)));
+
+        const byTool = new Map<string, { calls: number; failed: number }>();
+        const repeated = new Map<string, { count: number; sessions: number }>();
+        let totalToolCalls = 0;
+        let failedToolCalls = 0;
+        let errorTotal = 0;
+        let sessionsWithFriction = 0;
+
+        for (const r of rows) {
+          if (!r.stats) continue;
+          let parsed: { friction?: SessionFrictionStats };
+          try { parsed = JSON.parse(r.stats); } catch { continue; }
+          const f = parsed.friction;
+          if (!f) continue;
+          sessionsWithFriction++;
+          totalToolCalls += f.totalToolCalls;
+          failedToolCalls += f.failedToolCalls;
+          errorTotal += f.errorCount;
+          for (const t of f.tools ?? []) {
+            const e = byTool.get(t.tool) ?? { calls: 0, failed: 0 };
+            e.calls += t.count;
+            e.failed += t.failedCount;
+            byTool.set(t.tool, e);
+          }
+          for (const rc of f.repeatedCommands ?? []) {
+            const e = repeated.get(rc.command) ?? { count: 0, sessions: 0 };
+            e.count += rc.count;
+            e.sessions += 1;
+            repeated.set(rc.command, e);
+          }
+        }
+
+        const result = {
+          projectId,
+          windowHours,
+          sessionsInWindow: rows.length,
+          sessionsWithFriction,
+          coverage: rows.length > 0 ? Math.round((100 * sessionsWithFriction) / rows.length) / 100 : 0,
+          totalToolCalls,
+          failedToolCalls,
+          failPct: totalToolCalls > 0 ? Math.round((100 * failedToolCalls) / totalToolCalls) : 0,
+          errorTotal,
+          byTool: [...byTool.entries()]
+            .map(([tool, { calls, failed }]) => ({ tool, calls, failed, failPct: calls > 0 ? Math.round((100 * failed) / calls) : 0 }))
+            .sort((a, b) => b.failed - a.failed || b.calls - a.calls)
+            .slice(0, 20),
+          topRepeatedCommands: [...repeated.entries()]
+            .map(([command, { count, sessions: s }]) => ({ command, count, sessions: s }))
+            .sort((a, b) => b.count - a.count || b.sessions - a.sessions)
+            .slice(0, 15),
+        };
+
+        if (options.json) {
+          console.log(JSON.stringify(result, null, 2));
+          if (sessionsWithFriction === 0) {
+            console.error(`\nNo friction stats found. Run: pnpm cli -- session backfill-friction --hours ${windowHours}`);
+          }
+          process.exit(0);
+        }
+
+        const L: string[] = [];
+        L.push(`\n=== Fleet Friction — last ${windowHours}h (project ${projectId.slice(0, 8)}) ===`);
+        L.push(`Sessions in window: ${result.sessionsInWindow}  |  with friction data: ${sessionsWithFriction}  |  coverage: ${(result.coverage * 100).toFixed(0)}%`);
+        if (sessionsWithFriction === 0) {
+          L.push(`\n(!) No friction stats found. Run: pnpm cli -- session backfill-friction --hours ${windowHours}`);
+        } else {
+          L.push(`\nTool calls: ${totalToolCalls}  |  failed: ${failedToolCalls}  (${result.failPct}%)  |  errors: ${errorTotal}`);
+          L.push(`\n-- Top failing tools --`);
+          if (result.byTool.length === 0) {
+            L.push("  (none)");
+          } else {
+            for (const t of result.byTool.slice(0, 10)) {
+              L.push(`  ${t.tool}: ${t.failed}/${t.calls} failed (${t.failPct}%)`);
+            }
+          }
+          L.push(`\n-- Top repeated commands --`);
+          if (result.topRepeatedCommands.length === 0) {
+            L.push("  (none)");
+          } else {
+            for (const rc of result.topRepeatedCommands.slice(0, 10)) {
+              L.push(`  [${rc.sessions} sessions, ${rc.count}×] ${rc.command.slice(0, 80)}`);
+            }
+          }
+        }
+        L.push("");
+        console.log(L.join("\n"));
+        process.exit(0);
+      } catch (err) {
+        console.error("Error:", err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+    });
+
+  // ── find-similar ─────────────────────────────────────────────────────────────
+  sessionCmd
+    .command("find-similar <issue-number>")
+    .description("Search the failure-pattern memory for past incidents similar to a given error text or issue description.")
+    .option("--error <text>", "Error text or description to match (overrides issue description lookup)")
+    .option("--limit <n>", "Maximum matches to return", "3")
+    .option("--json", "Emit raw JSON instead of a formatted report")
+    .addHelpText("after", `
+Examples:
+  pnpm cli -- session find-similar 42
+  pnpm cli -- session find-similar 42 --error "ReferenceError: X is not defined" --limit 5`)
+    .action(async (issueNumberStr: string, options: { error?: string; limit?: string; json?: boolean }) => {
+      try {
+        await runMigrations();
+
+        const effectiveLimit = Math.min(Math.max(1, parseInt(options.limit ?? "3", 10) || 3), 10);
+
+        let errorText = options.error ?? "";
+        if (!errorText) {
+          // Look up the issue description/title to use as query text
+          const issueNum = parseInt(issueNumberStr, 10);
+          if (isNaN(issueNum)) {
+            console.error("Invalid issue number.");
+            process.exit(1);
+          }
+          const issueRows = await db
+            .select({ title: issues.title, description: issues.description })
+            .from(issues)
+            .where(eq(issues.issueNumber, issueNum))
+            .limit(1);
+          if (issueRows.length === 0) {
+            console.error(`Issue #${issueNum} not found.`);
+            process.exit(1);
+          }
+          errorText = [issueRows[0].title, issueRows[0].description ?? ""].join(" ");
+        }
+
+        const queryKw = extractKeywords(errorText);
+        if (queryKw.length === 0) {
+          console.error("No meaningful keywords found in the error text.");
+          process.exit(1);
+        }
+
+        const all = await db.select().from(failurePatterns);
+        if (all.length === 0) {
+          console.log("No failure patterns stored yet. Patterns are ingested from docs/learnings/ on startup.");
+          process.exit(0);
+        }
+
+        const querySet = new Set(queryKw);
+        const overlapScore = (patternKw: string[], qs: Set<string>): { score: number; matched: string[] } => {
+          const matched = patternKw.filter(k => qs.has(k));
+          if (patternKw.length === 0 && qs.size === 0) return { score: 0, matched: [] };
+          const union = new Set([...patternKw, ...qs]);
+          return { score: union.size > 0 ? matched.length / union.size : 0, matched };
+        };
+
+        const scored = all.map(p => {
+          const patternKw = p.keywords ? p.keywords.split(" ").filter(Boolean) : [];
+          const { score, matched } = overlapScore(patternKw, querySet);
+          return { pattern: p, score, matchedKeywords: matched };
+        })
+          .filter(m => m.score > 0.05)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, effectiveLimit);
+
+        if (options.json) {
+          console.log(JSON.stringify({ query: errorText, keywords: queryKw, matches: scored.map(m => ({ ...m.pattern, score: m.score, matchedKeywords: m.matchedKeywords })) }, null, 2));
+          process.exit(0);
+        }
+
+        if (scored.length === 0) {
+          console.log("No similar failures found. This may be a new class of error.");
+          process.exit(0);
+        }
+
+        const lines = [
+          `Found ${scored.length} similar failure(s) (keywords: ${queryKw.slice(0, 6).join(", ")}):`,
+          "",
+          ...scored.map((m, i) => {
+            const p = m.pattern;
+            const parts = [
+              `## ${i + 1}. ${p.title} (${Math.round(m.score * 100)}% match)`,
+              `**Matched keywords**: ${m.matchedKeywords.slice(0, 8).join(", ")}`,
+            ];
+            if (p.errorClass) parts.push(`**Error class**: ${p.errorClass}`);
+            if (p.description) parts.push(`**Description**: ${p.description.slice(0, 300)}`);
+            if (p.rootCause) parts.push(`**Root cause**: ${p.rootCause.slice(0, 400)}`);
+            if (p.fix) parts.push(`**Fix**: ${p.fix.slice(0, 400)}`);
+            if (p.sourceRef) parts.push(`**Source**: ${p.sourceRef}`);
+            return parts.join("\n");
+          }),
+        ];
+        console.log(lines.join("\n\n"));
         process.exit(0);
       } catch (err) {
         console.error("Error:", err instanceof Error ? err.message : String(err));
