@@ -1,7 +1,8 @@
 import type { Command } from "commander";
 import { db } from "../../db/index.js";
-import { issues, projects, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, projects, workspaces, issueComments } from "@agentic-kanban/shared/schema";
 import { eq, and, desc, inArray } from "drizzle-orm";
+import { proposeTransition, computeWorkspaceSignals } from "@agentic-kanban/shared/lib/workflow-engine";
 import { randomUUID } from "node:crypto";
 import { runMigrations, getActiveProjectId } from "../shared.js";
 import { buildWorkspaceApiUrl, buildApiUrl } from "./workspace-api-url.js";
@@ -706,49 +707,91 @@ Examples:
 
   wsCmd
     .command("clarify <workspace-id>")
-    .description("Raise a clarifying question or propose the next workflow gate for a workspace.\n\nUse action=clarify to surface questions in the interactive UI, or action=propose to advance the workflow. Requires the kanban server to be running (pnpm dev).")
+    .description("Raise a clarifying question or propose the next workflow gate for a workspace.\n\nMirrors the clarify_or_propose MCP tool: action=clarify persists a structured question to the issue's activity thread (visible in the interactive UI on next refresh); action=propose advances the workspace's workflow gate. Operates directly on the database — no running server required.")
     .option("--action <action>", "Action: clarify or propose (default: clarify)", "clarify")
     .option("--question <text>", "The clarifying question to ask (for action=clarify)")
+    .option("--header <text>", "Short header for the question (for action=clarify)")
     .option("--to <nodeName>", "Target workflow stage (for action=propose)")
     .option("--summary <text>", "Short context or transition summary")
-    .option("-p, --port <port>", "Server port (default: $KANBAN_SERVER_PORT or 3001)")
+    .option("--tests-passed", "Mark tests as passed for conditional propose routing")
+    .option("--json", "Output raw JSON")
     .addHelpText("after", `
 Examples:
   $ agentic-kanban workspace clarify <workspace-id> --question "Should I update the tests?"
-  $ agentic-kanban workspace clarify <workspace-id> --action propose --to Done
+  $ agentic-kanban workspace clarify <workspace-id> --action propose --to Done --summary "Implementation complete"
 `)
-    .action(async (workspaceId: string, options: { action?: string; question?: string; to?: string; summary?: string; port?: string }) => {
+    .action(async (workspaceId: string, options: { action?: string; question?: string; header?: string; to?: string; summary?: string; testsPassed?: boolean; json?: boolean }) => {
       try {
-        const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
+        await runMigrations();
         const action = options.action ?? "clarify";
-        const body: Record<string, unknown> = { action, workspaceId };
-        if (options.question) body.questions = [{ question: options.question }];
-        if (options.to) body.toNodeName = options.to;
-        if (options.summary) body.summary = options.summary;
+        if (action !== "clarify" && action !== "propose") {
+          console.error(`Invalid --action '${action}'. Use clarify or propose.`);
+          process.exit(1);
+        }
 
-        const res = await fetch(buildApiUrl(port, `/api/workflows/workspaces/${encodeURIComponent(workspaceId)}/clarify`), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
+        const wsRows = await db
+          .select({ issueId: workspaces.issueId, projectId: issues.projectId, issueNumber: issues.issueNumber })
+          .from(workspaces)
+          .innerJoin(issues, eq(workspaces.issueId, issues.id))
+          .where(eq(workspaces.id, workspaceId))
+          .limit(1);
+        if (wsRows.length === 0) {
+          console.error(`Workspace '${workspaceId}' not found.`);
+          process.exit(1);
+        }
+        const ws = wsRows[0];
+
+        if (action === "clarify") {
+          if (!options.question || !options.question.trim()) {
+            console.error("--question is required for action=clarify.");
+            process.exit(1);
+          }
+          const toolUseId = `cli-clarify-${randomUUID()}`;
+          const question = { question: options.question.trim(), header: options.header, options: [{ label: "Answer in free text" }] };
+          const body = [
+            options.summary?.trim() || "The phase agent needs clarification before continuing.",
+            "",
+            `1. ${question.header ? `${question.header}: ` : ""}${question.question}`,
+          ].join("\n");
+          await db.insert(issueComments).values({
+            id: randomUUID(),
+            issueId: ws.issueId,
+            workspaceId,
+            kind: "agent-question",
+            author: "agent",
+            body,
+            payload: JSON.stringify({ toolUseId, questions: [question], source: "cli_clarify_or_propose" }),
+            createdAt: new Date().toISOString(),
+          });
+          const result = { ok: true, action: "clarify", toolUseId, workspaceId, issueId: ws.issueId, issueNumber: ws.issueNumber, question };
+          if (options.json) { console.log(JSON.stringify(result, null, 2)); process.exit(0); }
+          console.log(`Clarifying question recorded for workspace '${workspaceId}' (issue #${ws.issueNumber}).`);
+          console.log(`  toolUseId: ${toolUseId}`);
+          console.log("  It is now visible in the interactive UI on next refresh.");
+          process.exit(0);
+        }
+
+        const signals = await computeWorkspaceSignals(db, workspaceId, { testsPassed: options.testsPassed });
+        const result = await proposeTransition(db, {
+          workspaceId,
+          toNodeName: options.to,
+          summary: options.summary,
+          triggeredBy: "agent",
+          signals,
         });
-
-        let data: Record<string, unknown>;
-        try {
-          data = await res.json() as Record<string, unknown>;
-        } catch {
-          console.error(`Clarify failed: ${res.statusText}`);
-          process.exit(1);
-          return;
-        }
-
-        if (!res.ok) {
-          console.error(`Clarify failed: ${data.error ?? res.statusText}`);
+        if (!result.ok) {
+          console.error(`Transition failed: ${result.error ?? "unknown error"}`);
           process.exit(1);
         }
-
-        console.log(`Clarify action '${action}' for workspace '${workspaceId}'`);
-        if (data.movedTo) console.log(`  movedTo: ${data.movedTo}`);
-        if (data.guidance) console.log(`  guidance: ${data.guidance}`);
+        const next = (result.nextTransitions ?? []).map((t) => t.toNodeName);
+        if (options.json) {
+          console.log(JSON.stringify({ ok: true, action: "propose", movedTo: result.toNode?.name, autoRouted: result.autoResolved ?? false, status: result.statusName, terminal: next.length === 0, nextStages: next }, null, 2));
+          process.exit(0);
+        }
+        console.log(`Proposed transition for workspace '${workspaceId}'.`);
+        if (result.toNode?.name) console.log(`  movedTo: ${result.toNode.name}`);
+        if (result.statusName) console.log(`  status: ${result.statusName}`);
+        console.log(next.length === 0 ? "  terminal: workflow complete" : `  nextStages: ${next.join(", ")}`);
         process.exit(0);
       } catch (err) {
         console.error("Error:", err instanceof Error ? err.message : String(err));
