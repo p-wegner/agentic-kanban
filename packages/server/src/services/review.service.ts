@@ -186,19 +186,16 @@ Steps to resolve:
   if (verifyAgent === "reviewer") {
     prompt += `
 
-## Post-Review: Merge + Visual Verification Required
+## Post-Review: Visual Verification Required (before approval)
 
 This project uses \`visual_verification_mode=after_merge\` with \`after_merge_verify_agent=reviewer\`.
-**You are responsible for the complete pipeline**: approve code → merge workspace → visual verify on master.
+**You are responsible for visually verifying the UI before approving** — but do NOT merge the
+workspace yourself. The system runs the project's verify_script + smoke gate on your review
+exit and only then merges; merging by hand would skip that gate.
 
 After completing your code review and fixing any CRITICAL/MAJOR issues:
 
-1. **Merge the workspace** (instead of mark_ready_for_merge, call merge directly):
-   \`\`\`
-   curl -s -X POST http://localhost:${serverPort}/api/workspaces/${workspaceId ?? "{{workspaceId}}"}/merge
-   \`\`\`
-
-2. **After merge, visually verify** the UI changes on master:
+1. **Visually verify** the UI changes on this branch's worktree:
    - Use the playwright-cli skill (/playwright-cli) or run playwright directly
    - Navigate to http://localhost:${clientPort}
    - Check the relevant UI sections for the changed files on branch '${branch}'
@@ -206,9 +203,13 @@ After completing your code review and fixing any CRITICAL/MAJOR issues:
    - Write ANY screenshots, log files, or scratch output into a \`.verify/\` directory (it is
      gitignored) — never the repo root. Don't leave \`*.log\` / \`*.png\` artifacts in the checkout.
 
-3. **Report** your verification result.
+2. **Report** your verification result.
 
-The stop hook will remind you if you try to exit before completing all three steps.`;
+3. **Signal approval** exactly as instructed above (mark_ready_for_merge / move to 'AI Reviewed')
+   and exit normally. Do NOT call the merge endpoint yourself — the verify_script + smoke gate
+   runs on your exit and the system merges once it passes.
+
+The stop hook will remind you if you try to exit before verifying the UI.`;
   }
 
   return { prompt, model: skillModel };
