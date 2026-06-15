@@ -1,5 +1,15 @@
 # Workflows
 
+## PowerShell Git Commits
+
+When committing from PowerShell, keep the commit subject in one quoted `-m` argument. For a longer message, use repeated quoted `-m` flags instead of raw newlines:
+
+```powershell
+git commit -m "docs: learning step -- short subject" -m "Optional body paragraph."
+```
+
+If Git reports `pathspec '<word>' did not match any file(s)` for words from the intended message, the message was split by shell quoting and Git is treating the prose as paths. Run `git status --short`, then retry the commit with quoted `-m` arguments.
+
 ## Starting the App (Clean State)
 
 Use this when you want a fully initialized app with no stale issues, workspaces, or sessions.
