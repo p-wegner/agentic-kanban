@@ -449,6 +449,12 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
         // projects/the dev board are unaffected. A non-zero exit WITHHOLDS readyForMerge
         // so code that doesn't compile/test/run can't be auto-approved and merged
         // (the diff-only LLM review can't catch that on its own).
+        //
+        // #821: this same verify+smoke gate is extracted into `runPreMergeGate`
+        // (pre-merge-gate.service.ts) so the monitor's auto_merge_in_review path runs it too
+        // (it previously bypassed the gate entirely). The inline version below stays here because
+        // it interleaves the #812 build-approval repair (which must commit onto the branch BEFORE
+        // the verify build) and #826 diagnostics; keep the two in sync.
         const verifyScript = prefMap.get(`verify_script_${projectId}`);
         // #826 diagnostic: capture the gate decision inputs. On the ktor-gallery drive verify+smoke
         // ran 0× while readyForMerge was still set — this reveals exactly why (unset pref vs missing
