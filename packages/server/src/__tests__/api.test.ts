@@ -1917,6 +1917,9 @@ describe("Workspaces API", () => {
     // now part of the projected shape (value plumbing is covered by provider-config-resolution tests).
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.every((w) => "model" in w)).toBe(true);
+    // mergedAt + isDirect must also be projected so agents can judge merge/landing state.
+    expect(rows.every((w) => "mergedAt" in w)).toBe(true);
+    expect(rows.every((w) => "isDirect" in w)).toBe(true);
   });
 
   it("POST /api/workspaces skips setup script for direct workspaces", async () => {

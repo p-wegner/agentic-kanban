@@ -276,6 +276,12 @@ export function createWorkspacesRoute(
       // this projection, so the API always returned model=null even when a builder launched with a
       // real model (e.g. claude-sonnet-4-6). Surface it alongside provider (#819).
       model: workspaces.model,
+      // mergedAt/isDirect were also missing from this projection, so an agent reading the list API
+      // saw mergedAt=null and could wrongly conclude a workspace's work hasn't landed (a leaf's
+      // dependents look un-ready) even though it merged. They drive the dependency-wave readiness
+      // gate, so surface them here too (#827 follow-up; same class as the #819 model gap).
+      mergedAt: workspaces.mergedAt,
+      isDirect: workspaces.isDirect,
       createdAt: workspaces.createdAt,
       updatedAt: workspaces.updatedAt,
     };
