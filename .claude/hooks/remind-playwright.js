@@ -85,24 +85,23 @@ function main() {
   }
 
   const clientPort = process.env.KANBAN_CLIENT_PORT || process.env.VITE_PORT || "5173";
-  const serverPort = process.env.KANBAN_SERVER_PORT || process.env.SERVER_PORT || "3001";
 
   const isReviewerVerify = sessionType === "review" && afterMergeVerify === "reviewer";
   const reason = isReviewerVerify
     ? [
-        "REVIEWER: MERGE + VISUAL VERIFICATION REQUIRED",
+        "REVIEWER: VISUAL VERIFICATION REQUIRED (before approval)",
         "",
         "You are in after_merge+reviewer mode. Before stopping, you must:",
         "",
-        "  1. Merge the workspace:",
-        `     curl -s -X POST http://127.0.0.1:${serverPort}/api/workspaces/{workspaceId}/merge`,
-        "     (or use the workspaceId from your prompt)",
-        "",
-        "  2. Visually verify on master:",
+        "  1. Visually verify this branch's UI:",
         `     Open http://127.0.0.1:${clientPort} using playwright-cli (/playwright-cli)`,
         "     Navigate to the relevant UI sections and take a screenshot",
         "",
-        "  3. Report your verification result, then exit.",
+        "  2. Report your verification result.",
+        "",
+        "  3. Signal approval as instructed (mark_ready_for_merge / move to 'AI Reviewed'),",
+        "     then exit. Do NOT merge the workspace yourself — the verify_script + smoke gate",
+        "     runs on your exit and the system merges once it passes.",
       ].join("\n")
     : [
         "VISUAL VERIFICATION REQUIRED",
