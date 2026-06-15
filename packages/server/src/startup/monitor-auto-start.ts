@@ -161,7 +161,7 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
     if (currentWip >= wipLimit) continue;
 
     const inProgressIssues = await db.select({ id: issues.id, title: issues.title, description: issues.description, issueType: issues.issueType, issueNumber: issues.issueNumber }).from(issues)
-      .where(eq(issues.statusId, inProgressSt.id));
+      .where(and(eq(issues.statusId, inProgressSt.id), notDriveOrEpicMetaSql())); // #824: don't backfill a builder onto a meta created directly In Progress
     for (const issue of inProgressIssues) {
       if (currentWip >= wipLimit) break;
       if (startsRemaining(inProgressSt.projectId) <= 0) break;
