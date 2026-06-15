@@ -450,6 +450,19 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
         // so code that doesn't compile/test/run can't be auto-approved and merged
         // (the diff-only LLM review can't catch that on its own).
         const verifyScript = prefMap.get(`verify_script_${projectId}`);
+        // #826 diagnostic: capture the gate decision inputs. On the ktor-gallery drive verify+smoke
+        // ran 0× while readyForMerge was still set — this reveals exactly why (unset pref vs missing
+        // worktree vs profile) on the next drive.
+        const verifyConfigured = Boolean(verifyScript && verifyScript.trim());
+        console.log(`[workflow] verify gate eval ws=${workspaceId} project=${projectId}: verify_script=${verifyConfigured ? "set" : "UNSET"}, workingDir=${workspace.workingDir ? "present" : "MISSING"}`);
+        // #826 fail-closed: a CONFIGURED verify gate that cannot run (no worktree) must withhold
+        // readyForMerge — previously it skipped silently and still approved the code, so unverified
+        // work merged. Never set readyForMerge when the gate we were told to run didn't run.
+        if (verifyConfigured && !workspace.workingDir) {
+          console.log(`[workflow] verify_script configured but workspace ${workspaceId} has no worktree — withholding readyForMerge (cannot verify; #826)`);
+          boardEvents.broadcast(projectId, "workflow_error");
+          return;
+        }
         if (verifyScript && verifyScript.trim() && workspace.workingDir) {
           // #783/#789/#812: a builder that created the build manifest may not have approved
           // native build scripts or pinned a package-manager version that honors the approval —
@@ -515,11 +528,19 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
         // library/CLI project (no `isWeb`/dev command/health URL) yields no SmokeCheck and this is
         // a clean no-op. A failed boot/response WITHHOLDS readyForMerge — the diff-only LLM review
         // can't catch "compiles but doesn't boot". Generalizes the old `frontend-smoke.ps1`.
-        if (workspace.workingDir) {
+        {
           try {
             const profile = await getStackProfile(projectId, db);
             const smokeCheck = buildSmokeCheck(profile);
             if (smokeCheck) {
+              // #826 fail-closed: a web project's smoke (UI) gate that can't run for lack of a
+              // worktree must withhold readyForMerge, not silently approve. (Profile load needs no
+              // worktree, so we can detect "gate applies" before checking workingDir.)
+              if (!workspace.workingDir) {
+                console.log(`[workflow] smoke/UI gate applies (web project) but workspace ${workspaceId} has no worktree — withholding readyForMerge (#826)`);
+                boardEvents.broadcast(projectId, "workflow_error");
+                return;
+              }
               console.log(`[workflow] running smoke check for workspace ${workspaceId}: ${smokeCheck.devCommand} -> ${smokeCheck.healthUrl}`);
               const smoke = await runUnderBuildGate(() => runSmokeCheck(workspace.workingDir!, smokeCheck));
               if (!smoke.passed) {
