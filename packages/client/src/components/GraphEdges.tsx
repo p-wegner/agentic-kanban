@@ -2,8 +2,10 @@ import type { MutableRefObject } from "react";
 import { BRAND } from "../lib/chartColors";
 import type { CriticalPathResult } from "../lib/criticalPath.js";
 import {
+  ACTIVE_GLOW_COLOR,
   CHAIN_EDGE_COLOR,
   DEPENDENCY_COLORS,
+  isActivelyWorked,
   NODE_H,
   NODE_W,
   type Dependency,
@@ -74,10 +76,14 @@ export function GraphEdges({
 
         const color = DEPENDENCY_COLORS[edge.type] ?? "#9ca3af";
         const d = `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;
+        // Animate the "unblock" flow: an active source ticket feeds the
+        // dependent ticket it is about to unblock (blocking edges only).
+        const isUnblockFlow = isBlockingEdge && !isSelectedEdge && isActivelyWorked(src.issue);
         return (
           <g
             key={edge.id}
             data-edge-id={edge.id}
+            data-unblock-flow={isUnblockFlow || undefined}
             style={{ cursor: "pointer" }}
             onClick={(e) => {
               e.stopPropagation();
@@ -95,11 +101,25 @@ export function GraphEdges({
             <path
               d={d}
               fill="none"
-              stroke={isSelectedEdge ? BRAND : color}
-              strokeWidth={isSelectedEdge ? 2.5 : 1.5}
-              opacity={isSelectedEdge ? 1 : 0.7}
-              markerEnd={`url(#arrow-${edge.type})`}
+              stroke={isSelectedEdge ? BRAND : (isUnblockFlow ? ACTIVE_GLOW_COLOR : color)}
+              strokeWidth={isSelectedEdge ? 2.5 : (isUnblockFlow ? 2 : 1.5)}
+              opacity={isSelectedEdge ? 1 : (isUnblockFlow ? 0.95 : 0.7)}
+              markerEnd={isUnblockFlow ? "url(#arrow-critical-chain)" : `url(#arrow-${edge.type})`}
             />
+            {/* Animated flow overlay (dashed, marching toward the dependent) */}
+            {isUnblockFlow && (
+              <path
+                className="graph-unblock-flow"
+                d={d}
+                fill="none"
+                stroke="white"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeDasharray="2 10"
+                opacity={0.9}
+                pointerEvents="none"
+              />
+            )}
             <text
               x={mx}
               y={(y1 + y2) / 2 - 4}

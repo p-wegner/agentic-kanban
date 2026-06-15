@@ -2,7 +2,9 @@ import type { MouseEvent as ReactMouseEvent, MutableRefObject } from "react";
 import { BRAND, STATUS_COLORS, TYPE_COLORS } from "../lib/chartColors";
 import type { CriticalPathResult } from "../lib/criticalPath.js";
 import {
+  ACTIVE_GLOW_COLOR,
   CYCLE_COLOR,
+  isActivelyWorked,
   NODE_H,
   NODE_W,
   ROOT_BLOCKER_COLOR,
@@ -53,11 +55,14 @@ export function GraphNodes({
           : true;
         const title = node.issue.title;
         const displayTitle = title.length > 28 ? title.slice(0, 28) + "…" : title;
+        // Active = an agent is currently working this issue. Suppressed in
+        // critical-path mode, which uses the whole node-stroke channel itself.
+        const isActive = !isCriticalPathMode && isActivelyWorked(node.issue);
 
         // Critical-path mode visual overrides
         let nodeOpacity = isHighlighted ? 1 : 0.3;
-        let nodeStroke = isFocused ? BRAND : (isSelected ? BRAND : color);
-        let nodeStrokeWidth = isFocused ? 3 : (isSelected ? 2 : 1.5);
+        let nodeStroke = isFocused ? BRAND : (isSelected ? BRAND : (isActive ? ACTIVE_GLOW_COLOR : color));
+        let nodeStrokeWidth = isFocused ? 3 : (isSelected ? 2 : (isActive ? 2 : 1.5));
         let nodeStrokeDasharray: string | undefined;
         let isRootBlocker = false;
         let downstreamBadge: number | null = null;
@@ -114,6 +119,22 @@ export function GraphNodes({
               onNodeClick(node);
             }}
           >
+            {/* Pulsing halo — animated "actively worked on" indicator */}
+            {isActive && (
+              <rect
+                className="graph-active-halo"
+                x={-3}
+                y={-3}
+                width={NODE_W + 6}
+                height={NODE_H + 6}
+                rx={9}
+                ry={9}
+                fill="none"
+                stroke={ACTIVE_GLOW_COLOR}
+                strokeWidth={2}
+                pointerEvents="none"
+              />
+            )}
             <rect
               width={NODE_W}
               height={NODE_H}
@@ -125,8 +146,24 @@ export function GraphNodes({
               strokeDasharray={nodeStrokeDasharray}
               filter="drop-shadow(0 1px 3px rgba(0,0,0,0.12))"
             />
-            {/* Status indicator bar */}
-            <rect width={4} height={NODE_H} rx={3} fill={color} />
+            {/* Status indicator bar (pulses while actively worked) */}
+            <rect
+              className={isActive ? "graph-active-bar" : undefined}
+              width={4}
+              height={NODE_H}
+              rx={3}
+              fill={isActive ? ACTIVE_GLOW_COLOR : color}
+            />
+            {/* Active "working" dot */}
+            {isActive && (
+              <circle
+                className="graph-active-dot"
+                cx={NODE_W - 26}
+                cy={12}
+                r={3.5}
+                fill={ACTIVE_GLOW_COLOR}
+              />
+            )}
             {/* Priority dot */}
             <circle
               cx={NODE_W - 12}

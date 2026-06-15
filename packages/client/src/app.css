@@ -208,6 +208,52 @@ body {
   animation: count-pop 0.3s ease-out;
 }
 
+/* Graph view: "actively worked on" progress indication.
+   The pulsing halo + bar mark issues with a live agent workspace; the marching
+   dash overlay animates the unblock-flow edges from an active ticket to the
+   tickets it is about to unblock. */
+@keyframes graph-active-pulse {
+  0%   { opacity: 0.65; transform: scale(1); }
+  50%  { opacity: 0.15; transform: scale(1.015); }
+  100% { opacity: 0.65; transform: scale(1); }
+}
+
+.graph-active-halo {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: graph-active-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes graph-active-bar-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+
+.graph-active-bar {
+  animation: graph-active-bar-pulse 1.8s ease-in-out infinite;
+}
+
+.graph-active-dot {
+  animation: graph-active-bar-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes graph-unblock-march {
+  to { stroke-dashoffset: -120; }
+}
+
+.graph-unblock-flow {
+  animation: graph-unblock-march 2s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .graph-active-halo,
+  .graph-active-bar,
+  .graph-active-dot,
+  .graph-unblock-flow {
+    animation: none;
+  }
+}
+
 /* Horizontal scroll snap for active columns */
 .board-columns-scroll {
   scroll-snap-type: x mandatory;

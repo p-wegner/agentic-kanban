@@ -827,7 +827,10 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       .orderBy(issues.sortOrder);
 
     const issueIds = projectIssues.map((i) => i.id);
-    const edges = await buildGraphEdges(issueIds, database);
+    const [edges, workspaceSummaryMap] = await Promise.all([
+      buildGraphEdges(issueIds, database),
+      buildWorkspaceSummaryMap(issueIds, project.defaultBranch, database),
+    ]);
 
     const blockedIds = new Set(
       edges
@@ -835,7 +838,11 @@ export function createProjectService(deps: { database: Database; workspaceSummar
         .map((e) => e.issueId)
     );
 
-    const nodes = projectIssues.map((i) => ({ ...i, isBlocked: blockedIds.has(i.id) }));
+    const nodes = projectIssues.map((i) => ({
+      ...i,
+      isBlocked: blockedIds.has(i.id),
+      workspaceSummary: workspaceSummaryMap.get(i.id),
+    }));
     return { nodes, edges };
   }
 
