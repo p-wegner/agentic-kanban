@@ -11,6 +11,7 @@ Analyze past agent interactions to find friction and improve future sessions. Yo
 ## Input modes (from arguments)
 
 **No arguments (inline)** — you're a subagent; the parent conversation IS the session data. Analyze what you can see (what the agent did, what went wrong, what took extra turns); skip data collection. If the inline context has a structured session handoff, treat it as primary evidence — the feature worktree may already be clean/merged/emptied by board cleanup, so don't treat an empty/missing worktree as a blocker; fall back to the handoff, commit hash, changed-file list, test result, and any local transcript snippets.
+If the handoff names a "Last Commit" and the worktree still exists, verify it with `git rev-parse --short HEAD` before using or reporting that SHA; handoff commit hashes can be stale after later commit rewriting or regenerated summaries.
 
 **`--issue <N>`** — fetch structured data for kanban issue #N:
 ```powershell
