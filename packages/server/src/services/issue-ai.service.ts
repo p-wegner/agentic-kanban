@@ -9,6 +9,7 @@ import type { IssueEstimate } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
 import { invokeClaudePrompt } from "./claude-cli.service.js";
 import { NotFoundError } from "../errors/index.js";
+import { createDrive } from "../repositories/drive.repository.js";
 
 export interface EnhanceIssueResult {
   title: string;
@@ -504,10 +505,14 @@ export interface ConfirmDecomposeInput {
   projectId: string;
   children: DecomposeChildProposal[];
   dependencies: DecomposeDependencyProposal[];
+  /** When provided, a Drive record is auto-created with this target and metaIssueId set. */
+  driveTarget?: string;
 }
 
 export interface ConfirmDecomposeResult {
   createdIssues: Array<{ id: string; issueNumber: number; title: string; tempId: string }>;
+  /** The Drive record created for this decomposition, if driveTarget was supplied. */
+  driveId?: string;
 }
 
 export async function confirmEpicDecomposition(
@@ -609,7 +614,8 @@ export async function confirmEpicDecomposition(
     } catch { /* skip duplicate/cycle */ }
   }
 
-  // Wire parent_of deps from parent to each child
+  // Wire parent_of deps from parent to each child, AND child_of deps from each child back to parent.
+  // child_of (child.issueId → dependsOnId=parent) is what reconcileDriveCompletion queries.
   for (const child of createdIssues) {
     try {
       await database.insert(issueDependencies).values({
@@ -617,6 +623,15 @@ export async function confirmEpicDecomposition(
         issueId: issueId,
         dependsOnId: child.id,
         type: "parent_of",
+        createdAt: now,
+      });
+    } catch { /* skip */ }
+    try {
+      await database.insert(issueDependencies).values({
+        id: randomUUID(),
+        issueId: child.id,
+        dependsOnId: issueId,
+        type: "child_of",
         createdAt: now,
       });
     } catch { /* skip */ }
@@ -646,5 +661,14 @@ export async function confirmEpicDecomposition(
     .set({ description: newDescription, updatedAt: now })
     .where(eq(issues.id, issueId));
 
-  return { createdIssues };
+  let driveId: string | undefined;
+  if (input.driveTarget) {
+    const drive = await createDrive(
+      { projectId, metaIssueId: issueId, target: input.driveTarget },
+      database,
+    );
+    driveId = drive.id;
+  }
+
+  return { createdIssues, driveId };
 }

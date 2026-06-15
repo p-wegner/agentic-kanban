@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
+import { eq, and } from "drizzle-orm";
 import { Hono } from "hono";
 import * as schema from "@agentic-kanban/shared/schema";
 import { createIssuesRoute } from "../routes/issues.js";
@@ -99,6 +100,82 @@ describe("POST /api/issues/batch", () => {
 
     const rows = await db.select().from(schema.issues);
     expect(rows).toHaveLength(0);
+  });
+});
+
+describe("POST /api/issues/batch — parentIssueId + driveTarget", () => {
+  it("wires child_of edges when parentIssueId is provided", async () => {
+    const { app, db } = createTestApp();
+    const { projectId, statusId } = await seed(db);
+    const parentId = await insertIssue(db, projectId, statusId, 1);
+
+    const res = await app.request("/api/issues/batch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId,
+        parentIssueId: parentId,
+        issues: [{ title: "Child A" }, { title: "Child B" }],
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = await res.json() as any;
+    expect(body.issues).toHaveLength(2);
+
+    const deps = await db
+      .select()
+      .from(schema.issueDependencies)
+      .where(and(eq(schema.issueDependencies.dependsOnId, parentId), eq(schema.issueDependencies.type, "child_of")));
+    expect(deps).toHaveLength(2);
+    const childIds = body.issues.map((i: any) => i.id);
+    expect(deps.map((d) => d.issueId).sort()).toEqual(childIds.sort());
+  });
+
+  it("auto-creates a Drive record when driveTarget is provided with parentIssueId", async () => {
+    const { app, db } = createTestApp();
+    const { projectId, statusId } = await seed(db);
+    const parentId = await insertIssue(db, projectId, statusId, 1);
+
+    const res = await app.request("/api/issues/batch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId,
+        parentIssueId: parentId,
+        driveTarget: "Deliver the feature",
+        issues: [{ title: "Task 1" }],
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = await res.json() as any;
+    expect(body.driveId).toBeTruthy();
+
+    const drives = await db.select().from(schema.drives).where(eq(schema.drives.id, body.driveId));
+    expect(drives).toHaveLength(1);
+    expect(drives[0].metaIssueId).toBe(parentId);
+    expect(drives[0].target).toBe("Deliver the feature");
+    expect(drives[0].status).toBe("active");
+  });
+
+  it("does NOT create a Drive when driveTarget is given without parentIssueId", async () => {
+    const { app, db } = createTestApp();
+    const { projectId } = await seed(db);
+
+    const res = await app.request("/api/issues/batch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId,
+        driveTarget: "Should be ignored",
+        issues: [{ title: "Orphan" }],
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = await res.json() as any;
+    expect(body.driveId).toBeUndefined();
+
+    const drives = await db.select().from(schema.drives);
+    expect(drives).toHaveLength(0);
   });
 });
 

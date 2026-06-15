@@ -552,7 +552,7 @@ export function createIssueExportImportRoute(
     let created = 0;
     if (validInputs.length > 0) {
       const results = await issueService.createIssuesBatch(projectId, validInputs);
-      created = results.length;
+      created = results.issues.length;
     }
 
     return c.json({
