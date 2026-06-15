@@ -915,9 +915,8 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
 
   async function renameButler(butlerId: string, newName: string) {
     try {
-      await fetch(`/api/butler-definitions/${butlerId}`, {
+      await apiFetch(`/api/butler-definitions/${butlerId}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: newName }),
       });
       updateTab(butlerId, { butlerName: newName });
