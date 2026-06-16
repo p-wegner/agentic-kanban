@@ -97,7 +97,7 @@ interface ButlerSession {
   /** Composite map key: plain projectId for the default butler (backward compat),
    *  `${projectId}::${butlerId}` for any other. */
   key: string;
-  backend: "claude" | "codex";
+  backend: "claude" | "codex" | "mock";
   input?: Pushable<SDKUserMessage>;
   sessionId?: string;
   abort: AbortController;
@@ -180,7 +180,7 @@ function buildButlerSystemPrompt(projectName: string, repoPath: string): string 
 
 export interface ButlerSessionState {
   butlerId: string;
-  backend: "claude" | "codex";
+  backend: "claude" | "codex" | "mock";
   sessionId?: string;
   active: boolean;
   busy: boolean;
@@ -294,7 +294,7 @@ export function ensureButlerSession(opts: {
   repoPath: string;
   projectName: string;
   claudeProfile?: string;
-  backend?: "claude" | "codex";
+  backend?: "claude" | "codex" | "mock";
   profile?: { provider: ProviderName; name: string };
   agentCommand?: string;
   agentArgs?: string;
@@ -345,6 +345,20 @@ export function ensureButlerSession(opts: {
       broadcast(session, { type: "ready" });
       if (session.sessionId) broadcast(session, { type: "session", sessionId: session.sessionId });
       broadcast(session, { type: "meta", model: session.model, contextWindow: session.contextWindow, mcpConnected: session.mcpConnected });
+    });
+    return session;
+  }
+
+  if (backend === "mock") {
+    session.sessionId = opts.resumeSessionId || `mock-${Date.now()}`;
+    session.mcpConnected = false;
+    session.model = "mock";
+    session.contextWindow = 200000;
+    console.log(`[butler-sdk] starting mock session: project=${opts.projectId} butler=${butlerId}`);
+    queueMicrotask(() => {
+      broadcast(session, { type: "ready" });
+      broadcast(session, { type: "session", sessionId: session.sessionId! });
+      broadcast(session, { type: "meta", model: "mock", contextWindow: 200000, mcpConnected: false });
     });
     return session;
   }
@@ -725,6 +739,15 @@ export function sendButlerTurn(
   broadcast(s, { type: "turn-start" });
   if (s.backend === "codex") {
     runProviderTurn(s, content);
+  } else if (s.backend === "mock") {
+    const turnContent = content;
+    setTimeout(() => {
+      const response = `[mock] ${turnContent}`;
+      broadcast(s, { type: "text", text: response });
+      s.transcript.push({ role: "assistant", text: response, ts: Date.now() });
+      s.busy = false;
+      broadcast(s, { type: "result", text: response, isError: false });
+    }, 50);
   } else {
     s.input?.push({ type: "user", message: { role: "user", content }, parent_tool_use_id: null });
   }
