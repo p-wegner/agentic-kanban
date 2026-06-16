@@ -9,9 +9,12 @@
  * E.g. `C:\andrena\agentic-kanban` → `C--andrena-agentic-kanban`
  *
  * Each line is a JSON object. Relevant entries:
- *   - `{ type: "user", entrypoint: "sdk-cli", message: { role: "user", content: string }, timestamp: ISO, sessionId }`
- *   - `{ type: "assistant", entrypoint: "sdk-cli", message: { model, content: Array<{type,text}> }, timestamp: ISO, sessionId }`
+ *   - `{ type: "user", entrypoint: "sdk-cli"|"cli", message: { role: "user", content: string }, timestamp: ISO, sessionId }`
+ *   - `{ type: "assistant", entrypoint: "sdk-cli"|"cli", message: { model, content: Array<{type,text}> }, timestamp: ISO, sessionId }`
  *   - `{ type: "ai-title", aiTitle: string, sessionId }`
+ *
+ * Note: older SDK versions wrote entrypoint: "sdk-cli"; newer versions write "cli".
+ * Both are accepted.
  */
 import { readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -36,6 +39,13 @@ export interface ButlerSessionMessage {
 function encodeCwd(cwd: string): string {
   // Claude replaces `:`, `\`, and `/` all with `-`
   return cwd.replace(/[:\\/]/g, "-");
+}
+
+/** The Claude Agent SDK has used both "sdk-cli" and "cli" as the entrypoint value
+ *  across versions. Accept either so session transcripts are readable regardless of
+ *  which SDK version wrote them. */
+function isSdkEntry(entry: JsonlEntry): boolean {
+  return entry.entrypoint === "sdk-cli" || entry.entrypoint === "cli";
 }
 
 /** Resolve the Claude projects transcript directory for the given repo path. */
@@ -104,7 +114,7 @@ async function parseSessionFile(filePath: string, sessionId: string): Promise<Bu
       title = entry.aiTitle;
     }
 
-    if (entry.entrypoint !== "sdk-cli") continue;
+    if (!isSdkEntry(entry)) continue;
     hasSdkCli = true;
 
     if (entry.type === "user" && entry.message?.role === "user") {
@@ -215,7 +225,7 @@ export async function getButlerSessionMessages(
   for (const line of content.split("\n")) {
     if (!line.trim()) continue;
     const entry = parseJsonlEntry(line);
-    if (!entry || entry.entrypoint !== "sdk-cli") continue;
+    if (!entry || !isSdkEntry(entry)) continue;
 
     if (entry.type === "user" && entry.message?.role === "user") {
       const text = typeof entry.message.content === "string"
