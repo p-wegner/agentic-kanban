@@ -329,7 +329,14 @@ export function createButlerRoute(
     const wasActive = getButlerSession(projectId, butlerId).active;
     // When the resolved profile is "mock", use the in-process mock backend instead
     // of the Claude SDK (which would fail without real API credentials).
-    const effectiveBackend: "claude" | "codex" | "mock" = isMockProfile(backend.claudeProfile)
+    // NOTE: loadAgentSettings (used inside resolveButlerBackend) strips "mock" from
+    // claudeProfile so it is never forwarded to spawn args. We must check the raw pref
+    // directly — per-project butler override wins, then the global claude_profile.
+    const rawProfile =
+      (await getPreference(butlerProfilePrefKey(projectId), database)) ||
+      (await getPreference("claude_profile", database)) ||
+      undefined;
+    const effectiveBackend: "claude" | "codex" | "mock" = isMockProfile(rawProfile)
       ? "mock"
       : backend.provider;
     const session = ensureButlerSession({
