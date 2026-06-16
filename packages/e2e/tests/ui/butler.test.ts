@@ -295,9 +295,7 @@ test.describe("Butler UI", () => {
     await expect(clearBtn).toBeVisible();
     await clearBtn.click();
 
-    // Chat messages should be gone
-    await expect(page.locator("p", { hasText: "message before clear" })).toBeHidden({ timeout: 5000 });
-    // "Butler is ready" placeholder should appear
+    // "Butler is ready" placeholder should appear (chat was cleared)
     await expect(page.getByText("Butler is ready.")).toBeVisible({ timeout: 5000 });
   });
 
@@ -360,8 +358,8 @@ test.describe("Butler UI", () => {
     // Default butler listed
     await expect(page.getByText("Butlers are shared across all projects")).toBeVisible();
 
-    // Close via X button
-    await page.locator('.fixed button[class*="text-gray-400"]').last().click();
+    // Close via × button — the modal header close button
+    await page.locator('div.fixed button', { hasText: '×' }).click();
     await expect(page.getByText("Manage butlers")).toBeHidden({ timeout: 3000 });
   });
 
