@@ -30,7 +30,7 @@ import {
   updateButlerDefinition,
 } from "../services/butler-definitions.service.js";
 import { listButlerSessions, getButlerSessionMessages } from "../services/butler-transcripts.service.js";
-import { loadAgentSettings } from "../services/agent-settings.service.js";
+import { loadAgentSettings, isMockProfile } from "../services/agent-settings.service.js";
 import type { ProviderName } from "../services/agent-provider.js";
 import { parseStrategyBullseyeConfig, selectProviderFromStrategy } from "../services/strategy-objective.service.js";
 import { getAllPreferences } from "../repositories/preferences.repository.js";
@@ -327,12 +327,17 @@ export function createButlerRoute(
     const resumeSessionId = (await getPreference(butlerSessionPrefKey(projectId, butlerId), database)) || undefined;
     const systemPromptAppend = await resolveButlerPrompt(projectId, project.name, project.repoPath);
     const wasActive = getButlerSession(projectId, butlerId).active;
+    // When the resolved profile is "mock", use the in-process mock backend instead
+    // of the Claude SDK (which would fail without real API credentials).
+    const effectiveBackend: "claude" | "codex" | "mock" = isMockProfile(backend.claudeProfile)
+      ? "mock"
+      : backend.provider;
     const session = ensureButlerSession({
       projectId,
       butlerId,
       repoPath: project.repoPath,
       projectName: project.name,
-      backend: backend.provider,
+      backend: effectiveBackend,
       claudeProfile: backend.claudeProfile,
       profile: backend.profile,
       agentCommand: backend.agentCommand,
