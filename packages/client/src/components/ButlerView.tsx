@@ -9,7 +9,7 @@ import { AgentQuestionsPanel } from "./AgentQuestionsPanel.js";
 import { ButlerVoiceButton, type ButlerVoiceButtonHandle } from "./ButlerVoiceButton.js";
 
 interface ButlerState {
-  backend?: "claude" | "codex";
+  backend?: "claude" | "codex" | "mock";
   active: boolean;
   sessionId: string | null;
   contextTokens?: number;
@@ -280,18 +280,20 @@ interface ButlerListItem {
   contextWindow?: number;
   sessionId: string | null;
   mcpConnected?: boolean;
-  backend?: "claude" | "codex";
+  backend?: "claude" | "codex" | "mock";
 }
 
 function backendLabel(backend?: string): string {
-  return backend === "codex" ? "Codex" : "Claude";
+  if (backend === "codex") return "Codex";
+  if (backend === "mock") return "Mock";
+  return "Claude";
 }
 
-function modelOptionsForBackend(backend?: "claude" | "codex") {
+function modelOptionsForBackend(backend?: "claude" | "codex" | "mock") {
   return backend === "codex" ? CODEX_MODEL_OPTIONS : CLAUDE_MODEL_OPTIONS;
 }
 
-function modelLabel(value: string, backend?: "claude" | "codex"): string {
+function modelLabel(value: string, backend?: "claude" | "codex" | "mock"): string {
   return modelOptionsForBackend(backend).find((m) => m.value === value)?.label ?? value;
 }
 
@@ -441,7 +443,7 @@ interface TabState {
   butlerName: string;
   chatMessages: ChatMessage[];
   butlerState: ButlerState | null;
-  backend: "claude" | "codex";
+  backend: "claude" | "codex" | "mock";
   contextTokens: number;
   model: string | undefined;
   contextWindow: number | undefined;
