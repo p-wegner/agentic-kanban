@@ -29,6 +29,17 @@ type ResolvedTunables = {
   startPolicy?: StartPolicy;
 };
 
+type ConductorSchedule = {
+  enabled: boolean;
+  cron: string;
+  agent: "claude" | "codex";
+  lastFiredAt: string | null;
+  valid: boolean;
+  error: string | null;
+  description: string | null;
+  nextFireAt: string | null;
+};
+
 type DirtyMainCheckoutWarning = {
   projectId: string;
   projectName: string;
@@ -416,6 +427,9 @@ export function MonitorPopover({
                   )}
                 </div>
               )}
+              {orchestrator?.available && projectId && (
+                <ConductorCronSection projectId={projectId} formatAge={formatAge} formatCountdown={formatCountdown} />
+              )}
               {resolvedTunables?.startPolicy?.mode === "monitor" && (
                 <div className="space-y-1.5 pt-0.5">
                   <SubToggle label="Continue chains after merge" checked={resolvedTunables.startPolicy.postMergeCascade} disabled={startModeSaving} onChange={(v) => putSettings({ dependency_auto_chain: v ? "true" : "false" })} />
@@ -741,6 +755,111 @@ function SubToggle({ label, checked, disabled, onChange }: { label: string; chec
       >
         <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${checked ? "translate-x-[0.875rem]" : "translate-x-0.5"}`} />
       </button>
+    </div>
+  );
+}
+
+// Cron schedule for the off-process Conductor (ticket #841). Self-contained: fetches and
+// writes /api/projects/:id/conductor-schedule itself so it needs no props threaded through
+// BoardPage. Drives one off-process board-monitor cycle per scheduled tick (independent of
+// the always-on loop), and tracks the next/last fire so the user can see it ran.
+function ConductorCronSection({
+  projectId,
+  formatAge,
+  formatCountdown,
+}: {
+  projectId: string;
+  formatAge: (isoStr: string) => string;
+  formatCountdown: (isoStr: string) => string;
+}) {
+  const [schedule, setSchedule] = useState<ConductorSchedule | null>(null);
+  const [cronInput, setCronInput] = useState("");
+  const [agent, setAgent] = useState<"claude" | "codex">("claude");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function load() {
+    try {
+      const data = await apiFetch<{ available: boolean; schedule: ConductorSchedule }>(`/api/projects/${projectId}/conductor-schedule`);
+      setSchedule(data.schedule);
+      setCronInput(data.schedule.cron);
+      setAgent(data.schedule.agent);
+    } catch { /* leave prior state */ }
+  }
+
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [projectId]);
+
+  async function save(patch: { enabled?: boolean; cron?: string; agent?: "claude" | "codex" }) {
+    setSaving(true);
+    setError(null);
+    try {
+      const data = await apiFetch<{ schedule: ConductorSchedule }>(`/api/projects/${projectId}/conductor-schedule`, {
+        method: "PUT",
+        body: JSON.stringify(patch),
+      });
+      setSchedule(data.schedule);
+      setCronInput(data.schedule.cron);
+      setAgent(data.schedule.agent);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save schedule");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const enabled = schedule?.enabled ?? false;
+
+  return (
+    <div className="rounded-md bg-gray-50 dark:bg-gray-950 px-2 py-2 space-y-1.5">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Cron schedule</span>
+        <SubToggle
+          label=""
+          checked={enabled}
+          disabled={saving || (!enabled && !cronInput.trim())}
+          onChange={(v) => save({ enabled: v, cron: cronInput.trim() })}
+        />
+      </div>
+      <div className="flex items-center gap-1.5">
+        <input
+          type="text"
+          value={cronInput}
+          placeholder="*/30 * * * *"
+          spellCheck={false}
+          onChange={(e) => setCronInput(e.target.value)}
+          onBlur={() => { if (cronInput.trim() !== (schedule?.cron ?? "")) save({ cron: cronInput.trim() }); }}
+          className="flex-1 min-w-0 font-mono text-[11px] border border-gray-200 dark:border-gray-700 rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-emerald-400 bg-white dark:bg-gray-900"
+        />
+        <select
+          value={agent}
+          disabled={saving}
+          onChange={(e) => { const a = e.target.value as "claude" | "codex"; setAgent(a); save({ agent: a }); }}
+          className="text-[11px] border border-gray-200 dark:border-gray-700 rounded-md px-1 py-1 bg-white dark:bg-gray-900"
+        >
+          <option value="claude">claude</option>
+          <option value="codex">codex</option>
+        </select>
+      </div>
+      {error && <p className="text-[10px] text-red-600 dark:text-red-400 leading-snug">{error}</p>}
+      {schedule?.cron && schedule.error && !error && (
+        <p className="text-[10px] text-red-600 dark:text-red-400 leading-snug">{schedule.error}</p>
+      )}
+      {schedule?.valid && schedule.description && (
+        <p className="text-[10px] text-gray-500 dark:text-gray-400 leading-snug">{schedule.description}</p>
+      )}
+      {enabled && schedule?.nextFireAt && (
+        <div className="flex items-center justify-between text-[10px] text-gray-500 dark:text-gray-400">
+          <span>Next fire</span>
+          <span className="font-mono">in {formatCountdown(schedule.nextFireAt)}</span>
+        </div>
+      )}
+      {schedule?.lastFiredAt && (
+        <div className="flex items-center justify-between text-[10px] text-gray-500 dark:text-gray-400">
+          <span>Last fired</span>
+          <span className="font-mono">{formatAge(schedule.lastFiredAt)}</span>
+        </div>
+      )}
+      <p className="text-[9px] text-gray-400 dark:text-gray-500 leading-snug">Fires one off-process board-monitor cycle per tick (skipped while the loop is already running).</p>
     </div>
   );
 }

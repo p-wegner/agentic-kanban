@@ -61,6 +61,7 @@ function isAllowedDynamicKey(key: string): boolean {
     /^board_autodrive_[0-9a-f-]+$/.test(key) ||
     /^start_mode_[0-9a-f-]+$/.test(key) ||
     /^board_conductor_[0-9a-f-]+$/.test(key) ||
+    /^conductor_cron_[0-9a-f-]+$/.test(key) ||
     /^verify_script_[0-9a-f-]+$/.test(key) ||
     /^cold_clone_check_[0-9a-f-]+$/.test(key) ||
     /^project_stack_profile_[0-9a-f-]+$/.test(key) ||
