@@ -54,7 +54,7 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
   { name: "update_issue", description: "Update an existing issue (title, description, status, priority)", category: "issues" },
   { name: "delete_issue", description: "Delete an issue and all its associated data (workspaces, sessions, messages, tags)", category: "issues" },
   { name: "move_issue", description: "Move an issue to a different status column by name (e.g., 'Todo', 'In Progress', 'Done')", category: "issues" },
-  { name: "attach_artifact", description: "Attach a text, link, or image artifact to an issue", category: "issues" },
+  { name: "attach_artifact", description: "Attach a text, link, image, or video artifact to an issue", category: "issues" },
   { name: "check_issue_overlap", description: "Check whether issues touch overlapping files, to detect merge-conflict risk before parallel work", category: "issues" },
   { name: "analyze_touched_files", description: "Predict which source files an issue will likely modify", category: "issues" },
   // workspaces

@@ -173,6 +173,9 @@ Steps to resolve:
 
   const serverPort = process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001";
   const clientPort = process.env.KANBAN_CLIENT_PORT || process.env.VITE_PORT || "5173";
+  const visualProofAttachTarget = workspaceId
+    ? `\`workspaceId: "${workspaceId}"\``
+    : `\`issueId: "${issueId}"\``;
 
   let prompt = conflictPreamble + template
     .replace(/\{\{branch}}/g, branch)
@@ -199,9 +202,11 @@ After completing your code review and fixing any CRITICAL/MAJOR issues:
    - Use the playwright-cli skill (/playwright-cli) or run playwright directly
    - Navigate to http://localhost:${clientPort}
    - Check the relevant UI sections for the changed files on branch '${branch}'
-   - Take a screenshot to confirm the UI renders correctly
+   - Capture a short WebM proof recording and take a screenshot to confirm the UI renders correctly
    - Write ANY screenshots, log files, or scratch output into a \`.verify/\` directory (it is
-     gitignored) — never the repo root. Don't leave \`*.log\` / \`*.png\` artifacts in the checkout.
+     gitignored) — never the repo root. Don't leave \`*.log\`, \`*.png\`, or \`*.webm\` artifacts in the checkout.
+   - Attach the WebM recording with \`attach_artifact\` using \`type: "video"\`,
+     \`mimeType: "video/webm"\`, ${visualProofAttachTarget}, and a visual-proof caption.
 
 2. **Report** your verification result.
 
