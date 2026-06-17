@@ -26,7 +26,7 @@ async function openAllWorkspacesPanel(page: import("@playwright/test").Page) {
   ).toBeVisible({ timeout: 5000 });
 }
 
-test.describe("Ready for Merge badge — All Workspaces Panel", () => {
+test.describe("@system: Ready for Merge badge — All Workspaces Panel", () => {
   let projectId: string;
   let statusId: string;
   let issueId: string;

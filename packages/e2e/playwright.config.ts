@@ -29,6 +29,9 @@ export default defineConfig({
   testDir: "./tests",
   fullyParallel: false,
   retries: 0,
+  // Exclude @system tests by default — they require a real agent provider.
+  // To run only system tests: remove this line and use --grep @system
+  grepInvert: /@system/,
   globalSetup: "./global-setup.ts",
   globalTeardown: "./global-teardown.ts",
   use: {

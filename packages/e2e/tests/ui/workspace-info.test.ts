@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
 
-test.describe("Workspace panel info: baseBranch and skill name", () => {
+test.describe("@system: Workspace panel info: baseBranch and skill name", () => {
   let projectId: string;
   let todoStatusId: string;
   let defaultBranch: string;

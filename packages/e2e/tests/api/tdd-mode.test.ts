@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
 import { getE2EProjectId } from "../helpers/e2e-project.js";
 
-test.describe("TDD mode", () => {
+test.describe("@system: TDD mode", () => {
   let projectId: string;
   let issueId: string;
   const suffix = Date.now().toString(36);
