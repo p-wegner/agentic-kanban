@@ -417,6 +417,79 @@ function MonitorPolicyPresets({
   );
 }
 
+const CUSTOM_PROFILE_SENTINEL = "__custom__";
+
+/**
+ * Profile picker for a provider policy: a dropdown of the real profiles
+ * available for the policy's provider, with a "Custom…" escape hatch that
+ * reveals a free-text input. Keeps any pre-existing custom value selectable
+ * even if it is no longer reported by the profile endpoints (AK-836).
+ */
+export function ProviderPolicyProfileField({
+  provider,
+  profileName,
+  availableProfiles,
+  onChange,
+}: {
+  provider: "claude" | "codex" | "copilot" | "pi";
+  profileName: string;
+  availableProfiles: string[];
+  onChange: (name: string) => void;
+}) {
+  const known = profileName === "" || availableProfiles.includes(profileName);
+  const [custom, setCustom] = useState(!known);
+
+  // When the provider changes the profile may no longer be in the list; only
+  // force custom mode for a non-empty value that isn't selectable.
+  useEffect(() => {
+    if (profileName && !availableProfiles.includes(profileName)) setCustom(true);
+  }, [provider, profileName, availableProfiles]);
+
+  const useCustom = custom || !known;
+  const selectClass = "w-full rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100";
+
+  return (
+    <label className="block">
+      <span className="mb-1 block text-[11px] font-medium text-gray-500 dark:text-gray-400">Profile</span>
+      {useCustom ? (
+        <div className="flex items-center gap-1">
+          <input
+            value={profileName}
+            onChange={(event) => onChange(event.target.value)}
+            placeholder="default"
+            className={selectClass}
+          />
+          {availableProfiles.length > 0 && (
+            <button
+              type="button"
+              onClick={() => { setCustom(false); onChange(availableProfiles[0] ?? ""); }}
+              className="shrink-0 rounded px-1.5 py-1 text-[10px] text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
+              title="Pick from available profiles"
+            >
+              List
+            </button>
+          )}
+        </div>
+      ) : (
+        <select
+          value={profileName}
+          onChange={(event) => {
+            if (event.target.value === CUSTOM_PROFILE_SENTINEL) { setCustom(true); return; }
+            onChange(event.target.value);
+          }}
+          className={selectClass}
+        >
+          <option value="">default</option>
+          {availableProfiles.map((name) => (
+            <option key={name} value={name}>{name}</option>
+          ))}
+          <option value={CUSTOM_PROFILE_SENTINEL}>Custom…</option>
+        </select>
+      )}
+    </label>
+  );
+}
+
 function StrategyBoard({
   segments,
   issues,
@@ -555,8 +628,14 @@ function StrategyBoard({
   );
 }
 
+/** Available profile names per provider, populated from the preferences profile endpoints. */
+type ProfilesByProvider = Record<"claude" | "codex" | "copilot" | "pi", string[]>;
+
+const EMPTY_PROFILES: ProfilesByProvider = { claude: [], codex: [], copilot: [], pi: [] };
+
 export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQuery }: StrategyTargetsViewProps) {
   const allIssues = useMemo(() => columns.flatMap((column) => column.issues), [columns]);
+  const [profilesByProvider, setProfilesByProvider] = useState<ProfilesByProvider>(EMPTY_PROFILES);
   const [config, setConfig] = useState<StrategyConfig>(DEFAULT_CONFIG);
   const [savedConfig, setSavedConfig] = useState<StrategyConfig>(DEFAULT_CONFIG);
   const [selectedId, setSelectedId] = useState<string | null>(DEFAULT_CONFIG.segments[0]?.id ?? null);
@@ -590,6 +669,27 @@ export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQu
       });
     return () => { cancelled = true; };
   }, [key]);
+
+  // Load the available profile names per provider so provider policies can
+  // select a real profile instead of typing one by hand (AK-836).
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles").catch(() => ({ profiles: [] as string[] })),
+      apiFetch<{ profiles: string[] }>("/api/preferences/codex-profiles").catch(() => ({ profiles: [] as string[] })),
+      apiFetch<{ profiles: string[] }>("/api/preferences/copilot-profiles").catch(() => ({ profiles: [] as string[] })),
+      apiFetch<{ profiles: string[] }>("/api/preferences/pi-profiles").catch(() => ({ profiles: [] as string[] })),
+    ]).then(([claude, codex, copilot, pi]) => {
+      if (cancelled) return;
+      setProfilesByProvider({
+        claude: claude.profiles ?? [],
+        codex: codex.profiles ?? [],
+        copilot: copilot.profiles ?? [],
+        pi: pi.profiles ?? [],
+      });
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   const selectedSegment = config.segments.find((segment) => segment.id === selectedId) ?? config.segments[0] ?? null;
   const visibleIssues = useMemo(() => {
@@ -938,15 +1038,12 @@ export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQu
                               <option value="pi">Pi</option>
                             </select>
                           </label>
-                          <label className="block">
-                            <span className="mb-1 block text-[11px] font-medium text-gray-500 dark:text-gray-400">Profile name</span>
-                            <input
-                              value={policy.profileName}
-                              onChange={(event) => updateProviderPolicy(policy.id, { profileName: event.target.value })}
-                              placeholder="default"
-                              className="w-full rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-                            />
-                          </label>
+                          <ProviderPolicyProfileField
+                            provider={policy.provider}
+                            profileName={policy.profileName}
+                            availableProfiles={profilesByProvider[policy.provider] ?? []}
+                            onChange={(name) => updateProviderPolicy(policy.id, { profileName: name })}
+                          />
                         </div>
                         <label className="block">
                           <span className="mb-1 block text-[11px] font-medium text-gray-500 dark:text-gray-400">Display label</span>
