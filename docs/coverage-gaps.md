@@ -49,11 +49,26 @@ This snapshot focuses on the current test inventory under:
 | GET | `/ws/sessions/:sessionId` | Partially covered | Session lifecycle/history tests exercise session output paths; direct reconnect/error behavior remains a gap |
 | GET | `/ws/board/:projectId` | Covered | `packages/e2e/tests/api/board-events.test.ts`, `packages/server/src/__tests__/board-events.test.ts` |
 
+### Newly-covered API surface (added since 2026-05-31)
+
+| Method | Path / behavior | Coverage | Evidence |
+|--------|-----------------|----------|----------|
+| GET | `/api/sessions/:id/output` (bare-array replay contract) | Covered | `packages/e2e/tests/api/session-replay.test.ts` |
+| POST/GET | `/api/codemods*` (preview/apply with escape prevention, save/list CRUD) | Covered | `packages/e2e/tests/api/codemod.test.ts` |
+| GET/DELETE | `/api/projects/:id/worktrees` (list, orphan detection, cascade-delete) | Covered | `packages/e2e/tests/api/worktrees.test.ts` |
+| POST/GET | `/api/issues/:id/showdown`, `/api/showdowns/:id*` (N-contestant, pick-winner) | Covered | `packages/e2e/tests/api/showdown.test.ts` |
+| POST | `/api/workspaces` (`tddMode` flag) + per-project TDD pref | Covered | `packages/e2e/tests/api/tdd-mode.test.ts` |
+| POST | `/api/workspaces/:id/merge` (advances master, idempotent, disconnect-resilient) | Covered | `packages/e2e/tests/api/merge-advances-master.test.ts`, `packages/e2e/tests/api/merge-cascade.test.ts` |
+| POST/GET | `/api/workspaces/:id/ready-for-merge` (+ board summary reflection, stale-flag regression) | Covered | `packages/e2e/tests/api/ready-for-merge.test.ts`, `packages/e2e/tests/api/stale-ready-flag-merge.test.ts` |
+| GET/POST | `/api/workspaces/:id/already-merged-status`, `/reconcile-as-done` | Covered | `packages/e2e/tests/api/monitor-merge-reconciliation.test.ts` |
+| CRUD | `/api/agent-skills` (built-in protection, scope, path-traversal/duplicate rejection) | Covered | `packages/e2e/tests/api/agent-skills.test.ts` |
+| — | Get-by-id response shape / field-presence contract | Covered | `packages/e2e/tests/api/get-by-id-contract.test.ts` |
+
 ### Remaining API Gaps
 
 1. `POST /api/internal/board-notify` has no direct test match. Add a route-level server test that posts to the internal endpoint and asserts the board notification side effect or expected no-op response.
 2. WebSocket reconnect/error scenarios are not directly covered. Add focused tests for `/ws/sessions/:sessionId` and `/ws/board/:projectId` reconnect behavior, invalid IDs, and close handling.
-3. Error response shape is still inconsistently asserted. Several API tests check status codes and happy-path bodies, but there is no shared contract test for `{ error }` formatting across representative routes.
+3. Error response shape is still inconsistently asserted. Individual endpoints now validate `{ error }` (e.g. `codemod.test.ts`, `worktrees.test.ts`, `ready-for-merge.test.ts`) and `get-by-id-contract.test.ts` asserts field presence, but there is still no shared cross-route contract test for `{ error }` formatting.
 
 ---
 
@@ -72,8 +87,14 @@ This snapshot focuses on the current test inventory under:
 | Search highlighting | Covered | `packages/e2e/tests/ui/search.test.ts` |
 | Terminal/session views | Covered | `packages/e2e/tests/ui/workspace.test.ts`, `session-history.test.ts`, `workspace-chat.test.ts` |
 | Workspace panel diff and merge actions | Covered | `packages/e2e/tests/ui/workspace.test.ts`, `diff-viewer.test.ts` |
-| Project registration/switching support | Covered | `packages/e2e/tests/ui/register-project.test.ts`, active-project preference tests |
-| Toast notifications | Partially covered | Specific toasts are asserted in `settings.test.ts`, `command-palette.test.ts`, and `settings-scheduled-runs.test.ts`; broad error/success toast coverage is still incomplete |
+| Project registration/switching support | Covered | `packages/e2e/tests/ui/register-project.test.ts`, `active-project-recovery.test.ts`, active-project preference tests |
+| Board stats bar / priority-sort / bulk-select / context menu | Covered | `packages/e2e/tests/ui/board-stats-bar.test.ts`, `priority-sort.test.ts`, `board-card-bulk-select.test.ts`, `issue-card-context-menu.test.ts` |
+| Issue dependencies UI | Covered | `packages/e2e/tests/ui/issue-dependencies.test.ts` |
+| Quick Tasks panel | Covered | `packages/e2e/tests/ui/quick-tasks-panel.test.ts` |
+| All Workspaces panel / Merge Queue panel / Worktrees panel | Covered | `packages/e2e/tests/ui/all-workspaces-panel.test.ts`, `merge-queue-panel.test.ts`, `worktrees-panel.test.ts` |
+| Settings Workflow tab / Scheduled Runs / Agent profile dashboard | Covered | `packages/e2e/tests/ui/settings-workflow.test.ts`, `settings-scheduled-runs.test.ts`, `agent-profile-dashboard.test.ts` |
+| AI Reviewed column / Ready-for-Merge badge / session stats / task progress | Covered | `packages/e2e/tests/ui/ai-reviewed-column.test.ts`, `ready-for-merge-badge.test.ts`, `session-stats.test.ts`, `task-progress.test.ts` |
+| Toast notifications | Partially covered | Specific toasts are asserted in `settings.test.ts`, `command-palette.test.ts`, and `settings-scheduled-runs.test.ts`; broad error/success toast coverage is still incomplete (#184) |
 | Skeleton/loading state | Gap | Only comments mention waiting past the skeleton phase; no direct assertion of `SkeletonBoard` rendering was found |
 
 ### Remaining UI Gaps
@@ -170,7 +191,9 @@ Known stale areas:
 
 ## Last Verified
 
-Verified on 2026-05-31 with these repository searches:
+Re-audited on 2026-06-17 via a parallel sweep of every spec under `packages/e2e/tests/` (~80 files). Since 2026-05-31, ~21 previously-"Not yet covered" tickets gained E2E coverage and ~13 new API/UI spec files were added (merge lifecycle, worktrees, codemod, showdown, TDD mode, agent-skills API, get-by-id contract, board-monitor toolbar, project scripts, active-project recovery). Detailed feature→file mapping lives in `docs/prd/06-testability-strategy.md`. Still-open gaps: `POST /api/internal/board-notify`, `/ws/sessions/:sessionId` reconnect, unified `{ error }` contract, `SkeletonBoard` loading state, broad failure-toast coverage.
+
+Originally verified on 2026-05-31 with these repository searches:
 
 ```powershell
 rg --files packages/e2e/tests packages/server/src/__tests__
