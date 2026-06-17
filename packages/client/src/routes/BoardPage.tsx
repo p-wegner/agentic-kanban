@@ -2233,6 +2233,7 @@ export function BoardPage() {
               initialSessionId={workspaceInitial?.sessionId}
               initialShowCreate={workspaceOpenCreate}
               initialShowDiff={workspaceInitialDiff}
+              liveStats={liveStats[workspaceIssue.id] ?? null}
             />
           </Suspense>
         </BoardErrorBoundary>
