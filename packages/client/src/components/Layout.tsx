@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { useTheme, type Theme } from "../hooks/useTheme.js";
 import { ProjectTabs } from "./ProjectTabs.js";
+import { ProjectSelector } from "./ProjectSelector.js";
 import { NotificationBell } from "./NotificationBell.js";
 import type { NotificationEvent } from "../hooks/useActivityNotifications.js";
 
@@ -8,6 +8,9 @@ interface Project {
   id: string;
   name: string;
   color?: string | null;
+  repoName?: string | null;
+  repoPath?: string | null;
+  defaultBranch?: string | null;
   archivedAt?: string | null;
 }
 
@@ -206,7 +209,7 @@ export function Layout({
             <h1 className="wordmark hidden sm:block text-xl font-semibold text-ink dark:text-stone-100 shrink-0">
               Agentic Kanban
             </h1>
-            {/* Pinned-project chips are redundant with the select below on phones. */}
+            {/* Pinned-project chips are an optional fast path; the selector remains the full project switcher. */}
             <div className="hidden sm:contents">
               <ProjectTabs
                 projects={projects}
@@ -214,46 +217,11 @@ export function Layout({
                 onProjectChange={onProjectChange}
               />
             </div>
-            {projects.length > 1 && (
-              <div className="flex items-center gap-2">
-                <select
-                  value={activeProjectId ?? ""}
-                  onChange={(e) => onProjectChange?.(e.target.value)}
-                  className="text-sm border border-gray-300 dark:border-gray-600 rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                >
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-                {(() => {
-                  const active = projects.find((p) => p.id === activeProjectId);
-                  if (active?.color) {
-                    return (
-                      <div
-                        className="w-3 h-3 rounded-full border border-gray-300 dark:border-gray-600"
-                        style={{ backgroundColor: active.color }}
-                        title={`Color: ${active.color}`}
-                      />
-                    );
-                  }
-                  return null;
-                })()}
-              </div>
-            )}
-            {projects.length === 1 && (
-              <div className="hidden sm:flex items-center gap-2">
-                <span className="text-sm text-gray-500 dark:text-gray-400">{projects[0].name}</span>
-                {projects[0].color && (
-                  <div
-                    className="w-3 h-3 rounded-full border border-gray-300 dark:border-gray-600"
-                    style={{ backgroundColor: projects[0].color }}
-                    title={`Color: ${projects[0].color}`}
-                  />
-                )}
-              </div>
-            )}
+            <ProjectSelector
+              projects={projects}
+              activeProjectId={activeProjectId ?? null}
+              onProjectChange={onProjectChange}
+            />
             {projects.length > 0 && onArchiveProject && (
               <button
                 onClick={() => {
