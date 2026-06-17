@@ -2251,6 +2251,15 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                                   {a.type === "text" && (
                                     <pre className="text-[11px] font-mono text-gray-800 dark:text-gray-200 bg-gray-50 dark:bg-gray-900 rounded p-2 overflow-auto max-h-40 whitespace-pre-wrap break-all">{a.content}</pre>
                                   )}
+                                  {a.type === "video" && (
+                                    <video
+                                      src={a.content}
+                                      controls
+                                      className="max-h-80 w-full rounded border border-gray-200 dark:border-gray-700"
+                                    >
+                                      Your browser does not support the video tag.
+                                    </video>
+                                  )}
                                   <p className="text-[10px] text-gray-400 dark:text-gray-500">{new Date(a.createdAt).toLocaleString("en-US")}</p>
                                 </div>
                               ))}

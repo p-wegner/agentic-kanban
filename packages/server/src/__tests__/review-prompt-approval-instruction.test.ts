@@ -48,6 +48,10 @@ describe("buildReviewPrompt approval instruction", () => {
     // still does the visual verification
     expect(prompt).toContain("Visual Verification");
     expect(prompt).toContain("playwright-cli");
+    expect(prompt).toContain("WebM proof recording");
+    expect(prompt).toContain('type: "video"');
+    expect(prompt).toContain('mimeType: "video/webm"');
+    expect(prompt).toContain('workspaceId: "ws-123"');
     // approves via the normal gated path, NOT a hand-rolled merge
     expect(prompt).toContain("mark_ready_for_merge");
     expect(prompt).not.toMatch(/curl[^\n]*\/merge/);

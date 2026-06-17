@@ -4,20 +4,20 @@ import { and, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { prodDeps, type ToolDeps } from "./deps.js";
 
-const ARTIFACT_TYPES = ["text", "link", "image"] as const;
+const ARTIFACT_TYPES = ["text", "link", "image", "video"] as const;
 
 export function registerAttachArtifact(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, notifyBoard } = deps;
 
   server.tool(
     "attach_artifact",
-    "Attach a text, link, or image artifact to an issue or workspace. Workspace artifacts are also tied to the workspace's issue.",
+    "Attach a text, link, image, or video artifact to an issue or workspace. Workspace artifacts are also tied to the workspace's issue.",
     {
       issueId: z.string().optional().describe("Issue ID to attach to. Required unless workspaceId is provided."),
       workspaceId: z.string().optional().describe("Workspace ID to attach to. When provided without issueId, the issue is resolved from the workspace."),
-      type: z.enum(ARTIFACT_TYPES).describe("Artifact type: text, link, or image"),
-      content: z.string().describe("Text content, URL, or base64/data URL image content"),
-      mimeType: z.string().optional().describe("Optional MIME type, e.g. text/markdown or image/png"),
+      type: z.enum(ARTIFACT_TYPES).describe("Artifact type: text, link, image, or video"),
+      content: z.string().describe("Text content, URL, or base64/data URL image/video content"),
+      mimeType: z.string().optional().describe("Optional MIME type, e.g. text/markdown, image/png, or video/webm"),
       caption: z.string().optional().describe("Optional short caption. Phase artifacts should use phase-artifact:<phase>."),
     },
     async ({ issueId, workspaceId, type, content, mimeType, caption }) => {
