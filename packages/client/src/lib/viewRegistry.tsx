@@ -20,6 +20,7 @@ export type ViewMode =
   | "agents"
   | "timeline"
   | "metrics"
+  | "crime-scene"
   | "quality-metrics"
   | "milestones"
   | "butler"
@@ -130,6 +131,13 @@ const ICON = {
   metrics: (
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+    </svg>
+  ),
+  "crime-scene": (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 20h18M5 20V9l4-3 4 3v11M13 20V7l6 3v10" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M7 12h2M7 15h2M15 12h2M15 15h2" />
+      <circle cx="18" cy="6" r="2" fill="currentColor" stroke="none" />
     </svg>
   ),
   "quality-metrics": (
@@ -394,6 +402,17 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteIcon: "▥",
     paletteDescription: "Show board metrics and charts",
     shortcut: "m",
+    group: "secondary",
+  },
+  {
+    id: "crime-scene",
+    toolbarLabel: "Hotspots",
+    label: "Code Crime Scene",
+    tooltip: "Code Crime Scene - city view of churn hotspots",
+    icon: ICON["crime-scene"],
+    paletteIcon: "CS",
+    paletteDescription: "Visualize the codebase as districts and buildings with hotspot evidence markers",
+    activeClass: "bg-red-700 text-white",
     group: "secondary",
   },
   {
