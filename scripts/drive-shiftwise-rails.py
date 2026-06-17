@@ -53,11 +53,26 @@ def ensure_project() -> dict:
     for project in projects:
         if project.get("repoPath", "").lower() == str(PROJECT_PATH).lower():
             return project
+    if PROJECT_PATH.exists():
+        if not (PROJECT_PATH / ".git").exists():
+            run(["git", "init"], PROJECT_PATH)
+        return request(
+            "POST",
+            "/api/projects",
+            {
+                "repoPath": str(PROJECT_PATH),
+                "name": PROJECT_NAME,
+                "description": "Ruby on Rails shift and employee management app driven by a 30-ticket board epic.",
+                "gitignoreTemplate": "ruby",
+                "generateReadme": True,
+            },
+        )
     return request(
         "POST",
         "/api/projects/create",
         {
             "name": PROJECT_NAME,
+            "path": str(PROJECT_PATH),
             "description": "Ruby on Rails shift and employee management app driven by a 30-ticket board epic.",
             "gitignoreTemplate": "ruby",
             "generateReadme": True,
@@ -273,6 +288,11 @@ def seed_issues(project_id: str) -> tuple[str, int, int, str | None]:
     for row in existing:
         if row.get("title") == "[ShiftWise] EPIC: shift and employee management Rails app":
             children = [i for i in existing if "[ShiftWise]" in (i.get("title") or "") and i.get("id") != row.get("id")]
+            if len(children) != len(tickets()):
+                raise RuntimeError(
+                    "Found the ShiftWise epic but not the expected 30 child tickets; "
+                    "repair or remove the partial seed before rerunning."
+                )
             low = min(i["issueNumber"] for i in children)
             high = max(i["issueNumber"] for i in children)
             drives = request("GET", f"/api/projects/{project_id}/drives")
