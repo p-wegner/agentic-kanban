@@ -1,8 +1,12 @@
 import { db } from "../db/index.js";
-import { scheduledRunHistory, scheduledRuns } from "@agentic-kanban/shared/schema";
+import { projects, scheduledRunHistory, scheduledRuns } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { getNextCronRun } from "@agentic-kanban/shared/lib/cron-utils";
 import { randomUUID } from "node:crypto";
+import { getPreference, setPreference } from "../repositories/preferences.repository.js";
+import { conductorAvailable, runConductorCycleOnce } from "../services/conductor-control.service.js";
+import { readOrchestratorStatus } from "../services/orchestrator-monitor.service.js";
+import { conductorCronPrefKey, runDueConductorCrons } from "../services/conductor-schedule.service.js";
 
 export interface ScheduledTaskTimers {
   timer: ReturnType<typeof setTimeout>;
@@ -59,10 +63,43 @@ export function setupScheduledTasks(serverPort: number): ScheduledTaskTimers {
     }
   }
 
+  // Fire one off-process Conductor cycle for every project whose cron schedule is due
+  // (ticket #841). Independent of the scheduled_runs table above — this drives the
+  // out-of-process board-monitor loop on a cron instead of running it continuously.
+  async function runConductorCronCycle() {
+    try {
+      const fired = await runDueConductorCrons({
+        listProjects: async () => {
+          const rows = await db.select({ id: projects.id, repoPath: projects.repoPath }).from(projects);
+          return rows
+            .filter((r) => !!r.repoPath)
+            .map((r) => ({ projectId: r.id, repoPath: r.repoPath as string }));
+        },
+        getSchedulePref: (projectId) => getPreference(conductorCronPrefKey(projectId), db),
+        setSchedulePref: (projectId, value) => setPreference(conductorCronPrefKey(projectId), value, db),
+        fire: (repoPath, agent) => runConductorCycleOnce(repoPath, agent),
+        isAvailable: (repoPath) => conductorAvailable(repoPath),
+        isAlive: (repoPath) => readOrchestratorStatus(repoPath).alive,
+      });
+      for (const r of fired) {
+        if (r.fired) console.log(`[scheduler] fired Conductor cron cycle for project ${r.projectId} (pid ${r.pid ?? "?"})`);
+        else if (r.skipped === "fire_failed") console.warn(`[scheduler] Conductor cron fire failed for project ${r.projectId}: ${r.error ?? "unknown"}`);
+      }
+    } catch (err) {
+      console.error("[scheduler] conductor cron cycle error:", err);
+    }
+  }
+
   // Check every minute
-  const interval = setInterval(() => { runScheduledRunsCycle().catch(() => {}); }, 60 * 1000);
+  const interval = setInterval(() => {
+    runScheduledRunsCycle().catch(() => {});
+    runConductorCronCycle().catch(() => {});
+  }, 60 * 1000);
   // Initial check after 10s (let server fully start)
-  const timer = setTimeout(() => { runScheduledRunsCycle().catch(() => {}); }, 10 * 1000);
+  const timer = setTimeout(() => {
+    runScheduledRunsCycle().catch(() => {});
+    runConductorCronCycle().catch(() => {});
+  }, 10 * 1000);
 
   const handles: ScheduledTaskTimers = { timer, interval };
   activeScheduledTaskTimers = handles;
