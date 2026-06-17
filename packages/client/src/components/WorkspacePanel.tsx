@@ -9,6 +9,7 @@ import { TerminalView } from "./TerminalView.js";
 import { CreateWorkspaceForm } from "./CreateWorkspaceForm.js";
 import { WorkspaceDiffPanel } from "./WorkspaceDiffPanel.js";
 import { WorkspacePreviewPanel } from "./WorkspacePreviewPanel.js";
+import { WorkspaceActionButton } from "./WorkspaceActionButton.js";
 import { WorkspaceArtifactsBrowser } from "./WorkspaceArtifactsBrowser.js";
 import { WorkspaceDiagnosticsPanel } from "./WorkspaceDiagnosticsPanel.js";
 import { WorkspaceTimelinePanel } from "./WorkspaceTimelinePanel.js";
@@ -2442,143 +2443,61 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                           )}
                         </div>
                       )}
-                      <div className="flex gap-2 flex-wrap">
+                      <div className="flex gap-2 flex-wrap items-center rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-900/40 p-2">
                         {ws.workingDir && canResume(ws, sessions) && (
-                          <div className="flex gap-1">
-                            <button
+                          <div className="inline-flex">
+                            <WorkspaceActionButton
+                              intent="accent"
+                              rounded="rounded-l-md"
                               onClick={() => handleResume(ws.id)}
                               disabled={actionLoading}
-                              className="text-sm bg-green-600 text-white px-3 py-1.5 rounded-l hover:bg-green-700 disabled:opacity-50"
                             >
                               Resume
-                            </button>
-                            <button
+                            </WorkspaceActionButton>
+                            <WorkspaceActionButton
+                              intent="accent"
+                              rounded="rounded-r-md"
+                              className="px-2 border-l border-accent-700"
                               onClick={() => handleResume(ws.id, true)}
                               disabled={actionLoading}
-                              className="text-sm bg-green-700 text-white px-2 py-1.5 rounded-r hover:bg-green-800 disabled:opacity-50 border-l border-green-500"
                               title="Resume with --dangerously-skip-permissions (bypasses all permission prompts)"
                             >
                               ⚡
-                            </button>
+                            </WorkspaceActionButton>
                           </div>
                         )}
                         {ws.workingDir && canRestart(ws, sessions) && (
-                          <div className="flex gap-1">
-                            <button
+                          <div className="inline-flex">
+                            <WorkspaceActionButton
+                              intent="primary"
+                              rounded="rounded-l-md"
                               onClick={() => handleRestart(ws.id)}
                               disabled={actionLoading}
-                              className="text-sm bg-brand-600 text-white px-3 py-1.5 rounded-l hover:bg-brand-700 disabled:opacity-50"
                               title="Start a new session (previous session has no resume ID)"
                             >
                               Restart
-                            </button>
-                            <button
+                            </WorkspaceActionButton>
+                            <WorkspaceActionButton
+                              intent="primary"
+                              rounded="rounded-r-md"
+                              className="px-2 border-l border-brand-700"
                               onClick={() => handleRestart(ws.id, true)}
                               disabled={actionLoading}
-                              className="text-sm bg-brand-700 text-white px-2 py-1.5 rounded-r hover:bg-brand-800 disabled:opacity-50 border-l border-brand-500"
                               title="Restart with --dangerously-skip-permissions (bypasses all permission prompts)"
                             >
                               ⚡
-                            </button>
+                            </WorkspaceActionButton>
                           </div>
                         )}
-                        {!ws.isDirect && ws.workingDir && ws.status !== "closed" && !isRunning && (
-                          <button
-                            onClick={() => handleUpdateBase(ws.id, "rebase")}
-                            disabled={actionLoading}
-                            className="text-sm bg-teal-600 text-white px-3 py-1.5 rounded hover:bg-teal-700 disabled:opacity-50"
-                            title="Rebase onto latest base branch"
-                          >
-                            Update Base
-                          </button>
-                        )}
                         {ws.workingDir && (
-                        <button
-                          onClick={() => handleOpenTerminal(ws.id)}
-                          disabled={actionLoading}
-                          className="text-sm bg-gray-700 text-white px-3 py-1.5 rounded hover:bg-gray-800 disabled:opacity-50"
-                          title="Open terminal in workspace directory"
-                        >
-                          Terminal
-                        </button>
-                        )}
-                        {ws.workingDir && (
-                        <button
-                          onClick={() => handleOpenEditor(ws.id)}
-                          disabled={actionLoading}
-                          className="text-sm bg-gray-700 text-white px-3 py-1.5 rounded hover:bg-gray-800 disabled:opacity-50"
-                          title="Open workspace directory in VS Code"
-                        >
-                          VS Code
-                        </button>
-                        )}
-                        {ws.workingDir && preview.ok && (
-                          <div className="flex gap-1">
-                            <button
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                window.open(preview.url, "_blank", "noopener,noreferrer");
-                              }}
-                              disabled={actionLoading}
-                              className="text-sm bg-sky-600 text-white px-3 py-1.5 rounded-l hover:bg-sky-700 disabled:opacity-50"
-                              title={`Open dev preview at ${preview.url}`}
-                            >
-                              Preview
-                            </button>
-                            <button
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                void copyPreviewUrl(preview.url);
-                              }}
-                              disabled={actionLoading}
-                              className="text-sm bg-sky-700 text-white px-2 py-1.5 rounded-r hover:bg-sky-800 disabled:opacity-50 border-l border-sky-500"
-                              title={`Copy ${preview.url}`}
-                            >
-                              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                              </svg>
-                              <span className="sr-only">Copy preview URL</span>
-                            </button>
-                          </div>
-                        )}
-                        {ws.workingDir && !preview.ok && (
-                          <button
-                            disabled
-                            className="text-sm bg-gray-200 dark:bg-gray-800 text-gray-500 dark:text-gray-400 px-3 py-1.5 rounded cursor-not-allowed"
-                            title={preview.reason}
-                          >
-                            Preview unavailable
-                          </button>
-                        )}
-                        {ws.workingDir && (
-                        <button
-                          onClick={() => handleReview(ws.id)}
-                          disabled={actionLoading || isRunning}
-                          className="text-sm bg-brand-600 text-white px-3 py-1.5 rounded hover:bg-brand-700 disabled:opacity-50"
-                          title="Trigger AI code review"
-                        >
-                          Review
-                        </button>
-                        )}
-                        {ws.workingDir && !isRunning && (
-                        <button
-                          onClick={() => handleAutoBisect(ws.id)}
-                          disabled={actionLoading}
-                          className="text-sm bg-rose-600 text-white px-3 py-1.5 rounded hover:bg-rose-700 disabled:opacity-50"
-                          title="Find the commit that introduced the failing test"
-                        >
-                          Auto-bisect
-                        </button>
-                        )}
-                        {ws.workingDir && (
-                        <button
+                        <WorkspaceActionButton
+                          intent="primary"
+                          className="flex-1"
                           onClick={() => handleViewDiff(ws.id)}
                           disabled={actionLoading}
-                          className="text-sm bg-brand-600 text-white px-3 py-1.5 rounded hover:bg-brand-700 disabled:opacity-50 flex-1"
                         >
                           {ws.isDirect ? "View Changes" : "View Diff"}
-                        </button>
+                        </WorkspaceActionButton>
                         )}
                         {ws.workingDir && selectedWorkspace === ws.id && diff && (() => {
                           const unresolved = diffComments.filter((c) => c.resolvedAt == null).length;
@@ -2594,33 +2513,132 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                           );
                         })()}
                         {ws.workingDir && (
-                        <button
+                        <WorkspaceActionButton
+                          intent="primary"
+                          onClick={() => handleReview(ws.id)}
+                          disabled={actionLoading || isRunning}
+                          title="Trigger AI code review"
+                        >
+                          Review
+                        </WorkspaceActionButton>
+                        )}
+                        {ws.workingDir && (
+                        <WorkspaceActionButton
+                          intent="accent"
+                          className="flex-1"
                           onClick={() => handleMerge(ws.id)}
                           disabled={actionLoading}
-                          className="text-sm bg-orange-600 text-white px-3 py-1.5 rounded hover:bg-orange-700 disabled:opacity-50 flex-1"
                         >
                           {ws.isDirect ? "Close" : "Merge"}
-                        </button>
+                        </WorkspaceActionButton>
                         )}
-                        <span className="w-px bg-gray-300 dark:bg-gray-600 self-stretch mx-2" aria-hidden="true" />
+
+                        <span className="w-px bg-gray-300 dark:bg-gray-600 self-stretch mx-1" aria-hidden="true" />
+
+                        {!ws.isDirect && ws.workingDir && ws.status !== "closed" && !isRunning && (
+                          <WorkspaceActionButton
+                            intent="neutral"
+                            onClick={() => handleUpdateBase(ws.id, "rebase")}
+                            disabled={actionLoading}
+                            title="Rebase onto latest base branch"
+                          >
+                            Update Base
+                          </WorkspaceActionButton>
+                        )}
+                        {ws.workingDir && (
+                        <WorkspaceActionButton
+                          intent="neutral"
+                          onClick={() => handleOpenTerminal(ws.id)}
+                          disabled={actionLoading}
+                          title="Open terminal in workspace directory"
+                        >
+                          Terminal
+                        </WorkspaceActionButton>
+                        )}
+                        {ws.workingDir && (
+                        <WorkspaceActionButton
+                          intent="neutral"
+                          onClick={() => handleOpenEditor(ws.id)}
+                          disabled={actionLoading}
+                          title="Open workspace directory in VS Code"
+                        >
+                          VS Code
+                        </WorkspaceActionButton>
+                        )}
+                        {ws.workingDir && preview.ok && (
+                          <div className="inline-flex">
+                            <WorkspaceActionButton
+                              intent="info"
+                              rounded="rounded-l-md"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                window.open(preview.url, "_blank", "noopener,noreferrer");
+                              }}
+                              disabled={actionLoading}
+                              title={`Open dev preview at ${preview.url}`}
+                            >
+                              Preview
+                            </WorkspaceActionButton>
+                            <WorkspaceActionButton
+                              intent="info"
+                              rounded="rounded-r-md"
+                              className="px-2 border-l border-sky-700"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void copyPreviewUrl(preview.url);
+                              }}
+                              disabled={actionLoading}
+                              title={`Copy ${preview.url}`}
+                            >
+                              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                              </svg>
+                              <span className="sr-only">Copy preview URL</span>
+                            </WorkspaceActionButton>
+                          </div>
+                        )}
+                        {ws.workingDir && !preview.ok && (
+                          <WorkspaceActionButton
+                            intent="neutral"
+                            disabled
+                            title={preview.reason}
+                          >
+                            Preview unavailable
+                          </WorkspaceActionButton>
+                        )}
+                        {ws.workingDir && !isRunning && (
+                        <WorkspaceActionButton
+                          intent="warn"
+                          onClick={() => handleAutoBisect(ws.id)}
+                          disabled={actionLoading}
+                          title="Find the commit that introduced the failing test"
+                        >
+                          Auto-bisect
+                        </WorkspaceActionButton>
+                        )}
+
+                        <span className="w-px bg-gray-300 dark:bg-gray-600 self-stretch mx-1" aria-hidden="true" />
+
                         {!ws.isDirect && ws.status !== "closed" && !isRunning && (
-                          <button
+                          <WorkspaceActionButton
+                            intent="ghost"
                             onClick={() => handleCloseWorkspace(ws.id)}
                             disabled={actionLoading}
-                            className="text-sm text-gray-600 dark:text-gray-300 px-3 py-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50 border border-gray-300 dark:border-gray-600 font-medium"
                             title="Close without merging (e.g. already merged elsewhere or abandoned). Keeps session history."
                           >
                             Close
-                          </button>
+                          </WorkspaceActionButton>
                         )}
-                        <button
+                        <WorkspaceActionButton
+                          intent="ghost"
+                          className="!text-red-600 dark:!text-red-400 hover:!bg-red-50 dark:hover:!bg-red-950 !border-red-300 dark:!border-red-800"
                           onClick={() => handleDeleteWorkspace(ws.id)}
                           disabled={actionLoading}
-                          className="text-sm text-red-600 px-3 py-1.5 rounded hover:bg-red-50 dark:hover:bg-red-950 disabled:opacity-50 border border-red-300 dark:border-red-800 font-medium"
                           title="Delete this workspace permanently"
                         >
                           Delete
-                        </button>
+                        </WorkspaceActionButton>
                       </div>
                       {mergeError && mergeError.wsId === ws.id && (
                         <div className="mt-2 p-2 bg-orange-50 dark:bg-orange-950 border border-orange-200 dark:border-orange-800 rounded">
@@ -2672,30 +2690,32 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
 
                     {!selectedHistoryId && ws.status === "closed" && (
                       <div className="pt-2 border-t border-gray-200 dark:border-gray-700 space-y-2">
-                        <div className="flex gap-2">
-                          <button
+                        <div className="flex gap-2 flex-wrap items-center rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-900/40 p-2">
+                          <WorkspaceActionButton
+                            intent="info"
+                            className="flex-1"
                             onClick={() => handleGenerateGithubDraft(ws.id)}
                             disabled={actionLoading}
-                            className="text-sm bg-gray-700 text-white px-3 py-1.5 rounded hover:bg-gray-800 disabled:opacity-50 flex-1"
                             title="Generate a local GitHub PR or release-note draft and save it as an issue artifact"
                           >
                             Generate GitHub Draft
-                          </button>
-                          <button
+                          </WorkspaceActionButton>
+                          <WorkspaceActionButton
+                            intent="warn"
                             onClick={() => void handleExportHandoffBundle(ws.id)}
                             disabled={actionLoading}
-                            className="text-sm bg-amber-600 text-white px-3 py-1.5 rounded hover:bg-amber-700 disabled:opacity-50"
                             title="Download a Markdown handoff bundle for this workspace"
                           >
                             Export Handoff
-                          </button>
-                          <button
+                          </WorkspaceActionButton>
+                          <WorkspaceActionButton
+                            intent="danger"
                             onClick={() => handleDeleteWorkspace(ws.id)}
                             disabled={actionLoading}
-                            className="text-sm bg-red-600 text-white px-3 py-1.5 rounded hover:bg-red-700 disabled:opacity-50"
+                            title="Delete this workspace permanently"
                           >
                             Delete
-                          </button>
+                          </WorkspaceActionButton>
                         </div>
                         {githubDrafts[ws.id] && (
                           <details className="text-xs">
