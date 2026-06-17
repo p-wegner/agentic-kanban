@@ -289,6 +289,12 @@ interface IssueDetailPanelProps {
   onNavigateToIssue?: (issueId: string) => void;
   /** Navigate to the graph view and focus this issue. */
   onViewInGraph?: (issueId: string) => void;
+  /**
+   * Open the butler with this ticket's context pre-loaded (#838) — for asking
+   * "what took so long", "where did the agents fail", "what context was missing",
+   * etc., and digging into the ticket's transcript.
+   */
+  onChatAboutTicket?: (issue: IssueWithStatus) => void;
   /** Multi-ticket navigation trail (#383). Rendered as a breadcrumb strip in the header. */
   trail?: TicketTrailControls;
 }
@@ -385,6 +391,7 @@ export function IssueDetailPanel({
   onIssueUpdate,
   onNavigateToIssue,
   onViewInGraph,
+  onChatAboutTicket,
   trail,
 }: IssueDetailPanelProps) {
   const [editing, setEditing] = useState(false);
@@ -1175,6 +1182,18 @@ export function IssueDetailPanel({
                 </button>
                 {issue.issueNumber != null && (
                   <CopyLinkButton issueNumber={issue.issueNumber} />
+                )}
+                {onChatAboutTicket && (
+                  <button
+                    onClick={() => onChatAboutTicket(issue)}
+                    title="Chat about this ticket with the butler — what took so long, where agents failed, missing context"
+                    aria-label="Chat about this ticket with the butler"
+                    className="text-gray-400 dark:text-gray-500 hover:text-brand-600 dark:hover:text-brand-400 p-0.5 rounded transition-colors"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                    </svg>
+                  </button>
                 )}
                 <button
                   onClick={toggleVisualVerify}
