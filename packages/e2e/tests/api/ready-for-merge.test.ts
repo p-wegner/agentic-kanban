@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
 import { getE2EProjectId } from "../helpers/e2e-project.js";
 
-test.describe("Ready for Merge — API", () => {
+test.describe("@system: Ready for Merge — API", () => {
   let projectId: string;
   let statusId: string;
   let issueId: string;

@@ -3,7 +3,7 @@ import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { SERVER_URL } from "../helpers/port.js";
 
-test.describe("Worktrees API", () => {
+test.describe("@system: Worktrees API", () => {
   let projectId: string;
   let projectRepoPath: string;
   let statusId: string;

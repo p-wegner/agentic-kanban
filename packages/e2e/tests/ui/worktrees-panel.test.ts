@@ -8,7 +8,7 @@ async function openWorktreesPanel(page: import("@playwright/test").Page) {
   await expect(page.locator("h2", { hasText: "Worktrees" })).toBeVisible({ timeout: 5000 });
 }
 
-test.describe("Worktrees Panel — orphaned detection and bulk clean", () => {
+test.describe("@system: Worktrees Panel — orphaned detection and bulk clean", () => {
   let projectId: string;
   let statusId: string;
   const createdIssueIds: string[] = [];

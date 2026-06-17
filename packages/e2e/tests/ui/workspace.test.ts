@@ -82,7 +82,7 @@ test.describe("Workspace Panel UI", () => {
   });
 });
 
-test.describe("Workspace Diff and Merge UI", () => {
+test.describe("@system: Workspace Diff and Merge UI", () => {
   let projectId: string;
   let todoStatusId: string;
   const createdWorkspaceIds: string[] = [];
