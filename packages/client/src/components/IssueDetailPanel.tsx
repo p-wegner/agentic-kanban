@@ -1278,7 +1278,13 @@ export function IssueDetailPanel({
           />
         )}
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div
+          className={`flex-1 overflow-y-auto p-4 space-y-4 ${
+            panelMode === "sidebar"
+              ? ""
+              : "xl:space-y-0 xl:[column-width:34rem] xl:[column-gap:1rem] xl:[&>*]:[break-inside:avoid] xl:[&>*]:mb-4"
+          }`}
+        >
           {/* Blocked banner — shown when issue has unresolved blocking dependencies */}
           {(() => {
             const RESOLVED = ["done", "cancelled", "ai reviewed"];
