@@ -203,10 +203,10 @@ export function Layout({
 
   return (
     <div className="h-screen flex flex-col bg-surface dark:bg-surface-dark">
-      <header className="bg-surface-raised dark:bg-surface-raised-dark border-b border-black/[0.07] dark:border-white/10 px-3 py-1.5 sm:px-4 sm:py-2.5 shrink-0">
-        <div className="flex items-center justify-between gap-2 sm:gap-4 flex-wrap">
-          <div className="flex items-center gap-2 min-w-0">
-            <h1 className="wordmark hidden sm:block text-xl font-semibold text-ink dark:text-stone-100 shrink-0">
+      <header className="bg-surface-raised dark:bg-surface-raised-dark border-b border-black/[0.07] dark:border-white/10 px-2.5 py-1.5 sm:px-3 shrink-0">
+        <div className="flex items-center justify-between gap-2 overflow-hidden">
+          <div className="flex flex-1 items-center gap-1.5 min-w-0">
+            <h1 className="wordmark hidden sm:block text-base lg:text-lg font-semibold text-ink dark:text-stone-100 shrink-0">
               Agentic Kanban
             </h1>
             {/* Pinned-project chips are an optional fast path; the selector remains the full project switcher. */}
@@ -260,8 +260,8 @@ export function Layout({
               </svg>
             </button>
           </div>
-          <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-            <div className="relative">
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+            <div className="relative hidden md:block">
               <svg
                 className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500"
                 viewBox="0 0 24 24"
@@ -278,7 +278,7 @@ export function Layout({
                 value={searchQuery}
                 onChange={(e) => onSearchChange?.(e.target.value)}
                 placeholder='Search issues... ("/")'
-                className="pl-8 pr-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md w-32 sm:w-48 md:w-64 focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500"
+                className="pl-8 pr-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md w-44 lg:w-56 xl:w-64 focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500"
               />
               {searchQuery && (
                 <button
@@ -289,7 +289,7 @@ export function Layout({
                 </button>
               )}
             </div>
-            <div className="hidden sm:flex items-center gap-2 sm:gap-3">
+            <div className="hidden sm:flex items-center gap-1.5">
             <button
               onClick={onAllWorkspacesClick}
               className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
