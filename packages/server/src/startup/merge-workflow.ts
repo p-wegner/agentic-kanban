@@ -226,10 +226,12 @@ Your task: visually verify that the UI changes look correct in the browser.
 1. Use the playwright-cli skill (/playwright-cli) or run playwright directly
 2. Navigate to http://localhost:${clientPort}
 3. Check the relevant UI sections based on the changed files from branch '${workspace.branch}'
-4. Take a screenshot confirming the UI renders correctly and report your findings
+4. Capture a short WebM proof recording and take a screenshot confirming the UI renders correctly
+5. Attach the WebM recording with \`attach_artifact\` using \`type: "video"\`, \`mimeType: "video/webm"\`, \`workspaceId: "${workspace.id}"\`, and a visual-proof caption
+6. Report your findings
 
 Write ANY screenshots, log files, or scratch output into a \`.verify/\` directory (it is
-gitignored) — never the repo root. Don't leave \`*.log\` / \`*.png\` artifacts in the checkout.
+gitignored) — never the repo root. Don't leave \`*.log\`, \`*.png\`, or \`*.webm\` artifacts in the checkout.
 
 If the dev server is not responding, wait 10 seconds and retry once.
 
