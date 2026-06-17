@@ -11,6 +11,7 @@ const TableView = lazy(() => import("../components/TableView.js").then((m) => ({
 const AgentGrid = lazy(() => import("../components/AgentGrid.js").then((m) => ({ default: m.AgentGrid })));
 const TimelineView = lazy(() => import("../components/TimelineView.js").then((m) => ({ default: m.TimelineView })));
 const MetricsView = lazy(() => import("../components/MetricsView.js").then((m) => ({ default: m.MetricsView })));
+const CrimeSceneCityView = lazy(() => import("../components/CrimeSceneCityView.js").then((m) => ({ default: m.CrimeSceneCityView })));
 const QualityMetricsView = lazy(() => import("../components/QualityMetricsView.js").then((m) => ({ default: m.QualityMetricsView })));
 const MilestonesOverview = lazy(() => import("../components/MilestonesOverview.js").then((m) => ({ default: m.MilestonesOverview })));
 const ButlerView = lazy(() => import("../components/ButlerView.js").then((m) => ({ default: m.ButlerView })));
@@ -1828,6 +1829,11 @@ export function BoardPage() {
               onIssueClick={handleIssueClick}
               onCreatedDateClick={handleCreatedDateDrilldown}
             />
+          </BoardErrorBoundary>
+        )}
+        {viewMode === "crime-scene" && activeProjectId && (
+          <BoardErrorBoundary columnName="Code Crime Scene">
+            <CrimeSceneCityView projectId={activeProjectId} />
           </BoardErrorBoundary>
         )}
         {viewMode === "quality-metrics" && activeProjectId && (
