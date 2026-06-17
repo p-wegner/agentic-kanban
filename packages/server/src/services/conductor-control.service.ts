@@ -34,16 +34,21 @@ export interface ConductorActionResult {
 }
 
 /**
- * Spawn the Conductor loop detached (survives a server hot-reload, like agent
- * subprocesses) and record its OS PID so stop can tree-kill it. No-op if it is already alive.
+ * Spawn the detached Conductor loop with extra env knobs. Survives a server hot-reload
+ * (like agent subprocesses) and records its OS PID so stop can tree-kill it. No-op if a
+ * Conductor is already alive — the caller never gets two drivers on one board.
  */
-export function startConductor(repoPath: string, agent: "claude" | "codex" = "claude"): ConductorActionResult {
+function spawnConductorLoop(
+  repoPath: string,
+  agent: "claude" | "codex",
+  extraEnv: NodeJS.ProcessEnv,
+): ConductorActionResult {
   if (!conductorAvailable(repoPath)) return { ok: false, pid: null, error: "no scripts/board-monitor/loop.sh in this project" };
   if (readOrchestratorStatus(repoPath).alive) return { ok: false, pid: null, error: "conductor already running" };
   try {
     const child = spawn("bash", ["scripts/board-monitor/loop.sh"], {
       cwd: repoPath,
-      env: { ...process.env, MONITOR_AGENT: agent },
+      env: { ...process.env, MONITOR_AGENT: agent, ...extraEnv },
       detached: true,
       windowsHide: true,
       stdio: "ignore",
@@ -57,6 +62,22 @@ export function startConductor(repoPath: string, agent: "claude" | "codex" = "cl
   } catch (err) {
     return { ok: false, pid: null, error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/**
+ * Start the continuous Conductor loop (the always-on driver for `conductor` Start Mode).
+ */
+export function startConductor(repoPath: string, agent: "claude" | "codex" = "claude"): ConductorActionResult {
+  return spawnConductorLoop(repoPath, agent, {});
+}
+
+/**
+ * Fire exactly ONE off-process board-monitor cycle then exit (cron-driven, ticket #841).
+ * `MONITOR_MAX_ITERS=1` runs a single iteration; `MONITOR_SLEEP=0` skips the loop's trailing
+ * inter-cycle sleep so the detached process exits promptly instead of lingering ~30 min.
+ */
+export function runConductorCycleOnce(repoPath: string, agent: "claude" | "codex" = "claude"): ConductorActionResult {
+  return spawnConductorLoop(repoPath, agent, { MONITOR_MAX_ITERS: "1", MONITOR_SLEEP: "0" });
 }
 
 /**
