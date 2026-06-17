@@ -268,30 +268,31 @@ _Last updated: 2026-06-17 (full re-audit of `packages/e2e/tests/`, ~80 spec file
 | F-DATA-03: Session history/output persistence + UI selector | `packages/e2e/tests/api/session-history.test.ts`, `packages/e2e/tests/ui/session-history.test.ts` |
 | Preferences API (active-project get/set) | `packages/e2e/tests/api/preferences.test.ts` |
 | Projects API (list, create, statuses, branches) | `packages/e2e/tests/api/projects.test.ts` |
+| F-UI-06: Failure toast notification (error toast appears + auto-dismisses) | `packages/e2e/tests/ui/failure-toast.test.ts` |
+| F-WS-04: Direct workspace UI (purple "direct" badge, "View Changes"/"Close" labels) | `packages/e2e/tests/ui/direct-workspace-ui.test.ts` |
+| Skip auto review toggle in issue detail edit (#174) | `packages/e2e/tests/ui/skip-review-toggle.test.ts` |
+| Blocked-by summary banner in issue detail panel (#185) | `packages/e2e/tests/ui/blocked-by-banner.test.ts` |
+| Issue detail panel expand button (sidebar → modal → fullscreen) (#190) | `packages/e2e/tests/ui/issue-detail-expand.test.ts` |
+| Follow-up task creation in issue detail panel (#198) | `packages/e2e/tests/ui/follow-up-task.test.ts` |
+| Auto-start follow-up tasks setting in Settings > Workflow (#199) | `packages/e2e/tests/ui/auto-start-followup-setting.test.ts` |
+| Markdown preview toggle in description **edit** mode (#203) | `packages/e2e/tests/ui/markdown-preview-toggle.test.ts` |
+| "Open in VS Code" button in workspace panel (#204) | `packages/e2e/tests/ui/workspace-vscode-button.test.ts` |
+| Worktrees panel per-row actions — Open-in-Explorer + Delete buttons (#206) | `packages/e2e/tests/ui/worktrees-row-actions.test.ts` |
+| Graph view "Fit to view" + Table view Tags/Updated columns (#207) | `packages/e2e/tests/ui/graph-table-extras.test.ts` |
+| Skeleton/loading state (`SkeletonBoard`, route-delayed board) | `packages/e2e/tests/ui/skeleton-board.test.ts` |
+| Issue artifacts API (create/list/delete) (#205) | `packages/e2e/tests/api/issue-artifacts.test.ts` |
+| `POST /api/internal/board-notify` (broadcast + no-op cases) | `packages/e2e/tests/api/board-notify.test.ts` |
+| `/ws/sessions/:sessionId` reconnect/replay + unknown-id lenient behavior | `packages/e2e/tests/api/ws-session-reconnect.test.ts` |
+| Unified `{ error }` response-shape contract across representative routes | `packages/e2e/tests/api/error-contract.test.ts` |
 
 ### ❌ Not yet covered
 
-Re-audited 2026-06-17. The previously-listed tickets #157, #158, #163, #167, #169, #170, #172, #173, #175, #176, #177, #178, #179, #182, #188, #189, #191, #193, #194, #196, #197 are now covered (see table above). Remaining gaps:
+Re-audited 2026-06-17. The previously-listed tickets #157, #158, #163, #167, #169, #170, #172, #173, #175, #176, #177, #178, #179, #182, #188, #189, #191, #193, #194, #196, #197 are now covered, and 2026-06-17 added E2E coverage for #174, #184, #185, #190, #195, #198, #199, #203, #204, #205, #206, #207, the SkeletonBoard loading state, and the three API gaps (board-notify, ws/sessions reconnect, error contract) — all in the table above. Remaining gaps:
 
 | Feature | Ticket |
 |---------|--------|
-| F-UI-06: In-app toast notifications (create/delete/merge success toasts, auto-dismiss) | #184 |
-| F-WS-04: Direct workspace UI (purple badge, "Close"/"View Changes" vs "Merge"/"View Diff") — only basic Merge/View-Diff covered today | #195 |
-| E2E: cover skip auto review toggle in issue detail edit | #174 |
 | E2E: cover workspace setup scripts (F-WS-08) — distinct from project-script shortcuts already covered | #183 |
-| E2E: cover blocked-by summary banner in issue detail panel | #185 |
-| E2E: cover expand button for issue detail panel (full-width mode) | #190 |
-| E2E: cover follow-up task creation in issue detail panel | #198 |
-| E2E: cover auto-start follow-up tasks setting in Settings > Workflow — only the toggle's tab is covered | #199 |
-| E2E: cover markdown preview toggle in issue description **edit** mode (distinct from #178 view render) | #203 |
-| E2E: cover Open in VS Code button in workspace panel | #204 |
-| E2E: cover issue artifacts API (create/list/delete attachments on issues) | #205 |
-| E2E: cover Worktrees panel row actions (Open-in-Explorer, Delete) — bulk-clean covered, row actions not | #206 |
-| E2E: cover graph view zoom-to-fit and table view Tags/Updated columns | #207 |
-| Skeleton/loading state (`SkeletonBoard`) — delay board response, assert skeleton | #167-area |
-| `POST /api/internal/board-notify` route-level test | (api) |
-| `/ws/sessions/:sessionId` reconnect/error/close behavior | (api) |
-| Unified `{ error }` response-shape contract across representative routes | (api) |
+| Worktrees panel row Delete that actually removes the worktree — button + confirm are covered (#206), but asserting the removal is unreliable on Windows (worktree-cleanup EBUSY); bulk-clean removal is covered in `worktrees-panel.test.ts` | #206 |
 
 
 ## Known Test Considerations
