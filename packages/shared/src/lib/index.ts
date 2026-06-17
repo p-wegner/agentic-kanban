@@ -5,6 +5,7 @@ export * from "./failure-keywords.js";
 export * from "./status-view.js";
 export * from "./workspace-activity-state.js";
 export * from "./branch.js";
+export * from "./butler-ticket-prompt.js";
 export * from "./outbound-webhook.js";
 // Type-only: smoke-check.ts imports node:child_process (runSmokeCheck), which crashes
 // the browser bundle if pulled into the client via this barrel. The sole runtime consumer

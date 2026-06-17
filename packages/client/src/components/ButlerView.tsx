@@ -82,6 +82,15 @@ interface ButlerViewProps {
   liveStats: Record<string, LiveSessionStats>;
   onIssueClick: (issue: IssueWithStatus) => void;
   onExit?: () => void;
+  /**
+   * A message to pre-fill into the active butler tab's input once it's ready
+   * (e.g. the "Chat about this ticket" entry point from a ticket — #838). Each
+   * distinct value is applied once; the butler is started first if it's cold so
+   * the prompt can be sent. Consumed via {@link ButlerViewProps.onInitialPromptConsumed}.
+   */
+  initialPrompt?: string;
+  /** Called after `initialPrompt` has been prefilled, so the parent can clear it. */
+  onInitialPromptConsumed?: () => void;
 }
 
 function formatRelativeTs(ts: number): string {
@@ -525,7 +534,7 @@ function TabRenameInput({ name, onSave, onCancel }: { name: string; onSave: (v: 
 
 // ─── Main ButlerView ─────────────────────────────────────────────────────────
 
-export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssueClick, onExit }: ButlerViewProps) {
+export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssueClick, onExit, initialPrompt, onInitialPromptConsumed }: ButlerViewProps) {
   const [loadingState, setLoadingState] = useState(true);
   const [butlers, setButlers] = useState<ButlerListItem[]>([]);
   const [butlerMax, setButlerMax] = useState(4);
@@ -1013,6 +1022,36 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [tab?.chatMessages]);
+
+  // Prefill the active tab with an external prompt (e.g. "Chat about this ticket",
+  // #838). Apply each distinct prompt once: start the butler if it's cold, drop the
+  // text into the input for review, focus + size the textarea, and notify the parent
+  // so it can clear the prompt. We deliberately do NOT auto-send — the user gets to
+  // see the ticket context that was injected and tweak it before the first turn.
+  const appliedInitialPromptRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (loadingState || !initialPrompt || !activeTabId) return;
+    if (appliedInitialPromptRef.current === initialPrompt) return;
+    const cur = tabStates[activeTabId];
+    if (!cur) return;
+    appliedInitialPromptRef.current = initialPrompt;
+    void (async () => {
+      if (!cur.butlerState?.active) {
+        await handleStart();
+      }
+      setTabInput(activeTabId, initialPrompt);
+      requestAnimationFrame(() => {
+        const t = inputRef.current;
+        if (t) {
+          t.focus();
+          t.style.height = "auto";
+          t.style.height = `${Math.min(t.scrollHeight, 160)}px`;
+        }
+      });
+      onInitialPromptConsumed?.();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPrompt, loadingState, activeTabId]);
 
   // ── Per-tab actions ──
 
