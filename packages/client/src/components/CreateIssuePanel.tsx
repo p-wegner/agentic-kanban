@@ -179,9 +179,10 @@ export function CreateIssuePanel({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent, forceStart = false) {
     e.preventDefault();
     if (!title.trim() || submitting) return;
+    const start = startWorkspace || forceStart;
     setSubmitting(true);
     try {
       await onSubmit({
@@ -191,16 +192,25 @@ export function CreateIssuePanel({
         estimate: estimate || undefined,
         statusId: selectedStatusId,
         projectId,
-        startWorkspace: startWorkspace || undefined,
-        planMode: (startWorkspace && planMode) || undefined,
-        skipAutoReview: (startWorkspace && skipAutoReview) || undefined,
-        profile: startWorkspace ? profileSelection() : undefined,
-        model: (startWorkspace && (isClaudeSelected || isCodexSelected) && selectedModel) || undefined,
-        isDirect: (startWorkspace && isDirect) || undefined,
-        skillId: (startWorkspace && skillId) || undefined,
+        startWorkspace: start || undefined,
+        planMode: (start && planMode) || undefined,
+        skipAutoReview: (start && skipAutoReview) || undefined,
+        profile: start ? profileSelection() : undefined,
+        model: (start && (isClaudeSelected || isCodexSelected) && selectedModel) || undefined,
+        isDirect: (start && isDirect) || undefined,
+        skillId: (start && skillId) || undefined,
       });
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  // Ctrl/Cmd+Enter creates the issue and starts a workspace immediately,
+  // regardless of the "Start workspace" checkbox state.
+  function handleFormKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      void handleSubmit(e, true);
     }
   }
 
@@ -229,7 +239,7 @@ export function CreateIssuePanel({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-y-auto p-5 gap-4">
+        <form onSubmit={handleSubmit} onKeyDown={handleFormKeyDown} className="flex flex-col flex-1 overflow-y-auto p-5 gap-4">
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Title</label>
             <input
@@ -461,6 +471,7 @@ export function CreateIssuePanel({
             <button
               type="submit"
               disabled={!title.trim() || submitting}
+              title="Ctrl+Enter to create and start a workspace"
               className="text-sm bg-brand-600 text-white px-4 py-2 rounded hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {submitting
