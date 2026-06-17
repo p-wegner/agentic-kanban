@@ -1188,9 +1188,10 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
 
     if (currentDragMode === "sidebar") {
       const isLeftSidebar = sidebarSide === "left";
+      const modalWidth = Math.min(1200, window.innerWidth * 0.96);
       const modalX = isLeftSidebar
-        ? Math.min(window.innerWidth - 580, 200)
-        : Math.max(0, dragStartRef.current.panelX - 10);
+        ? Math.max(0, Math.min(window.innerWidth - modalWidth, 200))
+        : Math.max(0, Math.min(window.innerWidth - modalWidth, dragStartRef.current.panelX - 10));
       const modalY = Math.max(0, dragStartRef.current.panelY + 40);
       currentDragMode = "modal";
       setPanelMode("modal");
@@ -1261,7 +1262,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
         data-panel
         className={`fixed bg-surface-raised dark:bg-surface-raised-dark shadow-xl z-50 flex flex-col animate-slide-in-right ${resizing ? "select-none" : ""} ${
           panelMode === "modal"
-            ? "top-[5vh] left-1/2 -translate-x-1/2 w-[min(560px,96vw)] h-[90vh] rounded-lg border border-gray-200 dark:border-gray-700"
+            ? "top-[5vh] left-1/2 -translate-x-1/2 w-[min(1200px,96vw)] h-[90vh] rounded-lg border border-gray-200 dark:border-gray-700"
             : sidebarSide === "left"
             ? "left-0 top-0 h-full border-r border-gray-200 dark:border-gray-700"
             : "right-0 top-0 h-full border-l border-gray-200 dark:border-gray-700"
