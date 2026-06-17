@@ -92,6 +92,7 @@ import type {
   StatusWithIssues,
   UpdateIssueRequest,
 } from "@agentic-kanban/shared";
+import { buildTicketChatPrompt } from "@agentic-kanban/shared";
 import type { BoardViewState, SavedViewReference } from "../lib/boardSavedViews.js";
 
 /** Lightweight fallback shown for the ~1 frame it takes to fetch a lazy view chunk. */
@@ -264,6 +265,9 @@ export function BoardPage() {
   const [workspaceInitial, setWorkspaceInitial] = useState<{ workspaceId: string; sessionId: string } | null>(null);
   const [workspaceInitialDiff, setWorkspaceInitialDiff] = useState(false);
   const [workspaceOpenCreate, setWorkspaceOpenCreate] = useState(false);
+  // A prompt to seed the butler with when entering its view via "Chat about this
+  // ticket" (#838). Cleared once ButlerView has consumed it.
+  const [butlerInitialPrompt, setButlerInitialPrompt] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [focusMode, setFocusMode] = useState(() => {
     try { return sessionStorage.getItem("board-focus-mode") === "1"; } catch { return false; }
@@ -1236,6 +1240,18 @@ export function BoardPage() {
     }
   }
 
+  function handleChatAboutTicket(issue: IssueWithStatus) {
+    setButlerInitialPrompt(buildTicketChatPrompt({
+      issueNumber: issue.issueNumber,
+      title: issue.title,
+      description: issue.description,
+      statusName: issue.statusName,
+      issueType: issue.issueType,
+    }));
+    setSelectedIssue(null);
+    handleViewModeChange("butler");
+  }
+
   function handleOpenDiff(issue: IssueWithStatus, workspaceId: string) {
     setSelectedIssue(null);
     setWorkspaceIssue(issue);
@@ -1858,6 +1874,8 @@ export function BoardPage() {
               liveStats={liveStats}
               onIssueClick={handleIssueClick}
               onExit={() => handleViewModeChange("kanban")}
+              initialPrompt={butlerInitialPrompt ?? undefined}
+              onInitialPromptConsumed={() => setButlerInitialPrompt(null)}
             />
           </BoardErrorBoundary>
         )}
@@ -2184,6 +2202,7 @@ export function BoardPage() {
           onManageWorkspaces={handleManageWorkspaces}
           onStartWorkspace={handleStartWorkspace}
           onIssueUpdate={setSelectedIssue}
+          onChatAboutTicket={handleChatAboutTicket}
           onNavigateToIssue={(issueId) => openIssueById(issueId)}
           onViewInGraph={(issueId) => {
             setGraphFocusIssueId(issueId);
