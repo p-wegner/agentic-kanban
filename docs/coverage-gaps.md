@@ -63,12 +63,14 @@ This snapshot focuses on the current test inventory under:
 | GET/POST | `/api/workspaces/:id/already-merged-status`, `/reconcile-as-done` | Covered | `packages/e2e/tests/api/monitor-merge-reconciliation.test.ts` |
 | CRUD | `/api/agent-skills` (built-in protection, scope, path-traversal/duplicate rejection) | Covered | `packages/e2e/tests/api/agent-skills.test.ts` |
 | — | Get-by-id response shape / field-presence contract | Covered | `packages/e2e/tests/api/get-by-id-contract.test.ts` |
+| POST | `/api/internal/board-notify` (broadcasts `board_changed` with projectId; no-op + empty-body cases) | Covered | `packages/e2e/tests/api/board-notify.test.ts` |
+| WS | `/ws/sessions/:sessionId` reconnect/replay (valid session receives frames; unknown id opens + stays quiet — documented lenient behavior) | Covered | `packages/e2e/tests/api/ws-session-reconnect.test.ts` |
+| — | Shared `{ error: string }` response-shape contract across representative routes (issue/workspace/session 404s, missing-field 400s) | Covered | `packages/e2e/tests/api/error-contract.test.ts` |
 
 ### Remaining API Gaps
 
-1. `POST /api/internal/board-notify` has no direct test match. Add a route-level server test that posts to the internal endpoint and asserts the board notification side effect or expected no-op response.
-2. WebSocket reconnect/error scenarios are not directly covered. Add focused tests for `/ws/sessions/:sessionId` and `/ws/board/:projectId` reconnect behavior, invalid IDs, and close handling.
-3. Error response shape is still inconsistently asserted. Individual endpoints now validate `{ error }` (e.g. `codemod.test.ts`, `worktrees.test.ts`, `ready-for-merge.test.ts`) and `get-by-id-contract.test.ts` asserts field presence, but there is still no shared cross-route contract test for `{ error }` formatting.
+1. `/ws/board/:projectId` reconnect/close handling after a dropped connection is still only indirectly exercised (the happy-path event stream is covered by `board-events.test.ts`); a dedicated reconnect test would harden it. (The session-WS reconnect path is now covered by `ws-session-reconnect.test.ts`.)
+2. There is intentionally no `GET /api/projects/:id` route, so a bogus project id returns Hono's plain-text 404 rather than the JSON `{ error }` contract — the contract test uses a session 404 instead. Worth normalizing if a single-project GET is ever added.
 
 ---
 
@@ -94,8 +96,10 @@ This snapshot focuses on the current test inventory under:
 | All Workspaces panel / Merge Queue panel / Worktrees panel | Covered | `packages/e2e/tests/ui/all-workspaces-panel.test.ts`, `merge-queue-panel.test.ts`, `worktrees-panel.test.ts` |
 | Settings Workflow tab / Scheduled Runs / Agent profile dashboard | Covered | `packages/e2e/tests/ui/settings-workflow.test.ts`, `settings-scheduled-runs.test.ts`, `agent-profile-dashboard.test.ts` |
 | AI Reviewed column / Ready-for-Merge badge / session stats / task progress | Covered | `packages/e2e/tests/ui/ai-reviewed-column.test.ts`, `ready-for-merge-badge.test.ts`, `session-stats.test.ts`, `task-progress.test.ts` |
-| Toast notifications | Partially covered | Specific toasts are asserted in `settings.test.ts`, `command-palette.test.ts`, and `settings-scheduled-runs.test.ts`; broad error/success toast coverage is still incomplete (#184) |
-| Skeleton/loading state | Gap | Only comments mention waiting past the skeleton phase; no direct assertion of `SkeletonBoard` rendering was found |
+| Issue detail extras — skip-review toggle / blocked-by banner / expand modal / follow-up create / markdown preview | Covered | `packages/e2e/tests/ui/skip-review-toggle.test.ts`, `blocked-by-banner.test.ts`, `issue-detail-expand.test.ts`, `follow-up-task.test.ts`, `markdown-preview-toggle.test.ts` |
+| Direct workspace UI / VS Code button / Worktrees row actions / Graph-fit + Table columns | Covered | `packages/e2e/tests/ui/direct-workspace-ui.test.ts`, `workspace-vscode-button.test.ts`, `worktrees-row-actions.test.ts`, `graph-table-extras.test.ts` |
+| Toast notifications | Covered | Success toasts in `settings.test.ts`, `command-palette.test.ts`, `settings-scheduled-runs.test.ts`; a dedicated **failure** toast (route-forced 500 → error toast + auto-dismiss) in `failure-toast.test.ts` |
+| Skeleton/loading state | Covered | `packages/e2e/tests/ui/skeleton-board.test.ts` route-delays the board response and asserts `SkeletonBoard` shows then is replaced |
 
 ### Remaining UI Gaps
 
@@ -191,7 +195,9 @@ Known stale areas:
 
 ## Last Verified
 
-Re-audited on 2026-06-17 via a parallel sweep of every spec under `packages/e2e/tests/` (~80 files). Since 2026-05-31, ~21 previously-"Not yet covered" tickets gained E2E coverage and ~13 new API/UI spec files were added (merge lifecycle, worktrees, codemod, showdown, TDD mode, agent-skills API, get-by-id contract, board-monitor toolbar, project scripts, active-project recovery). Detailed feature→file mapping lives in `docs/prd/06-testability-strategy.md`. Still-open gaps: `POST /api/internal/board-notify`, `/ws/sessions/:sessionId` reconnect, unified `{ error }` contract, `SkeletonBoard` loading state, broad failure-toast coverage.
+Re-audited on 2026-06-17 via a parallel sweep of every spec under `packages/e2e/tests/` (~80 files). Since 2026-05-31, ~21 previously-"Not yet covered" tickets gained E2E coverage and ~13 new API/UI spec files were added (merge lifecycle, worktrees, codemod, showdown, TDD mode, agent-skills API, get-by-id contract, board-monitor toolbar, project scripts, active-project recovery). Detailed feature→file mapping lives in `docs/prd/06-testability-strategy.md`.
+
+Then on 2026-06-17, **16 new spec files were authored and verified green** to close the remaining gaps: `issue-artifacts`, `board-notify`, `error-contract`, `ws-session-reconnect` (API) and `skip-review-toggle`, `blocked-by-banner`, `issue-detail-expand`, `follow-up-task`, `markdown-preview-toggle`, `workspace-vscode-button`, `worktrees-row-actions`, `direct-workspace-ui`, `graph-table-extras`, `auto-start-followup-setting`, `failure-toast`, `skeleton-board` (UI). Remaining open gaps are now narrow: `/ws/board/:projectId` reconnect-after-drop, F-WS-08 workspace setup scripts (#183), and the Windows-EBUSY-blocked "row Delete actually removes the worktree" assertion (#206 — button + confirm are covered; bulk removal is covered in `worktrees-panel.test.ts`).
 
 Originally verified on 2026-05-31 with these repository searches:
 
