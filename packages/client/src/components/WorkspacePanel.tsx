@@ -37,6 +37,8 @@ import {
   resolveQuickLaunchDefault,
 } from "../lib/workspace-helpers.js";
 import { SessionStatsBadge, SessionStatsSummary } from "../lib/session-stats.js";
+import { ContextWindowView } from "./ContextWindowView.js";
+import type { LiveSessionStats } from "../lib/useBoardEvents.js";
 import type {
   AgentOutputMessage,
   IssueArtifact,
@@ -102,6 +104,8 @@ interface WorkspacePanelProps {
   autoSelectId?: string;
   initialShowCreate?: boolean;
   initialShowDiff?: boolean;
+  /** Live token/context stats for this issue's active session, if any. */
+  liveStats?: LiveSessionStats | null;
 }
 
 type AvailableSkill = {
@@ -249,7 +253,7 @@ function WorkspaceQuickActions({
   );
 }
 
-export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onWorkspaceCreating, onWorkspaceCreateSettled, initialWorkspaceId, initialSessionId, autoSelectId, initialShowCreate, initialShowDiff }: WorkspacePanelProps) {
+export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onWorkspaceCreating, onWorkspaceCreateSettled, initialWorkspaceId, initialSessionId, autoSelectId, initialShowCreate, initialShowDiff, liveStats }: WorkspacePanelProps) {
   const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(initialShowCreate ?? false);
@@ -1756,6 +1760,12 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
 
                 {isSelected && (
                   <div className="space-y-2 pt-2 border-t border-gray-200 dark:border-gray-700" onClick={(e) => e.stopPropagation()}>
+                    {(completedSessions.length > 0 || (isThisRunning && liveStats)) && (
+                      <ContextWindowView
+                        sessions={completedSessions}
+                        liveStats={isThisRunning ? liveStats : null}
+                      />
+                    )}
                     {completedSessions.length > 0 && (
                       <div className="space-y-1">
                         <div className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Sessions</div>
