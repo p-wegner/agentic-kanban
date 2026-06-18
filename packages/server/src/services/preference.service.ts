@@ -4,10 +4,9 @@ import { join } from "node:path";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getPreference, setPreference, getAllPreferences, setPreferences } from "../repositories/preferences.repository.js";
+import { getProjectById } from "../repositories/project.repository.js";
 import { allHarnessSettingKeys } from "./harness-settings.js";
 import { commitObjectiveFile, isBoardStrategyKey, parseStrategyBullseyeConfig, PROJECT_CONDUCTOR_OBJECTIVE_RELATIVE_PATH, projectIdFromBoardStrategyKey, selectProviderFromStrategy, writeStrategyObjective } from "./strategy-objective.service.js";
-import { projects } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
 import { PREF_BUILDER_GUARDRAILS, PREF_MERGE_STRATEGY, PREF_PI_PROFILE, PREF_CODEX_LICENSE_RING, PREF_CODEX_LICENSE_ROTATION, PREF_CLAUDE_SUBSCRIPTION_RING, PREF_CLAUDE_SUBSCRIPTION_ROTATION } from "../constants/preference-keys.js";
 import { parseCodexLicenseRing, ringProfileNames, discoverCodexHomeProfiles } from "./codex-license-ring.js";
 import { parseClaudeSubscriptionRing, ringProfileNames as claudeRingProfileNames, discoverClaudeConfigDirProfiles } from "./claude-subscription-ring.js";
@@ -125,12 +124,7 @@ export function createPreferenceService({ database }: { database: Database }) {
     for (const entry of strategyEntries) {
       const projectId = projectIdFromBoardStrategyKey(entry.key);
       if (!projectId) continue;
-      const projectRows = await database
-        .select({ id: projects.id, name: projects.name, repoPath: projects.repoPath, defaultBranch: projects.defaultBranch })
-        .from(projects)
-        .where(eq(projects.id, projectId))
-        .limit(1);
-      const project = projectRows[0];
+      const project = await getProjectById(projectId, database);
       const repoPath = project?.repoPath;
       if (!repoPath) continue;
       const conductorEnabled = isConductorEnabledPreference(await getPreference(`board_conductor_${projectId}`, database));
