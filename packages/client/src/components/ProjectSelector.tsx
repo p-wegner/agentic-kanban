@@ -7,6 +7,35 @@ export interface ProjectSelectorProject {
   repoName?: string | null;
   repoPath?: string | null;
   defaultBranch?: string | null;
+  /** Number of workspaces in this project whose agent is currently active. */
+  activeWorkspaceCount?: number;
+}
+
+interface ActiveAgentsBadgeProps {
+  count: number;
+  /** Compact form (no label text) for the small trigger button. */
+  compact?: boolean;
+}
+
+/**
+ * A small pulsing-dot pill showing how many agents are actively working in a
+ * project. Renders nothing when there are no active agents.
+ */
+export function ActiveAgentsBadge({ count, compact = false }: ActiveAgentsBadgeProps) {
+  if (count <= 0) return null;
+  const label = compact ? String(count) : `${count} active agent${count === 1 ? "" : "s"}`;
+  return (
+    <span
+      className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium leading-none text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"
+      title={`${count} active agent${count === 1 ? "" : "s"}`}
+    >
+      <span className="relative flex h-1.5 w-1.5 shrink-0" aria-hidden="true">
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+        <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
+      </span>
+      {label}
+    </span>
+  );
 }
 
 export function getProjectInitials(name: string): string {
@@ -98,6 +127,7 @@ export function ProjectSelector({ projects, activeProjectId, onProjectChange }: 
             </span>
           )}
         </span>
+        <ActiveAgentsBadge count={activeProject.activeWorkspaceCount ?? 0} compact />
         <svg className="h-4 w-4 shrink-0 text-gray-400 dark:text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
         </svg>
@@ -166,6 +196,7 @@ export function ProjectSelector({ projects, activeProjectId, onProjectChange }: 
                           {project.defaultBranch ? ` - ${project.defaultBranch}` : ""}
                         </span>
                       </span>
+                      <ActiveAgentsBadge count={project.activeWorkspaceCount ?? 0} />
                       {active && (
                         <svg className="h-4 w-4 shrink-0 text-brand-600 dark:text-brand-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                           <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />

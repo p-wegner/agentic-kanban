@@ -80,6 +80,47 @@ describe("Projects API", () => {
     expect(body.length).toBeGreaterThanOrEqual(1);
     expect(body[0].name).toBeDefined();
     expect(body[0].repoPath).toBeDefined();
+    expect(typeof body[0].activeWorkspaceCount).toBe("number");
+  });
+
+  it("GET /api/projects counts active (non-idle/closed) workspaces per project", async () => {
+    const countProjectId = await createProjectDirectly(database, { name: "Active Agents", repoPath: "/tmp/active-agents" });
+    const statusId = await createStatusDirectly(database, countProjectId, "In Progress", 0);
+
+    async function seedWorkspace(status: string) {
+      const issueId = randomUUID();
+      const now = new Date().toISOString();
+      await database.insert(schema.issues).values({
+        id: issueId,
+        title: `Issue ${status}`,
+        projectId: countProjectId,
+        statusId,
+        priority: "medium",
+        issueType: "task",
+        sortOrder: 0,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await database.insert(schema.workspaces).values({
+        id: randomUUID(),
+        issueId,
+        branch: `test/${status}-${randomUUID().slice(0, 8)}`,
+        status,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    // Two active (running, resolving conflicts), plus idle/closed which must not count.
+    await seedWorkspace("active");
+    await seedWorkspace("fixing");
+    await seedWorkspace("idle");
+    await seedWorkspace("closed");
+
+    const body = await (await app.request("/api/projects")).json() as any[];
+    const project = body.find((p) => p.id === countProjectId);
+    expect(project).toBeDefined();
+    expect(project.activeWorkspaceCount).toBe(2);
   });
 
   it("archive hides a project from the default list and unarchive restores it", async () => {

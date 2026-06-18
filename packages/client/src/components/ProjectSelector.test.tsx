@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { filterProjects, getProjectInitials, ProjectSelector, type ProjectSelectorProject } from "./ProjectSelector.js";
+import { ActiveAgentsBadge, filterProjects, getProjectInitials, ProjectSelector, type ProjectSelectorProject } from "./ProjectSelector.js";
 
 const projects: ProjectSelectorProject[] = [
   {
@@ -40,5 +40,37 @@ describe("ProjectSelector", () => {
     expect(html).toContain("Agentic Kanban");
     expect(html).toContain("2 projects");
     expect(html).not.toContain("<select");
+  });
+});
+
+describe("ActiveAgentsBadge", () => {
+  it("renders nothing when there are no active agents", () => {
+    expect(renderToStaticMarkup(<ActiveAgentsBadge count={0} />)).toBe("");
+    expect(renderToStaticMarkup(<ActiveAgentsBadge count={-1} />)).toBe("");
+  });
+
+  it("renders a pluralized label with the count", () => {
+    expect(renderToStaticMarkup(<ActiveAgentsBadge count={1} />)).toContain("1 active agent");
+    expect(renderToStaticMarkup(<ActiveAgentsBadge count={3} />)).toContain("3 active agents");
+  });
+
+  it("renders just the number in compact mode", () => {
+    const html = renderToStaticMarkup(<ActiveAgentsBadge count={2} compact />);
+    expect(html).toContain(">2<");
+    expect(html).not.toContain("active agents");
+    expect(html).toContain('title="2 active agents"');
+  });
+});
+
+describe("ProjectSelector active agents", () => {
+  it("surfaces the active agent count for the selected project", () => {
+    const withCounts: ProjectSelectorProject[] = [
+      { ...projects[0], activeWorkspaceCount: 2 },
+      { ...projects[1], activeWorkspaceCount: 0 },
+    ];
+    const html = renderToStaticMarkup(
+      <ProjectSelector projects={withCounts} activeProjectId="project-1" onProjectChange={() => undefined} />,
+    );
+    expect(html).toContain('title="2 active agents"');
   });
 });
