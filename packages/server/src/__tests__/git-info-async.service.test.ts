@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
 import { getProjectGitStats, getProjectGitStatsAsync } from "../services/git-info.service.js";
 
-function exec(cmd: string, args: string[], cwd: string): Promise<string> {
+function exec(cmd: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(cmd, args, { cwd, windowsHide: true }, (err, stdout) => {
+    execFile(cmd, args, { cwd, windowsHide: true, env: env ? { ...process.env, ...env } : process.env }, (err, stdout) => {
       if (err) reject(err);
       else resolve(stdout.toString().trim());
     });
@@ -141,6 +141,40 @@ describe("getProjectGitStatsAsync", () => {
       expect(a.commitCount).toBe(2);
     } finally {
       await rm(dedupeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to full history for hotspots when all churn is older than the 12-week window", async () => {
+    // A repo whose only commits predate the windowed history would otherwise return
+    // zero hotspots, leaving the Crime Scene / Hot Files views empty (#844).
+    const oldDir = await mkdtemp(join(tmpdir(), "kanban-stats-async-old-"));
+    try {
+      await exec("git", ["init"], oldDir);
+      await exec("git", ["config", "user.email", "test@test.com"], oldDir);
+      await exec("git", ["config", "user.name", "Test"], oldDir);
+      await mkdir(join(oldDir, "src"), { recursive: true });
+      await writeFile(join(oldDir, "src", "legacy.ts"), "const a = 1;\nconst b = 2;\nexport { a, b };\n", "utf8");
+      await exec("git", ["add", "."], oldDir);
+      // Commit dated ~1 year ago — well outside the 12-week (~84 day) history window.
+      const oldDate = "2024-01-15T12:00:00";
+      await exec("git", ["commit", "-m", "ancient commit"], oldDir, {
+        GIT_AUTHOR_DATE: oldDate,
+        GIT_COMMITTER_DATE: oldDate,
+      });
+
+      const branch = await exec("git", ["rev-parse", "--abbrev-ref", "HEAD"], oldDir);
+      const stats = await getProjectGitStatsAsync(oldDir, branch);
+
+      // No commits land inside the weekly window...
+      expect(stats.history.weeks.reduce((sum, w) => sum + w.commits, 0)).toBe(0);
+      // ...but hotspots are still populated via the full-history fallback.
+      expect(stats.hotspots.map((h) => h.path)).toContain("src/legacy.ts");
+
+      // Sync path matches.
+      const syncStats = getProjectGitStats(oldDir, branch);
+      expect(syncStats.hotspots.map((h) => h.path)).toContain("src/legacy.ts");
+    } finally {
+      await rm(oldDir, { recursive: true, force: true });
     }
   });
 

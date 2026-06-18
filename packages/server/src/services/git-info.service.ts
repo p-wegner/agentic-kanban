@@ -332,6 +332,41 @@ function historyLogArgs(since: string, branch: string): string[] {
   return ["log", branch, `--since=${since}`, `--format=commit${GIT_SEP}%aI${GIT_SEP}%an`, "--numstat", "--"];
 }
 
+/**
+ * Full-history (no `--since`) variant used to populate hotspots for dormant repos.
+ * The windowed weekly chart still drives off `historyLogArgs`, but a project whose
+ * latest commit is older than HISTORY_WEEKS would otherwise yield zero hotspots —
+ * leaving the Crime Scene / Hot Files views empty even though there's churn to show.
+ */
+function hotspotLogArgs(branch: string): string[] {
+  return ["log", branch, `--format=commit${GIT_SEP}%aI${GIT_SEP}%an`, "--numstat", "--"];
+}
+
+/**
+ * Parse `--numstat` log output into ranked hotspots only, ignoring week binning.
+ * Used as a fallback when the windowed parse found no source churn in the recent window.
+ */
+function parseHotspotsLog(logOut: string): ProjectGitStats["hotspots"] {
+  const hotspots = new Map<string, { path: string; additions: number; deletions: number; changes: number }>();
+
+  for (const line of logOut.split(/\r?\n/)) {
+    if (!line || line.startsWith(`commit${GIT_SEP}`)) continue;
+    const [addedRaw, deletedRaw, pathRaw] = line.split("\t");
+    if (!pathRaw || addedRaw === "-" || deletedRaw === "-") continue;
+    if (!isSourceFile(pathRaw)) continue;
+    const additions = Number.parseInt(addedRaw, 10) || 0;
+    const deletions = Number.parseInt(deletedRaw, 10) || 0;
+    const path = normalizePath(pathRaw);
+    const existing = hotspots.get(path) ?? { path, additions: 0, deletions: 0, changes: 0 };
+    existing.additions += additions;
+    existing.deletions += deletions;
+    existing.changes += additions + deletions;
+    hotspots.set(path, existing);
+  }
+
+  return [...hotspots.values()].sort((a, b) => b.changes - a.changes).slice(0, MAX_HOTSPOTS);
+}
+
 function collectHistoryMetrics(repoPath: string, branch: string): Pick<ProjectGitStats, "history" | "hotspots"> {
   const weeks = buildEmptyWeeks();
   let logOut = "";
@@ -346,7 +381,20 @@ function collectHistoryMetrics(repoPath: string, branch: string): Pick<ProjectGi
     // Git history is best-effort. Current LOC still makes the metrics view useful.
   }
 
-  return parseHistoryLog(weeks, logOut);
+  const result = parseHistoryLog(weeks, logOut);
+  if (result.hotspots.length === 0) {
+    try {
+      const fullOut = execFileSync(
+        "git",
+        hotspotLogArgs(branch),
+        { cwd: repoPath, timeout: 7000, maxBuffer: 4 * 1024 * 1024 },
+      ).toString();
+      result.hotspots = parseHotspotsLog(fullOut);
+    } catch {
+      // Fallback is best-effort; an empty hotspot list is acceptable.
+    }
+  }
+  return result;
 }
 
 /** Async twin of collectHistoryMetrics — same git invocation and parsing, without blocking. */
@@ -360,7 +408,16 @@ async function collectHistoryMetricsAsync(repoPath: string, branch: string): Pro
     // Git history is best-effort. Current LOC still makes the metrics view useful.
   }
 
-  return parseHistoryLog(weeks, logOut);
+  const result = parseHistoryLog(weeks, logOut);
+  if (result.hotspots.length === 0) {
+    try {
+      const fullOut = await execGitCapture(hotspotLogArgs(branch), repoPath, 7000, 4 * 1024 * 1024);
+      result.hotspots = parseHotspotsLog(fullOut);
+    } catch {
+      // Fallback is best-effort; an empty hotspot list is acceptable.
+    }
+  }
+  return result;
 }
 
 function collectProjectCodeAndHistory(repoPath: string, branch: string): CachedMetrics {
