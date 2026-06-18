@@ -1,10 +1,8 @@
 import { createHash } from "node:crypto";
-import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createSessionReadService } from "../services/session-read.service.js";
+import { searchTranscriptMessages } from "../repositories/session.repository.js";
 import { createRouter } from "../middleware/create-router.js";
-import { sessions, sessionMessages, workspaces, issues, projectStatuses, projects } from "@agentic-kanban/shared/schema";
-import { eq, and, or, sql, desc, inArray } from "drizzle-orm";
 
 export interface TranscriptSearchResult {
   messageId: number;
@@ -44,7 +42,7 @@ function makeSnippet(text: string, matchIdx: number): string {
   return snippet;
 }
 
-export function createSessionsRoute(database: Database = db) {
+export function createSessionsRoute(database: Database) {
   const router = createRouter();
   const sessionReadService = createSessionReadService({ database });
 
@@ -65,52 +63,10 @@ export function createSessionsRoute(database: Database = db) {
     const statusFilter = c.req.query("status"); // e.g. "In Progress", "In Review", "Done"
     const providerFilter = c.req.query("provider"); // e.g. "claude-code", "codex"
 
-    // Build conditions
-    const conditions = [
-      sql`${sessionMessages.data} IS NOT NULL`,
-      sql`${sessionMessages.data} LIKE ${"%" + q + "%"}`,
-      sql`${sessionMessages.type} != 'exit'`,
-    ];
-
-    if (projectId) {
-      conditions.push(eq(issues.projectId, projectId));
-    }
-    if (statusFilter) {
-      conditions.push(eq(projectStatuses.name, statusFilter));
-    }
-    if (providerFilter) {
-      conditions.push(eq(sessions.executor, providerFilter));
-    }
-
-    // Query matching messages with full join chain
-    const rows = await database
-      .select({
-        messageId: sessionMessages.id,
-        messageData: sessionMessages.data,
-        messageCreatedAt: sessionMessages.createdAt,
-        sessionId: sessions.id,
-        sessionStartedAt: sessions.startedAt,
-        sessionStatus: sessions.status,
-        executor: sessions.executor,
-        workspaceId: workspaces.id,
-        branch: workspaces.branch,
-        workspaceStatus: workspaces.status,
-        projectId: projects.id,
-        projectName: projects.name,
-        issueId: issues.id,
-        issueNumber: issues.issueNumber,
-        issueTitle: issues.title,
-        issueStatusName: projectStatuses.name,
-      })
-      .from(sessionMessages)
-      .innerJoin(sessions, eq(sessionMessages.sessionId, sessions.id))
-      .innerJoin(workspaces, eq(sessions.workspaceId, workspaces.id))
-      .innerJoin(issues, eq(workspaces.issueId, issues.id))
-      .innerJoin(projects, eq(issues.projectId, projects.id))
-      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-      .where(and(...conditions))
-      .orderBy(desc(sessionMessages.id))
-      .limit(limit);
+    const rows = await searchTranscriptMessages(
+      { q, projectId, statusFilter, providerFilter, limit },
+      database,
+    );
 
     const results: TranscriptSearchResult[] = rows.map((row) => {
       const data = row.messageData ?? "";

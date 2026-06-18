@@ -1,5 +1,5 @@
-import { sessions, sessionMessages, diffComments, agentSkills } from "@agentic-kanban/shared/schema";
-import { eq, and } from "drizzle-orm";
+import { sessions, sessionMessages, diffComments, agentSkills, workspaces, issues, projects, projectStatuses } from "@agentic-kanban/shared/schema";
+import { eq, and, sql, desc } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { readFileSync, existsSync, openSync, readSync, closeSync, fstatSync } from "node:fs";
 import { db } from "../db/index.js";
@@ -391,4 +391,61 @@ export async function getSessionSummaryData(
     endedAt: session.endedAt,
     ...summary,
   };
+}
+
+export interface TranscriptSearchParams {
+  q: string;
+  projectId?: string;
+  statusFilter?: string;
+  providerFilter?: string;
+  limit: number;
+}
+
+/**
+ * Full-text-ish transcript search across session messages, joined up to the issue
+ * /project/status chain so the caller can present and filter results. Pure read;
+ * the route owns snippet extraction + DTO shaping.
+ */
+export async function searchTranscriptMessages(
+  params: TranscriptSearchParams,
+  database: Database = db,
+) {
+  const { q, projectId, statusFilter, providerFilter, limit } = params;
+  const conditions = [
+    sql`${sessionMessages.data} IS NOT NULL`,
+    sql`${sessionMessages.data} LIKE ${"%" + q + "%"}`,
+    sql`${sessionMessages.type} != 'exit'`,
+  ];
+  if (projectId) conditions.push(eq(issues.projectId, projectId));
+  if (statusFilter) conditions.push(eq(projectStatuses.name, statusFilter));
+  if (providerFilter) conditions.push(eq(sessions.executor, providerFilter));
+
+  return database
+    .select({
+      messageId: sessionMessages.id,
+      messageData: sessionMessages.data,
+      messageCreatedAt: sessionMessages.createdAt,
+      sessionId: sessions.id,
+      sessionStartedAt: sessions.startedAt,
+      sessionStatus: sessions.status,
+      executor: sessions.executor,
+      workspaceId: workspaces.id,
+      branch: workspaces.branch,
+      workspaceStatus: workspaces.status,
+      projectId: projects.id,
+      projectName: projects.name,
+      issueId: issues.id,
+      issueNumber: issues.issueNumber,
+      issueTitle: issues.title,
+      issueStatusName: projectStatuses.name,
+    })
+    .from(sessionMessages)
+    .innerJoin(sessions, eq(sessionMessages.sessionId, sessions.id))
+    .innerJoin(workspaces, eq(sessions.workspaceId, workspaces.id))
+    .innerJoin(issues, eq(workspaces.issueId, issues.id))
+    .innerJoin(projects, eq(issues.projectId, projects.id))
+    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+    .where(and(...conditions))
+    .orderBy(desc(sessionMessages.id))
+    .limit(limit);
 }
