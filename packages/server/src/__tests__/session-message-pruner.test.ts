@@ -60,7 +60,7 @@ async function insertMessages(db: ReturnType<typeof createTestDb>["db"], session
 describe("pruneOldSessionMessages", () => {
   it("deletes messages for old merged workspaces beyond the retention window", async () => {
     const { db } = createTestDb();
-    const { issueId } = await seedBase({ db } as any);
+    const { issueId } = await seedBase(db as any);
 
     const oldDate = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(); // 4 days ago
     const wsId = await insertWorkspace(db as any, issueId, "closed", oldDate, oldDate);
@@ -76,7 +76,7 @@ describe("pruneOldSessionMessages", () => {
 
   it("does not delete messages for recently closed workspaces (within retention)", async () => {
     const { db } = createTestDb();
-    const { issueId } = await seedBase({ db } as any);
+    const { issueId } = await seedBase(db as any);
 
     const recentDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(); // 1 day ago
     const wsId = await insertWorkspace(db as any, issueId, "closed", recentDate, recentDate);
@@ -92,7 +92,7 @@ describe("pruneOldSessionMessages", () => {
 
   it("does not delete messages for active workspaces", async () => {
     const { db } = createTestDb();
-    const { issueId } = await seedBase({ db } as any);
+    const { issueId } = await seedBase(db as any);
 
     const oldDate = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
     const wsId = await insertWorkspace(db as any, issueId, "active", oldDate);
@@ -105,7 +105,7 @@ describe("pruneOldSessionMessages", () => {
 
   it("accepts a nowOverride for deterministic time-based tests", async () => {
     const { db } = createTestDb();
-    const { issueId } = await seedBase({ db } as any);
+    const { issueId } = await seedBase(db as any);
 
     // Workspace closed "2 days ago" relative to now, but we override 'now' to 5 days later
     const closedAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
@@ -122,7 +122,7 @@ describe("pruneOldSessionMessages", () => {
 describe("capSessionMessages", () => {
   it("removes oldest messages beyond the per-session cap", async () => {
     const { db } = createTestDb();
-    const { issueId } = await seedBase({ db } as any);
+    const { issueId } = await seedBase(db as any);
 
     const now = new Date().toISOString();
     const wsId = await insertWorkspace(db as any, issueId, "active", now);
@@ -142,7 +142,7 @@ describe("capSessionMessages", () => {
 
   it("does nothing for sessions within the cap", async () => {
     const { db } = createTestDb();
-    const { issueId } = await seedBase({ db } as any);
+    const { issueId } = await seedBase(db as any);
 
     const now = new Date().toISOString();
     const wsId = await insertWorkspace(db as any, issueId, "active", now);
