@@ -24,6 +24,7 @@
  */
 import { modelBelongsToProvider } from "@agentic-kanban/shared";
 import type { ProviderName } from "./agent-provider.js";
+import { narrowProviderName, getProfilePrefKey } from "./agent-provider.js";
 import { resolveAgentSettings } from "./agent-settings.service.js";
 import { applyProviderSelectionToPrefMap } from "./strategy-objective.service.js";
 
@@ -61,19 +62,9 @@ export function resolveProviderConfig(input: ProviderConfigInput): ResolvedProvi
   // bullseye selection. Each writes the provider + provider-specific *_profile key
   // onto prefMap so the shared resolveAgentSettings reads a consistent view.
   if (profileOverride?.name) {
-    if (profileOverride.provider === "codex") {
-      prefMap.set("codex_profile", profileOverride.name);
-      prefMap.set("provider", "codex");
-    } else if (profileOverride.provider === "pi") {
-      prefMap.set("pi_profile", profileOverride.name);
-      prefMap.set("provider", "pi");
-    } else if (profileOverride.provider === "copilot") {
-      prefMap.set("copilot_profile", profileOverride.name);
-      prefMap.set("provider", "copilot");
-    } else {
-      prefMap.set("claude_profile", profileOverride.name);
-      prefMap.set("provider", "claude");
-    }
+    const overrideProvider = narrowProviderName(profileOverride.provider);
+    prefMap.set(getProfilePrefKey(overrideProvider), profileOverride.name);
+    prefMap.set("provider", overrideProvider);
   } else if (legacyProfileOverride) {
     prefMap.set("claude_profile", legacyProfileOverride);
     prefMap.set("provider", "claude");

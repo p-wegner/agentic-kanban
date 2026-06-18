@@ -7,9 +7,6 @@ import {
   PREF_AGENT_ARGS,
   PREF_SKIP_PERMISSIONS,
   PREF_CLAUDE_PROFILE,
-  PREF_CODEX_PROFILE,
-  PREF_PI_PROFILE,
-  PREF_COPILOT_PROFILE,
   PREF_PROVIDER,
   PREF_MOCK_AGENT_PROFILE,
   PREF_MOCK_AGENT_DELAY_MS,
@@ -18,6 +15,7 @@ import {
 } from "../constants/preference-keys.js";
 import type { ProviderName } from "./agent-provider.js";
 import type { ProviderId } from "./agent-provider.js";
+import { narrowProviderName, getProfilePrefKey } from "./agent-provider.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MOCK_AGENT_PATH = resolve(__dirname, "../scripts/mock-agent.ts");
@@ -108,20 +106,17 @@ export function resolveAgentSettings(
   // Don't pass mock profile name to Claude Code — it's only used to select the mock agent command
   const resolvedProfile = isMockProfile(claudeProfile) ? undefined : claudeProfile;
 
+  // Claude reads the mock-filtered profile; every other provider reads its own
+  // profilePrefKey (owned by the provider adapter, resolved via the registry).
   const effectiveProfileName =
-    provider === "codex"
-      ? (prefMap.get(PREF_CODEX_PROFILE) || undefined)
-      : provider === "pi"
-        ? (prefMap.get(PREF_PI_PROFILE) || undefined)
-      : provider === "copilot"
-        ? (prefMap.get(PREF_COPILOT_PROFILE) || undefined)
-        : resolvedProfile;
+    provider === "claude"
+      ? resolvedProfile
+      : (prefMap.get(getProfilePrefKey(provider)) || undefined);
 
   const profile = effectiveProfileName ? { provider, name: effectiveProfileName } : undefined;
   return { agentCommand, agentArgs, claudeProfile: resolvedProfile, profile, provider, resumeWithNewModel, permissionPromptTool };
 }
 
 function parseProviderName(provider: string | undefined): ProviderName {
-  if (provider === "codex" || provider === "copilot" || provider === "pi") return provider;
-  return "claude";
+  return narrowProviderName(provider);
 }

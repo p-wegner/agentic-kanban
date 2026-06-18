@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { preferences } from "@agentic-kanban/shared/schema";
 import { modelBelongsToProvider } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
+import { getProfilePrefKey } from "./agent-provider.js";
 import { fetchLiveQuotaUsage } from "./quota-usage.service.js";
 import type { QuotaUsageResult } from "./quota-usage.service.js";
 
@@ -510,19 +511,8 @@ export function applyProviderSelectionToPrefMap(
   prefMap: Map<string, string>,
   selected: { provider: "claude" | "codex" | "copilot" | "pi"; profileName: string },
 ): void {
-  if (selected.provider === "codex") {
-    if (selected.profileName) prefMap.set("codex_profile", selected.profileName);
-    prefMap.set("provider", "codex");
-  } else if (selected.provider === "pi") {
-    if (selected.profileName) prefMap.set("pi_profile", selected.profileName);
-    prefMap.set("provider", "pi");
-  } else if (selected.provider === "copilot") {
-    if (selected.profileName) prefMap.set("copilot_profile", selected.profileName);
-    prefMap.set("provider", "copilot");
-  } else {
-    if (selected.profileName) prefMap.set("claude_profile", selected.profileName);
-    prefMap.set("provider", "claude");
-  }
+  if (selected.profileName) prefMap.set(getProfilePrefKey(selected.provider), selected.profileName);
+  prefMap.set("provider", selected.provider);
 }
 
 /**

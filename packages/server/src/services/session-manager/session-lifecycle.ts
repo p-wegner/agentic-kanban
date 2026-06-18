@@ -11,6 +11,7 @@ import { computeWorkspaceCodeMetrics } from "../workspace-code-metrics.service.j
 import { recordAgentProfileLaunchFailure } from "../agent-profile-health.service.js";
 import { emitButlerSystemEvent } from "../butler-event-feed.js";
 import type { ProviderName } from "../agent-provider.js";
+import { narrowProviderName } from "../agent-provider.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import { modelBelongsToProvider } from "@agentic-kanban/shared";
 import type { SessionManagerOptions, SessionState, StartSessionOptions } from "./types.js";
@@ -157,9 +158,11 @@ function buildClaudeUsageLimitStats(executor: string, durationMs: number, exitCo
 }
 
 function lifecycleProviderName(provider: string | undefined, profile?: { provider?: string; name?: string }): ProviderName {
-  if (profile?.provider === "codex" || profile?.provider === "copilot" || profile?.provider === "claude" || profile?.provider === "pi") return profile.provider;
-  if (provider === "codex" || provider === "copilot" || provider === "pi") return provider;
-  return "claude";
+  // A recorded profile.provider (a valid ProviderName) wins; otherwise narrow the
+  // launch provider string (handles the legacy "claude-code" id, defaults to claude).
+  const fromProfile = profile?.provider;
+  if (fromProfile === "codex" || fromProfile === "copilot" || fromProfile === "claude" || fromProfile === "pi") return fromProfile;
+  return narrowProviderName(provider);
 }
 
 export function createSessionLifecycle(
