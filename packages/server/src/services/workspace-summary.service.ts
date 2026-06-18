@@ -1,5 +1,3 @@
-import { workspaces, sessions, sessionMessages, showdowns, workflowEdges, workflowNodes } from "@agentic-kanban/shared/schema";
-import { eq, inArray, sql, desc } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { detectConflicts, getCommitCountAhead, getDiffShortstat, getLatestCommit } from "./git.service.js";
 import type { ProviderName } from "./agent-provider.js";
@@ -9,6 +7,18 @@ import type { WorkspaceCodeMetrics, WorkspaceSummary } from "@agentic-kanban/sha
 import { ACTIVE_WORKSPACE_STATUSES, workspaceStatusPriority } from "@agentic-kanban/shared";
 import { readSessionStdoutFile } from "../repositories/session.repository.js";
 import { extractAssistantMessage, extractToolName, safeParseStringArray } from "../lib/session-message-extraction.js";
+import {
+  aggregateWorkspaceCountRows,
+  fetchWorkspaceDetailRows,
+  getShowdownStatuses,
+  updateWorkspaceDiffStatCache,
+  updateWorkspaceConflictCache,
+  getWorkflowNodesByIds,
+  getOutgoingWorkflowEdges,
+  getWorkflowNodeNamesByIds,
+  getSessionsForWorkspaces,
+  getSessionMessagesForSessions,
+} from "../repositories/workspace-summary.repository.js";
 
 // Limit concurrent background git operations to avoid hammering the filesystem
 let _bgGitRunning = 0;
@@ -133,16 +143,7 @@ export async function buildWorkspaceSummaryMap(
 async function aggregateWorkspaceCounts(issueIds: string[], database: Database): Promise<Map<string, WorkspaceSummary>> {
   const workspaceSummaryMap = new Map<string, WorkspaceSummary>();
 
-  const wsRows = await database
-    .select({
-      issueId: workspaces.issueId,
-      status: workspaces.status,
-      branch: workspaces.branch,
-      count: sql<number>`count(*)`.as("count"),
-    })
-    .from(workspaces)
-    .where(inArray(workspaces.issueId, issueIds))
-    .groupBy(workspaces.issueId, workspaces.status, workspaces.branch);
+  const wsRows = await aggregateWorkspaceCountRows(issueIds, database);
 
   for (const row of wsRows) {
     let summary = workspaceSummaryMap.get(row.issueId);
@@ -166,43 +167,6 @@ async function aggregateWorkspaceCounts(issueIds: string[], database: Database):
   return workspaceSummaryMap;
 }
 
-async function fetchWorkspaceDetailRows(issueIds: string[], database: Database) {
-  return database
-    .select({
-      id: workspaces.id,
-      issueId: workspaces.issueId,
-      branch: workspaces.branch,
-      status: workspaces.status,
-      updatedAt: workspaces.updatedAt,
-      claudeProfile: workspaces.claudeProfile,
-      agentCommand: workspaces.agentCommand,
-      provider: workspaces.provider,
-      model: workspaces.model,
-      pendingPlanPath: workspaces.pendingPlanPath,
-      planMode: workspaces.planMode,
-      workingDir: workspaces.workingDir,
-      baseBranch: workspaces.baseBranch,
-      isDirect: workspaces.isDirect,
-      conflictCacheCheckedAt: workspaces.conflictCacheCheckedAt,
-      conflictCacheHasConflicts: workspaces.conflictCacheHasConflicts,
-      conflictCacheFiles: workspaces.conflictCacheFiles,
-      readyForMerge: workspaces.readyForMerge,
-      diffStatCacheCheckedAt: workspaces.diffStatCacheCheckedAt,
-      diffStatCacheHeadSha: workspaces.diffStatCacheHeadSha,
-      diffStatCacheFilesChanged: workspaces.diffStatCacheFilesChanged,
-      diffStatCacheInsertions: workspaces.diffStatCacheInsertions,
-      diffStatCacheDeletions: workspaces.diffStatCacheDeletions,
-      scorecardScore: workspaces.scorecardScore,
-      codeMetricsJson: workspaces.codeMetricsJson,
-      codeMetricsComputedAt: workspaces.codeMetricsComputedAt,
-      currentNodeId: workspaces.currentNodeId,
-      showdownId: workspaces.showdownId,
-      mergedAt: workspaces.mergedAt,
-    })
-    .from(workspaces)
-    .where(inArray(workspaces.issueId, issueIds));
-}
-
 type WorkspaceDetailRow = Awaited<ReturnType<typeof fetchWorkspaceDetailRows>>[number];
 
 // Phase 2: populate showdown summary — find issues that have showdown workspaces.
@@ -218,10 +182,7 @@ async function populateShowdownSummaries(
   if (showdownIdsByIssue.size === 0) return;
 
   const allShowdownIds = [...new Set(showdownIdsByIssue.values())];
-  const showdownRows = await database
-    .select({ id: showdowns.id, status: showdowns.status })
-    .from(showdowns)
-    .where(inArray(showdowns.id, allShowdownIds));
+  const showdownRows = await getShowdownStatuses(allShowdownIds, database);
   const showdownStatusMap = new Map(showdownRows.map(r => [r.id, r.status]));
 
   for (const [issueId, showdownId] of showdownIdsByIssue) {
@@ -335,13 +296,13 @@ function applyDiffStats(
     runBgGit(() =>
       getDiffShortstat(workingDir, diffRef)
         .then(stats => {
-          database.update(workspaces).set({
+          updateWorkspaceDiffStatCache(wsId, {
             diffStatCacheCheckedAt: new Date().toISOString(),
             diffStatCacheHeadSha: headShaAtRefresh,
             diffStatCacheFilesChanged: stats.filesChanged,
             diffStatCacheInsertions: stats.insertions,
             diffStatCacheDeletions: stats.deletions,
-          }).where(eq(workspaces.id, wsId)).catch(() => {});
+          }, database).catch(() => {});
         })
         .catch(() => {})
     );
@@ -404,11 +365,11 @@ function applyConflicts(
       runBgGit(() =>
         detectConflicts(workingDir, baseBranch)
           .then(result => {
-            database.update(workspaces).set({
+            updateWorkspaceConflictCache(wsId, {
               conflictCacheCheckedAt: new Date().toISOString(),
               conflictCacheHasConflicts: result.hasConflicts,
               conflictCacheFiles: JSON.stringify(result.conflictingFiles),
-            }).where(eq(workspaces.id, wsId)).catch(() => {});
+            }, database).catch(() => {});
           })
           .catch(() => {})
       );
@@ -429,31 +390,13 @@ async function populateWorkflowInfo(
     .filter((id): id is string => !!id);
   if (currentNodeIds.length === 0) return;
 
-  const currentNodes = await database
-    .select({
-      id: workflowNodes.id,
-      name: workflowNodes.name,
-      nodeType: workflowNodes.nodeType,
-      statusName: workflowNodes.statusName,
-    })
-    .from(workflowNodes)
-    .where(inArray(workflowNodes.id, currentNodeIds));
+  const currentNodes = await getWorkflowNodesByIds(currentNodeIds, database);
   const currentNodeById = new Map(currentNodes.map((n) => [n.id, n]));
 
-  const outgoingEdges = await database
-    .select({
-      fromNodeId: workflowEdges.fromNodeId,
-      toNodeId: workflowEdges.toNodeId,
-      sortOrder: workflowEdges.sortOrder,
-    })
-    .from(workflowEdges)
-    .where(inArray(workflowEdges.fromNodeId, currentNodeIds));
+  const outgoingEdges = await getOutgoingWorkflowEdges(currentNodeIds, database);
   const targetNodeIds = [...new Set(outgoingEdges.map((e) => e.toNodeId))];
   const targetNodes = targetNodeIds.length > 0
-    ? await database
-        .select({ id: workflowNodes.id, name: workflowNodes.name })
-        .from(workflowNodes)
-        .where(inArray(workflowNodes.id, targetNodeIds))
+    ? await getWorkflowNodeNamesByIds(targetNodeIds, database)
     : [];
   const targetNameById = new Map(targetNodes.map((n) => [n.id, n.name]));
 
@@ -500,19 +443,7 @@ async function attachSessionData(
   const mainWsIds = [...mainWorkspaceMap.values()].map(w => w.id);
   if (mainWsIds.length === 0) return;
 
-  const sessionRows = await database
-    .select({
-      id: sessions.id,
-      workspaceId: sessions.workspaceId,
-      status: sessions.status,
-      startedAt: sessions.startedAt,
-      endedAt: sessions.endedAt,
-      stats: sessions.stats,
-      triggerType: sessions.triggerType,
-    })
-    .from(sessions)
-    .where(inArray(sessions.workspaceId, mainWsIds))
-    .orderBy(sessions.startedAt);
+  const sessionRows = await getSessionsForWorkspaces(mainWsIds, database);
 
   const latestByWs = new Map<string, { id: string; status: string; startedAt: string; endedAt: string | null; stats: string | null; triggerType: string | null }>();
   const latestNoiseByWs = new Map<string, { id: string; status: string; startedAt: string; endedAt: string | null; stats: string | null; triggerType: string | null }>();
@@ -564,11 +495,7 @@ async function attachSessionData(
     }
 
     if (needsDb.length > 0) {
-      const msgRows = await database
-        .select({ sessionId: sessionMessages.sessionId, data: sessionMessages.data })
-        .from(sessionMessages)
-        .where(inArray(sessionMessages.sessionId, needsDb))
-        .orderBy(desc(sessionMessages.id));
+      const msgRows = await getSessionMessagesForSessions(needsDb, database);
 
       for (const msg of msgRows) {
         const hasTool = lastToolBySession.has(msg.sessionId);
