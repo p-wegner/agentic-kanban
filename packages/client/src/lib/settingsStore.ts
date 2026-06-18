@@ -54,6 +54,35 @@ export function getSettings(): Promise<Settings> {
 }
 
 /**
+ * Single write chokepoint for settings: PUT /api/preferences/settings (a
+ * partial, merge-not-replace patch) followed by the mandatory
+ * invalidateSettings() so cached consumers converge. Bundling the two means no
+ * call site can forget the invalidate (the latent staleness bug this replaces:
+ * MonitorPopover wrote Start-Mode without invalidating, leaving the shared read
+ * cache stale up to the 30s TTL).
+ *
+ * Owns ONLY the PUT + invalidate. Each caller keeps its own follow-up
+ * (local-state refetch, loadTunables(), error swallowing) around this call.
+ */
+export async function setSettings(patch: Record<string, string>): Promise<void> {
+  await apiFetch("/api/preferences/settings", {
+    method: "PUT",
+    body: JSON.stringify(patch),
+  });
+  invalidateSettings();
+}
+
+/**
+ * Thin helper for the project-scoped preference families that drift most
+ * (start_mode_<id>, board_strategy_<id>, auto_merge_disabled_<id>, …). Keeps the
+ * key a plain string by design — the scoped-key space is too large and dynamic
+ * for a closed typed union.
+ */
+export function setProjectPref(projectId: string, key: string, value: string): Promise<void> {
+  return setSettings({ [`${key}_${projectId}`]: value });
+}
+
+/**
  * Drop the cached settings so the next getSettings() hits the network.
  * MUST be called after every successful PUT /api/preferences/settings so
  * cached consumers converge on the new values.
