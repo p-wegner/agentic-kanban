@@ -152,13 +152,22 @@ function createFakeGitService(overrides: Partial<GitService> = {}): GitService {
     pruneWorktrees: vi.fn(async () => {}),
     rebaseOntoBase: vi.fn(async () => ({ success: true })),
     abortRebase: vi.fn(async () => {}),
-    checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: false, branchSha: "branch-sha-abc", baseSha: "base-sha-123" })),
+    // Stateful ancestry: pre-merge resolveMergeState passes the worktreeDir (4th arg) and
+    // must see the branch as NOT yet merged so the merge proceeds; the post-merge invariant
+    // check (verifyPostMergeAncestry) calls WITHOUT a worktreeDir and must see it as merged.
+    checkBranchTipIsAncestor: vi.fn(async (_repo: string, _branch: string, _base: string, worktreeDir?: string) =>
+      worktreeDir !== undefined
+        ? { isAncestor: false, branchSha: "branch-sha-abc", baseSha: "base-sha-123" }
+        : { isAncestor: true, branchSha: "branch-sha-abc", baseSha: "base-sha-123" },
+    ),
     countUniqueCommits: vi.fn(async () => 1),
     countBehindCommits: vi.fn(async () => 0),
     autoRenumberMigrations: vi.fn(async () => ({ renumbered: false, renames: [] })),
     getChangedFilesBetween: vi.fn(async () => []),
     getCommitSummariesBetween: vi.fn(async () => []),
-    detectConflictsByBranch: vi.fn(async () => ({ hasConflicts: false, conflictingFiles: [] })),
+    // Intentionally NOT mocking detectConflictsByBranch: the conflict-detection path prefers it
+    // when present, which would shadow per-test `detectConflicts` overrides. Leaving it absent
+    // makes detectConflictsReadOnly fall through to `detectConflicts` (the override surface).
     detectAppendOnlyResolvableConflicts: vi.fn(async () => null),
     commitPaths: vi.fn(async () => true),
     mergeBaseIntoBranch: vi.fn(async () => ({ success: true })),
@@ -272,6 +281,8 @@ describe("workspace.service", () => {
       const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, result.id));
       expect(wsRows[0].provider).toBe("codex");
       expect(wsRows[0].claudeProfile).toBeNull();
+      // Agent launch is deferred (#587) — flush the setImmediate before asserting the call.
+      await new Promise<void>((resolve) => setImmediate(resolve));
       expect(sessionManager.startSession).toHaveBeenCalledWith(expect.objectContaining({
         provider: "codex",
         profile: undefined,
@@ -299,13 +310,15 @@ describe("workspace.service", () => {
       const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, result.id));
       expect(wsRows[0].provider).toBe("codex");
       expect(wsRows[0].claudeProfile).toBe("fast");
+      // Agent launch is deferred (#587) — flush the setImmediate before asserting the call.
+      await new Promise<void>((resolve) => setImmediate(resolve));
       expect(sessionManager.startSession).toHaveBeenCalledWith(expect.objectContaining({
         provider: "codex",
         profile: { provider: "codex", name: "fast" },
       }));
     });
 
-    it("rolls back the DB row and the worktree when agent spawn fails, and throws", async () => {
+    it("marks the workspace idle with a launch error when the deferred agent spawn fails", async () => {
       const { issueId } = await seedProjectAndIssue(db);
       const gitService = createFakeGitService();
       const sessionManager = createMockSessionManager();
@@ -318,14 +331,19 @@ describe("workspace.service", () => {
         gitService,
       });
 
-      await expect(service.createWorkspace({ issueId, branch: "feature/ak-1-fail" })).rejects.toThrow("spawn ENOENT");
+      // Agent launch is deferred (#587): createWorkspace resolves with the record, and the
+      // spawn failure is handled in the background callback (no synchronous throw/rollback).
+      const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-fail" });
+      expect(result.error).toBeUndefined();
 
-      // Orphaned worktree was cleaned up
-      expect(gitService.removeWorktree).toHaveBeenCalledWith("/tmp/test-repo", "/tmp/test-repo/.worktrees/feature-1");
+      // Let the deferred setImmediate fire so the failing launch + status update run.
+      await new Promise<void>((resolve) => setImmediate(resolve));
 
-      // No workspace row must remain in the DB (atomic rollback)
-      const wsRows = await db.select().from(workspaces);
-      expect(wsRows).toHaveLength(0);
+      // The workspace row remains (relaunchable) and is marked idle with the launch error.
+      const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, result.id));
+      expect(wsRows).toHaveLength(1);
+      expect(wsRows[0].status).toBe("idle");
+      expect(wsRows[0].latestLaunchError).toContain("spawn ENOENT");
     });
 
     it("returns 201-equivalent record with error field when worktree setup fails before insert", async () => {
@@ -435,9 +453,18 @@ describe("workspace.service", () => {
 
       const result = await service.mergeWorkspace(wsId);
 
+      // Post-merge cleanup (worktree removal, workingDir clear) is deferred to the background
+      // (#407) so the HTTP response returns immediately — flush it before asserting cleanup.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
       expect(result.id).toBe(wsId);
       expect(result.mergeOutput).toContain("Merge made");
-      expect(gitService.mergeBranch).toHaveBeenCalledWith("/tmp/test-repo", "feature/ak-1-test", "main");
+      expect(gitService.mergeBranch).toHaveBeenCalledWith(
+        "/tmp/test-repo",
+        "feature/ak-1-test",
+        "main",
+        expect.objectContaining({ deferWorkingTreeSync: true, autoResolveAppendConflicts: true }),
+      );
       expect(gitService.removeWorktree).toHaveBeenCalled();
 
       // Workspace closed
@@ -482,8 +509,16 @@ describe("workspace.service", () => {
 
       const result = await service.mergeWorkspace(wsId);
 
+      // Post-merge cleanup is deferred to the background (#407) — flush before asserting it.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
       expect(result.mergeOutput).toContain("already merged");
-      expect(gitService.mergeBranch).toHaveBeenCalledWith("/tmp/test-repo", "feature/ak-1-test", "main");
+      expect(gitService.mergeBranch).toHaveBeenCalledWith(
+        "/tmp/test-repo",
+        "feature/ak-1-test",
+        "main",
+        expect.objectContaining({ deferWorkingTreeSync: true, autoResolveAppendConflicts: true }),
+      );
       expect(gitService.removeWorktree).toHaveBeenCalledWith("/tmp/test-repo", "/tmp/test-repo/.worktrees/feature-1");
       expect(gitService.deleteBranch).toHaveBeenCalledWith("/tmp/test-repo", "feature/ak-1-test");
 
@@ -790,7 +825,12 @@ describe("workspace.service", () => {
       const result = await service.mergeWorkspace(wsId);
 
       expect(result.id).toBe(wsId);
-      expect(gitService.mergeBranch).toHaveBeenCalledWith("/tmp/test-repo", "feature/ak-1-test", "main");
+      expect(gitService.mergeBranch).toHaveBeenCalledWith(
+        "/tmp/test-repo",
+        "feature/ak-1-test",
+        "main",
+        expect.objectContaining({ deferWorkingTreeSync: true, autoResolveAppendConflicts: true }),
+      );
       expect(activeMerges.has("/tmp/test-repo")).toBe(false);
     });
 
@@ -875,6 +915,7 @@ describe("workspace.service", () => {
         baseBranch: "main",
         isDirect: false,
         status: "active",
+        readyForMerge: true,
         provider: "claude",
         createdAt: now,
         updatedAt: now,
