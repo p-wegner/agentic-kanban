@@ -100,6 +100,34 @@ export type CreateIssueResult = NonNullable<Awaited<ReturnType<typeof getIssueDe
 
 export type WebhookSender = (projectId: string, payload: WebhookIssueStatusPayload) => void;
 
+/**
+ * Build the column updates SHARED by single-issue and bulk-issue updates from a PATCH
+ * body. Pure (no DB) so it is unit-testable and so the two write paths can never drift
+ * on these fields again — previously this block was duplicated verbatim in updateIssue
+ * and updateIssuesBulk. Caller-specific fields stay with the caller: updateIssue layers
+ * on checklist/pinned/milestoneId after calling this; those are intentionally NOT part
+ * of bulk update.
+ */
+export function buildSharedIssueUpdate(
+  body: Record<string, unknown>,
+  now: string,
+): Record<string, unknown> {
+  const updates: Record<string, unknown> = { updatedAt: now };
+  if (body.title !== undefined) updates.title = body.title;
+  if (body.description !== undefined) updates.description = body.description;
+  if (body.priority !== undefined) updates.priority = body.priority;
+  if (body.issueType !== undefined) updates.issueType = body.issueType;
+  if (body.statusId !== undefined) { updates.statusId = body.statusId; updates.statusChangedAt = now; }
+  if (body.sortOrder !== undefined) updates.sortOrder = body.sortOrder;
+  if (body.estimate !== undefined) updates.estimate = body.estimate;
+  if (body.skipAutoReview !== undefined) updates.skipAutoReview = body.skipAutoReview;
+  if (body.dueDate !== undefined) updates.dueDate = body.dueDate;
+  if (body.externalKey !== undefined) updates.externalKey = normalizeExternalKey(body.externalKey);
+  if (body.externalUrl !== undefined) updates.externalUrl = validateExternalUrl(body.externalUrl);
+  if (body.workflowTemplateId !== undefined) updates.workflowTemplateId = body.workflowTemplateId;
+  return updates;
+}
+
 export function createIssueService(deps: {
   database: Database;
   boardEvents?: BoardEvents;
@@ -277,19 +305,7 @@ export function createIssueService(deps: {
 
     const now = new Date().toISOString();
 
-    const updates: Record<string, unknown> = { updatedAt: now };
-    if (body.title !== undefined) updates.title = body.title;
-    if (body.description !== undefined) updates.description = body.description;
-    if (body.priority !== undefined) updates.priority = body.priority;
-    if (body.issueType !== undefined) updates.issueType = body.issueType;
-    if (body.statusId !== undefined) { updates.statusId = body.statusId; updates.statusChangedAt = now; }
-    if (body.sortOrder !== undefined) updates.sortOrder = body.sortOrder;
-    if (body.estimate !== undefined) updates.estimate = body.estimate;
-    if (body.skipAutoReview !== undefined) updates.skipAutoReview = body.skipAutoReview;
-    if (body.dueDate !== undefined) updates.dueDate = body.dueDate;
-    if (body.externalKey !== undefined) updates.externalKey = normalizeExternalKey(body.externalKey);
-    if (body.externalUrl !== undefined) updates.externalUrl = validateExternalUrl(body.externalUrl);
-    if (body.workflowTemplateId !== undefined) updates.workflowTemplateId = body.workflowTemplateId;
+    const updates = buildSharedIssueUpdate(body, now);
     if (body.checklist !== undefined) updates.checklistJson = body.checklist === null ? null : JSON.stringify(body.checklist);
     if (body.pinned !== undefined) updates.pinned = body.pinned;
     if (body.milestoneId !== undefined) updates.milestoneId = body.milestoneId ?? null;
@@ -414,19 +430,7 @@ export function createIssueService(deps: {
     }
 
     const now = new Date().toISOString();
-    const updates: Record<string, unknown> = { updatedAt: now };
-    if (body.title !== undefined) updates.title = body.title;
-    if (body.description !== undefined) updates.description = body.description;
-    if (body.priority !== undefined) updates.priority = body.priority;
-    if (body.issueType !== undefined) updates.issueType = body.issueType;
-    if (body.statusId !== undefined) { updates.statusId = body.statusId; updates.statusChangedAt = now; }
-    if (body.sortOrder !== undefined) updates.sortOrder = body.sortOrder;
-    if (body.estimate !== undefined) updates.estimate = body.estimate;
-    if (body.skipAutoReview !== undefined) updates.skipAutoReview = body.skipAutoReview;
-    if (body.dueDate !== undefined) updates.dueDate = body.dueDate;
-    if (body.externalKey !== undefined) updates.externalKey = normalizeExternalKey(body.externalKey);
-    if (body.externalUrl !== undefined) updates.externalUrl = validateExternalUrl(body.externalUrl);
-    if (body.workflowTemplateId !== undefined) updates.workflowTemplateId = body.workflowTemplateId;
+    const updates = buildSharedIssueUpdate(body, now);
 
     const uniqueIds = [...new Set(ids)];
     await database.update(issues).set(updates).where(inArray(issues.id, uniqueIds));
