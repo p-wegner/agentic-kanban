@@ -3,6 +3,7 @@ import { issues, issueTags, issueDependencies, issueArtifacts, issueComments, sh
 import { eq, and, or, sql, inArray, desc } from "drizzle-orm";
 import { createDrive } from "../repositories/drive.repository.js";
 import type { Database } from "../db/index.js";
+import { withTransaction } from "../db/index.js";
 import type { BoardEvents } from "./board-events.js";
 import type { WebhookIssueStatusPayload } from "@agentic-kanban/shared/lib";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
@@ -197,7 +198,7 @@ export function createIssueService(deps: {
       }
     }
 
-    const results: string[] = await database.transaction(async (tx) => {
+    const results: string[] = await withTransaction(database, async (tx) => {
       const maxRow = await tx
         .select({ maxNum: sql<number | null>`max(${issues.issueNumber})` })
         .from(issues)
@@ -571,7 +572,7 @@ export function createIssueService(deps: {
     let added = 0;
     let removed = 0;
 
-    await database.transaction(async (tx) => {
+    await withTransaction(database, async (tx) => {
       const issueIds = [...new Set(edges.flatMap(e => [e.issueId, e.dependsOnId]))];
       const issueRows = issueIds.length === 0 ? [] : await tx
         .select({ id: issues.id, projectId: issues.projectId })

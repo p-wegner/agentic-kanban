@@ -47,6 +47,25 @@ export const writeDb = drizzle({ client: writeClient, schema });
 export const rawClient = client;
 export const rawWriteClient = writeClient;
 export { schema };
-export { withDbRetry } from "./retry.js";
+import { withDbRetry } from "./retry.js";
+export { withDbRetry };
 
 export type Database = ReturnType<typeof drizzle<typeof schema>>;
+
+/** The transaction handle drizzle passes to a `db.transaction(fn)` callback. */
+export type TransactionClient = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
+/**
+ * Run `fn` inside a single atomic transaction WITH SQLITE_BUSY retry. Makes
+ * "multi-write or nothing" the easy default: every statement on the supplied `tx`
+ * commits together or rolls back, and the whole transaction is retried on
+ * contention via withDbRetry. Prefer this over a bare `database.transaction(...)`
+ * for any operation that does more than one dependent write.
+ */
+export async function withTransaction<T>(
+  database: Database,
+  fn: (tx: TransactionClient) => Promise<T>,
+  context = "transaction",
+): Promise<T> {
+  return withDbRetry(() => database.transaction(fn), context);
+}
