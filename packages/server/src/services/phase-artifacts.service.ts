@@ -1,8 +1,13 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { and, eq, like, sql } from "drizzle-orm";
-import { issueArtifacts, issues, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
+import {
+  getLatestPhaseArtifact,
+  getPhaseArtifactRows,
+  getWorkflowNodeName,
+  getWorkspaceArtifactTarget,
+  getWorkspaceIssueId,
+} from "../repositories/phase-artifacts.repository.js";
 
 const PHASE_FILES: Record<string, string> = {
   specify: "spec.md",
@@ -57,18 +62,7 @@ export async function materializePhaseArtifactToWorktree(
 ): Promise<{ relativePath: string | null }> {
   if (!input.workspaceId || !phaseFileNameFromCaption(input.caption)) return { relativePath: null };
 
-  const rows = await database
-    .select({
-      issueNumber: issues.issueNumber,
-      title: issues.title,
-      workingDir: workspaces.workingDir,
-    })
-    .from(workspaces)
-    .innerJoin(issues, eq(workspaces.issueId, issues.id))
-    .where(and(eq(workspaces.id, input.workspaceId), eq(workspaces.issueId, input.issueId)))
-    .limit(1);
-
-  const row = rows[0];
+  const row = await getWorkspaceArtifactTarget(input.workspaceId, input.issueId, database);
   if (!row?.workingDir || !input.caption) return { relativePath: null };
 
   const relativePath = artifactRelativePath(row.issueNumber, row.title, input.caption);
@@ -88,31 +82,10 @@ export async function materializeLatestPhaseArtifactForWorkspace(
   if (!key || !fileName) return { relativePath: null, artifactId: null };
   const caption = `phase-artifact:${key}`;
 
-  const workspaceRows = await database
-    .select({ issueId: workspaces.issueId })
-    .from(workspaces)
-    .where(eq(workspaces.id, workspaceId))
-    .limit(1);
-  const issueId = workspaceRows[0]?.issueId;
+  const issueId = await getWorkspaceIssueId(workspaceId, database);
   if (!issueId) return { relativePath: null, artifactId: null };
 
-  const artifactRows = await database
-    .select({
-      id: issueArtifacts.id,
-      content: issueArtifacts.content,
-      caption: issueArtifacts.caption,
-    })
-    .from(issueArtifacts)
-    .where(and(
-      eq(issueArtifacts.issueId, issueId),
-      eq(issueArtifacts.workspaceId, workspaceId),
-      eq(issueArtifacts.type, "text"),
-      eq(issueArtifacts.caption, caption),
-    ))
-    .orderBy(sql`${issueArtifacts.createdAt} DESC`)
-    .limit(1);
-
-  const artifact = artifactRows[0];
+  const artifact = await getLatestPhaseArtifact(issueId, workspaceId, caption, database);
   if (!artifact) return { relativePath: null, artifactId: null };
 
   const result = await materializePhaseArtifactToWorktree(database, {
@@ -129,22 +102,7 @@ export async function buildPhaseArtifactsContext(
   issueId: string,
   workspaceId?: string | null,
 ): Promise<string> {
-  const conditions = [
-    eq(issueArtifacts.issueId, issueId),
-    eq(issueArtifacts.type, "text"),
-    like(issueArtifacts.caption, "phase-artifact:%"),
-  ];
-  if (workspaceId) conditions.push(eq(issueArtifacts.workspaceId, workspaceId));
-
-  const rows = await database
-    .select({
-      caption: issueArtifacts.caption,
-      content: issueArtifacts.content,
-      createdAt: issueArtifacts.createdAt,
-    })
-    .from(issueArtifacts)
-    .where(and(...conditions))
-    .orderBy(issueArtifacts.createdAt);
+  const rows = await getPhaseArtifactRows(issueId, workspaceId, database);
 
   const latest = new Map<string, { caption: string; content: string; createdAt: string }>();
   for (const row of rows) {
@@ -172,10 +130,6 @@ export async function buildPhaseArtifactsContext(
 
 export async function isImplementWorkflowNode(database: Database, nodeId: string | null | undefined): Promise<boolean> {
   if (!nodeId) return false;
-  const rows = await database
-    .select({ name: workflowNodes.name })
-    .from(workflowNodes)
-    .where(eq(workflowNodes.id, nodeId))
-    .limit(1);
-  return rows[0]?.name?.trim().toLowerCase() === "implement";
+  const name = await getWorkflowNodeName(nodeId, database);
+  return name?.trim().toLowerCase() === "implement";
 }

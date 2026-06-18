@@ -1,8 +1,13 @@
-import { projects, projectStatuses, issues, workspaces, sessions } from "@agentic-kanban/shared/schema";
-import { eq, inArray, desc, and, ne } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { isAnalyticsNoise } from "./session-filter.js";
 import { isCodexUsageLimitStats } from "./codex-rate-limit.js";
+import {
+  getNonClosedWorkspacesForIssues,
+  getProjectIdOrNull,
+  getProjectIssueRows,
+  getProjectStatusRows,
+  getSessionsForWorkspacesDesc,
+} from "../repositories/workspace-launch-failures.repository.js";
 
 export type LaunchFailureCategory =
   | "zero-output"   // session exited in <=1s or had zero tokens
@@ -79,28 +84,18 @@ export async function getWorkspaceLaunchFailures(
   database: Database,
 ): Promise<WorkspaceLaunchFailuresResponse> {
   // Resolve project
-  const projectRows = await database
-    .select({ id: projects.id })
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .limit(1);
-  if (projectRows.length === 0) throw new Error(`Project ${projectId} not found`);
+  const projectIdResolved = await getProjectIdOrNull(projectId, database);
+  if (!projectIdResolved) throw new Error(`Project ${projectId} not found`);
 
   // Get non-terminal issue statuses
-  const statusRows = await database
-    .select({ id: projectStatuses.id, name: projectStatuses.name })
-    .from(projectStatuses)
-    .where(eq(projectStatuses.projectId, projectId));
+  const statusRows = await getProjectStatusRows(projectId, database);
   const terminalStatusIds = new Set(
     statusRows.filter(s => s.name === "Done" || s.name === "Cancelled").map(s => s.id),
   );
   const statusNameById = new Map(statusRows.map(s => [s.id, s.name]));
 
   // Get active (non-terminal) issues
-  const issueRows = await database
-    .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, statusId: issues.statusId })
-    .from(issues)
-    .where(eq(issues.projectId, projectId));
+  const issueRows = await getProjectIssueRows(projectId, database);
   const activeIssues = issueRows.filter(i => !terminalStatusIds.has(i.statusId));
   if (activeIssues.length === 0) {
     return { projectId, generatedAt: new Date().toISOString(), failures: [] };
@@ -110,13 +105,7 @@ export async function getWorkspaceLaunchFailures(
   const issueById = new Map(activeIssues.map(i => [i.id, i]));
 
   // Get workspaces for active issues (non-closed)
-  const workspaceRows = await database
-    .select()
-    .from(workspaces)
-    .where(and(
-      inArray(workspaces.issueId, activeIssueIds),
-      ne(workspaces.status, "closed"),
-    ));
+  const workspaceRows = await getNonClosedWorkspacesForIssues(activeIssueIds, database);
 
   if (workspaceRows.length === 0) {
     return { projectId, generatedAt: new Date().toISOString(), failures: [] };
@@ -125,11 +114,7 @@ export async function getWorkspaceLaunchFailures(
   const wsIds = workspaceRows.map(w => w.id);
 
   // Get recent sessions for these workspaces
-  const sessionRows = await database
-    .select()
-    .from(sessions)
-    .where(inArray(sessions.workspaceId, wsIds))
-    .orderBy(desc(sessions.startedAt));
+  const sessionRows = await getSessionsForWorkspacesDesc(wsIds, database);
 
   // Group sessions by workspaceId (most recent first, excluding analytics noise)
   const latestSessionByWs = new Map<string, typeof sessionRows[0]>();
