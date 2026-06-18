@@ -117,6 +117,7 @@ interface Project {
   symlinkEnabled?: boolean;
   symlinkDirs?: string | null;
   archivedAt?: string | null;
+  activeWorkspaceCount?: number;
 }
 
 interface Tag {
