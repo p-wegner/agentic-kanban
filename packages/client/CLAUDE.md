@@ -43,7 +43,7 @@ Use `<SplitButton>` (`src/components/SplitButton.tsx`) whenever an action has on
 />
 ```
 
-**Current usages:** Review/Thorough Review in `WorkspacePanel`. The "New Workspace" quick-launch at the top and bottom of `WorkspacePanel` uses an equivalent inline pattern (not yet migrated because it has complex inline state logic).
+**Current usages:** none at present — the component is available as a sanctioned primitive but no view wires it today (the former Review/Thorough Review usage was superseded). `WorkspacePanel`'s "New Workspace" quick-launch uses an equivalent inline pattern (not migrated because it has complex inline state logic). Reach for `SplitButton` when adding a new default+variants action rather than hand-rolling a dropdown.
 
 **When to apply:** Two separate buttons that do "the same thing but differently" (intensity, model, mode flag) should become one SplitButton. Unrelated actions stay as separate buttons.
 
