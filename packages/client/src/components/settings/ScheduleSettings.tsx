@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from "react";
-import { apiFetch } from "../../lib/api.js";
+import { apiFetch, apiPost, apiPut, apiDelete } from "../../lib/api.js";
 import { describeCronExpression, validateCronExpression } from "../../lib/cron-utils.js";
 import { formatNextFire, formatScheduledRunTime, type ScheduledRun } from "../SettingsPanel.shared.js";
 import { showToast } from "../Toast.js";
@@ -127,7 +127,7 @@ export function ScheduleSettings({ activeProjectId, scheduledRunsList, setSchedu
                                           payload.intervalMinutes = editRunInterval;
                                           payload.cronExpression = "";
                                         }
-                                        await apiFetch(`/api/scheduled-runs/${run.id}`, { method: "PUT", body: JSON.stringify(payload) });
+                                        await apiPut(`/api/scheduled-runs/${run.id}`, payload);
                                         setScheduledRunsList((r) => r.map((x) => x.id === run.id ? { ...x, name: editRunName.trim(), prompt: editRunPrompt.trim(), intervalMinutes: editRunMode === "interval" ? editRunInterval : x.intervalMinutes, cronExpression: editRunMode === "cron" ? editRunCron.trim() : null } : x));
                                         setEditingRun(null);
                                         showToast("Scheduled run updated", "success");
@@ -159,10 +159,7 @@ export function ScheduleSettings({ activeProjectId, scheduledRunsList, setSchedu
                                   onChange={async (e) => {
                                     const enabled = e.target.checked;
                                     try {
-                                      await apiFetch(`/api/scheduled-runs/${run.id}`, {
-                                        method: "PUT",
-                                        body: JSON.stringify({ enabled }),
-                                      });
+                                      await apiPut(`/api/scheduled-runs/${run.id}`, { enabled });
                                       setScheduledRunsList((r) => r.map((x) => x.id === run.id ? { ...x, enabled } : x));
                                     } catch {
                                       showToast("Failed to update", "error");
@@ -176,10 +173,7 @@ export function ScheduleSettings({ activeProjectId, scheduledRunsList, setSchedu
                                   onClick={async () => {
                                     const enabled = !run.enabled;
                                     try {
-                                      await apiFetch(`/api/scheduled-runs/${run.id}`, {
-                                        method: "PUT",
-                                        body: JSON.stringify({ enabled }),
-                                      });
+                                      await apiPut(`/api/scheduled-runs/${run.id}`, { enabled });
                                       setScheduledRunsList((r) => r.map((x) => x.id === run.id ? { ...x, enabled, nextFireAt: enabled ? x.nextFireAt : null } : x));
                                       showToast(enabled ? "Scheduled run resumed" : "Scheduled run paused", "success");
                                     } catch {
@@ -201,7 +195,7 @@ export function ScheduleSettings({ activeProjectId, scheduledRunsList, setSchedu
                                   onClick={async () => {
                                     setTriggeringRun(run.id);
                                     try {
-                                      await apiFetch(`/api/scheduled-runs/${run.id}/run`, { method: "POST" });
+                                      await apiPost(`/api/scheduled-runs/${run.id}/run`);
                                       showToast("Run triggered", "success");
                                       const runs = await apiFetch<ScheduledRun[]>(`/api/scheduled-runs?projectId=${activeProjectId}`);
                                       setScheduledRunsList(runs);
@@ -216,7 +210,7 @@ export function ScheduleSettings({ activeProjectId, scheduledRunsList, setSchedu
                                   onClick={async () => {
                                     if (!confirm(`Delete scheduled run "${run.name}"?`)) return;
                                     try {
-                                      await apiFetch(`/api/scheduled-runs/${run.id}`, { method: "DELETE" });
+                                      await apiDelete(`/api/scheduled-runs/${run.id}`);
                                       setScheduledRunsList((r) => r.filter((x) => x.id !== run.id));
                                       showToast("Deleted", "success");
                                     } catch {
@@ -379,10 +373,7 @@ export function ScheduleSettings({ activeProjectId, scheduledRunsList, setSchedu
                             } else {
                               payload.intervalMinutes = newRunInterval;
                             }
-                            const created = await apiFetch<ScheduledRun>("/api/scheduled-runs", {
-                              method: "POST",
-                              body: JSON.stringify(payload),
-                            });
+                            const created = await apiPost<ScheduledRun>("/api/scheduled-runs", payload);
                             setScheduledRunsList((r) => [...r, created]);
                             setNewRunName("");
                             setNewRunPrompt("");
