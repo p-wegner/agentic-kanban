@@ -62,6 +62,7 @@ import { suggestBranchName } from "../lib/branch.js";
 import { MentionProvider } from "../lib/MentionContext.js";
 import { apiFetch } from "../lib/api.js";
 import { getSettings } from "../lib/settingsStore.js";
+import { setBoardDragData, getBoardDragData } from "../lib/dragData.js";
 import { matchesBoardFilters } from "../lib/boardFiltering.js";
 import { runCreateIssueFlow, type CreateIssuePayload } from "../lib/createIssueService.js";
 import { applyLocalReorder, moveIssueToStatus } from "../lib/issueMoveHelpers.js";
@@ -994,10 +995,7 @@ export function BoardPage() {
   }
 
   const handleBoardDragStart = useCallback((e: React.DragEvent, issue: IssueWithStatus) => {
-    (window as unknown as Record<string, unknown>).__dragData = {
-      issueId: issue.id,
-      sourceStatusId: issue.statusId,
-    };
+    setBoardDragData({ issueId: issue.id, sourceStatusId: issue.statusId });
     handleDragStart(e, issue);
   }, []);
 
@@ -1007,9 +1005,9 @@ export function BoardPage() {
   }
 
   async function handleDropWithLane(targetStatusId: string, laneKey: string, sortOrder?: number) {
-    const raw = (window as unknown as Record<string, unknown>).__dragData;
-    if (!raw || typeof raw !== "object") return;
-    const { issueId } = raw as { issueId: string; sourceStatusId: string };
+    const data = getBoardDragData();
+    if (!data) return;
+    const { issueId } = data;
     if (!issueId) return;
 
     const lanePriority = swimlaneDimension === "priority" && laneKey !== "ungrouped" ? laneKey : undefined;
@@ -1056,15 +1054,9 @@ export function BoardPage() {
   }
 
   async function handleDrop(targetStatusId: string, sortOrder?: number) {
-    const raw = (window as unknown as Record<string, unknown>).__dragData;
-    let issueId: string | undefined;
-    let sourceStatusId: string | undefined;
-
-    if (raw && typeof raw === "object") {
-      const data = raw as { issueId: string; sourceStatusId: string };
-      issueId = data.issueId;
-      sourceStatusId = data.sourceStatusId;
-    }
+    const data = getBoardDragData();
+    const issueId = data?.issueId;
+    const sourceStatusId = data?.sourceStatusId;
 
     if (!issueId) return;
     if (sourceStatusId === targetStatusId && sortOrder === undefined) return;

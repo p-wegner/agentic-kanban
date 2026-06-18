@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
+import { getBoardDragData } from "../lib/dragData.js";
 
 const STARTABLE_STATUS_NAMES = new Set(["Backlog", "Todo"]);
 
@@ -319,9 +320,8 @@ function EmptySlot({ onDropIssue, columns }: EmptySlotProps) {
   const [isDragOver, setIsDragOver] = useState(false);
 
   function getDraggedIssue(): IssueWithStatus | null {
-    const raw = (window as unknown as Record<string, unknown>).__dragData;
-    if (!raw || typeof raw !== "object") return null;
-    const data = raw as { issueId: string };
+    const data = getBoardDragData();
+    if (!data) return null;
     const allIssues = columns.flatMap((col) => col.issues);
     return allIssues.find((i) => i.id === data.issueId) ?? null;
   }
