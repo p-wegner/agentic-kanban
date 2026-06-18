@@ -4,6 +4,7 @@ import { invalidateSettings } from "../lib/settingsStore.js";
 import { showToast } from "./Toast.js";
 import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
 import { CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, DEFAULT_SETTINGS, PI_DEFAULT_PROFILE, TABS, uniqueProfiles, type AgentProfileHealth, type McpHealth, type MonitorTunables, type ProjectSettingsState, type ScheduledRun, type Settings, type SettingsPanelProps, type SkillSetting, type Tab, type TagSetting } from "./SettingsPanel.shared.js";
+import type { MonitorAction } from "./MonitorPopover.js";
 import { AgentSettings } from "./settings/AgentSettings.js";
 import { WorkflowSettings } from "./settings/WorkflowSettings.js";
 import { SkillsSettings } from "./settings/SkillsSettings.js";
@@ -96,7 +97,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
     active: boolean;
     lastRun: string | null;
     nextRunAt: string | null;
-    recentActions: string[];
+    recentActions: MonitorAction[];
     maintenanceActive?: boolean;
     maintenanceEnd?: string | null;
   } | null>(null);

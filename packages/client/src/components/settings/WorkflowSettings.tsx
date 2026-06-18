@@ -1,5 +1,6 @@
 import type { Dispatch, SetStateAction } from "react";
 import { WorkflowAgentBehaviourSection, WorkflowBoardMonitorSection, WorkflowFollowUpSection, WorkflowLearningSection, WorkflowProcessPipelineSection, WorkflowReviewMergeSection, type MonitorTunables, type Settings, type SettingsBoolSetter, type SettingsTextSetter, type SkillSetting } from "../SettingsPanel.shared.js";
+import type { MonitorAction } from "../MonitorPopover.js";
 
 type WorkflowSettingsProps = {
   settings: Settings;
@@ -8,7 +9,7 @@ type WorkflowSettingsProps = {
   setSettings: Dispatch<SetStateAction<Settings>>;
   activeProjectId?: string | null;
   autoReviewOn: boolean;
-  monitorStatus: { enabled: boolean; intervalMin: number; active: boolean; lastRun: string | null; nextRunAt: string | null; recentActions: string[]; maintenanceActive?: boolean; maintenanceEnd?: string | null } | null;
+  monitorStatus: { enabled: boolean; intervalMin: number; active: boolean; lastRun: string | null; nextRunAt: string | null; recentActions: MonitorAction[]; maintenanceActive?: boolean; maintenanceEnd?: string | null } | null;
   monitorTunables: { tunables: MonitorTunables; source: "strategy" | "prefs" } | null;
   monitorRunning: boolean;
   migratingToStrategy: boolean;
