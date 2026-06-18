@@ -79,13 +79,14 @@ describe("git service removeWorktree cleanup fallback", () => {
     await mkdir(sourceDir, { recursive: true });
     await writeFile(join(sourceDir, "sentinel.txt"), "must-survive\n");
 
-    // Create the junction/symlink inside the worktree dir
+    // Create the junction/symlink inside the worktree dir. Use fs.symlink with the
+    // "junction" type on Windows (a real junction, same as the bootstrap) rather than
+    // shelling out to mklink — node:child_process.execFile is mocked here, so an
+    // execFileAsync("cmd", ["mklink", ...]) would hang on the unconfigured mock.
     const junctionPath = join(worktreePath, "node_modules");
-    if (process.platform === "win32") {
-      await execFileAsync("cmd", ["/c", "mklink", "/J", junctionPath, sourceDir]);
-    } else {
-      await symlink(sourceDir, junctionPath, "dir");
-    }
+    // beforeEach seeds a real node_modules directory; replace it with the junction.
+    await rm(junctionPath, { recursive: true, force: true });
+    await symlink(sourceDir, junctionPath, process.platform === "win32" ? "junction" : "dir");
 
     execFileMock.mockImplementation((_cmd, args, _opts, callback) => {
       if (args[0] === "worktree" && args[1] === "remove") {

@@ -192,7 +192,13 @@ describe("createAutoMerge: project-not-found guard (regression #588)", () => {
 
     // autoMerge wraps everything in try/catch — the "project not found" throw is caught
     // and triggers the error path, leaving the issue status unchanged.
-    await autoMerge(ws, missingProjectId, issueId, doneStatusId, new Date().toISOString());
+    //
+    // autoMerge reads preferences from the module-global db (not the injected test db); the
+    // real board may have learning_step_before_merge=true, whose pre-merge learning poll only
+    // runs when workspace.workingDir is set. The worktree is irrelevant to the project-not-found
+    // guard (which fires before any worktree work), so pass a worktree-less workspace to avoid
+    // a 3-minute poll against a mock session that never completes.
+    await autoMerge({ ...ws, workingDir: null }, missingProjectId, issueId, doneStatusId, new Date().toISOString());
 
     // Issue must NOT be Done — project-not-found guard threw before the git merge ran.
     const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
