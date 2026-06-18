@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch, apiPost, apiPatch } from "../lib/api.js";
-import { showToast } from "../components/Toast.js";
+import { showToast } from "../lib/toast.js";
 import type { IssueWithStatus, UpdateIssueRequest } from "@agentic-kanban/shared";
 
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);

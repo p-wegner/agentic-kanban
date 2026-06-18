@@ -7,7 +7,7 @@ import type {
 } from "@agentic-kanban/shared";
 import { apiPost } from "./api.js";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
-import { showToast } from "../components/Toast.js";
+import { showToast } from "../lib/toast.js";
 
 /** Payload accepted by the board's create-issue flow (issue data plus optional workspace launch). */
 export type CreateIssuePayload = CreateIssueRequest & {

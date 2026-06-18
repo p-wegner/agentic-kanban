@@ -122,6 +122,51 @@ module.exports = {
       to: { path: "^packages/server/src/services/" },
     },
     {
+      name: "client-lib-is-leaf",
+      comment:
+        "The client's lib/ layer is the leaf: pure helpers, stores, API verb helpers, " +
+        "and view-models. It must not import UP into components/, hooks/, or routes/ as a " +
+        "VALUE (type-only imports are erased, tsPreCompilationDeps:false, so importing a " +
+        "component's exported TYPE is fine). The lone offender was showToast living in " +
+        "components/Toast.tsx; its store was relocated to lib/toast.ts. Backlog: 0.",
+      severity: "error",
+      from: { path: "^packages/client/src/lib/" },
+      to: {
+        path: [
+          "^packages/client/src/components/",
+          "^packages/client/src/hooks/",
+          "^packages/client/src/routes/",
+        ],
+      },
+    },
+    {
+      name: "client-hooks-not-up-to-components-or-routes",
+      comment:
+        "Client hooks/ (reusable stateful logic) may depend DOWN on lib/ but must not " +
+        "import components/ or routes/ as a VALUE — that would invert the layering and " +
+        "couple logic to a specific view. Type-only imports are erased so a hook may still " +
+        "reference a component's exported prop/data TYPE. Drained by the showToast move. " +
+        "Backlog: 0.",
+      severity: "error",
+      from: { path: "^packages/client/src/hooks/" },
+      to: {
+        path: [
+          "^packages/client/src/components/",
+          "^packages/client/src/routes/",
+        ],
+      },
+    },
+    {
+      name: "client-components-not-up-to-routes",
+      comment:
+        "Client components/ must not import the routes/ (page) layer as a VALUE. Routes " +
+        "compose components, not the reverse. Type-only imports are erased. Lands green " +
+        "today. Backlog: 0.",
+      severity: "error",
+      from: { path: "^packages/client/src/components/" },
+      to: { path: "^packages/client/src/routes/" },
+    },
+    {
       name: "services-bypass-repositories",
       comment:
         "BACKLOG (76 services import drizzle-orm directly): the application layer runs raw " +

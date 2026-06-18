@@ -4,7 +4,7 @@ import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { registerAction } from "../lib/actions.js";
 import { SHORTCUT_TO_VIEW, VIEW_REGISTRY, type ViewMode } from "../lib/viewRegistry.js";
-import { showToast } from "../components/Toast.js";
+import { showToast } from "../lib/toast.js";
 import type { BoardPanelState } from "./useBoardPanels.js";
 
 export interface BoardKeyboardShortcutProject {

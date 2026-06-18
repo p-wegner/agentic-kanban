@@ -1,7 +1,7 @@
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { apiPost, apiPatch, apiDelete } from "./api.js";
-import { showToast } from "../components/Toast.js";
+import { showToast } from "../lib/toast.js";
 
 interface QuickUpdateTag {
   id: string;
