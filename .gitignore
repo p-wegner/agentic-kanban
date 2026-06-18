@@ -43,3 +43,13 @@ verify-*.png
 
 # code-metrics analysis output (regenerable; config in .codemetricsrc is tracked)
 code-metrics-out/
+
+# AI agent artifacts (written during a workspace session; not project source)
+/*.log
+/classpath.txt
+.verify/
+/*-review.png
+
+# Build output (per-stack; generated, not source — keeps a fresh worktree's main clean for auto-merge)
+build/
+.next/

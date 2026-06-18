@@ -78,6 +78,15 @@
             "command": "node C:/andrena/agentic-kanban/.claude/hooks/smart-hooks-runner.js PostToolUse"
           }
         ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $CLAUDE_PROJECT_DIR/.claude/hooks/smart-hooks-runner.js PostToolUse"
+          }
+        ]
       }
     ],
     "Stop": [
@@ -94,6 +103,14 @@
           {
             "type": "command",
             "command": "node C:/andrena/agentic-kanban/.claude/hooks/check-conflict-markers.js"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $CLAUDE_PROJECT_DIR/.claude/hooks/smart-hooks-runner.js Stop"
           }
         ]
       }
