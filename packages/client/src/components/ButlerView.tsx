@@ -547,6 +547,10 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   const [tabStates, setTabStates] = useState<Record<string, TabState>>({});
   // Rename: which tab is being edited inline.
   const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
+  // Add-tab dropdown: click-controlled (a hover-only menu had a dead-zone gap
+  // between the "+" button and the menu, so the click never landed — #842).
+  const [addTabOpen, setAddTabOpen] = useState(false);
+  const addTabRef = useRef<HTMLDivElement>(null);
 
   // Per-tab SSE streams: kept outside React state to avoid re-render churn.
   const eventSourcesRef = useRef<Record<string, EventSource>>({});
@@ -1023,6 +1027,21 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [tab?.chatMessages]);
 
+  // Close the add-tab dropdown on outside click / Escape (#842).
+  useEffect(() => {
+    if (!addTabOpen) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (addTabRef.current && !addTabRef.current.contains(e.target as Node)) setAddTabOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => { if (e.key === "Escape") setAddTabOpen(false); };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [addTabOpen]);
+
   // Prefill the active tab with an external prompt (e.g. "Chat about this ticket",
   // #838). Apply each distinct prompt once: start the butler if it's cold, drop the
   // text into the input for review, focus + size the textarea, and notify the parent
@@ -1479,29 +1498,38 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
           );
         })}
 
-        {/* Add tab dropdown */}
+        {/* Add tab dropdown — click-controlled (a hover-only menu dropped its
+            :hover crossing the gap to the menu, so the click never landed, #842) */}
         {canOpenMore && (
-          <div className="relative group/add shrink-0 flex items-center">
+          <div ref={addTabRef} className="relative shrink-0 flex items-center">
             <button
+              type="button"
+              onClick={() => setAddTabOpen((o) => !o)}
               className="flex items-center gap-1 px-2.5 py-2 text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 text-xs transition-colors"
               title="Open another butler in a new tab"
+              aria-haspopup="menu"
+              aria-expanded={addTabOpen}
               data-testid="butler-add-tab"
             >
               <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14" /></svg>
             </button>
-            {/* Hover dropdown to pick which butler to open */}
-            <div className="absolute top-full left-0 mt-0.5 hidden group-hover/add:block z-30 rounded-md shadow-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 py-1 min-w-[140px]">
-              {availableToOpen.map((b) => (
-                <button
-                  key={b.id}
-                  onClick={() => { openTab(b.id, b.name); }}
-                  className="w-full text-left px-3 py-1.5 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-2"
-                >
-                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${b.active ? "bg-green-400" : "bg-gray-300 dark:bg-gray-600"}`} />
-                  {b.name}
-                </button>
-              ))}
-            </div>
+            {/* Dropdown to pick which butler to open */}
+            {addTabOpen && (
+              <div role="menu" className="absolute top-full left-0 mt-0.5 z-30 rounded-md shadow-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 py-1 min-w-[140px]">
+                {availableToOpen.map((b) => (
+                  <button
+                    key={b.id}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => { openTab(b.id, b.name); setAddTabOpen(false); }}
+                    className="w-full text-left px-3 py-1.5 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-2"
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${b.active ? "bg-green-400" : "bg-gray-300 dark:bg-gray-600"}`} />
+                    {b.name}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
