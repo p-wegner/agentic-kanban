@@ -1,8 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, or, sql } from "drizzle-orm";
-import { issueArtifacts, issueDependencies, issues, projectStatuses, workspaces, workflowNodes } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "./board-events.js";
+import {
+  getWorkspaceMaterializationContext,
+  getExistingChildLinks,
+  getLatestTasksArtifact,
+  getMaxIssueNumber,
+  getBacklogStatusId,
+  insertMaterializedIssue,
+  insertIssueDependency,
+} from "../repositories/spec-tasks-materialization.repository.js";
 
 interface ParsedTask {
   tempId: string;
@@ -124,47 +131,17 @@ export async function materializeSpecTasksForWorkspace(
   database: Database,
   options?: { boardEvents?: BoardEvents; requireCurrentTasks?: boolean },
 ): Promise<MaterializeResult> {
-  const workspaceRows = await database
-    .select({
-      issueId: workspaces.issueId,
-      currentNodeId: workspaces.currentNodeId,
-      nodeName: workflowNodes.name,
-      projectId: issues.projectId,
-    })
-    .from(workspaces)
-    .innerJoin(issues, eq(workspaces.issueId, issues.id))
-    .leftJoin(workflowNodes, eq(workspaces.currentNodeId, workflowNodes.id))
-    .where(eq(workspaces.id, workspaceId))
-    .limit(1);
-
-  const workspace = workspaceRows[0];
+  const workspace = await getWorkspaceMaterializationContext(workspaceId, database);
   if (!workspace || (options?.requireCurrentTasks !== false && workspace.nodeName?.toLowerCase() !== "tasks")) {
     return { created: [], dependencyEdges: 0, skipped: true, reason: "not-tasks-phase" };
   }
 
-  const existingChildLinks = await database
-    .select({ id: issueDependencies.id })
-    .from(issueDependencies)
-    .where(or(
-      and(eq(issueDependencies.dependsOnId, workspace.issueId), eq(issueDependencies.type, "child_of")),
-      and(eq(issueDependencies.issueId, workspace.issueId), eq(issueDependencies.type, "parent_of")),
-    ))
-    .limit(1);
+  const existingChildLinks = await getExistingChildLinks(workspace.issueId, database);
   if (existingChildLinks.length > 0) {
     return { created: [], dependencyEdges: 0, skipped: true, reason: "already-materialized" };
   }
 
-  const artifacts = await database
-    .select({ content: issueArtifacts.content, createdAt: issueArtifacts.createdAt })
-    .from(issueArtifacts)
-    .where(and(
-      eq(issueArtifacts.issueId, workspace.issueId),
-      eq(issueArtifacts.workspaceId, workspaceId),
-      eq(issueArtifacts.caption, "phase-artifact:tasks"),
-    ))
-    .orderBy(sql`${issueArtifacts.createdAt} DESC`)
-    .limit(1);
-  const artifact = artifacts[0];
+  const artifact = await getLatestTasksArtifact(workspace.issueId, workspaceId, database);
   if (!artifact?.content) {
     return { created: [], dependencyEdges: 0, skipped: true, reason: "missing-artifact" };
   }
@@ -180,68 +157,40 @@ export async function materializeSpecTasksForWorkspace(
   let alreadyMaterialized = false;
 
   await database.transaction(async (tx) => {
-    const childLinks = await tx
-      .select({ id: issueDependencies.id })
-      .from(issueDependencies)
-      .where(or(
-        and(eq(issueDependencies.dependsOnId, workspace.issueId), eq(issueDependencies.type, "child_of")),
-        and(eq(issueDependencies.issueId, workspace.issueId), eq(issueDependencies.type, "parent_of")),
-      ))
-      .limit(1);
+    const childLinks = await getExistingChildLinks(workspace.issueId, tx);
     if (childLinks.length > 0) {
       alreadyMaterialized = true;
       return;
     }
 
-    const maxRow = await tx
-      .select({ maxNum: sql<number | null>`max(${issues.issueNumber})` })
-      .from(issues)
-      .where(eq(issues.projectId, workspace.projectId));
-    let nextNumber = (maxRow[0]?.maxNum ?? 0) + 1;
+    let nextNumber = (await getMaxIssueNumber(workspace.projectId, tx)) + 1;
 
-    const backlogRows = await tx
-      .select({ id: projectStatuses.id })
-      .from(projectStatuses)
-      .where(and(eq(projectStatuses.projectId, workspace.projectId), eq(projectStatuses.name, "Backlog")))
-      .limit(1);
-    const defaultRows = backlogRows.length > 0
-      ? backlogRows
-      : await tx
-          .select({ id: projectStatuses.id })
-          .from(projectStatuses)
-          .where(eq(projectStatuses.projectId, workspace.projectId))
-          .orderBy(projectStatuses.sortOrder)
-          .limit(1);
-    const statusId = defaultRows[0]?.id;
+    const statusId = await getBacklogStatusId(workspace.projectId, tx);
     if (!statusId) throw new Error("No statuses found for project");
 
     for (const task of parsedTasks) {
       const id = randomUUID();
       const issueNumber = nextNumber++;
-      await tx.insert(issues).values({
+      await insertMaterializedIssue({
         id,
         issueNumber,
         title: task.title,
         description: task.description,
         priority: task.priority,
-        issueType: "task",
-        skipAutoReview: false,
-        estimate: null,
-        sortOrder: 0,
         statusId,
         projectId: workspace.projectId,
         createdAt: now,
         updatedAt: now,
-      });
+      }, tx);
       created.push({ id, issueNumber, title: task.title, tempId: task.tempId });
 
-      await tx.insert(issueDependencies).values({
+      await insertIssueDependency({
         id: randomUUID(),
         issueId: id,
         dependsOnId: workspace.issueId,
         type: "child_of",
         createdAt: now,
-      });
+      }, tx);
       dependencyEdges++;
     }
 
@@ -251,13 +200,13 @@ export async function materializeSpecTasksForWorkspace(
       const key = `${edge.issueId}|${edge.dependsOnId}|${edge.type}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      await tx.insert(issueDependencies).values({
+      await insertIssueDependency({
         id: randomUUID(),
         issueId: edge.issueId,
         dependsOnId: edge.dependsOnId,
         type: edge.type,
         createdAt: now,
-      });
+      }, tx);
       dependencyEdges++;
     }
   });

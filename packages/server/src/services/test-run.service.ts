@@ -1,7 +1,15 @@
-import { eq, desc, gte, sql } from "drizzle-orm";
-import { testRuns, flakyTestPins, sessionMessages } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import { readSessionStdoutFile } from "../repositories/session.repository.js";
+import {
+  insertTestRunBatch,
+  getFlakyAggregates,
+  getFlakyPinNames,
+  insertFlakyPin,
+  deleteFlakyPin,
+  getPinnedTestRows,
+  getTestRunIdForSession,
+  getSessionStdoutMessages,
+} from "../repositories/test-run.repository.js";
 
 export interface TestRunRecord {
   sessionId: string;
@@ -405,7 +413,7 @@ export function createTestRunService(database: Database) {
     const batchSize = 50;
     for (let i = 0; i < records.length; i += batchSize) {
       const batch = records.slice(i, i + batchSize);
-      await database.insert(testRuns).values(
+      await insertTestRunBatch(
         batch.map(r => ({
           sessionId: r.sessionId,
           commitSha: r.commitSha ?? null,
@@ -418,6 +426,7 @@ export function createTestRunService(database: Database) {
           runner: r.runner,
           recordedAt: new Date().toISOString(),
         })),
+        database,
       );
     }
   }
@@ -430,28 +439,9 @@ export function createTestRunService(database: Database) {
     const { limit = 50, minRuns = 5, windowDays = 30 } = opts;
     const cutoff = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString();
 
-    const rows = await database
-      .select({
-        testName: testRuns.testName,
-        file: testRuns.file,
-        suite: testRuns.suite,
-        runner: testRuns.runner,
-        totalRuns: sql<number>`count(*)`,
-        passCount: sql<number>`sum(case when ${testRuns.passed} = 1 then 1 else 0 end)`,
-        failCount: sql<number>`sum(case when ${testRuns.passed} = 0 then 1 else 0 end)`,
-        lastSeen: sql<string>`max(${testRuns.recordedAt})`,
-        lastError: sql<string | null>`(
-          select t2.error_message from test_runs t2
-          where t2.test_name = ${testRuns.testName} and t2.passed = 0
-          order by t2.recorded_at desc limit 1
-        )`,
-      })
-      .from(testRuns)
-      .where(gte(testRuns.recordedAt, cutoff))
-      .groupBy(testRuns.testName, testRuns.file, testRuns.suite, testRuns.runner)
-      .having(sql`count(*) >= ${minRuns}`);
+    const rows = await getFlakyAggregates(cutoff, minRuns, database);
 
-    const pins = await database.select({ testName: flakyTestPins.testName }).from(flakyTestPins);
+    const pins = await getFlakyPinNames(database);
     const pinnedSet = new Set(pins.map(p => p.testName));
 
     const flaky: FlakyTestEntry[] = [];
@@ -482,21 +472,15 @@ export function createTestRunService(database: Database) {
   }
 
   async function pinTest(testName: string, file?: string): Promise<void> {
-    await database
-      .insert(flakyTestPins)
-      .values({ testName, file: file ?? null, pinnedAt: new Date().toISOString() })
-      .onConflictDoNothing();
+    await insertFlakyPin(testName, file ?? null, new Date().toISOString(), database);
   }
 
   async function unpinTest(testName: string): Promise<void> {
-    await database.delete(flakyTestPins).where(eq(flakyTestPins.testName, testName));
+    await deleteFlakyPin(testName, database);
   }
 
   async function getPinnedTests(): Promise<Array<{ testName: string; file: string | null; pinnedAt: string }>> {
-    return database
-      .select({ testName: flakyTestPins.testName, file: flakyTestPins.file, pinnedAt: flakyTestPins.pinnedAt })
-      .from(flakyTestPins)
-      .orderBy(desc(flakyTestPins.pinnedAt));
+    return getPinnedTestRows(database);
   }
 
   /**
@@ -508,11 +492,7 @@ export function createTestRunService(database: Database) {
    */
   async function ingestSession(sessionId: string): Promise<number> {
     // Skip if this session already has recorded runs (idempotent across re-exits).
-    const existing = await database
-      .select({ id: testRuns.id })
-      .from(testRuns)
-      .where(eq(testRuns.sessionId, sessionId))
-      .limit(1);
+    const existing = await getTestRunIdForSession(sessionId, database);
     if (existing.length > 0) return 0;
 
     const textParts: string[] = [];
@@ -521,11 +501,7 @@ export function createTestRunService(database: Database) {
     if (fileContent !== null) {
       textParts.push(extractTextFromMessageData(fileContent));
     } else {
-      const msgs = await database
-        .select({ type: sessionMessages.type, data: sessionMessages.data })
-        .from(sessionMessages)
-        .where(eq(sessionMessages.sessionId, sessionId))
-        .orderBy(sessionMessages.id);
+      const msgs = await getSessionStdoutMessages(sessionId, database);
       for (const m of msgs) {
         if ((m.type === "stdout" || m.type === "stderr") && m.data) {
           textParts.push(extractTextFromMessageData(m.data));
