@@ -15,6 +15,32 @@ export interface WebhookIssueStatusPayload {
   statusChangedAt: string;
 }
 
+/**
+ * Build the issue.status_changed payload from its parts. Single source of the wire shape —
+ * the MCP move/update tools and the server issue.service all emit identical payloads and
+ * had each hand-built the object literal (a drift hazard as the shape grows).
+ */
+export function buildIssueStatusPayload(args: {
+  issueId: string;
+  issueNumber: number | null;
+  title: string;
+  projectId: string;
+  newStatusId: string;
+  newStatusName: string | null;
+  statusChangedAt: string;
+}): WebhookIssueStatusPayload {
+  return {
+    event: "issue.status_changed",
+    issueId: args.issueId,
+    issueNumber: args.issueNumber,
+    title: args.title,
+    projectId: args.projectId,
+    newStatusId: args.newStatusId,
+    newStatusName: args.newStatusName,
+    statusChangedAt: args.statusChangedAt,
+  };
+}
+
 /** Returns the trimmed URL if valid and loopback, or null otherwise. */
 export function validateWebhookUrl(raw: string | null | undefined): string | null {
   if (!raw) return null;
