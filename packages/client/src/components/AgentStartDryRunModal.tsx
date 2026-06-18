@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
-import { suggestBranchName } from "../lib/branch.js";
+import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { LaunchPreviewPanel } from "./LaunchPreviewPanel.js";
 
 interface AgentStartDryRunModalProps {

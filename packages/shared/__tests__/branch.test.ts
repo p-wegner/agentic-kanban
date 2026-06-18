@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sanitizeBranchName, suggestBranchName } from "./branch";
+import { sanitizeBranchName, suggestBranchName } from "../src/lib/branch.js";
 
 describe("sanitizeBranchName", () => {
   it("lowercases input", () => {

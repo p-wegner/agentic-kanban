@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { getSettings, invalidateSettings } from "../lib/settingsStore.js";
-import { suggestBranchName, sanitizeBranchName } from "../lib/branch.js";
+import { suggestBranchName, sanitizeBranchName } from "@agentic-kanban/shared/lib/branch";
 import type { IssueWithStatus, ProfileSelection, WorkspaceResponse } from "@agentic-kanban/shared";
 import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import { PreflightModal } from "./PreflightModal.js";
