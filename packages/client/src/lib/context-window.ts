@@ -20,14 +20,33 @@ export const DEFAULT_CONTEXT_WINDOW = 200_000;
 export function contextWindowForModel(model: string | null | undefined): number {
   if (!model) return DEFAULT_CONTEXT_WINDOW;
   const m = model.toLowerCase();
-  // Claude 1M-context variants (e.g. the "[1m]" model ids).
+  // Explicit 1M-context variants (e.g. the "[1m]" / "-1m" model ids).
   if (m.includes("[1m]") || m.includes("-1m")) return 1_000_000;
   // GPT / o-series and Gemini families commonly expose larger windows.
   if (m.includes("gemini")) return 1_000_000;
   if (m.includes("gpt-4.1") || m.includes("gpt-5") || m.startsWith("o1") || m.startsWith("o3") || m.includes("codex")) return 400_000;
   if (m.includes("gpt-4o") || m.includes("gpt-4-turbo")) return 128_000;
-  // Claude family (opus / sonnet / haiku) and everything else.
+  // Modern Claude families ship a 1M context window at standard pricing:
+  // Fable 5, Opus 4.6 / 4.7 / 4.8, and Sonnet 4.6 — so a bare "claude-opus-4-8"
+  // is 1M, not 200k. Only Haiku and pre-4.6 Claude models stay at 200k.
+  if (m.includes("fable") || isMillionContextClaude(m)) return 1_000_000;
+  // Claude Haiku, older Claude versions, and everything else.
   return DEFAULT_CONTEXT_WINDOW;
+}
+
+/**
+ * True for the Claude Opus/Sonnet model ids that ship a 1M context window
+ * (Opus 4.6+, Sonnet 4.6+). Matches the version number embedded in the id so
+ * future point releases (e.g. opus-4-9, sonnet-4-7, opus-5-0) are covered
+ * without an exhaustive list, while older 200k models (opus-4-5, sonnet-4-5)
+ * are not. Haiku is never 1M, so it's excluded from the family match.
+ */
+function isMillionContextClaude(m: string): boolean {
+  const match = m.match(/claude-(?:opus|sonnet)-(\d+)-(\d+)/);
+  if (!match) return false;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  return major > 4 || (major === 4 && minor >= 6);
 }
 
 export interface ContextOccupancy {
