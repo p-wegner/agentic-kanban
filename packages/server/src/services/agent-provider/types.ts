@@ -2,7 +2,15 @@
 export const PLAN_BEGIN_MARKER = "===PLAN BEGIN===";
 export const PLAN_END_MARKER = "===PLAN END===";
 
-export type ProviderName = "claude" | "codex" | "copilot" | "pi";
+/**
+ * The single source of truth for the set of concrete agent providers. Both the
+ * `ProviderName` union and the registry derive from this, and a parity test
+ * (agent-provider-registry.test.ts) asserts the registry implements exactly these —
+ * so adding a 5th provider is a one-line change that cannot silently drift out of
+ * sync with the registry.
+ */
+export const PROVIDER_NAMES = ["claude", "codex", "copilot", "pi"] as const;
+export type ProviderName = (typeof PROVIDER_NAMES)[number];
 export type ProviderId = "claude-code" | "codex" | "copilot" | "pi";
 
 export interface AgentLaunchConfig {

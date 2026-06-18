@@ -124,19 +124,42 @@ describe("MCP Server Tools", () => {
     try { rmSync(tmpDir, { recursive: true }); } catch { /* ignore */ }
   });
 
-  it("tools/list registers every advertised MCP_TOOL_DEFINITIONS tool", async () => {
+  it("the MCP_TOOL_DEFINITIONS catalog and the runtime tools/list stay in exact name-parity", async () => {
     // Regression: mark_ready_for_merge was advertised in MCP_TOOL_DEFINITIONS (and the
     // review prompt told reviewers to call it) but was never wired into TOOL_REGISTRARS,
     // so every worktree review stranded its issue in "In Review" — the approval signal
-    // referenced a tool that didn't exist over MCP. Assert the advertised list and the
-    // actually-registered list can never drift again.
+    // referenced a tool that didn't exist over MCP.
+    //
+    // We assert NAME parity in BOTH directions (the catalog drives the Settings UI tool
+    // browser, grouped by category; the runtime is what agents can actually call):
+    //   - advertised ⊆ registered  → no catalog entry references a non-existent tool
+    //     (the mark_ready class).
+    //   - registered ⊆ advertised  → no runtime tool can ship without a UI catalog
+    //     entry + category (so the tool browser never silently omits a real tool).
+    //
+    // We deliberately do NOT assert description EQUALITY: by design the catalog holds a
+    // terse one-line UI label while each registrar holds a richer agent-facing
+    // description (e.g. add_dependency lists every dependency type). Equality would be
+    // both false today and a regression in agent UX. We only guard that every runtime
+    // description is non-empty.
     const resp = await sendAndReceive(proc, makeRequest("tools/list"));
-    const registered = new Set<string>((resp.result.tools as { name: string }[]).map((t) => t.name));
+    const tools = resp.result.tools as { name: string; description?: string }[];
+    const registered = new Set<string>(tools.map((t) => t.name));
+    const advertised = new Set<string>(MCP_TOOL_DEFINITIONS.map((d) => d.name));
 
-    const advertised = MCP_TOOL_DEFINITIONS.map((d) => d.name);
-    const missing = advertised.filter((name) => !registered.has(name));
-    expect(missing, `advertised but not registered: ${missing.join(", ")}`).toEqual([]);
+    const missing = [...advertised].filter((name) => !registered.has(name));
+    expect(missing, `advertised in catalog but not registered at runtime: ${missing.join(", ")}`).toEqual([]);
+
+    const uncatalogued = [...registered].filter((name) => !advertised.has(name));
+    expect(
+      uncatalogued,
+      `registered at runtime but missing from MCP_TOOL_DEFINITIONS (add it + a category so the Settings tool browser shows it): ${uncatalogued.join(", ")}`,
+    ).toEqual([]);
+
     expect(registered.has("mark_ready_for_merge")).toBe(true);
+
+    const blankDescriptions = tools.filter((t) => !t.description || t.description.trim().length === 0).map((t) => t.name);
+    expect(blankDescriptions, `tools shipped with an empty description: ${blankDescriptions.join(", ")}`).toEqual([]);
   });
 
   it("get_context returns project info", async () => {
