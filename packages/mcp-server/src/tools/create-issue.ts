@@ -3,7 +3,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { mcpError, resolveStatusByName, nextIssueNumber } from "../db-utils.js";
+import { mcpError, resolveStatusByName, nextIssueNumber, resolveActiveProjectId } from "../db-utils.js";
 
 export function registerCreateIssue(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, notifyBoard } = deps;
@@ -18,19 +18,9 @@ export function registerCreateIssue(server: McpServer, deps: ToolDeps = prodDeps
       statusName: z.string().optional().describe("Status column name (default: 'Todo')"),
     },
     async ({ title, description, priority, projectId, statusName }) => {
-      let pid = projectId;
-
-      if (!pid) {
-        const pref = await db
-          .select({ value: schema.preferences.value })
-          .from(schema.preferences)
-          .where(eq(schema.preferences.key, "activeProjectId"))
-          .limit(1);
-        if (pref.length === 0 || !pref[0].value) {
-          return { content: [{ type: "text" as const, text: "No active project. Run `pnpm cli -- register <path>` first." }] };
-        }
-        pid = pref[0].value;
-      }
+      const rpid = await resolveActiveProjectId(db, schema, projectId);
+      if (!rpid.ok) return rpid.error;
+      const pid = rpid.projectId;
 
       // Find status ID by name or default to first
       let statusId: string;

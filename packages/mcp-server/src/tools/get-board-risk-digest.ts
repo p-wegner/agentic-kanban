@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
+import { resolveActiveProjectId } from "../db-utils.js";
 
 const SERVER_PORT = Number(process.env.SERVER_PORT) || 3001;
 
@@ -15,18 +15,9 @@ export function registerGetBoardRiskDigest(server: McpServer, deps: ToolDeps = p
     },
     async ({ projectId }) => {
       try {
-        let pid = projectId;
-        if (!pid) {
-          const pref = await db
-            .select({ value: schema.preferences.value })
-            .from(schema.preferences)
-            .where(eq(schema.preferences.key, "activeProjectId"))
-            .limit(1);
-          if (pref.length === 0) {
-            return { content: [{ type: "text" as const, text: "No active project. Run `pnpm cli -- register <path>` first." }] };
-          }
-          pid = pref[0].value;
-        }
+        const rpid = await resolveActiveProjectId(db, schema, projectId);
+        if (!rpid.ok) return rpid.error;
+        const pid = rpid.projectId;
 
         const res = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/projects/${pid}/board-risk-digest`);
         if (!res.ok) {

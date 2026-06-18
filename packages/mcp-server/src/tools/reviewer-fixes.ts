@@ -4,6 +4,7 @@ import { eq, and, gte } from "drizzle-orm";
 import { parseSessionSummary } from "@agentic-kanban/shared";
 import { getCommitsForBranch } from "../git-service.js";
 import { prodDeps, type ToolDeps } from "./deps.js";
+import { resolveActiveProjectId } from "../db-utils.js";
 
 /**
  * Mirrors `pnpm cli -- session reviewer-fixes`.
@@ -42,18 +43,9 @@ export function registerReviewerFixes(server: McpServer, deps: ToolDeps = prodDe
       const GRACE_MS = 2 * 60 * 1000;
 
       // Resolve projectId
-      let pid = projectId;
-      if (!pid) {
-        const pref = await db
-          .select({ value: schema.preferences.value })
-          .from(schema.preferences)
-          .where(eq(schema.preferences.key, "activeProjectId"))
-          .limit(1);
-        if (pref.length === 0) {
-          return { content: [{ type: "text" as const, text: "No active project. Pass projectId or set an active project." }] };
-        }
-        pid = pref[0].value;
-      }
+      const rpid = await resolveActiveProjectId(db, schema, projectId);
+      if (!rpid.ok) return rpid.error;
+      const pid = rpid.projectId;
 
       // Project repoPath
       const projRows = await db

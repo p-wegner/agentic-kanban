@@ -3,6 +3,7 @@ import { z } from "zod";
 import { eq, and, gte } from "drizzle-orm";
 import type { SessionFrictionStats } from "@agentic-kanban/shared";
 import { db, schema } from "../db.js";
+import { resolveActiveProjectId } from "../db-utils.js";
 
 /**
  * Fleet-level friction snapshot over a recent time window — the data backbone
@@ -22,18 +23,9 @@ export function registerGetFleetFriction(server: McpServer) {
     async ({ projectId, hours }) => {
       const windowHours = hours && hours > 0 ? hours : 48;
 
-      let pid = projectId;
-      if (!pid) {
-        const pref = await db
-          .select({ value: schema.preferences.value })
-          .from(schema.preferences)
-          .where(eq(schema.preferences.key, "activeProjectId"))
-          .limit(1);
-        if (pref.length === 0) {
-          return { content: [{ type: "text" as const, text: "No active project. Pass projectId or set an active project." }] };
-        }
-        pid = pref[0].value;
-      }
+      const rpid = await resolveActiveProjectId(db, schema, projectId);
+      if (!rpid.ok) return rpid.error;
+      const pid = rpid.projectId;
 
       const sinceIso = new Date(Date.now() - windowHours * 60 * 60 * 1000).toISOString();
 

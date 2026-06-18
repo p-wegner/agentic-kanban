@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { eq, gte, and, inArray } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
+import { resolveActiveProjectId } from "../db-utils.js";
 
 /**
  * Mirrors `pnpm cli -- session review-effectiveness`.
@@ -39,18 +40,9 @@ export function registerSessionReviewEffectiveness(server: McpServer, deps: Tool
       const sinceIso = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString();
 
       // Resolve projectId
-      let pid = projectId;
-      if (!pid) {
-        const pref = await db
-          .select({ value: schema.preferences.value })
-          .from(schema.preferences)
-          .where(eq(schema.preferences.key, "activeProjectId"))
-          .limit(1);
-        if (pref.length === 0) {
-          return { content: [{ type: "text" as const, text: "No active project. Pass projectId or set an active project." }] };
-        }
-        pid = pref[0].value;
-      }
+      const rpid = await resolveActiveProjectId(db, schema, projectId);
+      if (!rpid.ok) return rpid.error;
+      const pid = rpid.projectId;
 
       // Fetch sessions in window
       const rows = await db
