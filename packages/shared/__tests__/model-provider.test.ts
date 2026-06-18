@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { modelBelongsToProvider } from "../src/types/api.js";
+import { modelBelongsToProvider } from "../src/lib/provider-models.js";
 
 describe("modelBelongsToProvider", () => {
   // The bug (#696): a leftover Codex model id (e.g. gpt-5.5) in the provider-agnostic
