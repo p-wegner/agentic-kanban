@@ -196,6 +196,7 @@ export function MonitorPopover({
   const [healthEventsError, setHealthEventsError] = useState<string | null>(null);
   const [replayTarget, setReplayTarget] = useState<ReplayTarget | null>(null);
   const [resolvedTunables, setResolvedTunables] = useState<ResolvedTunables | null>(null);
+  const [tunablesError, setTunablesError] = useState<string | null>(null);
   const [startModeSaving, setStartModeSaving] = useState(false);
 
   async function loadHealthEvents() {
@@ -242,10 +243,10 @@ export function MonitorPopover({
   }, [projectId]);
 
   function loadTunables() {
-    if (!projectId) { setResolvedTunables(null); return; }
+    if (!projectId) { setResolvedTunables(null); setTunablesError(null); return; }
     apiFetch<ResolvedTunables>(`/api/projects/${projectId}/monitor-tunables`)
-      .then((data) => setResolvedTunables(data))
-      .catch(() => setResolvedTunables(null));
+      .then((data) => { setResolvedTunables(data); setTunablesError(null); })
+      .catch((err) => { setResolvedTunables(null); setTunablesError(err instanceof Error ? err.message : "Failed to load start policy"); });
   }
 
   // Start Mode + its sub-toggles write straight to preferences, then refetch the resolved
@@ -391,6 +392,12 @@ export function MonitorPopover({
                   </span>
                 )}
               </div>
+              {tunablesError && !resolvedTunables && (
+                <div className="flex items-center justify-between gap-2 rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-2 py-1.5">
+                  <span className="text-[10px] text-red-600 dark:text-red-400 leading-snug min-w-0">Couldn't load start policy: {tunablesError}</span>
+                  <button onClick={loadTunables} className="text-[10px] font-medium text-red-700 dark:text-red-300 hover:underline shrink-0">Retry</button>
+                </div>
+              )}
               <div className="flex rounded-md border border-gray-200 dark:border-gray-700 overflow-hidden">
                 {(["manual", "monitor", ...(orchestrator?.available ? (["conductor"] as StartMode[]) : [])] as StartMode[]).map((m) => {
                   const active = resolvedTunables?.startPolicy?.mode === m;
@@ -808,6 +815,10 @@ function ConductorCronSection({
   }
 
   const enabled = schedule?.enabled ?? false;
+  // Cheap client-side shape check (5 or 6 whitespace-separated fields) so a typo gets
+  // immediate feedback instead of waiting for the blur → server round-trip to reject it.
+  const trimmedCron = cronInput.trim();
+  const cronShapeInvalid = trimmedCron.length > 0 && ![5, 6].includes(trimmedCron.split(/\s+/).length);
 
   return (
     <div className="rounded-md bg-gray-50 dark:bg-gray-950 px-2 py-2 space-y-1.5">
@@ -816,7 +827,7 @@ function ConductorCronSection({
         <SubToggle
           label=""
           checked={enabled}
-          disabled={saving || (!enabled && !cronInput.trim())}
+          disabled={saving || (!enabled && (!cronInput.trim() || cronShapeInvalid))}
           onChange={(v) => save({ enabled: v, cron: cronInput.trim() })}
         />
       </div>
@@ -827,8 +838,8 @@ function ConductorCronSection({
           placeholder="*/30 * * * *"
           spellCheck={false}
           onChange={(e) => setCronInput(e.target.value)}
-          onBlur={() => { if (cronInput.trim() !== (schedule?.cron ?? "")) save({ cron: cronInput.trim() }); }}
-          className="flex-1 min-w-0 font-mono text-[11px] border border-gray-200 dark:border-gray-700 rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-emerald-400 bg-white dark:bg-gray-900"
+          onBlur={() => { if (!cronShapeInvalid && cronInput.trim() !== (schedule?.cron ?? "")) save({ cron: cronInput.trim() }); }}
+          className={`flex-1 min-w-0 font-mono text-[11px] border rounded-md px-2 py-1 focus:outline-none focus:ring-1 bg-white dark:bg-gray-900 ${cronShapeInvalid ? "border-red-300 dark:border-red-700 focus:ring-red-400" : "border-gray-200 dark:border-gray-700 focus:ring-emerald-400"}`}
         />
         <select
           value={agent}
@@ -840,6 +851,7 @@ function ConductorCronSection({
           <option value="codex">codex</option>
         </select>
       </div>
+      {cronShapeInvalid && <p className="text-[10px] text-red-600 dark:text-red-400 leading-snug">Cron needs 5 fields (min hour day month weekday), e.g. <span className="font-mono">*/30 * * * *</span>.</p>}
       {error && <p className="text-[10px] text-red-600 dark:text-red-400 leading-snug">{error}</p>}
       {schedule?.cron && schedule.error && !error && (
         <p className="text-[10px] text-red-600 dark:text-red-400 leading-snug">{schedule.error}</p>
