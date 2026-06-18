@@ -1,4 +1,4 @@
-import { issues, workspaces, sessions, sessionMessages, projectStatuses, tags, issueTags, issueDependencies, issueArtifacts, agentSkills } from "@agentic-kanban/shared/schema";
+import { issues, workspaces, sessions, sessionMessages, projectStatuses, workflowNodes, tags, issueTags, issueDependencies, issueArtifacts, agentSkills } from "@agentic-kanban/shared/schema";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
 import { parseSessionSummary, formatDurationStr } from "@agentic-kanban/shared";
 import { eq, inArray, desc, sql, and } from "drizzle-orm";
@@ -326,6 +326,44 @@ export async function getIncomingDependencies(
     .innerJoin(issues, eq(issueDependencies.issueId, issues.id))
     .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
     .where(eq(issueDependencies.dependsOnId, issueId));
+}
+
+/**
+ * Issue rows projected for the Focus ranking ("what should I work on next?"):
+ * status name + the current workflow node's type (so isTerminalStatusView can tell
+ * done-ness), priority/estimate for scoring. One per-project read, no I/O beyond the DB.
+ */
+export async function getFocusIssueRows(projectId: string, database: Database = db) {
+  return database
+    .select({
+      id: issues.id,
+      issueNumber: issues.issueNumber,
+      title: issues.title,
+      statusId: issues.statusId,
+      statusName: projectStatuses.name,
+      currentNodeId: issues.currentNodeId,
+      currentNodeType: workflowNodes.nodeType,
+      priority: issues.priority,
+      issueType: issues.issueType,
+      estimate: issues.estimate,
+    })
+    .from(issues)
+    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+    .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
+    .where(eq(issues.projectId, projectId));
+}
+
+/** All dependency edges whose dependent (issueId) is in the given set — for graph building. */
+export async function getDependenciesForIssues(issueIds: string[], database: Database = db) {
+  if (issueIds.length === 0) return [];
+  return database
+    .select({
+      issueId: issueDependencies.issueId,
+      dependsOnId: issueDependencies.dependsOnId,
+      type: issueDependencies.type,
+    })
+    .from(issueDependencies)
+    .where(inArray(issueDependencies.issueId, issueIds));
 }
 
 export async function getIssueWorkspaces(

@@ -1,14 +1,8 @@
-import { eq, inArray } from "drizzle-orm";
-import {
-  issueDependencies,
-  issues,
-  projectStatuses,
-  workflowNodes,
-} from "@agentic-kanban/shared/schema";
 import { isTerminalStatusView } from "@agentic-kanban/shared";
-import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createRouter } from "../middleware/create-router.js";
+import { getFocusIssueRows, getDependenciesForIssues } from "../repositories/issue.repository.js";
+import { getProjectStatuses } from "../repositories/project.repository.js";
 
 /**
  * Focus — "What should I work on next?".
@@ -85,7 +79,7 @@ interface FocusData {
   };
 }
 
-export function createFocusRoute(database: Database = db) {
+export function createFocusRoute(database: Database) {
   const router = createRouter();
 
   // `now` is accepted for parity with the digest route and deterministic tests;
@@ -97,29 +91,10 @@ export function createFocusRoute(database: Database = db) {
     const nowParam = c.req.query("now");
     const now = nowParam ? new Date(nowParam) : new Date();
 
-    const statusRows = await database
-      .select({ id: projectStatuses.id, name: projectStatuses.name })
-      .from(projectStatuses)
-      .where(eq(projectStatuses.projectId, projectId));
+    const statusRows = await getProjectStatuses(projectId, database);
     const statusName = new Map(statusRows.map((s) => [s.id, s.name]));
 
-    const issueRows = await database
-      .select({
-        id: issues.id,
-        issueNumber: issues.issueNumber,
-        title: issues.title,
-        statusId: issues.statusId,
-        statusName: projectStatuses.name,
-        currentNodeId: issues.currentNodeId,
-        currentNodeType: workflowNodes.nodeType,
-        priority: issues.priority,
-        issueType: issues.issueType,
-        estimate: issues.estimate,
-      })
-      .from(issues)
-      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-      .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
-      .where(eq(issues.projectId, projectId));
+    const issueRows = await getFocusIssueRows(projectId, database);
 
     const issueMeta = new Map(issueRows.map((r) => [r.id, r]));
     const isDone = (id: string) => {
@@ -135,14 +110,7 @@ export function createFocusRoute(database: Database = db) {
     const blocks = new Map<string, Set<string>>(); // blocker -> issues it blocks
 
     if (issueIds.length > 0) {
-      const deps = await database
-        .select({
-          issueId: issueDependencies.issueId,
-          dependsOnId: issueDependencies.dependsOnId,
-          type: issueDependencies.type,
-        })
-        .from(issueDependencies)
-        .where(inArray(issueDependencies.issueId, issueIds));
+      const deps = await getDependenciesForIssues(issueIds, database);
 
       for (const dep of deps) {
         if (!DEP_TYPES_THAT_BLOCK.has(dep.type)) continue;

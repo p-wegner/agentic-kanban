@@ -105,7 +105,6 @@ module.exports = {
         pathNot: [
           "^packages/server/src/routes/butler\\.ts$",
           "^packages/server/src/routes/digest\\.ts$",
-          "^packages/server/src/routes/focus\\.ts$",
           "^packages/server/src/routes/insights\\.ts$",
           "^packages/server/src/routes/issues\\.ts$",
           "^packages/server/src/routes/projects\\.ts$",
@@ -132,7 +131,6 @@ module.exports = {
         path: [
           "^packages/server/src/routes/butler\\.ts$",
           "^packages/server/src/routes/digest\\.ts$",
-          "^packages/server/src/routes/focus\\.ts$",
           "^packages/server/src/routes/insights\\.ts$",
           "^packages/server/src/routes/issues\\.ts$",
           "^packages/server/src/routes/projects\\.ts$",
