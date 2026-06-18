@@ -151,8 +151,8 @@ describe("auto-merge orchestrator", () => {
       { key: "merge_strategy", value: "merge_queue", updatedAt: now },
     ]);
 
-    const { projectId } = await seedProject(db);
-    const workspaceId = await seedWorkspace(db, { projectId, statusId: randomUUID(), workspaceStatus: "fixing" });
+    const { projectId, statusIds } = await seedProject(db);
+    const workspaceId = await seedWorkspace(db, { projectId, statusId: statusIds["In Review"], workspaceStatus: "fixing" });
 
     // Plant a "running" session started 6 minutes ago with no output messages → zombie
     const sessionId = randomUUID();
