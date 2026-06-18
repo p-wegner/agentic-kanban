@@ -15,9 +15,14 @@ import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Database } from "../db/index.js";
 import { db as realDb } from "../db/index.js";
-import { failurePatterns, sessionMessages } from "@agentic-kanban/shared/schema";
 import { extractKeywords } from "@agentic-kanban/shared";
-import { eq, desc } from "drizzle-orm";
+import {
+  findPatternBySourceRef,
+  insertFailurePattern,
+  getAllFailurePatterns,
+  getSessionMessageTypesAndData,
+  deleteFailurePattern,
+} from "../repositories/failure-pattern.repository.js";
 
 export interface FailurePattern {
   id: string;
@@ -112,20 +117,16 @@ export async function ingestLearningFile(filePath: string, db: Database = realDb
   if (!parsed) return false;
 
   // Skip if already ingested
-  const existing = await db
-    .select({ id: failurePatterns.id })
-    .from(failurePatterns)
-    .where(eq(failurePatterns.sourceRef, filePath))
-    .limit(1);
+  const existing = await findPatternBySourceRef(filePath, db);
   if (existing.length > 0) return false;
 
   const now = new Date().toISOString();
-  await db.insert(failurePatterns).values({
+  await insertFailurePattern({
     id: randomUUID(),
     ...parsed,
     createdAt: now,
     updatedAt: now,
-  });
+  }, db);
   return true;
 }
 
@@ -162,7 +163,7 @@ export async function createPattern(
   const id = randomUUID();
   const keywords = extractKeywords([data.title, data.description ?? "", data.rootCause ?? "", data.fix ?? ""].join(" ")).join(" ");
   const row = { id, keywords, createdAt: now, updatedAt: now, ...data };
-  await db.insert(failurePatterns).values(row);
+  await insertFailurePattern(row, db);
   return row as FailurePattern;
 }
 
@@ -178,7 +179,7 @@ export async function findSimilarFailures(
   const queryKw = extractKeywords(errorText);
   if (queryKw.length === 0) return [];
 
-  const all = await db.select().from(failurePatterns);
+  const all = await getAllFailurePatterns(db);
   if (all.length === 0) return [];
 
   const querySet = new Set(queryKw);
@@ -197,12 +198,7 @@ export async function findSimilarFailures(
 
 /** Extract the last N lines from session stderr messages. */
 export async function extractSessionStderr(sessionId: string, maxLines = 50, db: Database = realDb): Promise<string> {
-  const msgs = await db
-    .select({ type: sessionMessages.type, data: sessionMessages.data })
-    .from(sessionMessages)
-    .where(eq(sessionMessages.sessionId, sessionId))
-    .orderBy(desc(sessionMessages.id))
-    .limit(maxLines * 2);
+  const msgs = await getSessionMessageTypesAndData(sessionId, maxLines * 2, db);
 
   const stderrLines = msgs
     .filter(m => m.type === "stderr" && m.data)
@@ -215,10 +211,10 @@ export async function extractSessionStderr(sessionId: string, maxLines = 50, db:
 
 /** List all stored failure patterns (for API/MCP). */
 export async function listPatterns(db: Database = realDb): Promise<FailurePattern[]> {
-  return db.select().from(failurePatterns) as Promise<FailurePattern[]>;
+  return getAllFailurePatterns(db) as Promise<FailurePattern[]>;
 }
 
 /** Delete a pattern by ID. */
 export async function deletePattern(id: string, db: Database = realDb): Promise<void> {
-  await db.delete(failurePatterns).where(eq(failurePatterns.id, id));
+  await deleteFailurePattern(id, db);
 }

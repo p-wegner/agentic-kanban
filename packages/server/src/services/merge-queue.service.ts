@@ -1,7 +1,12 @@
 import type { Database } from "../db/index.js";
-import { workspaces, issues, projects } from "@agentic-kanban/shared/schema";
-import { eq, inArray } from "drizzle-orm";
 import * as gitService from "./git.service.js";
+import {
+  getMergeQueueWorkspaceRows,
+  getMergeQueueIssueRows,
+  getMergeQueueProjectRows,
+  getWorkspaceStatus,
+  getWorkspaceMergeState,
+} from "../repositories/merge-queue.repository.js";
 import { createWorkspaceMergeService } from "./workspace-merge.service.js";
 import type { BoardEvents } from "./board-events.js";
 import type { SessionManager } from "./session.manager.js";
@@ -214,22 +219,13 @@ export function createMergeQueueService(deps: {
   async function getWorkspaceQueueInfos(workspaceIds: string[]): Promise<WorkspaceQueueInfo[]> {
     if (workspaceIds.length === 0) return [];
 
-    const wsRows = await database
-      .select()
-      .from(workspaces)
-      .where(inArray(workspaces.id, workspaceIds));
+    const wsRows = await getMergeQueueWorkspaceRows(workspaceIds, database);
 
     const issueIds = wsRows.map((w) => w.issueId);
-    const issueRows = await database
-      .select()
-      .from(issues)
-      .where(inArray(issues.id, issueIds));
+    const issueRows = await getMergeQueueIssueRows(issueIds, database);
 
     const projectIds = [...new Set(issueRows.map((i) => i.projectId))];
-    const projectRows = await database
-      .select()
-      .from(projects)
-      .where(inArray(projects.id, projectIds));
+    const projectRows = await getMergeQueueProjectRows(projectIds, database);
 
     const issueMap = new Map(issueRows.map((i) => [i.id, i]));
     const projectMap = new Map(projectRows.map((p) => [p.id, p]));
@@ -420,14 +416,7 @@ export function createMergeQueueService(deps: {
   }
 
   async function verifyWorkspaceMerged(ws: WorkspaceQueueInfo, featureSha: string | null): Promise<void> {
-    const [row] = await database
-      .select({
-        status: workspaces.status,
-        mergedAt: workspaces.mergedAt,
-      })
-      .from(workspaces)
-      .where(eq(workspaces.id, ws.id))
-      .limit(1);
+    const row = await getWorkspaceMergeState(ws.id, database);
 
     if (!row || row.status !== "closed" || (!ws.isDirect && !row.mergedAt)) {
       throw new Error("Merge returned but workspace is not marked closed with mergedAt");
@@ -459,12 +448,8 @@ export function createMergeQueueService(deps: {
 
       // Skip already-closed workspaces
       try {
-        const [current] = await database
-          .select({ status: workspaces.status })
-          .from(workspaces)
-          .where(eq(workspaces.id, ws.id))
-          .limit(1);
-        if (current?.status === "closed") {
+        const currentStatus = await getWorkspaceStatus(ws.id, database);
+        if (currentStatus === "closed") {
           skipped.push(ws.id);
           yield {
             type: "skipped",
