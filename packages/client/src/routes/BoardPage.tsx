@@ -507,7 +507,11 @@ export function BoardPage() {
 
   // Real-time board updates via WebSocket
   const handleBoardChange = useCallback((reason: string) => {
-    if (reason.startsWith("project_")) {
+    // `project_created/updated/deleted` are project-lifecycle reasons that require a
+    // project-list reload. `project_completed` (#848) shares the `project_` prefix but is
+    // a board notification, NOT a lifecycle change — let it fall through to the
+    // notification handling below instead of swallowing it with an early return.
+    if (reason.startsWith("project_") && reason !== "project_completed") {
       void (async () => {
         try {
           const nextProjectId = await loadProjectsRef.current();
