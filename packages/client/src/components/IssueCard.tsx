@@ -2,6 +2,7 @@ import { memo, useRef, useState } from "react";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { apiFetch } from "../lib/api.js";
+import { getBoardDragData } from "../lib/dragData.js";
 import { prefetchBundle } from "../lib/issueDetailBundleCache.js";
 import { IssueWorkLogBadge } from "./IssueWorkLogBadge.js";
 import { showToast } from "./Toast.js";
@@ -89,7 +90,7 @@ function useIssueCardDrag(
   function handleDragEnd() { setIsDragging(false); }
 
   function handleDragOver(e: React.DragEvent) {
-    const dragData = (window as unknown as Record<string, unknown>).__dragData as { issueId?: string } | undefined;
+    const dragData = getBoardDragData();
     if (dragData?.issueId && dragData.issueId !== issue.id && e.shiftKey) {
       e.preventDefault();
       e.dataTransfer.dropEffect = "link";
@@ -102,7 +103,7 @@ function useIssueCardDrag(
   async function handleDrop(e: React.DragEvent) {
     setDepDragOver(false);
     if (!e.shiftKey) return;
-    const dragData = (window as unknown as Record<string, unknown>).__dragData as { issueId?: string } | undefined;
+    const dragData = getBoardDragData();
     if (!dragData?.issueId || dragData.issueId === issue.id) return;
     e.stopPropagation();
     try {
