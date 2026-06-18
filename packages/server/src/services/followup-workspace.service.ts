@@ -1,13 +1,23 @@
 import { randomUUID } from "node:crypto";
 import { isTerminalStatusIdView, isTerminalStatusName } from "@agentic-kanban/shared";
-import { workspaces, sessions, issues, projects, projectStatuses, issueDependencies, workflowNodes } from "@agentic-kanban/shared/schema";
-import { eq, and, inArray } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import * as gitService from "./git.service.js";
 import { resolveAgentSettings } from "./agent-settings.service.js";
 import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
 import { DEFAULT_BUILDER_GUARDRAILS, PREF_BUILDER_GUARDRAILS } from "../constants/preference-keys.js";
+import {
+  getDependentsOf,
+  getProjectStatusesForFollowup,
+  getProjectForFollowup,
+  getBlockingDepsForIssue,
+  getDepIssueStatusRows,
+  getWorkspacesForIssue,
+  getIssueById,
+  insertFollowupWorkspace,
+  updateIssueStatus,
+  updateWorkspaceStatus,
+} from "../repositories/followup-workspace.repository.js";
 
 /**
  * After an issue is merged, find issues that depended on it and are now unblocked.
@@ -22,20 +32,14 @@ export async function autoStartFollowups(
   prefMap: Map<string, string>,
   options?: { boardEvents?: BoardEvents },
 ): Promise<void> {
-  const dependents = await database
-    .select({ issueId: issueDependencies.issueId, type: issueDependencies.type })
-    .from(issueDependencies)
-    .where(and(
-      eq(issueDependencies.dependsOnId, mergedIssueId),
-      inArray(issueDependencies.type, ["depends_on", "blocked_by"]),
-    ));
+  const dependents = await getDependentsOf(mergedIssueId, database);
 
   if (dependents.length === 0) return;
 
-  const statuses = await database.select().from(projectStatuses).where(eq(projectStatuses.projectId, projectId));
+  const statuses = await getProjectStatusesForFollowup(projectId, database);
   const doneStatusIds = new Set(statuses.filter(s => isTerminalStatusName(s.name)).map(s => s.id));
   const todoStatus = statuses.find(s => s.name === "Todo") ?? statuses[0];
-  const project = await database.select().from(projects).where(eq(projects.id, projectId)).limit(1);
+  const project = await getProjectForFollowup(projectId, database);
   if (!project[0]) return;
   if (!project[0].defaultBranch) {
     console.warn(`[followup-workspace] default branch is not configured for project ${projectId}; skipping auto-start follow-ups`);
@@ -43,39 +47,21 @@ export async function autoStartFollowups(
   }
 
   for (const dep of dependents) {
-    const allDeps = await database
-      .select({ dependsOnId: issueDependencies.dependsOnId, type: issueDependencies.type })
-      .from(issueDependencies)
-      .where(and(
-        eq(issueDependencies.issueId, dep.issueId),
-        inArray(issueDependencies.type, ["depends_on", "blocked_by"]),
-      ));
+    const allDeps = await getBlockingDepsForIssue(dep.issueId, database);
 
     const depIssueIds = allDeps.map(d => d.dependsOnId);
     if (depIssueIds.length === 0) continue;
 
-    const depIssueRows = await database
-      .select({
-        id: issues.id,
-        statusId: issues.statusId,
-        currentNodeId: issues.currentNodeId,
-        currentNodeType: workflowNodes.nodeType,
-      })
-      .from(issues)
-      .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
-      .where(inArray(issues.id, depIssueIds));
+    const depIssueRows = await getDepIssueStatusRows(depIssueIds, database);
 
     const allResolved = depIssueRows.every(i => isTerminalStatusIdView(i, doneStatusIds));
     if (!allResolved) continue;
 
-    const existingWs = await database
-      .select({ id: workspaces.id, status: workspaces.status })
-      .from(workspaces)
-      .where(eq(workspaces.issueId, dep.issueId));
+    const existingWs = await getWorkspacesForIssue(dep.issueId, database);
     const hasActive = existingWs.some(w => w.status !== "closed");
     if (hasActive) continue;
 
-    const followupIssue = await database.select().from(issues).where(eq(issues.id, dep.issueId)).limit(1);
+    const followupIssue = await getIssueById(dep.issueId, database);
     if (!followupIssue[0]) continue;
 
     try {
@@ -90,7 +76,7 @@ export async function autoStartFollowups(
 
       const worktreePath = await gitService.createWorktree(project[0].repoPath, branch, project[0].defaultBranch);
 
-      await database.insert(workspaces).values({
+      await insertFollowupWorkspace({
         id: wsId,
         issueId: dep.issueId,
         branch,
@@ -101,10 +87,10 @@ export async function autoStartFollowups(
         planMode: false,
         createdAt: now,
         updatedAt: now,
-      });
+      }, database);
 
       const inProgressStatus = statuses.find(s => s.name === "In Progress") ?? todoStatus;
-      await database.update(issues).set({ statusId: inProgressStatus.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, dep.issueId));
+      await updateIssueStatus(dep.issueId, { statusId: inProgressStatus.id, updatedAt: now, statusChangedAt: now }, database);
 
       const { agentCommand, agentArgs, claudeProfile, profile, provider } = resolveAgentSettings(prefMap);
       const prompt = `${followupIssue[0].title}\n\n${followupIssue[0].description ?? ""}`.trim();
@@ -120,7 +106,7 @@ export async function autoStartFollowups(
         triggerType: "auto-start",
         systemInstructions: prefMap.get(PREF_BUILDER_GUARDRAILS) ?? DEFAULT_BUILDER_GUARDRAILS,
       });
-      await database.update(workspaces).set({ status: "active", updatedAt: now }).where(eq(workspaces.id, wsId));
+      await updateWorkspaceStatus(wsId, { status: "active", updatedAt: now }, database);
 
       console.log(`[followup-workspace] auto-started follow-up workspace for issue ${followupIssue[0].issueNumber ?? dep.issueId}`);
       options?.boardEvents?.broadcast(projectId, "workspace_merged");
