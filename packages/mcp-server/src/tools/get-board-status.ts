@@ -4,7 +4,7 @@ import { eq, inArray, desc } from "drizzle-orm";
 import { extractMeaningfulOutput, isTerminalStatusIdView } from "@agentic-kanban/shared";
 import type { BoardStatusIssue } from "@agentic-kanban/shared";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { requireEntity, readSessionStdoutFile } from "../db-utils.js";
+import { requireEntity, readSessionStdoutFile, resolveActiveProjectId } from "../db-utils.js";
 // Shared single-source-of-truth classifiers. The previous local copies had drifted
 // behind the server's (emitting only "idle-awaiting", missing "closed-in-review" and
 // "stale-in-review"), so agents over MCP saw a strictly poorer board than humans.
@@ -29,18 +29,9 @@ export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodD
 
       try {
         // 1. Resolve project
-        let pid = projectId;
-        if (!pid) {
-          const pref = await db
-            .select({ value: schema.preferences.value })
-            .from(schema.preferences)
-            .where(eq(schema.preferences.key, "activeProjectId"))
-            .limit(1);
-          if (pref.length === 0) {
-            return { content: [{ type: "text" as const, text: "No active project. Run `pnpm cli -- register <path>` first." }] };
-          }
-          pid = pref[0].value;
-        }
+        const rpid = await resolveActiveProjectId(db, schema, projectId);
+        if (!rpid.ok) return rpid.error;
+        const pid = rpid.projectId;
 
         const projectRows = await db
           .select({ id: schema.projects.id, name: schema.projects.name, repoPath: schema.projects.repoPath, defaultBranch: schema.projects.defaultBranch })

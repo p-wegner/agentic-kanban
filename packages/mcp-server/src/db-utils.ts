@@ -77,6 +77,41 @@ export function requireEntity<T>(
 }
 
 /**
+ * Resolves the project to operate on: the explicitly-provided id when present,
+ * otherwise the `activeProjectId` preference. Returns a standardized
+ * "No active project" MCP error when neither is available.
+ *
+ * Replaces the ~10 copy-pasted `if (!pid) { ...preferences lookup...; return "No
+ * active project" }` blocks across the project-scoped tools.
+ *
+ * Usage:
+ * ```ts
+ * const r = await resolveActiveProjectId(db, schema, projectId);
+ * if (!r.ok) return r.error;
+ * const pid = r.projectId;
+ * ```
+ */
+export async function resolveActiveProjectId(
+  db: ToolDb,
+  schema: typeof schemaModule,
+  providedId?: string,
+): Promise<{ ok: true; projectId: string } | { ok: false; error: McpResponse }> {
+  if (providedId) return { ok: true, projectId: providedId };
+  const pref = await db
+    .select({ value: schema.preferences.value })
+    .from(schema.preferences)
+    .where(eq(schema.preferences.key, "activeProjectId"))
+    .limit(1);
+  if (pref.length === 0 || !pref[0].value) {
+    return {
+      ok: false,
+      error: mcpError("No active project. Run `pnpm cli -- register <path>` first."),
+    };
+  }
+  return { ok: true, projectId: pref[0].value };
+}
+
+/**
  * Resolves a status column by name within a project.
  * Returns the status ID on success, or an MCP error response listing available
  * statuses on failure.

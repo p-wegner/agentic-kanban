@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
-import { requireEntity } from "../db-utils.js";
+import { requireEntity, resolveActiveProjectId } from "../db-utils.js";
 
 export function registerGetContext(server: McpServer) {
   server.tool(
@@ -12,19 +12,9 @@ export function registerGetContext(server: McpServer) {
       projectId: z.string().optional().describe("Project ID (defaults to active project)"),
     },
     async ({ projectId }) => {
-      let pid = projectId;
-
-      if (!pid) {
-        const pref = await db
-          .select({ value: schema.preferences.value })
-          .from(schema.preferences)
-          .where(eq(schema.preferences.key, "activeProjectId"))
-          .limit(1);
-        if (pref.length === 0 || !pref[0].value) {
-          return { content: [{ type: "text" as const, text: "No active project. Run `pnpm cli -- register <path>` first." }] };
-        }
-        pid = pref[0].value;
-      }
+      const rpid = await resolveActiveProjectId(db, schema, projectId);
+      if (!rpid.ok) return rpid.error;
+      const pid = rpid.projectId;
 
       const project = await db.select().from(schema.projects).where(eq(schema.projects.id, pid)).limit(1);
       const rp = requireEntity(project, pid, "Project");
