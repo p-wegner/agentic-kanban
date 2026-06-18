@@ -1,6 +1,6 @@
-import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createProjectService } from "../services/project.service.js";
+import { getProjectById, getDoneIssueProviderAttribution } from "../repositories/project.repository.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../middleware/ai-operation.js";
@@ -19,8 +19,6 @@ import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 import { createHash } from "node:crypto";
 import { createWorkspaceSummaryCache } from "../services/workspace-summary-cache.service.js";
-import { issues, projectStatuses, workspaces, projects } from "@agentic-kanban/shared/schema";
-import { and, eq, gte } from "drizzle-orm";
 import { getStackProfile, populateStackProfile, saveStackProfile } from "../services/stack-profile.service.js";
 import type { StackProfile } from "@agentic-kanban/shared";
 
@@ -88,7 +86,7 @@ interface BoardEtagMemo {
   computedAt: number;
 }
 
-export function createProjectsRoute(database: Database = db, options?: { boardEvents?: BoardEvents; getSessionManager?: () => SessionManager }) {
+export function createProjectsRoute(database: Database, options?: { boardEvents?: BoardEvents; getSessionManager?: () => SessionManager }) {
   const router = createRouter();
 
   const workspaceSummaryCache = createWorkspaceSummaryCache();
@@ -511,25 +509,7 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
     // We join to workspaces where mergedAt is set (actual merge happened) to get the
     // provider attribution. If multiple workspaces merged for the same issue, the first
     // merged workspace wins (deduplicated by issue ID).
-    const rows = await database
-      .select({
-        issueId: issues.id,
-        issueCreatedAt: issues.createdAt,
-        statusChangedAt: issues.statusChangedAt,
-        provider: workspaces.provider,
-        claudeProfile: workspaces.claudeProfile,
-        mergedAt: workspaces.mergedAt,
-      })
-      .from(issues)
-      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-      .innerJoin(workspaces, eq(issues.id, workspaces.issueId))
-      .where(
-        and(
-          eq(issues.projectId, projectId),
-          eq(projectStatuses.name, "Done"),
-          gte(issues.statusChangedAt, cutoffDay),
-        ),
-      );
+    const rows = await getDoneIssueProviderAttribution(projectId, cutoffDay, database);
 
     function percentile(sorted: number[], p: number): number | null {
       if (sorted.length === 0) return null;
@@ -596,11 +576,7 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
     const projectId = c.req.param("id");
     const refresh = c.req.query("refresh") === "true";
 
-    const [project] = await database
-      .select({ repoPath: projects.repoPath })
-      .from(projects)
-      .where(eq(projects.id, projectId))
-      .limit(1);
+    const project = await getProjectById(projectId, database);
     if (!project) return c.json({ error: "Project not found" }, 404);
 
     let profile = refresh ? null : await getStackProfile(projectId, database);
@@ -614,11 +590,7 @@ export function createProjectsRoute(database: Database = db, options?: { boardEv
   // Marks the saved profile source="manual" so a later auto-detect won't silently clobber it.
   router.put("/:id/stack-profile", async (c) => {
     const projectId = c.req.param("id");
-    const [project] = await database
-      .select({ repoPath: projects.repoPath })
-      .from(projects)
-      .where(eq(projects.id, projectId))
-      .limit(1);
+    const project = await getProjectById(projectId, database);
     if (!project) return c.json({ error: "Project not found" }, 404);
 
     const body = await parseJsonBody<Partial<StackProfile>>(c);

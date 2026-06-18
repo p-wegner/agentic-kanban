@@ -1,5 +1,5 @@
 import { projects, projectStatuses, issues, workspaces, preferences, tags, issueTags, scheduledRuns, agentSkills, repos, flakyTests, qualityMetrics, projectScriptShortcuts } from "@agentic-kanban/shared/schema";
-import { eq, sql, and, inArray, isNull } from "drizzle-orm";
+import { eq, sql, and, inArray, isNull, gte } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -127,6 +127,37 @@ export async function getProjectStats(
     .leftJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
     .where(eq(issues.projectId, projectId))
     .groupBy(projectStatuses.name);
+}
+
+/**
+ * Rows backing the per-provider throughput digest: Done issues (moved to Done
+ * within the window) joined to their merged workspace's provider attribution.
+ * Pure read — the route owns the dedup/percentile aggregation over these rows.
+ */
+export async function getDoneIssueProviderAttribution(
+  projectId: string,
+  cutoffDay: string,
+  database: Database = db,
+) {
+  return database
+    .select({
+      issueId: issues.id,
+      issueCreatedAt: issues.createdAt,
+      statusChangedAt: issues.statusChangedAt,
+      provider: workspaces.provider,
+      claudeProfile: workspaces.claudeProfile,
+      mergedAt: workspaces.mergedAt,
+    })
+    .from(issues)
+    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+    .innerJoin(workspaces, eq(issues.id, workspaces.issueId))
+    .where(
+      and(
+        eq(issues.projectId, projectId),
+        eq(projectStatuses.name, "Done"),
+        gte(issues.statusChangedAt, cutoffDay),
+      ),
+    );
 }
 
 export async function createProjectStatus(
