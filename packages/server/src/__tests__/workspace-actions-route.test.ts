@@ -11,9 +11,21 @@ const mergeWorkspaceMock = vi.hoisted(() => vi.fn(async (id: string) => ({
   ],
 })));
 
+// The /merge route calls mergeWorkspaceDeduped (the in-flight dedup wrapper). Mirror its
+// contract over mergeWorkspaceMock: concurrent calls for the same id reuse one in-flight
+// promise, so the underlying mergeWorkspace runs once even across a dropped + retried request.
+const inFlightMerges = vi.hoisted(() => new Map<string, Promise<unknown>>());
+
 vi.mock("../services/workspace.service.js", () => ({
   createWorkspaceService: vi.fn(() => ({
     mergeWorkspace: mergeWorkspaceMock,
+    mergeWorkspaceDeduped: vi.fn((id: string) => {
+      const existing = inFlightMerges.get(id);
+      if (existing) return existing;
+      const promise = Promise.resolve(mergeWorkspaceMock(id)).finally(() => inFlightMerges.delete(id));
+      inFlightMerges.set(id, promise);
+      return promise;
+    }),
   })),
 }));
 
