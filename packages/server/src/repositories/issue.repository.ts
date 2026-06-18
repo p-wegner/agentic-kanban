@@ -5,6 +5,7 @@ import { eq, inArray, desc, sql, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { ValidationError } from "../errors/index.js";
 import { getSessionMessageRows } from "./session.repository.js";
 
 type Issue = typeof issues.$inferSelect;
@@ -93,9 +94,7 @@ export async function resolveNewIssueDefaults(
   }
 
   if (!statusRows || statusRows.length === 0) {
-    const err = new Error("No statuses found for project") as any;
-    err.statusCode = 400;
-    throw err;
+    throw new ValidationError("No statuses found for project");
   }
 
   return { issueNumber, statusId: statusRows[0].id };
