@@ -1,11 +1,11 @@
-import { eq } from "drizzle-orm";
-import { workspaces } from "@agentic-kanban/shared/schema";
+import type { workspaces } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "./board-events.js";
 import { WorkspaceError, type GitService } from "./workspace-internals.js";
 import type { RecordMergeAttempt } from "./workspace-merge-prevalidation.service.js";
 import { finalizeMergeCleanup } from "./merge-cleanup.service.js";
 import { extractPendingWorkingTreeSync } from "@agentic-kanban/shared/lib/git-service";
+import { stampWorkspaceMergedAt } from "../repositories/workspace-merge-execution.repository.js";
 
 export type WorkspaceMergeExecutionResult = {
   response: {
@@ -167,7 +167,7 @@ async function verifyPostMergeAncestry(
 
 async function stampMergedAtEarly(id: string, now: string, mergedHeadSha: string | null, database: Database): Promise<void> {
   try {
-    await database.update(workspaces).set({ mergedAt: now, mergedHeadSha, updatedAt: now }).where(eq(workspaces.id, id));
+    await stampWorkspaceMergedAt(id, now, mergedHeadSha, database);
   } catch (err) {
     console.warn("[workspace-merge] early mergedAt stamp failed (non-fatal):", err instanceof Error ? err.message : String(err));
   }

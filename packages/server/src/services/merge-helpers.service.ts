@@ -1,5 +1,3 @@
-import { sessions } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -9,6 +7,7 @@ import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { PREF_LEARNING_STEP_BEFORE_MERGE } from "../constants/preference-keys.js";
+import { getSessionStatus } from "../repositories/merge-helpers.repository.js";
 
 const execFileAsync = promisify(execFile);
 const moduleDir = dirname(fileURLToPath(import.meta.url));
@@ -137,11 +136,11 @@ export async function runLearningStep(
         resolve();
       }, 3 * 60 * 1000);
       const poll = setInterval(async () => {
-        const sessRows = await database.select({ status: sessions.status }).from(sessions).where(eq(sessions.id, learningSessId)).limit(1);
-        if (sessRows.length > 0 && sessRows[0].status !== "running") {
+        const status = await getSessionStatus(learningSessId, database);
+        if (status !== null && status !== "running") {
           clearInterval(poll);
           clearTimeout(timeout);
-          console.log(`[merge-helpers] learning step finished: status=${sessRows[0].status}`);
+          console.log(`[merge-helpers] learning step finished: status=${status}`);
           resolve();
         }
       }, 5000);

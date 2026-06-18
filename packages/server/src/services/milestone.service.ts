@@ -1,7 +1,5 @@
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
-import { and, eq, isNotNull } from "drizzle-orm";
-import { issues, projectStatuses } from "@agentic-kanban/shared/schema";
 import { isTerminalStatusName } from "@agentic-kanban/shared";
 import {
   listMilestonesByProject,
@@ -10,6 +8,7 @@ import {
   updateMilestone,
   deleteMilestone,
 } from "../repositories/milestone.repository.js";
+import { getMilestoneIssueRows } from "../repositories/milestone-query.repository.js";
 
 export class MilestoneError extends Error {
   constructor(
@@ -43,16 +42,7 @@ export function createMilestoneService({ database }: { database: Database }) {
     const milestoneRows = await listMilestonesByProject(projectId, database);
     if (milestoneRows.length === 0) return [];
 
-    const issueRows = await database
-      .select({
-        milestoneId: issues.milestoneId,
-        createdAt: issues.createdAt,
-        statusChangedAt: issues.statusChangedAt,
-        statusName: projectStatuses.name,
-      })
-      .from(issues)
-      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-      .where(and(eq(issues.projectId, projectId), isNotNull(issues.milestoneId)));
+    const issueRows = await getMilestoneIssueRows(projectId, database);
 
     const today = new Date();
     const cutoffDate = new Date(today);
