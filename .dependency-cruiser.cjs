@@ -88,44 +88,18 @@ module.exports = {
       from: { path: "^packages/client/src" },
       to: { path: ["drizzle-orm", "@agentic-kanban/shared/schema", "^packages/shared/src/schema"] },
     },
-    // ───────────────────────── WARN: known debt backlogs ─────────────────────────
     {
       name: "routes-not-down-to-persistence",
       comment:
         "Transport (routes) must not run persistence: no VALUE import of db/index, " +
         "drizzle-orm, or @agentic-kanban/shared/schema. Type-only imports are erased " +
         "(tsPreCompilationDeps:false) so a `import type { Database }` is fine. Originally a " +
-        "26-file warn backlog; drained to ERROR for every clean route. The `pathNot` allow-list " +
-        "is the SHRINKING remaining backlog (analytics-heavy routes that need thin aggregation " +
-        "services). Drain one -> delete its line here AND in the companion warn rule. When the " +
-        "list is empty, remove both the pathNot and the warn rule — the gate is then total.",
+        "26-file warn backlog; fully drained — every route now goes through services/" +
+        "repositories. This is a TOTAL error gate now (no pathNot exceptions): a new inline " +
+        "persistence import in ANY route fails `pnpm lint:arch`. Backlog: 0.",
       severity: "error",
       from: {
         path: "^packages/server/src/routes/",
-        pathNot: [
-          "^packages/server/src/routes/issues\\.ts$",
-        ],
-      },
-      to: {
-        path: [
-          "^packages/server/src/db/index",
-          "/db/index\\.js$",
-          "drizzle-orm",
-          "@agentic-kanban/shared/schema",
-        ],
-      },
-    },
-    {
-      name: "routes-not-down-to-persistence-backlog",
-      comment:
-        "WARN tracker for the routes still holding inline persistence (mirrors the error rule's " +
-        "pathNot allow-list). Keeps the remaining drain backlog visible in lint:arch:report. " +
-        "When a route is drained, remove its line from BOTH this rule and the error rule's pathNot.",
-      severity: "warn",
-      from: {
-        path: [
-          "^packages/server/src/routes/issues\\.ts$",
-        ],
       },
       to: {
         path: [
