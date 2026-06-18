@@ -10,8 +10,7 @@
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
-import { issues } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
+import { getIssueDescription } from "../repositories/issue.repository.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { createWorkspaceService } from "../services/workspace.service.js";
@@ -103,11 +102,7 @@ export function createAgentQuestionsRoute(
     try {
       // Strip any cached recommendation from the questions before recomputing.
       const bareQuestions = target.questions.map(({ recommendation: _r, ...q }) => q);
-      const issueRows = await database
-        .select({ description: issues.description })
-        .from(issues)
-        .where(eq(issues.id, target.issueId))
-        .limit(1);
+      const issueRow = await getIssueDescription(target.issueId, database);
       const recommendations = await recommendQuestionsForSet(
         projectId,
         {
@@ -115,7 +110,7 @@ export function createAgentQuestionsRoute(
           issueId: target.issueId,
           issueNumber: target.issueNumber,
           issueTitle: target.issueTitle,
-          issueDescription: issueRows[0]?.description ?? null,
+          issueDescription: issueRow?.description ?? null,
           questions: bareQuestions,
         },
         database,

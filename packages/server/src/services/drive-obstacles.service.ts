@@ -14,6 +14,11 @@ import {
   type LogDriveObstacleInput,
 } from "../repositories/drive-obstacle.repository.js";
 
+// Re-export the obstacle taxonomy so transport-layer callers (routes) source the
+// kinds/severities from the service instead of reaching into the Drizzle schema.
+export { DRIVE_OBSTACLE_KINDS, DRIVE_OBSTACLE_SEVERITIES } from "@agentic-kanban/shared/schema";
+export type { DriveObstacleKind, DriveObstacleSeverity } from "@agentic-kanban/shared/schema";
+
 /**
  * Structured drive-obstacle telemetry (#803).
  *
