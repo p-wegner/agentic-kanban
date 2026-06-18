@@ -11,6 +11,7 @@ import { eq } from "drizzle-orm";
 import { PREF_BUILDER_GUARDRAILS, PREF_MERGE_STRATEGY, PREF_PI_PROFILE, PREF_CODEX_LICENSE_RING, PREF_CODEX_LICENSE_ROTATION, PREF_CLAUDE_SUBSCRIPTION_RING, PREF_CLAUDE_SUBSCRIPTION_ROTATION } from "../constants/preference-keys.js";
 import { parseCodexLicenseRing, ringProfileNames, discoverCodexHomeProfiles } from "./codex-license-ring.js";
 import { parseClaudeSubscriptionRing, ringProfileNames as claudeRingProfileNames, discoverClaudeConfigDirProfiles } from "./claude-subscription-ring.js";
+import { getProfilePrefKey } from "./agent-provider.js";
 
 export const SETTINGS_KEYS = [
   "agent_command", "agent_args", "output_parser", "skip_permissions", "claude_profile",
@@ -254,13 +255,7 @@ export function createPreferenceService({ database }: { database: Database }) {
     }
 
     const settingsProvider = prefMap.get("provider") || "claude";
-    const settingsProfile = settingsProvider === "codex"
-      ? (prefMap.get("codex_profile") || null)
-      : settingsProvider === "pi"
-        ? (prefMap.get(PREF_PI_PROFILE) || null)
-      : settingsProvider === "copilot"
-        ? (prefMap.get("copilot_profile") || null)
-        : (prefMap.get("claude_profile") || null);
+    const settingsProfile = prefMap.get(getProfilePrefKey(settingsProvider)) || null;
 
     const providerDiverged = bullseyeProvider !== null && bullseyeProvider !== settingsProvider;
     const profileDiverged = bullseyeProfile !== null && bullseyeProfile !== "" && bullseyeProfile !== settingsProfile;

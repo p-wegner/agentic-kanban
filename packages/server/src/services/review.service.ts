@@ -1,8 +1,8 @@
 import { agentSkills, issues, preferences, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { Database } from "../db/index.js";
-import { PREF_CODEX_PROFILE, PREF_COPILOT_PROFILE, PREF_PI_PROFILE } from "../constants/preference-keys.js";
 import type { ProviderName } from "./agent-provider.js";
+import { narrowProviderName, getProfilePrefKey } from "./agent-provider.js";
 import type { BoardEvents } from "./board-events.js";
 import type { SessionManager } from "./session.manager.js";
 import * as gitService from "./git.service.js";
@@ -36,16 +36,12 @@ export function buildReviewArgs(prefMap: Map<string, string>, provider: Provider
 }
 
 export function parseProviderPref(prefMap: Map<string, string>): ProviderName {
-  const provider = prefMap.get("provider");
-  if (provider === "codex" || provider === "copilot" || provider === "pi") return provider;
-  return "claude";
+  return narrowProviderName(prefMap.get("provider"));
 }
 
 export function getEffectiveProfile(prefMap: Map<string, string>, provider: ProviderName, claudeProfile: string | undefined): string | undefined {
-  if (provider === "codex") return prefMap.get(PREF_CODEX_PROFILE) || undefined;
-  if (provider === "pi") return prefMap.get(PREF_PI_PROFILE) || undefined;
-  if (provider === "copilot") return prefMap.get(PREF_COPILOT_PROFILE) || undefined;
-  return claudeProfile;
+  // Claude uses the passed (mock-filtered) profile; others read their own profilePrefKey.
+  return provider === "claude" ? claudeProfile : (prefMap.get(getProfilePrefKey(provider)) || undefined);
 }
 
 /**
@@ -66,12 +62,7 @@ export function applyWorkspaceProfileToPrefs(
   const next = new Map(prefMap);
   next.set("provider", provider);
   const name = workspace.claudeProfile || undefined;
-  if (name) {
-    if (provider === "codex") next.set(PREF_CODEX_PROFILE, name);
-    else if (provider === "pi") next.set(PREF_PI_PROFILE, name);
-    else if (provider === "copilot") next.set(PREF_COPILOT_PROFILE, name);
-    else next.set("claude_profile", name);
-  }
+  if (name) next.set(getProfilePrefKey(provider), name);
   return next;
 }
 
