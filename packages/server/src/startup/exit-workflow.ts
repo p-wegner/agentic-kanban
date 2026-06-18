@@ -23,6 +23,7 @@ import { isCodexUsageLimitStats } from "../services/codex-rate-limit.js";
 import { rotateCodexLicense } from "../services/codex-license-ring.js";
 import { isClaudeUsageLimitStats } from "../services/claude-rate-limit.js";
 import { rotateClaudeSubscription } from "../services/claude-subscription-ring.js";
+import { isBuilderSession, decideRateLimitExit, formatRateLimitBlockedReason } from "./rate-limit-exit-decision.js";
 import { buildLearningStepPrompt } from "../services/merge-helpers.service.js";
 import { isFoundationalBlocker } from "../services/foundational-merge.service.js";
 import { isColdCloneCheckEnabled, runColdCloneBuildCheckForProject } from "../services/cold-clone-build-check.service.js";
@@ -242,9 +243,9 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
         const rotationPrefMap = new Map((await db.select().from(preferences)).map((r) => [r.key, r.value]));
         const currentLicense = rotationPrefMap.get("codex_profile") || "default";
         const rotation = await rotateCodexLicense(db, rotationPrefMap, currentLicense, retryAfter, new Date(now));
-        const isBuilderSession = !reviewSessionIds.has(sessionId) && !fixAndMergeSessionIds.has(sessionId) && !learningSessionIds.has(sessionId);
+        const builder = isBuilderSession(sessionId, { reviewSessionIds, fixAndMergeSessionIds, learningSessionIds });
 
-        if (rotation.rotated && rotation.toProfile && isBuilderSession) {
+        if (decideRateLimitExit(rotation, builder).action === "relaunch") {
           try {
             const continuation = await buildRotationContinuationPrompt(db, issueId, "Codex");
             await db.update(workspaces).set({ status: "active", updatedAt: now }).where(eq(workspaces.id, workspaceId));
@@ -272,9 +273,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
         boardEvents.broadcastActivity(projectId, { issueId, sessionId, activity: "" });
         boardEvents.broadcast(projectId, "session_completed");
         boardEvents.broadcast(projectId, "workflow_error");
-        const blockedReason = rotation.rotated
-          ? `Codex usage limit reached for workspace ${workspaceId}; rotated codex_profile to '${rotation.toProfile}' (relaunch a builder manually).`
-          : `Codex usage limit reached for workspace ${workspaceId}; ${rotation.reason}. Monitor will not relaunch it automatically.`;
+        const blockedReason = formatRateLimitBlockedReason("Codex", workspaceId, rotation);
         emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: blockedReason });
         console.warn(`[workflow] codex-rate-limited workspace ${workspaceId} from session ${sessionId} left blocked (${rotation.reason})`);
         return;
@@ -289,9 +288,9 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
         const rotationPrefMap = new Map((await db.select().from(preferences)).map((r) => [r.key, r.value]));
         const currentSubscription = rotationPrefMap.get("claude_profile") || "default";
         const rotation = await rotateClaudeSubscription(db, rotationPrefMap, currentSubscription, resetsAt, new Date(now));
-        const isBuilderSession = !reviewSessionIds.has(sessionId) && !fixAndMergeSessionIds.has(sessionId) && !learningSessionIds.has(sessionId);
+        const builder = isBuilderSession(sessionId, { reviewSessionIds, fixAndMergeSessionIds, learningSessionIds });
 
-        if (rotation.rotated && rotation.toProfile && isBuilderSession) {
+        if (decideRateLimitExit(rotation, builder).action === "relaunch") {
           try {
             const continuation = await buildRotationContinuationPrompt(db, issueId, "Claude");
             await db.update(workspaces).set({ status: "active", updatedAt: now }).where(eq(workspaces.id, workspaceId));
@@ -320,9 +319,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
         boardEvents.broadcastActivity(projectId, { issueId, sessionId, activity: "" });
         boardEvents.broadcast(projectId, "session_completed");
         boardEvents.broadcast(projectId, "workflow_error");
-        const blockedReason = rotation.rotated
-          ? `Claude usage limit reached for workspace ${workspaceId}; rotated claude_profile to '${rotation.toProfile}' (relaunch a builder manually).`
-          : `Claude usage limit reached for workspace ${workspaceId}; ${rotation.reason}. Monitor will not relaunch it automatically.`;
+        const blockedReason = formatRateLimitBlockedReason("Claude", workspaceId, rotation);
         emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: blockedReason });
         console.warn(`[workflow] claude-rate-limited workspace ${workspaceId} from session ${sessionId} left blocked (${rotation.reason})`);
         return;
