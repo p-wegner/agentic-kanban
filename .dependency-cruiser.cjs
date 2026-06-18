@@ -73,6 +73,21 @@ module.exports = {
       from: { path: "^packages/server/src/repositories/" },
       to: { path: "^packages/server/src/routes/" },
     },
+    {
+      name: "client-no-drizzle-or-schema",
+      comment:
+        "The client bundle must never import the ORM or the Drizzle schema as a VALUE. " +
+        "The wire contract is the hand-authored DTOs in @agentic-kanban/shared/types; " +
+        "Drizzle rows ($inferSelect) and drizzle-orm operators stay server-side. A value " +
+        "import of either pulls drizzle into the browser bundle AND couples the client to " +
+        "the persistence layer. Type-only imports are erased (tsPreCompilationDeps:false), " +
+        "so importing a schema TYPE does not trip this — only a runtime value import does. " +
+        "Complements the #791 barrel-client-safety test (node-builtins); this guards the " +
+        "wire-DTO boundary, which was convention-only before. Lands green today. Backlog: 0.",
+      severity: "error",
+      from: { path: "^packages/client/src" },
+      to: { path: ["drizzle-orm", "@agentic-kanban/shared/schema", "^packages/shared/src/schema"] },
+    },
     // ───────────────────────── WARN: known debt backlogs ─────────────────────────
     {
       name: "routes-not-down-to-persistence",
