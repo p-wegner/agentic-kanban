@@ -423,3 +423,34 @@ export async function deleteArtifact(
   await database.delete(issueArtifacts)
     .where(and(eq(issueArtifacts.id, artifactId), eq(issueArtifacts.issueId, issueId)));
 }
+
+/** All issues of a project + their status name, ordered by issue number — for export. */
+export async function getIssuesForExport(projectId: string, database: Database = db) {
+  return database
+    .select({
+      id: issues.id,
+      issueNumber: issues.issueNumber,
+      title: issues.title,
+      description: issues.description,
+      priority: issues.priority,
+      issueType: issues.issueType,
+      estimate: issues.estimate,
+      statusName: projectStatuses.name,
+      createdAt: issues.createdAt,
+      updatedAt: issues.updatedAt,
+    })
+    .from(issues)
+    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+    .where(eq(issues.projectId, projectId))
+    .orderBy(issues.issueNumber);
+}
+
+/** Tag names for a batch of issues (issue_tags ⋈ tags). Empty input → empty result. */
+export async function getTagsForIssues(issueIds: string[], database: Database = db) {
+  if (issueIds.length === 0) return [];
+  return database
+    .select({ issueId: issueTags.issueId, tagName: tags.name })
+    .from(issueTags)
+    .innerJoin(tags, eq(issueTags.tagId, tags.id))
+    .where(inArray(issueTags.issueId, issueIds));
+}

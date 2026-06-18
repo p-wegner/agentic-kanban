@@ -1,9 +1,7 @@
-import { issues, issueTags, tags, projectStatuses } from "@agentic-kanban/shared/schema";
-import { eq, inArray } from "drizzle-orm";
-import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import { createIssueService } from "../services/issue.service.js";
+import { getIssuesForExport, getTagsForIssues } from "../repositories/issue.repository.js";
 import { createRouter } from "../middleware/create-router.js";
 
 const EXPORT_COLUMNS = [
@@ -91,32 +89,12 @@ function parseCsvLine(line: string): string[] {
 }
 
 async function fetchExportRows(projectId: string, database: Database): Promise<ExportRow[]> {
-  const issueRows = await database
-    .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
-      description: issues.description,
-      priority: issues.priority,
-      issueType: issues.issueType,
-      estimate: issues.estimate,
-      statusName: projectStatuses.name,
-      createdAt: issues.createdAt,
-      updatedAt: issues.updatedAt,
-    })
-    .from(issues)
-    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-    .where(eq(issues.projectId, projectId))
-    .orderBy(issues.issueNumber);
+  const issueRows = await getIssuesForExport(projectId, database);
 
   if (issueRows.length === 0) return [];
 
   const issueIds = issueRows.map((r) => r.id);
-  const tagRows = await database
-    .select({ issueId: issueTags.issueId, tagName: tags.name })
-    .from(issueTags)
-    .innerJoin(tags, eq(issueTags.tagId, tags.id))
-    .where(inArray(issueTags.issueId, issueIds));
+  const tagRows = await getTagsForIssues(issueIds, database);
 
   const tagsByIssue = new Map<string, string[]>();
   for (const tr of tagRows) {
@@ -426,7 +404,7 @@ function validateRows(parsedRows: ImportRow[]): {
 }
 
 export function createIssueExportImportRoute(
-  database: Database = db,
+  database: Database,
   options?: { boardEvents?: BoardEvents },
 ) {
   const router = createRouter();
