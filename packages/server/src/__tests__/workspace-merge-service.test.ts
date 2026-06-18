@@ -16,8 +16,18 @@ import { eq } from "drizzle-orm";
 import { issues, projectStatuses, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
-import { resolveMergeState, WorkspaceError } from "../services/workspace-internals.js";
+import { resolveMergeState, WorkspaceError, activeMerges } from "../services/workspace-internals.js";
 import { createMockSessionManager } from "./helpers/mocks.js";
+
+// Test isolation: the per-repoPath merge lock (activeMerges) is a module-level Map.
+// If one test is killed by vitest's timeout while its mergePromise is still pending
+// (e.g. under heavy parallel CPU load in the full suite), its .finally() release has
+// not run yet, so the lock leaks and every following test that merges the same '/repo'
+// fails with "A merge is already in progress" — turning one slow test into a cascade
+// of false failures. Clearing the map before each test confines a timeout to itself.
+beforeEach(() => {
+  activeMerges.clear();
+});
 
 function makeGit(overrides: Partial<Record<string, (...a: unknown[]) => unknown>> = {}) {
   return {
