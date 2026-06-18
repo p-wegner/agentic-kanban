@@ -36,7 +36,14 @@ const tempRepos: string[] = [];
 
 afterEach(() => {
   for (const repoPath of tempRepos.splice(0)) {
-    rmSync(repoPath, { recursive: true, force: true });
+    // Best-effort cleanup: Windows keeps git's pack/object files read-only and may briefly
+    // hold a lock, which makes rmSync throw EPERM. Retry, and never let a temp-dir cleanup
+    // failure fail the test itself.
+    try {
+      rmSync(repoPath, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    } catch {
+      /* temp dir will be reaped by the OS */
+    }
   }
 });
 

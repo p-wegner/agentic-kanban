@@ -284,18 +284,23 @@ describe("Butler provider selection", () => {
     });
     expect(getButlerSession(projectId)).toMatchObject({ model: "opus", claudeProfile: undefined });
 
+    // Switch to a non-mock Claude profile: the "mock" profile routes to a separate mock
+    // backend (no SDK query, model "mock"), which is not what this SDK-session
+    // model/profile-preservation test is exercising.
     const profileRes = await app.request(`/api/projects/${projectId}/butler/profile`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ profile: "mock" }),
+      body: JSON.stringify({ profile: "anth" }),
     });
     expect(profileRes.status).toBe(200);
-    expect(await profileRes.json()).toMatchObject({ ok: true, profile: "mock", active: true });
+    expect(await profileRes.json()).toMatchObject({ ok: true, profile: "anth", active: true });
     await waitForQueryCalls(2);
     await waitForSessionId(projectId, sdkMock.calls[1].sessionId);
 
-    expect(await getPreference(butlerSessionPrefKey(projectId), db)).toBe("");
+    // The old resume id was forgotten (the restarted session does NOT resume) and the pref
+    // now tracks the freshly-started session's id.
     expect(sdkMock.calls[1].options).not.toHaveProperty("resume");
+    expect(await getPreference(butlerSessionPrefKey(projectId), db)).toBe(sdkMock.calls[1].sessionId);
     expect(sdkMock.calls[1].options.model).toBe("opus");
 
     const afterProfile = await app.request(`/api/projects/${projectId}/butler`);
@@ -304,9 +309,9 @@ describe("Butler provider selection", () => {
       active: true,
       model: "opus",
       selectedModel: "opus",
-      selectedProfile: "mock",
+      selectedProfile: "anth",
     });
-    expect(getButlerSession(projectId)).toMatchObject({ model: "opus", claudeProfile: "mock" });
+    expect(getButlerSession(projectId)).toMatchObject({ model: "opus", claudeProfile: "anth" });
 
     const haikuRes = await app.request(`/api/projects/${projectId}/butler/model`, {
       method: "POST",
@@ -323,9 +328,9 @@ describe("Butler provider selection", () => {
       active: true,
       model: "haiku",
       selectedModel: "haiku",
-      selectedProfile: "mock",
+      selectedProfile: "anth",
     });
-    expect(getButlerSession(projectId)).toMatchObject({ model: "haiku", claudeProfile: "mock" });
+    expect(getButlerSession(projectId)).toMatchObject({ model: "haiku", claudeProfile: "anth" });
   });
 
   it("rejects overlapping Codex Butler turns instead of enqueueing ambiguous prompts", () => {
