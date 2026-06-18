@@ -3,7 +3,7 @@ import { join, resolve, extname, relative, isAbsolute } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Database } from "../db/index.js";
-import { workspaces } from "@agentic-kanban/shared/schema";
+import { workspaces, issueArtifacts } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 
 const execFileAsync = promisify(execFile);
@@ -154,6 +154,27 @@ export function createSessionArtifactsService(deps: { database: Database }) {
     return (await getWorkspaceInfo(workspaceId)).workingDir;
   }
 
+  /**
+   * List the persisted visual-proof artifacts (issue_artifacts rows) for a workspace,
+   * newest-relevant order. Returns null when the workspace does not exist so the caller
+   * can respond 404 without the transport layer touching the database.
+   */
+  async function listVisualProof(
+    workspaceId: string,
+  ): Promise<(typeof issueArtifacts.$inferSelect)[] | null> {
+    const exists = await database
+      .select({ id: workspaces.id })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1);
+    if (!exists[0]) return null;
+    return database
+      .select()
+      .from(issueArtifacts)
+      .where(eq(issueArtifacts.workspaceId, workspaceId))
+      .orderBy(issueArtifacts.createdAt);
+  }
+
   /** Get paths of files changed or added relative to baseBranch (git diff + untracked). */
   async function getChangedPaths(workingDir: string, baseBranch: string | null): Promise<Set<string> | null> {
     if (!baseBranch) return null;
@@ -256,5 +277,6 @@ export function createSessionArtifactsService(deps: { database: Database }) {
     readTextArtifact,
     readImageArtifact,
     getWorkspaceDir,
+    listVisualProof,
   };
 }
