@@ -1,13 +1,21 @@
-import { randomUUID } from "node:crypto";
-import { issueComments, issueDependencies, issues, issueTags, projectStatuses, tags, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { isResolvedDependencyStatusView } from "@agentic-kanban/shared";
-import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "./board-events.js";
 import type { SessionManager } from "./session.manager.js";
 import type { GitService } from "./workspace-internals.js";
 import { createWorkspaceCrudService } from "./workspace-crud.service.js";
 import { resolveStartPolicy } from "./start-policy.service.js";
+import {
+  getProjectStatusesForAutoChain,
+  getActiveWipCount,
+  getAutoChainCandidates,
+  getProjectDependencyRows,
+  hasSkipAutoStartTag,
+  hasExistingOpenWorkspace,
+  getBlockingDependencyIds,
+  getBlockerStatuses,
+  insertAutoChainAuditComment,
+} from "../repositories/dependency-auto-chain.repository.js";
 
 const BLOCKING_DEPENDENCY_TYPES = ["depends_on", "blocked_by"] as const;
 const AUTO_CHAIN_TRIGGER_TYPES = ["depends_on", "blocked_by", "child_of"] as const;
@@ -87,10 +95,7 @@ export async function findAutoStartableDependencyIssue(args: {
 }): Promise<AutoStartDecision> {
   const { database, projectId, completedIssueId, wipLimit } = args;
 
-  const statuses = await database
-    .select({ id: projectStatuses.id, name: projectStatuses.name, sortOrder: projectStatuses.sortOrder })
-    .from(projectStatuses)
-    .where(eq(projectStatuses.projectId, projectId));
+  const statuses = await getProjectStatusesForAutoChain(projectId, database);
 
   const inProgressStatusIds = statuses.filter((s) => s.name === "In Progress").map((s) => s.id);
   const startableStatusIds = statuses.filter((s) => s.name === "Todo" || s.name === "Backlog").map((s) => s.id);
@@ -98,53 +103,23 @@ export async function findAutoStartableDependencyIssue(args: {
     return { candidate: null, reason: "missing-status", currentWip: 0, wipLimit };
   }
 
-  const activeWipRows = await database
-    .select({ count: sql<number>`count(distinct ${issues.id})` })
-    .from(issues)
-    .innerJoin(workspaces, eq(workspaces.issueId, issues.id))
-    .where(and(
-      eq(issues.projectId, projectId),
-      inArray(issues.statusId, inProgressStatusIds),
-      ne(workspaces.status, "closed"),
-    ));
-  const currentWip = Number(activeWipRows[0]?.count ?? 0);
+  const currentWip = await getActiveWipCount(projectId, inProgressStatusIds, database);
   if (currentWip >= wipLimit) {
     return { candidate: null, reason: "wip-limit", currentWip, wipLimit };
   }
 
-  const candidates = await database
-    .select({
-      id: issues.id,
-      title: issues.title,
-      issueNumber: issues.issueNumber,
-      projectId: issues.projectId,
-      statusSortOrder: projectStatuses.sortOrder,
-      sortOrder: issues.sortOrder,
-    })
-    .from(issueDependencies)
-    .innerJoin(issues, eq(issueDependencies.issueId, issues.id))
-    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-    .where(and(
-      eq(issues.projectId, projectId),
-      eq(issueDependencies.dependsOnId, completedIssueId),
-      inArray(issueDependencies.type, AUTO_CHAIN_TRIGGER_TYPES),
-      inArray(issues.statusId, startableStatusIds),
-    ))
-    .orderBy(asc(projectStatuses.sortOrder), asc(issues.sortOrder), asc(issues.issueNumber));
+  const candidates = await getAutoChainCandidates({
+    projectId,
+    completedIssueId,
+    triggerTypes: AUTO_CHAIN_TRIGGER_TYPES,
+    startableStatusIds,
+  }, database);
 
   if (candidates.length === 0) {
     return { candidate: null, reason: "no-candidates", currentWip, wipLimit };
   }
 
-  const projectDependencyRows = await database
-    .select({
-      issueId: issueDependencies.issueId,
-      dependsOnId: issueDependencies.dependsOnId,
-      type: issueDependencies.type,
-    })
-    .from(issueDependencies)
-    .innerJoin(issues, eq(issueDependencies.issueId, issues.id))
-    .where(eq(issues.projectId, projectId));
+  const projectDependencyRows = await getProjectDependencyRows(projectId, database);
   const cycleIssueIds = findCycleIssueIds(
     [...new Set(projectDependencyRows.flatMap((dep) => [dep.issueId, dep.dependsOnId]))],
     projectDependencyRows,
@@ -159,32 +134,14 @@ export async function findAutoStartableDependencyIssue(args: {
       continue;
     }
 
-    const skipTagRows = await database
-      .select({ id: tags.id })
-      .from(issueTags)
-      .innerJoin(tags, eq(issueTags.tagId, tags.id))
-      .where(and(eq(issueTags.issueId, candidate.id), eq(tags.name, SKIP_AUTO_START_TAG)))
-      .limit(1);
-    if (skipTagRows.length > 0) {
+    if (await hasSkipAutoStartTag(candidate.id, SKIP_AUTO_START_TAG, database)) {
       skippedForTag = true;
       continue;
     }
 
-    const existingOpenWorkspace = await database
-      .select({ id: workspaces.id })
-      .from(workspaces)
-      .where(and(eq(workspaces.issueId, candidate.id), ne(workspaces.status, "closed")))
-      .limit(1);
-    if (existingOpenWorkspace.length > 0) continue;
+    if (await hasExistingOpenWorkspace(candidate.id, database)) continue;
 
-    const blockingDeps = await database
-      .select({ dependsOnId: issueDependencies.dependsOnId })
-      .from(issueDependencies)
-      .where(and(
-        eq(issueDependencies.issueId, candidate.id),
-        inArray(issueDependencies.type, BLOCKING_DEPENDENCY_TYPES),
-      ));
-    const blockerIds = [...new Set(blockingDeps.map((dep) => dep.dependsOnId))];
+    const blockerIds = await getBlockingDependencyIds(candidate.id, BLOCKING_DEPENDENCY_TYPES, database);
     if (blockerIds.length === 0) {
       return {
         candidate: {
@@ -201,17 +158,7 @@ export async function findAutoStartableDependencyIssue(args: {
       };
     }
 
-    const blockers = await database
-      .select({
-        id: issues.id,
-        statusName: projectStatuses.name,
-        currentNodeId: issues.currentNodeId,
-        currentNodeType: workflowNodes.nodeType,
-      })
-      .from(issues)
-      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-      .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
-      .where(inArray(issues.id, blockerIds));
+    const blockers = await getBlockerStatuses(blockerIds, database);
 
     if (blockers.length !== blockerIds.length) continue;
     if (!blockers.every((blocker) => isResolvedDependencyStatusView(blocker))) continue;
@@ -243,16 +190,12 @@ async function addAutoChainAuditComment(args: {
   body: string;
   payload: Record<string, unknown>;
 }) {
-  await args.database.insert(issueComments).values({
-    id: randomUUID(),
+  await insertAutoChainAuditComment({
     issueId: args.issueId,
-    workspaceId: args.workspaceId ?? null,
-    kind: "note",
-    author: "butler",
+    workspaceId: args.workspaceId,
     body: args.body,
-    payload: JSON.stringify({ trigger: "dependency-auto-chain", ...args.payload }),
-    createdAt: new Date().toISOString(),
-  });
+    payload: args.payload,
+  }, args.database);
 }
 
 export async function autoStartUnblockedDependencyIssue(args: {

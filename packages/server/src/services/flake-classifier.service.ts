@@ -1,7 +1,20 @@
 import { randomUUID } from "node:crypto";
-import { eq, desc, inArray } from "drizzle-orm";
-import { flakyTests, testRetryDecisions, projects, workspaces as workspacesTable, issues } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
+import {
+  listFlakyTestsByProject,
+  insertFlakyTest,
+  getFlakyTestById,
+  deleteFlakyTestById,
+  getProjectRetrySettings,
+  listKnownFlakyByProject,
+  insertTestRetryDecision,
+  updateTestRetryDecision,
+  getTestRetryDecisionById,
+  getDecisionsBySession,
+  getDecisionsByWorkspace,
+  getWorkspaceIdsByProject,
+  getDecisionsByWorkspaceIds,
+} from "../repositories/flake-classifier.repository.js";
 
 export type FlakeDecision = "flake" | "suspicious" | "real";
 export type FinalOutcome = "confirmed_flake" | "confirmed_real" | "pending";
@@ -112,17 +125,13 @@ export function createFlakeClassifierService(database: Database) {
   // ─── Flaky Test Registry CRUD ─────────────────────────────────────────────
 
   async function listFlakyTests(projectId: string): Promise<FlakyTestResponse[]> {
-    return database
-      .select()
-      .from(flakyTests)
-      .where(eq(flakyTests.projectId, projectId))
-      .orderBy(flakyTests.createdAt);
+    return listFlakyTestsByProject(projectId, database);
   }
 
   async function createFlakyTest(req: CreateFlakyTestRequest): Promise<FlakyTestResponse> {
     const id = randomUUID();
     const now = new Date().toISOString();
-    await database.insert(flakyTests).values({
+    await insertFlakyTest({
       id,
       projectId: req.projectId,
       testName: req.testName,
@@ -130,13 +139,13 @@ export function createFlakeClassifierService(database: Database) {
       errorPattern: req.errorPattern ?? null,
       reason: req.reason ?? null,
       createdAt: now,
-    });
-    const [row] = await database.select().from(flakyTests).where(eq(flakyTests.id, id));
+    }, database);
+    const row = await getFlakyTestById(id, database);
     return row;
   }
 
   async function deleteFlakyTest(id: string): Promise<void> {
-    await database.delete(flakyTests).where(eq(flakyTests.id, id));
+    await deleteFlakyTestById(id, database);
   }
 
   // ─── Classifier ───────────────────────────────────────────────────────────
@@ -147,17 +156,10 @@ export function createFlakeClassifierService(database: Database) {
    */
   async function classifyFailure(input: ClassifierInput): Promise<ClassifierResult & { decisionId: string }> {
     // Load project retry settings
-    const [project] = await database
-      .select({ autoRetryFlakes: projects.autoRetryFlakes, maxRetries: projects.maxRetries })
-      .from(projects)
-      .where(eq(projects.id, input.projectId))
-      .limit(1);
+    const project = await getProjectRetrySettings(input.projectId, database);
 
     // Load all known flaky tests for this project
-    const knownFlaky = await database
-      .select()
-      .from(flakyTests)
-      .where(eq(flakyTests.projectId, input.projectId));
+    const knownFlaky = await listKnownFlakyByProject(input.projectId, database);
 
     type FlakyTestRow = { id: string; testName: string; testFilePath: string | null; errorPattern: string | null; reason: string | null };
 
@@ -208,7 +210,7 @@ export function createFlakeClassifierService(database: Database) {
     // Persist the decision
     const decisionId = randomUUID();
     const now = new Date().toISOString();
-    await database.insert(testRetryDecisions).values({
+    await insertTestRetryDecision({
       id: decisionId,
       sessionId: input.sessionId,
       workspaceId: input.workspaceId,
@@ -227,7 +229,7 @@ export function createFlakeClassifierService(database: Database) {
       reasoning,
       createdAt: now,
       updatedAt: now,
-    });
+    }, database);
 
     return { decision, confidence, reasoning, matchedFlakyTestId: match?.id, changesOverlapWithSubject, decisionId };
   }
@@ -254,30 +256,20 @@ export function createFlakeClassifierService(database: Database) {
       finalOutcome = "confirmed_flake";
     }
 
-    await database.update(testRetryDecisions)
-      .set({ retryCount, finalOutcome, updatedAt: now })
-      .where(eq(testRetryDecisions.id, decisionId));
+    await updateTestRetryDecision(decisionId, { retryCount, finalOutcome, updatedAt: now }, database);
 
-    const [updated] = await database.select().from(testRetryDecisions).where(eq(testRetryDecisions.id, decisionId));
+    const updated = await getTestRetryDecisionById(decisionId, database);
     return updated as RetryDecisionResponse;
   }
 
   // ─── Query ────────────────────────────────────────────────────────────────
 
   async function getDecisionsForSession(sessionId: string): Promise<RetryDecisionResponse[]> {
-    return database
-      .select()
-      .from(testRetryDecisions)
-      .where(eq(testRetryDecisions.sessionId, sessionId))
-      .orderBy(desc(testRetryDecisions.createdAt)) as Promise<RetryDecisionResponse[]>;
+    return getDecisionsBySession(sessionId, database) as Promise<RetryDecisionResponse[]>;
   }
 
   async function getDecisionsForWorkspace(workspaceId: string): Promise<RetryDecisionResponse[]> {
-    return database
-      .select()
-      .from(testRetryDecisions)
-      .where(eq(testRetryDecisions.workspaceId, workspaceId))
-      .orderBy(desc(testRetryDecisions.createdAt)) as Promise<RetryDecisionResponse[]>;
+    return getDecisionsByWorkspace(workspaceId, database) as Promise<RetryDecisionResponse[]>;
   }
 
   /**
@@ -286,21 +278,14 @@ export function createFlakeClassifierService(database: Database) {
    *   final outcome was "confirmed_flake" (i.e. retries exhausted, still failing = real regression)
    */
   async function getTelemetry(projectId: string): Promise<FalseFlakeTelemetry> {
-    const wsRows = await database
-      .select({ id: workspacesTable.id })
-      .from(workspacesTable)
-      .innerJoin(issues, eq(workspacesTable.issueId, issues.id))
-      .where(eq(issues.projectId, projectId));
+    const wsRows = await getWorkspaceIdsByProject(projectId, database);
 
     if (wsRows.length === 0) {
       return { total: 0, confirmedReal: 0, confirmedFlake: 0, pending: 0, falseFlakeRate: 0 };
     }
 
     const wsIds = wsRows.map((r: { id: string }) => r.id);
-    const decisions = await database
-      .select()
-      .from(testRetryDecisions)
-      .where(inArray(testRetryDecisions.workspaceId, wsIds));
+    const decisions = await getDecisionsByWorkspaceIds(wsIds, database);
 
     const retried = decisions.filter((d: { decision: string }) => d.decision !== "real");
     const confirmedFlake = retried.filter((d: { finalOutcome: string }) => d.finalOutcome === "confirmed_flake").length;
