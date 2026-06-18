@@ -52,7 +52,6 @@ function daysAgo(days: number): string {
 describe("column age badge", () => {
   it("provides columnAgeDays for all issues based on statusChangedAt", async () => {
     const issueId = randomUUID();
-    const now = new Date().toISOString();
     await db.insert(schema.issues).values({
       id: issueId,
       issueNumber: 100,
@@ -64,6 +63,9 @@ describe("column age badge", () => {
       statusChangedAt: daysAgo(5),
     });
 
+    // Capture `now` AFTER seeding so the elapsed span is a clean >= 5 days — capturing it
+    // before daysAgo(5) leaves elapsed a few ms under 5 days, which Math.floor() rounds to 4.
+    const now = new Date().toISOString();
     const service = createProjectService({ database: db });
     const board = await service.getBoard(projectId, now);
     const col = board.find((c) => c.name === "Todo");

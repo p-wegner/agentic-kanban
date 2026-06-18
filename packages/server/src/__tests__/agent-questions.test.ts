@@ -151,17 +151,21 @@ describe("computeStaleness", () => {
     expect(computeStaleness(freshInput({ issueStatusName: "Cancelled" }))?.reason).toBe("issue-done");
   });
 
-  it("uses workflow end node type before the derived status column", () => {
+  it("treats an end node OR a terminal status as done (#537 status<->node desync guard)", () => {
+    // A workflow end node makes the issue terminal even when the legacy status column
+    // has not caught up.
     expect(computeStaleness(freshInput({
       issueStatusName: "In Progress",
       issueCurrentNodeId: "node-done",
       issueCurrentNodeType: "end",
     }))?.reason).toBe("issue-done");
+    // ...and a terminal STATUS (Done/Cancelled) is terminal even for a workflow-driven
+    // issue stuck on a non-`end` node — otherwise dependents would never resolve (#537).
     expect(computeStaleness(freshInput({
       issueStatusName: "Done",
       issueCurrentNodeId: "node-implement",
       issueCurrentNodeType: "normal",
-    }))).toBe(null);
+    }))?.reason).toBe("issue-done");
   });
 
   it("flags a question superseded by a newer session", () => {
