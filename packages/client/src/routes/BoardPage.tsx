@@ -345,7 +345,7 @@ export function BoardPage() {
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [tagsLoaded, setTagsLoaded] = useState(false);
 
-  const refetchBoard = useCallback(async (projectId?: string) => {
+  const refetchBoard = useCallback(async (projectId?: string, options?: { force?: boolean }) => {
     const pid = projectId || activeProjectId;
     if (!pid) return;
     // Monotonic sequence guard: overlapping refetches can resolve out of
@@ -354,7 +354,11 @@ export function BoardPage() {
     // state (and its ETag) untouched.
     const seq = ++refetchSeqRef.current;
     const headers: Record<string, string> = { "Content-Type": "application/json" };
-    const cachedEtag = boardEtagRef.current[pid];
+    // On a forced refetch (e.g. project switch, where columns were just
+    // cleared) we must NOT send If-None-Match: a 304 would early-return the
+    // now-empty columnsRef and leave the board blank. Skip the conditional so
+    // the server always sends the full board back.
+    const cachedEtag = options?.force ? undefined : boardEtagRef.current[pid];
     if (cachedEtag) headers["If-None-Match"] = cachedEtag;
     const res = await fetch(`/api/projects/${pid}/board`, { headers });
     if (res.status === 304) {
@@ -857,7 +861,7 @@ export function BoardPage() {
         method: "PUT",
         body: JSON.stringify({ projectId: id }),
       });
-      await refetchBoard(id);
+      await refetchBoard(id, { force: true });
     } catch {
       showToast("Failed to switch project", "error");
     } finally {
