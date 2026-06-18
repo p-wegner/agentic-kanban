@@ -51,7 +51,7 @@ import * as realGitService from "./git.service.js";
 import { estimateBudget } from "./budget-estimator.service.js";
 import type { BudgetEstimate } from "./budget-estimator.service.js";
 import { kill as killAgent } from "./agent.service.js";
-import { teardownWorktree } from "./workspace-teardown.service.js";
+import { teardownWorktree, killProcessTree, removeDirWithRetry } from "./workspace-teardown.service.js";
 import { runSetupScript } from "./setup-script.js";
 import type { SetupScriptResult } from "./setup-script.js";
 import type { WorkspaceSymlinkRun } from "@agentic-kanban/shared";
@@ -85,7 +85,6 @@ import {
 } from "./workspace-internals.js";
 import { buildContextPrimer } from "./context-packer.service.js";
 import { getStackProfile } from "./stack-profile.service.js";
-import { auditProcessEvent, guardProcessKill } from "./process-guard.js";
 
 export function createWorkspaceCrudService(deps: {
   database: Database;
@@ -1074,49 +1073,8 @@ exit 1
   }
 
   /** Force-kill a process tree by pid. Windows: taskkill /F /T; otherwise SIGKILL. Guards already-dead pids. */
-  async function killProcessTree(pid: number): Promise<void> {
-    if (!pid || pid <= 0) return;
-    if (!guardProcessKill(pid, { reason: "workspace-cleanup-fallback" })) return;
-    if (process.platform === "win32") {
-      const { spawn } = await import("node:child_process");
-      await new Promise<void>((resolve) => {
-        const p = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true });
-        p.on("error", () => resolve());
-        p.on("close", () => resolve());
-      });
-      auditProcessEvent({ action: "workspace-cleanup-taskkill-issued", pid });
-    } else {
-      try {
-        process.kill(-pid, "SIGKILL");
-        auditProcessEvent({ action: "workspace-cleanup-sigkill-group-issued", pid });
-      } catch {
-        try {
-          process.kill(pid, "SIGKILL");
-          auditProcessEvent({ action: "workspace-cleanup-sigkill-issued", pid });
-        } catch { /* already dead */ }
-      }
-    }
-  }
-
-  /** Remove a directory recursively, retrying to ride out async Windows file-handle release. */
-  async function removeDirWithRetry(dir: string, attempts = 5, backoffMs = 300): Promise<boolean> {
-    const { rm } = await import("node:fs/promises");
-    const { existsSync } = await import("node:fs");
-    for (let i = 0; i < attempts; i++) {
-      try {
-        await rm(dir, { recursive: true, force: true });
-        if (!existsSync(dir)) return true;
-      } catch (err) {
-        if (i === attempts - 1) {
-          console.warn(`[workspaces] directory removal failed after ${attempts} attempts: ${dir}`, err);
-          return false;
-        }
-      }
-      if (!existsSync(dir)) return true;
-      await new Promise((resolve) => setTimeout(resolve, backoffMs * (i + 1)));
-    }
-    return !existsSync(dir);
-  }
+  // killProcessTree / removeDirWithRetry are generic OS/fs teardown primitives —
+  // moved to ./workspace-teardown.service.ts (imported at top of file).
 
   /**
    * Close a workspace WITHOUT merging — for work that was abandoned or already
