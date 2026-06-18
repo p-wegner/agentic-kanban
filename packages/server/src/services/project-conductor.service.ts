@@ -81,6 +81,18 @@ export function startProjectConductorSupervisor(options: { database: Database; b
   let syncRunning = false;
   let timer: ReturnType<typeof setInterval> | null = null;
   const launched = new Map<string, string>();
+  // Per-project spawn-failure backoff so a project whose loop won't launch (bad repo
+  // path, missing bash, ulimit) doesn't get re-spawned every poll tick (~30s) forever,
+  // spamming logs. Exponential: 1, 2, 4, … capped, cleared once a launch sticks.
+  const BACKOFF_BASE_MS = 30_000;
+  const BACKOFF_CAP_MS = 30 * 60_000;
+  const failures = new Map<string, { count: number; until: number }>();
+  function noteSpawnFailure(projectId: string) {
+    const prev = failures.get(projectId)?.count ?? 0;
+    const count = prev + 1;
+    const delay = Math.min(BACKOFF_CAP_MS, BACKOFF_BASE_MS * 2 ** (count - 1));
+    failures.set(projectId, { count, until: Date.now() + delay });
+  }
 
   async function sync() {
     if (stopped || syncRunning) return;
@@ -99,6 +111,7 @@ export function startProjectConductorSupervisor(options: { database: Database; b
         if (!configs.has(projectId)) {
           requestStop(repoPath, { createStateDir: true });
           launched.delete(projectId);
+          failures.delete(projectId);
         }
       }
 
@@ -106,31 +119,44 @@ export function startProjectConductorSupervisor(options: { database: Database; b
         const project = byId.get(projectId);
         if (!project?.repoPath) continue;
         await ensureObjective(database, project);
-        if (launched.has(projectId)) continue;
+        if (launched.has(projectId)) {
+          // Already running and didn't error this round — the launch stuck, so reset backoff.
+          failures.delete(projectId);
+          continue;
+        }
+        const backoff = failures.get(projectId);
+        if (backoff && Date.now() < backoff.until) continue; // wait out the backoff window
         const objectivePath = join(project.repoPath, PROJECT_CONDUCTOR_OBJECTIVE_RELATIVE_PATH);
         const stateDir = join(project.repoPath, PROJECT_CONDUCTOR_STATE_RELATIVE_DIR);
-        mkdirSync(stateDir, { recursive: true });
-        const child = spawn("bash", [
-          loopScript,
-          "--project", project.id,
-          "--repo", project.repoPath,
-          "--objective", objectivePath,
-          "--state-dir", stateDir,
-          "--agent", config.agent,
-          "--sleep", String(config.cadenceSeconds),
-        ], {
-          cwd: boardRepoRoot,
-          detached: true,
-          stdio: "ignore",
-          windowsHide: true,
-        });
-        child.on("error", (err) => {
-          launched.delete(projectId);
-          console.warn(`[conductor] failed to launch project ${projectId}:`, err instanceof Error ? err.message : String(err));
-        });
-        child.unref();
-        launched.set(projectId, project.repoPath);
-        console.log(`[conductor] launched project ${projectId} (${project.name}) agent=${config.agent} cadence=${config.cadenceSeconds}s`);
+        try {
+          mkdirSync(stateDir, { recursive: true });
+          const child = spawn("bash", [
+            loopScript,
+            "--project", project.id,
+            "--repo", project.repoPath,
+            "--objective", objectivePath,
+            "--state-dir", stateDir,
+            "--agent", config.agent,
+            "--sleep", String(config.cadenceSeconds),
+          ], {
+            cwd: boardRepoRoot,
+            detached: true,
+            stdio: "ignore",
+            windowsHide: true,
+          });
+          child.on("error", (err) => {
+            launched.delete(projectId);
+            noteSpawnFailure(projectId);
+            const next = failures.get(projectId);
+            console.warn(`[conductor] failed to launch project ${projectId} (attempt ${next?.count}, backing off ${Math.round((next ? next.until - Date.now() : 0) / 1000)}s):`, err instanceof Error ? err.message : String(err));
+          });
+          child.unref();
+          launched.set(projectId, project.repoPath);
+          console.log(`[conductor] launched project ${projectId} (${project.name}) agent=${config.agent} cadence=${config.cadenceSeconds}s`);
+        } catch (err) {
+          noteSpawnFailure(projectId);
+          console.warn(`[conductor] spawn threw for project ${projectId}:`, err instanceof Error ? err.message : String(err));
+        }
       }
     } catch (err) {
       console.warn("[conductor] supervisor sync failed:", err instanceof Error ? err.message : String(err));
