@@ -2,10 +2,9 @@ import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } fr
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
-import { eq } from "drizzle-orm";
-import { agentSkills } from "@agentic-kanban/shared/schema";
 import { getCurrentBranch } from "@agentic-kanban/shared/lib/git-service";
 import { db, type Database } from "../db/index.js";
+import { getBoardNavigatorSkillId } from "../repositories/project-scaffold.repository.js";
 
 /**
  * New-project scaffold: the small, project-agnostic, clobber-safe pieces the board writes when a
@@ -880,10 +879,5 @@ export function ensurePnpmBuildApproval(repoPath: string): boolean {
  * worktrees aren't skill-less. Returns null gracefully if the builtin isn't seeded. (#531)
  */
 export async function getDefaultSkillId(database: Database = db): Promise<string | null> {
-  const [nav] = await database
-    .select({ id: agentSkills.id })
-    .from(agentSkills)
-    .where(eq(agentSkills.name, "board-navigator"))
-    .limit(1);
-  return nav?.id ?? null;
+  return getBoardNavigatorSkillId(database);
 }

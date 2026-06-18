@@ -1,9 +1,11 @@
 import { readdir, readFile } from "node:fs/promises";
 import { relative } from "node:path";
-import { eq } from "drizzle-orm";
-import { workspaces } from "@agentic-kanban/shared/schema";
 import type { WorkspaceCodeMetrics } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
+import {
+  getWorkspaceWorkingDir,
+  updateWorkspaceCodeMetrics,
+} from "../repositories/workspace-code-metrics.repository.js";
 
 const MAX_REPORT_FILES = 2500;
 const MAX_SOURCE_FILES = 300;
@@ -268,20 +270,16 @@ export async function computeWorkspaceCodeMetrics(
   workspaceId: string,
   database: Database,
 ): Promise<WorkspaceCodeMetrics | null> {
-  const rows = await database
-    .select({ workingDir: workspaces.workingDir })
-    .from(workspaces)
-    .where(eq(workspaces.id, workspaceId))
-    .limit(1);
-
-  const workingDir = rows[0]?.workingDir;
+  const workingDir = await getWorkspaceWorkingDir(workspaceId, database);
   if (!workingDir) return null;
 
   const metrics = await collectWorkspaceCodeMetrics(workingDir);
-  await database.update(workspaces).set({
-    codeMetricsJson: JSON.stringify(metrics),
-    codeMetricsComputedAt: metrics.computedAt,
-  }).where(eq(workspaces.id, workspaceId));
+  await updateWorkspaceCodeMetrics(
+    workspaceId,
+    JSON.stringify(metrics),
+    metrics.computedAt,
+    database,
+  );
 
   return metrics;
 }

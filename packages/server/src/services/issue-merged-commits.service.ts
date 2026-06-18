@@ -1,6 +1,8 @@
-import { eq } from "drizzle-orm";
-import { issues, workspaces } from "@agentic-kanban/shared/schema";
 import { getProjectById } from "../repositories/project.repository.js";
+import {
+  getIssueProjectRef,
+  getWorkspacesForIssueMergedCommits,
+} from "../repositories/issue-merged-commits.repository.js";
 import type { MergedCommit, MergedCommitsResponse } from "@agentic-kanban/shared";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -27,30 +29,15 @@ export function createIssueMergedCommitsService(deps: {
   const gitService = deps.gitService ?? realGitService;
 
   async function getMergedCommits(issueId: string): Promise<MergedCommitsResponse | null> {
-    const issueRows = await database
-      .select({ id: issues.id, projectId: issues.projectId })
-      .from(issues)
-      .where(eq(issues.id, issueId))
-      .limit(1);
-    if (issueRows.length === 0) return null;
+    const issueRow = await getIssueProjectRef(issueId, database);
+    if (!issueRow) return null;
 
-    const project = await getProjectById(issueRows[0].projectId, database);
+    const project = await getProjectById(issueRow.projectId, database);
     if (!project) return null;
 
     const { repoPath, defaultBranch } = project;
 
-    const wsRows = await database
-      .select({
-        id: workspaces.id,
-        branch: workspaces.branch,
-        baseBranch: workspaces.baseBranch,
-        baseCommitSha: workspaces.baseCommitSha,
-        mergedAt: workspaces.mergedAt,
-        mergedHeadSha: workspaces.mergedHeadSha,
-        isDirect: workspaces.isDirect,
-      })
-      .from(workspaces)
-      .where(eq(workspaces.issueId, issueId));
+    const wsRows = await getWorkspacesForIssueMergedCommits(issueId, database);
 
     // Only merged, non-direct workspaces have a branch whose commits landed on the
     // default branch. Direct workspaces commit straight onto the working branch and
