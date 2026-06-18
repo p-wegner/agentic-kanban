@@ -2,32 +2,27 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
-import { IssueCard, type ProjectTag, type QuickUpdateCallbacks } from "./IssueCard.js";
+import { type ProjectTag, type QuickUpdateCallbacks } from "./IssueCard.js";
+import { BoardColumnCard } from "./BoardColumnCard.js";
 import { evaluateWipLimit } from "../lib/wipLimits.js";
 import { computeDropSortOrder } from "../lib/reorderIssues.js";
 import {
   groupByPriority,
   groupByTag,
   computeColumnEstimate,
-  sortIssues,
   PRIORITY_LANE_STYLES,
-  type SortMode,
 } from "../lib/columnHelpers.js";
+import {
+  loadSortMode,
+  saveSortMode,
+  nextSortMode,
+  sortColumnIssues,
+  type SortMode,
+} from "../lib/boardColumnSort.js";
 import type { CardDensity } from "../hooks/useBoardPreferences.js";
 import "./BoardColumn.css";
 
 export type SwimlaneDimension = "none" | "priority" | "tag";
-
-const VALID_SORT_MODES = new Set<string>(["default", "type"]);
-
-function loadSortMode(columnId: string): SortMode {
-  try {
-    const stored = localStorage.getItem(`col-sort-${columnId}`);
-    return (stored && VALID_SORT_MODES.has(stored) ? stored : "default") as SortMode;
-  } catch {
-    return "default";
-  }
-}
 
 interface BoardColumnProps {
   column: StatusWithIssues;
@@ -216,13 +211,9 @@ export function BoardColumn({
   }
 
   function toggleSort() {
-    const next: SortMode = sortMode === "default" ? "type" : "default";
+    const next: SortMode = nextSortMode(sortMode);
     setSortMode(next);
-    try {
-      localStorage.setItem(`col-sort-${column.id}`, next);
-    } catch {
-      // ignore
-    }
+    saveSortMode(column.id, next);
   }
 
   const [editingWipLimit, setEditingWipLimit] = useState(false);
@@ -251,7 +242,7 @@ export function BoardColumn({
   }
 
   const isCreating = creatingInColumn === column.id;
-  const displayedIssues = sortIssues(column.issues, sortMode);
+  const displayedIssues = sortColumnIssues(column.issues, sortMode);
   const wipStatus = evaluateWipLimit(column.issues.length, wipLimit ?? null);
   const estimateRollup = computeColumnEstimate(column.issues);
   const shouldVirtualizeIssues =
@@ -280,32 +271,34 @@ export function BoardColumn({
   // list (matching the original per-branch prop lists), so IssueCard's defaults
   // still apply inside swimlanes.
   const renderCard = (issue: IssueWithStatus, includeAging: boolean) => (
-    <IssueCard
+    <BoardColumnCard
       issue={issue}
-      onClick={onIssueClick}
+      includeAging={includeAging}
+      onIssueClick={onIssueClick}
       onWorkspaceClick={onWorkspaceClick}
       onOpenDiff={onOpenDiff}
       onStartWorkspace={onStartWorkspace}
       onDryRun={onDryRun}
       onDragStart={onDragStart}
       onDuplicate={onDuplicate}
-      onMoveToNext={nextStatus && onMoveToNext ? (iss) => onMoveToNext(iss, nextStatus.id) : undefined}
-      nextStatusName={nextStatus?.name}
-      tags={issue.tags}
+      onMoveToNext={onMoveToNext}
+      nextStatus={nextStatus}
       allProjectTags={allProjectTags}
       quickUpdate={quickUpdate}
-      allStatuses={statusOptions}
+      statusOptions={statusOptions}
       onDeleteIssue={onDeleteIssue}
       searchQuery={searchQuery}
-      liveActivity={sessionActivity?.[issue.id]}
-      liveStats={liveStats?.[issue.id]}
-      todos={sessionTodos?.[issue.id]}
-      isPendingIssue={pendingIssueIds?.has(issue.id)}
-      isPendingWorkspace={pendingWorkspaceIssueIds?.has(issue.id)}
-      isSelected={selectedIssueIds?.has(issue.id)}
-      isKeyboardFocused={keyboardCursorIssueId === issue.id}
+      sessionActivity={sessionActivity}
+      liveStats={liveStats}
+      sessionTodos={sessionTodos}
+      pendingIssueIds={pendingIssueIds}
+      pendingWorkspaceIssueIds={pendingWorkspaceIssueIds}
+      selectedIssueIds={selectedIssueIds}
+      keyboardCursorIssueId={keyboardCursorIssueId}
       cardDensity={cardDensity}
-      {...(includeAging ? { showAgingHeatmap, agingWarmDays, agingHotDays } : {})}
+      showAgingHeatmap={showAgingHeatmap}
+      agingWarmDays={agingWarmDays}
+      agingHotDays={agingHotDays}
     />
   );
 
