@@ -1,9 +1,12 @@
-import { eq, and, inArray } from "drizzle-orm";
 import { isTerminalStatusIdView, TERMINAL_STATUS_NAMES } from "@agentic-kanban/shared";
-import { issues, projectStatuses, workflowNodes } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import { invokeClaudePrompt } from "./claude-cli.service.js";
 import { NotFoundError } from "../errors/index.js";
+import {
+  getPreflightTargetIssue,
+  getTerminalStatusIds,
+  getProjectIssuesWithNodeType,
+} from "../repositories/ticket-preflight.repository.js";
 
 export type PreflightVerdict = "ready" | "needs-clarification" | `duplicate-of-#${number}` | `blocked-by-#${number}`;
 
@@ -46,48 +49,16 @@ export async function runTicketPreflight(
   database: Database,
   clarifications?: PreflightClarification[],
 ): Promise<TicketPreflightResult> {
-  const issueRows = await database
-    .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
-      description: issues.description,
-    })
-    .from(issues)
-    .where(eq(issues.id, issueId))
-    .limit(1);
+  const target = await getPreflightTargetIssue(issueId, database);
 
-  if (issueRows.length === 0) {
+  if (!target) {
     throw new NotFoundError("Issue not found");
   }
 
-  const target = issueRows[0];
-
   // Fetch open issues (excluding Done/Cancelled) as duplicate/conflict candidates
-  const doneOrCancelledStatuses = await database
-    .select({ id: projectStatuses.id })
-    .from(projectStatuses)
-    .where(
-      and(
-        eq(projectStatuses.projectId, projectId),
-        inArray(projectStatuses.name, [...TERMINAL_STATUS_NAMES]),
-      ),
-    );
-  const excludeIds = doneOrCancelledStatuses.map((s) => s.id);
+  const excludeIds = await getTerminalStatusIds(projectId, [...TERMINAL_STATUS_NAMES], database);
 
-  const allProjectIssues = await database
-    .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
-      description: issues.description,
-      statusId: issues.statusId,
-      currentNodeId: issues.currentNodeId,
-      currentNodeType: workflowNodes.nodeType,
-    })
-    .from(issues)
-    .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
-    .where(eq(issues.projectId, projectId));
+  const allProjectIssues = await getProjectIssuesWithNodeType(projectId, database);
   const terminalStatusIds = new Set(excludeIds);
   const openIssues = allProjectIssues.filter((issue) => !isTerminalStatusIdView(issue, terminalStatusIds));
 

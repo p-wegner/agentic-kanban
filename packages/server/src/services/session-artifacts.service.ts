@@ -3,8 +3,12 @@ import { join, resolve, extname, relative, isAbsolute } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Database } from "../db/index.js";
-import { workspaces, issueArtifacts } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
+import { issueArtifacts } from "@agentic-kanban/shared/schema";
+import {
+  getWorkspaceWorkingDirAndBase,
+  workspaceExists,
+  getWorkspaceArtifacts,
+} from "../repositories/session-artifacts.repository.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -135,15 +139,12 @@ export function createSessionArtifactsService(deps: { database: Database }) {
   }
 
   async function getWorkspaceInfo(workspaceId: string): Promise<WorkspaceInfo> {
-    const rows = await database
-      .select({ workingDir: workspaces.workingDir, baseBranch: workspaces.baseBranch })
-      .from(workspaces)
-      .where(eq(workspaces.id, workspaceId));
+    const row = await getWorkspaceWorkingDirAndBase(workspaceId, database);
 
-    if (rows.length === 0) {
+    if (!row) {
       throw new Error("Workspace not found");
     }
-    const { workingDir, baseBranch } = rows[0];
+    const { workingDir, baseBranch } = row;
     if (!workingDir) {
       throw new Error("Workspace has no working directory");
     }
@@ -162,17 +163,9 @@ export function createSessionArtifactsService(deps: { database: Database }) {
   async function listVisualProof(
     workspaceId: string,
   ): Promise<(typeof issueArtifacts.$inferSelect)[] | null> {
-    const exists = await database
-      .select({ id: workspaces.id })
-      .from(workspaces)
-      .where(eq(workspaces.id, workspaceId))
-      .limit(1);
-    if (!exists[0]) return null;
-    return database
-      .select()
-      .from(issueArtifacts)
-      .where(eq(issueArtifacts.workspaceId, workspaceId))
-      .orderBy(issueArtifacts.createdAt);
+    const exists = await workspaceExists(workspaceId, database);
+    if (!exists) return null;
+    return getWorkspaceArtifacts(workspaceId, database);
   }
 
   /** Get paths of files changed or added relative to baseBranch (git diff + untracked). */
