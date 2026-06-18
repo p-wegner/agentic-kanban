@@ -2374,7 +2374,12 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                       />
                     )}
 
-                    {!selectedHistoryId && !activeSession && viewMode === "output" && ws.workingDir && ws.status !== "closed" && (
+                    {/* Idle message input — available on ANY sub-view (output/diff/summary/...) so that
+                        following up on an idle or In-Review workspace is always possible, not only on the
+                        output tab. When there is no live session, the only meaningful action is to send
+                        (which resumes the prior conversation via /launch with resumeFromId), so the
+                        unreachable "Agent is working / Stop" branch is intentionally gone here. */}
+                    {!selectedHistoryId && !activeSession && ws.workingDir && ws.status !== "closed" && (
                       <div className="flex gap-2">
                         <TicketMentionInput
                           inputRef={textareaRef}
@@ -2383,35 +2388,22 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                           onKeyDown={(e) => {
                             if (e.key === "Enter" && e.ctrlKey) {
                               e.preventDefault();
-                              if (isSessionAlive && !isWaitingForInput) {
-                                handleStop(ws.id);
-                              } else if (prompt.trim()) {
+                              if (prompt.trim()) {
                                 handleLaunch(ws.id);
                               }
                             }
                           }}
-                          placeholder={isSessionAlive && !isWaitingForInput ? "Agent is working..." : "Message agent..."}
+                          placeholder="Message agent..."
                           rows={2}
-                          disabled={isSessionAlive && !isWaitingForInput}
                           className="flex-1 text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none disabled:bg-gray-50 dark:disabled:bg-gray-950 disabled:text-gray-400 dark:disabled:text-gray-500"
                         />
-                        {isSessionAlive && !isWaitingForInput ? (
-                          <button
-                            onClick={() => handleStop(ws.id)}
-                            disabled={actionLoading}
-                            className="text-sm bg-red-600 text-white px-3 py-1.5 rounded hover:bg-red-700 disabled:opacity-50 self-end"
-                          >
-                            Stop
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => handleLaunch(ws.id)}
-                            disabled={actionLoading || !prompt.trim()}
-                            className="text-sm bg-brand-600 text-white px-3 py-1.5 rounded hover:bg-brand-700 disabled:opacity-50 self-end"
-                          >
-                            Send
-                          </button>
-                        )}
+                        <button
+                          onClick={() => handleLaunch(ws.id)}
+                          disabled={actionLoading || !prompt.trim()}
+                          className="text-sm bg-brand-600 text-white px-3 py-1.5 rounded hover:bg-brand-700 disabled:opacity-50 self-end"
+                        >
+                          Send
+                        </button>
                       </div>
                     )}
 
