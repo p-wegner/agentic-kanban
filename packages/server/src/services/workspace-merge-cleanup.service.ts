@@ -1,7 +1,6 @@
-import { eq } from "drizzle-orm";
-import { workspaces } from "@agentic-kanban/shared/schema";
 import { applyOpenSpecDeltas, OPENSPEC_CHANGES_DIR, OPENSPEC_SPECS_DIR } from "@agentic-kanban/shared/lib/openspec";
 import type { Database } from "../db/index.js";
+import { persistWorkspaceCleanupWarning, getWorkspaceById } from "../repositories/workspace-merge-cleanup.repository.js";
 import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
 import type { GitService } from "./workspace-internals.js";
@@ -143,9 +142,7 @@ async function removeWorktreeDirectory(
     addRecoverableWarning(warnings, "remove-worktree", err);
     const warningMsg = err instanceof Error ? err.message : String(err);
     try {
-      await deps.database.update(workspaces)
-        .set({ cleanupWarning: warningMsg, workingDir: args.workingDir, updatedAt: new Date().toISOString() })
-        .where(eq(workspaces.id, args.workspaceId));
+      await persistWorkspaceCleanupWarning(args.workspaceId, warningMsg, args.workingDir, deps.database);
     } catch (dbErr) {
       console.warn("[workspace-merge] failed to persist cleanup warning:", dbErr instanceof Error ? dbErr.message : String(dbErr));
     }
@@ -172,7 +169,7 @@ async function recordCleanupWarnings(
 ): Promise<void> {
   if (warnings.length === 0) return;
   try {
-    const workspace = await database.select().from(workspaces).where(eq(workspaces.id, args.workspaceId)).limit(1).then((r) => r[0]);
+    const workspace = await getWorkspaceById(args.workspaceId, database);
     if (!workspace) return;
     await insertIssueComment({
       issueId: workspace.issueId,

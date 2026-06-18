@@ -1,6 +1,5 @@
-import { sessions } from "@agentic-kanban/shared/schema";
-import { inArray } from "drizzle-orm";
 import type { Database } from "../db/index.js";
+import { getSessionStatsByWorkspaceIds } from "../repositories/session-stats.repository.js";
 
 /**
  * For a list of workspace IDs, query their latest sessions and return:
@@ -16,11 +15,7 @@ export async function enrichWorkspacesWithSessionData(
 
   if (wsIds.length === 0) return { contextTokensMap, lastToolMap };
 
-  const sessRows = await database
-    .select({ id: sessions.id, workspaceId: sessions.workspaceId, stats: sessions.stats })
-    .from(sessions)
-    .where(inArray(sessions.workspaceId, wsIds))
-    .orderBy(sessions.startedAt);
+  const sessRows = await getSessionStatsByWorkspaceIds(wsIds, database);
 
   const latestByWs = new Map<string, { id: string; stats: string | null }>();
   for (const s of sessRows) latestByWs.set(s.workspaceId, { id: s.id, stats: s.stats });

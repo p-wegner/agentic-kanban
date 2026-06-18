@@ -1,10 +1,9 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { issues, sessions, workspaces } from "@agentic-kanban/shared/schema";
-import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { db, type Database } from "../db/index.js";
 import { auditProcessEvent, guardProcessKill, protectedPids } from "./process-guard.js";
 import { resolveWorktreeDevPorts as resolveWorktreeDevPortsByPath } from "./worktree-ports.js";
+import { getAllWorkspaceWorkingDirs, getActiveWorkspaceResourceRows } from "../repositories/stale-dev-processes.repository.js";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_BOARD_SERVER_PORT = 3001;
@@ -266,7 +265,7 @@ export function classifyStaleDevProcessTrees(input: RuntimeSnapshotInput): Board
 }
 
 async function getWorkspaceCleanupScopePaths(database: Database): Promise<string[]> {
-  const rows = await database.select({ workingDir: workspaces.workingDir }).from(workspaces);
+  const rows = await getAllWorkspaceWorkingDirs(database);
   const paths = new Set<string>();
   for (const row of rows) {
     const dir = normalizePath(row.workingDir);
@@ -365,18 +364,7 @@ export async function listPortListeners(): Promise<PortListener[]> {
 }
 
 async function getActiveWorkspaceResources(database: Database): Promise<ActiveWorkspaceResource[]> {
-  const rows = await database
-    .select({
-      workspaceId: workspaces.id,
-      issueId: issues.id,
-      issueNumber: issues.issueNumber,
-      workingDir: workspaces.workingDir,
-      sessionPid: sessions.pid,
-    })
-    .from(workspaces)
-    .innerJoin(issues, eq(workspaces.issueId, issues.id))
-    .leftJoin(sessions, and(eq(sessions.workspaceId, workspaces.id), eq(sessions.status, "running")))
-    .where(and(sql`${workspaces.status} != 'closed'`, or(isNull(workspaces.closedAt), sql`${workspaces.closedAt} = ''`)));
+  const rows = await getActiveWorkspaceResourceRows(database);
 
   const byWorkspace = new Map<string, ActiveWorkspaceResource>();
   for (const row of rows) {

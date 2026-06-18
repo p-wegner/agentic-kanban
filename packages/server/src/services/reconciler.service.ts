@@ -1,8 +1,7 @@
-import { desc, sql } from "drizzle-orm";
-import { agentSkills } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import type { MergeQueuePlan } from "./merge-queue.service.js";
 import { MERGE_RECONCILER_PROMPT } from "./merge-reconciler-prompt.js";
+import { getMergeReconcilerSkillPrompt } from "../repositories/reconciler.repository.js";
 
 export interface ReconcilerPromptContext {
   baseBranch: string;
@@ -26,13 +25,8 @@ export async function buildReconcilerPrompt(
 ): Promise<string> {
   let template = MERGE_RECONCILER_PROMPT;
   if (ctx.projectId) {
-    const row = await database
-      .select({ prompt: agentSkills.prompt })
-      .from(agentSkills)
-      .where(sql`${agentSkills.name} = 'merge-reconciler' AND (${agentSkills.projectId} = ${ctx.projectId} OR ${agentSkills.projectId} IS NULL)`)
-      .orderBy(desc(agentSkills.projectId))
-      .limit(1);
-    if (row[0]?.prompt) template = row[0].prompt;
+    const prompt = await getMergeReconcilerSkillPrompt(ctx.projectId, database);
+    if (prompt) template = prompt;
   }
 
   const subs: Record<string, string> = {

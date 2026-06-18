@@ -1,12 +1,11 @@
 import type { db } from "../db/index.js";
-import { sessionMessages } from "@agentic-kanban/shared/schema";
 import type { workspaces } from "@agentic-kanban/shared/schema";
-import { eq, desc } from "drizzle-orm";
 import { detectConflicts } from "./git.service.js";
 import { getWorkspaceDiffStats } from "./workspace-diff-stats.js";
 import { extractMeaningfulOutput } from "@agentic-kanban/shared";
 import type { BoardStatusIssue } from "@agentic-kanban/shared";
 import { readSessionStdoutFile } from "../repositories/session.repository.js";
+import { getRecentSessionMessages } from "../repositories/board-status-enrichment.repository.js";
 import { parseAgentMessageFromJsonLine, parseLastAgentMessage } from "./session-message-parser.js";
 
 type WorkspaceRow = typeof workspaces.$inferSelect;
@@ -96,12 +95,7 @@ async function loadLastSessionOutput(
     return;
   }
 
-  const msgs = await database
-    .select({ type: sessionMessages.type, data: sessionMessages.data, createdAt: sessionMessages.createdAt })
-    .from(sessionMessages)
-    .where(eq(sessionMessages.sessionId, sessionId))
-    .orderBy(desc(sessionMessages.id))
-    .limit(50);
+  const msgs = await getRecentSessionMessages(sessionId, database);
 
   if (msgs.length > 0 && msgs[0].createdAt) {
     entry.lastActivity = msgs[0].createdAt;
