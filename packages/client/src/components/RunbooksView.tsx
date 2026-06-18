@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { apiFetch } from "../lib/api.js";
+import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 
 interface RunbookEntry {
   path: string;
@@ -17,26 +18,6 @@ interface RunbookContent {
 
 interface RunbooksViewProps {
   projectId: string | null;
-}
-
-function formatRelativeTime(iso: string): string {
-  try {
-    const date = new Date(iso);
-    const diffMs = Date.now() - date.getTime();
-    const diffSec = Math.floor(diffMs / 1000);
-    const diffMin = Math.floor(diffSec / 60);
-    const diffHr = Math.floor(diffMin / 60);
-    const diffDay = Math.floor(diffHr / 24);
-    if (diffDay > 30) {
-      return date.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
-    }
-    if (diffDay > 0) return `${diffDay}d ago`;
-    if (diffHr > 0) return `${diffHr}h ago`;
-    if (diffMin > 0) return `${diffMin}m ago`;
-    return "just now";
-  } catch {
-    return iso;
-  }
 }
 
 function SpinnerIcon({ className }: { className?: string }) {
