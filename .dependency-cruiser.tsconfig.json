@@ -1,0 +1,12 @@
+{
+  "// purpose": "Resolution-only tsconfig for dependency-cruiser. No 'extends'/'include' so depcruise does not mis-resolve relative paths; files to scan come from the CLI args. Mirrors tsconfig.base.json compilerOptions that affect module resolution.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "allowJs": true,
+    "allowImportingTsExtensions": true
+  }
+}
