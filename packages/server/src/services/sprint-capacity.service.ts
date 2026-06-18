@@ -1,8 +1,12 @@
-import { issues, preferences, projectStatuses, workspaces } from "@agentic-kanban/shared/schema";
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { deriveMonitorTunables, parseStrategyBullseyeConfig, type MonitorTunables } from "./strategy-objective.service.js";
-import { ACTIVE_WORKSPACE_STATUSES } from "@agentic-kanban/shared";
+import {
+  countActiveWorkspaceIssues,
+  getIssueIdsWithOpenWorkspace,
+  getIssuesByStatusIds,
+  getProjectStatusList,
+  getStrategyBullseyePref,
+} from "../repositories/sprint-capacity.repository.js";
 
 export interface SprintCapacityPolicy {
   activeAgentsTarget: number;
@@ -30,16 +34,11 @@ export interface SprintCapacityPlan {
 }
 
 async function loadMonitorTunables(database: Database, projectId: string): Promise<MonitorTunables> {
-  const strategyKey = `board_strategy_${projectId}`;
-  const rows = await database
-    .select({ value: preferences.value })
-    .from(preferences)
-    .where(eq(preferences.key, strategyKey))
-    .limit(1);
+  const value = await getStrategyBullseyePref(projectId, database);
 
-  if (rows[0]?.value) {
+  if (value) {
     try {
-      const config = parseStrategyBullseyeConfig(rows[0].value);
+      const config = parseStrategyBullseyeConfig(value);
       return deriveMonitorTunables(config);
     } catch {
       // fall through to defaults
@@ -50,16 +49,7 @@ async function loadMonitorTunables(database: Database, projectId: string): Promi
 }
 
 async function countActiveWorkspaces(database: Database, projectId: string): Promise<number> {
-  const rows = await database
-    .select({ count: sql<number>`count(distinct ${issues.id})` })
-    .from(issues)
-    .innerJoin(workspaces, eq(workspaces.issueId, issues.id))
-    .where(and(
-      eq(issues.projectId, projectId),
-      inArray(workspaces.status, [...ACTIVE_WORKSPACE_STATUSES]),
-    ));
-
-  return Number(rows[0]?.count ?? 0);
+  return countActiveWorkspaceIssues(projectId, database);
 }
 
 const BACKLOG_STATUS_NAMES = new Set(["Backlog", "Todo"]);
@@ -69,10 +59,7 @@ async function fetchEligibleIssues(
   projectId: string,
 ): Promise<SprintEligibleIssue[]> {
   // Get all open statuses
-  const allStatuses = await database
-    .select({ id: projectStatuses.id, name: projectStatuses.name })
-    .from(projectStatuses)
-    .where(eq(projectStatuses.projectId, projectId));
+  const allStatuses = await getProjectStatusList(projectId, database);
 
   const backlogStatusIds = allStatuses
     .filter((s) => BACKLOG_STATUS_NAMES.has(s.name))
@@ -81,33 +68,14 @@ async function fetchEligibleIssues(
   if (backlogStatusIds.length === 0) return [];
 
   // Get all backlog issues
-  const backlogIssues = await database
-    .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
-      priority: issues.priority,
-      statusName: projectStatuses.name,
-    })
-    .from(issues)
-    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-    .where(and(
-      eq(issues.projectId, projectId),
-      inArray(issues.statusId, backlogStatusIds),
-    ));
+  const backlogIssues = await getIssuesByStatusIds(projectId, backlogStatusIds, database);
 
   if (backlogIssues.length === 0) return [];
 
   const issueIds = backlogIssues.map((i) => i.id);
 
   // Check which issues already have an open workspace
-  const openWorkspaceRows = await database
-    .select({ issueId: workspaces.issueId })
-    .from(workspaces)
-    .where(and(
-      inArray(workspaces.issueId, issueIds),
-      ne(workspaces.status, "closed"),
-    ));
+  const openWorkspaceRows = await getIssueIdsWithOpenWorkspace(issueIds, database);
   const issueIdsWithOpenWorkspace = new Set(openWorkspaceRows.map((r) => r.issueId));
 
   return backlogIssues.map((issue) => {
