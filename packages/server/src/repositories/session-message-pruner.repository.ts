@@ -3,6 +3,16 @@ import { desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
+/**
+ * Extract the affected-row count from a drizzle delete/update result. The libsql
+ * driver (used in both production and tests) reports this as `rowsAffected`;
+ * better-sqlite3 used `changes`. Support both so the count is never silently 0.
+ */
+function rowsAffected(result: unknown): number {
+  const r = result as { rowsAffected?: number; changes?: number };
+  return r.rowsAffected ?? r.changes ?? 0;
+}
+
 export async function getStaleWorkspaceIds(
   cutoff: string,
   database: Database = db,
@@ -34,7 +44,7 @@ export async function deleteSessionMessagesForSessions(
   const result = await database
     .delete(sessionMessages)
     .where(inArray(sessionMessages.sessionId, sessionIds));
-  return (result as { changes?: number }).changes ?? 0;
+  return rowsAffected(result);
 }
 
 export async function getOverflowSessions(
@@ -73,5 +83,5 @@ export async function deleteSessionMessagesUpToId(
     .where(
       sql`${sessionMessages.sessionId} = ${sessionId} AND ${sessionMessages.id} <= ${thresholdId}`,
     );
-  return (result as { changes?: number }).changes ?? 0;
+  return rowsAffected(result);
 }

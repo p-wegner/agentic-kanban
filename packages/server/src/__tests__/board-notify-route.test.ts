@@ -13,6 +13,8 @@ function createMockBoardEvents(): BoardEvents & { broadcasts: Array<{ projectId:
     }),
     subscribe: vi.fn(),
     unsubscribe: vi.fn(),
+    addInvalidationListener: vi.fn(),
+    removeInvalidationListener: vi.fn(),
   } as unknown as BoardEvents & { broadcasts: Array<{ projectId: string; reason: string }> };
 }
 
