@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { PROVIDER_NAMES } from "../services/agent-provider/types.js";
-import { getProvider } from "../services/agent-provider/registry.js";
+import { getProvider, getProfilePrefKey, narrowProviderName } from "../services/agent-provider/registry.js";
 
 /**
  * Locks the agent-provider PORT to its registry. The provider abstraction
@@ -32,5 +32,27 @@ describe("agent-provider registry parity", () => {
 
   it("throws on an unknown provider name", () => {
     expect(() => getProvider("not-a-real-provider")).toThrow(/Unknown agent provider/);
+  });
+
+  it("every provider owns a distinct, conventional profilePrefKey", () => {
+    const keys = PROVIDER_NAMES.map((name) => getProvider(name).profilePrefKey);
+    for (const name of PROVIDER_NAMES) {
+      expect(getProvider(name).profilePrefKey, `${name} profilePrefKey`).toBe(`${name}_profile`);
+    }
+    expect(new Set(keys).size, "profilePrefKeys must be distinct").toBe(PROVIDER_NAMES.length);
+  });
+
+  it("getProfilePrefKey resolves untrusted strings (incl. claude-code) to the right key", () => {
+    expect(getProfilePrefKey("codex")).toBe("codex_profile");
+    expect(getProfilePrefKey("claude-code")).toBe("claude_profile");
+    expect(getProfilePrefKey(undefined)).toBe("claude_profile");
+    expect(getProfilePrefKey("garbage")).toBe("claude_profile");
+  });
+
+  it("narrowProviderName canonicalizes and defaults to claude", () => {
+    expect(narrowProviderName("codex")).toBe("codex");
+    expect(narrowProviderName("claude-code")).toBe("claude");
+    expect(narrowProviderName(null)).toBe("claude");
+    expect(narrowProviderName("nonsense")).toBe("claude");
   });
 });

@@ -118,6 +118,14 @@ export interface ParsedStreamEvent {
 export interface AgentProvider {
   readonly name: string;
 
+  /**
+   * The preference key holding this provider's selected profile (e.g.
+   * "codex_profile"). The provider OWNS this mapping so the provider→pref-key
+   * ladder need not be hand-rolled across services — read it via the registry's
+   * getProfilePrefKey().
+   */
+  readonly profilePrefKey: string;
+
   /** Build the full spawn configuration for this provider. */
   buildLaunchConfig(options: ProviderLaunchOptions): AgentLaunchConfig;
 

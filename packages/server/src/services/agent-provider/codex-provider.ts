@@ -15,6 +15,7 @@ function numberValue(value: unknown): number {
 
 export class CodexProvider implements AgentProvider {
   readonly name = "codex";
+  readonly profilePrefKey = "codex_profile";
   private readonly fs: FileSystem;
 
   constructor(fs: FileSystem = nodeFileSystem) {
