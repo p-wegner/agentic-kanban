@@ -1,14 +1,5 @@
 import type { Database } from "../db/index.js";
 import {
-  workflowTemplates,
-  workflowNodes,
-  workflowEdges,
-  workflowTransitions,
-  issues,
-  workspaces,
-} from "@agentic-kanban/shared/schema";
-import { and, eq, asc, sql } from "drizzle-orm";
-import {
   createWorkflowTemplate,
   proposeTransition,
   resolveTemplateForIssue,
@@ -21,6 +12,23 @@ import {
   evaluateCondition,
 } from "@agentic-kanban/shared/lib/workflow-engine";
 import type { SignalContext } from "@agentic-kanban/shared/lib/workflow-engine";
+import {
+  loadGraph,
+  listTemplateRows,
+  getTemplateRow,
+  insertTemplate,
+  updateTemplateRow,
+  deleteTemplateCascade,
+  getAnalyticsRows,
+  getStageNodeRow,
+  getStageVisitRows,
+  getIssueResolveRow,
+  getWorkspaceProgressRow,
+  getIssueTemplateIdRow,
+  getWorkspaceTransitions,
+  getCurrentNodeRow,
+  getWorkspaceProjectRow,
+} from "../repositories/workflow.repository.js";
 import { randomUUID } from "node:crypto";
 import type { BoardEvents } from "./board-events.js";
 import { materializeSpecTasksForWorkspace } from "./spec-tasks-materialization.service.js";
@@ -129,23 +137,6 @@ function validateImportedTemplate(spec: ReturnType<typeof normalizeImportedTempl
   return errors;
 }
 
-/** Load a template's nodes + edges as a graph payload. */
-async function loadGraph(database: Database, templateId: string) {
-  const [nodes, edges] = await Promise.all([
-    database
-      .select()
-      .from(workflowNodes)
-      .where(eq(workflowNodes.templateId, templateId))
-      .orderBy(asc(workflowNodes.sortOrder)),
-    database
-      .select()
-      .from(workflowEdges)
-      .where(eq(workflowEdges.templateId, templateId))
-      .orderBy(asc(workflowEdges.sortOrder)),
-  ]);
-  return { nodes, edges };
-}
-
 async function validateTransitionRequest(
   database: Database,
   input: {
@@ -200,14 +191,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps) {
     ticketType?: string;
     withGraph?: boolean;
   }) {
-    const rows = await database
-      .select()
-      .from(workflowTemplates)
-      .where(
-        opts.projectId
-          ? sql`${workflowTemplates.projectId} = ${opts.projectId} OR ${workflowTemplates.projectId} IS NULL`
-          : sql`1 = 1`,
-      );
+    const rows = await listTemplateRows({ projectId: opts.projectId }, database);
 
     let filtered = rows;
     if (opts.ticketType) {
@@ -221,22 +205,14 @@ export function createWorkflowService(deps: WorkflowServiceDeps) {
   }
 
   async function getTemplate(id: string) {
-    const rows = await database
-      .select()
-      .from(workflowTemplates)
-      .where(eq(workflowTemplates.id, id))
-      .limit(1);
+    const rows = await getTemplateRow(id, database);
     if (rows.length === 0) return { error: "Template not found" as const };
     const graph = await loadGraph(database, id);
     return { data: { ...rows[0], ...graph } };
   }
 
   async function exportTemplate(id: string) {
-    const rows = await database
-      .select()
-      .from(workflowTemplates)
-      .where(eq(workflowTemplates.id, id))
-      .limit(1);
+    const rows = await getTemplateRow(id, database);
     if (rows.length === 0) return { error: "Template not found" as const };
     const graph = await loadGraph(database, id);
     return { data: toTemplateJson(rows[0], graph) };
@@ -261,7 +237,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps) {
     let tplType = opts.ticketType ?? null;
 
     if (opts.cloneFrom) {
-      const src = await database.select().from(workflowTemplates).where(eq(workflowTemplates.id, opts.cloneFrom)).limit(1);
+      const src = await getTemplateRow(opts.cloneFrom, database);
       if (src.length === 0) return { error: "cloneFrom template not found" as const };
       const g = await loadGraph(database, opts.cloneFrom);
       srcNodes = g.nodes.map((n) => ({ ...n }));
@@ -282,13 +258,13 @@ export function createWorkflowService(deps: WorkflowServiceDeps) {
 
     const now = new Date().toISOString();
     const id = randomUUID();
-    await database.insert(workflowTemplates).values({
+    await insertTemplate({
       id, projectId: opts.projectId, name: tplName, description: tplDesc ?? null, ticketType: tplType,
       isDefault: !!opts.isDefault, isBuiltin: false, builtinKey: null, createdAt: now, updatedAt: now,
-    });
+    }, database);
     await writeTemplateGraph(database, id, srcNodes, srcEdges);
     boardEvents?.broadcast(opts.projectId, "workflow_template_saved");
-    const rows = await database.select().from(workflowTemplates).where(eq(workflowTemplates.id, id)).limit(1);
+    const rows = await getTemplateRow(id, database);
     return { data: { ...rows[0], ...(await loadGraph(database, id)) } };
   }
 
@@ -312,11 +288,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps) {
     if (!result.ok) return { error: "Invalid workflow graph" as const, errors: result.errors };
 
     boardEvents?.broadcast(opts.projectId, "workflow_template_saved");
-    const rows = await database
-      .select()
-      .from(workflowTemplates)
-      .where(eq(workflowTemplates.id, result.id))
-      .limit(1);
+    const rows = await getTemplateRow(result.id, database);
     return { data: { ...rows[0], ...(await loadGraph(database, result.id)) } };
   }
 
@@ -328,7 +300,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps) {
     nodes?: any[];
     edges?: any[];
   }) {
-    const rows = await database.select().from(workflowTemplates).where(eq(workflowTemplates.id, id)).limit(1);
+    const rows = await getTemplateRow(id, database);
     if (rows.length === 0) return { error: "Template not found" as const };
     if (rows[0].isBuiltin) {
       return { error: "Built-in workflows cannot be edited. Duplicate it first (POST with cloneFrom)." as const };
@@ -346,28 +318,26 @@ export function createWorkflowService(deps: WorkflowServiceDeps) {
     }
 
     const now = new Date().toISOString();
-    await database.update(workflowTemplates).set({
+    await updateTemplateRow(id, {
       name: opts.name ?? rows[0].name,
       description: opts.description !== undefined ? opts.description : rows[0].description,
       ticketType: opts.ticketType !== undefined ? opts.ticketType : rows[0].ticketType,
       isDefault: opts.isDefault !== undefined ? !!opts.isDefault : rows[0].isDefault,
       updatedAt: now,
-    }).where(eq(workflowTemplates.id, id));
+    }, database);
     if (shouldWriteGraph) {
       await writeTemplateGraph(database, id, nodes, edges);
     }
     if (rows[0].projectId) boardEvents?.broadcast(rows[0].projectId, "workflow_template_saved");
-    const updatedRows = await database.select().from(workflowTemplates).where(eq(workflowTemplates.id, id)).limit(1);
+    const updatedRows = await getTemplateRow(id, database);
     return { data: { ...updatedRows[0], ...(await loadGraph(database, id)) } };
   }
 
   async function deleteTemplate(id: string) {
-    const rows = await database.select().from(workflowTemplates).where(eq(workflowTemplates.id, id)).limit(1);
+    const rows = await getTemplateRow(id, database);
     if (rows.length === 0) return { error: "Template not found" as const };
     if (rows[0].isBuiltin) return { error: "Built-in workflows cannot be deleted." as const };
-    await database.delete(workflowEdges).where(eq(workflowEdges.templateId, id));
-    await database.delete(workflowNodes).where(eq(workflowNodes.templateId, id));
-    await database.delete(workflowTemplates).where(eq(workflowTemplates.id, id));
+    await deleteTemplateCascade(id, database);
     if (rows[0].projectId) boardEvents?.broadcast(rows[0].projectId, "workflow_template_deleted");
     return { ok: true };
   }
@@ -375,23 +345,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps) {
   // ── Analytics ──────────────────────────────────────────────────────────
 
   async function getAnalytics(projectId: string) {
-    const rows = await database
-      .select({
-        workspaceId: workflowTransitions.workspaceId,
-        toNodeId: workflowTransitions.toNodeId,
-        createdAt: workflowTransitions.createdAt,
-        nodeName: workflowNodes.name,
-        nodeType: workflowNodes.nodeType,
-        templateId: workflowNodes.templateId,
-        templateName: workflowTemplates.name,
-        sortOrder: workflowNodes.sortOrder,
-      })
-      .from(workflowTransitions)
-      .innerJoin(workspaces, eq(workflowTransitions.workspaceId, workspaces.id))
-      .innerJoin(issues, eq(workspaces.issueId, issues.id))
-      .leftJoin(workflowNodes, eq(workflowTransitions.toNodeId, workflowNodes.id))
-      .leftJoin(workflowTemplates, eq(workflowNodes.templateId, workflowTemplates.id))
-      .where(eq(issues.projectId, projectId));
+    const rows = await getAnalyticsRows(projectId, database);
 
     const byWorkspace = new Map<string, typeof rows>();
     for (const r of rows) {
@@ -532,29 +486,10 @@ export function createWorkflowService(deps: WorkflowServiceDeps) {
   }) {
     const { templateId, nodeId, projectId } = opts;
 
-    const nodeRows = await database
-      .select({ id: workflowNodes.id, name: workflowNodes.name, nodeType: workflowNodes.nodeType })
-      .from(workflowNodes)
-      .where(and(eq(workflowNodes.id, nodeId), eq(workflowNodes.templateId, templateId)))
-      .limit(1);
+    const nodeRows = await getStageNodeRow(templateId, nodeId, database);
     if (nodeRows.length === 0) return { error: "Workflow stage not found" as const };
 
-    const baseQuery = database
-      .select({
-        workspaceId: workflowTransitions.workspaceId,
-        workspaceName: workspaces.branch,
-        issueId: issues.id,
-        issueNumber: issues.issueNumber,
-        issueTitle: issues.title,
-        toNodeId: workflowTransitions.toNodeId,
-        enteredAt: workflowTransitions.createdAt,
-        currentNodeId: workspaces.currentNodeId,
-      })
-      .from(workflowTransitions)
-      .innerJoin(workspaces, eq(workflowTransitions.workspaceId, workspaces.id))
-      .innerJoin(issues, eq(workspaces.issueId, issues.id));
-
-    const rows = projectId ? await baseQuery.where(eq(issues.projectId, projectId)) : await baseQuery;
+    const rows = await getStageVisitRows(projectId, database);
 
     const byWorkspace = new Map<string, typeof rows>();
     for (const r of rows) {
@@ -613,15 +548,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps) {
     issueType?: string;
   }) {
     if (opts.issueId) {
-      const rows = await database
-        .select({
-          projectId: issues.projectId,
-          issueType: issues.issueType,
-          workflowTemplateId: issues.workflowTemplateId,
-        })
-        .from(issues)
-        .where(eq(issues.id, opts.issueId))
-        .limit(1);
+      const rows = await getIssueResolveRow(opts.issueId, database);
       if (rows.length === 0) return { error: "Issue not found" as const };
       const templateId = await resolveTemplateForIssue(database, {
         projectId: rows[0].projectId,
@@ -641,30 +568,14 @@ export function createWorkflowService(deps: WorkflowServiceDeps) {
   }
 
   async function getWorkspaceProgress(workspaceId: string) {
-    const wsRows = await database
-      .select({
-        id: workspaces.id,
-        issueId: workspaces.issueId,
-        currentNodeId: workspaces.currentNodeId,
-      })
-      .from(workspaces)
-      .where(eq(workspaces.id, workspaceId))
-      .limit(1);
+    const wsRows = await getWorkspaceProgressRow(workspaceId, database);
     if (wsRows.length === 0) return { error: "Workspace not found" as const };
     const ws = wsRows[0];
 
-    const issueRows = await database
-      .select({ workflowTemplateId: issues.workflowTemplateId })
-      .from(issues)
-      .where(eq(issues.id, ws.issueId))
-      .limit(1);
+    const issueRows = await getIssueTemplateIdRow(ws.issueId, database);
     const templateId = issueRows[0]?.workflowTemplateId ?? null;
 
-    const transitions = await database
-      .select()
-      .from(workflowTransitions)
-      .where(eq(workflowTransitions.workspaceId, workspaceId))
-      .orderBy(asc(workflowTransitions.createdAt));
+    const transitions = await getWorkspaceTransitions(workspaceId, database);
 
     const graph = templateId ? await loadGraph(database, templateId) : { nodes: [], edges: [] };
     const currentNode = ws.currentNodeId
@@ -706,12 +617,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps) {
       return { error: "toNodeId or toNodeName is required" };
     }
 
-    const currentRows = await database
-      .select({ currentNodeId: workspaces.currentNodeId, nodeName: workflowNodes.name })
-      .from(workspaces)
-      .leftJoin(workflowNodes, eq(workspaces.currentNodeId, workflowNodes.id))
-      .where(eq(workspaces.id, workspaceId))
-      .limit(1);
+    const currentRows = await getCurrentNodeRow(workspaceId, database);
 
     const signals = await computeWorkspaceSignals(database, workspaceId);
     const transitionError = await validateTransitionRequest(database, {
@@ -754,12 +660,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps) {
       return { error: result.error };
     }
 
-    const projRows = await database
-      .select({ projectId: issues.projectId })
-      .from(workspaces)
-      .innerJoin(issues, eq(workspaces.issueId, issues.id))
-      .where(eq(workspaces.id, workspaceId))
-      .limit(1);
+    const projRows = await getWorkspaceProjectRow(workspaceId, database);
     if (projRows[0]?.projectId) {
       boardEvents?.broadcast(projRows[0].projectId, "workflow_transition");
     }
