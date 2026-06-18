@@ -546,6 +546,8 @@ function StrategyBoard({
         ref={svgRef}
         viewBox={`0 0 ${size} ${size}`}
         className="h-full w-full touch-none"
+        role="img"
+        aria-label={`Strategy bullseye: ${segments.length} segment${segments.length === 1 ? "" : "s"}, drag a marker toward the centre to raise its priority. A keyboard-accessible list of the same segments is below.`}
         onPointerDown={handlePointer}
         onPointerMove={(event) => {
           if (event.buttons === 1) handlePointer(event);
