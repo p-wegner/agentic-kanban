@@ -1,9 +1,8 @@
-import { and, eq, gte, inArray } from "drizzle-orm";
-import { agentSkills, issues, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import type { SessionFrictionStats } from "@agentic-kanban/shared";
-import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createRouter } from "../middleware/create-router.js";
+import { getInsightsSessionRows } from "../repositories/session.repository.js";
+import { getActiveWorkspacesForProject } from "../repositories/workspace.repository.js";
 
 const RANGE_DAYS = {
   "7d": 7,
@@ -327,7 +326,7 @@ function addUtcDays(date: Date, days: number) {
   return next;
 }
 
-export function createInsightsRoute(database: Database = db) {
+export function createInsightsRoute(database: Database) {
   const router = createRouter();
 
   router.get("/", async (c) => {
@@ -350,52 +349,14 @@ export function createInsightsRoute(database: Database = db) {
         ? null
         : startOfUtcDay(addUtcDays(now, -(RANGE_DAYS[range] - 1)));
 
-    const whereClause = queryDateFrom
-      ? and(
-          eq(issues.projectId, projectId),
-          gte(sessions.startedAt, queryDateFrom.toISOString()),
-        )
-      : eq(issues.projectId, projectId);
-
-    const rows = await database
-      .select({
-        sessionId: sessions.id,
-        workspaceId: sessions.workspaceId,
-        stats: sessions.stats,
-        startedAt: sessions.startedAt,
-        exitCode: sessions.exitCode,
-        wsModel: workspaces.model,
-        wsSkillId: workspaces.skillId,
-        wsProvider: workspaces.provider,
-        wsClaudeProfile: workspaces.claudeProfile,
-        sessionSkillId: sessions.skillId,
-        sessionSkillName: sessions.skillName,
-        issueType: issues.issueType,
-        issuePriority: issues.priority,
-        issueTitle: issues.title,
-        issueNumber: issues.issueNumber,
-        issueId: issues.id,
-        skillName: agentSkills.name,
-      })
-      .from(sessions)
-      .innerJoin(workspaces, eq(sessions.workspaceId, workspaces.id))
-      .innerJoin(issues, eq(workspaces.issueId, issues.id))
-      .leftJoin(agentSkills, eq(workspaces.skillId, agentSkills.id))
-      .where(whereClause);
+    const rows = await getInsightsSessionRows(
+      projectId,
+      queryDateFrom ? queryDateFrom.toISOString() : null,
+      database,
+    );
 
     // Fetch active workspace IDs grouped by provider/profile for the ledger
-    const activeWorkspaceRows = await database
-      .select({
-        id: workspaces.id,
-        provider: workspaces.provider,
-        claudeProfile: workspaces.claudeProfile,
-      })
-      .from(workspaces)
-      .innerJoin(issues, eq(workspaces.issueId, issues.id))
-      .where(and(
-        eq(issues.projectId, projectId),
-        inArray(workspaces.status, ["active", "fixing"]),
-      ));
+    const activeWorkspaceRows = await getActiveWorkspacesForProject(projectId, database);
 
     const bySkill = new Map<string, SkillBucket>();
     const byModel = new Map<string, ModelBucket>();
