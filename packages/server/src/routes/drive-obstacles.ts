@@ -1,17 +1,14 @@
-import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import {
-  DRIVE_OBSTACLE_KINDS,
-  DRIVE_OBSTACLE_SEVERITIES,
-} from "@agentic-kanban/shared/schema";
-import type { DriveObstacleKind, DriveObstacleSeverity } from "@agentic-kanban/shared/schema";
-import {
   createDriveObstacleService,
   isDriveObstacleKind,
   isDriveObstacleSeverity,
+  DRIVE_OBSTACLE_KINDS,
+  DRIVE_OBSTACLE_SEVERITIES,
 } from "../services/drive-obstacles.service.js";
+import type { DriveObstacleKind, DriveObstacleSeverity } from "../services/drive-obstacles.service.js";
 import type { BoardEvents } from "../services/board-events.js";
 
 const VALID_KINDS = new Set<string>(DRIVE_OBSTACLE_KINDS);
@@ -50,7 +47,7 @@ interface DriveObstaclesRouteOptions {
  *        by detectors that run inside a request; broadcasts a `drive_obstacle` event.
  */
 export function createDriveObstaclesRoute(
-  database: Database = db,
+  database: Database,
   options: DriveObstaclesRouteOptions = {},
 ) {
   const router = createRouter();

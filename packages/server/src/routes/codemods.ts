@@ -7,10 +7,9 @@ import {
   findSkillByName,
   listAgentSkills,
   getAgentSkillById,
+  updateAgentSkill,
 } from "../repositories/agent-skill.repository.js";
 import type { Database } from "../db/index.js";
-import { agentSkills } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
 
 export function createCodemodsRoute(database: Database) {
   const router = createRouter();
@@ -136,7 +135,7 @@ export function createCodemodsRoute(database: Database) {
     );
 
     // Update type to 'codemod'
-    await database.update(agentSkills).set({ type: "codemod" }).where(eq(agentSkills.id, codemod.id));
+    await updateAgentSkill(codemod.id, { type: "codemod" }, database);
 
     return c.json({ ...codemod, type: "codemod" }, 201);
   });

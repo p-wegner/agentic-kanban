@@ -1,13 +1,12 @@
 import { homedir } from "node:os";
 import { sep } from "node:path";
-import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createPreferenceService } from "../services/preference.service.js";
 import { spawnCodexLogin } from "../services/codex-login.service.js";
 import { listCodexLicenses, parseCodexLicenseRing } from "../services/codex-license-ring.js";
 import { spawnClaudeLogin } from "../services/claude-login.service.js";
 import { listClaudeSubscriptions, parseClaudeSubscriptionRing } from "../services/claude-subscription-ring.js";
-import { getPreference } from "../repositories/preferences.repository.js";
+import { getPreference, getAllPreferences } from "../repositories/preferences.repository.js";
 import { PREF_CODEX_LICENSE_RING, PREF_CLAUDE_SUBSCRIPTION_RING } from "../constants/preference-keys.js";
 import {
   listAgentProfileHealth,
@@ -20,10 +19,9 @@ import { createAgentSkillService } from "../services/agent-skill.service.js";
 import { createTagService } from "../services/tag.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
-import { preferences } from "@agentic-kanban/shared/schema";
 import type { ProviderName } from "../services/agent-provider.js";
 
-export function createPreferencesRoute(database: Database = db) {
+export function createPreferencesRoute(database: Database) {
   const router = createRouter();
   const preferenceService = createPreferenceService({ database });
   const agentSkillService = createAgentSkillService({ database });
@@ -173,7 +171,7 @@ export function createPreferencesRoute(database: Database = db) {
       return c.json({ ok: false, status: "error", errors: ["Unsupported provider"], warnings: [], flags: [], command: "", provider: body.provider ?? "", profileName: body.profileName ?? "" }, 400);
     }
     const profileName = body.profileName?.trim() || "default";
-    const prefRows = await database.select().from(preferences);
+    const prefRows = await getAllPreferences(database);
     const prefMap = new Map(prefRows.map((row) => [row.key, row.value]));
     const result: AgentProfilePreflightResult = preflightAgentProfile(prefMap, provider, profileName);
     return c.json(result);
