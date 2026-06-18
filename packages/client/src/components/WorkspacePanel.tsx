@@ -261,6 +261,12 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
   const [quickDropdownOpen, setQuickDropdownOpen] = useState(false);
   const [selectedWorkspace, setSelectedWorkspace] = useState<string | null>(initialWorkspaceId ?? null);
   const [activeSession, setActiveSession] = useState<string | null>(initialSessionId || null);
+  // Immediate optimistic feedback for fix-and-merge / resolve-conflicts launches.
+  // The POST does a multi-second preflight (kill worktree procs + rebase onto base)
+  // before the agent session even exists, so without this the button click looks dead.
+  const [launchingFix, setLaunchingFix] = useState<
+    { wsId: string; kind: "fix-and-merge" | "resolve" } | null
+  >(null);
   const {
     mode: panelMode,
     setMode: setPanelMode,
@@ -790,16 +796,24 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     setActionLoading(true);
     setError(null);
     setMergeError(null);
+    // Show feedback the instant the button is pressed — the POST below blocks for
+    // several seconds on a preflight rebase before the session exists, and we want
+    // the live agent output front-and-centre the moment it does.
+    setLaunchingFix({ wsId, kind: "fix-and-merge" });
+    setSelectedHistoryId(null);
+    setViewMode("output");
     try {
       const result = await apiFetch<{ sessionId: string }>(`/api/workspaces/${wsId}/fix-and-merge`, {
         method: "POST",
         body: JSON.stringify({ mergeError: errorMessage }),
       });
       setActiveSession(result.sessionId);
+      setViewMode("output");
       await fetchWorkspaces();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Fix-and-merge launch failed");
     } finally {
+      setLaunchingFix(null);
       setActionLoading(false);
     }
   }
@@ -952,6 +966,9 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
   async function handleResolveConflicts(wsId: string) {
     setActionLoading(true);
     setError(null);
+    setLaunchingFix({ wsId, kind: "resolve" });
+    setSelectedHistoryId(null);
+    setViewMode("output");
     try {
       const result = await apiFetch<{ sessionId: string }>(
         `/api/workspaces/${wsId}/resolve-conflicts`,
@@ -960,9 +977,11 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
       setActiveSession(result.sessionId);
       setCompletedMessages([]);
       setConflictState(null);
+      setViewMode("output");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Resolve conflicts failed");
     } finally {
+      setLaunchingFix(null);
       setActionLoading(false);
     }
   }
@@ -1695,17 +1714,39 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                   </div>
                 )}
 
+                {isSelected && launchingFix?.wsId === ws.id && (
+                  <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                    <svg className="w-4 h-4 text-blue-600 dark:text-blue-400 animate-spin shrink-0" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z" />
+                    </svg>
+                    <div className="text-xs text-blue-700 dark:text-blue-300">
+                      <span className="font-medium">
+                        {launchingFix.kind === "resolve" ? "Launching conflict resolution…" : "Launching fix &amp; merge…"}
+                      </span>
+                      <span className="text-blue-600/80 dark:text-blue-400/80"> preparing worktree (rebasing onto {ws.baseBranch || "base"}), then starting the AI agent.</span>
+                    </div>
+                  </div>
+                )}
+
                 {isSelected && ws.status === "fixing" && (() => {
                   const fixSession = sessions.find(s => s.triggerType === "fix-and-merge" && s.status === "running")
                     ?? sessions.filter(s => s.triggerType === "fix-and-merge").at(-1);
                   const conflictFiles = ws.conflicts?.conflictingFiles ?? [];
+                  const watchingLive = !!fixSession && activeSession === fixSession.id;
+                  const noOutputYet = watchingLive && messages.length === 0;
                   return (
                     <div className="mt-2 p-2 bg-orange-50 dark:bg-orange-950 border border-orange-200 dark:border-orange-800 rounded space-y-1.5" onClick={(e) => e.stopPropagation()}>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-sm font-medium text-orange-700 dark:text-orange-400 animate-pulse">AI Fixing Conflicts</span>
                         {ws.baseBranch && (
                           <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">
                             target: {ws.baseBranch}
+                          </span>
+                        )}
+                        {watchingLive && (
+                          <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${wsState === "open" ? "bg-green-100 text-green-700" : "bg-gray-200 text-gray-600"}`}>
+                            {wsState === "open" ? "● live" : wsState}
                           </span>
                         )}
                       </div>
@@ -1721,19 +1762,41 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                           </ul>
                         </div>
                       )}
-                      {fixSession && (
-                        <button
-                          onClick={() => handleViewHistory(fixSession.id)}
-                          className="text-xs text-orange-600 dark:text-orange-400 hover:text-orange-800 dark:hover:text-orange-200 underline"
-                        >
-                          View fix session output
-                        </button>
+                      {noOutputYet && (
+                        <div className="text-xs text-orange-600 dark:text-orange-400">
+                          Connected — waiting for the agent's first output. If nothing appears after a minute or two the session may be stuck; use Stop and retry.
+                        </div>
                       )}
+                      <div className="flex items-center gap-3">
+                        {fixSession && !watchingLive && (
+                          <button
+                            onClick={() => { setSelectedHistoryId(null); setActiveSession(fixSession.id); setViewMode("output"); }}
+                            className="text-xs text-orange-700 dark:text-orange-300 hover:text-orange-900 dark:hover:text-orange-100 underline font-medium"
+                          >
+                            Watch live output
+                          </button>
+                        )}
+                        {fixSession && (
+                          <button
+                            onClick={() => handleViewHistory(fixSession.id)}
+                            className="text-xs text-orange-600 dark:text-orange-400 hover:text-orange-800 dark:hover:text-orange-200 underline"
+                          >
+                            View session log
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleStop(ws.id)}
+                          disabled={actionLoading}
+                          className="text-xs text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200 underline disabled:opacity-50 ml-auto"
+                        >
+                          Stop fix session
+                        </button>
+                      </div>
                     </div>
                   );
                 })()}
 
-                {isSelected && ws.status === "idle" && (() => {
+                {isSelected && !launchingFix && ws.status === "idle" && (() => {
                   const lastFixAndMerge = completedSessions.filter(s => s.triggerType === "fix-and-merge").at(-1);
                   if (!lastFixAndMerge) return null;
                   const succeeded = lastFixAndMerge.status === "completed";
