@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { FormEvent } from "react";
 import { apiFetch } from "../lib/api.js";
 import { STATUS_COLORS, ACCENT, BRAND } from "../lib/chartColors.js";
+import { showToast } from "./Toast.js";
 import type { DriveDashboard as DriveDashboardData } from "@agentic-kanban/shared";
 
 /**
@@ -48,6 +50,7 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
   const [data, setData] = useState<DriveDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showStartForm, setShowStartForm] = useState(false);
 
   // Load the drive list and default to the most recent active drive.
   const fetchDrives = useCallback(() => {
@@ -71,6 +74,17 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
   useEffect(() => {
     fetchDrives();
   }, [fetchDrives]);
+
+  // A new drive was started — select it, close the form, and refresh the list so
+  // it (and its dashboard) appear immediately.
+  const handleStarted = useCallback(
+    (driveId: string) => {
+      setShowStartForm(false);
+      setSelectedDriveId(driveId);
+      fetchDrives();
+    },
+    [fetchDrives],
+  );
 
   // Fetch (and poll) the selected drive's dashboard.
   const fetchDashboard = useCallback(() => {
@@ -120,12 +134,30 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
 
   if (!loading && drives.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 gap-2 text-gray-400 dark:text-gray-500">
-        <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-        </svg>
-        <span className="text-sm">No drives yet for this project.</span>
-        <span className="text-xs">Start one via the API or the drive-new-project skill.</span>
+      <div className="flex flex-col items-center justify-center h-full gap-3 p-4 text-gray-400 dark:text-gray-500">
+        {showStartForm ? (
+          <div className="w-full max-w-lg">
+            <StartDriveForm
+              projectId={projectId}
+              onStarted={handleStarted}
+              onCancel={() => setShowStartForm(false)}
+            />
+          </div>
+        ) : (
+          <>
+            <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+            <span className="text-sm">No drives yet for this project.</span>
+            <button
+              onClick={() => setShowStartForm(true)}
+              className="px-3 py-1.5 text-sm rounded-md font-medium text-white"
+              style={{ backgroundColor: BRAND }}
+            >
+              Start a drive
+            </button>
+          </>
+        )}
       </div>
     );
   }
@@ -182,6 +214,13 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
         <div className="ml-auto flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
           <span>Started {fmtTime(drive.startedAt)}</span>
           <button
+            onClick={() => setShowStartForm((v) => !v)}
+            className="px-2 py-1 rounded-md text-xs font-medium text-white"
+            style={{ backgroundColor: BRAND }}
+          >
+            + Start drive
+          </button>
+          <button
             onClick={fetchDashboard}
             title="Refresh"
             className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
@@ -192,6 +231,14 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
           </button>
         </div>
       </div>
+
+      {showStartForm && (
+        <StartDriveForm
+          projectId={projectId}
+          onStarted={handleStarted}
+          onCancel={() => setShowStartForm(false)}
+        />
+      )}
 
       <p className="text-sm text-gray-600 dark:text-gray-400 -mt-1">{drive.target}</p>
 
@@ -377,6 +424,143 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
         )}
       </div>
     </div>
+  );
+}
+
+interface PickerIssue {
+  id: string;
+  issueNumber: number | null;
+  title: string;
+}
+
+/**
+ * Inline "Start a drive" form (#845). Starting a drive previously required the API or the
+ * drive-new-project skill; this brings it into the drive view. Target is required; the
+ * meta/epic issue (optional) is what the dashboard's tier graph + scoped review-effectiveness
+ * hang off, so we offer a picker of the project's issues. Completion contract is free text.
+ */
+function StartDriveForm({
+  projectId,
+  onStarted,
+  onCancel,
+}: {
+  projectId: string;
+  onStarted: (driveId: string) => void;
+  onCancel: () => void;
+}) {
+  const [target, setTarget] = useState("");
+  const [metaIssueId, setMetaIssueId] = useState("");
+  const [contract, setContract] = useState("");
+  const [issues, setIssues] = useState<PickerIssue[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    apiFetch<PickerIssue[]>(`/api/issues?projectId=${projectId}&slim=1`)
+      .then(setIssues)
+      .catch(() => setIssues([]));
+  }, [projectId]);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!target.trim()) {
+      setErr("A target is required.");
+      return;
+    }
+    setSubmitting(true);
+    setErr(null);
+    try {
+      const drive = await apiFetch<{ id: string }>(`/api/projects/${projectId}/drives`, {
+        method: "POST",
+        body: JSON.stringify({
+          target: target.trim(),
+          metaIssueId: metaIssueId || null,
+          completionContract: contract.trim() || null,
+        }),
+      });
+      showToast("Drive started", "success");
+      onStarted(drive.id);
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : "Failed to start drive");
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form
+      onSubmit={submit}
+      className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/40 p-4 flex flex-col gap-3"
+    >
+      <div className="flex items-center gap-2">
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: BRAND }}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+        </svg>
+        <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">Start a drive</span>
+      </div>
+
+      <label className="flex flex-col gap-1">
+        <span className="text-xs font-medium text-gray-600 dark:text-gray-300">
+          Target <span className="text-red-500">*</span>
+        </span>
+        <input
+          type="text"
+          value={target}
+          onChange={(e) => setTarget(e.target.value)}
+          placeholder="e.g. Drive the auth epic to master"
+          autoFocus
+          className="px-2 py-1.5 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+        />
+      </label>
+
+      <label className="flex flex-col gap-1">
+        <span className="text-xs font-medium text-gray-600 dark:text-gray-300">Meta / epic issue (optional)</span>
+        <select
+          value={metaIssueId}
+          onChange={(e) => setMetaIssueId(e.target.value)}
+          className="px-2 py-1.5 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+        >
+          <option value="">— none —</option>
+          {issues.map((i) => (
+            <option key={i.id} value={i.id}>
+              {i.issueNumber != null ? `#${i.issueNumber} ` : ""}
+              {i.title}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="flex flex-col gap-1">
+        <span className="text-xs font-medium text-gray-600 dark:text-gray-300">Completion contract (optional)</span>
+        <textarea
+          value={contract}
+          onChange={(e) => setContract(e.target.value)}
+          rows={2}
+          placeholder="e.g. All children Done AND master contains the work"
+          className="px-2 py-1.5 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 resize-y"
+        />
+      </label>
+
+      {err && <span className="text-xs text-red-500">{err}</span>}
+
+      <div className="flex items-center gap-2">
+        <button
+          type="submit"
+          disabled={submitting || !target.trim()}
+          className="px-3 py-1.5 text-sm rounded-md font-medium text-white disabled:opacity-50"
+          style={{ backgroundColor: BRAND }}
+        >
+          {submitting ? "Starting…" : "Start drive"}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={submitting}
+          className="px-3 py-1.5 text-sm rounded-md text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 }
 
