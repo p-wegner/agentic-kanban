@@ -1,6 +1,9 @@
-import { writeDb } from "../../db/index.js";
-import { sessions, sessionMessages } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
+import {
+  selectSessionStats,
+  updateSessionStats,
+  insertSessionMessages,
+  updateProviderSessionId,
+} from "../../repositories/broadcast.repository.js";
 import * as agentService from "../agent.service.js";
 import { getProvider } from "../agent-provider.js";
 import { parseSessionSummary, computeFrictionStats } from "@agentic-kanban/shared";
@@ -36,7 +39,7 @@ async function persistFrictionFallback(sessionId: string, messages: AgentOutputM
     const friction = frictionFromBuffer(messages);
     const usageLimit = detectCodexUsageLimitMessages(messages);
     if (!friction && !usageLimit) return;
-    const rows = await writeDb.select({ stats: sessions.stats }).from(sessions).where(eq(sessions.id, sessionId)).limit(1);
+    const rows = await selectSessionStats(sessionId);
     if (rows.length === 0) return;
     let stats: Record<string, unknown> = {};
     if (rows[0].stats) {
@@ -55,14 +58,14 @@ async function persistFrictionFallback(sessionId: string, messages: AgentOutputM
       if (stats.friction && !usageLimit) return; // already persisted on the result-event write
       stats.friction = friction;
     }
-    await writeDb.update(sessions).set({ stats: JSON.stringify(stats) }).where(eq(sessions.id, sessionId));
+    await updateSessionStats(sessionId, JSON.stringify(stats));
   } catch (err) {
     console.error("Failed to persist session friction (fallback):", err);
   }
 }
 
 async function mergeExistingStats(sessionId: string, statsToSave: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const rows = await writeDb.select({ stats: sessions.stats }).from(sessions).where(eq(sessions.id, sessionId)).limit(1);
+  const rows = await selectSessionStats(sessionId);
   if (rows.length === 0 || !rows[0].stats) return statsToSave;
   try {
     const existing = JSON.parse(rows[0].stats) as Record<string, unknown>;
@@ -84,7 +87,7 @@ function flushDbBuffer(state: SessionState, sessionId: string) {
   const rows = state.dbWriteBuffer.get(sessionId);
   if (!rows || rows.length === 0) return;
   state.dbWriteBuffer.delete(sessionId);
-  writeDb.insert(sessionMessages).values(rows.map((r) => ({ sessionId, ...r }))).catch((err: unknown) => {
+  insertSessionMessages(sessionId, rows).catch((err: unknown) => {
     // FK constraint failure means the session was already deleted (race with workspace cleanup) — ignore
     const msg = err instanceof Error ? err.message : String(err);
     if (!msg.includes("SQLITE_CONSTRAINT_FOREIGNKEY") && !msg.includes("FOREIGN KEY")) {
@@ -154,9 +157,7 @@ export function createBroadcaster(
 
         // Provider session ID (e.g. Claude's system/init session_id)
         if (evt.providerSessionId) {
-          writeDb.update(sessions)
-            .set({ providerSessionId: evt.providerSessionId })
-            .where(eq(sessions.id, sessionId))
+          updateProviderSessionId(sessionId, evt.providerSessionId)
             .catch((err) => console.error("Failed to update providerSessionId:", err));
         }
 
@@ -192,9 +193,7 @@ export function createBroadcaster(
             ...(friction ? { friction } : {}),
           };
           mergeExistingStats(sessionId, statsToSave)
-            .then((mergedStats) => writeDb.update(sessions)
-              .set({ stats: JSON.stringify(mergedStats) })
-              .where(eq(sessions.id, sessionId)))
+            .then((mergedStats) => updateSessionStats(sessionId, JSON.stringify(mergedStats)))
             .catch((err) => console.error("Failed to update session stats:", err));
         }
 
