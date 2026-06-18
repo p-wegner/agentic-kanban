@@ -1,4 +1,3 @@
-import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
@@ -17,7 +16,7 @@ import { runDrivePreflight } from "../services/drive-preflight.service.js";
  * - POST /api/projects/:projectId/drive/preflight {autoRepair?} — same, but when `autoRepair`
  *        is true and every blocker is auto-fixable, flips Drive on to repair and re-evaluates.
  */
-export function createDriveRoute(database: Database = db) {
+export function createDriveRoute(database: Database) {
   const router = createRouter();
 
   router.get("/:projectId/drive", async (c) => {

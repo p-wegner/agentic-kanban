@@ -1,4 +1,3 @@
-import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createPreferenceService } from "../services/preference.service.js";
 import { createProjectService } from "../services/project.service.js";
@@ -96,7 +95,7 @@ function validateBoardConfigShape(body: unknown): { config: BoardConfigExport; e
   };
 }
 
-export function createConfigExportImportRoute(database: Database = db) {
+export function createConfigExportImportRoute(database: Database) {
   const router = createRouter();
   const preferenceService = createPreferenceService({ database });
   const projectService = createProjectService({ database });

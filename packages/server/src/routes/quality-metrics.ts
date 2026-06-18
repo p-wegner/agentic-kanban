@@ -1,11 +1,10 @@
-import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { createQualityMetricsService } from "../services/quality-metrics.service.js";
 import type { CreateQualityMetricsRequest, QualityMetricsResponse } from "@agentic-kanban/shared/types";
 
-export function createQualityMetricsRoute(database: Database = db) {
+export function createQualityMetricsRoute(database: Database) {
   const router = createRouter();
   const service = createQualityMetricsService(database);
 

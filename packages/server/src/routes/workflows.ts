@@ -1,4 +1,3 @@
-import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
@@ -11,7 +10,7 @@ interface WorkflowsRouteOptions {
   onWorkflowAdvanced?: (workspaceId: string) => void;
 }
 
-export function createWorkflowsRoute(database: Database = db, options?: WorkflowsRouteOptions) {
+export function createWorkflowsRoute(database: Database, options?: WorkflowsRouteOptions) {
   const router = createRouter();
   const service = createWorkflowService({
     database,

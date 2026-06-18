@@ -1,4 +1,3 @@
-import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createDriveService } from "../services/drive.service.js";
 import { buildDriveDashboard } from "../services/drive-dashboard.service.js";
@@ -12,7 +11,7 @@ import {
 // DriveError is mapped to HTTP centrally by domainErrorHandler (createRouter applies
 // it as onError) via its `code` field — NOT_FOUND→404, FORBIDDEN→403, BAD_REQUEST→400.
 // Handlers just let it throw; no per-route try/catch or status mapping needed.
-export function createDrivesRoute(database: Database = db) {
+export function createDrivesRoute(database: Database) {
   const router = createRouter();
   const service = createDriveService({ database });
 

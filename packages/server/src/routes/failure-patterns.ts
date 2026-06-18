@@ -1,4 +1,3 @@
-import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
@@ -10,7 +9,7 @@ import {
   deletePattern,
 } from "../services/failure-pattern.service.js";
 
-export function createFailurePatternsRoute(database: Database = db) {
+export function createFailurePatternsRoute(database: Database) {
   const router = createRouter();
 
   // GET /api/failure-patterns — list all stored patterns
