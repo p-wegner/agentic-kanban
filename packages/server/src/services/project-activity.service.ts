@@ -1,6 +1,10 @@
-import { eq, inArray, desc } from "drizzle-orm";
-import { issues, workspaces, sessions, issueComments, projectStatuses } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
+import {
+  getProjectActivityIssues,
+  getProjectActivityWorkspaces,
+  getProjectActivitySessions,
+  getProjectActivityComments,
+} from "../repositories/project-activity.repository.js";
 
 export interface ProjectActivityEvent {
   id: string;
@@ -27,18 +31,7 @@ export async function getProjectActivity(
   limit = 100,
 ): Promise<ProjectActivityResult> {
   // Fetch all issues for the project
-  const issueRows = await database
-    .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
-      createdAt: issues.createdAt,
-      statusChangedAt: issues.statusChangedAt,
-      statusName: projectStatuses.name,
-    })
-    .from(issues)
-    .leftJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-    .where(eq(issues.projectId, projectId));
+  const issueRows = await getProjectActivityIssues(projectId, database);
 
   if (issueRows.length === 0) {
     return { events: [], generatedAt: new Date().toISOString() };
@@ -77,10 +70,7 @@ export async function getProjectActivity(
   }
 
   // Workspace events
-  const wsRows = await database
-    .select()
-    .from(workspaces)
-    .where(inArray(workspaces.issueId, issueIds));
+  const wsRows = await getProjectActivityWorkspaces(issueIds, database);
 
   const wsIds = wsRows.map((w) => w.id);
 
@@ -130,10 +120,7 @@ export async function getProjectActivity(
   // Session events (batch load all sessions for project workspaces)
   if (wsIds.length > 0) {
     const wsIssueMap = new Map(wsRows.map((w) => [w.id, w.issueId]));
-    const sessionRows = await database
-      .select()
-      .from(sessions)
-      .where(inArray(sessions.workspaceId, wsIds));
+    const sessionRows = await getProjectActivitySessions(wsIds, database);
 
     for (const sess of sessionRows) {
       const issueId = wsIssueMap.get(sess.workspaceId ?? "");
@@ -183,10 +170,7 @@ export async function getProjectActivity(
   }
 
   // Comment events
-  const commentRows = await database
-    .select()
-    .from(issueComments)
-    .where(inArray(issueComments.issueId, issueIds));
+  const commentRows = await getProjectActivityComments(issueIds, database);
 
   for (const cmt of commentRows) {
     const issue = issueMap.get(cmt.issueId);

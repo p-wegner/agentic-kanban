@@ -1,10 +1,14 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
-import { diffComments, issues, projects, projectStatuses, sessionMessages, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { parseSessionSummary } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
 import * as realGitService from "./git.service.js";
 import { WorkspaceError, type GitService } from "./workspace-internals.js";
 import { readSessionStdoutFile } from "../repositories/session.repository.js";
+import {
+  getHandoffBundleRow,
+  getHandoffBundleSessions,
+  getHandoffBundleSessionMessages,
+  getHandoffBundleDiffComments,
+} from "../repositories/workspace-handoff-bundle.repository.js";
 
 export interface WorkspaceHandoffBundle {
   exportedAt: string;
@@ -59,46 +63,10 @@ export async function exportWorkspaceHandoffBundle(args: {
   const { workspaceId, database } = args;
   const gitService = args.gitService ?? realGitService;
 
-  const rows = await database
-    .select({
-      issueNumber: issues.issueNumber,
-      issueTitle: issues.title,
-      issueDescription: issues.description,
-      statusName: projectStatuses.name,
-      repoPath: projects.repoPath,
-      defaultBranch: projects.defaultBranch,
-      wsId: workspaces.id,
-      branch: workspaces.branch,
-      baseBranch: workspaces.baseBranch,
-      baseCommitSha: workspaces.baseCommitSha,
-      status: workspaces.status,
-      isDirect: workspaces.isDirect,
-      workingDir: workspaces.workingDir,
-      createdAt: workspaces.createdAt,
-      closedAt: workspaces.closedAt,
-      mergedAt: workspaces.mergedAt,
-    })
-    .from(workspaces)
-    .innerJoin(issues, eq(workspaces.issueId, issues.id))
-    .innerJoin(projects, eq(issues.projectId, projects.id))
-    .leftJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-    .where(eq(workspaces.id, workspaceId))
-    .limit(1);
-  const row = rows[0];
+  const row = await getHandoffBundleRow(workspaceId, database);
   if (!row) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
 
-  const sessionRows = await database
-    .select({
-      id: sessions.id,
-      triggerType: sessions.triggerType,
-      status: sessions.status,
-      startedAt: sessions.startedAt,
-      endedAt: sessions.endedAt,
-      exitCode: sessions.exitCode,
-    })
-    .from(sessions)
-    .where(eq(sessions.workspaceId, workspaceId))
-    .orderBy(desc(sessions.startedAt));
+  const sessionRows = await getHandoffBundleSessions(workspaceId, database);
 
   const sessionIds = sessionRows.map((s) => s.id);
   let messageRows: Array<{ type: string; data: string | null; sessionId: string }> = [];
@@ -114,21 +82,14 @@ export async function exportWorkspaceHandoffBundle(args: {
       }
     }
     if (needsDb.length > 0) {
-      const dbRows = await database
-        .select({ type: sessionMessages.type, data: sessionMessages.data, sessionId: sessionMessages.sessionId })
-        .from(sessionMessages)
-        .where(inArray(sessionMessages.sessionId, needsDb));
+      const dbRows = await getHandoffBundleSessionMessages(needsDb, database);
       messageRows = messageRows.concat(dbRows);
     }
   }
 
   const summary = parseSessionSummary(messageRows);
 
-  const commentRows = await database
-    .select({ filePath: diffComments.filePath, lineNumNew: diffComments.lineNumNew, body: diffComments.body })
-    .from(diffComments)
-    .where(and(eq(diffComments.workspaceId, workspaceId)))
-    .orderBy(diffComments.createdAt);
+  const commentRows = await getHandoffBundleDiffComments(workspaceId, database);
   const reviewerNotes = commentRows.map((c) => {
     const location = c.lineNumNew ? `${c.filePath}:${c.lineNumNew}` : c.filePath;
     return `${location}: ${c.body}`;

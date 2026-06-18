@@ -1,6 +1,10 @@
-import { eq, asc } from "drizzle-orm";
-import { workspaces, sessions, issueComments, issues, projectStatuses } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
+import {
+  getIssueActivityRow,
+  getIssueActivityWorkspaces,
+  getIssueActivityWorkspaceSessions,
+  getIssueActivityComments,
+} from "../repositories/issue-activity.repository.js";
 
 export type ActivityEventType =
   | "issue_created"
@@ -32,21 +36,10 @@ export interface IssueActivityResult {
 
 export async function getIssueActivity(issueId: string, database: Database): Promise<IssueActivityResult | null> {
   // Verify issue exists and fetch creation/status data
-  const issueRows = await database
-    .select({
-      id: issues.id,
-      createdAt: issues.createdAt,
-      statusChangedAt: issues.statusChangedAt,
-      statusName: projectStatuses.name,
-    })
-    .from(issues)
-    .leftJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-    .where(eq(issues.id, issueId))
-    .limit(1);
+  const issue = await getIssueActivityRow(issueId, database);
 
-  if (issueRows.length === 0) return null;
+  if (!issue) return null;
 
-  const issue = issueRows[0];
   const events: ActivityEvent[] = [];
 
   // Issue created
@@ -70,11 +63,7 @@ export async function getIssueActivity(issueId: string, database: Database): Pro
   }
 
   // Workspaces and their sessions
-  const wsRows = await database
-    .select()
-    .from(workspaces)
-    .where(eq(workspaces.issueId, issueId))
-    .orderBy(asc(workspaces.createdAt));
+  const wsRows = await getIssueActivityWorkspaces(issueId, database);
 
   for (const ws of wsRows) {
     const provider = ws.provider ?? ws.claudeProfile ?? null;
@@ -108,11 +97,7 @@ export async function getIssueActivity(issueId: string, database: Database): Pro
       });
     }
 
-    const sessionRows = await database
-      .select()
-      .from(sessions)
-      .where(eq(sessions.workspaceId, ws.id))
-      .orderBy(asc(sessions.startedAt));
+    const sessionRows = await getIssueActivityWorkspaceSessions(ws.id, database);
 
     for (const sess of sessionRows) {
       const actor = sess.executor ?? provider;
@@ -149,11 +134,7 @@ export async function getIssueActivity(issueId: string, database: Database): Pro
   }
 
   // Comments (preflight clarifications, agent questions, merge attempts, notes)
-  const commentRows = await database
-    .select()
-    .from(issueComments)
-    .where(eq(issueComments.issueId, issueId))
-    .orderBy(asc(issueComments.createdAt));
+  const commentRows = await getIssueActivityComments(issueId, database);
 
   for (const cmt of commentRows) {
     events.push({

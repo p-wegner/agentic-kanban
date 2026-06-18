@@ -1,8 +1,12 @@
-import { issues, projectStatuses } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "./board-events.js";
 import { closeWorkspace, stopWorkspaceSessions } from "./workspace-lifecycle-reconcile.service.js";
+import {
+  getIssueStatusAndProject,
+  getIssueProject,
+  getProjectStatusOptions,
+  setIssueStatus,
+} from "../repositories/merge-cleanup.repository.js";
 
 export interface FinalizeMergeCleanupInput {
   database: Database;
@@ -62,11 +66,7 @@ export async function reconcileMergedIssue(
 ): Promise<ReconcileMergedIssueResult> {
   const now = input.now ?? new Date().toISOString();
 
-  const [issue] = await input.database
-    .select({ statusId: issues.statusId, projectId: issues.projectId })
-    .from(issues)
-    .where(eq(issues.id, input.issueId))
-    .limit(1);
+  const issue = await getIssueStatusAndProject(input.issueId, input.database);
 
   if (!issue) {
     throw new Error(`Issue not found: ${input.issueId}`);
@@ -77,10 +77,7 @@ export async function reconcileMergedIssue(
     return { projectId: null, issueTransitioned: false, targetStatusId: null };
   }
 
-  const statuses = await input.database
-    .select({ id: projectStatuses.id, name: projectStatuses.name })
-    .from(projectStatuses)
-    .where(eq(projectStatuses.projectId, projectId));
+  const statuses = await getProjectStatusOptions(projectId, input.database);
   const targetStatus = statuses.find((status) => status.name === "Done")
     ?? (input.fallbackToAiReviewed ? statuses.find((status) => status.name === "AI Reviewed") : undefined);
 
@@ -95,10 +92,7 @@ export async function reconcileMergedIssue(
     return { projectId, issueTransitioned: false, targetStatusId: targetStatus.id };
   }
 
-  await input.database
-    .update(issues)
-    .set({ statusId: targetStatus.id, updatedAt: now, statusChangedAt: now })
-    .where(eq(issues.id, input.issueId));
+  await setIssueStatus(input.issueId, targetStatus.id, now, input.database);
 
   return { projectId, issueTransitioned: true, targetStatusId: targetStatus.id };
 }
@@ -117,11 +111,7 @@ export async function finalizeMergeCleanup(
   const now = input.now ?? new Date().toISOString();
   const shouldMarkMerged = input.markMerged ?? true;
 
-  const [issue] = await input.database
-    .select({ projectId: issues.projectId })
-    .from(issues)
-    .where(eq(issues.id, input.issueId))
-    .limit(1);
+  const issue = await getIssueProject(input.issueId, input.database);
 
   if (!issue) {
     throw new Error(`Issue not found: ${input.issueId}`);
