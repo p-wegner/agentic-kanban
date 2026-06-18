@@ -22,6 +22,11 @@ function boardMonitorDir(repoPath: string): string {
 function serverPidPath(repoPath: string): string {
   return join(boardMonitorDir(repoPath), "loop.server.pid");
 }
+// Dropped by stopConductor so the status reader reports "stopped" immediately instead of
+// waiting out ALIVE_STALENESS_MS for loop.log to go stale. See readOrchestratorStatus.
+function stopMarkerPath(repoPath: string): string {
+  return join(boardMonitorDir(repoPath), "loop.stopped");
+}
 
 export function conductorAvailable(repoPath: string): boolean {
   return !!repoPath && existsSync(join(boardMonitorDir(repoPath), "loop.sh"));
@@ -54,6 +59,8 @@ function spawnConductorLoop(
       stdio: "ignore",
     });
     child.unref();
+    // Clear any stale stop-marker so the freshly-started loop reads as alive at once.
+    try { unlinkSync(stopMarkerPath(repoPath)); } catch { /* already gone */ }
     const pid = child.pid ?? null;
     if (pid) {
       try { writeFileSync(serverPidPath(repoPath), String(pid), "utf8"); } catch { /* non-fatal */ }
@@ -114,6 +121,9 @@ export function stopConductor(repoPath: string): ConductorActionResult {
     // Clear the pid files so the status reader reports stopped on its next poll.
     try { unlinkSync(pidPath); } catch { /* already gone */ }
     try { unlinkSync(join(boardMonitorDir(repoPath), "loop.pid")); } catch { /* already gone */ }
+    // Drop a stop-marker so readOrchestratorStatus reports "stopped" right away rather than
+    // showing "running" until loop.log goes stale (~11 min). A later restart supersedes it.
+    try { writeFileSync(stopMarkerPath(repoPath), new Date().toISOString(), "utf8"); } catch { /* non-fatal */ }
     return { ok: true, pid };
   } catch (err) {
     return { ok: false, pid, error: err instanceof Error ? err.message : String(err) };

@@ -155,6 +155,24 @@ export function readOrchestratorStatus(
     }
   }
 
+  // A server-initiated Stop writes a `loop.stopped` marker. The loop.log mtime signal
+  // alone lags up to ALIVE_STALENESS_MS (~11 min), so the Start Mode UI would keep
+  // showing "running" long after the loop was killed. Honor the marker — UNLESS loop.log
+  // has been written *since* the marker was dropped, which means the loop was restarted
+  // (e.g. via `nohup bash loop.sh`, which never touches this marker) and superseded it.
+  if (alive) {
+    const stopPath = join(dir, "loop.stopped");
+    if (existsSync(stopPath)) {
+      try {
+        const stopMtime = statSync(stopPath).mtimeMs;
+        const logMtime = lastLogAt ? new Date(lastLogAt).getTime() : 0;
+        if (stopMtime >= logMtime) alive = false;
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
   // --- last iteration boundary (tail of loop.log) ---
   let lastEventAt: string | null = null;
   let iteration: number | null = null;
