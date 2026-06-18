@@ -12,13 +12,19 @@
  * preferences table so answered questions stop appearing.
  */
 import { isTerminalStatusView } from "@agentic-kanban/shared";
-import { sessions, sessionMessages, workspaces, issues, projects, projectStatuses, issueComments, workflowNodes } from "@agentic-kanban/shared/schema";
-import { eq, ne, and, desc } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { getPreference, setPreference } from "../repositories/preferences.repository.js";
 import { ensureButlerSession, sendButlerTurn, subscribeButler, getButlerSession } from "./butler-sdk.service.js";
 import { readSessionStdoutFileTail } from "../repositories/session.repository.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
+import {
+  getWorkspaceIssueId,
+  getPendingQuestionWorkspaces,
+  getRecentSessionsForWorkspace,
+  getSessionStdoutMessages,
+  getSyntheticQuestionComments,
+  getProjectRow,
+} from "../repositories/agent-questions.repository.js";
 
 /** Function signature for sending a follow-up turn to a workspace — injected so this
  *  service does not depend on the session manager singleton directly. */
@@ -190,12 +196,7 @@ export async function writeAgentQuestionComment(
   db: Database,
 ): Promise<void> {
   try {
-    const wsRows = await db
-      .select({ issueId: workspaces.issueId })
-      .from(workspaces)
-      .where(eq(workspaces.id, params.workspaceId))
-      .limit(1);
-    const issueId = wsRows[0]?.issueId;
+    const issueId = await getWorkspaceIssueId(params.workspaceId, db);
     if (!issueId) return;
     await insertIssueComment(
       {
@@ -375,25 +376,7 @@ export async function listPendingQuestionsForProject(
   // up front: computeStaleness returns "workspace-merged" for status === "closed"
   // and those results are dropped unconditionally below, so scanning them is
   // provably wasted work (609 of 648 workspaces on the measured project).
-  const wsRows = await db
-    .select({
-      workspaceId: workspaces.id,
-      workspaceStatus: workspaces.status,
-      workspaceClosedAt: workspaces.closedAt,
-      readyForMerge: workspaces.readyForMerge,
-      issueId: issues.id,
-      issueNumber: issues.issueNumber,
-      issueTitle: issues.title,
-      issueDescription: issues.description,
-      issueStatusName: projectStatuses.name,
-      issueCurrentNodeId: issues.currentNodeId,
-      issueCurrentNodeType: workflowNodes.nodeType,
-    })
-    .from(workspaces)
-    .innerJoin(issues, eq(workspaces.issueId, issues.id))
-    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-    .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
-    .where(and(eq(issues.projectId, projectId), ne(workspaces.status, "closed")));
+  const wsRows = await getPendingQuestionWorkspaces(projectId, db);
 
   const results: PendingQuestionSet[] = [];
   const now = nowOverride ?? new Date().toISOString();
@@ -401,12 +384,7 @@ export async function listPendingQuestionsForProject(
   for (const ws of wsRows) {
     // Recent sessions (any status), newest first. We scan a few because a question
     // asked in an older session is "superseded" once a newer session has run.
-    const sessRows = await db
-      .select({ id: sessions.id, startedAt: sessions.startedAt, endedAt: sessions.endedAt, status: sessions.status })
-      .from(sessions)
-      .where(eq(sessions.workspaceId, ws.workspaceId))
-      .orderBy(desc(sessions.startedAt))
-      .limit(10);
+    const sessRows = await getRecentSessionsForWorkspace(ws.workspaceId, db);
     if (sessRows.length === 0) continue;
     const latestSession = sessRows[0];
 
@@ -435,10 +413,7 @@ export async function listPendingQuestionsForProject(
       if (fileContent !== null) {
         msgs = fileContent.split("\n").map((line) => ({ type: "stdout", data: line }));
       } else {
-        msgs = await db
-          .select({ type: sessionMessages.type, data: sessionMessages.data })
-          .from(sessionMessages)
-          .where(eq(sessionMessages.sessionId, sess.id));
+        msgs = await getSessionStdoutMessages(sess.id, db);
       }
 
       const extracted = extractQuestionsFromSession(msgs);
@@ -501,21 +476,7 @@ export async function listPendingQuestionsForProject(
   // (see mcp-server tools/clarify-or-propose.ts), so filter by kind instead of
   // scanning every comment of the project — the unbounded scan grew with the
   // full comment history.
-  const syntheticRows = await db
-    .select({
-      id: issueComments.id,
-      issueId: issueComments.issueId,
-      workspaceId: issueComments.workspaceId,
-      body: issueComments.body,
-      payload: issueComments.payload,
-      createdAt: issueComments.createdAt,
-      issueNumber: issues.issueNumber,
-      issueTitle: issues.title,
-    })
-    .from(issueComments)
-    .innerJoin(issues, eq(issueComments.issueId, issues.id))
-    .where(and(eq(issues.projectId, projectId), eq(issueComments.kind, "agent-question")))
-    .orderBy(desc(issueComments.createdAt));
+  const syntheticRows = await getSyntheticQuestionComments(projectId, db);
 
   const seenToolUseIds = new Set(results.map((r) => r.toolUseId));
   for (const row of syntheticRows) {
@@ -743,8 +704,7 @@ export async function recommendQuestionsForSet(
   // Ensure a butler session exists; if not, start one from the project record so the
   // recommender works even before the user opens the Butler view.
   if (!getButlerSession(projectId).active) {
-    const projRows = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
-    const project = projRows[0];
+    const project = await getProjectRow(projectId, db);
     if (!project) throw new Error(`project not found: ${projectId}`);
     const claudeProfile = (await getPreference(`butler_profile_${projectId}`, db))
       || (await getPreference("claude_profile", db))

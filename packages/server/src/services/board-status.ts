@@ -1,6 +1,5 @@
 import { db } from "../db/index.js";
-import { projects, projectStatuses, issues, workspaces, sessions, preferences, workflowNodes } from "@agentic-kanban/shared/schema";
-import { eq, inArray } from "drizzle-orm";
+import { workspaces } from "@agentic-kanban/shared/schema";
 import { isTerminalStatusIdView, ACTIVE_WORKSPACE_STATUSES, workspaceStatusPriority } from "@agentic-kanban/shared";
 import type { BoardStatusResponse, BoardStatusIssue } from "@agentic-kanban/shared";
 import { isAnalyticsNoise } from "./session-filter.js";
@@ -10,6 +9,16 @@ import {
   type BoardStatusClassificationOptions,
 } from "./board-status-classifiers.js";
 import { collectBoardStatusEntryWork, type ConflictCacheEntry } from "./board-status-enrichment.js";
+import {
+  getActiveProjectIdPref,
+  getBoardStatusProject,
+  getAutoMergePreferences,
+  getBoardStatusStatuses,
+  getBoardStatusIssues,
+  getWorkspacesForIssues,
+  getWorkflowNodeStatuses,
+  getSessionsForWorkspaces,
+} from "../repositories/board-status.repository.js";
 
 export { classifyBoardStatusIssueAttention, classifyBoardStatusIssueMergeState } from "./board-status-classifiers.js";
 
@@ -76,27 +85,15 @@ export async function getBoardStatus(
   // 1. Resolve project
   let projectId = options.projectId;
   if (!projectId) {
-    const pref = await database
-      .select({ value: preferences.value })
-      .from(preferences)
-      .where(eq(preferences.key, "activeProjectId"))
-      .limit(1);
-    if (pref.length === 0) throw new Error("No active project");
-    projectId = pref[0].value;
+    const activeId = await getActiveProjectIdPref(database);
+    if (activeId === null) throw new Error("No active project");
+    projectId = activeId;
   }
 
-  const projectRows = await database
-    .select({ id: projects.id, name: projects.name, repoPath: projects.repoPath, defaultBranch: projects.defaultBranch })
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .limit(1);
-  if (projectRows.length === 0) throw new Error(`Project ${projectId} not found`);
-  const project = projectRows[0];
+  const project = await getBoardStatusProject(projectId, database);
+  if (!project) throw new Error(`Project ${projectId} not found`);
 
-  const preferenceRows = await database
-    .select({ key: preferences.key, value: preferences.value })
-    .from(preferences)
-    .where(inArray(preferences.key, ["auto_merge", "auto_merge_in_review"]));
+  const preferenceRows = await getAutoMergePreferences(database);
   const preferenceMap = new Map(preferenceRows.map((pref) => [pref.key, pref.value]));
   const classificationOptions: BoardStatusClassificationOptions = {
     autoMergeEnabled: preferenceMap.get("auto_merge") === "true",
@@ -104,32 +101,14 @@ export async function getBoardStatus(
   };
 
   // 2. Get statuses to identify terminal ones (legacy fallback for non-workflow issues)
-  const statuses = await database
-    .select({ id: projectStatuses.id, name: projectStatuses.name })
-    .from(projectStatuses)
-    .where(eq(projectStatuses.projectId, projectId))
-    .orderBy(projectStatuses.sortOrder);
+  const statuses = await getBoardStatusStatuses(projectId, database);
   const terminalStatusIds = new Set(
     statuses.filter(s => s.name === "Done" || s.name === "Cancelled").map(s => s.id),
   );
 
   // 3. Get issues with status names + current workflow node type (LEFT JOIN so
   //    non-workflow issues are still returned with nodeType = null).
-  let projectIssues = await database
-    .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
-      priority: issues.priority,
-      issueType: issues.issueType,
-      statusId: issues.statusId,
-      statusName: projectStatuses.name,
-      currentNodeType: workflowNodes.nodeType,
-    })
-    .from(issues)
-    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-    .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
-    .where(eq(issues.projectId, projectId));
+  let projectIssues = await getBoardStatusIssues(projectId, database);
 
   if (!includeClosed) {
     projectIssues = projectIssues.filter(i => !isTerminalStatusIdView(i, terminalStatusIds));
@@ -147,7 +126,7 @@ export async function getBoardStatus(
   const issueIds = projectIssues.map(i => i.id);
 
   // 4. Get workspaces for these issues
-  const wsRows = await database.select().from(workspaces).where(inArray(workspaces.issueId, issueIds));
+  const wsRows = await getWorkspacesForIssues(issueIds, database);
   const currentNodeIds = [
     ...new Set(
       wsRows
@@ -155,20 +134,13 @@ export async function getBoardStatus(
         .map((w) => w.currentNodeId as string),
     ),
   ];
-  const currentNodeStatuses = currentNodeIds.length > 0
-    ? await database
-        .select({ id: workflowNodes.id, statusName: workflowNodes.statusName })
-        .from(workflowNodes)
-        .where(inArray(workflowNodes.id, currentNodeIds))
-    : [];
+  const currentNodeStatuses = await getWorkflowNodeStatuses(currentNodeIds, database);
   const currentNodeStatusById = new Map(currentNodeStatuses.map((node) => [node.id, node.statusName]));
   const statusByName = new Map(statuses.map((status) => [status.name.toLowerCase(), status]));
 
   // 5. Get sessions for these workspaces
   const wsIds = wsRows.map(w => w.id);
-  const sessionRows = wsIds.length > 0
-    ? await database.select().from(sessions).where(inArray(sessions.workspaceId, wsIds))
-    : [];
+  const sessionRows = await getSessionsForWorkspaces(wsIds, database);
 
   // Group sessions by workspaceId (most recent first)
   const sessionsByWs = new Map<string, typeof sessionRows>();
