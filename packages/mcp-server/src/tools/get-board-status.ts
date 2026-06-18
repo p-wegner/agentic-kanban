@@ -5,53 +5,14 @@ import { extractMeaningfulOutput, isTerminalStatusIdView } from "@agentic-kanban
 import type { BoardStatusIssue } from "@agentic-kanban/shared";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { requireEntity, readSessionStdoutFile } from "../db-utils.js";
-
-function classifyAttention(issue: BoardStatusIssue): BoardStatusIssue["attention"] {
-  if (issue.mergeState?.bucket === "pending_merge") return null;
-
-  const stats = issue.diffStats;
-  if (
-    issue.statusName === "In Review"
-    && issue.workspace
-    && issue.workspace.status !== "closed"
-    && !issue.workspace.readyForMerge
-    && stats
-    && stats.filesChanged === 0
-    && stats.insertions === 0
-    && stats.deletions === 0
-  ) {
-    return {
-      bucket: "needs_attention",
-      reason: "idle-awaiting",
-      label: "In Review workspace has no file changes and is not ready for merge",
-    };
-  }
-  return null;
-}
-
-function classifyMergeState(
-  issue: BoardStatusIssue,
-  options: { autoMergeEnabled: boolean; autoMergeInReview: boolean },
-): BoardStatusIssue["mergeState"] {
-  const stats = issue.diffStats;
-  if (
-    options.autoMergeEnabled
-    && options.autoMergeInReview
-    && issue.statusName === "In Review"
-    && issue.workspace
-    && issue.workspace.status === "idle"
-    && !issue.workspace.readyForMerge
-    && stats
-    && (stats.filesChanged > 0 || stats.insertions > 0 || stats.deletions > 0)
-  ) {
-    return {
-      bucket: "pending_merge",
-      reason: "auto-merge-in-review",
-      label: "Auto-merge pending for idle In Review workspace",
-    };
-  }
-  return null;
-}
+// Shared single-source-of-truth classifiers. The previous local copies had drifted
+// behind the server's (emitting only "idle-awaiting", missing "closed-in-review" and
+// "stale-in-review"), so agents over MCP saw a strictly poorer board than humans.
+// Aliased to the prior local names to keep the call sites below unchanged.
+import {
+  classifyBoardStatusIssueAttention as classifyAttention,
+  classifyBoardStatusIssueMergeState as classifyMergeState,
+} from "@agentic-kanban/shared/lib/board-status-classifiers";
 
 export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, getDiffShortstat } = deps;
