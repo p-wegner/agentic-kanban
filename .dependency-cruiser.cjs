@@ -103,7 +103,6 @@ module.exports = {
       from: {
         path: "^packages/server/src/routes/",
         pathNot: [
-          "^packages/server/src/routes/butler\\.ts$",
           "^packages/server/src/routes/digest\\.ts$",
           "^packages/server/src/routes/insights\\.ts$",
           "^packages/server/src/routes/issues\\.ts$",
@@ -129,7 +128,6 @@ module.exports = {
       severity: "warn",
       from: {
         path: [
-          "^packages/server/src/routes/butler\\.ts$",
           "^packages/server/src/routes/digest\\.ts$",
           "^packages/server/src/routes/insights\\.ts$",
           "^packages/server/src/routes/issues\\.ts$",

@@ -2,13 +2,18 @@ import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
 import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
-import { projects, agentSkills } from "@agentic-kanban/shared/schema";
-import { eq, sql, desc } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
 import { streamSSE } from "hono/streaming";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { getPreference, setPreference } from "../repositories/preferences.repository.js";
+import { getProjectById } from "../repositories/project.repository.js";
+import {
+  getButlerPrompt,
+  getButlerOverride,
+  getGlobalButlerPrompt,
+  upsertButlerOverride,
+  deleteButlerOverride,
+} from "../repositories/agent-skill.repository.js";
 import { preferenceService } from "../services/preference.service.js";
 import { scanLocalSkills } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { ensureBoardGuideFile } from "../butler/board-guide.js";
@@ -181,25 +186,19 @@ export function createButlerRoute(
   const router = createRouter();
 
   async function resolveProject(projectId: string) {
-    const rows = await database.select().from(projects).where(eq(projects.id, projectId)).limit(1);
-    return rows[0] ?? null;
+    return getProjectById(projectId, database);
   }
 
   /** Resolve the butler's system prompt from the editable `butler` agent skill
    *  (project-scoped overrides global), falling back to DEFAULT_BUTLER_PROMPT, then
    *  substitute the {{projectName}}/{{repoPath}}/{{serverPort}} placeholders. */
   async function resolveButlerPrompt(projectId: string, projectName: string, repoPath: string): Promise<string> {
-    const rows = await database
-      .select({ prompt: agentSkills.prompt })
-      .from(agentSkills)
-      .where(sql`${agentSkills.name} = 'butler' AND (${agentSkills.projectId} = ${projectId} OR ${agentSkills.projectId} IS NULL)`)
-      .orderBy(desc(agentSkills.projectId))
-      .limit(1);
+    const prompt = await getButlerPrompt(projectId, database);
     const serverPort = process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001";
     const appPort = process.env.KANBAN_CLIENT_PORT || serverPort;
     const appBaseUrl = `http://localhost:${appPort}`;
     const boardGuidePath = ensureBoardGuideFile();
-    return (rows[0]?.prompt ?? DEFAULT_BUTLER_PROMPT)
+    return (prompt ?? DEFAULT_BUTLER_PROMPT)
       .replace(/\{\{projectName}}/g, projectName)
       .replace(/\{\{repoPath}}/g, repoPath)
       .replace(/\{\{serverPort}}/g, serverPort)
@@ -505,12 +504,10 @@ export function createButlerRoute(
   // project-scoped override exists (vs the global default).
   router.get("/:id/butler/skill", async (c) => {
     const projectId = c.req.param("id");
-    const override = await database.select({ prompt: agentSkills.prompt }).from(agentSkills)
-      .where(sql`${agentSkills.name} = 'butler' AND ${agentSkills.projectId} = ${projectId}`).limit(1);
-    if (override[0]) return c.json({ prompt: override[0].prompt, isOverride: true });
-    const global = await database.select({ prompt: agentSkills.prompt }).from(agentSkills)
-      .where(sql`${agentSkills.name} = 'butler' AND ${agentSkills.projectId} IS NULL`).limit(1);
-    return c.json({ prompt: global[0]?.prompt ?? DEFAULT_BUTLER_PROMPT, isOverride: false });
+    const override = await getButlerOverride(projectId, database);
+    if (override) return c.json({ prompt: override.prompt, isOverride: true });
+    const global = await getGlobalButlerPrompt(database);
+    return c.json({ prompt: global ?? DEFAULT_BUTLER_PROMPT, isOverride: false });
   });
 
   // PUT /api/projects/:id/butler/skill — upsert the project-scoped butler override.
@@ -518,22 +515,11 @@ export function createButlerRoute(
   router.put("/:id/butler/skill", async (c) => {
     const projectId = c.req.param("id");
     const body = await parseJsonBody<{ prompt: string }>(c);
-    const existing = await database.select({ id: agentSkills.id }).from(agentSkills)
-      .where(sql`${agentSkills.name} = 'butler' AND ${agentSkills.projectId} = ${projectId}`).limit(1);
-    const now = new Date().toISOString();
     if (!body.prompt?.trim()) {
-      if (existing[0]) await database.delete(agentSkills).where(eq(agentSkills.id, existing[0].id));
+      await deleteButlerOverride(projectId, database);
       return c.json({ ok: true, isOverride: false });
     }
-    if (existing[0]) {
-      await database.update(agentSkills).set({ prompt: body.prompt, updatedAt: now }).where(eq(agentSkills.id, existing[0].id));
-    } else {
-      await database.insert(agentSkills).values({
-        id: randomUUID(), name: "butler", projectId,
-        description: "Project butler behavior override", prompt: body.prompt,
-        isBuiltin: false, createdAt: now, updatedAt: now,
-      });
-    }
+    await upsertButlerOverride(projectId, body.prompt, database);
     return c.json({ ok: true, isOverride: true });
   });
 
