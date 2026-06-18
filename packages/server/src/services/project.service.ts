@@ -915,7 +915,30 @@ export function createProjectService(deps: { database: Database; workspaceSummar
   }
 
   async function listProjects(opts: { includeArchived?: boolean } = {}) {
-    return getAllProjects(database, opts);
+    const projectRows = await getAllProjects(database, opts);
+
+    // Enrich each project with a count of workspaces whose agent is currently
+    // active (running, reviewing, or resolving conflicts), so the project
+    // selector can surface where agents are working without a second request.
+    const activeCounts = await database
+      .select({
+        projectId: issues.projectId,
+        count: sql<number>`count(*)`,
+      })
+      .from(workspaces)
+      .innerJoin(issues, eq(workspaces.issueId, issues.id))
+      .where(notInArray(workspaces.status, ["idle", "closed"]))
+      .groupBy(issues.projectId);
+
+    const countByProject = new Map<string, number>();
+    for (const row of activeCounts) {
+      countByProject.set(row.projectId, Number(row.count));
+    }
+
+    return projectRows.map((project) => ({
+      ...project,
+      activeWorkspaceCount: countByProject.get(project.id) ?? 0,
+    }));
   }
 
   async function listStatuses(projectId: string) {

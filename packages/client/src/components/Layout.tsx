@@ -12,6 +12,7 @@ interface Project {
   repoPath?: string | null;
   defaultBranch?: string | null;
   archivedAt?: string | null;
+  activeWorkspaceCount?: number;
 }
 
 interface RegisterOptions {
