@@ -1,6 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { issues, issueTags, issueDependencies, issueArtifacts, issueComments, showdowns, workspaces, projectStatuses, workflowTemplates, workflowNodes, sessions } from "@agentic-kanban/shared/schema";
-import { eq, and, or, sql, inArray, desc } from "drizzle-orm";
 import { createDrive } from "../repositories/drive.repository.js";
 import type { Database } from "../db/index.js";
 import { withTransaction } from "../db/index.js";
@@ -25,6 +23,40 @@ import {
   deleteArtifact as deleteArtifactRepo,
   getIssueDescription,
 } from "../repositories/issue.repository.js";
+import {
+  insertIssue,
+  getWorkflowTemplateForProject,
+  getMaxIssueNumber,
+  getFirstProjectStatusId,
+  insertBatchIssue,
+  insertDependency,
+  getIssueWebhookSnapshot,
+  updateIssueById,
+  getProjectStatusName,
+  getIssueCurrentNodeInfo,
+  closeOpenWorkspacesForIssue,
+  getIssueIdsAndProjects,
+  updateIssuesByIds,
+  deleteIssueArtifactsForIssue,
+  deleteIssueCommentsForIssue,
+  getWorkspaceIdsForIssue,
+  deleteIssueTagsForIssue,
+  deleteDependenciesTouchingIssue,
+  deleteShowdownsForIssue,
+  deleteIssueRow,
+  getIssueProjectIdsPair,
+  deleteDependencyByIdAndIssue,
+  getIssueIdsAndProjectsForBatch,
+  getDependencyRowsForProjects,
+  deleteDependencyById,
+  insertIssueArtifact,
+  getLatestSessionsForWorkspaces,
+  getDuplicateSourceIssue,
+  getArchivedStatusId,
+  getDoneStatusIds,
+  getDoneCandidateIssues,
+  archiveIssuesByIds,
+} from "../repositories/issue-service.repository.js";
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
 import { enrichWorkspacesWithSessionData, wouldCreateCycle } from "./board-aggregation.service.js";
 import { materializePhaseArtifactToWorktree } from "./phase-artifacts.service.js";
@@ -156,7 +188,7 @@ export function createIssueService(deps: {
       ? await resolveInitialWorkflowState(input.projectId, input.workflowTemplateId, statusId)
       : { currentNodeId: null, statusId };
 
-    await database.insert(issues).values({
+    await insertIssue({
       id,
       issueNumber,
       title: input.title,
@@ -174,7 +206,7 @@ export function createIssueService(deps: {
       projectId: input.projectId,
       createdAt: now,
       updatedAt: now,
-    });
+    }, database);
 
     if (input.projectId) boardEvents?.broadcast(input.projectId, "issue_created");
 
@@ -186,12 +218,7 @@ export function createIssueService(deps: {
     templateId: string,
     fallbackStatusId: string,
   ): Promise<{ currentNodeId: string | null; statusId: string }> {
-    const templateRows = await database
-      .select({ id: workflowTemplates.id, projectId: workflowTemplates.projectId })
-      .from(workflowTemplates)
-      .where(eq(workflowTemplates.id, templateId))
-      .limit(1);
-    const template = templateRows[0];
+    const template = await getWorkflowTemplateForProject(templateId, database);
     if (!template || (template.projectId !== null && template.projectId !== projectId)) {
       throw new IssueError("Workflow template not found for project", "BAD_REQUEST");
     }
@@ -228,29 +255,20 @@ export function createIssueService(deps: {
     }
 
     const results: string[] = await withTransaction(database, async (tx) => {
-      const maxRow = await tx
-        .select({ maxNum: sql<number | null>`max(${issues.issueNumber})` })
-        .from(issues)
-        .where(eq(issues.projectId, projectId));
-      let nextNumber = (maxRow[0]?.maxNum ?? 0) + 1;
+      let nextNumber = (await getMaxIssueNumber(projectId, tx) ?? 0) + 1;
 
-      const defaultStatusRows = await tx
-        .select({ id: projectStatuses.id })
-        .from(projectStatuses)
-        .where(eq(projectStatuses.projectId, projectId))
-        .limit(1);
-      if (defaultStatusRows.length === 0) {
+      const defaultStatusId = await getFirstProjectStatusId(projectId, tx);
+      if (defaultStatusId === null) {
         const err = new IssueError("No statuses found for project", "BAD_REQUEST");
         throw err;
       }
-      const defaultStatusId = defaultStatusRows[0].id;
 
       const now = new Date().toISOString();
       const insertedIds: string[] = [];
       for (const input of inputs) {
         const id = randomUUID();
         const issueNumber = nextNumber++;
-        await tx.insert(issues).values({
+        await insertBatchIssue({
           id,
           issueNumber,
           title: input.title,
@@ -264,15 +282,15 @@ export function createIssueService(deps: {
           projectId,
           createdAt: now,
           updatedAt: now,
-        });
+        }, tx);
         if (opts?.parentIssueId) {
-          await tx.insert(issueDependencies).values({
+          await insertDependency({
             id: randomUUID(),
             issueId: id,
             dependsOnId: opts.parentIssueId,
             type: "child_of",
             createdAt: now,
-          });
+          }, tx);
         }
         insertedIds.push(id);
       }
@@ -320,29 +338,18 @@ export function createIssueService(deps: {
     // already-terminal issue.
     let wasTerminal = false;
     if (body.statusId !== undefined) {
-      const beforeRow = await database
-        .select({
-          issueNumber: issues.issueNumber,
-          title: issues.title,
-          statusId: issues.statusId,
-          statusName: projectStatuses.name,
-          currentNodeId: issues.currentNodeId,
-        })
-        .from(issues)
-        .leftJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-        .where(eq(issues.id, id))
-        .limit(1);
-      if (beforeRow[0]) {
-        issueNumberForWebhook = beforeRow[0].issueNumber;
-        issueTitleForWebhook = beforeRow[0].title;
+      const before = await getIssueWebhookSnapshot(id, database);
+      if (before) {
+        issueNumberForWebhook = before.issueNumber;
+        issueTitleForWebhook = before.title;
         wasTerminal = isTerminalStatusView({
-          statusName: beforeRow[0].statusName,
-          currentNodeId: beforeRow[0].currentNodeId,
+          statusName: before.statusName,
+          currentNodeId: before.currentNodeId,
         });
       }
     }
 
-    await database.update(issues).set(updates).where(eq(issues.id, id));
+    await updateIssueById(id, updates, database);
 
     // If a manual status change moved an issue that runs a workflow, keep its
     // currentNode consistent with the new board status (#78 status-as-view).
@@ -354,12 +361,7 @@ export function createIssueService(deps: {
     // below and the webhook payload.
     let newStatusName: string | null = null;
     if (body.statusId !== undefined) {
-      const statusRow = await database
-        .select({ name: projectStatuses.name })
-        .from(projectStatuses)
-        .where(eq(projectStatuses.id, body.statusId as string))
-        .limit(1);
-      newStatusName = statusRow[0]?.name ?? null;
+      newStatusName = await getProjectStatusName(body.statusId as string, database);
     }
 
     // When an issue transitions INTO a terminal status (Done/Cancelled/Archived),
@@ -370,23 +372,15 @@ export function createIssueService(deps: {
     // terminal "closed" state) rather than importing the workspace service, to avoid
     // an import cycle; downstream worktree cleanup is handled on the next reconcile.
     if (body.statusId !== undefined && !wasTerminal) {
-      const afterRow = await database
-        .select({ currentNodeId: issues.currentNodeId, currentNodeType: workflowNodes.nodeType })
-        .from(issues)
-        .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
-        .where(eq(issues.id, id))
-        .limit(1);
+      const afterRow = await getIssueCurrentNodeInfo(id, database);
       const nowTerminal = isTerminalStatusView({
         statusName: newStatusName,
-        currentNodeId: afterRow[0]?.currentNodeId ?? null,
-        currentNodeType: afterRow[0]?.currentNodeType ?? null,
+        currentNodeId: afterRow?.currentNodeId ?? null,
+        currentNodeType: afterRow?.currentNodeType ?? null,
       });
       if (nowTerminal) {
         const closedAt = new Date().toISOString();
-        await database
-          .update(workspaces)
-          .set({ status: "closed", closedAt, updatedAt: closedAt })
-          .where(and(eq(workspaces.issueId, id), sql`${workspaces.status} != 'closed'`));
+        await closeOpenWorkspacesForIssue(id, closedAt, database);
       }
     }
 
@@ -415,10 +409,7 @@ export function createIssueService(deps: {
       throw new IssueError("issueIds must be a non-empty array", "BAD_REQUEST");
     }
 
-    const rows = await database
-      .select({ id: issues.id, projectId: issues.projectId })
-      .from(issues)
-      .where(inArray(issues.id, ids));
+    const rows = await getIssueIdsAndProjects(ids, database);
 
     if (rows.length !== new Set(ids).size) {
       throw new IssueError("One or more issues were not found", "NOT_FOUND");
@@ -433,7 +424,7 @@ export function createIssueService(deps: {
     const updates = buildSharedIssueUpdate(body, now);
 
     const uniqueIds = [...new Set(ids)];
-    await database.update(issues).set(updates).where(inArray(issues.id, uniqueIds));
+    await updateIssuesByIds(uniqueIds, updates, database);
 
     if (body.statusId !== undefined) {
       await Promise.all(uniqueIds.map((id) => syncCurrentNodeToStatus(database, id).catch(() => {})));
@@ -451,19 +442,19 @@ export function createIssueService(deps: {
 
     // These rows can point at both the issue and its workspaces, so remove them
     // before deleting workspace rows.
-    await database.delete(issueArtifacts).where(eq(issueArtifacts.issueId, id));
-    await database.delete(issueComments).where(eq(issueComments.issueId, id));
+    await deleteIssueArtifactsForIssue(id, database);
+    await deleteIssueCommentsForIssue(id, database);
 
     // Find all workspaces for this issue and cascade delete
-    const wsRows = await database.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.issueId, id));
+    const wsRows = await getWorkspaceIdsForIssue(id, database);
     for (const ws of wsRows) {
       await deleteWorkspaceCascade(ws.id, database);
     }
 
-    await database.delete(issueTags).where(eq(issueTags.issueId, id));
-    await database.delete(issueDependencies).where(or(eq(issueDependencies.issueId, id), eq(issueDependencies.dependsOnId, id)));
-    await database.delete(showdowns).where(eq(showdowns.issueId, id));
-    await database.delete(issues).where(eq(issues.id, id));
+    await deleteIssueTagsForIssue(id, database);
+    await deleteDependenciesTouchingIssue(id, database);
+    await deleteShowdownsForIssue(id, database);
+    await deleteIssueRow(id, database);
 
     boardEvents?.broadcast(projectId, "issue_deleted");
     return projectId;
@@ -484,10 +475,7 @@ export function createIssueService(deps: {
       throw new IssueError(`Invalid dependency type. Must be one of: ${validTypes.join(", ")}`, "BAD_REQUEST");
     }
 
-    const [sourceIssue, targetIssue] = await Promise.all([
-      database.select({ projectId: issues.projectId }).from(issues).where(eq(issues.id, issueId)).limit(1),
-      database.select({ projectId: issues.projectId }).from(issues).where(eq(issues.id, dependsOnId)).limit(1),
-    ]);
+    const [sourceIssue, targetIssue] = await getIssueProjectIdsPair(issueId, dependsOnId, database);
 
     if (sourceIssue.length === 0) throw new IssueError("Issue not found", "NOT_FOUND");
     if (targetIssue.length === 0) throw new IssueError("Dependency target issue not found", "NOT_FOUND");
@@ -504,13 +492,13 @@ export function createIssueService(deps: {
 
     const id = randomUUID();
     try {
-      await database.insert(issueDependencies).values({
+      await insertDependency({
         id,
         issueId,
         dependsOnId,
         type: depType,
         createdAt: new Date().toISOString(),
-      });
+      }, database);
     } catch (err: any) {
       const isUnique =
         err.message?.includes("UNIQUE constraint") ||
@@ -528,8 +516,7 @@ export function createIssueService(deps: {
   }
 
   async function removeDependency(issueId: string, depId: string): Promise<string | null> {
-    await database.delete(issueDependencies)
-      .where(and(eq(issueDependencies.id, depId), eq(issueDependencies.issueId, issueId)));
+    await deleteDependencyByIdAndIssue(depId, issueId, database);
 
     const projectId = await getIssueProjectId(issueId, database);
     if (projectId) boardEvents?.broadcast(projectId, "dependency_removed");
@@ -578,26 +565,13 @@ export function createIssueService(deps: {
 
     await withTransaction(database, async (tx) => {
       const issueIds = [...new Set(edges.flatMap(e => [e.issueId, e.dependsOnId]))];
-      const issueRows = issueIds.length === 0 ? [] : await tx
-        .select({ id: issues.id, projectId: issues.projectId })
-        .from(issues)
-        .where(inArray(issues.id, issueIds));
+      const issueRows = issueIds.length === 0 ? [] : await getIssueIdsAndProjectsForBatch(issueIds, tx);
       const projectByIssue = new Map(issueRows.map(r => [r.id, r.projectId]));
 
       const projectIds = [...new Set(issueRows.map(r => r.projectId))];
       const allDepRows = projectIds.length === 0
         ? []
-        : await tx
-            .select({
-              id: issueDependencies.id,
-              issueId: issueDependencies.issueId,
-              dependsOnId: issueDependencies.dependsOnId,
-              type: issueDependencies.type,
-              projectId: issues.projectId,
-            })
-            .from(issueDependencies)
-            .innerJoin(issues, eq(issueDependencies.issueId, issues.id))
-            .where(inArray(issues.projectId, projectIds));
+        : await getDependencyRowsForProjects(projectIds, tx);
 
       const adjByProject = new Map<string, Map<string, Set<string>>>();
       const edgeKeyToRow = new Map<string, { id: string; projectId: string }>();
@@ -658,13 +632,13 @@ export function createIssueService(deps: {
           }
 
           const id = randomUUID();
-          await tx.insert(issueDependencies).values({
+          await insertDependency({
             id,
             issueId: e.issueId,
             dependsOnId: e.dependsOnId,
             type: type as DependencyType,
             createdAt: new Date().toISOString(),
-          });
+          }, tx);
           edgeKeyToRow.set(key, { id, projectId: srcProj });
           touchedProjectIds.add(srcProj);
           added++;
@@ -672,7 +646,7 @@ export function createIssueService(deps: {
           const key = `${e.issueId}|${e.dependsOnId}|${type}`;
           const row = edgeKeyToRow.get(key);
           if (!row) { skipped.push({ edge: e, reason: "dependency does not exist" }); continue; }
-          await tx.delete(issueDependencies).where(eq(issueDependencies.id, row.id));
+          await deleteDependencyById(row.id, tx);
           edgeKeyToRow.delete(key);
           if (DIRECTIONAL.has(type)) {
             const adj = adjByProject.get(row.projectId);
@@ -710,7 +684,7 @@ export function createIssueService(deps: {
     }
 
     const id = randomUUID();
-    await database.insert(issueArtifacts).values({
+    await insertIssueArtifact({
       id,
       issueId,
       workspaceId: body.workspaceId ?? null,
@@ -718,7 +692,7 @@ export function createIssueService(deps: {
       mimeType: body.mimeType ?? null,
       content: body.content,
       caption: body.caption ?? null,
-    });
+    }, database);
 
     const projectId = await getIssueProjectId(issueId, database);
     if (projectId) boardEvents?.broadcast(projectId, "issue_updated");
@@ -732,19 +706,7 @@ export function createIssueService(deps: {
     const { contextTokensMap, lastToolMap } = await enrichWorkspacesWithSessionData(wsIds, database);
 
     // Fetch latest session per workspace for lastSessionAt / sessionStatus
-    const sessionRows = wsIds.length > 0
-      ? await database
-          .select({
-            workspaceId: sessions.workspaceId,
-            status: sessions.status,
-            startedAt: sessions.startedAt,
-            endedAt: sessions.endedAt,
-            triggerType: sessions.triggerType,
-          })
-          .from(sessions)
-          .where(inArray(sessions.workspaceId, wsIds))
-          .orderBy(desc(sessions.startedAt))
-      : [];
+    const sessionRows = await getLatestSessionsForWorkspaces(wsIds, database);
     const latestSessionByWs = new Map<string, typeof sessionRows[0]>();
     for (const s of sessionRows) {
       if (!latestSessionByWs.has(s.workspaceId)) latestSessionByWs.set(s.workspaceId, s);
@@ -872,20 +834,9 @@ export function createIssueService(deps: {
   }
 
   async function duplicateIssue(sourceId: string): Promise<CreateIssueResult> {
-    const rows = await database
-      .select({
-        projectId: issues.projectId,
-        title: issues.title,
-        description: issues.description,
-        priority: issues.priority,
-        issueType: issues.issueType,
-      })
-      .from(issues)
-      .where(eq(issues.id, sourceId))
-      .limit(1);
+    const source = await getDuplicateSourceIssue(sourceId, database);
 
-    if (rows.length === 0) throw new IssueError("Issue not found", "NOT_FOUND");
-    const source = rows[0];
+    if (!source) throw new IssueError("Issue not found", "NOT_FOUND");
 
     const newIssue = await createIssue({
       projectId: source.projectId,
@@ -912,35 +863,23 @@ export function createIssueService(deps: {
       throw new IssueError("olderThanDays must be a positive number", "BAD_REQUEST");
     }
 
-    const archivedStatus = await database
-      .select({ id: projectStatuses.id })
-      .from(projectStatuses)
-      .where(and(eq(projectStatuses.projectId, projectId), eq(projectStatuses.name, "Archived")))
-      .limit(1);
+    const archivedStatusId = await getArchivedStatusId(projectId, database);
 
-    if (archivedStatus.length === 0) {
+    if (archivedStatusId === null) {
       throw new IssueError("Archived status not found for this project", "NOT_FOUND");
     }
-    const archivedStatusId = archivedStatus[0].id;
 
-    const doneStatuses = await database
-      .select({ id: projectStatuses.id })
-      .from(projectStatuses)
-      .where(and(eq(projectStatuses.projectId, projectId), eq(projectStatuses.name, "Done")));
+    const doneStatusIds = await getDoneStatusIds(projectId, database);
 
-    if (doneStatuses.length === 0) {
+    if (doneStatusIds.length === 0) {
       return { archived: 0 };
     }
-    const doneStatusIds = doneStatuses.map((s) => s.id);
 
     const cutoff = new Date(
       new Date(nowOverride ?? new Date().toISOString()).getTime() - olderThanDays * 24 * 60 * 60 * 1000,
     ).toISOString();
 
-    const candidates = await database
-      .select({ id: issues.id, statusChangedAt: issues.statusChangedAt, createdAt: issues.createdAt })
-      .from(issues)
-      .where(and(eq(issues.projectId, projectId), inArray(issues.statusId, doneStatusIds)));
+    const candidates = await getDoneCandidateIssues(projectId, doneStatusIds, database);
 
     const toArchive = candidates
       .filter((i) => {
@@ -954,10 +893,7 @@ export function createIssueService(deps: {
     }
 
     const now = new Date().toISOString();
-    await database
-      .update(issues)
-      .set({ statusId: archivedStatusId, statusChangedAt: now, updatedAt: now })
-      .where(inArray(issues.id, toArchive));
+    await archiveIssuesByIds(toArchive, archivedStatusId, now, database);
 
     boardEvents?.broadcast(projectId, "issue_updated");
 
