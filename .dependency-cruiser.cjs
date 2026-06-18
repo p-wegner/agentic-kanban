@@ -92,11 +92,55 @@ module.exports = {
     {
       name: "routes-not-down-to-persistence",
       comment:
-        "BACKLOG (34 route files import db/index, 13 import drizzle-orm directly): HTTP " +
-        "routes should call a service, not run persistence themselves. Migrate per-route, " +
-        "then tighten this rule to error. The transport layer must not know about Drizzle.",
+        "Transport (routes) must not run persistence: no VALUE import of db/index, " +
+        "drizzle-orm, or @agentic-kanban/shared/schema. Type-only imports are erased " +
+        "(tsPreCompilationDeps:false) so a `import type { Database }` is fine. Originally a " +
+        "26-file warn backlog; drained to ERROR for every clean route. The `pathNot` allow-list " +
+        "is the SHRINKING remaining backlog (analytics-heavy routes that need thin aggregation " +
+        "services). Drain one -> delete its line here AND in the companion warn rule. When the " +
+        "list is empty, remove both the pathNot and the warn rule — the gate is then total.",
+      severity: "error",
+      from: {
+        path: "^packages/server/src/routes/",
+        pathNot: [
+          "^packages/server/src/routes/butler\\.ts$",
+          "^packages/server/src/routes/digest\\.ts$",
+          "^packages/server/src/routes/focus\\.ts$",
+          "^packages/server/src/routes/insights\\.ts$",
+          "^packages/server/src/routes/issues\\.ts$",
+          "^packages/server/src/routes/projects\\.ts$",
+          "^packages/server/src/routes/time-report\\.ts$",
+          "^packages/server/src/routes/workspaces\\.ts$",
+        ],
+      },
+      to: {
+        path: [
+          "^packages/server/src/db/index",
+          "/db/index\\.js$",
+          "drizzle-orm",
+          "@agentic-kanban/shared/schema",
+        ],
+      },
+    },
+    {
+      name: "routes-not-down-to-persistence-backlog",
+      comment:
+        "WARN tracker for the routes still holding inline persistence (mirrors the error rule's " +
+        "pathNot allow-list). Keeps the remaining drain backlog visible in lint:arch:report. " +
+        "When a route is drained, remove its line from BOTH this rule and the error rule's pathNot.",
       severity: "warn",
-      from: { path: "^packages/server/src/routes/" },
+      from: {
+        path: [
+          "^packages/server/src/routes/butler\\.ts$",
+          "^packages/server/src/routes/digest\\.ts$",
+          "^packages/server/src/routes/focus\\.ts$",
+          "^packages/server/src/routes/insights\\.ts$",
+          "^packages/server/src/routes/issues\\.ts$",
+          "^packages/server/src/routes/projects\\.ts$",
+          "^packages/server/src/routes/time-report\\.ts$",
+          "^packages/server/src/routes/workspaces\\.ts$",
+        ],
+      },
       to: {
         path: [
           "^packages/server/src/db/index",
