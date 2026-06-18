@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from "react";
-import { apiFetch } from "../../lib/api.js";
+import { apiPost, apiPut, apiDelete } from "../../lib/api.js";
 import { EditSkillForm, type SkillSetting } from "../SettingsPanel.shared.js";
 import { showToast } from "../Toast.js";
 
@@ -30,10 +30,7 @@ export function SkillsSettings({ skills, setSkills, editingSkill, setEditingSkil
                         <EditSkillForm
                           skill={skill}
                           onSave={async (updates) => {
-                            await apiFetch(`/api/agent-skills/${skill.id}`, {
-                              method: "PUT",
-                              body: JSON.stringify(updates),
-                            });
+                            await apiPut(`/api/agent-skills/${skill.id}`, updates);
                             setSkills((s) => s.map((sk) => sk.id === skill.id ? { ...sk, ...updates } : sk));
                             setEditingSkill(null);
                           }}
@@ -71,7 +68,7 @@ export function SkillsSettings({ skills, setSkills, editingSkill, setEditingSkil
                               onClick={async () => {
                                 setInstallingSkill(skill.id);
                                 try {
-                                  await apiFetch(`/api/agent-skills/${skill.id}/install`, { method: "POST" });
+                                  await apiPost(`/api/agent-skills/${skill.id}/install`);
                                   setInstalledSkills((s) => ({ ...s, [skill.id]: true }));
                                   showToast(`Installed "${skill.name}" to .claude/skills/`, "success");
                                 } catch {
@@ -87,7 +84,7 @@ export function SkillsSettings({ skills, setSkills, editingSkill, setEditingSkil
                             {!skill.isBuiltin && (
                               <button
                                 onClick={async () => {
-                                  await apiFetch(`/api/agent-skills/${skill.id}`, { method: "DELETE" });
+                                  await apiDelete(`/api/agent-skills/${skill.id}`);
                                   setSkills((s) => s.filter((sk) => sk.id !== skill.id));
                                 }}
                                 className="text-xs text-gray-400 hover:text-red-600 px-1"
@@ -106,10 +103,7 @@ export function SkillsSettings({ skills, setSkills, editingSkill, setEditingSkil
                         skill={{ name: newSkill.name, description: newSkill.description, prompt: newSkill.prompt, model: newSkill.model || null, projectId: null }}
                         isNew
                         onSave={async (data) => {
-                          const created = await apiFetch<{ id: string }>("/api/agent-skills", {
-                            method: "POST",
-                            body: JSON.stringify(data),
-                          });
+                          const created = await apiPost<{ id: string }>("/api/agent-skills", data);
                           setSkills((s) => [...s, { ...data, id: created.id, isBuiltin: false, projectId: null }]);
                           setNewSkill(null);
                         }}

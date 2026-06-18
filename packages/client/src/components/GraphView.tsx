@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost, apiDelete } from "../lib/api.js";
 import { STATUS_COLORS } from "../lib/chartColors";
 import { computeCriticalPath, type CriticalPathResult } from "../lib/criticalPath.js";
 import {
@@ -310,7 +310,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery, focus
   async function handleRemoveEdge(edgeId: string) {
     const edge = graphData?.edges.find((e) => e.id === edgeId);
     if (!edge) throw new Error("Dependency not found");
-    await apiFetch(`/api/issues/${edge.issueId}/dependencies/${edgeId}`, { method: "DELETE" });
+    await apiDelete(`/api/issues/${edge.issueId}/dependencies/${edgeId}`);
     await reloadGraph();
   }
 
@@ -319,20 +319,12 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery, focus
     // If the POST fails, restore the original edge so nothing is silently lost.
     const edge = graphData?.edges.find((e) => e.id === edgeId);
     if (!edge) return;
-    await apiFetch(`/api/issues/${edge.issueId}/dependencies/${edgeId}`, { method: "DELETE" });
+    await apiDelete(`/api/issues/${edge.issueId}/dependencies/${edgeId}`);
     try {
-      await apiFetch(`/api/issues/${edge.issueId}/dependencies`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dependsOnId: edge.dependsOnId, type: newType }),
-      });
+      await apiPost(`/api/issues/${edge.issueId}/dependencies`, { dependsOnId: edge.dependsOnId, type: newType });
     } catch (err) {
       // Rollback: restore the original edge so the graph is not left with a missing edge
-      await apiFetch(`/api/issues/${edge.issueId}/dependencies`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dependsOnId: edge.dependsOnId, type: edge.type }),
-      }).catch(() => {/* best-effort rollback */});
+      await apiPost(`/api/issues/${edge.issueId}/dependencies`, { dependsOnId: edge.dependsOnId, type: edge.type }).catch(() => {/* best-effort rollback */});
       await reloadGraph();
       throw err;
     }
@@ -342,11 +334,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery, focus
   }
 
   async function handleAddEdge(sourceId: string, targetId: string, type: DependencyType) {
-    await apiFetch(`/api/issues/${targetId}/dependencies`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dependsOnId: sourceId, type }),
-    });
+    await apiPost(`/api/issues/${targetId}/dependencies`, { dependsOnId: sourceId, type });
     await reloadGraph();
   }
 
