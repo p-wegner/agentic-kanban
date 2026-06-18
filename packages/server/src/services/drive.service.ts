@@ -1,10 +1,9 @@
-import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { projects } from "@agentic-kanban/shared/schema";
 import { DRIVE_STATUSES } from "@agentic-kanban/shared/schema";
 import type { DriveStatus } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import { getAllPreferences, setPreferences } from "../repositories/preferences.repository.js";
+import { getProjectRepoPath } from "../repositories/drive-service.repository.js";
 import {
   listDrivesByProject,
   getDriveById,
@@ -103,12 +102,7 @@ export async function getDriveStatus(
 }
 
 async function resolveRepoPath(projectId: string, database: Database): Promise<string | null> {
-  const rows = await database
-    .select({ repoPath: projects.repoPath })
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .limit(1);
-  return rows[0]?.repoPath ?? null;
+  return getProjectRepoPath(projectId, database);
 }
 
 /**
