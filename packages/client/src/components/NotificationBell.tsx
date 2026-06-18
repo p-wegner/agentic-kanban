@@ -23,6 +23,7 @@ function eventLabel(type: NotificationEventType): string {
     case "workflow_error": return "Workflow error";
     case "workflow_transition": return "Issue moved";
     case "approval_requested": return "Agent needs input";
+    case "project_completed": return "Project complete 🎉";
   }
 }
 
@@ -73,6 +74,12 @@ function EventIcon({ type }: { type: NotificationEventType }) {
       return (
         <svg className="h-4 w-4 text-amber-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path strokeLinecap="round" strokeLinejoin="round" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      );
+    case "project_completed":
+      return (
+        <svg className="h-4 w-4 text-emerald-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L23 12l-6.714 2.143L14 21l-2.286-6.857L5 12l6.714-2.143L14 3z" />
         </svg>
       );
   }
