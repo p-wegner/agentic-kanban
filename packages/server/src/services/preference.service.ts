@@ -17,6 +17,11 @@ export const SETTINGS_KEYS = [
   "codex_profile", PREF_PI_PROFILE, "copilot_profile", "provider", "default_model", "mock_agent_profile", "mock_agent_delay_ms",
   "permission_prompt_tool", "auto_review", "auto_merge", "auto_merge_in_review", "resume_with_new_model",
   "review_auto_fix", "disabled_mcp_tools", "auto_start_followup", "require_manual_approval",
+  // auto_rebase_on_continue: read by workspace-session.service before relaunch.
+  // skip_preflight: defaults the per-launch preflight toggle in CreateWorkspaceForm.
+  // Both are surfaced as toggles in SettingsPanel but were absent here, so updateSettings
+  // silently dropped writes to them — the toggles could never persist.
+  "auto_rebase_on_continue", "skip_preflight",
   "dependency_auto_chain",
   "dynamic_column_scaling", "card_density", "persistent_agent", "learning_step_after_agent",
   "learning_step_after_review", "learning_step_before_merge", "auto_monitor",
