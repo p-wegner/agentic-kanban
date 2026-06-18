@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { apiFetch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 import { SlowRequestsPanel } from "./SlowRequestsPanel.js";
+import type { MonitorAction } from "./MonitorPopover.js";
 
 export interface SettingsPanelProps {
   onClose: () => void;
@@ -956,7 +957,7 @@ export type WorkflowBoardMonitorSectionProps = WorkflowSectionProps & {
     active: boolean;
     lastRun: string | null;
     nextRunAt: string | null;
-    recentActions: string[];
+    recentActions: MonitorAction[];
     maintenanceActive?: boolean;
     maintenanceEnd?: string | null;
   } | null;
@@ -1274,7 +1275,12 @@ export function WorkflowBoardMonitorSection({
               {monitorStatus.recentActions.length > 0 ? (
                 <ul className="divide-y divide-gray-100 dark:divide-gray-800">
                   {monitorStatus.recentActions.slice(0, 10).map((action, i) => (
-                    <li key={i} className="px-3 py-1.5 text-[11px] text-gray-600 dark:text-gray-400 leading-snug">{action}</li>
+                    <li key={i} className="px-3 py-1.5 text-[11px] text-gray-600 dark:text-gray-400 leading-snug flex items-center gap-2">
+                      <span className="font-medium">{action.action}</span>
+                      {action.httpStatus != null && <span className="text-gray-400 dark:text-gray-500 font-mono">{action.httpStatus}</span>}
+                      {action.verificationResult && <span className="text-gray-400 dark:text-gray-500">{action.verificationResult}</span>}
+                      <span className="ml-auto text-gray-400 dark:text-gray-500 font-mono shrink-0">{new Date(action.at).toLocaleTimeString('en-US')}</span>
+                    </li>
                   ))}
                 </ul>
               ) : (
