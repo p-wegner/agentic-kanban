@@ -2,17 +2,16 @@ import { randomUUID } from "node:crypto";
 import { execSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { resolve, sep, join } from "node:path";
-import { projects, projectStatuses, issues, workspaces, preferences } from "@agentic-kanban/shared/schema";
 import { ensureAgentGitignore, ensureStarterClaudeMd, ensureStarterAgentsMd, ensureHookScaffold, ensureVerifyGateRunner, getDefaultSkillId, commitProjectScaffoldArtifacts } from "./project-scaffold.js";
 import { isSkillsDirAbsentOrEmpty, writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { listAgentSkills } from "../repositories/agent-skill.repository.js";
 import { getPreference } from "../repositories/preferences.repository.js";
-import { eq, and, notInArray, sql } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { branchExists, detectRepoInfo, getProjectGitStatsAsync } from "./git-info.service.js";
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree } from "./git.service.js";
 import { buildWorkspaceSummaryMap, buildBlockedMap, buildTagMap, buildGraphEdges } from "./board-aggregation.service.js";
 import { getProjectById, getProjectByRepoPath, getAllProjects, insertProject, deleteProjectCascade, setProjectArchived, getProjectStats, getProjectStatuses, createProjectStatus, deleteProjectStatus, updateProjectStatusSortOrder } from "../repositories/project.repository.js";
+import { getProjectsBasePath, updateProjectFields, clearActiveProjectPreference, getProjectWorkspacesWithIssue, getWorkspaceWorkingDirById, getProjectStatusIdsAndNames, getBoardIssueRows, getProjectStatusesOrdered, getBoardIssues, getPreferenceValue, getGraphIssues, getCrossProjectIssues, getActiveWorkspaceCounts, getBoardSummaryRows } from "../repositories/project-service.repository.js";
 import { generateSetupScript as generateSetupScriptAI, generateTeardownScript as generateTeardownScriptAI, generateVerifyScript as generateVerifyScriptAI } from "./project-setup.service.js";
 import { populateStackProfile, populateVerifyScript, detectStackProfile } from "./stack-profile.service.js";
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
@@ -236,11 +235,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
         throw new ProjectError('Project name contains invalid characters. Avoid: / \\ < > : " | ? *', "BAD_REQUEST");
       }
 
-      const baseDirRows = await database
-        .select({ value: preferences.value })
-        .from(preferences)
-        .where(eq(preferences.key, "projects_base_path"))
-        .limit(1);
+      const baseDirRows = await getProjectsBasePath(database);
       const baseDir = baseDirRows[0]?.value?.trim();
       if (!baseDir) {
         throw new ProjectError("No base directory configured. Set 'Projects base directory' in Settings â€º Project, or provide an explicit path.", "BAD_REQUEST");
@@ -370,7 +365,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       }
     }
 
-    await database.update(projects).set(updates).where(eq(projects.id, id));
+    await updateProjectFields(id, updates, database);
     return { id };
   }
 
@@ -386,9 +381,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     await setProjectArchived(id, true, database);
     // Clear the active-project preference if it pointed at the now-archived project,
     // so the board doesn't try to render a hidden project on next load.
-    await database
-      .delete(preferences)
-      .where(and(eq(preferences.key, "activeProjectId"), eq(preferences.value, id)));
+    await clearActiveProjectPreference(id, database);
     return { id };
   }
 
@@ -407,21 +400,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
 
     const gitWorktrees = await listWorktrees(repoPath);
 
-    const projectWorkspaces = await database
-      .select({
-        id: workspaces.id,
-        issueId: workspaces.issueId,
-        branch: workspaces.branch,
-        workingDir: workspaces.workingDir,
-        baseBranch: workspaces.baseBranch,
-        isDirect: workspaces.isDirect,
-        status: workspaces.status,
-        issueNumber: issues.issueNumber,
-        issueTitle: issues.title,
-      })
-      .from(workspaces)
-      .innerJoin(issues, eq(workspaces.issueId, issues.id))
-      .where(eq(issues.projectId, projectId));
+    const projectWorkspaces = await getProjectWorkspacesWithIssue(projectId, database);
 
     const wsByDir = new Map<string, typeof projectWorkspaces[number]>();
     for (const ws of projectWorkspaces) {
@@ -481,11 +460,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     let removedPath = body.path;
 
     if (body.workspaceId) {
-      const wsRows = await database
-        .select({ id: workspaces.id, workingDir: workspaces.workingDir })
-        .from(workspaces)
-        .where(eq(workspaces.id, body.workspaceId))
-        .limit(1);
+      const wsRows = await getWorkspaceWorkingDirById(body.workspaceId, database);
 
       if (wsRows.length === 0) {
         throw new ProjectError("Workspace not found", "NOT_FOUND");
@@ -554,20 +529,9 @@ export function createProjectService(deps: { database: Database; workspaceSummar
   // Issue ids + archived-issue ids for the default board view (Archived column excluded),
   // mirroring getBoard's own queries — used by the invalidation-triggered warm-ahead path.
   async function fetchBoardIssueIds(projectId: string): Promise<{ issueIds: string[]; archivedIssueIds: Set<string> }> {
-    const statuses = await database
-      .select({ id: projectStatuses.id, name: projectStatuses.name })
-      .from(projectStatuses)
-      .where(eq(projectStatuses.projectId, projectId));
+    const statuses = await getProjectStatusIdsAndNames(projectId, database);
     const archivedStatusIds = statuses.filter((s) => s.name === "Archived").map((s) => s.id);
-    const rows = await database
-      .select({ id: issues.id, statusName: projectStatuses.name })
-      .from(issues)
-      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-      .where(
-        archivedStatusIds.length === 0
-          ? eq(issues.projectId, projectId)
-          : and(eq(issues.projectId, projectId), notInArray(issues.statusId, archivedStatusIds)),
-      );
+    const rows = await getBoardIssueRows(projectId, archivedStatusIds, database);
     return {
       issueIds: rows.map((r) => r.id),
       archivedIssueIds: new Set(
@@ -612,11 +576,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     const project = await getProjectById(projectId, database);
     if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
 
-    const statuses = await database
-      .select()
-      .from(projectStatuses)
-      .where(eq(projectStatuses.projectId, projectId))
-      .orderBy(projectStatuses.sortOrder);
+    const statuses = await getProjectStatusesOrdered(projectId, database);
 
     const archivedStatusIds = new Set(
       statuses.filter((s) => s.name === "Archived").map((s) => s.id),
@@ -626,36 +586,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       ? statuses
       : statuses.filter((s) => !archivedStatusIds.has(s.id));
 
-    const projectIssues = await database
-      .select({
-        id: issues.id,
-        issueNumber: issues.issueNumber,
-        title: issues.title,
-        priority: issues.priority,
-        issueType: issues.issueType,
-        sortOrder: issues.sortOrder,
-        statusId: issues.statusId,
-        projectId: issues.projectId,
-        createdAt: issues.createdAt,
-        updatedAt: issues.updatedAt,
-        statusChangedAt: issues.statusChangedAt,
-        statusName: projectStatuses.name,
-        skipAutoReview: issues.skipAutoReview,
-        estimate: issues.estimate,
-        externalKey: issues.externalKey,
-        externalUrl: issues.externalUrl,
-        checklistJson: issues.checklistJson,
-        pinned: issues.pinned,
-        milestoneId: issues.milestoneId,
-      })
-      .from(issues)
-      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-      .where(
-        opts?.includeArchived || archivedStatusIds.size === 0
-          ? eq(issues.projectId, projectId)
-          : and(eq(issues.projectId, projectId), notInArray(issues.statusId, [...archivedStatusIds])),
-      )
-      .orderBy(issues.sortOrder);
+    const projectIssues = await getBoardIssues(projectId, !!opts?.includeArchived, [...archivedStatusIds], database);
 
     const issueIds = projectIssues.map((i) => i.id);
     const defaultBranch = project.defaultBranch;
@@ -699,8 +630,8 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       summaryMapPromise,
       buildBlockedMap(issueIds, database),
       buildTagMap(issueIds, database),
-      database.select({ value: preferences.value }).from(preferences).where(eq(preferences.key, "backlog_stale_days")).limit(1),
-      database.select({ value: preferences.value }).from(preferences).where(eq(preferences.key, "inprogress_stale_days")).limit(1),
+      getPreferenceValue("backlog_stale_days", database),
+      getPreferenceValue("inprogress_stale_days", database),
     ]);
 
     const staleDays = parseInt(staleDaysRow[0]?.value ?? "14", 10) || 14;
@@ -801,30 +732,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     const project = await getProjectById(projectId, database);
     if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
 
-    const projectIssues = await database
-      .select({
-        id: issues.id,
-        issueNumber: issues.issueNumber,
-        title: issues.title,
-        description: issues.description,
-        priority: issues.priority,
-        issueType: issues.issueType,
-        sortOrder: issues.sortOrder,
-        statusId: issues.statusId,
-        projectId: issues.projectId,
-        createdAt: issues.createdAt,
-        updatedAt: issues.updatedAt,
-        statusChangedAt: issues.statusChangedAt,
-        statusName: projectStatuses.name,
-        skipAutoReview: issues.skipAutoReview,
-        estimate: issues.estimate,
-        pinned: issues.pinned,
-        milestoneId: issues.milestoneId,
-      })
-      .from(issues)
-      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-      .where(eq(issues.projectId, projectId))
-      .orderBy(issues.sortOrder);
+    const projectIssues = await getGraphIssues(projectId, database);
 
     const issueIds = projectIssues.map((i) => i.id);
     const [edges, workspaceSummaryMap] = await Promise.all([
@@ -851,30 +759,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
 
     const results = await Promise.all(
       allProjects.map(async (project: typeof allProjects[number]) => {
-        const statuses = await database
-          .select()
-          .from(projectStatuses)
-          .where(eq(projectStatuses.projectId, project.id))
-          .orderBy(projectStatuses.sortOrder);
-
-        const projectIssues = await database
-          .select({
-            id: issues.id,
-            issueNumber: issues.issueNumber,
-            title: issues.title,
-            priority: issues.priority,
-            issueType: issues.issueType,
-            sortOrder: issues.sortOrder,
-            statusId: issues.statusId,
-            projectId: issues.projectId,
-            createdAt: issues.createdAt,
-            updatedAt: issues.updatedAt,
-            statusName: projectStatuses.name,
-          })
-          .from(issues)
-          .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-          .where(eq(issues.projectId, project.id))
-          .orderBy(issues.sortOrder);
+        const projectIssues = await getCrossProjectIssues(project.id, database);
 
         const issueIds = projectIssues.map((i) => i.id);
         const workspaceSummaryMap = await buildWorkspaceSummaryMap(issueIds, project.defaultBranch, database);
@@ -920,15 +805,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     // Enrich each project with a count of workspaces whose agent is currently
     // active (running, reviewing, or resolving conflicts), so the project
     // selector can surface where agents are working without a second request.
-    const activeCounts = await database
-      .select({
-        projectId: issues.projectId,
-        count: sql<number>`count(*)`,
-      })
-      .from(workspaces)
-      .innerJoin(issues, eq(workspaces.issueId, issues.id))
-      .where(notInArray(workspaces.status, ["idle", "closed"]))
-      .groupBy(issues.projectId);
+    const activeCounts = await getActiveWorkspaceCounts(database);
 
     const countByProject = new Map<string, number>();
     for (const row of activeCounts) {
@@ -1004,18 +881,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     const project = await getProjectById(projectId, database);
     if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
 
-    const rows = await database
-      .select({
-        statusId: projectStatuses.id,
-        name: projectStatuses.name,
-        sortOrder: projectStatuses.sortOrder,
-        count: sql<number>`count(${issues.id})`,
-      })
-      .from(projectStatuses)
-      .leftJoin(issues, eq(issues.statusId, projectStatuses.id))
-      .where(eq(projectStatuses.projectId, projectId))
-      .groupBy(projectStatuses.id, projectStatuses.name, projectStatuses.sortOrder)
-      .orderBy(projectStatuses.sortOrder);
+    const rows = await getBoardSummaryRows(projectId, database);
 
     return rows.map((r) => ({ ...r, count: Number(r.count) }));
   }
