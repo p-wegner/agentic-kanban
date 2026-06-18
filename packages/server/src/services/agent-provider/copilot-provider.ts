@@ -17,6 +17,7 @@ import {
 
 export class CopilotProvider implements AgentProvider {
   readonly name = "copilot";
+  readonly profilePrefKey = "copilot_profile";
   private readonly fs: FileSystem;
 
   constructor(fs: FileSystem = nodeFileSystem) {

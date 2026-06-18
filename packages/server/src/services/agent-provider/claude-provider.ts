@@ -6,6 +6,7 @@ import { getMcpConfigPath, buildSpawnEnv, splitArgs, nodeFileSystem, profileDefi
 
 export class ClaudeProvider implements AgentProvider {
   readonly name = "claude";
+  readonly profilePrefKey = "claude_profile";
   private readonly fs: FileSystem;
 
   constructor(fs: FileSystem = nodeFileSystem) {

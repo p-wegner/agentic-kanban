@@ -66,6 +66,7 @@ function hasParsedFields(result: ParsedStreamEvent): boolean {
 
 export class PiProvider implements AgentProvider {
   readonly name = "pi";
+  readonly profilePrefKey = "pi_profile";
   private readonly fs: FileSystem;
 
   constructor(fs: FileSystem = nodeFileSystem) {
