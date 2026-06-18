@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
-import { getSettings, invalidateSettings } from "./settingsStore.js";
+import { getSettings, invalidateSettings, setSettings, setProjectPref } from "./settingsStore.js";
 import { apiFetch } from "./api.js";
 
 vi.mock("./api.js", () => ({ apiFetch: vi.fn() }));
@@ -77,5 +77,43 @@ describe("settingsStore", () => {
     expect((await stalePromise).a).toBe("stale");
     expect((await getSettings()).a).toBe("fresh");
     expect(apiFetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("setSettings PUTs the patch and invalidates the read cache", async () => {
+    // Prime the cache with an initial read.
+    apiFetchMock.mockResolvedValueOnce({ card_density: "comfortable" });
+    expect((await getSettings()).card_density).toBe("comfortable");
+
+    // The PUT, then the post-invalidation refetch sees the new value.
+    apiFetchMock.mockResolvedValueOnce(undefined); // PUT
+    apiFetchMock.mockResolvedValueOnce({ card_density: "compact" }); // refetch
+    await setSettings({ card_density: "compact" });
+
+    expect(apiFetchMock).toHaveBeenNthCalledWith(2, "/api/preferences/settings", {
+      method: "PUT",
+      body: JSON.stringify({ card_density: "compact" }),
+    });
+    // Cache was invalidated, so the next read hits the network (not the stale copy).
+    expect((await getSettings()).card_density).toBe("compact");
+    expect(apiFetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not invalidate the cache when the PUT rejects", async () => {
+    apiFetchMock.mockResolvedValueOnce({ a: "cached" });
+    await getSettings();
+    apiFetchMock.mockRejectedValueOnce(new Error("network"));
+    await expect(setSettings({ a: "x" })).rejects.toThrow("network");
+    // Still served from cache — no refetch triggered.
+    expect((await getSettings()).a).toBe("cached");
+    expect(apiFetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("setProjectPref scopes the key by project id", async () => {
+    apiFetchMock.mockResolvedValue(undefined);
+    await setProjectPref("p1", "start_mode", "monitor");
+    expect(apiFetchMock).toHaveBeenCalledWith("/api/preferences/settings", {
+      method: "PUT",
+      body: JSON.stringify({ ["start_mode_p1"]: "monitor" }),
+    });
   });
 });

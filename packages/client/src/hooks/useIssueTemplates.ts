@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { apiFetch } from "../lib/api.js";
-import { getSettings, invalidateSettings } from "../lib/settingsStore.js";
+import { getSettings, setSettings } from "../lib/settingsStore.js";
 
 export interface IssueTemplate {
   id: string;
@@ -80,11 +79,7 @@ export function useIssueTemplates() {
   }, []);
 
   const save = useCallback(async (templates: IssueTemplate[]) => {
-    await apiFetch("/api/preferences/settings", {
-      method: "PUT",
-      body: JSON.stringify({ issue_templates: JSON.stringify(templates) }),
-    });
-    invalidateSettings();
+    await setSettings({ issue_templates: JSON.stringify(templates) });
     setCustomTemplates(templates);
   }, []);
 

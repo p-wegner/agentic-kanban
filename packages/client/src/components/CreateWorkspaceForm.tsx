@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api.js";
-import { getSettings, invalidateSettings } from "../lib/settingsStore.js";
+import { getSettings, setSettings } from "../lib/settingsStore.js";
 import { suggestBranchName, sanitizeBranchName } from "@agentic-kanban/shared/lib/branch";
 import type { IssueWithStatus, ProfileSelection, WorkspaceResponse } from "@agentic-kanban/shared";
 import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
@@ -190,10 +190,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
       // Persist TDD mode preference per-project (best-effort)
       if (project) {
         const prefKey = `tdd_mode_${project.id}`;
-        apiFetch("/api/preferences/settings", {
-          method: "PUT",
-          body: JSON.stringify({ [prefKey]: String(tddMode) }),
-        }).then(() => invalidateSettings()).catch(() => {});
+        setSettings({ [prefKey]: String(tddMode) }).catch(() => {});
       }
       onCreated({ id: result.id, sessionId: result.sessionId });
     } catch (err) {
@@ -281,11 +278,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
     if (!templateSettingsKey) return false;
     setTemplateSaving(true);
     try {
-      await apiFetch("/api/preferences/settings", {
-        method: "PUT",
-        body: JSON.stringify({ [templateSettingsKey]: JSON.stringify(nextTemplates) }),
-      });
-      invalidateSettings();
+      await setSettings({ [templateSettingsKey]: JSON.stringify(nextTemplates) });
       setTemplates(nextTemplates);
       showToast(message, "success");
       return true;

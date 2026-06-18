@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
-import { apiFetch } from "../../lib/api.js";
-import { getSettings, invalidateSettings } from "../../lib/settingsStore.js";
+import { getSettings, setSettings } from "../../lib/settingsStore.js";
 import { showToast } from "../Toast.js";
 import {
   CODEX_DEFAULT_PROFILE,
@@ -70,11 +69,7 @@ export function AgentPresetsEditor({ activeProjectId, profiles, codexProfiles, c
     if (!prefKey) return false;
     setSaving(true);
     try {
-      await apiFetch("/api/preferences/settings", {
-        method: "PUT",
-        body: JSON.stringify({ [prefKey]: JSON.stringify(next) }),
-      });
-      invalidateSettings();
+      await setSettings({ [prefKey]: JSON.stringify(next) });
       setPresets(next);
       showToast(message, "success");
       return true;

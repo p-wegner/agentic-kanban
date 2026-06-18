@@ -5,7 +5,7 @@ import { CreateIssueForm } from "./CreateIssueForm.js";
 import { IssueCard } from "./IssueCard.js";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { apiFetch } from "../lib/api.js";
-import { getSettings, invalidateSettings } from "../lib/settingsStore.js";
+import { getSettings, setSettings } from "../lib/settingsStore.js";
 import { showToast } from "./Toast.js";
 
 type SortMode = "rank" | "newest" | "oldest" | "priority" | "type" | "due";
@@ -353,11 +353,7 @@ export function BacklogView({
   async function persistPresets(nextPresets: BacklogPreset[], successMessage: string) {
     setPresetsSaving(true);
     try {
-      await apiFetch("/api/preferences/settings", {
-        method: "PUT",
-        body: JSON.stringify({ [presetSettingsKey]: JSON.stringify(nextPresets) }),
-      });
-      invalidateSettings();
+      await setSettings({ [presetSettingsKey]: JSON.stringify(nextPresets) });
       setPresets(nextPresets);
       showToast(successMessage, "success");
       return true;

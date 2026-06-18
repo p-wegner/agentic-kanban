@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { apiFetch } from "../lib/api.js";
-import { getSettings, invalidateSettings } from "../lib/settingsStore.js";
+import { getSettings, setSettings } from "../lib/settingsStore.js";
 import type { StatusWithIssues, IssueWithStatus } from "@agentic-kanban/shared";
 
 interface StaleWorkDashboardProps {
@@ -83,10 +83,7 @@ export function StaleWorkDashboard({ projectId, onIssueClick }: StaleWorkDashboa
     const parsed = parseInt(value, 10);
     if (!isNaN(parsed) && parsed > 0) {
       setThreshold(parsed);
-      apiFetch("/api/preferences/settings", {
-        method: "PUT",
-        body: JSON.stringify({ [PREF_KEY]: String(parsed) }),
-      }).then(() => invalidateSettings()).catch(() => {});
+      setSettings({ [PREF_KEY]: String(parsed) }).catch(() => {});
     }
   }, []);
 

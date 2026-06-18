@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
-import { invalidateSettings } from "../lib/settingsStore.js";
+import { invalidateSettings, setSettings as savePreferences } from "../lib/settingsStore.js";
 import { showToast } from "./Toast.js";
 import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
 import { CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, DEFAULT_SETTINGS, PI_DEFAULT_PROFILE, TABS, uniqueProfiles, type AgentProfileHealth, type McpHealth, type MonitorTunables, type ProjectSettingsState, type ScheduledRun, type Settings, type SettingsPanelProps, type SkillSetting, type Tab, type TagSetting } from "./SettingsPanel.shared.js";
@@ -342,11 +342,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
         maxNewStartsPerCycle: 3,
         segments: [],
       };
-      await apiFetch("/api/preferences/settings", {
-        method: "PUT",
-        body: JSON.stringify({ [`board_strategy_${activeProjectId}`]: JSON.stringify(strategyConfig) }),
-      });
-      invalidateSettings();
+      await savePreferences({ [`board_strategy_${activeProjectId}`]: JSON.stringify(strategyConfig) });
       showToast("Migrated to Strategy Bullseye", "success");
       await fetchMonitorTunables();
     } catch {
