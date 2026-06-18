@@ -32,11 +32,9 @@ import { randomUUID } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { query, type Options } from "@anthropic-ai/claude-agent-sdk";
-import { projects, preferences } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
-import { db } from "../db/index.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
+import { getProjectSummaryById } from "../repositories/monitor-butler.repository.js";
 import { buildSpawnEnv, getMcpServersConfig } from "./agent-provider/helpers.js";
 import { getBoardStatus } from "./board-status.js";
 import { isTransientNetworkError } from "../startup/transient-errors.js";
@@ -131,11 +129,7 @@ export async function runMonitorButlerCycle(opts?: { projectId?: string }): Prom
       return;
     }
 
-    const projectRows = await db
-      .select({ id: projects.id, name: projects.name, repoPath: projects.repoPath })
-      .from(projects)
-      .where(eq(projects.id, projectId))
-      .limit(1);
+    const projectRows = await getProjectSummaryById(projectId);
     if (projectRows.length === 0) {
       console.warn(`[monitor-butler] project ${projectId} not found — skipping cycle`);
       return;

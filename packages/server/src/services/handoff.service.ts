@@ -3,10 +3,9 @@ import { readFile, appendFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getLatestCommit, getDiffShortstat, getChangedFileNames } from "./git.service.js";
 import { parseSessionSummary } from "@agentic-kanban/shared";
-import { sessions } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { getSessionMessageRows } from "../repositories/session.repository.js";
+import { getSessionStats } from "../repositories/handoff.repository.js";
 
 const HANDOFF_FILENAME = "HANDOFF.md";
 const MAX_FILES = 20;
@@ -57,7 +56,7 @@ export async function generateHandoff(
     getLatestCommit(workingDir).catch(() => null),
     getDiffShortstat(workingDir, diffBase).catch(() => null),
     getChangedFileNames(workingDir, diffBase).catch(() => []),
-    database.select({ stats: sessions.stats }).from(sessions).where(eq(sessions.id, sessionId)).limit(1),
+    getSessionStats(sessionId, database),
     getSessionMessageRows(sessionId, database),
   ]);
 
