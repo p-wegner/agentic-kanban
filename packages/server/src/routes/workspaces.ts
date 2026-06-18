@@ -5,8 +5,12 @@ import { createWorkspaceService } from "../services/workspace.service.js";
 import type { CreateWorkspaceInput } from "../services/workspace.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
-import { and, eq, gte, inArray, isNotNull } from "drizzle-orm";
-import { workspaces, issues, sessions } from "@agentic-kanban/shared/schema";
+import {
+  getProviderMixRows,
+  getCostOverTimeRows,
+  getScorecardScores,
+  listWorkspacesSlim,
+} from "../repositories/workspace.repository.js";
 
 export function createWorkspacesRoute(
   database: Database,
@@ -33,20 +37,7 @@ export function createWorkspacesRoute(
     cutoffDate.setDate(cutoffDate.getDate() - days + 1);
     const cutoffDay = cutoffDate.toISOString().slice(0, 10);
 
-    const rows = await database
-      .select({
-        provider: workspaces.provider,
-        claudeProfile: workspaces.claudeProfile,
-        createdAt: workspaces.createdAt,
-      })
-      .from(workspaces)
-      .innerJoin(issues, eq(workspaces.issueId, issues.id))
-      .where(
-        and(
-          eq(issues.projectId, projectId),
-          gte(workspaces.createdAt, cutoffDay)
-        )
-      );
+    const rows = await getProviderMixRows(projectId, cutoffDay, database);
 
     // Build date axis
     const today = new Date();
@@ -97,21 +88,7 @@ export function createWorkspacesRoute(
     cutoffDate.setUTCHours(0, 0, 0, 0);
     const cutoffIso = cutoffDate.toISOString();
 
-    const rows = await database
-      .select({
-        provider: workspaces.provider,
-        startedAt: sessions.startedAt,
-        stats: sessions.stats,
-      })
-      .from(sessions)
-      .innerJoin(workspaces, eq(sessions.workspaceId, workspaces.id))
-      .innerJoin(issues, eq(workspaces.issueId, issues.id))
-      .where(
-        and(
-          eq(issues.projectId, projectId),
-          gte(sessions.startedAt, cutoffIso),
-        )
-      );
+    const rows = await getCostOverTimeRows(projectId, cutoffIso, database);
 
     // Build a continuous UTC-day axis from the cutoff through today.
     const today = new Date();
@@ -166,17 +143,7 @@ export function createWorkspacesRoute(
     cutoffDate.setDate(cutoffDate.getDate() - days + 1);
     const cutoffDay = cutoffDate.toISOString().slice(0, 10);
 
-    const rows = await database
-      .select({ score: workspaces.scorecardScore })
-      .from(workspaces)
-      .innerJoin(issues, eq(workspaces.issueId, issues.id))
-      .where(
-        and(
-          eq(issues.projectId, projectId),
-          gte(workspaces.createdAt, cutoffDay),
-          isNotNull(workspaces.scorecardScore)
-        )
-      );
+    const rows = await getScorecardScores(projectId, cutoffDay, database);
 
     const buckets = [
       { range: "0-20", min: 0, max: 20, count: 0 },
@@ -265,51 +232,15 @@ export function createWorkspacesRoute(
     const limit = !isNaN(limitParsed) ? Math.max(1, limitParsed) : undefined;
     const offset = !isNaN(offsetParsed) ? Math.max(0, offsetParsed) : undefined;
 
-    const selectShape = {
-      id: workspaces.id,
-      issueId: workspaces.issueId,
-      branch: workspaces.branch,
-      status: workspaces.status,
-      readyForMerge: workspaces.readyForMerge,
-      provider: workspaces.provider,
-      // The model column is persisted at creation (insertWorkspaceRecord) but was missing from
-      // this projection, so the API always returned model=null even when a builder launched with a
-      // real model (e.g. claude-sonnet-4-6). Surface it alongside provider (#819).
-      model: workspaces.model,
-      // mergedAt/isDirect were also missing from this projection, so an agent reading the list API
-      // saw mergedAt=null and could wrongly conclude a workspace's work hasn't landed (a leaf's
-      // dependents look un-ready) even though it merged. They drive the dependency-wave readiness
-      // gate, so surface them here too (#827 follow-up; same class as the #819 model gap).
-      mergedAt: workspaces.mergedAt,
-      isDirect: workspaces.isDirect,
-      createdAt: workspaces.createdAt,
-      updatedAt: workspaces.updatedAt,
-    };
-
-    if (issueId) {
-      const conditions = [eq(workspaces.issueId, issueId)];
-      if (statusFilter) conditions.push(inArray(workspaces.status, statusFilter));
-      let query = database
-        .select(selectShape)
-        .from(workspaces)
-        .where(and(...conditions))
-        .$dynamic();
-      if (limit !== undefined) query = query.limit(limit);
-      if (offset !== undefined) query = query.offset(offset);
-      return c.json(await query);
-    }
-
-    const conditions = [eq(issues.projectId, projectId!)];
-    if (statusFilter) conditions.push(inArray(workspaces.status, statusFilter));
-    let query = database
-      .select(selectShape)
-      .from(workspaces)
-      .innerJoin(issues, eq(workspaces.issueId, issues.id))
-      .where(and(...conditions))
-      .$dynamic();
-    if (limit !== undefined) query = query.limit(limit);
-    if (offset !== undefined) query = query.offset(offset);
-    return c.json(await query);
+    // Slim projection lives in the repository (listWorkspacesSlim). issueId takes
+    // precedence (no join); otherwise scope by projectId through the issues join.
+    // The projection surfaces model + mergedAt/isDirect alongside provider so an
+    // agent reading the list API sees real model ids (#819) and merge state (#827).
+    const rows = await listWorkspacesSlim(
+      { issueId: issueId ?? undefined, projectId: projectId ?? undefined, statusFilter, limit, offset },
+      database,
+    );
+    return c.json(rows);
   });
 
   // POST /api/workspaces — create workspace with worktree + auto-launch agent

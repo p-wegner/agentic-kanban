@@ -14,7 +14,7 @@ import {
   workflowTransitions,
 } from "@agentic-kanban/shared/schema";
 import type { WorkspaceSetupRun, WorkspaceSymlinkRun } from "@agentic-kanban/shared";
-import { desc, eq, inArray, sql } from "drizzle-orm";
+import { desc, eq, inArray, sql, and, gte, isNotNull } from "drizzle-orm";
 
 type Project = typeof projects.$inferSelect;
 import { db } from "../db/index.js";
@@ -61,6 +61,99 @@ export async function getWorkspaceById(
 ): Promise<Workspace | null> {
   const rows = await database.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
   return rows[0] ?? null;
+}
+
+// ───────────────────────── Workspace analytics reads ─────────────────────────
+// Pure aggregation-source reads for the dashboard routes; the route owns the
+// date-axis / bucketing / rollup computation over the returned rows.
+
+/** Workspaces created since `cutoffDay` for a project, with provider attribution (provider-mix chart). */
+export async function getProviderMixRows(projectId: string, cutoffDay: string, database: Database = db) {
+  return database
+    .select({
+      provider: workspaces.provider,
+      claudeProfile: workspaces.claudeProfile,
+      createdAt: workspaces.createdAt,
+    })
+    .from(workspaces)
+    .innerJoin(issues, eq(workspaces.issueId, issues.id))
+    .where(and(eq(issues.projectId, projectId), gte(workspaces.createdAt, cutoffDay)));
+}
+
+/** Sessions started since `cutoffIso` for a project, with the workspace provider + stats blob (cost-over-time chart). */
+export async function getCostOverTimeRows(projectId: string, cutoffIso: string, database: Database = db) {
+  return database
+    .select({
+      provider: workspaces.provider,
+      startedAt: sessions.startedAt,
+      stats: sessions.stats,
+    })
+    .from(sessions)
+    .innerJoin(workspaces, eq(sessions.workspaceId, workspaces.id))
+    .innerJoin(issues, eq(workspaces.issueId, issues.id))
+    .where(and(eq(issues.projectId, projectId), gte(sessions.startedAt, cutoffIso)));
+}
+
+/** Non-null scorecard scores for workspaces created since `cutoffDay` (scorecard histogram). */
+export async function getScorecardScores(projectId: string, cutoffDay: string, database: Database = db) {
+  return database
+    .select({ score: workspaces.scorecardScore })
+    .from(workspaces)
+    .innerJoin(issues, eq(workspaces.issueId, issues.id))
+    .where(
+      and(
+        eq(issues.projectId, projectId),
+        gte(workspaces.createdAt, cutoffDay),
+        isNotNull(workspaces.scorecardScore),
+      ),
+    );
+}
+
+/**
+ * Slim workspace list (id/status/readyForMerge/issueId/branch/provider/model/
+ * mergedAt/isDirect/timestamps), scoped EITHER by issueId (no join) or by
+ * projectId (join through issues). Optional status filter + limit/offset.
+ * issueId takes precedence when both are passed (mirrors the route's branching).
+ */
+export async function listWorkspacesSlim(
+  opts: { issueId?: string; projectId?: string; statusFilter?: string[] | null; limit?: number; offset?: number },
+  database: Database = db,
+) {
+  const selectShape = {
+    id: workspaces.id,
+    issueId: workspaces.issueId,
+    branch: workspaces.branch,
+    status: workspaces.status,
+    readyForMerge: workspaces.readyForMerge,
+    provider: workspaces.provider,
+    model: workspaces.model,
+    mergedAt: workspaces.mergedAt,
+    isDirect: workspaces.isDirect,
+    createdAt: workspaces.createdAt,
+    updatedAt: workspaces.updatedAt,
+  };
+  const { issueId, projectId, statusFilter, limit, offset } = opts;
+
+  if (issueId) {
+    const conditions = [eq(workspaces.issueId, issueId)];
+    if (statusFilter) conditions.push(inArray(workspaces.status, statusFilter));
+    let query = database.select(selectShape).from(workspaces).where(and(...conditions)).$dynamic();
+    if (limit !== undefined) query = query.limit(limit);
+    if (offset !== undefined) query = query.offset(offset);
+    return query;
+  }
+
+  const conditions = [eq(issues.projectId, projectId!)];
+  if (statusFilter) conditions.push(inArray(workspaces.status, statusFilter));
+  let query = database
+    .select(selectShape)
+    .from(workspaces)
+    .innerJoin(issues, eq(workspaces.issueId, issues.id))
+    .where(and(...conditions))
+    .$dynamic();
+  if (limit !== undefined) query = query.limit(limit);
+  if (offset !== undefined) query = query.offset(offset);
+  return query;
 }
 
 /**
