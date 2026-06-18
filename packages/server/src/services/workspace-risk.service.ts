@@ -1,4 +1,5 @@
-import { workspaces, issues, projectStatuses, projects, sessions, sessionMessages } from "@agentic-kanban/shared/schema";
+import { workspaces, issues, projectStatuses, sessions, sessionMessages } from "@agentic-kanban/shared/schema";
+import { getProjectById } from "../repositories/project.repository.js";
 import { eq, inArray, and, desc } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { isAnalyticsNoise } from "./session-filter.js";
@@ -201,13 +202,9 @@ export async function getWorkspaceRisk(
   projectId: string,
   database: Database,
 ): Promise<WorkspaceRiskResponse> {
-  const projectRows = await database
-    .select({ id: projects.id, defaultBranch: projects.defaultBranch })
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .limit(1);
-  if (projectRows.length === 0) throw new Error(`Project ${projectId} not found`);
-  const defaultBranch = projectRows[0].defaultBranch;
+  const project = await getProjectById(projectId, database);
+  if (!project) throw new Error(`Project ${projectId} not found`);
+  const defaultBranch = project.defaultBranch;
 
   const statusRows = await database
     .select({ id: projectStatuses.id, name: projectStatuses.name })
