@@ -104,6 +104,47 @@ export async function getSessionMessageRows(
 }
 
 /**
+ * Session rows backing the Insights panel: every session for a project (optionally
+ * since `dateFromIso`), joined to its workspace/issue/skill for the per-skill,
+ * per-model, per-provider, friction and time-series rollups the route computes.
+ * Pure read; passing dateFromIso=null returns the whole-project history.
+ */
+export async function getInsightsSessionRows(
+  projectId: string,
+  dateFromIso: string | null,
+  database: Database = db,
+) {
+  const whereClause = dateFromIso
+    ? and(eq(issues.projectId, projectId), gte(sessions.startedAt, dateFromIso))
+    : eq(issues.projectId, projectId);
+  return database
+    .select({
+      sessionId: sessions.id,
+      workspaceId: sessions.workspaceId,
+      stats: sessions.stats,
+      startedAt: sessions.startedAt,
+      exitCode: sessions.exitCode,
+      wsModel: workspaces.model,
+      wsSkillId: workspaces.skillId,
+      wsProvider: workspaces.provider,
+      wsClaudeProfile: workspaces.claudeProfile,
+      sessionSkillId: sessions.skillId,
+      sessionSkillName: sessions.skillName,
+      issueType: issues.issueType,
+      issuePriority: issues.priority,
+      issueTitle: issues.title,
+      issueNumber: issues.issueNumber,
+      issueId: issues.id,
+      skillName: agentSkills.name,
+    })
+    .from(sessions)
+    .innerJoin(workspaces, eq(sessions.workspaceId, workspaces.id))
+    .innerJoin(issues, eq(workspaces.issueId, issues.id))
+    .leftJoin(agentSkills, eq(workspaces.skillId, agentSkills.id))
+    .where(whereClause);
+}
+
+/**
  * Sessions that started within the window for a set of workspaces — the columns
  * the standup digest rolls up (status/exitCode/stats/triggerType). Pure read.
  */

@@ -94,6 +94,19 @@ export async function getCostOverTimeRows(projectId: string, cutoffIso: string, 
     .where(and(eq(issues.projectId, projectId), gte(sessions.startedAt, cutoffIso)));
 }
 
+/** Currently-active (active/fixing) workspaces for a project with provider attribution (Insights ledger). */
+export async function getActiveWorkspacesForProject(projectId: string, database: Database = db) {
+  return database
+    .select({
+      id: workspaces.id,
+      provider: workspaces.provider,
+      claudeProfile: workspaces.claudeProfile,
+    })
+    .from(workspaces)
+    .innerJoin(issues, eq(workspaces.issueId, issues.id))
+    .where(and(eq(issues.projectId, projectId), inArray(workspaces.status, ["active", "fixing"])));
+}
+
 /** Non-null scorecard scores for workspaces created since `cutoffDay` (scorecard histogram). */
 export async function getScorecardScores(projectId: string, cutoffDay: string, database: Database = db) {
   return database
