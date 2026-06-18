@@ -1,8 +1,7 @@
 import { db as realDb } from "../../db/index.js";
 import type { Database } from "../../db/index.js";
-import { sessions, sessionMessages, workspaces, issues, projects, preferences, agentSkills } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
 import { createHash, randomUUID } from "node:crypto";
+import * as lifecycleRepo from "../../repositories/session-lifecycle.repository.js";
 import * as realAgentService from "../agent.service.js";
 import { extractPlan, writePlanFile, buildImplementPrompt } from "../plan-mode.service.js";
 import { getHarnessBoolSetting } from "../harness-settings.js";
@@ -61,10 +60,10 @@ function appendCodexBuilderCounterInstructions(instructions: string | undefined)
 }
 
 async function mergeExistingSessionStats(database: Database, sessionId: string, statsToSave: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const rows = await database.select({ stats: sessions.stats }).from(sessions).where(eq(sessions.id, sessionId)).limit(1);
-  if (rows.length === 0 || !rows[0].stats) return statsToSave;
+  const stats = await lifecycleRepo.getSessionStats(sessionId, database);
+  if (!stats) return statsToSave;
   try {
-    const existing = JSON.parse(rows[0].stats) as Record<string, unknown>;
+    const existing = JSON.parse(stats) as Record<string, unknown>;
     return { ...existing, ...statsToSave };
   } catch {
     return statsToSave;
@@ -200,10 +199,8 @@ export function createSessionLifecycle(
     } = opts;
 
     // Look up workspace to get workingDir
-    const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
-    if (wsRows.length === 0) throw new Error("Workspace not found");
-
-    const workspace = wsRows[0];
+    const workspace = await lifecycleRepo.getWorkspaceById(workspaceId, db);
+    if (!workspace) throw new Error("Workspace not found");
     // Per-call model wins; otherwise inherit the model stored on the workspace so resume/
     // review/follow-up sessions stay on the same model the workspace was created with.
     // Guard: if workspace.model is a cross-provider id (e.g. gpt-5.5 baked into a claude
@@ -250,25 +247,10 @@ export function createSessionLifecycle(
     }
 
     // Look up issue's projectId for activity broadcasting
-    const issueRows = await db
-      .select({ projectId: issues.projectId })
-      .from(issues)
-      .where(eq(issues.id, workspace.issueId))
-      .limit(1);
-    const projectId = issueRows.length > 0 ? issueRows[0].projectId : "";
+    const projectId = (await lifecycleRepo.getIssueProjectId(workspace.issueId, db)) ?? "";
 
     if (!skipLaunchPreflight && !workspace.isDirect && !workingDirOverride && projectId) {
-      const projectRows = await db
-        .select({
-          repoPath: projects.repoPath,
-          defaultBranch: projects.defaultBranch,
-          symlinkEnabled: projects.symlinkEnabled,
-          symlinkDirs: projects.symlinkDirs,
-        })
-        .from(projects)
-        .where(eq(projects.id, projectId))
-        .limit(1);
-      const project = projectRows[0];
+      const project = await lifecycleRepo.getProjectPreflightInfo(projectId, db);
       if (project?.repoPath) {
         const preflight = await launchPreflight({
           repoPath: project.repoPath,
@@ -296,22 +278,18 @@ export function createSessionLifecycle(
     // IDs are provider-local, so never pass a Claude session ID to Copilot or vice versa.
     let providerSessionId: string | undefined;
     if (resumeFromId) {
-      const prevRows = await db
-        .select({ providerSessionId: sessions.providerSessionId, executor: sessions.executor })
-        .from(sessions)
-        .where(eq(sessions.id, resumeFromId))
-        .limit(1);
-      if (prevRows.length > 0 && prevRows[0].providerSessionId && prevRows[0].executor === executor) {
+      const prev = await lifecycleRepo.getPrevSessionResumeInfo(resumeFromId, db);
+      if (prev && prev.providerSessionId && prev.executor === executor) {
         // Skip mock agent session IDs (e.g. "mock-session-xxx") — they are not resumable
-        const sid = prevRows[0].providerSessionId;
+        const sid = prev.providerSessionId;
         if (!sid.startsWith("mock-session-")) {
           providerSessionId = sid;
           console.log(`[session] resuming: resumeFromId=${resumeFromId} providerSessionId=${providerSessionId}`);
         } else {
           console.log(`[session] skipping resume: providerSessionId=${sid} is a mock session ID`);
         }
-      } else if (prevRows.length > 0 && prevRows[0].providerSessionId) {
-        console.log(`[session] skipping resume: previous executor=${prevRows[0].executor} current executor=${executor}`);
+      } else if (prev && prev.providerSessionId) {
+        console.log(`[session] skipping resume: previous executor=${prev.executor} current executor=${executor}`);
       }
     }
 
@@ -325,12 +303,7 @@ export function createSessionLifecycle(
     let sessionSkillId: string | null = workspace.skillId ?? null;
     let sessionSkillName: string | null = null;
     if (sessionSkillId) {
-      const skillRows = await db
-        .select({ name: agentSkills.name })
-        .from(agentSkills)
-        .where(eq(agentSkills.id, sessionSkillId))
-        .limit(1);
-      sessionSkillName = skillRows[0]?.name ?? null;
+      sessionSkillName = await lifecycleRepo.getAgentSkillName(sessionSkillId, db);
     }
 
     // Cache session context for activity broadcasting
@@ -339,14 +312,10 @@ export function createSessionLifecycle(
       state.turnStates.set(sessionId, "processing");
     }
 
-    const guardrailRows = await db
-      .select({ value: preferences.value })
-      .from(preferences)
-      .where(eq(preferences.key, PREF_BUILDER_GUARDRAILS))
-      .limit(1);
+    const guardrailValue = await lifecycleRepo.getPreferenceValue(PREF_BUILDER_GUARDRAILS, db);
     let effectiveSystemInstructions =
       systemInstructions === undefined
-        ? (guardrailRows.length === 0 ? DEFAULT_BUILDER_GUARDRAILS : guardrailRows[0].value)
+        ? (guardrailValue === undefined ? DEFAULT_BUILDER_GUARDRAILS : guardrailValue)
         : systemInstructions;
     if (executor === "codex" && builderSession) {
       effectiveSystemInstructions = appendCodexBuilderCounterInstructions(effectiveSystemInstructions);
@@ -363,7 +332,7 @@ export function createSessionLifecycle(
       },
     };
 
-    await db.insert(sessions).values({
+    await lifecycleRepo.insertSession({
       id: sessionId,
       workspaceId,
       executor,
@@ -375,11 +344,11 @@ export function createSessionLifecycle(
       skillId: sessionSkillId,
       skillName: sessionSkillName,
       stats: JSON.stringify(launchDiagnostics),
-    });
+    }, db);
     state.sessionProviders.set(sessionId, executor);
 
     // Determine skip_permissions: explicit opt takes priority over global preference.
-    const skipPermRows = await db.select().from(preferences).where(eq(preferences.key, "skip_permissions")).limit(1);
+    const skipPermRows = await lifecycleRepo.getSkipPermissionsRows(db);
     const dbSkipPerms = skipPermRows.length === 0 || skipPermRows[0].value !== "false";
     const skipPermissions = skipPermissionsOpt !== undefined ? skipPermissionsOpt : dbSkipPerms;
 
@@ -517,12 +486,8 @@ export function createSessionLifecycle(
                 at: endNow,
               });
               const mergedStats = await mergeExistingSessionStats(db, sessionId, stats);
-              await db.update(sessions)
-                .set({ status: "stopped", endedAt: endNow, exitCode: String(effectiveExitCode), stats: JSON.stringify(mergedStats) })
-                .where(eq(sessions.id, sessionId));
-              await db.update(workspaces)
-                .set({ status: "blocked", updatedAt: endNow })
-                .where(eq(workspaces.id, workspaceId));
+              await lifecycleRepo.updateSessionStoppedWithStats(sessionId, endNow, String(effectiveExitCode), JSON.stringify(mergedStats), db);
+              await lifecycleRepo.updateWorkspaceStatus(workspaceId, "blocked", endNow, db);
               console.warn(
                 `[agent] ${usageLimit.kind}-rate-limited: sessionId=${sessionId} workspace=${workspaceId}` +
                 `${usageLimit.retryAfter ? ` retryAfter=${usageLimit.retryAfter}` : ""}`,
@@ -567,18 +532,14 @@ export function createSessionLifecycle(
                 at: endNow,
               });
               const mergedStats = await mergeExistingSessionStats(db, sessionId, stats);
-              await db.update(sessions)
-                .set({ status: "stopped", endedAt: endNow, exitCode: String(effectiveExitCode), stats: JSON.stringify(mergedStats) })
-                .where(eq(sessions.id, sessionId));
-              await db.insert(sessionMessages).values({
+              await lifecycleRepo.updateSessionStoppedWithStats(sessionId, endNow, String(effectiveExitCode), JSON.stringify(mergedStats), db);
+              await lifecycleRepo.insertSessionMessage({
                 sessionId,
                 type: "stderr",
                 data: stats.failureReason,
                 exitCode: null,
-              });
-              await db.update(workspaces)
-                .set({ status: "idle", updatedAt: endNow })
-                .where(eq(workspaces.id, workspaceId));
+              }, db);
+              await lifecycleRepo.updateWorkspaceStatus(workspaceId, "idle", endNow, db);
               if (projectId) {
                 emitButlerSystemEvent({
                   projectId,
@@ -596,9 +557,7 @@ export function createSessionLifecycle(
           }
 
           const sessionFinalized = (async () => {
-            await db.update(sessions)
-              .set({ status: "completed", endedAt: endNow, exitCode: String(exitCode ?? 0) })
-              .where(eq(sessions.id, sessionId));
+            await lifecycleRepo.updateSessionCompleted(sessionId, endNow, String(exitCode ?? 0), db);
 
             // Write HANDOFF.md before workflow callbacks can launch the next session.
             if (effectiveWorkingDir) {
@@ -656,16 +615,16 @@ export function createSessionLifecycle(
                   return;
                 }
                 const planPath = writePlanFile(workspace.workingDir!, plan);
-                await db.update(workspaces).set({ planMode: false, updatedAt: new Date().toISOString() }).where(eq(workspaces.id, workspaceId));
+                await lifecycleRepo.updateWorkspacePlanMode(workspaceId, false, new Date().toISOString(), db);
 
                 const harness = provider === "codex" ? "codex" : provider === "copilot" ? "copilot" : "claude";
-                const prefRows = await db.select().from(preferences);
+                const prefRows = await lifecycleRepo.getAllPreferences(db);
                 const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
                 const autoContinue = getHarnessBoolSetting(prefMap, harness, "plan_auto_continue");
 
                 if (autoContinue) {
                   console.log(`[session] plan ready (${planPath}) — auto-continuing to implementation: workspaceId=${workspaceId}`);
-                  await db.update(workspaces).set({ status: "active", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, workspaceId));
+                  await lifecycleRepo.updateWorkspaceStatusOnly(workspaceId, "active", new Date().toISOString(), db);
                   await startSession({
                     workspaceId,
                     prompt: buildImplementPrompt(),
@@ -680,7 +639,7 @@ export function createSessionLifecycle(
                   });
                 } else {
                   console.log(`[session] plan ready (${planPath}) — awaiting human approval: workspaceId=${workspaceId}`);
-                  await db.update(workspaces).set({ pendingPlanPath: planPath, status: "awaiting-plan-approval", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, workspaceId));
+                  await lifecycleRepo.updateWorkspacePendingPlan(workspaceId, planPath, "awaiting-plan-approval", new Date().toISOString(), db);
                 }
               } catch (err) {
                 console.error(`[session] plan completion handling failed: workspaceId=${workspaceId}`, err);
@@ -694,9 +653,7 @@ export function createSessionLifecycle(
 
       // Persist PID so hot-reload can detect surviving processes
       if (proc.pid) {
-        db.update(sessions)
-          .set({ pid: proc.pid })
-          .where(eq(sessions.id, sessionId))
+        lifecycleRepo.updateSessionPid(sessionId, proc.pid, db)
           .catch((err) => console.error("Failed to store session pid:", err));
       }
     } catch (err) {
@@ -714,9 +671,7 @@ export function createSessionLifecycle(
       state.sessionProviders.delete(sessionId);
       state.sessionSubstantiveOutput.delete(sessionId);
       state.sessionExitHandled.delete(sessionId);
-      await db.update(sessions)
-        .set({ status: "stopped", endedAt: new Date().toISOString() })
-        .where(eq(sessions.id, sessionId))
+      await lifecycleRepo.updateSessionStoppedNoStats(sessionId, new Date().toISOString(), db)
         .catch(() => {});
       throw err;
     }
@@ -751,10 +706,7 @@ export function createSessionLifecycle(
       agentService.kill(sessionId);
     }
     const now = new Date().toISOString();
-    await db
-      .update(sessions)
-      .set({ status: "stopped", endedAt: now })
-      .where(eq(sessions.id, sessionId));
+    await lifecycleRepo.updateSessionStoppedNoStats(sessionId, now, db);
     return true;
   }
 
@@ -821,18 +773,11 @@ export function createSessionLifecycle(
     }
     state.dbWriteBuffer.delete(sessionId);
     const now = new Date().toISOString();
-    await db.update(sessions)
-      .set({ status: "stopped", endedAt: now })
-      .where(eq(sessions.id, sessionId));
+    await lifecycleRepo.updateSessionStoppedNoStats(sessionId, now, db);
     // Also reset workspace status to idle
-    const sessionRows = await db.select({ workspaceId: sessions.workspaceId })
-      .from(sessions)
-      .where(eq(sessions.id, sessionId))
-      .limit(1);
-    if (sessionRows.length > 0) {
-      await db.update(workspaces)
-        .set({ status: "idle", updatedAt: now })
-        .where(eq(workspaces.id, sessionRows[0].workspaceId));
+    const sessionRow = await lifecycleRepo.getSessionWorkspaceId(sessionId, db);
+    if (sessionRow) {
+      await lifecycleRepo.updateWorkspaceStatus(sessionRow.workspaceId, "idle", now, db);
     }
   }
 
@@ -888,12 +833,8 @@ export function createSessionLifecycle(
     }
     state.dbWriteBuffer.delete(sessionId);
 
-    const existingRows = await db
-      .select({ status: sessions.status })
-      .from(sessions)
-      .where(eq(sessions.id, sessionId))
-      .limit(1);
-    if (existingRows.length === 0 || existingRows[0].status !== "running") {
+    const existing = await lifecycleRepo.getSessionStatus(sessionId, db);
+    if (!existing || existing.status !== "running") {
       console.warn(`[session] external exit ignored for non-running session: sessionId=${sessionId}`);
       return;
     }
@@ -906,9 +847,7 @@ export function createSessionLifecycle(
 
     // Update DB
     const now = new Date().toISOString();
-    await db.update(sessions)
-      .set({ status: "completed", endedAt: now, exitCode: String(exitCode ?? 0) })
-      .where(eq(sessions.id, sessionId));
+    await lifecycleRepo.updateSessionCompleted(sessionId, now, String(exitCode ?? 0), db);
 
     // Fire workflow callback
     const wsId = ctx?.workspaceId;
