@@ -1,8 +1,12 @@
-import { eq, inArray, gte, lte, and } from "drizzle-orm";
-import { issues, workspaces, sessions, diffComments } from "@agentic-kanban/shared/schema";
 import { parseSessionSummary } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
 import { getSessionMessageRows } from "../repositories/session.repository.js";
+import {
+  getAllDependencyEdges,
+  getDiffCommentRowsForWorkspaces,
+  getProjectIssueIds,
+  getReviewEffectivenessSessionRows,
+} from "../repositories/review-effectiveness.repository.js";
 
 /**
  * Reconstructs each ticket's build -> review -> merge lifecycle from sessions +
@@ -145,50 +149,13 @@ export async function computeReviewEffectiveness(
 ): Promise<ReviewEffectivenessReport> {
   const { projectId, sinceIso, untilIso, issueIds, deep } = scope;
 
-  const conditions = [eq(issues.projectId, projectId), gte(sessions.startedAt, sinceIso)];
-  if (untilIso) conditions.push(lte(sessions.startedAt, untilIso));
-  if (issueIds) {
-    // Empty scope means "no issues in this drive" — short-circuit to an impossible
-    // filter so we don't accidentally fall through to the whole project.
-    if (issueIds.length === 0) conditions.push(eq(issues.id, "\0__none__"));
-    else conditions.push(inArray(issues.id, issueIds));
-  }
-
-  const rows = await database
-    .select({
-      sessionId: sessions.id,
-      triggerType: sessions.triggerType,
-      executor: sessions.executor,
-      startedAt: sessions.startedAt,
-      endedAt: sessions.endedAt,
-      sessionStatus: sessions.status,
-      stats: sessions.stats,
-      workspaceId: workspaces.id,
-      branch: workspaces.branch,
-      wsStatus: workspaces.status,
-      provider: workspaces.provider,
-      mergedAt: workspaces.mergedAt,
-      readyForMerge: workspaces.readyForMerge,
-      requiresReview: workspaces.requiresReview,
-      thoroughReview: workspaces.thoroughReview,
-      scorecardScore: workspaces.scorecardScore,
-      issueNumber: issues.issueNumber,
-      issueTitle: issues.title,
-      issueType: issues.issueType,
-    })
-    .from(sessions)
-    .innerJoin(workspaces, eq(sessions.workspaceId, workspaces.id))
-    .innerJoin(issues, eq(workspaces.issueId, issues.id))
-    .where(and(...conditions))
-    .orderBy(sessions.startedAt);
+  const rows = await getReviewEffectivenessSessionRows(
+    { projectId, sinceIso, untilIso, issueIds },
+    database,
+  );
 
   const wsIds = [...new Set(rows.map((r) => r.workspaceId))];
-  const commentRows = wsIds.length
-    ? await database
-        .select({ workspaceId: diffComments.workspaceId, resolvedAt: diffComments.resolvedAt })
-        .from(diffComments)
-        .where(inArray(diffComments.workspaceId, wsIds))
-    : [];
+  const commentRows = await getDiffCommentRowsForWorkspaces(wsIds, database);
 
   type WS = {
     workspaceId: string;
@@ -411,16 +378,10 @@ export async function resolveDriveIssueIds(
   // children regardless of which side of the edge they were recorded on
   // (the decomposer links children via parent_of/child_of; some flows use
   // depends_on). We only keep edges within this project.
-  const { issueDependencies } = await import("@agentic-kanban/shared/schema");
-  const projectIssueRows = await database
-    .select({ id: issues.id })
-    .from(issues)
-    .where(eq(issues.projectId, projectId));
+  const projectIssueRows = await getProjectIssueIds(projectId, database);
   const inProject = new Set(projectIssueRows.map((r) => r.id));
 
-  const edges = await database
-    .select({ issueId: issueDependencies.issueId, dependsOnId: issueDependencies.dependsOnId })
-    .from(issueDependencies);
+  const edges = await getAllDependencyEdges(database);
   const adjacency = new Map<string, Set<string>>();
   const link = (a: string, b: string) => {
     if (!adjacency.has(a)) adjacency.set(a, new Set());

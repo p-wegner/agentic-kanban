@@ -13,13 +13,6 @@
 // build, far too expensive for a pollable dashboard. We report the gate's
 // enablement plus the most recent build/verify-related health event instead.
 
-import { eq, inArray } from "drizzle-orm";
-import {
-  issueDependencies,
-  issues,
-  projectStatuses,
-  workflowNodes,
-} from "@agentic-kanban/shared/schema";
 import {
   computeBlockerReadiness,
   isResolvedDependencyStatusView,
@@ -29,6 +22,11 @@ import {
 } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
 import { getDriveById } from "../repositories/drive.repository.js";
+import {
+  getMetaIssueDependencyEdges,
+  getScopedDependencyEdges,
+  getScopedIssueRows,
+} from "../repositories/drive-dashboard.repository.js";
 import { listBoardHealthEvents } from "../repositories/board-health-events.repository.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { coldCloneCheckPrefKey } from "./cold-clone-build-check.service.js";
@@ -61,10 +59,7 @@ async function loadScopedIssues(
 ): Promise<ScopedIssue[]> {
   if (!metaIssueId) return [];
 
-  const edges = await database
-    .select({ childId: issueDependencies.dependsOnId, type: issueDependencies.type })
-    .from(issueDependencies)
-    .where(eq(issueDependencies.issueId, metaIssueId));
+  const edges = await getMetaIssueDependencyEdges(metaIssueId, database);
   // The drive-epic seeder wires epic→child as `parent_of`. Prefer those; fall
   // back to every outgoing edge if a drive was wired with a different type, so a
   // hand-assembled drive still surfaces its children.
@@ -74,20 +69,7 @@ async function loadScopedIssues(
     : edges.map((e) => e.childId);
   if (scopedIds.length === 0) return [];
 
-  const rows = await database
-    .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
-      projectId: issues.projectId,
-      statusName: projectStatuses.name,
-      currentNodeId: issues.currentNodeId,
-      currentNodeType: workflowNodes.nodeType,
-    })
-    .from(issues)
-    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-    .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
-    .where(inArray(issues.id, scopedIds));
+  const rows = await getScopedIssueRows(scopedIds, database);
   // Keep only same-project children with a resolved status (defensive — a drive's
   // children always belong to its project).
   return rows
@@ -145,14 +127,7 @@ export async function buildDriveDashboard(
   // --- dependency edges among scoped issues (for tiers + stalls) ---
   const blockingDepsByIssue = new Map<string, string[]>();
   if (scoped.length > 0) {
-    const deps = await database
-      .select({
-        issueId: issueDependencies.issueId,
-        dependsOnId: issueDependencies.dependsOnId,
-        type: issueDependencies.type,
-      })
-      .from(issueDependencies)
-      .where(inArray(issueDependencies.issueId, scoped.map((i) => i.id)));
+    const deps = await getScopedDependencyEdges(scoped.map((i) => i.id), database);
     for (const dep of deps) {
       if (!BLOCKING_DEPENDENCY_TYPES.has(dep.type)) continue;
       const list = blockingDepsByIssue.get(dep.issueId) ?? [];

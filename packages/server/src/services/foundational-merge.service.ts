@@ -1,6 +1,10 @@
-import { issueDependencies, issues, projectStatuses } from "@agentic-kanban/shared/schema";
-import { eq, inArray, sql } from "drizzle-orm";
 import type { Database } from "../db/index.js";
+import {
+  getBlockingDependencies,
+  getDependentEdges,
+  getIssueStatusIds,
+  getTerminalStatusIds,
+} from "../repositories/foundational-merge.repository.js";
 
 /**
  * #797 — synchronous foundational merge.
@@ -27,11 +31,7 @@ import type { Database } from "../db/index.js";
  */
 
 async function loadDoneStatusIds(database: Database): Promise<Set<string>> {
-  const rows = await database
-    .select({ id: projectStatuses.id })
-    .from(projectStatuses)
-    .where(sql`${projectStatuses.name} IN ('Done', 'Cancelled')`);
-  return new Set(rows.map((r) => r.id));
+  return getTerminalStatusIds(database);
 }
 
 /**
@@ -41,17 +41,11 @@ async function loadDoneStatusIds(database: Database): Promise<Set<string>> {
  * foundational ticket should have none at all.
  */
 async function hasUnresolvedDependencies(database: Database, issueId: string, doneStatusIds: Set<string>): Promise<boolean> {
-  const deps = await database
-    .select({ dependsOnId: issueDependencies.dependsOnId })
-    .from(issueDependencies)
-    .where(sql`${issueDependencies.issueId} = ${issueId} AND ${issueDependencies.type} IN ('depends_on', 'blocked_by')`);
+  const deps = await getBlockingDependencies(issueId, database);
   if (deps.length === 0) return false;
 
   const blockerIds = deps.map((d) => d.dependsOnId);
-  const blockers = await database
-    .select({ id: issues.id, statusId: issues.statusId })
-    .from(issues)
-    .where(inArray(issues.id, blockerIds));
+  const blockers = await getIssueStatusIds(blockerIds, database);
   // Any blocker not yet terminal => this ticket still has work to wait on.
   return blockers.some((b) => !doneStatusIds.has(b.statusId));
 }
@@ -62,19 +56,13 @@ async function hasUnresolvedDependencies(database: Database, issueId: string, do
  * work. A dependent that is already terminal doesn't count (nothing to unblock).
  */
 async function hasOpenDependents(database: Database, issueId: string, doneStatusIds: Set<string>): Promise<boolean> {
-  const dependents = await database
-    .select({ issueId: issueDependencies.issueId })
-    .from(issueDependencies)
-    .where(sql`${issueDependencies.dependsOnId} = ${issueId} AND ${issueDependencies.type} IN ('depends_on', 'blocked_by')`);
+  const dependents = await getDependentEdges(issueId, database);
   if (dependents.length === 0) return false;
 
   const dependentIds = [...new Set(dependents.map((d) => d.issueId))].filter((id) => id !== issueId);
   if (dependentIds.length === 0) return false;
 
-  const dependentIssues = await database
-    .select({ id: issues.id, statusId: issues.statusId })
-    .from(issues)
-    .where(inArray(issues.id, dependentIds));
+  const dependentIssues = await getIssueStatusIds(dependentIds, database);
   return dependentIssues.some((d) => !doneStatusIds.has(d.statusId));
 }
 
