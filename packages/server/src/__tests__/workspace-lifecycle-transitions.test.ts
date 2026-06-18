@@ -451,7 +451,14 @@ describe("lifecycle: mergedAt already set — workspace moved to Done, retry is 
       workspaceStatus: "closed",
       readyForMerge: false,
     });
-    const git = makeGit();
+    // The branch was genuinely merged (mergedAt is set) — the mergedAt-verification
+    // ancestry check must report it as an ancestor so the flag is honored (reconcile),
+    // not fall through to the already-closed guard.
+    const git = makeGit({
+      checkBranchTipIsAncestor: vi.fn(async () => ({
+        isAncestor: true as const, branchSha: "feature-sha", baseSha: "merge-commit-sha",
+      })),
+    });
 
     const svc = createWorkspaceMergeService({
       database: db,
@@ -477,7 +484,13 @@ describe("lifecycle: mergedAt already set — workspace moved to Done, retry is 
       readyForMerge: false,
     });
     const mergeBranch = vi.fn(async () => "Merge made by the 'ort' strategy.");
-    const git = makeGit({ mergeBranch });
+    const git = makeGit({
+      mergeBranch,
+      // mergedAt is set and the branch is an ancestor — honor the flag (reconcile, no merge).
+      checkBranchTipIsAncestor: vi.fn(async () => ({
+        isAncestor: true as const, branchSha: "feature-sha", baseSha: "merge-commit-sha",
+      })),
+    });
 
     const svc = createWorkspaceMergeService({
       database: db,
