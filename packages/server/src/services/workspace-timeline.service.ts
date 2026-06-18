@@ -1,8 +1,11 @@
-import { sessions, workspaces, sessionMessages } from "@agentic-kanban/shared/schema";
-import { eq, desc, and, inArray } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import type { WorkspaceTimelineEvent, WorkspaceTimelineResponse, WorkspaceTimelineEventType } from "@agentic-kanban/shared";
 import { readSessionStdoutFile } from "../repositories/session.repository.js";
+import {
+  getWorkspaceById,
+  getWorkspaceSessions,
+  getAssistantMessagesForSessions,
+} from "../repositories/workspace-timeline.repository.js";
 
 function isZeroOutputSession(session: { startedAt: string; endedAt: string | null; stats: string | null }): boolean {
   if (!session.endedAt) return false;
@@ -75,14 +78,7 @@ async function getLastAssistantMessagesBatch(
 
   // Fall back to DB for historical sessions
   if (needsDb.length > 0) {
-    const rows = await database
-      .select({ sessionId: sessionMessages.sessionId, data: sessionMessages.data, createdAt: sessionMessages.createdAt })
-      .from(sessionMessages)
-      .where(and(
-        inArray(sessionMessages.sessionId, needsDb),
-        eq(sessionMessages.type, "assistant"),
-      ))
-      .orderBy(desc(sessionMessages.createdAt));
+    const rows = await getAssistantMessagesForSessions(needsDb, database);
 
     for (const row of rows) {
       if (!result.has(row.sessionId)) {
@@ -101,20 +97,11 @@ export async function getWorkspaceTimeline(
   workspaceId: string,
   database: Database,
 ): Promise<WorkspaceTimelineResponse> {
-  const wsRows = await database
-    .select()
-    .from(workspaces)
-    .where(eq(workspaces.id, workspaceId))
-    .limit(1);
+  const ws = await getWorkspaceById(workspaceId, database);
 
-  if (wsRows.length === 0) throw new Error(`Workspace ${workspaceId} not found`);
-  const ws = wsRows[0];
+  if (!ws) throw new Error(`Workspace ${workspaceId} not found`);
 
-  const sessionRows = await database
-    .select()
-    .from(sessions)
-    .where(eq(sessions.workspaceId, workspaceId))
-    .orderBy(desc(sessions.startedAt));
+  const sessionRows = await getWorkspaceSessions(workspaceId, database);
 
   const events: WorkspaceTimelineEvent[] = [];
   let idCounter = 0;

@@ -1,10 +1,12 @@
 import { readdirSync } from "node:fs";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { projects } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { invokeClaudePrompt } from "./claude-cli.service.js";
+import {
+  getProjectRepoInfo,
+  getProjectRepoInfoWithSetupScript,
+} from "../repositories/project-setup.repository.js";
 
 const PROJECT_MARKER_FILES = [
   "package.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock",
@@ -23,16 +25,12 @@ export function detectProjectMarkers(repoPath: string): string[] {
 }
 
 export async function generateSetupScript(projectId: string, database: Database): Promise<string> {
-  const projectRows = await database
-    .select({ repoPath: projects.repoPath, repoName: projects.repoName })
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .limit(1);
-  if (projectRows.length === 0) {
+  const project = await getProjectRepoInfo(projectId, database);
+  if (!project) {
     throw Object.assign(new Error("Project not found"), { statusCode: 404 });
   }
 
-  const { repoPath, repoName } = projectRows[0];
+  const { repoPath, repoName } = project;
   const detected = detectProjectMarkers(repoPath);
 
   const prompt = `You are analyzing a software project to determine the correct setup command(s) to run after cloning the repository into a fresh git worktree.
@@ -49,16 +47,12 @@ Detected files: ${detected.length > 0 ? detected.join(", ") : "none"}`;
 }
 
 export async function generateTeardownScript(projectId: string, database: Database): Promise<string> {
-  const projectRows = await database
-    .select({ repoPath: projects.repoPath, repoName: projects.repoName, setupScript: projects.setupScript })
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .limit(1);
-  if (projectRows.length === 0) {
+  const project = await getProjectRepoInfoWithSetupScript(projectId, database);
+  if (!project) {
     throw Object.assign(new Error("Project not found"), { statusCode: 404 });
   }
 
-  const { repoPath, repoName, setupScript } = projectRows[0];
+  const { repoPath, repoName, setupScript } = project;
   const detected = detectProjectMarkers(repoPath);
 
   const contextParts: string[] = [];
@@ -140,16 +134,12 @@ export function deriveVerifyScript(repoPath: string, detected: string[]): string
 }
 
 export async function generateVerifyScript(projectId: string, database: Database): Promise<string> {
-  const projectRows = await database
-    .select({ repoPath: projects.repoPath, repoName: projects.repoName })
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .limit(1);
-  if (projectRows.length === 0) {
+  const project = await getProjectRepoInfo(projectId, database);
+  if (!project) {
     throw Object.assign(new Error("Project not found"), { statusCode: 404 });
   }
 
-  const { repoPath, repoName } = projectRows[0];
+  const { repoPath, repoName } = project;
   const detected = detectProjectMarkers(repoPath);
 
   const rule = deriveVerifyScript(repoPath, detected);

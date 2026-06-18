@@ -1,6 +1,9 @@
-import { and, desc, eq, inArray, ne } from "drizzle-orm";
-import { issues, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
+import {
+  getIssueDescriptionAndProject,
+  getOtherProjectWorkspaceIds,
+  getRecentSessionStats,
+} from "../repositories/budget-estimator.repository.js";
 
 export type BudgetRisk = "low" | "medium" | "high";
 
@@ -66,12 +69,7 @@ export async function estimateBudget(
   const contextLimit = PROVIDER_CONTEXT_LIMITS[provider] ?? PROVIDER_CONTEXT_LIMITS.claude;
 
   // 1. Get issue description length
-  const issueRows = await database
-    .select({ description: issues.description, projectId: issues.projectId })
-    .from(issues)
-    .where(eq(issues.id, issueId))
-    .limit(1);
-  const issue = issueRows[0];
+  const issue = await getIssueDescriptionAndProject(issueId, database);
   const descLen = (issue?.description ?? "").length;
   const descriptionTokens = charsToTokens(descLen);
 
@@ -81,25 +79,11 @@ export async function estimateBudget(
 
   if (issue?.projectId) {
     // Join workspaces through issues to filter by projectId (workspaces has no direct projectId column)
-    const wsRows = await database
-      .select({ id: workspaces.id })
-      .from(workspaces)
-      .innerJoin(issues, eq(workspaces.issueId, issues.id))
-      .where(
-        and(
-          eq(issues.projectId, issue.projectId),
-          ne(workspaces.issueId, issueId),
-        ),
-      );
+    const wsRows = await getOtherProjectWorkspaceIds(issue.projectId, issueId, database);
 
     if (wsRows.length > 0) {
       const wsIds = wsRows.map(w => w.id);
-      const sessRows = await database
-        .select({ stats: sessions.stats })
-        .from(sessions)
-        .where(inArray(sessions.workspaceId, wsIds))
-        .orderBy(desc(sessions.startedAt))
-        .limit(20);
+      const sessRows = await getRecentSessionStats(wsIds, 20, database);
 
       const validStats = sessRows
         .map(s => parseSessionStats(s.stats))
