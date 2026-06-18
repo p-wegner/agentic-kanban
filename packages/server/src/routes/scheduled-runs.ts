@@ -1,4 +1,3 @@
-import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createScheduledRunService } from "../services/scheduled-run.service.js";
 import { createWorkspaceService } from "../services/workspace.service.js";
@@ -8,7 +7,7 @@ import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 
 export function createScheduledRunsRoute(
-  database: Database = db,
+  database: Database,
   getSessionManager?: () => SessionManager,
   boardEvents?: BoardEvents,
 ) {

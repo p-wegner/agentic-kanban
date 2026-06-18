@@ -1,10 +1,9 @@
-import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createMilestoneService, MilestoneError } from "../services/milestone.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 
-export function createMilestonesRoute(database: Database = db) {
+export function createMilestonesRoute(database: Database) {
   const router = createRouter();
   const service = createMilestoneService({ database });
 

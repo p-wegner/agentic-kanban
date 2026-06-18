@@ -1,10 +1,9 @@
-import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createTagService } from "../services/tag.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 
-export function createTagsRoute(database: Database = db) {
+export function createTagsRoute(database: Database) {
   const router = createRouter();
   const tagService = createTagService({ database });
 

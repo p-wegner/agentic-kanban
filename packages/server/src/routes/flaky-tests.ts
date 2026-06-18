@@ -1,10 +1,9 @@
-import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createTestRunService, parseTestOutput } from "../services/test-run.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody, parseOptionalJsonBody } from "../middleware/parse-body.js";
 
-export function createFlakyTestsRoute(database: Database = db) {
+export function createFlakyTestsRoute(database: Database) {
   const router = createRouter();
   const svc = createTestRunService(database);
 
