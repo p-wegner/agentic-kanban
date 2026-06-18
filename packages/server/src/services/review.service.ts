@@ -1,6 +1,15 @@
-import { agentSkills, issues, preferences, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
-import { and, desc, eq, sql } from "drizzle-orm";
 import type { Database } from "../db/index.js";
+import {
+  getProjectScopedReviewSkill,
+  getGlobalReviewSkill,
+  getMonitorNudgeSkill,
+  getWorkspaceById,
+  getRunningReviewSession,
+  getIssueProjectAndId,
+  getAllPreferenceRows,
+  getProjectDefaultBranch,
+  setWorkspaceStatus,
+} from "../repositories/review.repository.js";
 import type { ProviderName } from "./agent-provider.js";
 import { narrowProviderName, getProfilePrefKey } from "./agent-provider.js";
 import type { BoardEvents } from "./board-events.js";
@@ -82,19 +91,14 @@ export async function buildReviewPrompt(
   let template: string | null = null;
   let skillModel: string | null = null;
   if (projectId) {
-    const projectSkill = await database.select({ prompt: agentSkills.prompt, model: agentSkills.model }).from(agentSkills)
-      .where(sql`${agentSkills.name} = ${skillName} AND (${agentSkills.projectId} = ${projectId} OR ${agentSkills.projectId} IS NULL)`)
-      .orderBy(desc(agentSkills.projectId))
-      .limit(1);
-    template = projectSkill[0]?.prompt ?? null;
-    skillModel = projectSkill[0]?.model ?? null;
+    const projectSkill = await getProjectScopedReviewSkill(skillName, projectId, database);
+    template = projectSkill?.prompt ?? null;
+    skillModel = projectSkill?.model ?? null;
   }
   if (!template) {
-    const globalSkill = await database.select({ prompt: agentSkills.prompt, model: agentSkills.model }).from(agentSkills)
-      .where(sql`${agentSkills.name} = ${skillName} AND ${agentSkills.projectId} IS NULL`)
-      .limit(1);
-    template = globalSkill[0]?.prompt ?? DEFAULT_REVIEW_PROMPT;
-    skillModel = globalSkill[0]?.model ?? null;
+    const globalSkill = await getGlobalReviewSkill(skillName, database);
+    template = globalSkill?.prompt ?? DEFAULT_REVIEW_PROMPT;
+    skillModel = globalSkill?.model ?? null;
   }
 
   // When a workspaceId is available, signal approval via mark_ready_for_merge with the
@@ -212,17 +216,8 @@ The stop hook will remind you if you try to exit before verifying the UI.`;
 }
 
 export async function buildMonitorNudgePrompt(database: Database, projectId: string): Promise<string> {
-  const skillRows = await database
-    .select({ prompt: agentSkills.prompt })
-    .from(agentSkills)
-    .where(sql`
-      ${agentSkills.name} = 'monitor-nudge'
-      AND (${agentSkills.projectId} = ${projectId} OR ${agentSkills.projectId} IS NULL)
-    `)
-    .orderBy(sql`${agentSkills.projectId} IS NULL`)
-    .limit(1);
-
-  return skillRows[0]?.prompt?.trim() || DEFAULT_MONITOR_NUDGE_PROMPT;
+  const skill = await getMonitorNudgeSkill(projectId, database);
+  return skill?.prompt?.trim() || DEFAULT_MONITOR_NUDGE_PROMPT;
 }
 
 export class ReviewError extends Error {
@@ -247,16 +242,12 @@ export async function startManualReview(
   workspaceId: string,
   thoroughReview: boolean,
 ): Promise<{ sessionId: string }> {
-  const wsRows = await database.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
+  const wsRows = await getWorkspaceById(workspaceId, database);
   if (wsRows.length === 0) throw new ReviewError("Workspace not found", "NOT_FOUND");
   const workspace = wsRows[0];
   if (workspace.status !== "idle") {
     // Check if there's an active review session so we can give a more specific message
-    const runningReview = await database
-      .select({ id: sessions.id })
-      .from(sessions)
-      .where(and(eq(sessions.workspaceId, workspaceId), eq(sessions.status, "running"), eq(sessions.triggerType, "review")))
-      .limit(1);
+    const runningReview = await getRunningReviewSession(workspaceId, database);
     if (runningReview.length > 0) {
       throw new ReviewError(`Review session ${runningReview[0].id} is already running for this workspace`, "CONFLICT");
     }
@@ -271,11 +262,11 @@ export async function startManualReview(
   pendingReviewLaunches.add(workspaceId);
 
   try {
-    const issueRows = await database.select({ projectId: issues.projectId, id: issues.id }).from(issues).where(eq(issues.id, workspace.issueId)).limit(1);
+    const issueRows = await getIssueProjectAndId(workspace.issueId, database);
     if (issueRows.length === 0) throw new ReviewError("Issue not found", "NOT_FOUND");
     const { projectId, id: issueId } = issueRows[0];
 
-    const prefRows = await database.select().from(preferences);
+    const prefRows = await getAllPreferenceRows(database);
     // Review on the same provider/profile the workspace was built with (e.g. its
     // Codex OAuth license), not the global default which may have rotated since.
     const prefMap = applyWorkspaceProfileToPrefs(new Map(prefRows.map((r) => [r.key, r.value])), workspace);
@@ -288,7 +279,7 @@ export async function startManualReview(
     const reviewArgs = buildReviewArgs(prefMap, provider);
     const autoFix = prefMap.get("review_auto_fix") !== "false";
 
-    const projectRows = await database.select({ defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.id, projectId)).limit(1);
+    const projectRows = await getProjectDefaultBranch(projectId, database);
     const defaultBranch = projectRows.length > 0 ? projectRows[0].defaultBranch : null;
     let diffRef = workspace.baseBranch || defaultBranch;
 
@@ -322,7 +313,7 @@ export async function startManualReview(
     const reviewArgsWithModel = reviewModel && provider === "claude" ? `${reviewArgs ?? ""} --model ${reviewModel}`.trim() : reviewArgs;
 
     const now = new Date().toISOString();
-    await database.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
+    await setWorkspaceStatus(workspaceId, "reviewing", now, database);
     boardEvents.broadcast(projectId, "issue_updated");
 
     let sessionId: string;
@@ -336,7 +327,7 @@ export async function startManualReview(
     } catch (sessionErr) {
       // Revert the workspace status so retries are possible — don't leave it stuck at "reviewing"
       const revertedAt = new Date().toISOString();
-      await database.update(workspaces).set({ status: "idle", updatedAt: revertedAt }).where(eq(workspaces.id, workspaceId));
+      await setWorkspaceStatus(workspaceId, "idle", revertedAt, database);
       boardEvents.broadcast(projectId, "issue_updated");
       throw sessionErr;
     }
