@@ -63,6 +63,25 @@ export async function getWorkspaceById(
   return rows[0] ?? null;
 }
 
+/**
+ * Lightweight workspace rows for a set of issues — id/issueId/branch/status/closedAt.
+ * Used by the standup digest to find merged (closed-in-window) workspaces and to
+ * map workspace ids back to issues for the session rollup.
+ */
+export async function getWorkspacesForIssues(issueIds: string[], database: Database = db) {
+  if (issueIds.length === 0) return [];
+  return database
+    .select({
+      id: workspaces.id,
+      issueId: workspaces.issueId,
+      branch: workspaces.branch,
+      status: workspaces.status,
+      closedAt: workspaces.closedAt,
+    })
+    .from(workspaces)
+    .where(inArray(workspaces.issueId, issueIds));
+}
+
 export async function updateWorkspaceStatus(
   workspaceId: string,
   status: string,

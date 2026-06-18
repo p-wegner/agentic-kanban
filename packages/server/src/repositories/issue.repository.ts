@@ -353,6 +353,32 @@ export async function getFocusIssueRows(projectId: string, database: Database = 
     .where(eq(issues.projectId, projectId));
 }
 
+/**
+ * Issue rows for the standup digest: every issue in a project with its status
+ * name, workflow node type, and the timestamps the digest windows on
+ * (createdAt / statusChangedAt). Pure read; the route buckets these in JS.
+ */
+export async function getDigestIssueRows(projectId: string, database: Database = db) {
+  return database
+    .select({
+      id: issues.id,
+      issueNumber: issues.issueNumber,
+      title: issues.title,
+      statusId: issues.statusId,
+      statusName: projectStatuses.name,
+      currentNodeId: issues.currentNodeId,
+      currentNodeType: workflowNodes.nodeType,
+      priority: issues.priority,
+      issueType: issues.issueType,
+      createdAt: issues.createdAt,
+      statusChangedAt: issues.statusChangedAt,
+    })
+    .from(issues)
+    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+    .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
+    .where(eq(issues.projectId, projectId));
+}
+
 /** All dependency edges whose dependent (issueId) is in the given set — for graph building. */
 export async function getDependenciesForIssues(issueIds: string[], database: Database = db) {
   if (issueIds.length === 0) return [];

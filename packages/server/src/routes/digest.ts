@@ -1,15 +1,10 @@
-import { and, eq, gte, inArray } from "drizzle-orm";
-import {
-  issues,
-  projectStatuses,
-  sessions,
-  workflowNodes,
-  workspaces,
-} from "@agentic-kanban/shared/schema";
 import { isTerminalStatusView } from "@agentic-kanban/shared";
-import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { createRouter } from "../middleware/create-router.js";
+import { getProjectStatuses } from "../repositories/project.repository.js";
+import { getDigestIssueRows, getDependenciesForIssues } from "../repositories/issue.repository.js";
+import { getWorkspacesForIssues } from "../repositories/workspace.repository.js";
+import { getSessionsForWorkspacesSince } from "../repositories/session.repository.js";
 
 /**
  * Standup Digest — "What changed since you were away".
@@ -99,7 +94,7 @@ function parseStats(raw: string | null): { success: boolean; durationMs: number;
   }
 }
 
-export function createDigestRoute(database: Database = db) {
+export function createDigestRoute(database: Database) {
   const router = createRouter();
 
   // `now` is injectable for deterministic time-window tests (nowOverride pattern).
@@ -114,32 +109,12 @@ export function createDigestRoute(database: Database = db) {
     const sinceIso = since.toISOString();
 
     // Status id -> name map for the project (small table, single query).
-    const statusRows = await database
-      .select({ id: projectStatuses.id, name: projectStatuses.name })
-      .from(projectStatuses)
-      .where(eq(projectStatuses.projectId, projectId));
+    const statusRows = await getProjectStatuses(projectId, database);
     const statusName = new Map(statusRows.map((s) => [s.id, s.name]));
 
     // All issues for the project — we filter by timestamp in JS so a single read
     // covers created/completed/moved/blocked without four separate queries.
-    const issueRows = await database
-      .select({
-        id: issues.id,
-        issueNumber: issues.issueNumber,
-        title: issues.title,
-        statusId: issues.statusId,
-        statusName: projectStatuses.name,
-        currentNodeId: issues.currentNodeId,
-        currentNodeType: workflowNodes.nodeType,
-        priority: issues.priority,
-        issueType: issues.issueType,
-        createdAt: issues.createdAt,
-        statusChangedAt: issues.statusChangedAt,
-      })
-      .from(issues)
-      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-      .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
-      .where(eq(issues.projectId, projectId));
+    const issueRows = await getDigestIssueRows(projectId, database);
 
     const created: DigestIssueRef[] = [];
     const completed: DigestIssueRef[] = [];
@@ -181,16 +156,7 @@ export function createDigestRoute(database: Database = db) {
     let activeAgents = 0;
 
     if (issueIds.length > 0) {
-      const wsRows = await database
-        .select({
-          id: workspaces.id,
-          issueId: workspaces.issueId,
-          branch: workspaces.branch,
-          status: workspaces.status,
-          closedAt: workspaces.closedAt,
-        })
-        .from(workspaces)
-        .where(inArray(workspaces.issueId, issueIds));
+      const wsRows = await getWorkspacesForIssues(issueIds, database);
 
       for (const ws of wsRows) {
         const meta = issueMeta.get(ws.issueId);
@@ -211,19 +177,7 @@ export function createDigestRoute(database: Database = db) {
       const wsToIssue = new Map(wsRows.map((w) => [w.id, w.issueId]));
 
       if (wsIds.length > 0) {
-        const sessionRows = await database
-          .select({
-            id: sessions.id,
-            workspaceId: sessions.workspaceId,
-            startedAt: sessions.startedAt,
-            endedAt: sessions.endedAt,
-            exitCode: sessions.exitCode,
-            status: sessions.status,
-            stats: sessions.stats,
-            triggerType: sessions.triggerType,
-          })
-          .from(sessions)
-          .where(and(inArray(sessions.workspaceId, wsIds), gte(sessions.startedAt, sinceIso)));
+        const sessionRows = await getSessionsForWorkspacesSince(wsIds, sinceIso, database);
 
         for (const s of sessionRows) {
           if (s.status === "running") activeAgents += 1;
@@ -251,15 +205,7 @@ export function createDigestRoute(database: Database = db) {
     // digest doubles as a "what needs attention" snapshot.
     const blocked: DigestIssueRef[] = await (async () => {
       if (issueIds.length === 0) return [];
-      const { issueDependencies } = await import("@agentic-kanban/shared/schema");
-      const deps = await database
-        .select({
-          issueId: issueDependencies.issueId,
-          type: issueDependencies.type,
-          dependsOnId: issueDependencies.dependsOnId,
-        })
-        .from(issueDependencies)
-        .where(inArray(issueDependencies.issueId, issueIds));
+      const deps = await getDependenciesForIssues(issueIds, database);
 
       const result: DigestIssueRef[] = [];
       for (const dep of deps) {
