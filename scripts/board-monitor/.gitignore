@@ -1,6 +1,8 @@
 # Runtime artifacts — not source
 loop.log
 STOP
+loop.stopped
+loop.lock/
 *.pid
 # Rolling cross-iteration memory: local runtime state, never committed.
 # (Gitignored so appending to it never dirties the tree and blocks the auto-merge queue.)
