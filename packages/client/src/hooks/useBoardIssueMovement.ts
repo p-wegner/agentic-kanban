@@ -8,7 +8,7 @@ import type {
 import { apiFetch, apiPatch } from "../lib/api.js";
 import { setBoardDragData, getBoardDragData } from "../lib/dragData.js";
 import { applyLocalReorder, moveIssueToStatus } from "../lib/issueMoveHelpers.js";
-import { showToast } from "../components/Toast.js";
+import { showToast } from "../lib/toast.js";
 
 /** Statuses whose name marks an issue as archived (terminal). Mirrors BoardPage. */
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);

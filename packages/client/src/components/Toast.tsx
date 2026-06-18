@@ -1,32 +1,14 @@
 import { useEffect, useState } from "react";
+import { type Toast, subscribeToasts, showToast } from "../lib/toast.js";
 
-interface Toast {
-  id: number;
-  message: string;
-  type: "error" | "success";
-}
-
-let toastId = 0;
-const listeners = new Set<(toasts: Toast[]) => void>();
-let toasts: Toast[] = [];
-
-export function showToast(message: string, type: "error" | "success" = "error") {
-  const id = ++toastId;
-  toasts = [...toasts, { id, message, type }];
-  listeners.forEach((fn) => fn([...toasts]));
-  setTimeout(() => {
-    toasts = toasts.filter((t) => t.id !== id);
-    listeners.forEach((fn) => fn([...toasts]));
-  }, 4000);
-}
+// Re-export so existing component-side `import { showToast } from "../components/Toast.js"`
+// call sites keep working. The store itself now lives in lib/toast.ts (leaf layer).
+export { showToast };
 
 export function ToastContainer() {
   const [currentToasts, setCurrentToasts] = useState<Toast[]>([]);
 
-  useEffect(() => {
-    listeners.add(setCurrentToasts);
-    return () => { listeners.delete(setCurrentToasts); };
-  }, []);
+  useEffect(() => subscribeToasts(setCurrentToasts), []);
 
   if (currentToasts.length === 0) return null;
 
