@@ -23,6 +23,57 @@
 import { killProcessesInDir, killProcessesOnPorts } from "./process-cleanup.js";
 import { runScript } from "./script-runner.js";
 import { resolveWorktreeDevPorts } from "./worktree-ports.js";
+import { auditProcessEvent, guardProcessKill } from "./process-guard.js";
+
+/**
+ * Best-effort kill of a process and its descendants by PID. Windows uses
+ * `taskkill /T /F`; POSIX kills the process group then the bare PID. Guarded by
+ * guardProcessKill so it never targets a protected/foreign PID. Generic OS teardown
+ * primitive — lives here (the teardown service), not inside the CRUD service.
+ */
+export async function killProcessTree(pid: number): Promise<void> {
+  if (!pid || pid <= 0) return;
+  if (!guardProcessKill(pid, { reason: "workspace-cleanup-fallback" })) return;
+  if (process.platform === "win32") {
+    const { spawn } = await import("node:child_process");
+    await new Promise<void>((resolve) => {
+      const p = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true });
+      p.on("error", () => resolve());
+      p.on("close", () => resolve());
+    });
+    auditProcessEvent({ action: "workspace-cleanup-taskkill-issued", pid });
+  } else {
+    try {
+      process.kill(-pid, "SIGKILL");
+      auditProcessEvent({ action: "workspace-cleanup-sigkill-group-issued", pid });
+    } catch {
+      try {
+        process.kill(pid, "SIGKILL");
+        auditProcessEvent({ action: "workspace-cleanup-sigkill-issued", pid });
+      } catch { /* already dead */ }
+    }
+  }
+}
+
+/** Remove a directory recursively, retrying to ride out async Windows file-handle release. */
+export async function removeDirWithRetry(dir: string, attempts = 5, backoffMs = 300): Promise<boolean> {
+  const { rm } = await import("node:fs/promises");
+  const { existsSync } = await import("node:fs");
+  for (let i = 0; i < attempts; i++) {
+    try {
+      await rm(dir, { recursive: true, force: true });
+      if (!existsSync(dir)) return true;
+    } catch (err) {
+      if (i === attempts - 1) {
+        console.warn(`[workspaces] directory removal failed after ${attempts} attempts: ${dir}`, err);
+        return false;
+      }
+    }
+    if (!existsSync(dir)) return true;
+    await new Promise((resolve) => setTimeout(resolve, backoffMs * (i + 1)));
+  }
+  return !existsSync(dir);
+}
 
 export interface TeardownWorktreeParams {
   workingDir: string | null | undefined;
