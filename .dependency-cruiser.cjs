@@ -151,10 +151,11 @@ module.exports = {
     {
       name: "repositories-not-up-to-services",
       comment:
-        "BACKLOG (1: session.repository.ts imports sessionOutputPath from agent.service). " +
-        "Persistence must not depend on application. Fix by relocating the path helper to a " +
-        "lib/constants module, then tighten to error.",
-      severity: "warn",
+        "Persistence (repositories) must not depend on the application layer (services). " +
+        "Dependencies point down. Backlog drained to 0 (the lone edge — session.repository " +
+        "importing sessionOutputPath from agent.service — was fixed by relocating the pure " +
+        "path helpers to lib/session-paths.ts), so this is now an ERROR gate. Backlog: 0.",
+      severity: "error",
       from: { path: "^packages/server/src/repositories/" },
       to: { path: "^packages/server/src/services/" },
     },

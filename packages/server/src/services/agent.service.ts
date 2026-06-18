@@ -1,8 +1,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { openSync, closeSync, readSync, statSync, unlinkSync, existsSync, writeFileSync, readFileSync, appendFileSync, readdirSync, type Dirent } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildAgentLaunchConfig, type ProviderId, type ProviderName } from "./agent-provider.js";
+import { sessionOutputPath, sessionErrorPath } from "../lib/session-paths.js";
 import { guardProcessKill, auditProcessEvent } from "./process-guard.js";
 import { resolveWorktreeDevPorts as resolveWorktreeDevPortsShared } from "./worktree-ports.js";
 
@@ -86,24 +86,8 @@ function piExtensionFiles(worktreePath: string): string[] {
   return existsSync(extensionPath) ? [extensionPath] : [];
 }
 
-/** Get the output file path for a session. */
-export function sessionOutputPath(sessionId: string): string {
-  return join(tmpdir(), `kanban-session-${sessionId}.out`);
-}
-
-/**
- * Get the stderr capture file path for a detached session.
- *
- * Detached agents (claude on Windows — see {@link launchAgent}) redirect stdout to the
- * `.out` file, but stderr used to be discarded (`stdio[2] = "ignore"`). When the provider
- * process dies BEFORE emitting any stdout (e.g. claude.exe exits 1 immediately from a
- * fix-and-merge launch in a mid-rebase / conflicted worktree), the `.out` file is 0 bytes
- * and the only diagnostic — the reason on stderr — was thrown away, producing an invisible
- * "0-token zombie" (#779). We now redirect stderr to this file so the failure is debuggable.
- */
-export function sessionErrorPath(sessionId: string): string {
-  return join(tmpdir(), `kanban-session-${sessionId}.err`);
-}
+// sessionOutputPath / sessionErrorPath moved to ../lib/session-paths.ts (re-imported above)
+// so the persistence layer can share them without a repository -> service import.
 
 /**
  * Read the captured stderr file for a detached session and, if non-empty, emit it as a
