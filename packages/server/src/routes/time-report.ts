@@ -1,7 +1,5 @@
-import { and, eq, gte, lte, sql, sum } from "drizzle-orm";
-import { issueTimeEntries, issues } from "@agentic-kanban/shared/schema";
-import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { getTimeReportByIssue, getTimeReportByDay } from "../repositories/issue-time-entries.repository.js";
 import { createRouter } from "../middleware/create-router.js";
 
 const RANGE_DAYS = {
@@ -39,7 +37,7 @@ export interface TimeReportData {
   dateTo: string;
 }
 
-export function createTimeReportRoute(database: Database = db) {
+export function createTimeReportRoute(database: Database) {
   const router = createRouter();
 
   // GET /api/projects/:id/time-report?range=30d
@@ -53,42 +51,8 @@ export function createTimeReportRoute(database: Database = db) {
       ? null
       : new Date(now.getTime() - RANGE_DAYS[range] * 24 * 60 * 60 * 1000).toISOString();
 
-    const whereClause = dateFrom
-      ? and(
-          eq(issues.projectId, projectId),
-          gte(issueTimeEntries.createdAt, dateFrom),
-          lte(issueTimeEntries.createdAt, dateTo),
-        )
-      : and(
-          eq(issues.projectId, projectId),
-          lte(issueTimeEntries.createdAt, dateTo),
-        );
-
-    // Single grouped query: join entries with issues, group by issueId
-    const byIssueRows = await database
-      .select({
-        issueId: issues.id,
-        issueNumber: issues.issueNumber,
-        issueTitle: issues.title,
-        totalMinutes: sum(issueTimeEntries.minutes),
-      })
-      .from(issueTimeEntries)
-      .innerJoin(issues, eq(issueTimeEntries.issueId, issues.id))
-      .where(whereClause)
-      .groupBy(issues.id, issues.issueNumber, issues.title)
-      .orderBy(sql`sum(${issueTimeEntries.minutes}) desc`);
-
-    // Single grouped query: group by date (first 10 chars of ISO string)
-    const byDayRows = await database
-      .select({
-        date: sql<string>`substr(${issueTimeEntries.createdAt}, 1, 10)`,
-        totalMinutes: sum(issueTimeEntries.minutes),
-      })
-      .from(issueTimeEntries)
-      .innerJoin(issues, eq(issueTimeEntries.issueId, issues.id))
-      .where(whereClause)
-      .groupBy(sql`substr(${issueTimeEntries.createdAt}, 1, 10)`)
-      .orderBy(sql`substr(${issueTimeEntries.createdAt}, 1, 10)`);
+    const byIssueRows = await getTimeReportByIssue(projectId, dateFrom, dateTo, database);
+    const byDayRows = await getTimeReportByDay(projectId, dateFrom, dateTo, database);
 
     const byIssue: TimeReportByIssue[] = byIssueRows.map((row) => ({
       issueId: row.issueId,

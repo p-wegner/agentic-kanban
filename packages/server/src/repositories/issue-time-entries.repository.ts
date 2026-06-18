@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { issueTimeEntries } from "@agentic-kanban/shared/schema";
-import { eq, sum } from "drizzle-orm";
+import { issueTimeEntries, issues } from "@agentic-kanban/shared/schema";
+import { eq, sum, and, gte, lte, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
@@ -57,4 +57,55 @@ export async function deleteTimeEntry(
   database: Database = db,
 ): Promise<void> {
   await database.delete(issueTimeEntries).where(eq(issueTimeEntries.id, entryId));
+}
+
+/** Shared filter for the project time report: project scope + an optional createdAt window. */
+function timeReportWhere(projectId: string, dateFrom: string | null, dateTo: string) {
+  return dateFrom
+    ? and(
+        eq(issues.projectId, projectId),
+        gte(issueTimeEntries.createdAt, dateFrom),
+        lte(issueTimeEntries.createdAt, dateTo),
+      )
+    : and(eq(issues.projectId, projectId), lte(issueTimeEntries.createdAt, dateTo));
+}
+
+/** Minutes logged per issue within the window, most-time-first. */
+export async function getTimeReportByIssue(
+  projectId: string,
+  dateFrom: string | null,
+  dateTo: string,
+  database: Database = db,
+) {
+  return database
+    .select({
+      issueId: issues.id,
+      issueNumber: issues.issueNumber,
+      issueTitle: issues.title,
+      totalMinutes: sum(issueTimeEntries.minutes),
+    })
+    .from(issueTimeEntries)
+    .innerJoin(issues, eq(issueTimeEntries.issueId, issues.id))
+    .where(timeReportWhere(projectId, dateFrom, dateTo))
+    .groupBy(issues.id, issues.issueNumber, issues.title)
+    .orderBy(sql`sum(${issueTimeEntries.minutes}) desc`);
+}
+
+/** Minutes logged per calendar day (YYYY-MM-DD) within the window, ascending. */
+export async function getTimeReportByDay(
+  projectId: string,
+  dateFrom: string | null,
+  dateTo: string,
+  database: Database = db,
+) {
+  return database
+    .select({
+      date: sql<string>`substr(${issueTimeEntries.createdAt}, 1, 10)`,
+      totalMinutes: sum(issueTimeEntries.minutes),
+    })
+    .from(issueTimeEntries)
+    .innerJoin(issues, eq(issueTimeEntries.issueId, issues.id))
+    .where(timeReportWhere(projectId, dateFrom, dateTo))
+    .groupBy(sql`substr(${issueTimeEntries.createdAt}, 1, 10)`)
+    .orderBy(sql`substr(${issueTimeEntries.createdAt}, 1, 10)`);
 }
