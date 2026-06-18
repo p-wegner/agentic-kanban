@@ -1,7 +1,6 @@
-import { workspaces, issues, projectStatuses, projects } from "@agentic-kanban/shared/schema";
-import { eq, and, inArray } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { getChangedFileNames } from "./git.service.js";
+import { getProjectDefaultBranch, getActiveContentionWorkspaces } from "../repositories/file-contention.repository.js";
 
 export interface ContentionWorkspace {
   workspaceId: string;
@@ -31,40 +30,15 @@ export async function getFileContention(
   projectId: string,
   database: Database,
 ): Promise<FileContentionResult> {
-  const projectRows = await database
-    .select({ id: projects.id, defaultBranch: projects.defaultBranch })
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .limit(1);
+  const project = await getProjectDefaultBranch(projectId, database);
 
-  if (projectRows.length === 0) {
+  if (!project) {
     throw new Error(`Project not found: ${projectId}`);
   }
-  const defaultBranch = projectRows[0].defaultBranch;
+  const defaultBranch = project.defaultBranch;
 
   // Load active workspaces for this project with issue info
-  const rows = await database
-    .select({
-      workspaceId: workspaces.id,
-      branch: workspaces.branch,
-      workingDir: workspaces.workingDir,
-      baseBranch: workspaces.baseBranch,
-      isDirect: workspaces.isDirect,
-      workspaceStatus: workspaces.status,
-      issueId: issues.id,
-      issueNumber: issues.issueNumber,
-      issueTitle: issues.title,
-      issueStatus: projectStatuses.name,
-    })
-    .from(workspaces)
-    .innerJoin(issues, eq(workspaces.issueId, issues.id))
-    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-    .where(
-      and(
-        eq(issues.projectId, projectId),
-        inArray(workspaces.status, [...ACTIVE_STATUSES]),
-      ),
-    );
+  const rows = await getActiveContentionWorkspaces(projectId, [...ACTIVE_STATUSES], database);
 
   // For each workspace, collect the set of touched files via git diff
   const fileToWorkspaces = new Map<string, ContentionWorkspace[]>();

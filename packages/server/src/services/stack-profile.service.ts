@@ -1,10 +1,9 @@
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { StackProfile, SmokeCheck } from "@agentic-kanban/shared";
-import { projects } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { getPreference, setPreference } from "../repositories/preferences.repository.js";
+import { getProjectSetupScript, setProjectSetupScript } from "../repositories/stack-profile.repository.js";
 import { detectProjectMarkers, deriveVerifyScript } from "./project-setup.service.js";
 import { invokeClaudePrompt } from "./claude-cli.service.js";
 
@@ -1162,20 +1161,13 @@ export async function populateSetupScript(
   database: Database,
   profile?: StackProfile | null,
 ): Promise<string | null> {
-  const [project] = await database
-    .select({ setupScript: projects.setupScript })
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .limit(1);
-  if (project?.setupScript && project.setupScript.trim()) return project.setupScript; // already configured
+  const existingSetupScript = await getProjectSetupScript(projectId, database);
+  if (existingSetupScript && existingSetupScript.trim()) return existingSetupScript; // already configured
 
   const resolvedProfile = profile ?? (await getStackProfile(projectId, database));
   const setup = deriveSetupScriptFromProfile(resolvedProfile, repoPath).trim();
   if (!setup) return null; // nothing to install — leave unset (pure no-op)
 
-  await database
-    .update(projects)
-    .set({ setupScript: setup, updatedAt: new Date().toISOString() })
-    .where(eq(projects.id, projectId));
+  await setProjectSetupScript(projectId, setup, database);
   return setup;
 }

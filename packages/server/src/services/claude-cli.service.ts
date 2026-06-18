@@ -3,10 +3,9 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { db } from "../db/index.js";
-import { preferences } from "@agentic-kanban/shared/schema";
-import { inArray } from "drizzle-orm";
 import { buildSpawnEnv } from "./agent-provider.js";
 import type { Database } from "../db/index.js";
+import { getClaudeCliPreferences } from "../repositories/claude-cli.repository.js";
 
 export interface ClaudeCliOptions {
   timeout?: number;
@@ -25,10 +24,7 @@ export async function invokeClaudePrompt(
   let claudeProfile: string | undefined;
   let provider = "claude";
   let codexProfile: string | undefined;
-  const prefs = await database
-    .select({ key: preferences.key, value: preferences.value })
-    .from(preferences)
-    .where(inArray(preferences.key, ["agent_command", "claude_profile", "provider", "codex_profile"]));
+  const prefs = await getClaudeCliPreferences(database);
   for (const p of prefs) {
     if (p.key === "agent_command" && p.value) agentCommand = p.value;
     if (p.key === "claude_profile" && p.value) claudeProfile = p.value;
