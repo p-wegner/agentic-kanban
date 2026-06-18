@@ -2,14 +2,13 @@ import { randomUUID } from "node:crypto";
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { isTerminalStatusIdView, TERMINAL_STATUS_NAMES } from "@agentic-kanban/shared";
-import { issues, projectStatuses, issueDependencies, agentSkills, tags, issueTags, projects, workflowNodes } from "@agentic-kanban/shared/schema";
-import { eq, and, inArray, sql, desc } from "drizzle-orm";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
 import type { IssueEstimate } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
 import { invokeClaudePrompt } from "./claude-cli.service.js";
 import { NotFoundError } from "../errors/index.js";
 import { createDrive } from "../repositories/drive.repository.js";
+import * as repo from "../repositories/issue-ai.repository.js";
 
 export interface EnhanceIssueResult {
   title: string;
@@ -62,52 +61,18 @@ export async function analyzeDependencies(
   projectId: string,
   database: Database,
 ): Promise<AnalyzeDependenciesResult> {
-  const issueRows = await database
-    .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, description: issues.description })
-    .from(issues)
-    .where(eq(issues.id, issueId))
-    .limit(1);
-  if (issueRows.length === 0) {
+  const targetIssue = await repo.getIssueBasics(issueId, database);
+  if (!targetIssue) {
     throw new NotFoundError("Issue not found");
   }
-  const targetIssue = issueRows[0];
 
-  const doneCancelledStatuses = await database
-    .select({ id: projectStatuses.id })
-    .from(projectStatuses)
-    .where(and(
-      eq(projectStatuses.projectId, projectId),
-      inArray(projectStatuses.name, [...TERMINAL_STATUS_NAMES]),
-    ));
-  const excludeStatusIds = doneCancelledStatuses.map(s => s.id);
+  const excludeStatusIds = await repo.getTerminalStatusIds(projectId, [...TERMINAL_STATUS_NAMES], database);
 
   const terminalStatusIds = new Set(excludeStatusIds);
-  const openIssues = (await database
-    .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
-      description: issues.description,
-      statusId: issues.statusId,
-      currentNodeId: issues.currentNodeId,
-      currentNodeType: workflowNodes.nodeType,
-    })
-    .from(issues)
-    .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
-    .where(eq(issues.projectId, projectId)))
+  const openIssues = (await repo.getOpenIssuesWithNode(projectId, database))
     .filter((issue) => !isTerminalStatusIdView(issue, terminalStatusIds));
 
-  const skillRows = await database
-    .select({ prompt: agentSkills.prompt })
-    .from(agentSkills)
-    .where(and(
-      eq(agentSkills.name, "dependency-analyzer"),
-      sql`(${agentSkills.projectId} = ${projectId} OR ${agentSkills.projectId} IS NULL)`,
-    ))
-    .orderBy(sql`${agentSkills.projectId} IS NULL`)
-    .limit(1);
-
-  const skillPrompt = skillRows[0]?.prompt || `Analyze the given issue and its relationship to other open issues on the board.`;
+  const skillPrompt = (await repo.getSkillPrompt("dependency-analyzer", projectId, database)) || `Analyze the given issue and its relationship to other open issues on the board.`;
 
   const issuesSummary = openIssues
     .filter(i => i.id !== issueId)
@@ -150,13 +115,13 @@ Only include genuinely useful dependencies, not just topical similarity.`;
 
     try {
       const id = randomUUID();
-      await database.insert(issueDependencies).values({
+      await repo.insertIssueDependency({
         id,
         issueId,
         dependsOnId: dep.issueId,
         type: dep.type as DependencyType,
         createdAt: new Date().toISOString(),
-      });
+      }, database);
       created.push({ id, type: dep.type, issueId: dep.issueId, reason: dep.reason ?? "" });
     } catch (err: any) {
       if (err.message?.includes("UNIQUE constraint")) continue;
@@ -235,19 +200,8 @@ export async function analyzeTouchedFiles(
   database: Database,
   forceRefresh = false,
 ): Promise<AnalyzeTouchedFilesResult> {
-  const issueRows = await database
-    .select({
-      id: issues.id,
-      title: issues.title,
-      description: issues.description,
-      projectId: issues.projectId,
-      touchedFilesJson: issues.touchedFilesJson,
-    })
-    .from(issues)
-    .where(eq(issues.id, issueId))
-    .limit(1);
-  if (issueRows.length === 0) throw new NotFoundError("Issue not found");
-  const issue = issueRows[0];
+  const issue = await repo.getIssueForTouchedFiles(issueId, database);
+  if (!issue) throw new NotFoundError("Issue not found");
 
   if (!forceRefresh && issue.touchedFilesJson) {
     try {
@@ -256,12 +210,7 @@ export async function analyzeTouchedFiles(
     } catch {}
   }
 
-  const projectRows = await database
-    .select({ repoPath: projects.repoPath })
-    .from(projects)
-    .where(eq(projects.id, issue.projectId))
-    .limit(1);
-  const repoPath = projectRows[0]?.repoPath ?? "";
+  const repoPath = (await repo.getProjectRepoPath(issue.projectId, database)) ?? "";
 
   let treeSection = "";
   if (repoPath) {
@@ -286,10 +235,7 @@ ${issue.description ? `Description:\n${issue.description}` : ""}`;
     f => f.path && f.reason && ["high", "medium", "low"].includes(f.confidence),
   );
 
-  await database
-    .update(issues)
-    .set({ touchedFilesJson: JSON.stringify(files) })
-    .where(eq(issues.id, issueId));
+  await repo.updateIssueTouchedFiles(issueId, JSON.stringify(files), database);
 
   return { files, cached: false };
 }
@@ -304,10 +250,7 @@ export async function checkIssueOverlap(
 ): Promise<CheckOverlapResult> {
   if (issueIds.length === 0) return { overlap: {} };
 
-  const rows = await database
-    .select({ id: issues.id, touchedFilesJson: issues.touchedFilesJson })
-    .from(issues)
-    .where(inArray(issues.id, issueIds));
+  const rows = await repo.getIssuesTouchedFiles(issueIds, database);
 
   const overlap: Record<string, string[]> = {};
   for (const row of rows) {
@@ -336,15 +279,11 @@ export async function aiEstimateIssue(
   issueId: string,
   database: Database,
 ): Promise<AiEstimateResult> {
-  const issueRows = await database
-    .select({ title: issues.title, description: issues.description })
-    .from(issues)
-    .where(eq(issues.id, issueId))
-    .limit(1);
-  if (issueRows.length === 0) {
+  const issueRow = await repo.getIssueTitleDescription(issueId, database);
+  if (!issueRow) {
     throw new NotFoundError("Issue not found");
   }
-  const { title, description } = issueRows[0];
+  const { title, description } = issueRow;
 
   const prompt = `You are a software project estimator. Given a kanban issue, suggest a T-shirt size estimate.
 Sizes: XS (< 1 hour), S (half day), M (1-2 days), L (3-5 days), XL (> 1 week).
@@ -389,51 +328,22 @@ export async function decomposeEpic(
   projectId: string,
   database: Database,
 ): Promise<DecomposeEpicResult> {
-  const issueRows = await database
-    .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, description: issues.description })
-    .from(issues)
-    .where(eq(issues.id, issueId))
-    .limit(1);
-  if (issueRows.length === 0) throw new NotFoundError("Issue not found");
-  const targetIssue = issueRows[0];
+  const targetIssue = await repo.getIssueBasics(issueId, database);
+  if (!targetIssue) throw new NotFoundError("Issue not found");
 
   // Check if already decomposed (has parent_of dependencies)
-  const existingChildDeps = await database
-    .select({ id: issueDependencies.id })
-    .from(issueDependencies)
-    .where(and(eq(issueDependencies.issueId, issueId), eq(issueDependencies.type, "parent_of")))
-    .limit(1);
+  const existingChildDeps = await repo.getParentOfDependency(issueId, database);
   const alreadyDecomposed = existingChildDeps.length > 0;
 
   // Get recent closed issues for context
-  const doneStatuses = await database
-    .select({ id: projectStatuses.id })
-    .from(projectStatuses)
-    .where(and(eq(projectStatuses.projectId, projectId), inArray(projectStatuses.name, [...TERMINAL_STATUS_NAMES])));
-  const doneStatusIds = doneStatuses.map(s => s.id);
+  const doneStatusIds = await repo.getTerminalStatusIds(projectId, [...TERMINAL_STATUS_NAMES], database);
 
-  const recentIssues = (await database
-    .select({
-      title: issues.title,
-      description: issues.description,
-      statusId: issues.statusId,
-      currentNodeId: issues.currentNodeId,
-      currentNodeType: workflowNodes.nodeType,
-      updatedAt: issues.updatedAt,
-    })
-    .from(issues)
-    .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
-    .where(eq(issues.projectId, projectId))
-    .orderBy(desc(issues.updatedAt)))
+  const recentIssues = (await repo.getRecentIssuesWithNode(projectId, database))
     .filter((issue) => isTerminalStatusIdView(issue, new Set(doneStatusIds)))
     .slice(0, 10);
 
-  const projectRows = await database
-    .select({ name: projects.name, repoName: projects.repoName })
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .limit(1);
-  const projectName = projectRows[0]?.repoName || projectRows[0]?.name || "unknown project";
+  const projectRow = await repo.getProjectNames(projectId, database);
+  const projectName = projectRow?.repoName || projectRow?.name || "unknown project";
 
   const recentContext = recentIssues.length > 0
     ? `\nRecently completed tasks (for context on coding patterns):\n${recentIssues.map(i => `  - ${i.title}`).join("\n")}`
@@ -522,55 +432,32 @@ export async function confirmEpicDecomposition(
   const { issueId, projectId, children, dependencies } = input;
 
   // Ensure the parent issue exists
-  const issueRows = await database
-    .select({ id: issues.id, title: issues.title, description: issues.description })
-    .from(issues)
-    .where(eq(issues.id, issueId))
-    .limit(1);
-  if (issueRows.length === 0) throw new NotFoundError("Issue not found");
-  const parentIssue = issueRows[0];
+  const parentIssue = await repo.getIssueBasics(issueId, database);
+  if (!parentIssue) throw new NotFoundError("Issue not found");
 
   // Get Backlog status id
-  const backlogStatus = await database
-    .select({ id: projectStatuses.id })
-    .from(projectStatuses)
-    .where(and(eq(projectStatuses.projectId, projectId), eq(projectStatuses.name, "Backlog")))
-    .limit(1);
-  const backlogStatusId = backlogStatus[0]?.id;
+  const backlogStatusId = await repo.getStatusIdByName(projectId, "Backlog", database);
 
   // Get or create epic tag
-  let epicTag = await database
-    .select({ id: tags.id })
-    .from(tags)
-    .where(eq(tags.name, "epic"))
-    .limit(1);
+  let epicTag = await repo.getTagByName("epic", database);
   if (epicTag.length === 0) {
     const tagId = randomUUID();
-    await database.insert(tags).values({
+    await repo.insertTag({
       id: tagId,
       name: "epic",
       color: "#8B5CF6",
       isBuiltin: true,
       createdAt: new Date().toISOString(),
-    }).catch(() => {});
+    }, database);
     epicTag = [{ id: tagId }];
   }
 
   // Create child issues
   const now = new Date().toISOString();
-  const maxRow = await database
-    .select({ maxNum: sql<number | null>`max(${issues.issueNumber})` })
-    .from(issues)
-    .where(eq(issues.projectId, projectId));
-  let nextNumber = (maxRow[0]?.maxNum ?? 0) + 1;
+  const maxNum = await repo.getMaxIssueNumber(projectId, database);
+  let nextNumber = (maxNum ?? 0) + 1;
 
-  const defaultStatusRow = await database
-    .select({ id: projectStatuses.id })
-    .from(projectStatuses)
-    .where(eq(projectStatuses.projectId, projectId))
-    .orderBy(projectStatuses.sortOrder)
-    .limit(1);
-  const defaultStatusId = backlogStatusId ?? defaultStatusRow[0]?.id;
+  const defaultStatusId = backlogStatusId ?? (await repo.getDefaultStatusId(projectId, database));
   if (!defaultStatusId) throw new NotFoundError("No statuses found for project");
 
   const createdIssues: ConfirmDecomposeResult["createdIssues"] = [];
@@ -579,7 +466,7 @@ export async function confirmEpicDecomposition(
   for (const child of children) {
     const childId = randomUUID();
     const issueNumber = nextNumber++;
-    await database.insert(issues).values({
+    await repo.insertChildIssue({
       id: childId,
       issueNumber,
       title: child.title,
@@ -593,7 +480,7 @@ export async function confirmEpicDecomposition(
       projectId,
       createdAt: now,
       updatedAt: now,
-    });
+    }, database);
     createdIssues.push({ id: childId, issueNumber, title: child.title, tempId: child.tempId });
     tempIdToIssueId.set(child.tempId, childId);
   }
@@ -603,52 +490,42 @@ export async function confirmEpicDecomposition(
     const fromId = tempIdToIssueId.get(dep.fromTempId);
     const toId = tempIdToIssueId.get(dep.toTempId);
     if (!fromId || !toId) continue;
-    try {
-      await database.insert(issueDependencies).values({
-        id: randomUUID(),
-        issueId: fromId,
-        dependsOnId: toId,
-        type: dep.type,
-        createdAt: now,
-      });
-    } catch { /* skip duplicate/cycle */ }
+    await repo.insertIssueDependencySafe({
+      id: randomUUID(),
+      issueId: fromId,
+      dependsOnId: toId,
+      type: dep.type,
+      createdAt: now,
+    }, database);
   }
 
   // Wire parent_of deps from parent to each child, AND child_of deps from each child back to parent.
   // child_of (child.issueId → dependsOnId=parent) is what reconcileDriveCompletion queries.
   for (const child of createdIssues) {
-    try {
-      await database.insert(issueDependencies).values({
-        id: randomUUID(),
-        issueId: issueId,
-        dependsOnId: child.id,
-        type: "parent_of",
-        createdAt: now,
-      });
-    } catch { /* skip */ }
-    try {
-      await database.insert(issueDependencies).values({
-        id: randomUUID(),
-        issueId: child.id,
-        dependsOnId: issueId,
-        type: "child_of",
-        createdAt: now,
-      });
-    } catch { /* skip */ }
+    await repo.insertIssueDependencySafe({
+      id: randomUUID(),
+      issueId: issueId,
+      dependsOnId: child.id,
+      type: "parent_of",
+      createdAt: now,
+    }, database);
+    await repo.insertIssueDependencySafe({
+      id: randomUUID(),
+      issueId: child.id,
+      dependsOnId: issueId,
+      type: "child_of",
+      createdAt: now,
+    }, database);
   }
 
   // Add epic tag to parent issue (if not already tagged)
-  const existingEpicTag = await database
-    .select({ id: issueTags.id })
-    .from(issueTags)
-    .where(and(eq(issueTags.issueId, issueId), eq(issueTags.tagId, epicTag[0].id)))
-    .limit(1);
+  const existingEpicTag = await repo.getIssueTagLink(issueId, epicTag[0].id, database);
   if (existingEpicTag.length === 0) {
-    await database.insert(issueTags).values({
+    await repo.insertIssueTag({
       id: randomUUID(),
       issueId,
       tagId: epicTag[0].id,
-    }).catch(() => {});
+    }, database);
   }
 
   // Prepend checklist of children to parent description
@@ -657,9 +534,7 @@ export async function confirmEpicDecomposition(
   const newDescription = parentIssue.description
     ? `${childrenSection}\n\n${parentIssue.description}`
     : childrenSection;
-  await database.update(issues)
-    .set({ description: newDescription, updatedAt: now })
-    .where(eq(issues.id, issueId));
+  await repo.updateIssueDescription(issueId, newDescription, now, database);
 
   let driveId: string | undefined;
   if (input.driveTarget) {
