@@ -1,10 +1,18 @@
 import { randomUUID } from "node:crypto";
-import { issues, issueTags, tags, projectStatuses } from "@agentic-kanban/shared/schema";
-import { and, eq, sql } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { invokeClaudePrompt } from "./claude-cli.service.js";
 import type { BoardEvents } from "./board-events.js";
 import { getOutgoingTransitions, syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import {
+  ensureVoiceCaptureTag as ensureVoiceCaptureTagRepo,
+  getProjectStatusesForVoiceCapture,
+  getProjectStatusNamesForVoiceCapture,
+  getIssueByNumberForVoiceCapture,
+  setIssueStatus,
+  getMaxIssueNumber,
+  insertVoiceCaptureIssue,
+  attachVoiceCaptureTag,
+} from "../repositories/voice-capture.repository.js";
 
 export interface VoiceCaptureInput {
   projectId: string;
@@ -105,36 +113,11 @@ function fallbackStructuredTranscript(transcript: string): { title: string; desc
 }
 
 /**
- * Find or create the `voice-capture` tag for the given database.
- * Returns the tag id.
- */
-async function ensureVoiceCaptureTag(database: Database): Promise<string> {
-  const TAG_NAME = "voice-capture";
-  const existing = await database
-    .select({ id: tags.id })
-    .from(tags)
-    .where(sql`lower(${tags.name}) = lower(${TAG_NAME})`)
-    .limit(1);
-  if (existing[0]) return existing[0].id;
-  const id = randomUUID();
-  await database.insert(tags).values({
-    id,
-    name: TAG_NAME,
-    color: "#8b5cf6",
-    createdAt: new Date().toISOString(),
-  });
-  return id;
-}
-
-/**
  * Resolve the Backlog statusId for a project. Falls back to the default status
  * when no "Backlog" status exists.
  */
 async function resolveBacklogStatusId(projectId: string, database: Database): Promise<string> {
-  const rows = await database
-    .select({ id: projectStatuses.id, name: projectStatuses.name, isDefault: projectStatuses.isDefault })
-    .from(projectStatuses)
-    .where(eq(projectStatuses.projectId, projectId));
+  const rows = await getProjectStatusesForVoiceCapture(projectId, database);
   const backlog = rows.find((r) => r.name.toLowerCase() === "backlog");
   if (backlog) return backlog.id;
   const def = rows.find((r) => r.isDefault) ?? rows[0];
@@ -171,21 +154,13 @@ async function moveIssueFromVoiceCommand(
   database: Database,
   boardEvents?: BoardEvents,
 ): Promise<VoiceCaptureActionResult> {
-  const issueRows = await database
-    .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, currentNodeId: issues.currentNodeId })
-    .from(issues)
-    .where(and(eq(issues.projectId, projectId), eq(issues.issueNumber, intent.issueNumber)))
-    .limit(1);
-  const issue = issueRows[0];
+  const issue = await getIssueByNumberForVoiceCapture(projectId, intent.issueNumber, database);
   if (!issue) throw new VoiceCaptureCommandError(`Issue #${intent.issueNumber} not found`);
   if (!intent.targetStatus.trim()) {
     throw new VoiceCaptureCommandError("Target status is required for move commands");
   }
 
-  const statusRows = await database
-    .select({ id: projectStatuses.id, name: projectStatuses.name })
-    .from(projectStatuses)
-    .where(eq(projectStatuses.projectId, projectId));
+  const statusRows = await getProjectStatusNamesForVoiceCapture(projectId, database);
   const target = findTargetStatus(intent.targetStatus, statusRows);
   if (!target) {
     throw new VoiceCaptureCommandError(`Status '${intent.targetStatus}' not found. Available: ${statusRows.map((s) => s.name).join(", ")}`);
@@ -209,10 +184,7 @@ async function moveIssueFromVoiceCommand(
   }
 
   const now = new Date().toISOString();
-  await database
-    .update(issues)
-    .set({ statusId: target.id, statusChangedAt: now, updatedAt: now })
-    .where(eq(issues.id, issue.id));
+  await setIssueStatus(issue.id, target.id, now, database);
   await syncCurrentNodeToStatus(database, issue.id).catch(() => {});
 
   boardEvents?.broadcast(projectId, "issue_updated");
@@ -301,42 +273,28 @@ export async function createVoiceCaptureIssue(
   const [structured, statusId, tagId] = await Promise.all([
     parseTranscript(transcript, database, speechLanguage, speechLanguageLabel),
     resolveBacklogStatusId(projectId, database),
-    ensureVoiceCaptureTag(database),
+    ensureVoiceCaptureTagRepo(database),
   ]);
 
   // Determine next issue number
-  const maxRow = await database
-    .select({ maxNum: sql<number | null>`max(${issues.issueNumber})` })
-    .from(issues)
-    .where(eq(issues.projectId, projectId));
-  const issueNumber = (maxRow[0]?.maxNum ?? 0) + 1;
+  const issueNumber = (await getMaxIssueNumber(projectId, database) ?? 0) + 1;
 
   const id = randomUUID();
   const now = new Date().toISOString();
 
-  await database.insert(issues).values({
+  await insertVoiceCaptureIssue({
     id,
     issueNumber,
     title: structured.title,
     description: structured.description,
     priority: structured.priority,
-    issueType: "task",
-    skipAutoReview: false,
-    estimate: null,
-    sortOrder: 0,
-    workflowTemplateId: null,
     statusId,
     projectId,
-    createdAt: now,
-    updatedAt: now,
-  });
+    now,
+  }, database);
 
   // Attach the voice-capture tag
-  await database.insert(issueTags).values({
-    id: randomUUID(),
-    issueId: id,
-    tagId,
-  });
+  await attachVoiceCaptureTag(id, tagId, database);
 
   boardEvents?.broadcast(projectId, "issue_created");
 

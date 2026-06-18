@@ -1,6 +1,12 @@
-import { count, desc, eq } from "drizzle-orm";
-import { projects, sessions, sessionMessages, workspaces } from "@agentic-kanban/shared/schema";
+import type { projects, workspaces } from "@agentic-kanban/shared/schema";
 import { isFailedLaunchSession } from "@agentic-kanban/shared/lib/workspace-activity-state.js";
+import {
+  getLatestSessionForWorkspace,
+  getLatestSessionStatusForWorkspace,
+  markSessionStopped,
+  countSessionMessages,
+  getIssueNumberById,
+} from "../repositories/workspace-merge.repository.js";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
@@ -103,14 +109,7 @@ export function createWorkspaceMergeService(deps: {
     if (workspace.status !== "fixing") return;
     if (!getSessionManager) return;
 
-    const latestSessionRows = await database
-      .select()
-      .from(sessions)
-      .where(eq(sessions.workspaceId, workspace.id))
-      .orderBy(desc(sessions.startedAt))
-      .limit(1);
-
-    const latestSession = latestSessionRows[0];
+    const latestSession = await getLatestSessionForWorkspace(workspace.id, database);
     if (!latestSession) return;
 
     const isFailed = isFailedLaunchSession({
@@ -131,32 +130,20 @@ export function createWorkspaceMergeService(deps: {
     } catch (err) {
       console.warn(`[workspace-merge] failed to force-stop ${label} ${sessionId}:`, err instanceof Error ? err.message : String(err));
     }
-    await database
-      .update(sessions)
-      .set({ status: "stopped", endedAt: new Date().toISOString() })
-      .where(eq(sessions.id, sessionId));
+    await markSessionStopped(sessionId, new Date().toISOString(), database);
   }
 
   async function recoverZeroOutputRunningFixAndMergeSession(workspace: typeof workspaces.$inferSelect) {
     if (!getSessionManager) return;
-    const latestSessionRows = await database
-      .select({ id: sessions.id, startedAt: sessions.startedAt, triggerType: sessions.triggerType, status: sessions.status })
-      .from(sessions)
-      .where(eq(sessions.workspaceId, workspace.id))
-      .orderBy(desc(sessions.startedAt))
-      .limit(1);
-    const latestSession = latestSessionRows[0];
+    const latestSession = await getLatestSessionStatusForWorkspace(workspace.id, database);
     if (!latestSession) return;
     if (latestSession.triggerType !== "fix-and-merge") return;
     const ageMs = Date.now() - new Date(latestSession.startedAt).getTime();
     if (ageMs < 60_000) return;
     if (latestSession.status !== "running") return;
 
-    const [msgCountRow] = await database
-      .select({ cnt: count() })
-      .from(sessionMessages)
-      .where(eq(sessionMessages.sessionId, latestSession.id));
-    if (msgCountRow?.cnt !== 0) return;
+    const msgCount = await countSessionMessages(latestSession.id, database);
+    if (msgCount !== 0) return;
 
     try {
       console.log(
@@ -594,13 +581,7 @@ export function createWorkspaceMergeService(deps: {
     const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
 
     // Resolve issue number for the confirmation summary
-    const { issues: issuesTable } = await import("@agentic-kanban/shared/schema");
-    const issueRows = await database
-      .select({ issueNumber: issuesTable.issueNumber })
-      .from(issuesTable)
-      .where(eq(issuesTable.id, workspace.issueId))
-      .limit(1);
-    const issueNumber = issueRows[0]?.issueNumber ?? null;
+    const issueNumber = await getIssueNumberById(workspace.issueId, database);
 
     // Check working-dir exists for accurate diff
     let diffOutput = "";

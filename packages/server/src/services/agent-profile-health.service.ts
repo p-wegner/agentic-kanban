@@ -1,10 +1,9 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, delimiter, join } from "node:path";
-import { preferences } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { setPreference } from "../repositories/preferences.repository.js";
+import { getAllPreferences } from "../repositories/agent-profile-health.repository.js";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { buildAgentLaunchConfig, type ProviderName } from "./agent-provider.js";
 import { resolvePiExecutable, splitArgs } from "./agent-provider/helpers.js";
@@ -289,7 +288,7 @@ export async function listAgentProfileHealth(
     piProfiles: string[];
   },
 ): Promise<AgentProfileHealthRow[]> {
-  const prefRows = await database.select().from(preferences);
+  const prefRows = await getAllPreferences(database);
   const prefMap = new Map(prefRows.map((row) => [row.key, row.value]));
   const failureRows = new Map(
     prefRows
