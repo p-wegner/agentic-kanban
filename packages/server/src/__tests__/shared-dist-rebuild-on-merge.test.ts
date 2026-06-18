@@ -32,11 +32,19 @@ import * as mergeHelpersModule from "../services/merge-helpers.service.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
 
 function makeGit(changedFiles: string[] = []) {
+  // Stateful ancestry: the branch is NOT yet an ancestor of base until mergeBranch
+  // runs, so resolveMergeState performs a real merge (rather than reconciling it as
+  // already-merged) and the post-merge invariant check then sees it as merged.
+  let merged = false;
+  const mergeBranch = vi.fn(async () => {
+    merged = true;
+    return "Merge made by the 'ort' strategy.";
+  });
   return {
     getDiff: vi.fn(async () => ""),
     revParse: vi.fn(async (_repo: string, _ref: string) => "merge-sha"),
     isAncestor: vi.fn(async () => false),
-    mergeBranch: vi.fn(async () => "Merge made by the 'ort' strategy."),
+    mergeBranch,
     detectConflicts: vi.fn(async () => ({ hasConflicts: false, conflictingFiles: [] })),
     syncBranchToHead: vi.fn(async () => false),
     removeWorktree: vi.fn(async () => {}),
@@ -46,7 +54,7 @@ function makeGit(changedFiles: string[] = []) {
     getCurrentBranch: vi.fn(async () => "master"),
     autoRenumberMigrations: vi.fn(async () => ({ renumbered: false, renames: [] })),
     checkBranchTipIsAncestor: vi.fn(async () => ({
-      isAncestor: true as const, branchSha: "branch-sha", baseSha: "merge-sha",
+      isAncestor: merged, branchSha: "branch-sha", baseSha: "merge-sha",
     })),
     getUncommittedTrackedChanges: vi.fn(async () => []),
     countUniqueCommits: vi.fn(async () => 1),
