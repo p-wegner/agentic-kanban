@@ -1255,18 +1255,20 @@ describe("Board API", () => {
 
   it("GET /api/projects/:id/board omits lastAssistantMessage/lastTool for closed workspaces (payload slim)", async () => {
     const p = await createProjectDirectly(database, { name: "Closed Summary Slim Project" });
-    const inReviewStatusId = await createStatusDirectly(database, p, "In Review", 1);
+    await createStatusDirectly(database, p, "In Review", 1);
     const inProgressStatusId = await createStatusDirectly(database, p, "In Progress", 0);
+    const doneStatusId = await createStatusDirectly(database, p, "Done", 2);
     const now = new Date().toISOString();
 
     // Closed (merged) workspace whose session has an assistant message + tool use.
-    // Lives on a non-archived issue so this assertion stays valid regardless of any
-    // archive lazy-loading: the behavior under test keys off workspace.status === "closed".
+    // Lives on an ARCHIVED (Done) issue: per #663 a closed workspace is dropped from `main`
+    // for non-archived issues, but archived issues keep their closed/merged main for display
+    // — which is exactly where the message-slimming behavior under test applies.
     const closedIssueId = randomUUID();
     const closedWsId = randomUUID();
     const closedSessionId = randomUUID();
     await database.insert(schema.issues).values({
-      id: closedIssueId, projectId: p, statusId: inReviewStatusId, issueNumber: 901,
+      id: closedIssueId, projectId: p, statusId: doneStatusId, issueNumber: 901,
       title: "Closed work", priority: "medium", issueType: "bug", sortOrder: 0, createdAt: now, updatedAt: now,
     });
     await database.insert(schema.workspaces).values({
@@ -1283,7 +1285,6 @@ describe("Board API", () => {
 
     // Archived (Done) issue with an IDLE (non-closed) main workspace — P1: archived
     // issues are slimmed regardless of workspace status (their card is a CompletedCard).
-    const doneStatusId = await createStatusDirectly(database, p, "Done", 2);
     const doneIssueId = randomUUID();
     const doneWsId = randomUUID();
     const doneSessionId = randomUUID();
@@ -1933,13 +1934,24 @@ describe("Workspaces API", () => {
     expect(body.id).toBeDefined();
   });
 
-  it("POST /api/workspaces requires issueId and branch", async () => {
-    const res = await app.request("/api/workspaces", {
+  it("POST /api/workspaces requires issueId (branch is optional — auto-generated when omitted)", async () => {
+    // Missing issueId → 400
+    const missingIssue = await app.request("/api/workspaces", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ branch: "feature/no-issue" }),
+    });
+    expect(missingIssue.status).toBe(400);
+
+    // issueId present, branch omitted → accepted (branch is auto-generated, #4ac61424),
+    // not rejected as a 400. (The branch value itself depends on the project's git repo,
+    // which isn't exercised here — only that the missing branch is no longer a 400.)
+    const autoBranch = await app.request("/api/workspaces", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ issueId }),
     });
-    expect(res.status).toBe(400);
+    expect(autoBranch.status).toBe(201);
   });
 
   it("GET /api/workspaces surfaces the model column in the list projection (#819)", async () => {
