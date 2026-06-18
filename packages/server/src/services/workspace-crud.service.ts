@@ -1,13 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync, chmodSync } from "node:fs";
 import { join } from "node:path";
-import { eq, inArray, and, isNotNull, ne } from "drizzle-orm";
 import { existsSync } from "node:fs";
 import { resolve as pathResolve, dirname, parse as pathParse, relative, sep } from "node:path";
-import {
-  issues, projects, preferences, workspaces, sessions, agentSkills, projectStatuses,
-  issueDependencies, workflowNodes,
-} from "@agentic-kanban/shared/schema";
 import { isResolvedDependencyStatusView } from "@agentic-kanban/shared/lib/status-view";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { branchHash, BASE_SERVER_PORT, BASE_CLIENT_PORT } from "./worktree-ports.js";
@@ -16,6 +11,7 @@ import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
+import * as crudRepo from "../repositories/workspace-crud.repository.js";
 
 export interface StaleWorktreeEntry {
   id: string;
@@ -213,20 +209,7 @@ export function createWorkspaceCrudService(deps: {
   }
 
   async function updateLatestSetupRun(workspaceId: string, run: LatestSetupRun, projectId?: string): Promise<void> {
-    await database
-      .update(workspaces)
-      .set({
-        latestSetupCommand: run.command,
-        latestSetupState: run.state,
-        latestSetupStartedAt: run.startedAt,
-        latestSetupEndedAt: run.endedAt,
-        latestSetupExitCode: run.exitCode,
-        latestSetupDurationMs: run.durationMs,
-        latestSetupStdoutTail: run.stdoutTail,
-        latestSetupStderrTail: run.stderrTail,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(workspaces.id, workspaceId));
+    await crudRepo.updateLatestSetupRunFields(workspaceId, run, database);
     if (projectId) boardEvents?.broadcast(projectId, "workspace_setup");
   }
 
@@ -236,11 +219,7 @@ export function createWorkspaceCrudService(deps: {
     setupConfig: { setupScript: string | null; setupBlocking: boolean; setupEnabled: boolean };
     symlinkConfig: { enabled: boolean; dirs: string[] };
   }> {
-    const issueRows = await database
-      .select({ projectId: issues.projectId, issueNumber: issues.issueNumber, title: issues.title, description: issues.description, priority: issues.priority })
-      .from(issues)
-      .where(eq(issues.id, issueId))
-      .limit(1);
+    const issueRows = await crudRepo.getIssueForWorkspaceCreate(issueId, database);
 
     if (issueRows.length === 0) {
       throw new WorkspaceError("Issue not found", "NOT_FOUND");
@@ -248,19 +227,7 @@ export function createWorkspaceCrudService(deps: {
 
     const issue = issueRows[0];
 
-    const projectRows = await database
-      .select({
-        repoPath: projects.repoPath,
-        defaultBranch: projects.defaultBranch,
-        setupScript: projects.setupScript,
-        setupBlocking: projects.setupBlocking,
-        setupEnabled: projects.setupEnabled,
-        symlinkEnabled: projects.symlinkEnabled,
-        symlinkDirs: projects.symlinkDirs,
-      })
-      .from(projects)
-      .where(eq(projects.id, issue.projectId))
-      .limit(1);
+    const projectRows = await crudRepo.getProjectForWorkspaceCreate(issue.projectId, database);
 
     if (projectRows.length === 0) {
       throw new WorkspaceError("Project not found", "NOT_FOUND");
@@ -400,7 +367,7 @@ export function createWorkspaceCrudService(deps: {
     repoPath: string,
   ): Promise<string | null> {
     if (skillId) {
-      const skillRows = await database.select().from(agentSkills).where(eq(agentSkills.id, skillId)).limit(1);
+      const skillRows = await crudRepo.getAgentSkillById(skillId, database);
       if (skillRows.length === 0) return null;
       const skill = skillRows[0];
       const localPrompt = await readLocalSkillPrompt(repoPath, skill.name);
@@ -429,7 +396,7 @@ export function createWorkspaceCrudService(deps: {
     model: string | undefined;
     systemInstructions: string;
   }> {
-    const prefRows = await database.select().from(preferences);
+    const prefRows = await crudRepo.getAllPreferences(database);
     const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
 
     // Impure inputs: an explicit profile/claudeProfile override takes precedence;
@@ -491,7 +458,7 @@ export function createWorkspaceCrudService(deps: {
     latestSymlink: LatestSymlinkRun;
     now: string;
   }): Promise<void> {
-    await database.insert(workspaces).values({
+    await crudRepo.insertWorkspaceRecordRow({
       id: params.id,
       issueId: params.issueId,
       branch: params.branch,
@@ -529,24 +496,11 @@ export function createWorkspaceCrudService(deps: {
       contextPrimer: params.contextPrimer,
       createdAt: params.now,
       updatedAt: params.now,
-    });
+    }, database);
   }
 
   async function assertNoOpenDirectWorkspaceForIssue(issueId: string): Promise<void> {
-    const openDirectRows = await database
-      .select({
-        id: workspaces.id,
-        branch: workspaces.branch,
-        status: workspaces.status,
-        updatedAt: workspaces.updatedAt,
-      })
-      .from(workspaces)
-      .where(and(
-        eq(workspaces.issueId, issueId),
-        eq(workspaces.isDirect, true),
-        ne(workspaces.status, "closed"),
-      ))
-      .limit(3);
+    const openDirectRows = await crudRepo.findOpenDirectWorkspacesForIssue(issueId, database);
 
     if (openDirectRows.length === 0) return;
 
@@ -620,7 +574,7 @@ export function createWorkspaceCrudService(deps: {
     console.error(`[workspaces] create failed: ${errorMsg}`);
 
     try {
-      const issueRows = await database.select({ projectId: issues.projectId }).from(issues).where(eq(issues.id, params.issueId)).limit(1);
+      const issueRows = await crudRepo.getIssueProjectId(params.issueId, database);
       if (issueRows.length > 0) {
         emitButlerSystemEvent({ projectId: issueRows[0].projectId, kind: "workspace_error", workspaceId: params.id, text: `Workspace creation failed for issue ${params.issueId} (branch ${params.branch}): ${errorMsg.slice(0, 200)}` });
       }
@@ -636,7 +590,7 @@ export function createWorkspaceCrudService(deps: {
     }
 
     try {
-      await database.insert(workspaces).values({
+      await crudRepo.insertWorkspaceRecordRow({
         id: params.id,
         issueId: params.issueId,
         branch: params.branch,
@@ -654,7 +608,7 @@ export function createWorkspaceCrudService(deps: {
         provider: params.resolvedProvider,
         createdAt: params.now,
         updatedAt: params.now,
-      });
+      }, database);
     } catch {
       // DB insert may fail if worktree creation itself failed
     }
@@ -906,11 +860,11 @@ exit 1
                 text: `Workspace launch blocked by stale safety policy for ${id}: ${errorMsg.slice(0, 200)}`,
               });
             }
-            database.update(workspaces).set({
+            crudRepo.updateWorkspaceLaunchFailure(id, {
               status: nextStatus,
               latestLaunchError: persistedError,
               updatedAt: new Date().toISOString(),
-            }).where(eq(workspaces.id, id))
+            }, database)
               .catch((dbErr: unknown) => console.warn(`[workspaces] failed to update workspace status after deferred launch failure: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`));
           });
       });
@@ -945,10 +899,7 @@ exit 1
   }
 
   async function deleteWorkspace(workspaceId: string): Promise<void> {
-    const wsSessions = await database
-      .select({ id: sessions.id, status: sessions.status, pid: sessions.pid })
-      .from(sessions)
-      .where(eq(sessions.workspaceId, workspaceId));
+    const wsSessions = await crudRepo.getSessionsForWorkspace(workspaceId, database);
 
     const runningSessions = wsSessions.filter(s => s.status === "running");
     if (getSessionManager && runningSessions.length > 0) {
@@ -979,21 +930,7 @@ exit 1
       }
     }
 
-    const wsRow = await database
-      .select({
-        workingDir: workspaces.workingDir,
-        isDirect: workspaces.isDirect,
-        branch: workspaces.branch,
-        repoPath: projects.repoPath,
-        projectId: issues.projectId,
-        teardownScript: projects.teardownScript,
-        setupEnabled: projects.setupEnabled,
-      })
-      .from(workspaces)
-      .leftJoin(issues, eq(workspaces.issueId, issues.id))
-      .leftJoin(projects, eq(issues.projectId, projects.id))
-      .where(eq(workspaces.id, workspaceId))
-      .limit(1);
+    const wsRow = await crudRepo.getWorkspaceDeletionContext(workspaceId, database);
     const workingDir = wsRow[0]?.workingDir;
     const isDirect = wsRow[0]?.isDirect;
     const repoPath = wsRow[0]?.repoPath;
@@ -1006,10 +943,7 @@ exit 1
     // row is already deleted above, so any match here is a genuine other sharer.
     let sharedByOthers = false;
     if (workingDir && !isDirect && repoPath) {
-      const sharers = await database
-        .select({ id: workspaces.id })
-        .from(workspaces)
-        .where(eq(workspaces.workingDir, workingDir));
+      const sharers = await crudRepo.findWorkspacesByWorkingDir(workingDir, database);
       sharedByOthers = sharers.length > 0;
       if (sharedByOthers) {
         console.log(`[workspaces] worktree ${workingDir} still referenced by ${sharers.length} other workspace(s) — skipping removal`);
@@ -1092,10 +1026,7 @@ exit 1
     // Only target running sessions — stopSession unconditionally rewrites status to
     // "stopped"/endedAt, so calling it on already-completed sessions would corrupt the
     // very history this close path promises to preserve (see deleteWorkspace).
-    const wsSessions = await database
-      .select({ id: sessions.id, status: sessions.status })
-      .from(sessions)
-      .where(eq(sessions.workspaceId, workspaceId));
+    const wsSessions = await crudRepo.getSessionStatusesForWorkspace(workspaceId, database);
     const runningSessions = wsSessions.filter((s) => s.status === "running");
     if (getSessionManager) {
       for (const s of runningSessions) {
@@ -1112,10 +1043,11 @@ exit 1
     }
 
     const now = new Date().toISOString();
-    await database
-      .update(workspaces)
-      .set({ status: "closed", workingDir: workspace.isDirect ? workspace.workingDir : null, closedAt: now, updatedAt: now })
-      .where(eq(workspaces.id, workspaceId));
+    await crudRepo.updateWorkspaceClosed(
+      workspaceId,
+      { status: "closed", workingDir: workspace.isDirect ? workspace.workingDir : null, closedAt: now, updatedAt: now },
+      database,
+    );
 
     const projectId = await resolveProjectId(workspaceId, database);
     if (projectId) boardEvents?.broadcast(projectId, "workspace_closed");
@@ -1124,24 +1056,16 @@ exit 1
   }
 
   async function markReadyForMerge(workspaceId: string): Promise<{ id: string; readyForMerge: boolean }> {
-    const wsRows = await database
-      .select({ issueId: workspaces.issueId })
-      .from(workspaces)
-      .where(eq(workspaces.id, workspaceId))
-      .limit(1);
+    const wsRows = await crudRepo.getWorkspaceIssueId(workspaceId, database);
     if (wsRows.length === 0) {
       throw new WorkspaceError("Workspace not found", "NOT_FOUND");
     }
 
     const now = new Date().toISOString();
-    await database.update(workspaces).set({ readyForMerge: true, updatedAt: now }).where(eq(workspaces.id, workspaceId));
+    await crudRepo.setWorkspaceReadyForMerge(workspaceId, now, database);
 
     if (boardEvents) {
-      const issueRows = await database
-        .select({ projectId: issues.projectId })
-        .from(issues)
-        .where(eq(issues.id, wsRows[0].issueId))
-        .limit(1);
+      const issueRows = await crudRepo.getIssueProjectIdById(wsRows[0].issueId, database);
       if (issueRows.length > 0) {
         boardEvents.broadcast(issueRows[0].projectId, "workspace_ready_for_merge");
       }
@@ -1166,10 +1090,7 @@ exit 1
     console.log(`[workspace-service] setup complete: workspaceId=${id} worktreePath=${worktreePath}`);
 
     const now = new Date().toISOString();
-    await database
-      .update(workspaces)
-      .set({ workingDir: worktreePath, baseBranch, updatedAt: now })
-      .where(eq(workspaces.id, id));
+    await crudRepo.setWorkspaceWorkingDir(id, { workingDir: worktreePath, baseBranch, updatedAt: now }, database);
 
     const projectId = await resolveProjectId(id, database);
     if (projectId) boardEvents?.broadcast(projectId, "workspace_setup");
@@ -1191,7 +1112,7 @@ exit 1
     if (body.claudeProfile !== undefined) updates.claudeProfile = body.claudeProfile ?? null;
     if (body.provider !== undefined) updates.provider = body.provider ?? null;
 
-    await database.update(workspaces).set(updates).where(eq(workspaces.id, id));
+    await crudRepo.applyWorkspaceUpdates(id, updates, database);
 
     return { id };
   }
@@ -1206,33 +1127,7 @@ exit 1
    * and whether the directory is still present.
    */
   async function listStaleWorktrees(projectId?: string): Promise<StaleWorktreeEntry[]> {
-    const conditions = [eq(workspaces.status, "closed")];
-    if (projectId) {
-      conditions.push(eq(issues.projectId, projectId));
-    }
-    const whereClause = conditions.length === 1 ? conditions[0] : and(...conditions);
-
-    const rows = await database
-      .select({
-        id: workspaces.id,
-        branch: workspaces.branch,
-        workingDir: workspaces.workingDir,
-        status: workspaces.status,
-        closedAt: workspaces.closedAt,
-        mergedAt: workspaces.mergedAt,
-        updatedAt: workspaces.updatedAt,
-        issueId: workspaces.issueId,
-        issueNumber: issues.issueNumber,
-        issueTitle: issues.title,
-        issueStatusName: projectStatuses.name,
-        projectId: issues.projectId,
-        repoPath: projects.repoPath,
-      })
-      .from(workspaces)
-      .innerJoin(issues, eq(workspaces.issueId, issues.id))
-      .leftJoin(projects, eq(issues.projectId, projects.id))
-      .leftJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-      .where(whereClause);
+    const rows = await crudRepo.listStaleWorktreeRows(projectId, database);
 
     const results: StaleWorktreeEntry[] = [];
 
@@ -1303,10 +1198,7 @@ exit 1
     if (!existsSync(workspace.workingDir)) {
       // Directory already gone — just null out workingDir in DB
       const now = new Date().toISOString();
-      await database
-        .update(workspaces)
-        .set({ workingDir: null, updatedAt: now })
-        .where(eq(workspaces.id, workspaceId));
+      await crudRepo.clearWorkspaceWorkingDir(workspaceId, now, database);
       return { success: true };
     }
 
@@ -1319,10 +1211,7 @@ exit 1
 
     // Null out workingDir so it no longer shows as stale
     const now = new Date().toISOString();
-    await database
-      .update(workspaces)
-      .set({ workingDir: null, updatedAt: now })
-      .where(eq(workspaces.id, workspaceId));
+    await crudRepo.clearWorkspaceWorkingDir(workspaceId, now, database);
 
     return { success: true };
   }
@@ -1382,7 +1271,7 @@ exit 1
     const skillId = input.skillId || null;
     let skill: { id: string; name: string } | null = null;
     if (skillId) {
-      const skillRows = await database.select({ id: agentSkills.id, name: agentSkills.name }).from(agentSkills).where(eq(agentSkills.id, skillId)).limit(1);
+      const skillRows = await crudRepo.getAgentSkillNameById(skillId, database);
       if (skillRows.length > 0) skill = skillRows[0];
     }
 
@@ -1397,10 +1286,7 @@ exit 1
       : null;
 
     // 7. Conflict detection: existing active/idle workspaces on this issue
-    const existingWs = await database
-      .select({ id: workspaces.id, status: workspaces.status, branch: workspaces.branch, isDirect: workspaces.isDirect })
-      .from(workspaces)
-      .where(eq(workspaces.issueId, input.issueId));
+    const existingWs = await crudRepo.findExistingWorkspacesForIssue(input.issueId, database);
     const activeExisting = existingWs.filter(ws => ws.status === "active" || ws.status === "idle" || ws.status === "fixing");
     if (activeExisting.length > 0) {
       const labels = activeExisting.map(ws =>
@@ -1427,7 +1313,7 @@ exit 1
     // 10. Profile availability check
     if (agentConfig.resolvedProfileSelection) {
       const { provider, name } = agentConfig.resolvedProfileSelection;
-      const prefRows = await database.select().from(preferences);
+      const prefRows = await crudRepo.getAllPreferences(database);
       const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
       const profileCheck = preflightAgentProfile(prefMap, provider, name);
       if (!profileCheck.ok) {
@@ -1439,17 +1325,7 @@ exit 1
 
     // 11. Dependency blocking check
     const BLOCKING_DEP_TYPES = ["depends_on", "blocked_by"] as const;
-    const depRows = await database
-      .select({
-        dependsOnId: issueDependencies.dependsOnId,
-        type: issueDependencies.type,
-      })
-      .from(issueDependencies)
-      .where(
-        and(
-          eq(issueDependencies.issueId, input.issueId),
-        ),
-      );
+    const depRows = await crudRepo.getDependenciesForIssue(input.issueId, database);
 
     const blockerIds = depRows
       .filter(d => BLOCKING_DEP_TYPES.includes(d.type as typeof BLOCKING_DEP_TYPES[number]))
@@ -1457,19 +1333,7 @@ exit 1
 
     let blockedBy: { issueNumber: number; title: string }[] = [];
     if (blockerIds.length > 0) {
-      const blockerIssues = await database
-        .select({
-          id: issues.id,
-          issueNumber: issues.issueNumber,
-          title: issues.title,
-          statusName: projectStatuses.name,
-          currentNodeId: issues.currentNodeId,
-          currentNodeType: workflowNodes.nodeType,
-        })
-        .from(issues)
-        .leftJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-        .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
-        .where(inArray(issues.id, blockerIds));
+      const blockerIssues = await crudRepo.getBlockerIssues(blockerIds, database);
 
       blockedBy = blockerIssues
         .filter(b => !isResolvedDependencyStatusView({ statusName: b.statusName, currentNodeId: b.currentNodeId, currentNodeType: b.currentNodeType }))
@@ -1519,33 +1383,7 @@ exit 1
    * List closed workspaces that have a pending cleanup warning (worktree removal failed post-merge).
    */
   async function listCleanupWarnings(projectId?: string): Promise<CleanupWarningEntry[]> {
-    const conditions = [
-      eq(workspaces.status, "closed"),
-      isNotNull(workspaces.cleanupWarning),
-      ne(workspaces.cleanupWarning, ""),
-    ];
-    if (projectId) {
-      conditions.push(eq(issues.projectId, projectId));
-    }
-    const whereClause = and(...conditions);
-
-    const rows = await database
-      .select({
-        id: workspaces.id,
-        branch: workspaces.branch,
-        workingDir: workspaces.workingDir,
-        cleanupWarning: workspaces.cleanupWarning,
-        closedAt: workspaces.closedAt,
-        mergedAt: workspaces.mergedAt,
-        updatedAt: workspaces.updatedAt,
-        issueId: workspaces.issueId,
-        issueNumber: issues.issueNumber,
-        issueTitle: issues.title,
-        projectId: issues.projectId,
-      })
-      .from(workspaces)
-      .innerJoin(issues, eq(workspaces.issueId, issues.id))
-      .where(whereClause);
+    const rows = await crudRepo.listCleanupWarningRows(projectId, database);
 
     return rows.map((row) => ({
         id: row.id,
@@ -1583,9 +1421,7 @@ exit 1
 
     if (result.success) {
       // Clear the warning now that cleanup succeeded.
-      await database.update(workspaces)
-        .set({ cleanupWarning: null, updatedAt: new Date().toISOString() })
-        .where(eq(workspaces.id, workspaceId));
+      await crudRepo.clearWorkspaceCleanupWarning(workspaceId, new Date().toISOString(), database);
     }
 
     return result;
