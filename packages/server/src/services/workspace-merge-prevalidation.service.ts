@@ -1,7 +1,10 @@
-import { eq } from "drizzle-orm";
-import { preferences, projects, workspaces } from "@agentic-kanban/shared/schema";
+import type { projects, workspaces } from "@agentic-kanban/shared/schema";
 import { OPENSPEC_CHANGES_DIR, OPENSPEC_SPECS_DIR, validateOpenSpecChange } from "@agentic-kanban/shared/lib/openspec";
 import type { Database } from "../db/index.js";
+import {
+  getAllPreferences,
+  clearWorkspaceReadyForMerge,
+} from "../repositories/workspace-merge-prevalidation.repository.js";
 import type { BoardEvents } from "./board-events.js";
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import { teardownWorktree } from "./workspace-teardown.service.js";
@@ -71,7 +74,7 @@ export async function handleWorkspaceMergeResolution(args: {
 
 export async function loadMergePreferences(database: Database): Promise<Map<string, string>> {
   return new Map<string, string>(
-    (await database.select().from(preferences)).map((r) => [r.key, r.value]),
+    (await getAllPreferences(database)).map((r) => [r.key, r.value]),
   );
 }
 
@@ -274,7 +277,7 @@ async function keepCleanAncestorInReview(
     `[workspace-merge] 0-commit ancestor guard: ws=${id} branchSha=${branchSha} baseSha=${baseSha} uniqueCommits=${uniqueCommits} ` +
       "refrain from merge, keep workspace in review.",
   );
-  await database.update(workspaces).set({ readyForMerge: false, updatedAt: now }).where(eq(workspaces.id, id));
+  await clearWorkspaceReadyForMerge(id, now, database);
   return {
     id,
     merged: false,
@@ -298,7 +301,7 @@ async function recordConflictAndClearReadyFlag(
 ) {
   const { id, workspace, database, baseBranch } = args;
   try {
-    await database.update(workspaces).set({ readyForMerge: false, updatedAt: new Date().toISOString() }).where(eq(workspaces.id, id));
+    await clearWorkspaceReadyForMerge(id, new Date().toISOString(), database);
   } catch (dbErr) {
     console.warn("[workspace-merge] failed to clear stale readyForMerge flag:", dbErr instanceof Error ? dbErr.message : String(dbErr));
   }
