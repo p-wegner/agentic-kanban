@@ -152,6 +152,18 @@ function createFakeGitService(overrides: Partial<GitService> = {}): GitService {
     pruneWorktrees: vi.fn(async () => {}),
     rebaseOntoBase: vi.fn(async () => ({ success: true })),
     abortRebase: vi.fn(async () => {}),
+    checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: false, branchSha: "branch-sha-abc", baseSha: "base-sha-123" })),
+    countUniqueCommits: vi.fn(async () => 1),
+    countBehindCommits: vi.fn(async () => 0),
+    autoRenumberMigrations: vi.fn(async () => ({ renumbered: false, renames: [] })),
+    getChangedFilesBetween: vi.fn(async () => []),
+    getCommitSummariesBetween: vi.fn(async () => []),
+    detectConflictsByBranch: vi.fn(async () => ({ hasConflicts: false, conflictingFiles: [] })),
+    detectAppendOnlyResolvableConflicts: vi.fn(async () => null),
+    commitPaths: vi.fn(async () => true),
+    mergeBaseIntoBranch: vi.fn(async () => ({ success: true })),
+    getDiffFromRepo: vi.fn(async () => ""),
+    getDiff: vi.fn(async () => ""),
     ...overrides,
   } as unknown as GitService;
 }
@@ -186,12 +198,15 @@ describe("workspace.service", () => {
       expect(result.error).toBeUndefined();
       expect(result.issueId).toBe(issueId);
       expect(result.workingDir).toBe("/tmp/test-repo/.worktrees/feature-1");
-      expect(result.sessionId).toBe("mock-session-id");
+      // Agent launch is deferred via setImmediate (#587) so the synchronous result
+      // carries no sessionId — the launch fires after the response is returned.
+      expect((result as { sessionId?: string }).sessionId).toBeUndefined();
 
       // Worktree was created off the project default branch
       expect(gitService.revParse).toHaveBeenCalledWith("/tmp/test-repo", "main");
       expect(gitService.createWorktree).toHaveBeenCalledWith("/tmp/test-repo", "feature/ak-1-test", "main");
-      // Agent launch happened
+      // Agent launch happened (deferred — flush the setImmediate first)
+      await new Promise<void>((resolve) => setImmediate(resolve));
       expect(sessionManager.startSession).toHaveBeenCalledOnce();
 
       // Workspace row persisted
@@ -401,6 +416,7 @@ describe("workspace.service", () => {
         baseBranch: "main",
         isDirect: false,
         status: "active",
+        readyForMerge: true,
         provider: "claude",
         createdAt: now,
         updatedAt: now,
@@ -666,8 +682,8 @@ describe("workspace.service", () => {
       const service = createWorkspaceService({ database: db, gitService, processKiller: vi.fn(async () => 0) });
 
       await expect(service.mergeWorkspace(wsId)).rejects.toMatchObject({
-        code: "BAD_REQUEST",
-        data: { conflictingFiles: ["src/foo.ts"] },
+        code: "CONFLICT",
+        data: { conflictFiles: ["src/foo.ts"] },
       });
       expect(gitService.mergeBranch).not.toHaveBeenCalled();
 
@@ -810,6 +826,8 @@ describe("workspace.service", () => {
 
       const gitService = createFakeGitService({
         deleteBranch: vi.fn(async () => {}),
+        // mergedAt is set but the branch ref is gone (merged + cleaned up) — honor the flag.
+        checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: false, branchSha: null, reason: "branch-not-found" })),
       });
 
       const service = createWorkspaceService({
@@ -901,6 +919,7 @@ describe("workspace.service", () => {
         baseBranch: "main",
         isDirect: false,
         status: "active",
+        readyForMerge: true,
         provider: "claude",
         createdAt: now,
         updatedAt: now,
@@ -916,8 +935,8 @@ describe("workspace.service", () => {
       const service = createWorkspaceService({ database: db, gitService, processKiller: vi.fn(async () => 0) });
 
       await expect(service.mergeWorkspace(wsId)).rejects.toMatchObject({
-        code: "BAD_REQUEST",
-        data: { conflictingFiles: ["src/index.ts", "src/routes.ts"] },
+        code: "CONFLICT",
+        data: { conflictFiles: ["src/index.ts", "src/routes.ts"] },
       });
 
       // Issue must still be in In Review — not silently moved to Done
@@ -964,7 +983,10 @@ describe("workspace.service", () => {
 
       const service = createWorkspaceService({
         database: db,
-        gitService: createFakeGitService({ deleteBranch: vi.fn(async () => {}) }),
+        gitService: createFakeGitService({
+          deleteBranch: vi.fn(async () => {}),
+          checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: false, branchSha: null, reason: "branch-not-found" })),
+        }),
         boardEvents: boardEvents as never,
         createBackup: vi.fn(async () => ({})),
         processKiller: vi.fn(async () => 0),
@@ -991,6 +1013,7 @@ describe("workspace.service", () => {
         baseBranch: "main",
         isDirect: false,
         status: "active",
+        readyForMerge: true,
         provider: "claude",
         createdAt: now,
         updatedAt: now,
@@ -1041,6 +1064,7 @@ describe("workspace.service", () => {
         baseBranch: "main",
         isDirect: false,
         status: "active",
+        readyForMerge: true,
         provider: "claude",
         createdAt: now,
         updatedAt: now,
