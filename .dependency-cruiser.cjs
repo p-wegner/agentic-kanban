@@ -170,29 +170,14 @@ module.exports = {
       name: "services-bypass-repositories",
       comment:
         "The application layer (services) must not run raw persistence: a VALUE import of " +
-        "drizzle-orm means the service issues queries directly instead of through a " +
-        "repository, leaving no seam to test/swap the data layer. This was a 76-file info " +
-        "backlog; it is now an ERROR gate that GRANDFATHERS the remaining offenders via " +
-        "from.pathNot (74 files, listed below) so a NEW service importing drizzle fails " +
-        "pnpm lint:arch / pnpm check, and any grandfathered file that is drained must be " +
-        "REMOVED from this list (so it can never regress). Shrink the list as services move " +
-        "behind repositories; when it hits 0, delete the pathNot entirely. Drained so far: " +
-        "preference.service (-> project.repository.getProjectById). Backlog: 9 (was 76).",
+        "drizzle-orm means the service issues queries directly instead of going through a " +
+        "repository, leaving no seam to test/swap the data layer. Originally a 76-file info " +
+        "backlog; fully DRAINED — every service now delegates its queries to a repository " +
+        "(per-service repositories/*.repository.ts). This is a TOTAL error gate now (no " +
+        "pathNot exceptions): any service importing drizzle-orm fails pnpm lint:arch / pnpm " +
+        "check. Type-only imports are erased (tsPreCompilationDeps:false). Backlog: 0.",
       severity: "error",
-      from: {
-        path: "^packages/server/src/services/",
-        pathNot: [
-          "^packages/server/src/services/issue-ai\.service\.ts$",
-          "^packages/server/src/services/issue\.service\.ts$",
-          "^packages/server/src/services/project-registration\.ts$",
-          "^packages/server/src/services/project\.service\.ts$",
-          "^packages/server/src/services/session-manager/broadcast\.ts$",
-          "^packages/server/src/services/session-manager/session-lifecycle\.ts$",
-          "^packages/server/src/services/workflow-fork\.service\.ts$",
-          "^packages/server/src/services/workflow\.service\.ts$",
-          "^packages/server/src/services/workspace-crud\.service\.ts$",
-        ],
-      },
+      from: { path: "^packages/server/src/services/" },
       to: { path: "drizzle-orm" },
     },
   ],
