@@ -6,6 +6,7 @@ import type { Database } from "../db/index.js";
 import { withTransaction } from "../db/index.js";
 import type { BoardEvents } from "./board-events.js";
 import type { WebhookIssueStatusPayload } from "@agentic-kanban/shared/lib";
+import { buildIssueStatusPayload } from "@agentic-kanban/shared/lib";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
 import { getStartNode, resolveStatusId, syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { isTerminalStatusView } from "@agentic-kanban/shared";
@@ -390,16 +391,15 @@ export function createIssueService(deps: {
     }
 
     if (body.statusId !== undefined && sendWebhook) {
-      sendWebhook(projectId, {
-        event: "issue.status_changed",
+      sendWebhook(projectId, buildIssueStatusPayload({
         issueId: id,
         issueNumber: issueNumberForWebhook,
         title: issueTitleForWebhook,
         projectId,
         newStatusId: body.statusId as string,
-        newStatusName: newStatusName,
+        newStatusName,
         statusChangedAt: now,
-      });
+      }));
     }
 
     boardEvents?.broadcast(projectId, "issue_updated");

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { and, eq, ne } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { requireEntity, resolveStatusByName } from "../db-utils.js";
-import { validateWebhookUrl, fireWebhook } from "@agentic-kanban/shared/lib";
+import { validateWebhookUrl, fireWebhook, buildIssueStatusPayload } from "@agentic-kanban/shared/lib";
 
 const TERMINAL_STATUSES = new Set(["Done", "Cancelled"]);
 
@@ -87,8 +87,7 @@ export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps
           .catch(() => null);
         const webhookUrl = validateWebhookUrl(webhookPref);
         if (webhookUrl) {
-          fireWebhook(webhookUrl, {
-            event: "issue.status_changed",
+          fireWebhook(webhookUrl, buildIssueStatusPayload({
             issueId,
             issueNumber: existing.issueNumber,
             title: title ?? existing.title,
@@ -96,7 +95,7 @@ export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps
             newStatusId: resolvedStatusId,
             newStatusName: statusName,
             statusChangedAt: now,
-          });
+          }));
         }
       }
 
