@@ -2,9 +2,18 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { isAbsolute, resolve, sep } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
-import { and, eq } from "drizzle-orm";
-import { projectScriptShortcuts, projects } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
+import {
+  getProjectForScripts,
+  listProjectScriptShortcuts,
+  findProjectScriptShortcutByName,
+  insertProjectScriptShortcut,
+  getProjectScriptShortcutById,
+  getProjectScriptShortcutForProject,
+  getProjectScriptShortcutIdForProject,
+  updateProjectScriptShortcut,
+  deleteProjectScriptShortcut,
+} from "../repositories/project-scripts.repository.js";
 
 export class ProjectScriptsError extends Error {
   constructor(
@@ -79,8 +88,7 @@ function resolveWorkingDir(repoPath: string, workingDir: string | null): string 
 }
 
 async function getProject(projectId: string, database: Database) {
-  const rows = await database.select().from(projects).where(eq(projects.id, projectId)).limit(1);
-  return rows[0] ?? null;
+  return getProjectForScripts(projectId, database);
 }
 
 function withLastRun<T extends { id: string }>(row: T) {
@@ -96,11 +104,7 @@ export function createProjectScriptsService(deps: { database: Database }) {
   async function list(projectId: string) {
     const project = await getProject(projectId, database);
     if (!project) throw new ProjectScriptsError("Project not found", "NOT_FOUND");
-    const rows = await database
-      .select()
-      .from(projectScriptShortcuts)
-      .where(eq(projectScriptShortcuts.projectId, projectId))
-      .orderBy(projectScriptShortcuts.sortOrder, projectScriptShortcuts.createdAt);
+    const rows = await listProjectScriptShortcuts(projectId, database);
     return rows.map(withLastRun);
   }
 
@@ -114,15 +118,11 @@ export function createProjectScriptsService(deps: { database: Database }) {
     const description = normalizeNullableText(body.description, "description");
     const { cwdMode, workingDir } = normalizeCwdInput(body);
     resolveWorkingDir(project.repoPath, workingDir);
-    const existing = await database
-      .select({ id: projectScriptShortcuts.id })
-      .from(projectScriptShortcuts)
-      .where(and(eq(projectScriptShortcuts.projectId, projectId), eq(projectScriptShortcuts.name, name)))
-      .limit(1);
+    const existing = await findProjectScriptShortcutByName(projectId, name, database);
     if (existing[0]) throw new ProjectScriptsError(`Script shortcut "${name}" already exists`, "CONFLICT");
     const now = new Date().toISOString();
     const id = randomUUID();
-    await database.insert(projectScriptShortcuts).values({
+    await insertProjectScriptShortcut({
       id,
       projectId,
       name,
@@ -133,19 +133,15 @@ export function createProjectScriptsService(deps: { database: Database }) {
       sortOrder: Number(body.sortOrder ?? 0),
       createdAt: now,
       updatedAt: now,
-    });
-    const rows = await database.select().from(projectScriptShortcuts).where(eq(projectScriptShortcuts.id, id)).limit(1);
+    }, database);
+    const rows = await getProjectScriptShortcutById(id, database);
     return withLastRun(rows[0]);
   }
 
   async function update(projectId: string, shortcutId: string, body: Record<string, unknown>) {
     const project = await getProject(projectId, database);
     if (!project) throw new ProjectScriptsError("Project not found", "NOT_FOUND");
-    const rows = await database
-      .select()
-      .from(projectScriptShortcuts)
-      .where(and(eq(projectScriptShortcuts.id, shortcutId), eq(projectScriptShortcuts.projectId, projectId)))
-      .limit(1);
+    const rows = await getProjectScriptShortcutForProject(shortcutId, projectId, database);
     if (!rows[0]) throw new ProjectScriptsError("Script shortcut not found", "NOT_FOUND");
     const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() };
     if (body.name !== undefined) {
@@ -172,30 +168,22 @@ export function createProjectScriptsService(deps: { database: Database }) {
       updates.workingDir = workingDir;
     }
     if (body.sortOrder !== undefined) updates.sortOrder = Number(body.sortOrder);
-    await database.update(projectScriptShortcuts).set(updates).where(eq(projectScriptShortcuts.id, shortcutId));
-    const updated = await database.select().from(projectScriptShortcuts).where(eq(projectScriptShortcuts.id, shortcutId)).limit(1);
+    await updateProjectScriptShortcut(shortcutId, updates, database);
+    const updated = await getProjectScriptShortcutById(shortcutId, database);
     return withLastRun(updated[0]);
   }
 
   async function remove(projectId: string, shortcutId: string) {
-    const rows = await database
-      .select({ id: projectScriptShortcuts.id })
-      .from(projectScriptShortcuts)
-      .where(and(eq(projectScriptShortcuts.id, shortcutId), eq(projectScriptShortcuts.projectId, projectId)))
-      .limit(1);
+    const rows = await getProjectScriptShortcutIdForProject(shortcutId, projectId, database);
     if (!rows[0]) throw new ProjectScriptsError("Script shortcut not found", "NOT_FOUND");
-    await database.delete(projectScriptShortcuts).where(eq(projectScriptShortcuts.id, shortcutId));
+    await deleteProjectScriptShortcut(shortcutId, database);
     lastRuns.delete(shortcutId);
   }
 
   async function run(projectId: string, shortcutId: string, onEvent: (event: ScriptRunEvent) => void) {
     const project = await getProject(projectId, database);
     if (!project) throw new ProjectScriptsError("Project not found", "NOT_FOUND");
-    const rows = await database
-      .select()
-      .from(projectScriptShortcuts)
-      .where(and(eq(projectScriptShortcuts.id, shortcutId), eq(projectScriptShortcuts.projectId, projectId)))
-      .limit(1);
+    const rows = await getProjectScriptShortcutForProject(shortcutId, projectId, database);
     const shortcut = rows[0];
     if (!shortcut) throw new ProjectScriptsError("Script shortcut not found", "NOT_FOUND");
     const cwd = resolveWorkingDir(project.repoPath, shortcut.workingDir);

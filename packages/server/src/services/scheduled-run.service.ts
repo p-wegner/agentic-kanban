@@ -1,5 +1,3 @@
-import { issues, projectStatuses, agentSkills, projects, workspaces } from "@agentic-kanban/shared/schema";
-import { eq, max } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import type { Database } from "../db/index.js";
 import { getNextCronRun, validateCronExpression } from "@agentic-kanban/shared/lib/cron-utils";
@@ -13,6 +11,16 @@ import {
   getScheduledRunHistoryByProject,
   updateScheduledRunHistory,
 } from "../repositories/scheduled-run.repository.js";
+import {
+  getScheduledRunSystemIssueSummary,
+  getScheduledRunWorkspaceSummary,
+  getScheduledRunSkill,
+  getScheduledRunProjectId,
+  getScheduledRunIssueId,
+  getProjectStatusesForScheduledRun,
+  getMaxIssueNumberForProject,
+  insertScheduledRunSystemIssue,
+} from "../repositories/scheduled-run-query.repository.js";
 import type { CreateWorkspaceInput, CreateWorkspaceResult } from "./workspace-internals.js";
 import { getAllPreferences } from "../repositories/preferences.repository.js";
 import { resolveStartPolicy } from "./start-policy.service.js";
@@ -45,18 +53,10 @@ export function createScheduledRunService(deps: {
     return Promise.all(runs.map(async (run) => {
       const runHistory = historyByRun.get(run.id) ?? [];
       const [issue] = run.systemIssueId
-        ? await database
-          .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title })
-          .from(issues)
-          .where(eq(issues.id, run.systemIssueId))
-          .limit(1)
+        ? await getScheduledRunSystemIssueSummary(run.systemIssueId, database)
         : [];
       const [workspace] = run.lastRunWorkspaceId
-        ? await database
-          .select({ id: workspaces.id, branch: workspaces.branch, status: workspaces.status })
-          .from(workspaces)
-          .where(eq(workspaces.id, run.lastRunWorkspaceId))
-          .limit(1)
+        ? await getScheduledRunWorkspaceSummary(run.lastRunWorkspaceId, database)
         : [];
       return {
         ...run,
@@ -166,11 +166,7 @@ export function createScheduledRunService(deps: {
     // Resolve effective prompt (skill overrides custom prompt)
     let effectivePrompt = run.prompt ?? "";
     if (run.skillId) {
-      const skillRows = await database
-        .select({ prompt: agentSkills.prompt, name: agentSkills.name })
-        .from(agentSkills)
-        .where(eq(agentSkills.id, run.skillId))
-        .limit(1);
+      const skillRows = await getScheduledRunSkill(run.skillId, database);
       if (skillRows.length > 0) {
         effectivePrompt = `/${skillRows[0].name}\n\n${skillRows[0].prompt}`;
       }
@@ -180,7 +176,7 @@ export function createScheduledRunService(deps: {
       return fail("No prompt or skill configured for this scheduled run");
     }
 
-    const projectRows = await database.select({ id: projects.id }).from(projects).where(eq(projects.id, run.projectId)).limit(1);
+    const projectRows = await getScheduledRunProjectId(run.projectId, database);
     if (projectRows.length === 0) {
       return fail("Project not found or disabled", "NOT_FOUND");
     }
@@ -198,7 +194,7 @@ export function createScheduledRunService(deps: {
       return fail("Could not create system issue for this scheduled run");
     }
 
-    const issueRows = await database.select({ id: issues.id }).from(issues).where(eq(issues.id, systemIssueId)).limit(1);
+    const issueRows = await getScheduledRunIssueId(systemIssueId, database);
     if (issueRows.length === 0) {
       const completedAt = new Date().toISOString();
       await recordRunFailure(run.id, run.projectId, null, null, triggeredBy, startedAt, "Missing system issue for this scheduled run");
@@ -313,22 +309,16 @@ export function createScheduledRunService(deps: {
 
   async function createSystemIssue(projectId: string, name: string): Promise<string | null> {
     try {
-      const statuses = await database
-        .select()
-        .from(projectStatuses)
-        .where(eq(projectStatuses.projectId, projectId));
+      const statuses = await getProjectStatusesForScheduledRun(projectId, database);
       const todoStatus = statuses.find(s => s.name === "Todo") ?? statuses[0];
       if (!todoStatus) return null;
 
       const issueId = randomUUID();
-      const numRows = await database
-        .select({ maxNum: max(issues.issueNumber) })
-        .from(issues)
-        .where(eq(issues.projectId, projectId));
+      const numRows = await getMaxIssueNumberForProject(projectId, database);
       const nextNum = (numRows[0]?.maxNum ?? 0) + 1;
 
       const now = new Date().toISOString();
-      await database.insert(issues).values({
+      await insertScheduledRunSystemIssue({
         id: issueId,
         issueNumber: nextNum,
         title: `⏰ ${name}`,
@@ -339,7 +329,7 @@ export function createScheduledRunService(deps: {
         skipAutoReview: true,
         createdAt: now,
         updatedAt: now,
-      });
+      }, database);
       return issueId;
     } catch (err) {
       console.warn("[scheduled-runs] Failed to create system issue:", err);
