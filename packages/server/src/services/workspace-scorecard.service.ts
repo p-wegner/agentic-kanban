@@ -1,9 +1,13 @@
-import { eq } from "drizzle-orm";
-import { issues, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import { detectConflicts, getDiff, getWorkingTreeDiff } from "./git.service.js";
 import { getWorkspaceById, resolveProjectRepo } from "../repositories/workspace.repository.js";
 import { getSessionMessageRows } from "../repositories/session.repository.js";
+import {
+  getScorecardIssue,
+  getScorecardReviewSessions,
+  persistScorecard,
+  getScorecardColumns,
+} from "../repositories/workspace-scorecard.repository.js";
 
 export interface ScorecardDimension {
   name: string;
@@ -22,13 +26,8 @@ export async function computeScorecard(workspaceId: string, database: Database):
   const ws = await getWorkspaceById(workspaceId, database);
   if (!ws || !ws.workingDir) return null;
 
-  const issueRows = await database
-    .select({ title: issues.title, description: issues.description })
-    .from(issues)
-    .where(eq(issues.id, ws.issueId))
-    .limit(1);
-  if (issueRows.length === 0) return null;
-  const issue = issueRows[0];
+  const issue = await getScorecardIssue(ws.issueId, database);
+  if (!issue) return null;
 
   const { defaultBranch } = await resolveProjectRepo(workspaceId, database);
   const baseBranch = ws.baseBranch || defaultBranch;
@@ -146,10 +145,7 @@ export async function computeScorecard(workspaceId: string, database: Database):
   let skillScore = 7;
   let skillSignal = "No code-review session found";
   try {
-    const reviewSessions = await database
-      .select({ id: sessions.id, exitCode: sessions.exitCode, triggerType: sessions.triggerType })
-      .from(sessions)
-      .where(eq(sessions.workspaceId, workspaceId));
+    const reviewSessions = await getScorecardReviewSessions(workspaceId, database);
     const reviewSession = [...reviewSessions].reverse().find((session) => session.exitCode !== null && session.triggerType === "review")
       ?? [...reviewSessions].reverse().find((session) => session.exitCode !== null);
     if (reviewSession) {
@@ -172,28 +168,18 @@ export async function computeScorecard(workspaceId: string, database: Database):
   const total = dimensions.reduce((sum, dimension) => sum + dimension.score, 0);
   const computedAt = new Date().toISOString();
 
-  await database.update(workspaces).set({
+  await persistScorecard(workspaceId, {
     scorecardScore: total,
     scorecardJson: JSON.stringify(dimensions),
     scorecardComputedAt: computedAt,
-  }).where(eq(workspaces.id, workspaceId));
+  }, database);
 
   return { total, dimensions, computedAt };
 }
 
 export async function getScorecardFromDb(workspaceId: string, database: Database): Promise<ScorecardResult | null> {
-  const wsRows = await database
-    .select({
-      scorecardScore: workspaces.scorecardScore,
-      scorecardJson: workspaces.scorecardJson,
-      scorecardComputedAt: workspaces.scorecardComputedAt,
-    })
-    .from(workspaces)
-    .where(eq(workspaces.id, workspaceId))
-    .limit(1);
-  if (wsRows.length === 0) return null;
-
-  const ws = wsRows[0];
+  const ws = await getScorecardColumns(workspaceId, database);
+  if (!ws) return null;
   if (ws.scorecardScore === null || !ws.scorecardJson) return null;
 
   try {
