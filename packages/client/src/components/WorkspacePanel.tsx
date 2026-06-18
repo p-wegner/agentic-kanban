@@ -21,7 +21,7 @@ import { useProfileSelection } from "../hooks/useProfileSelection.js";
 import { SessionReplay } from "./SessionReplay.js";
 import { SetupStatusPanel } from "./SetupStatusPanel.js";
 import { showToast } from "./Toast.js";
-import { suggestBranchName } from "../lib/branch.js";
+import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import {
   CODEX_DEFAULT_PROFILE,
   COPILOT_DEFAULT_PROFILE,

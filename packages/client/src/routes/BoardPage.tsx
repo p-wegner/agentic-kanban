@@ -58,7 +58,7 @@ const IssueDetailPanel = lazy(() => import("../components/IssueDetailPanel.js").
 const WorkspacePanel = lazy(() => import("../components/WorkspacePanel.js").then((m) => ({ default: m.WorkspacePanel })));
 import { SkeletonBoard } from "../components/SkeletonBoard.js";
 import { ToastContainer, showToast } from "../components/Toast.js";
-import { suggestBranchName } from "../lib/branch.js";
+import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { MentionProvider } from "../lib/MentionContext.js";
 import { apiFetch } from "../lib/api.js";
 import { getSettings } from "../lib/settingsStore.js";
