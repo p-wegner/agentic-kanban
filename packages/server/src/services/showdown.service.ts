@@ -1,12 +1,26 @@
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
-import { showdowns, workspaces, issues, projects, agentSkills } from "@agentic-kanban/shared/schema";
+import { showdowns } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
 import { createWorkspaceCrudService } from "./workspace-crud.service.js";
 import type { ShowdownContestant, ShowdownContestantResult, ShowdownResponse } from "@agentic-kanban/shared";
 import { WorkspaceError } from "./workspace-internals.js";
+import {
+  getIssueForShowdown,
+  getProjectDefaultBranch,
+  insertShowdown,
+  tagWorkspaceWithShowdown,
+  getAgentSkillName,
+  getShowdownById,
+  getShowdownByIssueId,
+  getShowdownWorkspaces,
+  getAgentSkillNamesByIds,
+  getShowdownWorkspaceMembership,
+  setShowdownWinner,
+  getShowdownWorkspaceIds,
+  getIssueProjectId,
+} from "../repositories/showdown.repository.js";
 
 const LABELS = ["A", "B", "C", "D"] as const;
 
@@ -27,33 +41,24 @@ export function createShowdownService(deps: {
     }
 
     // Resolve issue + project
-    const issueRows = await database
-      .select({ id: issues.id, projectId: issues.projectId, issueNumber: issues.issueNumber, title: issues.title })
-      .from(issues)
-      .where(eq(issues.id, issueId))
-      .limit(1);
-    if (issueRows.length === 0) throw new WorkspaceError("Issue not found", "NOT_FOUND");
-    const issue = issueRows[0];
+    const issue = await getIssueForShowdown(issueId, database);
+    if (!issue) throw new WorkspaceError("Issue not found", "NOT_FOUND");
 
-    const projectRows = await database
-      .select({ defaultBranch: projects.defaultBranch })
-      .from(projects)
-      .where(eq(projects.id, issue.projectId))
-      .limit(1);
-    if (projectRows.length === 0) throw new WorkspaceError("Project not found", "NOT_FOUND");
-    const defaultBranch = projectRows[0].defaultBranch;
+    const projectRow = await getProjectDefaultBranch(issue.projectId, database);
+    if (!projectRow) throw new WorkspaceError("Project not found", "NOT_FOUND");
+    const defaultBranch = projectRow.defaultBranch;
 
     const now = new Date().toISOString();
     const showdownId = randomUUID();
 
-    await database.insert(showdowns).values({
+    await insertShowdown({
       id: showdownId,
       issueId,
       status: "active",
       winnerWorkspaceId: null,
       createdAt: now,
       updatedAt: now,
-    });
+    }, database);
 
     // Create workspaces for each contestant
     const issueNum = issue.issueNumber ?? issueId.slice(0, 8);
@@ -78,16 +83,12 @@ export function createShowdownService(deps: {
       });
 
       // Tag workspace with showdown info
-      await database.update(workspaces).set({
-        showdownId,
-        showdownLabel: label,
-      }).where(eq(workspaces.id, result.id));
+      await tagWorkspaceWithShowdown(result.id, showdownId, label, database);
 
       // Resolve skill name for response
       let skillName: string | null = contestant.skillName ?? null;
       if (!skillName && contestant.skillId) {
-        const skillRows = await database.select({ name: agentSkills.name }).from(agentSkills).where(eq(agentSkills.id, contestant.skillId)).limit(1);
-        skillName = skillRows[0]?.name ?? null;
+        skillName = await getAgentSkillName(contestant.skillId, database);
       }
 
       createdWorkspaces.push({
@@ -122,47 +123,24 @@ export function createShowdownService(deps: {
   }
 
   async function getShowdown(showdownId: string): Promise<ShowdownResponse | null> {
-    const rows = await database
-      .select()
-      .from(showdowns)
-      .where(eq(showdowns.id, showdownId))
-      .limit(1);
-    if (rows.length === 0) return null;
-    const showdown = rows[0];
+    const showdown = await getShowdownById(showdownId, database);
+    if (!showdown) return null;
     return enrichShowdown(showdown);
   }
 
   async function getShowdownByIssue(issueId: string): Promise<ShowdownResponse | null> {
-    const rows = await database
-      .select()
-      .from(showdowns)
-      .where(eq(showdowns.issueId, issueId))
-      .orderBy(showdowns.createdAt)
-      .limit(1);
-    if (rows.length === 0) return null;
-    return enrichShowdown(rows[0]);
+    const showdown = await getShowdownByIssueId(issueId, database);
+    if (!showdown) return null;
+    return enrichShowdown(showdown);
   }
 
   async function enrichShowdown(showdown: typeof showdowns.$inferSelect): Promise<ShowdownResponse> {
-    const wsRows = await database
-      .select({
-        id: workspaces.id,
-        branch: workspaces.branch,
-        status: workspaces.status,
-        showdownLabel: workspaces.showdownLabel,
-        skillId: workspaces.skillId,
-        model: workspaces.model,
-        diffStatCacheFilesChanged: workspaces.diffStatCacheFilesChanged,
-        diffStatCacheInsertions: workspaces.diffStatCacheInsertions,
-        diffStatCacheDeletions: workspaces.diffStatCacheDeletions,
-      })
-      .from(workspaces)
-      .where(eq(workspaces.showdownId, showdown.id));
+    const wsRows = await getShowdownWorkspaces(showdown.id, database);
 
     const skillIds = wsRows.map(w => w.skillId).filter(Boolean) as string[];
     const skillMap = new Map<string, string>();
     if (skillIds.length > 0) {
-      const skills = await database.select({ id: agentSkills.id, name: agentSkills.name }).from(agentSkills).where(inArray(agentSkills.id, skillIds));
+      const skills = await getAgentSkillNamesByIds(skillIds, database);
       for (const s of skills) skillMap.set(s.id, s.name);
     }
 
@@ -192,36 +170,24 @@ export function createShowdownService(deps: {
   }
 
   async function pickWinner(showdownId: string, winnerWorkspaceId: string): Promise<ShowdownResponse> {
-    const rows = await database.select().from(showdowns).where(eq(showdowns.id, showdownId)).limit(1);
-    if (rows.length === 0) throw new WorkspaceError("Showdown not found", "NOT_FOUND");
+    const showdown = await getShowdownById(showdownId, database);
+    if (!showdown) throw new WorkspaceError("Showdown not found", "NOT_FOUND");
 
-    const showdown = rows[0];
     if (showdown.status === "decided") {
       throw new WorkspaceError("Showdown already decided", "BAD_REQUEST");
     }
 
     // Verify winner workspace belongs to this showdown
-    const winnerRows = await database
-      .select({ id: workspaces.id, showdownId: workspaces.showdownId, issueId: workspaces.issueId })
-      .from(workspaces)
-      .where(eq(workspaces.id, winnerWorkspaceId))
-      .limit(1);
-    if (winnerRows.length === 0 || winnerRows[0].showdownId !== showdownId) {
+    const winner = await getShowdownWorkspaceMembership(winnerWorkspaceId, database);
+    if (!winner || winner.showdownId !== showdownId) {
       throw new WorkspaceError("Workspace does not belong to this showdown", "BAD_REQUEST");
     }
 
     const now = new Date().toISOString();
-    await database.update(showdowns).set({
-      status: "decided",
-      winnerWorkspaceId,
-      updatedAt: now,
-    }).where(eq(showdowns.id, showdownId));
+    await setShowdownWinner(showdownId, winnerWorkspaceId, now, database);
 
     // Delete all loser workspaces (cascade via delete endpoint)
-    const allWsRows = await database
-      .select({ id: workspaces.id })
-      .from(workspaces)
-      .where(eq(workspaces.showdownId, showdownId));
+    const allWsRows = await getShowdownWorkspaceIds(showdownId, database);
 
     const losers = allWsRows.filter(w => w.id !== winnerWorkspaceId);
     for (const loser of losers) {
@@ -235,9 +201,9 @@ export function createShowdownService(deps: {
     }
 
     // Broadcast update
-    const issueRows = await database.select({ projectId: issues.projectId }).from(issues).where(eq(issues.id, showdown.issueId)).limit(1);
-    if (issueRows.length > 0) {
-      boardEvents?.broadcast(issueRows[0].projectId, "board_changed");
+    const issueRow = await getIssueProjectId(showdown.issueId, database);
+    if (issueRow) {
+      boardEvents?.broadcast(issueRow.projectId, "board_changed");
     }
 
     return (await getShowdown(showdownId))!;
