@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
-import { projects, qualityMetrics } from "@agentic-kanban/shared/schema";
+import { qualityMetrics } from "@agentic-kanban/shared/schema";
+import { getProjectById } from "../repositories/project.repository.js";
 import type { QualityMetricRecord } from "@agentic-kanban/shared/types";
 import type { Database } from "../db/index.js";
 import { NotFoundError, ValidationError } from "../errors/index.js";
@@ -52,8 +53,8 @@ function validateIsoDate(value: string, field: string): void {
 
 export function createQualityMetricsService(database: Database) {
   async function assertProject(projectId: string): Promise<void> {
-    const rows = await database.select({ id: projects.id }).from(projects).where(eq(projects.id, projectId)).limit(1);
-    if (rows.length === 0) throw new NotFoundError("Project not found");
+    const project = await getProjectById(projectId, database);
+    if (!project) throw new NotFoundError("Project not found");
   }
 
   async function recordBatch(projectId: string, input: QualityMetricsBatchInput): Promise<{ inserted: number; metrics: QualityMetricRecord[] }> {

@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
-import { issues, projects, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, workspaces } from "@agentic-kanban/shared/schema";
+import { getProjectById } from "../repositories/project.repository.js";
 import type { MergedCommit, MergedCommitsResponse } from "@agentic-kanban/shared";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -33,14 +34,10 @@ export function createIssueMergedCommitsService(deps: {
       .limit(1);
     if (issueRows.length === 0) return null;
 
-    const projectRows = await database
-      .select({ repoPath: projects.repoPath, defaultBranch: projects.defaultBranch })
-      .from(projects)
-      .where(eq(projects.id, issueRows[0].projectId))
-      .limit(1);
-    if (projectRows.length === 0) return null;
+    const project = await getProjectById(issueRows[0].projectId, database);
+    if (!project) return null;
 
-    const { repoPath, defaultBranch } = projectRows[0];
+    const { repoPath, defaultBranch } = project;
 
     const wsRows = await database
       .select({
