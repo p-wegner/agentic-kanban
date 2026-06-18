@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 import { SlowRequestsPanel } from "./SlowRequestsPanel.js";
 import type { MonitorAction } from "./MonitorPopover.js";
@@ -306,10 +306,7 @@ export function ArchiveDoneSection({ projectId }: { projectId: string | null | u
     setConfirming(false);
     setLastResult(null);
     try {
-      const result = await apiFetch<{ archived: number }>("/api/issues/archive-done", {
-        method: "POST",
-        body: JSON.stringify({ projectId, olderThanDays: threshold }),
-      });
+      const result = await apiPost<{ archived: number }>("/api/issues/archive-done", { projectId, olderThanDays: threshold });
       setLastResult(result);
       if (result.archived > 0) {
         showToast(`Archived ${result.archived} Done issue${result.archived === 1 ? "" : "s"}`, "success");
@@ -489,10 +486,7 @@ export function EditSkillForm({ skill, isNew, onSave, onCancel }: {
     setEnhancing(true);
     try {
       setPreEnhanceSnapshot({ name, description, prompt });
-      const result = await apiFetch<{ name: string; description: string; prompt: string }>("/api/agent-skills/enhance", {
-        method: "POST",
-        body: JSON.stringify({ name, description, prompt }),
-      });
+      const result = await apiPost<{ name: string; description: string; prompt: string }>("/api/agent-skills/enhance", { name, description, prompt });
       setName(result.name);
       setDescription(result.description);
       setPrompt(result.prompt);

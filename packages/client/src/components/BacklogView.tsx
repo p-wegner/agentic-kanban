@@ -4,7 +4,7 @@ import type { CreateIssueFormState } from "./CreateIssueForm.js";
 import { CreateIssueForm } from "./CreateIssueForm.js";
 import { IssueCard } from "./IssueCard.js";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost } from "../lib/api.js";
 import { getSettings, setSettings } from "../lib/settingsStore.js";
 import { showToast } from "./Toast.js";
 
@@ -407,7 +407,7 @@ export function BacklogView({
   async function startNextWave() {
     setStartingWave(true);
     try {
-      const result = await apiFetch<DependencyWaveStartResult>(`/api/projects/${projectId}/dependency-waves/start-next`, { method: "POST" });
+      const result = await apiPost<DependencyWaveStartResult>(`/api/projects/${projectId}/dependency-waves/start-next`);
       const failures = result.failed.length;
       if (result.started.length > 0) {
         showToast(

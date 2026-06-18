@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 
 type ImportFormat = "auto" | "csv" | "markdown";
@@ -76,10 +76,7 @@ export function ImportIssuesModal({ projectId, onClose }: ImportIssuesModalProps
     }
     setPreviewing(true);
     const id = window.setTimeout(() => {
-      apiFetch<PreviewResult>(`/api/projects/${projectId}/issues/import/preview`, {
-        method: "POST",
-        body: JSON.stringify({ text, format }),
-      })
+      apiPost<PreviewResult>(`/api/projects/${projectId}/issues/import/preview`, { text, format })
         .then((r) => { setPreview(r); })
         .catch(() => { setPreview(null); })
         .finally(() => setPreviewing(false));
@@ -116,10 +113,7 @@ export function ImportIssuesModal({ projectId, onClose }: ImportIssuesModalProps
     if (!preview || preview.rows.length === 0 || committing) return;
     setCommitting(true);
     try {
-      const res = await apiFetch<ImportResult>(`/api/projects/${projectId}/issues/import`, {
-        method: "POST",
-        body: JSON.stringify({ text, format }),
-      });
+      const res = await apiPost<ImportResult>(`/api/projects/${projectId}/issues/import`, { text, format });
       setResult(res);
       if (res.created > 0) {
         showToast(`Imported ${res.created} issue${res.created === 1 ? "" : "s"} into Backlog`, "success");

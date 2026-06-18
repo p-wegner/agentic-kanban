@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from "react";
-import { apiFetch } from "../../lib/api.js";
+import { apiFetch, apiPost } from "../../lib/api.js";
 import { ProjectScriptsSettingsSection } from "../ProjectScriptsSettingsSection.js";
 import { StackProfileSettingsSection } from "../StackProfileSettingsSection.js";
 import { DriveSettingsSection } from "../DriveSettingsSection.js";
@@ -154,13 +154,7 @@ export function ProjectSettings({ activeProjectId, settings, setSettings, projec
                             if (!activeProjectId || generatingScript) return;
                             setGeneratingScript(true);
                             try {
-                              const result = await apiFetch<{ setupScript: string }>(
-                                "/api/projects/generate-setup-script",
-                                {
-                                  method: "POST",
-                                  body: JSON.stringify({ projectId: activeProjectId }),
-                                },
-                              );
+                              const result = await apiPost<{ setupScript: string }>("/api/projects/generate-setup-script", { projectId: activeProjectId });
                               if (result.setupScript) {
                                 setProjectSettings(s => ({ ...s, setupScript: result.setupScript }));
                               }
@@ -263,13 +257,7 @@ export function ProjectSettings({ activeProjectId, settings, setSettings, projec
                             if (!activeProjectId || generatingTeardown) return;
                             setGeneratingTeardown(true);
                             try {
-                              const result = await apiFetch<{ teardownScript: string }>(
-                                "/api/projects/generate-teardown-script",
-                                {
-                                  method: "POST",
-                                  body: JSON.stringify({ projectId: activeProjectId }),
-                                },
-                              );
+                              const result = await apiPost<{ teardownScript: string }>("/api/projects/generate-teardown-script", { projectId: activeProjectId });
                               if (result.teardownScript) {
                                 setProjectSettings(s => ({ ...s, teardownScript: result.teardownScript }));
                               }
@@ -318,13 +306,7 @@ export function ProjectSettings({ activeProjectId, settings, setSettings, projec
                             if (!activeProjectId || generatingVerify) return;
                             setGeneratingVerify(true);
                             try {
-                              const result = await apiFetch<{ verifyScript: string }>(
-                                "/api/projects/generate-verify-script",
-                                {
-                                  method: "POST",
-                                  body: JSON.stringify({ projectId: activeProjectId }),
-                                },
-                              );
+                              const result = await apiPost<{ verifyScript: string }>("/api/projects/generate-verify-script", { projectId: activeProjectId });
                               if (result.verifyScript !== undefined) {
                                 setProjectSettings(s => ({ ...s, verifyScript: result.verifyScript }));
                               }

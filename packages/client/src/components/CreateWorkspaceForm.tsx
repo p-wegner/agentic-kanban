@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost } from "../lib/api.js";
 import { getSettings, setSettings } from "../lib/settingsStore.js";
 import { suggestBranchName, sanitizeBranchName } from "@agentic-kanban/shared/lib/branch";
 import type { IssueWithStatus, ProfileSelection, WorkspaceResponse } from "@agentic-kanban/shared";
@@ -183,10 +183,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
     setLocalError(null);
     onSubmitting?.();
     try {
-      const result = await apiFetch<WorkspaceResponse & { sessionId?: string }>("/api/workspaces", {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
+      const result = await apiPost<WorkspaceResponse & { sessionId?: string }>("/api/workspaces", body);
       // Persist TDD mode preference per-project (best-effort)
       if (project) {
         const prefKey = `tdd_mode_${project.id}`;
@@ -239,10 +236,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
     setPreflightLoading(true);
     setLocalError(null);
     try {
-      const result = await apiFetch<PreflightResult>(`/api/issues/${issue.id}/preflight`, {
-        method: "POST",
-        body: JSON.stringify({ projectId: issue.projectId }),
-      });
+      const result = await apiPost<PreflightResult>(`/api/issues/${issue.id}/preflight`, { projectId: issue.projectId });
       // Surface the modal when the verdict blocks, OR when a complex ticket is being run
       // directly on the main checkout (advisory direct-workspace warning).
       const directRisk = isDirect && result.looksComplex === true;
@@ -702,10 +696,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
           // into the launching agent's context.
           setPreflightLoading(true);
           try {
-            const result = await apiFetch<PreflightResult>(`/api/issues/${issue.id}/preflight`, {
-              method: "POST",
-              body: JSON.stringify({ projectId: issue.projectId, clarifications }),
-            });
+            const result = await apiPost<PreflightResult>(`/api/issues/${issue.id}/preflight`, { projectId: issue.projectId, clarifications });
             const launchBody = { ...pendingLaunch, clarifications: result.clarificationsBlock };
             if (result.verdict === "ready") {
               setPreflightResult(null);
@@ -735,10 +726,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
           // Re-run the preflight after the user saved edits
           setPreflightLoading(true);
           try {
-            const result = await apiFetch<PreflightResult>(`/api/issues/${issue.id}/preflight`, {
-              method: "POST",
-              body: JSON.stringify({ projectId: issue.projectId }),
-            });
+            const result = await apiPost<PreflightResult>(`/api/issues/${issue.id}/preflight`, { projectId: issue.projectId });
             if (result.verdict === "ready") {
               setPreflightResult(null);
               setPreflightLoading(false);

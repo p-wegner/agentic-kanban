@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 
 interface WfNode {
@@ -121,10 +121,7 @@ export function WorkflowProgress({
     if (!confirmed) return;
     setTransitioning(true);
     try {
-      await apiFetch(`/api/workflows/workspaces/${workspaceId}/transition`, {
-        method: "POST",
-        body: JSON.stringify({ toNodeId, summary: `Manually advanced to ${toNodeName}` }),
-      });
+      await apiPost(`/api/workflows/workspaces/${workspaceId}/transition`, { toNodeId, summary: `Manually advanced to ${toNodeName}` });
       showToast(`Advanced to ${toNodeName}`, "success");
       load();
     } catch (err) {

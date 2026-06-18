@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost, apiPut, apiPatch } from "../lib/api.js";
 import { invalidateSettings, setSettings as savePreferences } from "../lib/settingsStore.js";
 import { showToast } from "./Toast.js";
 import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
@@ -355,7 +355,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
   async function handleMonitorRunNow() {
     setMonitorRunning(true);
     try {
-      await apiFetch("/api/internal/monitor-run", { method: "POST" });
+      await apiPost("/api/internal/monitor-run");
       showToast("Monitor cycle triggered", "success");
       setTimeout(fetchMonitorStatus, 1500);
     } catch {
@@ -368,10 +368,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
   async function handleProfilePreflight(profile: AgentProfileHealth) {
     setPreflightingProfileId(profile.id);
     try {
-      const result = await apiFetch<AgentProfileHealth["preflight"]>("/api/preferences/agent-profiles/preflight", {
-        method: "POST",
-        body: JSON.stringify({ provider: profile.provider, profileName: profile.profileName }),
-      });
+      const result = await apiPost<AgentProfileHealth["preflight"]>("/api/preferences/agent-profiles/preflight", { provider: profile.provider, profileName: profile.profileName });
       setProfileHealth((rows) => rows.map((row) => row.id === profile.id
         ? { ...row, preflight: result, status: row.latestFailure ? "error" : result.status, command: result.command }
         : row));
@@ -386,7 +383,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
   async function handleMcpProbe() {
     setMcpProbing(true);
     try {
-      const result = await apiFetch<McpHealth>("/api/preferences/mcp/probe", { method: "POST" });
+      const result = await apiPost<McpHealth>("/api/preferences/mcp/probe");
       setMcpHealth(result);
       showToast(result.lastProbe?.ok ? "MCP probe passed" : "MCP probe found issues", result.lastProbe?.ok ? "success" : "error");
     } catch (err) {
@@ -408,16 +405,11 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
         settingsToSave[`verify_script_${activeProjectId}` as keyof Settings] = projectSettings.verifyScript;
       }
       const promises: Promise<unknown>[] = [
-        apiFetch("/api/preferences/settings", {
-          method: "PUT",
-          body: JSON.stringify(settingsToSave),
-        }),
+        apiPut("/api/preferences/settings", settingsToSave),
       ];
       if (activeProjectId) {
         promises.push(
-          apiFetch(`/api/projects/${activeProjectId}`, {
-            method: "PATCH",
-            body: JSON.stringify({
+          apiPatch(`/api/projects/${activeProjectId}`, {
               setupScript: projectSettings.setupScript || null,
               setupBlocking: projectSettings.setupBlocking,
               setupEnabled: projectSettings.setupEnabled,
@@ -428,7 +420,6 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
               symlinkDirs: projectSettings.symlinkDirs.trim() || null,
               defaultSkillId: projectSettings.defaultSkillId || null,
             }),
-          }),
         );
       }
       await Promise.all(promises);

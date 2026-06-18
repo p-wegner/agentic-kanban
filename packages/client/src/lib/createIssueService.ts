@@ -5,8 +5,8 @@ import type {
   ProfileSelection,
   StatusWithIssues,
 } from "@agentic-kanban/shared";
-import { apiFetch } from "./api.js";
-import { suggestBranchName } from "./branch.js";
+import { apiPost } from "./api.js";
+import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { showToast } from "../components/Toast.js";
 
 /** Payload accepted by the board's create-issue flow (issue data plus optional workspace launch). */
@@ -99,10 +99,7 @@ export async function runCreateIssueFlow(data: CreateIssuePayload, deps: CreateI
     }
   }
   try {
-    const created = await apiFetch<{ id: string; issueNumber: number; title: string }>(
-      "/api/issues",
-      { method: "POST", body: JSON.stringify(issueData) },
-    );
+    const created = await apiPost<{ id: string; issueNumber: number; title: string }>("/api/issues", issueData);
     setCreatingInColumnId(null);
     setExpandedCreatePanel(null);
     setPendingIssueIds((prev) => {
@@ -125,9 +122,7 @@ export async function runCreateIssueFlow(data: CreateIssuePayload, deps: CreateI
           issueNumber: created.issueNumber,
           title: created.title,
         });
-        const ws = await apiFetch<{ id: string; sessionId?: string }>("/api/workspaces", {
-          method: "POST",
-          body: JSON.stringify({
+        const ws = await apiPost<{ id: string; sessionId?: string }>("/api/workspaces", {
             issueId: created.id,
             branch: isDirect ? undefined : branch,
             baseBranch: isDirect ? undefined : activeProject.defaultBranch ?? undefined,
@@ -136,8 +131,7 @@ export async function runCreateIssueFlow(data: CreateIssuePayload, deps: CreateI
             profile: profile || undefined,
             model: model || undefined,
             skillId: skillId || undefined,
-          }),
-        });
+          });
         let launchedBoard = board;
         try {
           launchedBoard = await refetchBoard();

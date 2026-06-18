@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost } from "../lib/api.js";
 import { getSettings, setSettings } from "../lib/settingsStore.js";
 import { getWipLimit, wipLimitKey } from "../lib/wipLimits.js";
 import { startStaggeredPoll, type PollHandle } from "../lib/pollScheduler.js";
@@ -154,7 +154,7 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
   const handleMonitorRunNow = useCallback(async () => {
     setMonitorRunning(true);
     try {
-      await apiFetch("/api/internal/monitor-run", { method: "POST" });
+      await apiPost("/api/internal/monitor-run");
       const s = await apiFetch<MonitorStatus>("/api/internal/monitor-status");
       setMonitorStatus(s);
     } finally {

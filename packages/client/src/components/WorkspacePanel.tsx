@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost, apiPatch, apiDelete } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { getWorkspacePreviewUrl } from "../lib/workspace-preview.js";
 import { getOutputFormatForAgent, getOutputFormatForProvider, type AgentOutputFormat } from "../lib/agent-output-parser.js";
@@ -589,10 +589,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
         if (resolved) body.profile = resolved;
       }
       if ((isClaudeQuickLaunch || isCodexQuickLaunch) && selectedModel) body.model = selectedModel;
-      const result = await apiFetch<WorkspaceResponse & { sessionId?: string }>("/api/workspaces", {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
+      const result = await apiPost<WorkspaceResponse & { sessionId?: string }>("/api/workspaces", body);
       setShowCreate(false);
       if (result.sessionId) {
         setSelectedWorkspace(result.id);
@@ -632,10 +629,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
         if (resolved) body.profile = resolved;
       }
       if ((isClaudeQuickLaunch || isCodexQuickLaunch) && selectedModel) body.model = selectedModel;
-      const result = await apiFetch<WorkspaceResponse & { sessionId?: string }>("/api/workspaces", {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
+      const result = await apiPost<WorkspaceResponse & { sessionId?: string }>("/api/workspaces", body);
       setShowCreate(false);
       if (result.sessionId) {
         setSelectedWorkspace(result.id);
@@ -662,13 +656,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
       if (resumeId) {
         body.resumeFromId = resumeId;
       }
-      const result = await apiFetch<{ sessionId: string }>(
-        `/api/workspaces/${wsId}/launch`,
-        {
-          method: "POST",
-          body: JSON.stringify(body),
-        },
-      );
+      const result = await apiPost<{ sessionId: string }>(`/api/workspaces/${wsId}/launch`, body);
       setActiveSession(result.sessionId);
       setLastPrompt(prompt.trim());
       setPrompt("");
@@ -687,10 +675,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     const provider = colonIdx >= 0 ? profileValue.slice(0, colonIdx) : null;
     const name = colonIdx >= 0 ? profileValue.slice(colonIdx + 1) : null;
     try {
-      await apiFetch(`/api/workspaces/${wsId}`, {
-        method: "PATCH",
-        body: JSON.stringify({ provider: provider || null, claudeProfile: name || null }),
-      });
+      await apiPatch(`/api/workspaces/${wsId}`, { provider: provider || null, claudeProfile: name || null });
       setEditingProfileWsId(null);
       await fetchWorkspaces();
     } catch (err) {
@@ -703,13 +688,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     setActionLoading(true);
     setError(null);
     try {
-      const result = await apiFetch<{ ok?: boolean; sessionId?: string; resumed?: boolean }>(
-        `/api/workspaces/${wsId}/turn`,
-        {
-          method: "POST",
-          body: JSON.stringify({ content: prompt.trim() }),
-        },
-      );
+      const result = await apiPost<{ ok?: boolean; sessionId?: string; resumed?: boolean }>(`/api/workspaces/${wsId}/turn`, { content: prompt.trim() });
       setLastPrompt(prompt.trim());
       setPrompt("");
       if (result.resumed && result.sessionId) {
@@ -729,7 +708,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     setActionLoading(true);
     setError(null);
     try {
-      await apiFetch(`/api/workspaces/${wsId}/stop`, { method: "POST" });
+      await apiPost(`/api/workspaces/${wsId}/stop`);
       disconnect();
       if (activeSession) {
         setLastSessionPerWorkspace((prev) => ({ ...prev, [wsId]: activeSession }));
@@ -773,14 +752,11 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     setMergeError(null);
     try {
       if (isRunning) {
-        await apiFetch(`/api/workspaces/${wsId}/stop`, { method: "POST" });
+        await apiPost(`/api/workspaces/${wsId}/stop`);
         setActiveSession(null);
         setCompletedMessages([]);
       }
-      await apiFetch(`/api/workspaces/${wsId}/merge`, {
-        method: "POST",
-        body: JSON.stringify({}),
-      });
+      await apiPost(`/api/workspaces/${wsId}/merge`, {});
       await fetchWorkspaces();
       onWorkspaceChange?.();
     } catch (err) {
@@ -803,10 +779,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     setSelectedHistoryId(null);
     setViewMode("output");
     try {
-      const result = await apiFetch<{ sessionId: string }>(`/api/workspaces/${wsId}/fix-and-merge`, {
-        method: "POST",
-        body: JSON.stringify({ mergeError: errorMessage }),
-      });
+      const result = await apiPost<{ sessionId: string }>(`/api/workspaces/${wsId}/fix-and-merge`, { mergeError: errorMessage });
       setActiveSession(result.sessionId);
       setViewMode("output");
       await fetchWorkspaces();
@@ -822,10 +795,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     setActionLoading(true);
     setError(null);
     try {
-      await apiFetch(`/api/workspaces/${wsId}/terminal`, {
-        method: "POST",
-        body: JSON.stringify({}),
-      });
+      await apiPost(`/api/workspaces/${wsId}/terminal`, {});
     } catch (err) {
       setError(err instanceof Error ? err.message : "Terminal launch failed");
     } finally {
@@ -837,10 +807,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     setActionLoading(true);
     setError(null);
     try {
-      await apiFetch(`/api/workspaces/${wsId}/open-editor`, {
-        method: "POST",
-        body: JSON.stringify({}),
-      });
+      await apiPost(`/api/workspaces/${wsId}/open-editor`, {});
     } catch (err) {
       setError(err instanceof Error ? err.message : "VS Code launch failed");
     } finally {
@@ -862,9 +829,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     setActionLoading(true);
     setError(null);
     try {
-      const result = await apiFetch<{ content: string }>(`/api/workspaces/${wsId}/github-handoff-draft`, {
-        method: "POST",
-      });
+      const result = await apiPost<{ content: string }>(`/api/workspaces/${wsId}/github-handoff-draft`);
       setGithubDrafts((prev) => ({ ...prev, [wsId]: result.content }));
       try {
         if (!navigator.clipboard) throw new Error("Clipboard API unavailable");
@@ -921,10 +886,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     setError(null);
     setConflictState(null);
     try {
-      const result = await apiFetch<{ success: boolean; conflictingFiles?: string[]; error?: string }>(
-        `/api/workspaces/${wsId}/update-base`,
-        { method: "POST", body: JSON.stringify({ mode }) },
-      );
+      const result = await apiPost<{ success: boolean; conflictingFiles?: string[]; error?: string }>(`/api/workspaces/${wsId}/update-base`, { mode });
       if (!result.success && result.conflictingFiles?.length) {
         setConflictState({ hasConflicts: true, conflictingFiles: result.conflictingFiles });
       } else if (!result.success) {
@@ -943,7 +905,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
   async function handleMonitorRunNow() {
     setMonitorRunning(true);
     try {
-      await apiFetch("/api/internal/monitor-run", { method: "POST" });
+      await apiPost("/api/internal/monitor-run");
     } finally {
       setMonitorRunning(false);
     }
@@ -953,7 +915,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     setActionLoading(true);
     setError(null);
     try {
-      await apiFetch(`/api/workspaces/${wsId}/abort-rebase`, { method: "POST" });
+      await apiPost(`/api/workspaces/${wsId}/abort-rebase`);
       setConflictState(null);
       await fetchWorkspaces();
     } catch (err) {
@@ -970,10 +932,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     setSelectedHistoryId(null);
     setViewMode("output");
     try {
-      const result = await apiFetch<{ sessionId: string }>(
-        `/api/workspaces/${wsId}/resolve-conflicts`,
-        { method: "POST" },
-      );
+      const result = await apiPost<{ sessionId: string }>(`/api/workspaces/${wsId}/resolve-conflicts`);
       setActiveSession(result.sessionId);
       setCompletedMessages([]);
       setConflictState(null);
@@ -996,10 +955,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
         resumeFromId: lastSessionPerWorkspace[wsId] || "",
       };
       if (skipPermissions) body.skipPermissions = true;
-      const result = await apiFetch<{ sessionId: string }>(
-        `/api/workspaces/${wsId}/launch`,
-        { method: "POST", body: JSON.stringify(body) },
-      );
+      const result = await apiPost<{ sessionId: string }>(`/api/workspaces/${wsId}/launch`, body);
       setActiveSession(result.sessionId);
       setLastPrompt(resumePrompt);
       setPrompt("");
@@ -1043,10 +999,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
       const restartPrompt = `Continue where the previous session left off. If you were in the middle of implementing something, pick up from where it stopped. If the implementation is complete, commit your changes and move this issue to In Review.${contextSection}`;
       const launchBody: Record<string, unknown> = { prompt: restartPrompt };
       if (skipPermissions) launchBody.skipPermissions = true;
-      const result = await apiFetch<{ sessionId: string }>(
-        `/api/workspaces/${wsId}/launch`,
-        { method: "POST", body: JSON.stringify(launchBody) },
-      );
+      const result = await apiPost<{ sessionId: string }>(`/api/workspaces/${wsId}/launch`, launchBody);
       setActiveSession(result.sessionId);
       setLastPrompt(restartPrompt);
       setPrompt("");
@@ -1068,10 +1021,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
         resumeFromId: sessionId,
       };
       if (skipPermissions) body.skipPermissions = true;
-      const result = await apiFetch<{ sessionId: string }>(
-        `/api/workspaces/${wsId}/launch`,
-        { method: "POST", body: JSON.stringify(body) },
-      );
+      const result = await apiPost<{ sessionId: string }>(`/api/workspaces/${wsId}/launch`, body);
       setActiveSession(result.sessionId);
       setLastPrompt(continuePrompt);
       setPrompt("");
@@ -1089,10 +1039,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     setActionLoading(true);
     setError(null);
     try {
-      const result = await apiFetch<{ sessionId: string }>(`/api/workspaces/${wsId}/bisect`, {
-        method: "POST",
-        body: JSON.stringify({ scope }),
-      });
+      const result = await apiPost<{ sessionId: string }>(`/api/workspaces/${wsId}/bisect`, { scope });
       setActiveSession(result.sessionId);
       setLastPrompt(`Auto-bisect (${scope})`);
       setCompletedMessages([]);
@@ -1110,7 +1057,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     setActionLoading(true);
     setError(null);
     try {
-      const result = await apiFetch<{ sessionId: string }>(`/api/workspaces/${wsId}/review`, { method: "POST" });
+      const result = await apiPost<{ sessionId: string }>(`/api/workspaces/${wsId}/review`);
       setActiveSession(result.sessionId);
       setCompletedMessages([]);
       await fetchWorkspaces();
@@ -1147,10 +1094,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     setActionLoading(true);
     setError(null);
     try {
-      const result = await apiFetch<{ sessionId: string }>(`/api/workspaces/${wsId}/reject-plan`, {
-        method: "POST",
-        body: JSON.stringify({ feedback }),
-      });
+      const result = await apiPost<{ sessionId: string }>(`/api/workspaces/${wsId}/reject-plan`, { feedback });
       setActiveSession(result.sessionId);
       setCompletedMessages([]);
       setRejectMode((prev) => ({ ...prev, [wsId]: false }));
@@ -1170,11 +1114,11 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     setError(null);
     try {
       if (isRunning) {
-        await apiFetch(`/api/workspaces/${wsId}/stop`, { method: "POST" });
+        await apiPost(`/api/workspaces/${wsId}/stop`);
         setActiveSession(null);
         setCompletedMessages([]);
       }
-      await apiFetch(`/api/workspaces/${wsId}`, { method: "DELETE" });
+      await apiDelete(`/api/workspaces/${wsId}`);
       await fetchWorkspaces();
       onWorkspaceChange?.();
     } catch (err) {
@@ -1189,7 +1133,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     setActionLoading(true);
     setError(null);
     try {
-      await apiFetch(`/api/workspaces/${wsId}/close`, { method: "POST" });
+      await apiPost(`/api/workspaces/${wsId}/close`);
       await fetchWorkspaces();
       onWorkspaceChange?.();
     } catch (err) {

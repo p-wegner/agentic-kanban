@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost, apiPatch } from "../lib/api.js";
 import { showToast } from "../components/Toast.js";
 import type { IssueWithStatus, UpdateIssueRequest } from "@agentic-kanban/shared";
 
@@ -88,10 +88,7 @@ export function useBoardBulkSelection(
     setBoardBulkUpdating(true);
     try {
       const results = await Promise.allSettled(ids.map((id) =>
-        apiFetch(`/api/issues/${id}`, {
-          method: "PATCH",
-          body: JSON.stringify(updates),
-        })
+        apiPatch(`/api/issues/${id}`, updates)
       ));
       const failed = results.filter((result) => result.status === "rejected").length;
       const succeeded = ids.length - failed;
@@ -115,10 +112,7 @@ export function useBoardBulkSelection(
     setBoardBulkUpdating(true);
     try {
       const results = await Promise.allSettled(ids.map((id) =>
-        apiFetch(`/api/issues/${id}/tags`, {
-          method: "POST",
-          body: JSON.stringify({ tagId }),
-        })
+        apiPost(`/api/issues/${id}/tags`, { tagId })
       ));
       const failed = results.filter((result) => result.status === "rejected").length;
       const succeeded = ids.length - failed;

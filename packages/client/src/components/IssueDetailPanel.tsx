@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { IssueArtifact, IssueWithStatus, UpdateIssueRequest, DependencyInfo, MilestoneResponse, MergedCommit, MergedCommitsResponse } from "@agentic-kanban/shared";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost, apiPatch, apiDelete } from "../lib/api.js";
 import { getCachedBundle, revalidateBundle } from "../lib/issueDetailBundleCache.js";
 import { isHttpUrl } from "../lib/url.js";
 import { formatRelativeTime, formatAbsoluteTime } from "../lib/formatRelativeTime.js";
@@ -669,10 +669,7 @@ export function IssueDetailPanel({
     setEnhancing(true);
     try {
       setPreEnhanceSnapshot({ title, description });
-      const result = await apiFetch<{ title: string; description: string }>("/api/issues/enhance", {
-        method: "POST",
-        body: JSON.stringify({ title, description, projectId: issue.projectId }),
-      });
+      const result = await apiPost<{ title: string; description: string }>("/api/issues/enhance", { title, description, projectId: issue.projectId });
       setTitle(result.title);
       setDescription(result.description);
     } catch (err) {
@@ -703,10 +700,7 @@ export function IssueDetailPanel({
     if (duplicating) return;
     setDuplicating(true);
     try {
-      const result = await apiFetch<{ id: string; issueNumber: number; title: string }>(
-        `/api/issues/${issue.id}/duplicate`,
-        { method: "POST" },
-      );
+      const result = await apiPost<{ id: string; issueNumber: number; title: string }>(`/api/issues/${issue.id}/duplicate`);
       invalidateAvailableIssuesCache(issue.projectId);
       showToast(`Duplicated as #${result.issueNumber}`, "success");
       onNavigateToIssue?.(result.id);
@@ -721,10 +715,7 @@ export function IssueDetailPanel({
     if (estimating) return;
     setEstimating(true);
     try {
-      const result = await apiFetch<{ estimate: string; reasoning: string }>("/api/issues/ai-estimate", {
-        method: "POST",
-        body: JSON.stringify({ issueId: issue.id }),
-      });
+      const result = await apiPost<{ estimate: string; reasoning: string }>("/api/issues/ai-estimate", { issueId: issue.id });
       await onUpdate(issue.id, { estimate: result.estimate as UpdateIssueRequest["estimate"] });
       showToast(`AI suggested: ${result.estimate}${result.reasoning ? ` — ${result.reasoning}` : ""}`, "success");
     } catch (err) {
@@ -738,10 +729,7 @@ export function IssueDetailPanel({
     if (analyzingTouchedFiles) return;
     setAnalyzingTouchedFiles(true);
     try {
-      const result = await apiFetch<{ files: { path: string; reason: string; confidence: "high" | "medium" | "low" }[]; cached: boolean }>(`/api/issues/${issue.id}/analyze-touched-files`, {
-        method: "POST",
-        body: JSON.stringify({ refresh }),
-      });
+      const result = await apiPost<{ files: { path: string; reason: string; confidence: "high" | "medium" | "low" }[]; cached: boolean }>(`/api/issues/${issue.id}/analyze-touched-files`, { refresh });
       setTouchedFiles(result.files);
       showToast(result.cached ? "Showing cached prediction" : `Predicted ${result.files.length} file${result.files.length === 1 ? "" : "s"}`, "success");
     } catch (err) {
@@ -785,7 +773,7 @@ export function IssueDetailPanel({
     if (!window.confirm(`Delete artifact "${issueArtifactKind(artifact)}"? This cannot be undone.`)) return;
     setDeletingArtifactId(artifact.id);
     try {
-      await apiFetch(`/api/issues/${issue.id}/artifacts/${artifact.id}`, { method: "DELETE" });
+      await apiDelete(`/api/issues/${issue.id}/artifacts/${artifact.id}`);
       setArtifacts((prev) => prev.filter((item) => item.id !== artifact.id));
       setExpandedArtifactId((current) => current === artifact.id ? null : current);
       showToast("Artifact deleted", "success");
@@ -814,11 +802,7 @@ export function IssueDetailPanel({
     setNewNoteBody("");
     setSubmittingNote(true);
     try {
-      const created = await apiFetch<IssueComment>(`/api/issues/${issue.id}/comments`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body, kind: "note", author: "user" }),
-      });
+      const created = await apiPost<IssueComment>(`/api/issues/${issue.id}/comments`, { body, kind: "note", author: "user" });
       setComments((prev) => prev.map((c) => c.id === optimisticId ? created : c));
     } catch (err) {
       setComments((prev) => prev.filter((c) => c.id !== optimisticId));
@@ -833,7 +817,7 @@ export function IssueDetailPanel({
     if (deletingCommentId) return;
     setDeletingCommentId(commentId);
     try {
-      await apiFetch(`/api/issues/${issue.id}/comments/${commentId}`, { method: "DELETE" });
+      await apiDelete(`/api/issues/${issue.id}/comments/${commentId}`);
       setComments((prev) => prev.filter((c) => c.id !== commentId));
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to delete comment", "error");
@@ -851,7 +835,7 @@ export function IssueDetailPanel({
     try {
       if (isVisualVerify) {
         const tag = issueTags.find((t) => t.name === VISUAL_VERIFY_TAG)!;
-        await apiFetch(`/api/issues/${issue.id}/tags/${tag.id}`, { method: "DELETE" });
+        await apiDelete(`/api/issues/${issue.id}/tags/${tag.id}`);
         setIssueTags((prev) => prev.filter((t) => t.name !== VISUAL_VERIFY_TAG));
         showToast("Removed visual verify tag");
       } else {
@@ -866,10 +850,7 @@ export function IssueDetailPanel({
         if (!tag) {
           throw new Error(`Built-in tag "${VISUAL_VERIFY_TAG}" not found`);
         }
-        await apiFetch(`/api/issues/${issue.id}/tags`, {
-          method: "POST",
-          body: JSON.stringify({ tagId: tag.id }),
-        });
+        await apiPost(`/api/issues/${issue.id}/tags`, { tagId: tag.id });
         setIssueTags((prev) => [...prev, tag!]);
         showToast("Marked for visual verification", "success");
       }
@@ -884,14 +865,8 @@ export function IssueDetailPanel({
     if (!followUpTitle.trim() || followUpCreating) return;
     setFollowUpCreating(true);
     try {
-      const newIssue = await apiFetch<{ id: string }>("/api/issues", {
-        method: "POST",
-        body: JSON.stringify({ title: followUpTitle.trim(), description: "", priority: "medium", projectId: issue.projectId }),
-      });
-      await apiFetch(`/api/issues/${newIssue.id}/dependencies`, {
-        method: "POST",
-        body: JSON.stringify({ dependsOnId: issue.id, type: "depends_on" }),
-      }).catch(() => {});
+      const newIssue = await apiPost<{ id: string }>("/api/issues", { title: followUpTitle.trim(), description: "", priority: "medium", projectId: issue.projectId });
+      await apiPost(`/api/issues/${newIssue.id}/dependencies`, { dependsOnId: issue.id, type: "depends_on" }).catch(() => {});
       invalidateAvailableIssuesCache(issue.projectId);
       setFollowUpTitle("");
       setShowFollowUp(false);
@@ -906,10 +881,7 @@ export function IssueDetailPanel({
   async function persistChecklist(updated: { id: string; text: string; completed: boolean }[]) {
     setSavingChecklist(true);
     try {
-      await apiFetch(`/api/issues/${issue.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ checklist: updated }),
-      });
+      await apiPatch(`/api/issues/${issue.id}`, { checklist: updated });
     } catch {
       showToast("Failed to save checklist", "error");
     } finally {
@@ -984,10 +956,7 @@ export function IssueDetailPanel({
     const prev = issue.title;
     onIssueUpdate({ ...issue, title: trimmed });
     try {
-      await apiFetch(`/api/issues/${issue.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ title: trimmed }),
-      });
+      await apiPatch(`/api/issues/${issue.id}`, { title: trimmed });
       setInlineEditingTitle(false);
     } catch (err) {
       onIssueUpdate({ ...issue, title: prev });
@@ -1010,10 +979,7 @@ export function IssueDetailPanel({
     setInlineError(null);
     onIssueUpdate({ ...issue, description: value || undefined });
     try {
-      await apiFetch(`/api/issues/${issue.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ description: value || undefined }),
-      });
+      await apiPatch(`/api/issues/${issue.id}`, { description: value || undefined });
       setInlineEditingDescription(false);
     } catch (err) {
       onIssueUpdate({ ...issue, description: prev || undefined });
@@ -1898,7 +1864,7 @@ export function IssueDetailPanel({
                     <button
                       onClick={async () => {
                         try {
-                          await apiFetch(`/api/issues/${issue.id}/tags/${tag.id}`, { method: "DELETE" });
+                          await apiDelete(`/api/issues/${issue.id}/tags/${tag.id}`);
                           setIssueTags((prev) => prev.filter((t) => t.id !== tag.id));
                         } catch {
                           showToast("Failed to remove tag", "error");
@@ -1918,10 +1884,7 @@ export function IssueDetailPanel({
                       const tagId = e.target.value;
                       if (!tagId) return;
                       try {
-                        await apiFetch(`/api/issues/${issue.id}/tags`, {
-                          method: "POST",
-                          body: JSON.stringify({ tagId }),
-                        });
+                        await apiPost(`/api/issues/${issue.id}/tags`, { tagId });
                         const tag = allTags.find((t) => t.id === tagId);
                         if (tag) setIssueTags((prev) => [...prev, tag]);
                       } catch {

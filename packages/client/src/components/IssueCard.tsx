@@ -1,7 +1,7 @@
 import { memo, useRef, useState } from "react";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost } from "../lib/api.js";
 import { getBoardDragData } from "../lib/dragData.js";
 import { prefetchBundle } from "../lib/issueDetailBundleCache.js";
 import { IssueWorkLogBadge } from "./IssueWorkLogBadge.js";
@@ -107,10 +107,7 @@ function useIssueCardDrag(
     if (!dragData?.issueId || dragData.issueId === issue.id) return;
     e.stopPropagation();
     try {
-      await apiFetch(`/api/issues/${dragData.issueId}/dependencies`, {
-        method: "POST",
-        body: JSON.stringify({ dependsOnId: issue.id, type: "depends_on" }),
-      });
+      await apiPost(`/api/issues/${dragData.issueId}/dependencies`, { dependsOnId: issue.id, type: "depends_on" });
       showToast("Dependency added", "success");
     } catch {
       showToast("Failed to add dependency", "error");

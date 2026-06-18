@@ -1,4 +1,4 @@
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost, apiPatch, apiDelete } from "../lib/api.js";
 import { DiffViewer } from "./DiffViewer.js";
 import type { DiffResponse, DiffComment, CreateDiffCommentRequest } from "@agentic-kanban/shared";
 
@@ -14,10 +14,7 @@ interface WorkspaceDiffPanelProps {
 export function WorkspaceDiffPanel({ diff, diffComments, workspaceId, onClose, onCommentsChange, onError }: WorkspaceDiffPanelProps) {
   async function handleCreateComment(data: CreateDiffCommentRequest) {
     try {
-      const result = await apiFetch<DiffComment>(`/api/workspaces/${workspaceId}/comments`, {
-        method: "POST",
-        body: JSON.stringify(data),
-      });
+      const result = await apiPost<DiffComment>(`/api/workspaces/${workspaceId}/comments`, data);
       onCommentsChange([...diffComments, result]);
     } catch (err) {
       onError(err instanceof Error ? err.message : "Failed to create comment");
@@ -26,10 +23,7 @@ export function WorkspaceDiffPanel({ diff, diffComments, workspaceId, onClose, o
 
   async function handleEditComment(commentId: string, body: string) {
     try {
-      await apiFetch(`/api/workspaces/${workspaceId}/comments/${commentId}`, {
-        method: "PATCH",
-        body: JSON.stringify({ body }),
-      });
+      await apiPatch(`/api/workspaces/${workspaceId}/comments/${commentId}`, { body });
       onCommentsChange(diffComments.map(c => c.id === commentId ? { ...c, body, updatedAt: new Date().toISOString() } : c));
     } catch (err) {
       onError(err instanceof Error ? err.message : "Failed to update comment");
@@ -38,7 +32,7 @@ export function WorkspaceDiffPanel({ diff, diffComments, workspaceId, onClose, o
 
   async function handleDeleteComment(commentId: string) {
     try {
-      await apiFetch(`/api/workspaces/${workspaceId}/comments/${commentId}`, { method: "DELETE" });
+      await apiDelete(`/api/workspaces/${workspaceId}/comments/${commentId}`);
       onCommentsChange(diffComments.filter(c => c.id !== commentId));
     } catch (err) {
       onError(err instanceof Error ? err.message : "Failed to delete comment");
@@ -47,10 +41,7 @@ export function WorkspaceDiffPanel({ diff, diffComments, workspaceId, onClose, o
 
   async function handleResolveComment(commentId: string, resolved: boolean) {
     try {
-      const result = await apiFetch<DiffComment>(`/api/workspaces/${workspaceId}/comments/${commentId}/resolve`, {
-        method: "PATCH",
-        body: JSON.stringify({ resolved }),
-      });
+      const result = await apiPatch<DiffComment>(`/api/workspaces/${workspaceId}/comments/${commentId}/resolve`, { resolved });
       onCommentsChange(diffComments.map(c => c.id === commentId ? { ...c, resolvedAt: result.resolvedAt } : c));
     } catch (err) {
       onError(err instanceof Error ? err.message : "Failed to update comment");

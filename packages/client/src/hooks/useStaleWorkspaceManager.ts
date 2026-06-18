@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiDelete } from "../lib/api.js";
 
 export interface StaleWorktreeEntry {
   id: string;
@@ -73,7 +73,7 @@ export function useStaleWorkspaceManager({ enabled, projectFilter }: UseStaleWor
     setRemovingIds((prev) => new Set(prev).add(id));
     setStaleErrors((prev) => { const next = { ...prev }; delete next[id]; return next; });
     try {
-      const result = await apiFetch<{ success: boolean; error?: string }>(`/api/workspaces/${id}/stale-worktree`, { method: "DELETE" });
+      const result = await apiDelete<{ success: boolean; error?: string }>(`/api/workspaces/${id}/stale-worktree`);
       if (result.success) {
         setStaleWorktrees((prev) => prev.filter((w) => w.id !== id));
       } else {

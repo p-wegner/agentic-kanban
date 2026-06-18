@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 
 interface CleanupWarningEntry {
@@ -51,7 +51,7 @@ export function CleanupQueuePanel({ projectId, onClose }: CleanupQueuePanelProps
     setRetryingId(id);
     setRetryErrors((prev) => { const n = { ...prev }; delete n[id]; return n; });
     try {
-      await apiFetch(`/api/workspaces/${id}/retry-cleanup`, { method: "POST" });
+      await apiPost(`/api/workspaces/${id}/retry-cleanup`);
       setRetrySucceeded((prev) => new Set([...prev, id]));
       setEntries((prev) => prev.filter((e) => e.id !== id));
     } catch (e) {

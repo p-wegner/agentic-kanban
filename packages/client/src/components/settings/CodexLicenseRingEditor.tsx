@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { apiFetch } from "../../lib/api.js";
+import { apiFetch, apiPost } from "../../lib/api.js";
 import { Field, type Settings, type SettingsTextSetter } from "../SettingsPanel.shared.js";
 
 type RingMode = "oauth" | "apikey";
@@ -147,7 +147,7 @@ export function CodexLicenseRingEditor({ settings, set }: { settings: Settings; 
     const codexHome = resolvedHome(row);
     if (!codexHome) return;
     try {
-      await apiFetch("/api/preferences/codex-login", { method: "POST", body: JSON.stringify({ codexHome }) });
+      await apiPost("/api/preferences/codex-login", { codexHome });
       setLaunched(row.profile);
       setTimeout(() => setLaunched((cur) => (cur === row.profile ? null : cur)), 4000);
     } catch { /* user can use Copy and run it manually */ }

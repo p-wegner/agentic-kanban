@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiDelete } from "../lib/api.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { WorkspaceRiskHeatmap } from "./WorkspaceRiskHeatmap.js";
 import { CollapsibleSection } from "./CollapsibleSection.js";
@@ -133,7 +133,7 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
     setClosingIdle(true);
     for (const id of idleWorkspaceIds) {
       try {
-        await apiFetch(`/api/workspaces/${id}`, { method: "DELETE" });
+        await apiDelete(`/api/workspaces/${id}`);
       } catch {
         // non-fatal — continue with the rest
       }

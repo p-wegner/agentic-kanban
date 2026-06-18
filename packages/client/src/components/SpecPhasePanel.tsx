@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { IssueArtifact, IssueWithStatus } from "@agentic-kanban/shared";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost, apiDelete } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 import { AgentQuestionsPanel } from "./AgentQuestionsPanel.js";
 
@@ -234,18 +234,15 @@ export function SpecPhasePanel({
     setSavingArtifact(true);
     try {
       if (artifactId) {
-        await apiFetch(`/api/issues/${issue.id}/artifacts/${artifactId}`, { method: "DELETE" });
+        await apiDelete(`/api/issues/${issue.id}/artifacts/${artifactId}`);
       }
-      const result = await apiFetch<{ id: string }>(`/api/issues/${issue.id}/artifacts`, {
-        method: "POST",
-        body: JSON.stringify({
+      const result = await apiPost<{ id: string }>(`/api/issues/${issue.id}/artifacts`, {
           type: "text",
           mimeType: "text/markdown",
           content: artifactText,
           caption,
           workspaceId: workspace.id,
-        }),
-      });
+        });
       setArtifactId(result.id);
       setSavedText(artifactText);
       showToast("Phase artifact saved", "success");
@@ -274,10 +271,7 @@ export function SpecPhasePanel({
         if (phaseStreamRef.current === es) phaseStreamRef.current = null;
       };
       const prompt = `${assistantSeed(issue, phaseName, artifactText)}\n\nUser request:\n${content}`;
-      await apiFetch(`/api/projects/${issue.projectId}/butler/message`, {
-        method: "POST",
-        body: JSON.stringify({ content: prompt }),
-      });
+      await apiPost(`/api/projects/${issue.projectId}/butler/message`, { content: prompt });
       setTimeout(() => {
         if (phaseStreamRef.current === es) {
           es.close();
@@ -302,13 +296,10 @@ export function SpecPhasePanel({
     }
     setTransitioning(true);
     try {
-      await apiFetch(`/api/workflows/workspaces/${workspace.id}/transition`, {
-        method: "POST",
-        body: JSON.stringify({
+      await apiPost(`/api/workflows/workspaces/${workspace.id}/transition`, {
           toNodeId: next.toNodeId,
           summary: `Approved ${phaseName} artifact and continued to ${next.toNodeName}`,
-        }),
-      });
+        });
       showToast(`Approved ${phaseName} and continued to ${next.toNodeName}`, "success");
       onApproved?.();
       void loadProgress();

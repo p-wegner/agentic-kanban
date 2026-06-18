@@ -1,4 +1,4 @@
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPut } from "../lib/api.js";
 import type { ApprovalRequest } from "../lib/useBoardEvents.js";
 
 interface Props {
@@ -9,10 +9,7 @@ interface Props {
 type Decision = "allow" | "deny" | "allow_session" | "deny_session";
 
 async function resolve(id: string, decision: Decision) {
-  await apiFetch(`/api/approvals/${id}`, {
-    method: "PUT",
-    body: JSON.stringify({ decision }),
-  });
+  await apiPut(`/api/approvals/${id}`, { decision });
 }
 
 export function ApprovalDialog({ requests, onResolve }: Props) {

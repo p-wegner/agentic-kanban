@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 import type { ShowdownResponse, ShowdownContestantResult, DiffResponse } from "@agentic-kanban/shared";
 import { DiffViewer } from "./DiffViewer.js";
@@ -84,10 +84,7 @@ export function ShowdownPanel({ showdownId, onClose, onWinnerPicked }: ShowdownP
     if (pickingWinner) return;
     setPickingWinner(workspaceId);
     try {
-      await apiFetch<ShowdownResponse>(`/api/showdowns/${showdownId}/pick-winner`, {
-        method: "POST",
-        body: JSON.stringify({ winnerWorkspaceId: workspaceId }),
-      });
+      await apiPost<ShowdownResponse>(`/api/showdowns/${showdownId}/pick-winner`, { winnerWorkspaceId: workspaceId });
       showToast("Winner picked! Loser branches deleted.", "success");
       onWinnerPicked();
       onClose();

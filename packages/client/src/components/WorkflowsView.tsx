@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost, apiDelete } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 import { WorkflowBuilder } from "./WorkflowBuilder.js";
 
@@ -114,7 +114,7 @@ export function WorkflowsView({
 
   async function duplicate(t: Template) {
     try {
-      await apiFetch(`/api/workflows/templates`, { method: "POST", body: JSON.stringify({ projectId, cloneFrom: t.id }) });
+      await apiPost(`/api/workflows/templates`, { projectId, cloneFrom: t.id });
       showToast(`Duplicated "${t.name}"`, "success");
       load();
     } catch (err) {
@@ -124,7 +124,7 @@ export function WorkflowsView({
   async function remove(t: Template) {
     if (!window.confirm(`Delete workflow "${t.name}"?`)) return;
     try {
-      await apiFetch(`/api/workflows/templates/${t.id}`, { method: "DELETE" });
+      await apiDelete(`/api/workflows/templates/${t.id}`);
       showToast("Workflow deleted", "success");
       load();
     } catch (err) {
@@ -151,10 +151,7 @@ export function WorkflowsView({
   async function importTemplate(file: File) {
     try {
       const parsed = parseJsonText(await file.text());
-      await apiFetch(`/api/workflows/templates/import`, {
-        method: "POST",
-        body: JSON.stringify({ projectId, template: parsed }),
-      });
+      await apiPost(`/api/workflows/templates/import`, { projectId, template: parsed });
       showToast("Workflow imported", "success");
       load();
     } catch (err) {

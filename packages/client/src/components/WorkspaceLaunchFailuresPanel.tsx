@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import type { WorkspaceLaunchFailure, WorkspaceLaunchFailuresResponse } from "@agentic-kanban/shared";
 
@@ -157,7 +157,7 @@ export function WorkspaceLaunchFailuresPanel({ projectId, onClose, onIssueClick 
     setActionLoading(failure.workspaceId);
     setActionErrors((prev) => { const next = { ...prev }; delete next[failure.workspaceId]; return next; });
     try {
-      await apiFetch(`/api/workspaces/${failure.workspaceId}/launch`, { method: "POST" });
+      await apiPost(`/api/workspaces/${failure.workspaceId}/launch`);
       fetchFailures();
     } catch (err) {
       setActionErrors((prev) => ({ ...prev, [failure.workspaceId]: err instanceof Error ? err.message : String(err) }));
@@ -171,7 +171,7 @@ export function WorkspaceLaunchFailuresPanel({ projectId, onClose, onIssueClick 
     setActionLoading(failure.workspaceId);
     setActionErrors((prev) => { const next = { ...prev }; delete next[failure.workspaceId]; return next; });
     try {
-      await apiFetch(`/api/sessions/${failure.sessionId}/stop`, { method: "POST" });
+      await apiPost(`/api/sessions/${failure.sessionId}/stop`);
       fetchFailures();
     } catch (err) {
       setActionErrors((prev) => ({ ...prev, [failure.workspaceId]: err instanceof Error ? err.message : String(err) }));
@@ -184,7 +184,7 @@ export function WorkspaceLaunchFailuresPanel({ projectId, onClose, onIssueClick 
     setActionLoading(failure.workspaceId);
     setActionErrors((prev) => { const next = { ...prev }; delete next[failure.workspaceId]; return next; });
     try {
-      await apiFetch(`/api/workspaces/${failure.workspaceId}/quarantine`, { method: "POST" });
+      await apiPost(`/api/workspaces/${failure.workspaceId}/quarantine`);
       fetchFailures();
     } catch (err) {
       setActionErrors((prev) => ({ ...prev, [failure.workspaceId]: err instanceof Error ? err.message : String(err) }));

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost, apiDelete } from "../lib/api.js";
 import { formatRelativeTime, formatAbsoluteTime } from "../lib/formatRelativeTime.js";
 import { showToast } from "./Toast.js";
 
@@ -54,11 +54,7 @@ export function IssueWorkLogSection({ issueId }: IssueWorkLogSectionProps) {
     if (submitting) return;
     setSubmitting(true);
     try {
-      const entry = await apiFetch<TimeEntry>(`/api/issues/${issueId}/time-entries`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ minutes, note: noteInput.trim() || null }),
-      });
+      const entry = await apiPost<TimeEntry>(`/api/issues/${issueId}/time-entries`, { minutes, note: noteInput.trim() || null });
       setEntries((prev) => [...prev, entry]);
       setTotalMinutes((prev) => prev + entry.minutes);
       setMinutesInput("");
@@ -75,7 +71,7 @@ export function IssueWorkLogSection({ issueId }: IssueWorkLogSectionProps) {
     if (deletingId) return;
     setDeletingId(entry.id);
     try {
-      await apiFetch(`/api/issues/${issueId}/time-entries/${entry.id}`, { method: "DELETE" });
+      await apiDelete(`/api/issues/${issueId}/time-entries/${entry.id}`);
       setEntries((prev) => prev.filter((e) => e.id !== entry.id));
       setTotalMinutes((prev) => prev - entry.minutes);
     } catch (err) {

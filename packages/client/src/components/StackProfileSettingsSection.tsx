@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { StackProfile, StackProfileResponse } from "@agentic-kanban/shared";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPut } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 import { CollapsibleSection } from "./SettingsPanel.shared.js";
 
@@ -59,10 +59,7 @@ export function StackProfileSettingsSection({ projectId }: StackProfileSettingsS
     if (!profile) return;
     setSaving(true);
     try {
-      const res = await apiFetch<StackProfileResponse>(`/api/projects/${projectId}/stack-profile`, {
-        method: "PUT",
-        body: JSON.stringify(profile),
-      });
+      const res = await apiPut<StackProfileResponse>(`/api/projects/${projectId}/stack-profile`, profile);
       setProfile(res.profile);
       showToast("Stack profile saved", "success");
     } catch (err) {

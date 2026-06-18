@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { QualityMetricRecord, QualityMetricsResponse } from "@agentic-kanban/shared";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost } from "../lib/api.js";
 import { ACCENT, PRIMARY_SERIES, SEMANTIC, TYPE_COLORS } from "../lib/chartColors.js";
 
 interface QualityMetricsViewProps {
@@ -132,9 +132,7 @@ export function QualityMetricsView({ projectId }: QualityMetricsViewProps) {
       const skill = skills.find((item) => item.name === "quality-metrics-collector");
       if (!skill) throw new Error("quality-metrics-collector skill is not installed");
 
-      const created = await apiFetch<{ id: string; issueNumber: number; title: string }>("/api/issues", {
-        method: "POST",
-        body: JSON.stringify({
+      const created = await apiPost<{ id: string; issueNumber: number; title: string }>("/api/issues", {
           projectId,
           title: "Collect quality metrics",
           description: [
@@ -146,21 +144,17 @@ export function QualityMetricsView({ projectId }: QualityMetricsViewProps) {
           priority: "low",
           issueType: "chore",
           skipAutoReview: true,
-        }),
-      });
+        });
 
       const branchSlug = `feature/quality-metrics-${created.issueNumber ?? Date.now()}`;
-      await apiFetch("/api/workspaces", {
-        method: "POST",
-        body: JSON.stringify({
+      await apiPost("/api/workspaces", {
           issueId: created.id,
           branch: branchSlug,
           skillId: skill.id,
           planMode: false,
           requiresReview: false,
           skipContextPacker: true,
-        }),
-      });
+        });
       setNotice("Collector workspace launched");
       await fetchMetrics();
     } catch (err) {
