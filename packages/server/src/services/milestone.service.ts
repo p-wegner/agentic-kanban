@@ -2,6 +2,7 @@ import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { issues, projectStatuses } from "@agentic-kanban/shared/schema";
+import { isTerminalStatusName } from "@agentic-kanban/shared";
 import {
   listMilestonesByProject,
   getMilestoneById,
@@ -53,7 +54,6 @@ export function createMilestoneService({ database }: { database: Database }) {
       .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
       .where(and(eq(issues.projectId, projectId), isNotNull(issues.milestoneId)));
 
-    const terminalStatuses = new Set(["Done", "Cancelled"]);
     const today = new Date();
     const cutoffDate = new Date(today);
     cutoffDate.setDate(cutoffDate.getDate() - normalizedDays + 1);
@@ -71,7 +71,7 @@ export function createMilestoneService({ database }: { database: Database }) {
     for (const row of issueRows) {
       if (!row.milestoneId) continue;
       const createdDay = row.createdAt.slice(0, 10);
-      const closedDay = terminalStatuses.has(row.statusName)
+      const closedDay = isTerminalStatusName(row.statusName)
         ? (row.statusChangedAt ? row.statusChangedAt.slice(0, 10) : createdDay)
         : null;
       const bucket = issuesByMilestone.get(row.milestoneId) ?? [];

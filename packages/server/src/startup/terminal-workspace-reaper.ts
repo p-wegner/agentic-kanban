@@ -1,12 +1,12 @@
 import { and, eq, inArray, ne } from "drizzle-orm";
 import { checkBranchTipIsAncestor, countUniqueCommits, isAncestor, revParse } from "@agentic-kanban/shared/lib/git-service";
 import { issues, projectStatuses, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { TERMINAL_STATUS_NAMES } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
 import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
 
-const TERMINAL_STATUS_NAMES = ["Done", "Cancelled"];
 const REAPABLE_WORKSPACE_STATUSES = ["idle", "reviewing", "blocked"];
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -133,7 +133,7 @@ export async function reapTerminalWorkspaces(
         eq(workspaces.isDirect, false),
         ne(workspaces.status, "closed"),
         inArray(workspaces.status, REAPABLE_WORKSPACE_STATUSES),
-        inArray(projectStatuses.name, TERMINAL_STATUS_NAMES),
+        inArray(projectStatuses.name, [...TERMINAL_STATUS_NAMES]),
       ),
     );
 

@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, and, ne } from "drizzle-orm";
 import { readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -140,6 +140,32 @@ export async function resolveStatusByName(
     };
   }
   return { ok: true, statusId: found.id };
+}
+
+/**
+ * Guard for terminal-status moves: is there an open, non-direct, unmerged
+ * workspace for this issue? Direct workspaces (isDirect=true) commit straight to
+ * master — no branch to merge — so they are excluded. Moving an issue to a
+ * terminal status (Done/Cancelled) while such a workspace is open strands the
+ * branch and causes silent merge loss (AK-535). Shared by move_issue and
+ * update_issue so the two guards can't drift.
+ */
+export async function checkOpenUnmergedWorkspace(
+  db: ToolDb,
+  schema: typeof schemaModule,
+  issueId: string,
+): Promise<{ blocked: boolean; workspaceId?: string; branch?: string }> {
+  const openWs = await db
+    .select({ id: schema.workspaces.id, branch: schema.workspaces.branch })
+    .from(schema.workspaces)
+    .where(and(
+      eq(schema.workspaces.issueId, issueId),
+      ne(schema.workspaces.status, "closed"),
+      eq(schema.workspaces.isDirect, false),
+    ))
+    .limit(1);
+  if (openWs.length === 0) return { blocked: false };
+  return { blocked: true, workspaceId: openWs[0].id, branch: openWs[0].branch };
 }
 
 /**

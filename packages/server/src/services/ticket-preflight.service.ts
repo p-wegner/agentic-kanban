@@ -1,5 +1,5 @@
 import { eq, and, inArray } from "drizzle-orm";
-import { isTerminalStatusIdView } from "@agentic-kanban/shared";
+import { isTerminalStatusIdView, TERMINAL_STATUS_NAMES } from "@agentic-kanban/shared";
 import { issues, projectStatuses, workflowNodes } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import { invokeClaudePrompt } from "./claude-cli.service.js";
@@ -70,7 +70,7 @@ export async function runTicketPreflight(
     .where(
       and(
         eq(projectStatuses.projectId, projectId),
-        inArray(projectStatuses.name, ["Done", "Cancelled"]),
+        inArray(projectStatuses.name, [...TERMINAL_STATUS_NAMES]),
       ),
     );
   const excludeIds = doneOrCancelledStatuses.map((s) => s.id);

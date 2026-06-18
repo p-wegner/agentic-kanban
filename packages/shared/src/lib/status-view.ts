@@ -1,6 +1,20 @@
 export const LEGACY_TERMINAL_STATUS_NAMES = new Set(["Done", "Cancelled", "Archived"]);
 export const LEGACY_RESOLVED_DEPENDENCY_STATUS_NAMES = new Set(["Done", "AI Reviewed", "Cancelled"]);
 
+/**
+ * The terminal status-column names a status MOVE / transition treats as "closed".
+ * Single source of truth for the `["Done", "Cancelled"]` literal that was copied
+ * across the MCP move/update guards, the terminal-workspace reaper, and several
+ * services. Excludes the legacy "Archived" (that wider set is
+ * LEGACY_TERMINAL_STATUS_NAMES, used by the dependency-resolution view).
+ */
+export const TERMINAL_STATUS_NAMES = ["Done", "Cancelled"] as const;
+
+/** Whether a status-column name is terminal (Done / Cancelled). */
+export function isTerminalStatusName(name: string | null | undefined): boolean {
+  return name === "Done" || name === "Cancelled";
+}
+
 export interface StatusViewIssue {
   currentNodeId?: string | null;
   currentNodeType?: string | null;

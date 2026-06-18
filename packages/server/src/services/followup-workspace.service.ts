@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { isTerminalStatusIdView } from "@agentic-kanban/shared";
+import { isTerminalStatusIdView, isTerminalStatusName } from "@agentic-kanban/shared";
 import { workspaces, sessions, issues, projects, projectStatuses, issueDependencies, workflowNodes } from "@agentic-kanban/shared/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import type { Database } from "../db/index.js";
@@ -33,8 +33,7 @@ export async function autoStartFollowups(
   if (dependents.length === 0) return;
 
   const statuses = await database.select().from(projectStatuses).where(eq(projectStatuses.projectId, projectId));
-  const terminalNames = new Set(["Done", "Cancelled"]);
-  const doneStatusIds = new Set(statuses.filter(s => terminalNames.has(s.name)).map(s => s.id));
+  const doneStatusIds = new Set(statuses.filter(s => isTerminalStatusName(s.name)).map(s => s.id));
   const todoStatus = statuses.find(s => s.name === "Todo") ?? statuses[0];
   const project = await database.select().from(projects).where(eq(projects.id, projectId)).limit(1);
   if (!project[0]) return;
