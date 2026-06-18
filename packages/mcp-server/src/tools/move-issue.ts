@@ -1,39 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { and, eq, ne } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { requireEntity, resolveStatusByName } from "../db-utils.js";
+import { requireEntity, resolveStatusByName, checkOpenUnmergedWorkspace } from "../db-utils.js";
 import { syncCurrentNodeToStatus, getOutgoingTransitions } from "@agentic-kanban/shared/lib/workflow-engine";
-import { validateWebhookUrl, fireWebhook, buildIssueStatusPayload } from "@agentic-kanban/shared/lib";
-
-/** Status names that represent a terminal (closed) outcome. */
-const TERMINAL_STATUSES = new Set(["Done", "Cancelled"]);
-
-/**
- * Guard: reject a terminal-status move when the issue has an open non-direct
- * workspace that has not been merged. Direct workspaces (isDirect=true) commit
- * directly to master — there is no branch to merge, so they are excluded.
- *
- * Blocked when: status != "closed" AND isDirect = false.
- */
-async function checkOpenWorkspace(
-  db: ToolDeps["db"],
-  schema: ToolDeps["schema"],
-  issueId: string,
-): Promise<{ blocked: boolean; workspaceId?: string; branch?: string }> {
-  const openWs = await db
-    .select({ id: schema.workspaces.id, branch: schema.workspaces.branch })
-    .from(schema.workspaces)
-    .where(and(
-      eq(schema.workspaces.issueId, issueId),
-      ne(schema.workspaces.status, "closed"),
-      eq(schema.workspaces.isDirect, false),
-    ))
-    .limit(1);
-
-  if (openWs.length === 0) return { blocked: false };
-  return { blocked: true, workspaceId: openWs[0].id, branch: openWs[0].branch };
-}
+import { validateWebhookUrl, fireWebhook, buildIssueStatusPayload, isTerminalStatusName } from "@agentic-kanban/shared/lib";
 
 export function registerMoveIssue(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, notifyBoard } = deps;
@@ -63,8 +34,8 @@ export function registerMoveIssue(server: McpServer, deps: ToolDeps = prodDeps) 
       // An agent must call merge_workspace first — that merges the branch AND
       // auto-transitions the issue to Done. Skipping merge_workspace and calling
       // move_issue(Done) directly strands the branch and causes silent merge loss.
-      if (TERMINAL_STATUSES.has(statusName)) {
-        const check = await checkOpenWorkspace(db, schema, issueId);
+      if (isTerminalStatusName(statusName)) {
+        const check = await checkOpenUnmergedWorkspace(db, schema, issueId);
         if (check.blocked) {
           return {
             content: [{

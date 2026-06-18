@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { isTerminalStatusIdView } from "@agentic-kanban/shared";
+import { isTerminalStatusIdView, TERMINAL_STATUS_NAMES } from "@agentic-kanban/shared";
 import { issues, projectStatuses, issueDependencies, agentSkills, tags, issueTags, projects, workflowNodes } from "@agentic-kanban/shared/schema";
 import { eq, and, inArray, sql, desc } from "drizzle-orm";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
@@ -77,7 +77,7 @@ export async function analyzeDependencies(
     .from(projectStatuses)
     .where(and(
       eq(projectStatuses.projectId, projectId),
-      inArray(projectStatuses.name, ["Done", "Cancelled"]),
+      inArray(projectStatuses.name, [...TERMINAL_STATUS_NAMES]),
     ));
   const excludeStatusIds = doneCancelledStatuses.map(s => s.id);
 
@@ -409,7 +409,7 @@ export async function decomposeEpic(
   const doneStatuses = await database
     .select({ id: projectStatuses.id })
     .from(projectStatuses)
-    .where(and(eq(projectStatuses.projectId, projectId), inArray(projectStatuses.name, ["Done", "Cancelled"])));
+    .where(and(eq(projectStatuses.projectId, projectId), inArray(projectStatuses.name, [...TERMINAL_STATUS_NAMES])));
   const doneStatusIds = doneStatuses.map(s => s.id);
 
   const recentIssues = (await database

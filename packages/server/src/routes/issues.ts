@@ -2,6 +2,7 @@ import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { ShowdownContestant } from "@agentic-kanban/shared";
+import { isTerminalStatusName } from "@agentic-kanban/shared";
 import { analyzeDependencies, enhanceIssue, aiEstimateIssue, decomposeEpic, confirmEpicDecomposition, analyzeTouchedFiles } from "../services/issue-ai.service.js";
 import { createIssueService } from "../services/issue.service.js";
 import {
@@ -395,11 +396,10 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     // Per issue: the day it entered the board (createdAt) and the day it stopped being open
     // (statusChangedAt when the current status is terminal; an issue created straight into a
     // terminal status with no explicit move is treated as never-open).
-    const TERMINAL = new Set(["Done", "Cancelled"]);
     const items = rows.map((r) => {
       const createdDay = r.createdAt.slice(0, 10);
       let closedDay: string | null = null;
-      if (TERMINAL.has(r.statusName)) {
+      if (isTerminalStatusName(r.statusName)) {
         closedDay = r.statusChangedAt ? r.statusChangedAt.slice(0, 10) : createdDay;
       }
       return { createdDay, closedDay };
