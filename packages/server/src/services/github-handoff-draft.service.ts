@@ -1,11 +1,18 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, inArray } from "drizzle-orm";
-import { diffComments, issueArtifacts, issues, projects, projectStatuses, sessionMessages, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { parseSessionSummary } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
 import * as realGitService from "./git.service.js";
 import { WorkspaceError, type GitService } from "./workspace-internals.js";
 import { readSessionStdoutFile, getSessionMessageRows } from "../repositories/session.repository.js";
+import {
+  getHandoffWorkspaceContext,
+  getHandoffSessionRows,
+  getHandoffSessionMessageRows,
+  getHandoffDiffComments,
+  insertHandoffArtifact,
+  getHandoffWorkspaceIssueId,
+  getLatestHandoffArtifact,
+} from "../repositories/github-handoff-draft.repository.js";
 
 export const GITHUB_HANDOFF_DRAFT_CAPTION = "github-handoff-draft";
 
@@ -128,37 +135,13 @@ export async function generateGithubHandoffDraft(args: {
   const { workspaceId, database } = args;
   const gitService = args.gitService ?? realGitService;
 
-  const rows = await database
-    .select({
-      issueId: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
-      statusName: projectStatuses.name,
-      repoPath: projects.repoPath,
-      branch: workspaces.branch,
-      baseBranch: workspaces.baseBranch,
-      baseCommitSha: workspaces.baseCommitSha,
-      status: workspaces.status,
-      closedAt: workspaces.closedAt,
-      mergedAt: workspaces.mergedAt,
-    })
-    .from(workspaces)
-    .innerJoin(issues, eq(workspaces.issueId, issues.id))
-    .innerJoin(projects, eq(issues.projectId, projects.id))
-    .leftJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-    .where(eq(workspaces.id, workspaceId))
-    .limit(1);
-  const row = rows[0];
+  const row = await getHandoffWorkspaceContext(workspaceId, database);
   if (!row) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
   if (row.status !== "closed") {
     throw new WorkspaceError("GitHub handoff drafts can only be generated for closed workspaces", "BAD_REQUEST");
   }
 
-  const sessionRows = await database
-    .select({ id: sessions.id, triggerType: sessions.triggerType, stats: sessions.stats })
-    .from(sessions)
-    .where(eq(sessions.workspaceId, workspaceId))
-    .orderBy(desc(sessions.startedAt));
+  const sessionRows = await getHandoffSessionRows(workspaceId, database);
   const sessionIds = sessionRows.map((session) => session.id);
   let messageRows: Array<{ type: string; data: string | null; sessionId: string }> = [];
   if (sessionIds.length > 0) {
@@ -172,10 +155,7 @@ export async function generateGithubHandoffDraft(args: {
       }
     }
     if (needsDb.length > 0) {
-      const dbRows = await database
-        .select({ type: sessionMessages.type, data: sessionMessages.data, sessionId: sessionMessages.sessionId })
-        .from(sessionMessages)
-        .where(inArray(sessionMessages.sessionId, needsDb));
+      const dbRows = await getHandoffSessionMessageRows(needsDb, database);
       messageRows = messageRows.concat(dbRows);
     }
   }
@@ -224,11 +204,7 @@ async function collectReviewerNotes(
   workspaceId: string,
   sessionRows: Array<{ id: string; triggerType: string | null; stats: string | null }>,
 ): Promise<string[]> {
-  const comments = await database
-    .select({ filePath: diffComments.filePath, lineNumNew: diffComments.lineNumNew, body: diffComments.body })
-    .from(diffComments)
-    .where(eq(diffComments.workspaceId, workspaceId))
-    .orderBy(diffComments.createdAt);
+  const comments = await getHandoffDiffComments(workspaceId, database);
 
   const notes = comments.map((comment) => {
     const location = comment.lineNumNew ? `${comment.filePath}:${comment.lineNumNew}` : comment.filePath;
@@ -251,7 +227,7 @@ export async function persistGithubHandoffDraft(args: {
   database: Database;
 }): Promise<{ artifactId: string }> {
   const artifactId = randomUUID();
-  await args.database.insert(issueArtifacts).values({
+  await insertHandoffArtifact({
     id: artifactId,
     issueId: args.issueId,
     workspaceId: args.workspaceId,
@@ -259,7 +235,7 @@ export async function persistGithubHandoffDraft(args: {
     mimeType: "text/markdown",
     content: args.content,
     caption: GITHUB_HANDOFF_DRAFT_CAPTION,
-  });
+  }, args.database);
   return { artifactId };
 }
 
@@ -274,12 +250,7 @@ export async function generateAndPersistGithubHandoffDraft(args: {
   commits?: Array<{ sha: string; message: string }>;
   gitService?: GitService;
 }): Promise<{ artifactId: string; content: string }> {
-  const workspaceRows = await args.database
-    .select({ issueId: workspaces.issueId })
-    .from(workspaces)
-    .where(eq(workspaces.id, args.workspaceId))
-    .limit(1);
-  const issueId = args.issueId ?? workspaceRows[0]?.issueId;
+  const issueId = args.issueId ?? await getHandoffWorkspaceIssueId(args.workspaceId, args.database);
   if (!issueId) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
 
   const content = await generateGithubHandoffDraft(args);
@@ -296,12 +267,6 @@ export async function getLatestGithubHandoffDraft(args: {
   workspaceId: string;
   database: Database;
 }): Promise<{ artifactId: string; content: string; createdAt: string } | null> {
-  const rows = await args.database
-    .select({ id: issueArtifacts.id, content: issueArtifacts.content, createdAt: issueArtifacts.createdAt })
-    .from(issueArtifacts)
-    .where(and(eq(issueArtifacts.workspaceId, args.workspaceId), eq(issueArtifacts.caption, GITHUB_HANDOFF_DRAFT_CAPTION)))
-    .orderBy(desc(issueArtifacts.createdAt))
-    .limit(1);
-  const row = rows[0];
+  const row = await getLatestHandoffArtifact(args.workspaceId, GITHUB_HANDOFF_DRAFT_CAPTION, args.database);
   return row ? { artifactId: row.id, content: row.content, createdAt: row.createdAt } : null;
 }

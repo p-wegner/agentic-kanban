@@ -1,10 +1,17 @@
-import { issues, preferences, projectStatuses, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { isCodexUsageLimitStats } from "./codex-rate-limit.js";
 import { resolveStartPolicy } from "./start-policy.service.js";
 import { parseSessionStats } from "../startup/monitor-cycle-rules.js";
+import {
+  getAllPreferences,
+  getActiveAutodriveWorkspaceRows,
+  getLatestSessionForWorkspace,
+  getFixAndMergeSessionCount,
+  getProgressIssueRows,
+  getProgressWorkspaceRows,
+  getProgressSessionRows,
+} from "../repositories/autodrive-stall-warning.repository.js";
 
 const ACTIVE_AUTODRIVE_STATUS_NAMES = ["In Progress", "In Review"] as const;
 const ACTIVE_WORKSPACE_STATUSES = ["active", "reviewing", "fixing", "idle", "blocked"] as const;
@@ -151,23 +158,12 @@ function causeLabel(cause: AutodriveStallCause): string {
 async function attachSessions(database: Database, rows: ActiveWorkspaceRow[]): Promise<ActiveWorkspaceWithSessions[]> {
   const result: ActiveWorkspaceWithSessions[] = [];
   for (const row of rows) {
-    const [latestSession] = await database.select({
-      id: sessions.id,
-      status: sessions.status,
-      startedAt: sessions.startedAt,
-      endedAt: sessions.endedAt,
-      stats: sessions.stats,
-      triggerType: sessions.triggerType,
-    }).from(sessions)
-      .where(eq(sessions.workspaceId, row.workspaceId))
-      .orderBy(desc(sessions.startedAt))
-      .limit(1);
-    const fixCountRows = await database.select({ count: sql<number>`count(*)` }).from(sessions)
-      .where(and(eq(sessions.workspaceId, row.workspaceId), eq(sessions.triggerType, "fix-and-merge")));
+    const latestSession = await getLatestSessionForWorkspace(row.workspaceId, database);
+    const fixAndMergeSessionCount = await getFixAndMergeSessionCount(row.workspaceId, database);
     result.push({
       ...row,
-      latestSession: latestSession ?? null,
-      fixAndMergeSessionCount: Number(fixCountRows[0]?.count ?? 0),
+      latestSession,
+      fixAndMergeSessionCount,
     });
   }
   return result;
@@ -175,36 +171,17 @@ async function attachSessions(database: Database, rows: ActiveWorkspaceRow[]): P
 
 async function collectProjectProgress(database: Database, projectIds: string[]): Promise<Map<string, string[]>> {
   const progressByProject = new Map<string, string[]>();
-  const issueRows = await database.select({
-    projectId: issues.projectId,
-    updatedAt: issues.updatedAt,
-    statusChangedAt: issues.statusChangedAt,
-  }).from(issues)
-    .where(inArray(issues.projectId, projectIds));
+  const issueRows = await getProgressIssueRows(projectIds, database);
   for (const row of issueRows) {
     addProgress(progressByProject, row.projectId, row.updatedAt, row.statusChangedAt);
   }
 
-  const workspaceRows = await database.select({
-    projectId: issues.projectId,
-    createdAt: workspaces.createdAt,
-    updatedAt: workspaces.updatedAt,
-    mergedAt: workspaces.mergedAt,
-  }).from(workspaces)
-    .innerJoin(issues, eq(workspaces.issueId, issues.id))
-    .where(inArray(issues.projectId, projectIds));
+  const workspaceRows = await getProgressWorkspaceRows(projectIds, database);
   for (const row of workspaceRows) {
     addProgress(progressByProject, row.projectId, row.createdAt, row.updatedAt, row.mergedAt);
   }
 
-  const sessionRows = await database.select({
-    projectId: issues.projectId,
-    startedAt: sessions.startedAt,
-    endedAt: sessions.endedAt,
-  }).from(sessions)
-    .innerJoin(workspaces, eq(sessions.workspaceId, workspaces.id))
-    .innerJoin(issues, eq(workspaces.issueId, issues.id))
-    .where(inArray(issues.projectId, projectIds));
+  const sessionRows = await getProgressSessionRows(projectIds, database);
   for (const row of sessionRows) {
     addProgress(progressByProject, row.projectId, row.startedAt, row.endedAt);
   }
@@ -217,7 +194,7 @@ export async function scanAutodriveStallWarnings(
   prefMap?: Map<string, string>,
   now = new Date(),
 ): Promise<AutodriveStallWarning[]> {
-  const prefs = prefMap ?? new Map((await database.select().from(preferences)).map((r) => [r.key, r.value]));
+  const prefs = prefMap ?? new Map((await getAllPreferences(database)).map((r) => [r.key, r.value]));
   const autoDrivenIds = explicitAutoDrivenProjectIds(prefs);
   if (autoDrivenIds.size === 0) return [];
 
@@ -226,29 +203,12 @@ export async function scanAutodriveStallWarnings(
   const projectIds = [...autoDrivenIds].filter((projectId) => resolveStartPolicy(prefs, projectId).mode !== "manual");
   if (projectIds.length === 0) return [];
 
-  const activeRows = await database.select({
-    projectId: projects.id,
-    projectName: projects.name,
-    issueId: issues.id,
-    issueNumber: issues.issueNumber,
-    issueTitle: issues.title,
-    statusName: projectStatuses.name,
-    issueUpdatedAt: issues.updatedAt,
-    issueStatusChangedAt: issues.statusChangedAt,
-    workspaceId: workspaces.id,
-    workspaceStatus: workspaces.status,
-    workspaceUpdatedAt: workspaces.updatedAt,
-    workspaceCreatedAt: workspaces.createdAt,
-    readyForMerge: workspaces.readyForMerge,
-  }).from(workspaces)
-    .innerJoin(issues, eq(workspaces.issueId, issues.id))
-    .innerJoin(projects, eq(issues.projectId, projects.id))
-    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-    .where(and(
-      inArray(issues.projectId, projectIds),
-      inArray(projectStatuses.name, [...ACTIVE_AUTODRIVE_STATUS_NAMES]),
-      inArray(workspaces.status, [...ACTIVE_WORKSPACE_STATUSES]),
-    ));
+  const activeRows = await getActiveAutodriveWorkspaceRows(
+    projectIds,
+    [...ACTIVE_AUTODRIVE_STATUS_NAMES],
+    [...ACTIVE_WORKSPACE_STATUSES],
+    database,
+  );
   if (activeRows.length === 0) return [];
 
   const rows = await attachSessions(database, activeRows);
