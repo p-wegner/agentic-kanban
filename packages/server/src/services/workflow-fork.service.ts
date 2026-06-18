@@ -1,18 +1,42 @@
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { and, eq, ne, inArray } from "drizzle-orm";
-import {
-  issues,
-  projects,
-  preferences,
-  workspaces,
-  workflowTemplates,
-  agentSkills,
-  sessions,
-  sessionMessages,
-} from "@agentic-kanban/shared/schema";
 import { readSessionStdoutFile } from "../repositories/session.repository.js";
+import {
+  selectAllPreferences,
+  selectAgentSkillById,
+  selectWorkspaceIdById,
+  updateChildWorkspaceFailed,
+  insertFailedChildWorkspace,
+  selectTemplateBuiltinKey,
+  selectRunningSessionForWorkspace,
+  selectPhaseSession,
+  selectWorkspacePhaseContext,
+  updateWorkspaceSkill,
+  selectProjectRunningForkWorkspaces,
+  insertLaunchedChildWorkspace,
+  selectForkParent,
+  selectForkIssueWithTemplate,
+  selectProjectIdAndRepoPath,
+  selectExistingForkChildren,
+  insertQueuedChildWorkspace,
+  selectPendingForkChildren,
+  selectForkIssue,
+  selectRunningForkChildren,
+  selectQueuedForkChildren,
+  deleteWorkspaceById,
+  selectSessionsForWorkspaceOrdered,
+  selectStdoutSessionMessages,
+  selectChildJoinContext,
+  updateChildWorkspaceJoined,
+  selectRunningSessionsForWorkspace,
+  selectConsolidateParent,
+  selectConsolidateIssue,
+  selectForkChildrenForConsolidate,
+  selectCancelOverdueChild,
+  updateChildWorkspaceCancelled,
+  selectWorkspaceNodeContext,
+} from "../repositories/workflow-fork.repository.js";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
@@ -51,7 +75,7 @@ export function createWorkflowForkService(deps: {
   const gitService = deps.gitService ?? realGitService;
 
   async function resolveAgentConfig() {
-    const prefRows = await database.select().from(preferences);
+    const prefRows = await selectAllPreferences(database);
     const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
     const s = resolveAgentSettings(prefMap);
     const model = s.provider === "claude" ? prefMap.get("default_model") || undefined : undefined;
@@ -61,7 +85,7 @@ export function createWorkflowForkService(deps: {
   /** Write the node's attached skill into a child worktree, returning its name. */
   async function injectNodeSkill(node: WorkflowNodeRow, worktreePath: string, repoPath: string): Promise<string | null> {
     if (node.skillId) {
-      const rows = await database.select().from(agentSkills).where(eq(agentSkills.id, node.skillId)).limit(1);
+      const rows = await selectAgentSkillById(node.skillId, database);
       if (rows.length > 0) {
         const skill = rows[0];
         const localPrompt = await readLocalSkillPrompt(repoPath, skill.name);
@@ -107,38 +131,25 @@ export function createWorkflowForkService(deps: {
       closedAt: now,
       updatedAt: now,
     };
-    const existing = await database.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.id, childWorkspaceId)).limit(1);
+    const existing = await selectWorkspaceIdById(childWorkspaceId, database);
     if (existing.length > 0) {
-      await database.update(workspaces).set({
-        status: "closed",
-        forkStatus: "failed",
-        closedAt: now,
-        updatedAt: now,
-      }).where(eq(workspaces.id, childWorkspaceId));
+      await updateChildWorkspaceFailed(childWorkspaceId, now, database);
     } else {
-      await database.insert(workspaces).values({ ...insertValues, createdAt: now });
+      await insertFailedChildWorkspace(insertValues, now, database);
     }
     console.warn(`[fork] child launch failed (${childWorkspaceId}, ${entry.name}): ${failure}`);
   }
 
   async function isSpecDrivenPhaseNode(node: WorkflowNodeRow): Promise<boolean> {
     if (!node.skillName || !SPEC_PHASE_SKILLS.has(node.skillName)) return false;
-    const rows = await database
-      .select({ builtinKey: workflowTemplates.builtinKey })
-      .from(workflowTemplates)
-      .where(eq(workflowTemplates.id, node.templateId))
-      .limit(1);
+    const rows = await selectTemplateBuiltinKey(node.templateId, database);
     return rows[0]?.builtinKey === "spec-driven-phased-planning";
   }
 
   async function waitForWorkspaceSessionSlot(workspaceId: string, triggerType: string): Promise<boolean> {
     const deadline = Date.now() + SPEC_PHASE_SESSION_START_TIMEOUT_MS;
     while (true) {
-      const running = await database
-        .select({ id: sessions.id })
-        .from(sessions)
-        .where(and(eq(sessions.workspaceId, workspaceId), eq(sessions.status, "running")))
-        .limit(1);
+      const running = await selectRunningSessionForWorkspace(workspaceId, database);
       if (running.length === 0) return true;
       if (Date.now() >= deadline) {
         console.warn(`[fork] skipped ${triggerType} launch for workspace ${workspaceId}: another session is still running.`);
@@ -152,43 +163,20 @@ export function createWorkflowForkService(deps: {
     if (!getSessionManager || !(await isSpecDrivenPhaseNode(node))) return;
 
     const triggerType = `phase:${node.skillName}`;
-    const phaseSessions = () => database
-      .select({ id: sessions.id })
-      .from(sessions)
-      .where(and(eq(sessions.workspaceId, workspaceId), eq(sessions.triggerType, triggerType)))
-      .limit(1);
+    const phaseSessions = () => selectPhaseSession(workspaceId, triggerType, database);
     const existing = await phaseSessions();
     if (existing.length > 0) return;
     if (!(await waitForWorkspaceSessionSlot(workspaceId, triggerType))) return;
     if ((await phaseSessions()).length > 0) return;
 
-    const rows = await database
-      .select({
-        workspaceId: workspaces.id,
-        issueId: workspaces.issueId,
-        branch: workspaces.branch,
-        workingDir: workspaces.workingDir,
-        projectId: issues.projectId,
-        issueNumber: issues.issueNumber,
-        title: issues.title,
-        description: issues.description,
-        repoPath: projects.repoPath,
-      })
-      .from(workspaces)
-      .innerJoin(issues, eq(workspaces.issueId, issues.id))
-      .innerJoin(projects, eq(issues.projectId, projects.id))
-      .where(eq(workspaces.id, workspaceId))
-      .limit(1);
+    const rows = await selectWorkspacePhaseContext(workspaceId, database);
     const ws = rows[0];
     if (!ws?.workingDir) return;
 
     const skillName = await injectNodeSkill(node, ws.workingDir, ws.repoPath);
     if (!skillName) return;
 
-    await database.update(workspaces).set({
-      skillId: node.skillId ?? null,
-      updatedAt: new Date().toISOString(),
-    }).where(eq(workspaces.id, workspaceId));
+    await updateWorkspaceSkill(workspaceId, node.skillId ?? null, new Date().toISOString(), database);
 
     const transitions = await getOutgoingTransitions(database, node.id);
     const prompt =
@@ -214,11 +202,7 @@ export function createWorkflowForkService(deps: {
 
   /** Count fork-child sessions currently running across the whole project. */
   async function projectRunningForkCount(projectId: string): Promise<number> {
-    const rows = await database
-      .select({ id: workspaces.id })
-      .from(workspaces)
-      .innerJoin(issues, eq(workspaces.issueId, issues.id))
-      .where(and(eq(issues.projectId, projectId), eq(workspaces.forkStatus, "running")));
+    const rows = await selectProjectRunningForkWorkspaces(projectId, database);
     return rows.length;
   }
 
@@ -258,7 +242,7 @@ export function createWorkflowForkService(deps: {
 
     const cfg = await resolveAgentConfig();
 
-    await database.insert(workspaces).values({
+    await insertLaunchedChildWorkspace({
       id: childWorkspaceId,
       issueId: parent.issueId,
       branch: childBranch,
@@ -277,7 +261,7 @@ export function createWorkflowForkService(deps: {
       forkStatus: "running",
       createdAt: now,
       updatedAt: now,
-    });
+    }, database);
 
     // Record the structural fork → entry transition (child path).
     await placeWorkspaceOnNode(database, {
@@ -319,24 +303,16 @@ export function createWorkflowForkService(deps: {
 
   /** Spawn fork children for a parent workspace that just entered a parallel-fork node. */
   async function spawnForkChildren(parentWorkspaceId: string, forkNode: WorkflowNodeRow): Promise<void> {
-    const parentRows = await database
-      .select({ id: workspaces.id, issueId: workspaces.issueId, branch: workspaces.branch, workingDir: workspaces.workingDir })
-      .from(workspaces)
-      .where(eq(workspaces.id, parentWorkspaceId))
-      .limit(1);
+    const parentRows = await selectForkParent(parentWorkspaceId, database);
     if (parentRows.length === 0) return;
     const parent = parentRows[0];
     const sharedWorktree = getForkMode(forkNode.config) === "shared";
 
-    const issueRows = await database
-      .select({ issueNumber: issues.issueNumber, title: issues.title, description: issues.description, projectId: issues.projectId, workflowTemplateId: issues.workflowTemplateId })
-      .from(issues)
-      .where(eq(issues.id, parent.issueId))
-      .limit(1);
+    const issueRows = await selectForkIssueWithTemplate(parent.issueId, database);
     if (issueRows.length === 0) return;
     const issue = issueRows[0];
 
-    const projRows = await database.select({ id: projects.id, repoPath: projects.repoPath }).from(projects).where(eq(projects.id, issue.projectId)).limit(1);
+    const projRows = await selectProjectIdAndRepoPath(issue.projectId, database);
     if (projRows.length === 0) return;
     const project = projRows[0];
 
@@ -348,10 +324,7 @@ export function createWorkflowForkService(deps: {
     }
 
     // Idempotency: if children already exist for this parent+fork, do nothing.
-    const existing = await database
-      .select({ id: workspaces.id })
-      .from(workspaces)
-      .where(and(eq(workspaces.parentWorkspaceId, parent.id), eq(workspaces.forkNodeId, forkNode.id)));
+    const existing = await selectExistingForkChildren(parent.id, forkNode.id, database);
     if (existing.length > 0) return;
 
     const edges = await getOutgoingTransitions(database, forkNode.id);
@@ -383,7 +356,7 @@ export function createWorkflowForkService(deps: {
       } else {
         // Over the concurrency cap: queue the child (no worktree/session yet).
         const now = new Date().toISOString();
-        await database.insert(workspaces).values({
+        await insertQueuedChildWorkspace({
           id: childId,
           issueId: parent.issueId,
           branch: childBranchName(parent.branch, entry.name, sharedWorktree),
@@ -395,47 +368,32 @@ export function createWorkflowForkService(deps: {
           forkStatus: "queued",
           createdAt: now,
           updatedAt: now,
-        });
+        }, database);
       }
     }
     console.log(`[fork] parent=${parent.id} spawned ${launchedNow}/${entries.length} children now (rest queued).`);
 
-    const pending = await database
-      .select({ id: workspaces.id })
-      .from(workspaces)
-      .where(and(eq(workspaces.parentWorkspaceId, parent.id), inArray(workspaces.forkStatus, ["running", "queued"])));
+    const pending = await selectPendingForkChildren(parent.id, database);
     if (pending.length === 0) await consolidate(parent.id);
   }
 
   /** Drain queued children for a parent up to the concurrency caps. */
   async function drainQueued(parentWorkspaceId: string): Promise<void> {
-    const parentRows = await database
-      .select({ id: workspaces.id, issueId: workspaces.issueId, branch: workspaces.branch, workingDir: workspaces.workingDir })
-      .from(workspaces)
-      .where(eq(workspaces.id, parentWorkspaceId))
-      .limit(1);
+    const parentRows = await selectForkParent(parentWorkspaceId, database);
     if (parentRows.length === 0) return;
     const parent = parentRows[0];
 
-    const issueRows = await database
-      .select({ issueNumber: issues.issueNumber, title: issues.title, description: issues.description, projectId: issues.projectId })
-      .from(issues).where(eq(issues.id, parent.issueId)).limit(1);
+    const issueRows = await selectForkIssue(parent.issueId, database);
     if (issueRows.length === 0) return;
     const issue = issueRows[0];
-    const projRows = await database.select({ id: projects.id, repoPath: projects.repoPath }).from(projects).where(eq(projects.id, issue.projectId)).limit(1);
+    const projRows = await selectProjectIdAndRepoPath(issue.projectId, database);
     if (projRows.length === 0) return;
     const project = projRows[0];
 
-    const running = await database
-      .select({ id: workspaces.id })
-      .from(workspaces)
-      .where(and(eq(workspaces.parentWorkspaceId, parent.id), eq(workspaces.forkStatus, "running")));
+    const running = await selectRunningForkChildren(parent.id, database);
     let runningCount = running.length;
 
-    const queued = await database
-      .select()
-      .from(workspaces)
-      .where(and(eq(workspaces.parentWorkspaceId, parent.id), eq(workspaces.forkStatus, "queued")));
+    const queued = await selectQueuedForkChildren(parent.id, database);
 
     for (const q of queued) {
       const forkNode = q.forkNodeId ? await getNode(database, q.forkNodeId) : null;
@@ -448,7 +406,7 @@ export function createWorkflowForkService(deps: {
       if (runningCount >= perWorkspaceCap) break;
       if ((await projectRunningForkCount(issue.projectId)) >= MAX_CONCURRENT_PER_PROJECT) break;
       // Remove the placeholder row; launchChild re-inserts a full one with the same id.
-      await database.delete(workspaces).where(eq(workspaces.id, q.id));
+      await deleteWorkspaceById(q.id, database);
       await launchChild({ parent, project, issue, forkNode, joinNode, entry, childWorkspaceId: q.id, sharedWorktree });
       runningCount++;
     }
@@ -478,7 +436,7 @@ export function createWorkflowForkService(deps: {
   }
 
   async function lastAssistantSummary(workspaceId: string): Promise<string | null> {
-    const sess = await database.select({ id: sessions.id }).from(sessions).where(eq(sessions.workspaceId, workspaceId)).orderBy(sessions.startedAt);
+    const sess = await selectSessionsForWorkspaceOrdered(workspaceId, database);
     if (sess.length === 0) return null;
     const lastSession = sess[sess.length - 1];
     // Prefer .out file; fall back to DB for historical sessions
@@ -486,11 +444,7 @@ export function createWorkflowForkService(deps: {
     if (fileContent !== null) {
       return fileContent.length > 1500 ? fileContent.slice(-1500) : fileContent;
     }
-    const msgs = await database
-      .select({ data: sessionMessages.data })
-      .from(sessionMessages)
-      .where(and(eq(sessionMessages.sessionId, lastSession.id), eq(sessionMessages.type, "stdout")))
-      .orderBy(sessionMessages.createdAt);
+    const msgs = await selectStdoutSessionMessages(lastSession.id, database);
     if (msgs.length === 0) return null;
     const tail = msgs.slice(-1)[0]?.data ?? "";
     return tail.length > 1500 ? tail.slice(-1500) : tail;
@@ -498,31 +452,24 @@ export function createWorkflowForkService(deps: {
 
   /** Mark a child as joined; when all siblings are done, consolidate into the parent. */
   async function handleChildJoined(childWorkspaceId: string): Promise<void> {
-    const rows = await database
-      .select({ id: workspaces.id, parentWorkspaceId: workspaces.parentWorkspaceId, forkJoinNodeId: workspaces.forkJoinNodeId })
-      .from(workspaces)
-      .where(eq(workspaces.id, childWorkspaceId))
-      .limit(1);
+    const rows = await selectChildJoinContext(childWorkspaceId, database);
     if (rows.length === 0 || !rows[0].parentWorkspaceId) return;
     const child = rows[0];
     const parentId: string = rows[0].parentWorkspaceId;
     const now = new Date().toISOString();
 
-    await database.update(workspaces).set({ forkStatus: "joined", status: "closed", closedAt: now, updatedAt: now }).where(eq(workspaces.id, childWorkspaceId));
+    await updateChildWorkspaceJoined(childWorkspaceId, now, database);
 
     // Stop the child session if still running — its work is committed on its branch.
     if (getSessionManager) {
-      const running = await database.select({ id: sessions.id }).from(sessions).where(and(eq(sessions.workspaceId, childWorkspaceId), eq(sessions.status, "running")));
+      const running = await selectRunningSessionsForWorkspace(childWorkspaceId, database);
       for (const s of running) await getSessionManager().stopSession(s.id).catch(() => {});
     }
 
     await drainQueued(parentId);
 
     // All children done? (none running or queued)
-    const pending = await database
-      .select({ id: workspaces.id })
-      .from(workspaces)
-      .where(and(eq(workspaces.parentWorkspaceId, parentId), inArray(workspaces.forkStatus, ["running", "queued"])));
+    const pending = await selectPendingForkChildren(parentId, database);
     if (pending.length > 0) return;
 
     await consolidate(parentId);
@@ -530,16 +477,14 @@ export function createWorkflowForkService(deps: {
 
   /** Write the fork artifacts file and advance the parent into the join node. */
   async function consolidate(parentWorkspaceId: string): Promise<void> {
-    const parentRows = await database
-      .select({ id: workspaces.id, issueId: workspaces.issueId, branch: workspaces.branch, workingDir: workspaces.workingDir, currentNodeId: workspaces.currentNodeId })
-      .from(workspaces).where(eq(workspaces.id, parentWorkspaceId)).limit(1);
+    const parentRows = await selectConsolidateParent(parentWorkspaceId, database);
     if (parentRows.length === 0) return;
     const parent = parentRows[0];
 
-    const issueRows = await database.select({ issueNumber: issues.issueNumber, title: issues.title, description: issues.description, projectId: issues.projectId, workflowTemplateId: issues.workflowTemplateId }).from(issues).where(eq(issues.id, parent.issueId)).limit(1);
+    const issueRows = await selectConsolidateIssue(parent.issueId, database);
     if (issueRows.length === 0 || !issueRows[0].workflowTemplateId) return;
     const issue = issueRows[0];
-    const projRows = await database.select({ id: projects.id, repoPath: projects.repoPath }).from(projects).where(eq(projects.id, issue.projectId)).limit(1);
+    const projRows = await selectProjectIdAndRepoPath(issue.projectId, database);
     if (projRows.length === 0) return;
     const project = projRows[0];
 
@@ -549,10 +494,7 @@ export function createWorkflowForkService(deps: {
     // Idempotency: only consolidate once (parent not already on/past the join).
     if (parent.currentNodeId === joinNode.id) return;
 
-    const children = await database
-      .select({ id: workspaces.id, branch: workspaces.branch, workingDir: workspaces.workingDir, forkStatus: workspaces.forkStatus, forkNodeId: workspaces.forkNodeId })
-      .from(workspaces)
-      .where(eq(workspaces.parentWorkspaceId, parent.id));
+    const children = await selectForkChildrenForConsolidate(parent.id, database);
 
     // Shared-worktree forks ran sequentially on the parent branch, so their work
     // is already committed here — there's nothing to merge, and their workingDir
@@ -692,19 +634,19 @@ export function createWorkflowForkService(deps: {
   }
 
   async function cancelOverdueChild(childWorkspaceId: string): Promise<void> {
-    const rows = await database.select({ forkStatus: workspaces.forkStatus, parentWorkspaceId: workspaces.parentWorkspaceId }).from(workspaces).where(eq(workspaces.id, childWorkspaceId)).limit(1);
+    const rows = await selectCancelOverdueChild(childWorkspaceId, database);
     if (rows.length === 0 || rows[0].forkStatus !== "running") return;
     const now = new Date().toISOString();
     if (getSessionManager) {
-      const running = await database.select({ id: sessions.id }).from(sessions).where(and(eq(sessions.workspaceId, childWorkspaceId), eq(sessions.status, "running")));
+      const running = await selectRunningSessionsForWorkspace(childWorkspaceId, database);
       for (const s of running) await getSessionManager().stopSession(s.id).catch(() => {});
     }
-    await database.update(workspaces).set({ forkStatus: "cancelled", status: "closed", closedAt: now, updatedAt: now }).where(eq(workspaces.id, childWorkspaceId));
+    await updateChildWorkspaceCancelled(childWorkspaceId, now, database);
     console.warn(`[fork] child ${childWorkspaceId} timed out -> cancelled.`);
     const parentId = rows[0].parentWorkspaceId;
     if (parentId) {
       await drainQueued(parentId);
-      const pending = await database.select({ id: workspaces.id }).from(workspaces).where(and(eq(workspaces.parentWorkspaceId, parentId), inArray(workspaces.forkStatus, ["running", "queued"])));
+      const pending = await selectPendingForkChildren(parentId, database);
       if (pending.length === 0) await consolidate(parentId);
     }
   }
@@ -717,11 +659,7 @@ export function createWorkflowForkService(deps: {
    */
   async function onWorkspaceEnteredNode(workspaceId: string): Promise<void> {
     try {
-      const rows = await database
-        .select({ id: workspaces.id, currentNodeId: workspaces.currentNodeId, parentWorkspaceId: workspaces.parentWorkspaceId, forkStatus: workspaces.forkStatus })
-        .from(workspaces)
-        .where(eq(workspaces.id, workspaceId))
-        .limit(1);
+      const rows = await selectWorkspaceNodeContext(workspaceId, database);
       if (rows.length === 0 || !rows[0].currentNodeId) return;
       const ws = rows[0];
       const node = await getNode(database, rows[0].currentNodeId);
