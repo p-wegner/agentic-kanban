@@ -2,13 +2,20 @@ import { spawn, execFile, type ChildProcessWithoutNullStreams } from "node:child
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
-import { eq } from "drizzle-orm";
-import { issues, sessionMessages, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "./board-events.js";
 import type { SessionManager } from "./session.manager.js";
 import { WorkspaceError } from "./workspace-internals.js";
+import {
+  insertSessionMessage,
+  getBisectRunContext,
+  getBisectStartContext,
+  getSessionsForWorkspace,
+  insertBisectSession,
+  setSessionTerminal,
+  setWorkspaceStatus,
+} from "../repositories/bisect.repository.js";
 
 export type BisectScope = "related" | "full";
 
@@ -209,12 +216,12 @@ export function createBisectService(deps: {
       manager.handleOutput(sessionId, message);
       return;
     }
-    await database.insert(sessionMessages).values({
+    await insertSessionMessage({
       sessionId,
       type: message.type,
       data: message.data ?? null,
       exitCode: message.exitCode != null ? String(message.exitCode) : null,
-    });
+    }, database);
   }
 
   async function emitLine(sessionId: string, line: string) {
@@ -267,24 +274,16 @@ export function createBisectService(deps: {
       await emitLine(sessionId, `\n${formatResult(result)}`);
     }
     await emit(sessionId, { type: "exit", sessionId, exitCode });
-    await database.update(sessions)
-      .set({ status: "completed", endedAt: now, exitCode: String(exitCode) })
-      .where(eq(sessions.id, sessionId));
-    await database.update(workspaces)
-      .set({ status: "idle", updatedAt: now })
-      .where(eq(workspaces.id, workspaceId));
+    await setSessionTerminal(sessionId, "completed", now, String(exitCode), database);
+    await setWorkspaceStatus(workspaceId, "idle", now, database);
   }
 
   async function stopSession(workspaceId: string, sessionId: string) {
     const now = new Date().toISOString();
     await emitLine(sessionId, "Auto-bisect stopped.");
     await emit(sessionId, { type: "exit", sessionId, exitCode: 130 });
-    await database.update(sessions)
-      .set({ status: "stopped", endedAt: now, exitCode: "130" })
-      .where(eq(sessions.id, sessionId));
-    await database.update(workspaces)
-      .set({ status: "idle", updatedAt: now })
-      .where(eq(workspaces.id, workspaceId));
+    await setSessionTerminal(sessionId, "stopped", now, "130", database);
+    await setWorkspaceStatus(workspaceId, "idle", now, database);
   }
 
   async function runBisect(workspaceId: string, sessionId: string, scope: BisectScope) {
@@ -295,18 +294,7 @@ export function createBisectService(deps: {
     let projectId: string | null = null;
     let exitCode = 1;
     try {
-      const rows = await database
-        .select({
-          workingDir: workspaces.workingDir,
-          baseCommitSha: workspaces.baseCommitSha,
-          projectId: issues.projectId,
-        })
-        .from(workspaces)
-        .innerJoin(issues, eq(workspaces.issueId, issues.id))
-        .where(eq(workspaces.id, workspaceId))
-        .limit(1);
-
-      const row = rows[0];
+      const row = await getBisectRunContext(workspaceId, database);
       if (!row) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
       projectId = row.projectId;
       if (!row.workingDir) throw new WorkspaceError("Workspace has no working directory", "BAD_REQUEST");
@@ -442,39 +430,19 @@ export function createBisectService(deps: {
   }
 
   async function startBisect(workspaceId: string, scope: BisectScope): Promise<{ sessionId: string }> {
-    const rows = await database
-      .select({ workingDir: workspaces.workingDir, projectId: issues.projectId })
-      .from(workspaces)
-      .innerJoin(issues, eq(workspaces.issueId, issues.id))
-      .where(eq(workspaces.id, workspaceId))
-      .limit(1);
-    const row = rows[0];
+    const row = await getBisectStartContext(workspaceId, database);
     if (!row) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
     if (!row.workingDir) throw new WorkspaceError("Workspace has no working directory", "BAD_REQUEST");
 
-    const existingSessions = await database
-      .select({ id: sessions.id, status: sessions.status })
-      .from(sessions)
-      .where(eq(sessions.workspaceId, workspaceId));
+    const existingSessions = await getSessionsForWorkspace(workspaceId, database);
     if (existingSessions.some((s) => s.status === "running")) {
       throw new WorkspaceError("A session is already running for this workspace", "CONFLICT");
     }
 
     const sessionId = randomUUID();
     const now = new Date().toISOString();
-    await database.insert(sessions).values({
-      id: sessionId,
-      workspaceId,
-      executor: "auto-bisect",
-      status: "running",
-      startedAt: now,
-      endedAt: null,
-      exitCode: null,
-      triggerType: "bisect",
-    });
-    await database.update(workspaces)
-      .set({ status: "active", updatedAt: now })
-      .where(eq(workspaces.id, workspaceId));
+    await insertBisectSession({ id: sessionId, workspaceId, startedAt: now }, database);
+    await setWorkspaceStatus(workspaceId, "active", now, database);
 
     if (row.projectId) boardEvents?.broadcast(row.projectId, "session_launched");
     void runBisect(workspaceId, sessionId, scope);
