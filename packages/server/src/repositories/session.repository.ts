@@ -1,5 +1,5 @@
 import { sessions, sessionMessages, diffComments, agentSkills, workspaces, issues, projects, projectStatuses } from "@agentic-kanban/shared/schema";
-import { eq, and, sql, desc } from "drizzle-orm";
+import { eq, and, sql, desc, inArray, gte } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { readFileSync, existsSync, openSync, readSync, closeSync, fstatSync } from "node:fs";
 import { db } from "../db/index.js";
@@ -101,6 +101,31 @@ export async function getSessionMessageRows(
     .where(eq(sessionMessages.sessionId, sessionId))
     .orderBy(sessionMessages.id);
   return dbRows;
+}
+
+/**
+ * Sessions that started within the window for a set of workspaces — the columns
+ * the standup digest rolls up (status/exitCode/stats/triggerType). Pure read.
+ */
+export async function getSessionsForWorkspacesSince(
+  workspaceIds: string[],
+  sinceIso: string,
+  database: Database = db,
+) {
+  if (workspaceIds.length === 0) return [];
+  return database
+    .select({
+      id: sessions.id,
+      workspaceId: sessions.workspaceId,
+      startedAt: sessions.startedAt,
+      endedAt: sessions.endedAt,
+      exitCode: sessions.exitCode,
+      status: sessions.status,
+      stats: sessions.stats,
+      triggerType: sessions.triggerType,
+    })
+    .from(sessions)
+    .where(and(inArray(sessions.workspaceId, workspaceIds), gte(sessions.startedAt, sinceIso)));
 }
 
 export async function getSessionWorkspaceId(
