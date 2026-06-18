@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { apiFetch } from "../lib/api.js";
 import { getSettings, invalidateSettings } from "../lib/settingsStore.js";
-import type { StatusWithIssues, IssueWithStatus } from "@agentic-kanban/shared/types/api";
+import type { StatusWithIssues, IssueWithStatus } from "@agentic-kanban/shared";
 
 interface StaleWorkDashboardProps {
   projectId: string;
