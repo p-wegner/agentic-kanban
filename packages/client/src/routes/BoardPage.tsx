@@ -508,7 +508,11 @@ export function BoardPage() {
 
   // Real-time board updates via WebSocket
   const handleBoardChange = useCallback((reason: string) => {
-    if (reason.startsWith("project_")) {
+    // `project_created/updated/deleted` are project-lifecycle reasons that require a
+    // project-list reload. `project_completed` (#848) shares the `project_` prefix but is
+    // a board notification, NOT a lifecycle change — let it fall through to the
+    // notification handling below instead of swallowing it with an early return.
+    if (reason.startsWith("project_") && reason !== "project_completed") {
       void (async () => {
         try {
           const nextProjectId = await loadProjectsRef.current();
@@ -529,6 +533,8 @@ export function BoardPage() {
       sendDesktopNotification("Agentic Kanban", "Agent session completed");
     } else if (reason === "workspace_merged") {
       sendDesktopNotification("Agentic Kanban", "Workspace merged successfully");
+    } else if (reason === "project_completed") {
+      sendDesktopNotification("Agentic Kanban", "🎉 Project complete — the backlog is fully implemented");
     }
 
     // Activity notification bell — capture issue context from current board snapshot
@@ -536,13 +542,14 @@ export function BoardPage() {
       "workspace_merged", "workspace_ready_for_merge",
       "session_completed", "session_launched",
       "workflow_error", "workflow_transition",
+      "project_completed",
     ]);
     if (relevantReasons.has(reason)) {
       // Find the most relevant issue from the current board snapshot.
       // Match the most recently-active workspace for any event tied to a workspace.
-      // Workflow transitions move the issue (board not refreshed yet), so skip matching.
+      // Workflow transitions and project-completion are not tied to a single issue, so skip matching.
       let bestIssue: { id: string; issueNumber?: number; title?: string; workspaceId?: string } | undefined;
-      if (reason !== "workflow_transition") {
+      if (reason !== "workflow_transition" && reason !== "project_completed") {
         // Pick the issue with the most recently-active workspace
         let bestTime = 0;
         for (const col of columnsRef.current) {

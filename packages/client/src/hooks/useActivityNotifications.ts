@@ -8,7 +8,8 @@ export type NotificationEventType =
   | "session_launched"
   | "workflow_error"
   | "workflow_transition"
-  | "approval_requested";
+  | "approval_requested"
+  | "project_completed";
 
 export interface NotificationEvent {
   id: string;
@@ -67,6 +68,7 @@ const RELEVANT_REASONS = new Set<string>([
   "session_launched",
   "workflow_error",
   "workflow_transition",
+  "project_completed",
 ]);
 
 interface IssueSnapshot {

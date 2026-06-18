@@ -10,6 +10,7 @@ import type { SessionManager } from "../services/session.manager.js";
 import { resolveMergeStrategy } from "./merge-strategy.js";
 import { reconcileCompletionStates } from "./completion-state-reconciler.js";
 import { reconcileDriveCompletion } from "./drive-completion-reconciler.js";
+import { reconcileProjectCompletion } from "./project-completion-reconciler.js";
 
 const DEFAULT_INTERVAL_MS = 30_000;
 const MERGEABLE_STATUS_NAMES = ["In Review", "AI Reviewed"] as const;
@@ -258,6 +259,16 @@ export function createAutoMergeOrchestrator(deps: {
       });
       if (driveChanges > 0) {
         console.log(`[auto-merge] reconcileDriveCompletion: applied ${driveChanges} drive completion-contract change(s)`);
+      }
+
+      // Inform the user when a project's backlog is fully implemented (#848). Edge-triggered:
+      // broadcasts `project_completed` once per completion, not every cycle.
+      const completionChanges = await reconcileProjectCompletion(database, { boardEvents }).catch((err) => {
+        console.warn("[auto-merge] reconcileProjectCompletion failed (non-fatal):", err instanceof Error ? err.message : String(err));
+        return 0;
+      });
+      if (completionChanges > 0) {
+        console.log(`[auto-merge] reconcileProjectCompletion: ${completionChanges} project completion state change(s)`);
       }
 
       const workspaceIds = await findCompletedWorkspaceIds();
