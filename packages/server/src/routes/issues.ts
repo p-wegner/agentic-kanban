@@ -1,14 +1,17 @@
-import { Hono } from "hono";
-import { and, eq, gte } from "drizzle-orm";
-import { issues, projectStatuses } from "@agentic-kanban/shared/schema";
-import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { ShowdownContestant } from "@agentic-kanban/shared";
 import { analyzeDependencies, enhanceIssue, aiEstimateIssue, decomposeEpic, confirmEpicDecomposition, analyzeTouchedFiles } from "../services/issue-ai.service.js";
 import { createIssueService } from "../services/issue.service.js";
-import { getIssueDescription } from "../repositories/issue.repository.js";
+import {
+  getIssueDescription,
+  getIssueTouchedFiles,
+  getIssueTouchedFilesWithProject,
+  getProjectIssuesTouchedFiles,
+  getIssueStatusTimelineRows,
+  getDoneIssuesSince,
+} from "../repositories/issue.repository.js";
 import { createIssueCommentsService } from "../services/issue-comments.service.js";
 import { createIssueTimeEntriesService } from "../services/issue-time-entries.service.js";
 import type { IssueCommentKind, IssueCommentAuthor } from "../repositories/issue-comments.repository.js";
@@ -23,7 +26,7 @@ import { createIssueMergedCommitsService } from "../services/issue-merged-commit
 import { getIssueCycleTime } from "../services/cycle-time.service.js";
 import { createWebhookSender } from "../services/outbound-webhook.service.js";
 
-export function createIssuesRoute(database: Database = db, options?: { boardEvents?: BoardEvents; getSessionManager?: () => SessionManager }) {
+export function createIssuesRoute(database: Database, options?: { boardEvents?: BoardEvents; getSessionManager?: () => SessionManager }) {
   const router = createRouter();
 
   const issueService = createIssueService({ database, boardEvents: options?.boardEvents, sendWebhook: createWebhookSender(database) });
@@ -212,9 +215,9 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
   // GET /api/issues/:id/touched-files — return cached prediction only (no AI call)
   router.get("/:id/touched-files", async (c) => {
     const issueId = c.req.param("id");
-    const rows = await database.select({ touchedFilesJson: issues.touchedFilesJson }).from(issues).where(eq(issues.id, issueId)).limit(1);
-    if (rows.length === 0) return c.json({ error: "Issue not found" }, 404);
-    const json = rows[0].touchedFilesJson;
+    const row = await getIssueTouchedFiles(issueId, database);
+    if (!row) return c.json({ error: "Issue not found" }, 404);
+    const json = row.touchedFilesJson;
     let files: unknown[] = [];
     if (json) {
       try { files = JSON.parse(json); } catch { files = []; }
@@ -232,21 +235,16 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
   // GET /api/issues/:id/related-issues — find other issues that share touched files with this one
   router.get("/:id/related-issues", async (c) => {
     const issueId = c.req.param("id");
-    const rows = await database.select({ touchedFilesJson: issues.touchedFilesJson, projectId: issues.projectId }).from(issues).where(eq(issues.id, issueId)).limit(1);
-    if (rows.length === 0) return c.json({ error: "Issue not found" }, 404);
-    const json = rows[0].touchedFilesJson;
+    const row = await getIssueTouchedFilesWithProject(issueId, database);
+    if (!row) return c.json({ error: "Issue not found" }, 404);
+    const json = row.touchedFilesJson;
     if (!json) return c.json({ related: [] });
     let myFiles: { path: string }[] = [];
     try { myFiles = JSON.parse(json); } catch { return c.json({ related: [] }); }
     const myPaths = new Set(myFiles.map((f) => f.path));
     if (myPaths.size === 0) return c.json({ related: [] });
 
-    const candidates = await database.select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
-      touchedFilesJson: issues.touchedFilesJson,
-    }).from(issues).where(and(eq(issues.projectId, rows[0].projectId)));
+    const candidates = await getProjectIssuesTouchedFiles(row.projectId, database);
 
     const related: { id: string; issueNumber: number | null; title: string; sharedFileCount: number }[] = [];
     for (const candidate of candidates) {
@@ -392,15 +390,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
 
     // A remaining-open count on day D depends on every issue ever created — an issue opened
     // long before the window that is still open still counts as remaining — so fetch the lot.
-    const rows = await database
-      .select({
-        createdAt: issues.createdAt,
-        statusChangedAt: issues.statusChangedAt,
-        statusName: projectStatuses.name,
-      })
-      .from(issues)
-      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-      .where(eq(issues.projectId, projectId));
+    const rows = await getIssueStatusTimelineRows(projectId, database);
 
     // Per issue: the day it entered the board (createdAt) and the day it stopped being open
     // (statusChangedAt when the current status is terminal; an issue created straight into a
@@ -459,17 +449,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     cutoffDate.setDate(cutoffDate.getDate() - days);
 
     // Single query: all issues for the project with status metadata.
-    const rows = await database
-      .select({
-        issueId: issues.id,
-        createdAt: issues.createdAt,
-        statusChangedAt: issues.statusChangedAt,
-        statusName: projectStatuses.name,
-        statusSortOrder: projectStatuses.sortOrder,
-      })
-      .from(issues)
-      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-      .where(eq(issues.projectId, projectId));
+    const rows = await getIssueStatusTimelineRows(projectId, database);
 
     // Collect all statuses (sorted by board order).
     const statusMeta = new Map<string, { sortOrder: number }>();
@@ -527,19 +507,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     const cutoffDay = cutoffDate.toISOString().slice(0, 10);
 
     // Fetch only "Done" issues whose statusChangedAt falls within the window.
-    const rows = await database
-      .select({
-        statusChangedAt: issues.statusChangedAt,
-      })
-      .from(issues)
-      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-      .where(
-        and(
-          eq(issues.projectId, projectId),
-          eq(projectStatuses.name, "Done"),
-          gte(issues.statusChangedAt, cutoffDay)
-        )
-      );
+    const rows = await getDoneIssuesSince(projectId, cutoffDay, database);
 
     // Build the date axis: one entry per day in the trailing window.
     const today = new Date();
@@ -575,20 +543,7 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
     cutoffDate.setDate(cutoffDate.getDate() - days + 1);
     const cutoffDay = cutoffDate.toISOString().slice(0, 10);
 
-    const rows = await database
-      .select({
-        createdAt: issues.createdAt,
-        statusChangedAt: issues.statusChangedAt,
-      })
-      .from(issues)
-      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-      .where(
-        and(
-          eq(issues.projectId, projectId),
-          eq(projectStatuses.name, "Done"),
-          gte(issues.statusChangedAt, cutoffDay)
-        )
-      );
+    const rows = await getDoneIssuesSince(projectId, cutoffDay, database);
 
     // Build date axis.
     const today = new Date();
@@ -848,5 +803,3 @@ export function createIssuesRoute(database: Database = db, options?: { boardEven
 
   return router;
 }
-
-export const issuesRoute = createIssuesRoute(db, {});

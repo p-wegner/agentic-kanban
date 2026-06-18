@@ -1,7 +1,7 @@
 import { issues, workspaces, sessions, sessionMessages, projectStatuses, workflowNodes, tags, issueTags, issueDependencies, issueArtifacts, agentSkills } from "@agentic-kanban/shared/schema";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
 import { parseSessionSummary, formatDurationStr } from "@agentic-kanban/shared";
-import { eq, inArray, desc, sql, and } from "drizzle-orm";
+import { eq, inArray, desc, sql, and, gte } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -351,6 +351,85 @@ export async function getFocusIssueRows(projectId: string, database: Database = 
     .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
     .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
     .where(eq(issues.projectId, projectId));
+}
+
+/** The cached touched-files prediction JSON for one issue, or null when the issue is absent. */
+export async function getIssueTouchedFiles(
+  issueId: string,
+  database: Database = db,
+): Promise<{ touchedFilesJson: string | null } | null> {
+  const rows = await database
+    .select({ touchedFilesJson: issues.touchedFilesJson })
+    .from(issues)
+    .where(eq(issues.id, issueId))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/** Touched-files JSON + projectId for one issue (related-issues lookup), or null when absent. */
+export async function getIssueTouchedFilesWithProject(
+  issueId: string,
+  database: Database = db,
+): Promise<{ touchedFilesJson: string | null; projectId: string } | null> {
+  const rows = await database
+    .select({ touchedFilesJson: issues.touchedFilesJson, projectId: issues.projectId })
+    .from(issues)
+    .where(eq(issues.id, issueId))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/** All issues in a project with their touched-files JSON (related-issues file-overlap scan). */
+export async function getProjectIssuesTouchedFiles(projectId: string, database: Database = db) {
+  return database
+    .select({
+      id: issues.id,
+      issueNumber: issues.issueNumber,
+      title: issues.title,
+      touchedFilesJson: issues.touchedFilesJson,
+    })
+    .from(issues)
+    .where(eq(issues.projectId, projectId));
+}
+
+/**
+ * All issues in a project with status name + sort order + the create/move
+ * timestamps, for the cumulative-flow and status-distribution charts. Pure read;
+ * the route builds the day axis and per-status counts.
+ */
+export async function getIssueStatusTimelineRows(projectId: string, database: Database = db) {
+  return database
+    .select({
+      issueId: issues.id,
+      createdAt: issues.createdAt,
+      statusChangedAt: issues.statusChangedAt,
+      statusName: projectStatuses.name,
+      statusSortOrder: projectStatuses.sortOrder,
+    })
+    .from(issues)
+    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+    .where(eq(issues.projectId, projectId));
+}
+
+/**
+ * Issues currently in "Done" whose statusChangedAt falls on/after `cutoffDay`,
+ * with their create/move timestamps — backs the throughput and lead-time charts.
+ */
+export async function getDoneIssuesSince(projectId: string, cutoffDay: string, database: Database = db) {
+  return database
+    .select({
+      createdAt: issues.createdAt,
+      statusChangedAt: issues.statusChangedAt,
+    })
+    .from(issues)
+    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+    .where(
+      and(
+        eq(issues.projectId, projectId),
+        eq(projectStatuses.name, "Done"),
+        gte(issues.statusChangedAt, cutoffDay),
+      ),
+    );
 }
 
 /**
