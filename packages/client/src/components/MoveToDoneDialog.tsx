@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost, apiDelete } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 
 interface MoveToDoneDialogProps {
@@ -17,9 +17,9 @@ export function MoveToDoneDialog({ issue, onConfirm, onCancel }: MoveToDoneDialo
     setLoading(true);
     try {
       if (action === "stop" && ws) {
-        await apiFetch(`/api/workspaces/${ws.id}/stop`, { method: "POST" });
+        await apiPost(`/api/workspaces/${ws.id}/stop`);
       } else if (action === "close" && ws) {
-        await apiFetch(`/api/workspaces/${ws.id}`, { method: "DELETE" });
+        await apiDelete(`/api/workspaces/${ws.id}`);
       }
       await onConfirm();
     } catch {

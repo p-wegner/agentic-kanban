@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPut } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 
 interface DriveSettingsSectionProps {
@@ -49,10 +49,7 @@ export function DriveSettingsSection({ projectId, onChanged }: DriveSettingsSect
   async function toggle(enabled: boolean) {
     setSaving(true);
     try {
-      const next = await apiFetch<DriveStatus>(`/api/projects/${projectId}/drive`, {
-        method: "PUT",
-        body: JSON.stringify({ enabled }),
-      });
+      const next = await apiPut<DriveStatus>(`/api/projects/${projectId}/drive`, { enabled });
       setStatus(next);
       showToast(
         enabled ? "Driving this project — building hands-off" : "Drive off — triage mode restored",

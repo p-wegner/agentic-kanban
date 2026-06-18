@@ -1,6 +1,6 @@
 import React, { useRef, useState } from "react";
 import type { DependencyInfo, IssueWithStatus } from "@agentic-kanban/shared";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost, apiDelete } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 
 interface DependencyDisplayProps {
@@ -35,10 +35,7 @@ export function DependencyDisplay({
     if (analyzingDeps) return;
     setAnalyzingDeps(true);
     try {
-      const result = await apiFetch<{ dependencies: Array<{ id: string; type: string; issueId: string; reason: string }>; total: number }>("/api/issues/analyze-dependencies", {
-        method: "POST",
-        body: JSON.stringify({ issueId: issue.id, projectId: issue.projectId }),
-      });
+      const result = await apiPost<{ dependencies: Array<{ id: string; type: string; issueId: string; reason: string }>; total: number }>("/api/issues/analyze-dependencies", { issueId: issue.id, projectId: issue.projectId });
       // Reload dependencies to show newly created ones
       const deps = await apiFetch<DependencyInfo>(`/api/issues/${issue.id}/dependencies`);
       setDependencies(deps);
@@ -185,7 +182,7 @@ export function DependencyDisplay({
                             onClick={async (e) => {
                               e.stopPropagation();
                               try {
-                                await apiFetch(`/api/issues/${issue.id}/dependencies/${dep.id}`, { method: "DELETE" });
+                                await apiDelete(`/api/issues/${issue.id}/dependencies/${dep.id}`);
                                 setDependencies((prev) => ({
                                   dependencies: prev.dependencies.filter((d) => d.id !== dep.id),
                                 }));
@@ -224,10 +221,7 @@ export function DependencyDisplay({
         const addDep = async (depId: string) => {
           const depType = depTypeRef.current?.value || "depends_on";
           try {
-            await apiFetch(`/api/issues/${issue.id}/dependencies`, {
-              method: "POST",
-              body: JSON.stringify({ dependsOnId: depId, type: depType }),
-            });
+            await apiPost(`/api/issues/${issue.id}/dependencies`, { dependsOnId: depId, type: depType });
             const deps = await apiFetch<DependencyInfo>(`/api/issues/${issue.id}/dependencies`);
             setDependencies(deps);
             onIssueUpdate(issue);

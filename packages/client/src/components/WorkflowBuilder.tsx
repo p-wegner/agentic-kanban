@@ -15,7 +15,7 @@ import {
   type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost, apiPut } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 import { layoutGraph } from "../lib/workflowLayout.js";
 import {
@@ -359,10 +359,10 @@ export function WorkflowBuilder({
     };
     try {
       if (templateId && !isBuiltin) {
-        await apiFetch(`/api/workflows/templates/${templateId}`, { method: "PUT", body: JSON.stringify(payload) });
+        await apiPut(`/api/workflows/templates/${templateId}`, payload);
       } else {
         // New template, or "save" of a builtin → create a fresh editable copy.
-        await apiFetch(`/api/workflows/templates`, { method: "POST", body: JSON.stringify(payload) });
+        await apiPost(`/api/workflows/templates`, payload);
       }
       showToast("Workflow saved", "success");
       onSaved();

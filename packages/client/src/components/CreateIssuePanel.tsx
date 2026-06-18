@@ -3,7 +3,7 @@ import ReactMarkdown from "react-markdown";
 import type { CreateIssueRequest, IssueEstimate, ProfileSelection } from "@agentic-kanban/shared";
 import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import type { CreateIssueFormState } from "./CreateIssueForm.js";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost } from "../lib/api.js";
 import { getSettings } from "../lib/settingsStore.js";
 import { showToast } from "./Toast.js";
 import TicketMentionInput from "./TicketMentionInput.js";
@@ -101,10 +101,7 @@ export function CreateIssuePanel({
     setEnhancing(true);
     try {
       setPreEnhanceSnapshot({ title, description });
-      const result = await apiFetch<{ title: string; description: string }>("/api/issues/enhance", {
-        method: "POST",
-        body: JSON.stringify({ title, description, projectId }),
-      });
+      const result = await apiPost<{ title: string; description: string }>("/api/issues/enhance", { title, description, projectId });
       setTitle(result.title);
       setDescription(result.description);
     } catch (err) {

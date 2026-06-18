@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost } from "../lib/api.js";
 import { getSettings, setSettings } from "../lib/settingsStore.js";
 import type { StatusWithIssues, IssueWithStatus } from "@agentic-kanban/shared";
 
@@ -93,12 +93,9 @@ export function StaleWorkDashboard({ projectId, onIssueClick }: StaleWorkDashboa
       if (!wsId) return;
       setNudgeState((prev) => ({ ...prev, [issue.id]: "loading" }));
       try {
-        await apiFetch(`/api/workspaces/${wsId}/turn`, {
-          method: "POST",
-          body: JSON.stringify({
+        await apiPost(`/api/workspaces/${wsId}/turn`, {
             content: `Nudge: this issue (#${issue.issueNumber ?? issue.id}) has been stuck in "${issue.statusName}" for ${issue.columnAgeDays ?? 0} day(s). Please review current progress and either continue work or summarize the blocker.`,
-          }),
-        });
+          });
         setNudgeState((prev) => ({ ...prev, [issue.id]: "done" }));
       } catch {
         setNudgeState((prev) => ({ ...prev, [issue.id]: "error" }));

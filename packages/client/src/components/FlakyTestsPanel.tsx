@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost, apiDelete } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 
 interface FlakyTestEntry {
@@ -84,11 +84,7 @@ export function FlakyTestsPanel({ projectId }: FlakyTestsPanelProps) {
 
   async function handlePin(test: FlakyTestEntry) {
     try {
-      await apiFetch("/api/flaky-tests/pin", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ testName: test.testName, file: test.file }),
-      });
+      await apiPost("/api/flaky-tests/pin", { testName: test.testName, file: test.file });
       showToast("Pinned as known-flaky", "success");
       setTests(prev => prev.map(t => t.testName === test.testName ? { ...t, isPinned: true } : t));
     } catch {
@@ -98,11 +94,7 @@ export function FlakyTestsPanel({ projectId }: FlakyTestsPanelProps) {
 
   async function handleUnpin(test: FlakyTestEntry) {
     try {
-      await apiFetch("/api/flaky-tests/pin", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ testName: test.testName }),
-      });
+      await apiDelete("/api/flaky-tests/pin", { testName: test.testName });
       showToast("Unpinned", "success");
       setTests(prev => prev.map(t => t.testName === test.testName ? { ...t, isPinned: false } : t));
     } catch {
@@ -127,11 +119,7 @@ export function FlakyTestsPanel({ projectId }: FlakyTestsPanelProps) {
         `Consult \`list_flaky_tests\` MCP tool for current flaky test data.`,
       ].filter(Boolean).join("\n");
 
-      const resp = await apiFetch<{ issueNumber: number }>(`/api/issues`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId, title, description: desc, priority: "medium" }),
-      });
+      const resp = await apiPost<{ issueNumber: number }>(`/api/issues`, { projectId, title, description: desc, priority: "medium" });
       showToast(`Created ticket #${resp.issueNumber}`, "success");
     } catch {
       showToast("Failed to create ticket", "error");

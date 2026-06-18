@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost } from "../lib/api.js";
 import { STATUS_COLORS, ACCENT, BRAND } from "../lib/chartColors.js";
 import { showToast } from "./Toast.js";
 import type { DriveDashboard as DriveDashboardData } from "@agentic-kanban/shared";
@@ -470,14 +470,11 @@ function StartDriveForm({
     setSubmitting(true);
     setErr(null);
     try {
-      const drive = await apiFetch<{ id: string }>(`/api/projects/${projectId}/drives`, {
-        method: "POST",
-        body: JSON.stringify({
+      const drive = await apiPost<{ id: string }>(`/api/projects/${projectId}/drives`, {
           target: target.trim(),
           metaIssueId: metaIssueId || null,
           completionContract: contract.trim() || null,
-        }),
-      });
+        });
       showToast("Drive started", "success");
       onStarted(drive.id);
     } catch (e2) {

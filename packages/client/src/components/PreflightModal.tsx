@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPatch } from "../lib/api.js";
 
 export type PreflightVerdict = "ready" | "needs-clarification" | string;
 
@@ -85,10 +85,7 @@ export function PreflightModal({
     setSaving(true);
     setSaveError(null);
     try {
-      await apiFetch(`/api/issues/${issueId}`, {
-        method: "PATCH",
-        body: JSON.stringify({ title: editTitle.trim(), description: editDescription }),
-      });
+      await apiPatch(`/api/issues/${issueId}`, { title: editTitle.trim(), description: editDescription });
       setIsEditing(false);
       onRetry(editTitle.trim(), editDescription);
     } catch (err) {

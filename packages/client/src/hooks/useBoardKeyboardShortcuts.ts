@@ -1,7 +1,7 @@
 import { useEffect, type Dispatch, type RefObject, type SetStateAction } from "react";
 import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost } from "../lib/api.js";
 import { registerAction } from "../lib/actions.js";
 import { SHORTCUT_TO_VIEW, VIEW_REGISTRY, type ViewMode } from "../lib/viewRegistry.js";
 import { showToast } from "../components/Toast.js";
@@ -402,7 +402,7 @@ export function useBoardKeyboardShortcuts(
           category: "issue",
           handler: async () => {
             try {
-              await apiFetch(`/api/workspaces/${ws.id}/review`, { method: "POST" });
+              await apiPost(`/api/workspaces/${ws.id}/review`);
               showToast("Review started", "success");
             } catch {
               showToast("Failed to start review", "error");
@@ -420,7 +420,7 @@ export function useBoardKeyboardShortcuts(
           category: "issue",
           handler: async () => {
             try {
-              await apiFetch(`/api/workspaces/${ws.id}/merge`, { method: "POST" });
+              await apiPost(`/api/workspaces/${ws.id}/merge`);
               showToast("Merge started", "success");
             } catch {
               showToast("Failed to merge", "error");

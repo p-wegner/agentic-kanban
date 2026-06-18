@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 
 interface CodemodFileDiff {
@@ -103,15 +103,12 @@ export function CodemodPanel({ onClose, activeProjectId }: CodemodPanelProps) {
     setLimitWarning(null);
     setPreview(null);
     try {
-      const result = await apiFetch<CodemodPreviewResponse>("/api/codemods/preview", {
-        method: "POST",
-        body: JSON.stringify({
+      const result = await apiPost<CodemodPreviewResponse>("/api/codemods/preview", {
           description: description.trim(),
           projectId: activeProjectId,
           overrideLimit: opts?.override ?? overrideLimit,
           script: opts?.script,
-        }),
-      });
+        });
       setPreview(result);
       // Select all files by default
       setSelectedFiles(new Set(result.files.map((f) => f.filePath)));
@@ -149,14 +146,11 @@ export function CodemodPanel({ onClose, activeProjectId }: CodemodPanelProps) {
     if (!preview || selectedFiles.size === 0) return;
     setApplyingChanges(true);
     try {
-      const result = await apiFetch<{ applied: string[]; skipped: string[] }>("/api/codemods/apply", {
-        method: "POST",
-        body: JSON.stringify({
+      const result = await apiPost<{ applied: string[]; skipped: string[] }>("/api/codemods/apply", {
           projectId: activeProjectId,
           changes: preview.files.map((f) => ({ filePath: f.filePath, modified: f.modified })),
           selectedFiles: Array.from(selectedFiles),
-        }),
-      });
+        });
       showToast(`Applied ${result.applied.length} file(s). Skipped ${result.skipped.length}.`, "success");
       setPreview(null);
     } catch (err: unknown) {
@@ -170,15 +164,12 @@ export function CodemodPanel({ onClose, activeProjectId }: CodemodPanelProps) {
     if (!preview || !saveName.trim()) return;
     setSavingCodemod(true);
     try {
-      await apiFetch("/api/codemods", {
-        method: "POST",
-        body: JSON.stringify({
+      await apiPost("/api/codemods", {
           name: saveName.trim(),
           description: description.trim(),
           script: preview.script,
           projectId: activeProjectId ?? null,
-        }),
-      });
+        });
       showToast(`Codemod "${saveName}" saved.`, "success");
       setShowSaveForm(false);
       setSaveName("");

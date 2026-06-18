@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import type { IssueWithStatus, MainWorkspaceInfo, StatusWithIssues } from "@agentic-kanban/shared";
 
@@ -119,7 +119,7 @@ export function MergeQueuePanel({ columns, projectId: _projectId, onClose, onIss
     });
 
     try {
-      await apiFetch(`/api/workspaces/${workspaceId}/merge`, { method: "POST" });
+      await apiPost(`/api/workspaces/${workspaceId}/merge`);
       onMerged?.();
     } catch (err) {
       setErrorByWorkspace((prev) => ({
@@ -134,10 +134,7 @@ export function MergeQueuePanel({ columns, projectId: _projectId, onClose, onIss
   async function handleCheckConflicts(workspaceId: string) {
     setCheckingId(workspaceId);
     try {
-      const result = await apiFetch<{ ok: boolean; preview: ConflictPreview }>(
-        `/api/merge-queue/preview/${workspaceId}`,
-        { method: "POST" },
-      );
+      const result = await apiPost<{ ok: boolean; preview: ConflictPreview }>(`/api/merge-queue/preview/${workspaceId}`);
       setPreviewByWorkspace((prev) => ({ ...prev, [workspaceId]: result.preview }));
     } catch (err) {
       setPreviewByWorkspace((prev) => ({
@@ -160,14 +157,7 @@ export function MergeQueuePanel({ columns, projectId: _projectId, onClose, onIss
     if (workspaceIds.length === 0) return;
     setCheckingAll(true);
     try {
-      const result = await apiFetch<{ ok: boolean; dryRun: boolean; plan: { conflictPreviews: ConflictPreview[] } }>(
-        "/api/merge-queue",
-        {
-          method: "POST",
-          body: JSON.stringify({ workspaceIds, dryRun: true }),
-          headers: { "Content-Type": "application/json" },
-        },
-      );
+      const result = await apiPost<{ ok: boolean; dryRun: boolean; plan: { conflictPreviews: ConflictPreview[] } }>("/api/merge-queue", { workspaceIds, dryRun: true });
       const map: Record<string, ConflictPreview> = {};
       for (const preview of result.plan.conflictPreviews) {
         map[preview.workspaceId] = preview;

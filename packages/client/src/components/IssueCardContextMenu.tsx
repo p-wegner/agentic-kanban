@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPatch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 import type { QuickUpdateCallbacks, StatusOption } from "./IssueCard.js";
 
@@ -117,10 +117,7 @@ export function IssueCardContextMenu({
   async function handleMoveToStatus(statusName: string) {
     onClose();
     try {
-      await apiFetch(`/api/issues/${issue.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ statusName }),
-      });
+      await apiPatch(`/api/issues/${issue.id}`, { statusName });
     } catch {
       showToast("Failed to move issue", "error");
     }

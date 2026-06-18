@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { StatusWithIssues } from "@agentic-kanban/shared";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost, apiPut } from "../lib/api.js";
 import { setSettings, setProjectPref } from "../lib/settingsStore.js";
 import type { OrchestratorStatus } from "../hooks/useOrchestrator.js";
 import { MonitorActionReplayDrawer, type ReplayTarget } from "./MonitorActionReplayDrawer.js";
@@ -270,7 +270,7 @@ export function MonitorPopover({
     try {
       await setProjectPref(projectId, "start_mode", m);
       if (orchestrator?.available) {
-        await apiFetch(`/api/projects/${projectId}/conductor`, { method: "POST", body: JSON.stringify({ action: m === "conductor" ? "start" : "stop" }) }).catch(() => {});
+        await apiPost(`/api/projects/${projectId}/conductor`, { action: m === "conductor" ? "start" : "stop" }).catch(() => {});
       }
       loadTunables();
     } catch { /* surfaced by the read-out */ }
@@ -801,10 +801,7 @@ function ConductorCronSection({
     setSaving(true);
     setError(null);
     try {
-      const data = await apiFetch<{ schedule: ConductorSchedule }>(`/api/projects/${projectId}/conductor-schedule`, {
-        method: "PUT",
-        body: JSON.stringify(patch),
-      });
+      const data = await apiPut<{ schedule: ConductorSchedule }>(`/api/projects/${projectId}/conductor-schedule`, patch);
       setSchedule(data.schedule);
       setCronInput(data.schedule.cron);
       setAgent(data.schedule.agent);

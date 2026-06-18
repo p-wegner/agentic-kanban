@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost, apiDelete } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 
 interface WorktreeInfo {
@@ -69,10 +69,7 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
   async function handleOpenFolder(wt: WorktreeInfo) {
     setOpening(wt.path);
     try {
-      await apiFetch(`/api/projects/${projectId}/worktrees/open`, {
-        method: "POST",
-        body: JSON.stringify({ path: wt.path }),
-      });
+      await apiPost(`/api/projects/${projectId}/worktrees/open`, { path: wt.path });
     } catch {
       showToast("Failed to open folder", "error");
     } finally {
@@ -92,10 +89,7 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
       const body: Record<string, string> = { path: wt.path };
       if (wt.workspace) body.workspaceId = wt.workspace.id;
 
-      await apiFetch(`/api/projects/${projectId}/worktrees`, {
-        method: "DELETE",
-        body: JSON.stringify(body),
-      });
+      await apiDelete(`/api/projects/${projectId}/worktrees`, body);
       await loadWorktrees();
       setSelected((prev) => { const next = new Set(prev); next.delete(wt.path); return next; });
       onWorkspaceChange?.();
@@ -126,10 +120,7 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
       try {
         const body: Record<string, string> = { path: wt.path };
         if (wt.workspace) body.workspaceId = wt.workspace.id;
-        await apiFetch(`/api/projects/${projectId}/worktrees`, {
-          method: "DELETE",
-          body: JSON.stringify(body),
-        });
+        await apiDelete(`/api/projects/${projectId}/worktrees`, body);
       } catch {
         failed++;
       }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost } from "../lib/api.js";
 import { getSettings } from "../lib/settingsStore.js";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { showToast } from "./Toast.js";
@@ -77,10 +77,7 @@ export function StartWorkspacePicker({ issues, onClose, onStarted }: StartWorksp
       };
       if (settings.default_model) body.model = settings.default_model;
 
-      const result = await apiFetch<{ id: string; sessionId?: string }>("/api/workspaces", {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
+      const result = await apiPost<{ id: string; sessionId?: string }>("/api/workspaces", body);
       showToast(`Workspace started for #${issue.issueNumber} ${issue.title}`, "success");
       onStarted(result.id, issue);
       onClose();

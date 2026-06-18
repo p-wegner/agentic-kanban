@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost, apiPut, apiDelete } from "../lib/api.js";
 import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats } from "../lib/useBoardEvents.js";
@@ -936,10 +936,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
 
   async function renameButler(butlerId: string, newName: string) {
     try {
-      await apiFetch(`/api/butler-definitions/${butlerId}`, {
-        method: "PUT",
-        body: JSON.stringify({ name: newName }),
-      });
+      await apiPut(`/api/butler-definitions/${butlerId}`, { name: newName });
       updateTab(butlerId, { butlerName: newName });
       setButlers((prev) => prev.map((b) => b.id === butlerId ? { ...b, name: newName } : b));
     } catch (err) {
@@ -1097,7 +1094,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     buf.msgId = null;
     buf.textSeen = false;
     try {
-      await apiFetch(butlerUrl(activeTabId, ""), { method: "DELETE" });
+      await apiDelete(butlerUrl(activeTabId, ""));
     } catch { /* ignore */ }
     updateTab(activeTabId, {
       chatMessages: [],
@@ -1117,7 +1114,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     if (!tab) return;
     updateTab(activeTabId, { selectedModel: value });
     try {
-      await apiFetch(butlerUrl(activeTabId, "/model"), { method: "POST", body: JSON.stringify({ model: value }) });
+      await apiPost(butlerUrl(activeTabId, "/model"), { model: value });
       void fetchButlers();
     } catch (err) {
       console.error("Failed to switch butler model", err);
@@ -1140,7 +1137,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     updateTab(activeTabId, { selectedProfile: value, sending: true });
     closeStream(activeTabId);
     try {
-      await apiFetch(butlerUrl(activeTabId, "/profile"), { method: "POST", body: JSON.stringify({ profile: value }) });
+      await apiPost(butlerUrl(activeTabId, "/profile"), { profile: value });
       const buf = getOrInitBuf(activeTabId);
       buf.buf = "";
       buf.msgId = null;
@@ -1217,7 +1214,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     buf.textSeen = false;
 
     try {
-      await apiFetch<{ ok: boolean }>(butlerUrl(activeTabId, "/message"), { method: "POST", body: JSON.stringify({ content }) });
+      await apiPost<{ ok: boolean }>(butlerUrl(activeTabId, "/message"), { content });
     } catch (err) {
       setTabStates((prev) => {
         const cur = prev[activeTabId];
@@ -1290,10 +1287,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     if (!tab) return;
     updateTab(activeTabId, { customizeBusy: true });
     try {
-      await apiFetch(`/api/projects/${projectId}/butler/skill`, {
-        method: "PUT",
-        body: JSON.stringify({ prompt: tab.customizePrompt }),
-      });
+      await apiPut(`/api/projects/${projectId}/butler/skill`, { prompt: tab.customizePrompt });
       updateTab(activeTabId, { customizeOpen: false, customizeBusy: false });
       await handleClearContext();
     } catch (err) {

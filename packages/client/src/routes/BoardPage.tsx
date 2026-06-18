@@ -60,7 +60,7 @@ import { SkeletonBoard } from "../components/SkeletonBoard.js";
 import { ToastContainer, showToast } from "../components/Toast.js";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { MentionProvider } from "../lib/MentionContext.js";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost, apiPut, apiPatch, apiDelete } from "../lib/api.js";
 import { getSettings } from "../lib/settingsStore.js";
 import { setBoardDragData, getBoardDragData } from "../lib/dragData.js";
 import { matchesBoardFilters } from "../lib/boardFiltering.js";
@@ -858,10 +858,7 @@ export function BoardPage() {
     setWorkspaceIssue(null);
     setSwitchingProject(true);
     try {
-      await apiFetch("/api/preferences/active-project", {
-        method: "PUT",
-        body: JSON.stringify({ projectId: id }),
-      });
+      await apiPut("/api/preferences/active-project", { projectId: id });
       await refetchBoard(id, { force: true });
     } catch {
       showToast("Failed to switch project", "error");
@@ -871,10 +868,7 @@ export function BoardPage() {
   }
 
   async function handleRegisterProject({ repoPath, gitignoreTemplate, generateReadme }: { repoPath: string; gitignoreTemplate: string; generateReadme: boolean }) {
-    const result = await apiFetch<{ id: string; name: string; error?: string }>(
-      "/api/projects",
-      { method: "POST", body: JSON.stringify({ repoPath, gitignoreTemplate: gitignoreTemplate || undefined, generateReadme: generateReadme || undefined }) },
-    );
+    const result = await apiPost<{ id: string; name: string; error?: string }>("/api/projects", { repoPath, gitignoreTemplate: gitignoreTemplate || undefined, generateReadme: generateReadme || undefined });
     if (result.error) throw new Error(result.error);
     await loadProjects();
     await handleProjectChange(result.id);
@@ -886,10 +880,7 @@ export function BoardPage() {
     if (path) body.path = path;
     if (gitignoreTemplate) body.gitignoreTemplate = gitignoreTemplate;
     if (generateReadme) body.generateReadme = generateReadme;
-    const result = await apiFetch<{ id: string; name: string; error?: string }>(
-      "/api/projects/create",
-      { method: "POST", body: JSON.stringify(body) },
-    );
+    const result = await apiPost<{ id: string; name: string; error?: string }>("/api/projects/create", body);
     if (result.error) throw new Error(result.error);
     await loadProjects();
     await handleProjectChange(result.id);
@@ -898,7 +889,7 @@ export function BoardPage() {
 
   async function handleUnregisterProject(id: string) {
     const project = projects.find((p) => p.id === id);
-    await apiFetch(`/api/projects/${id}`, { method: "DELETE" });
+    await apiDelete(`/api/projects/${id}`);
     const remaining = projects.filter((p) => p.id !== id);
     if (remaining.length > 0) {
       await handleProjectChange(remaining[0].id);
@@ -911,7 +902,7 @@ export function BoardPage() {
 
   async function handleArchiveProject(id: string) {
     const project = projects.find((p) => p.id === id);
-    await apiFetch(`/api/projects/${id}/archive`, { method: "POST" });
+    await apiPost(`/api/projects/${id}/archive`);
     if (activeProjectId === id) {
       const remaining = projects.filter((p) => p.id !== id);
       if (remaining.length > 0) {
@@ -926,7 +917,7 @@ export function BoardPage() {
 
   async function handleUnarchiveProject(id: string) {
     const project = archivedProjects.find((p) => p.id === id);
-    await apiFetch(`/api/projects/${id}/unarchive`, { method: "POST" });
+    await apiPost(`/api/projects/${id}/unarchive`);
     await loadProjects();
     await handleProjectChange(id);
     showToast(`Restored "${project?.name ?? "project"}"`, "success");
@@ -955,10 +946,7 @@ export function BoardPage() {
     setMutating(true);
     setError(null);
     try {
-      await apiFetch(`/api/issues/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify(data),
-      });
+      await apiPatch(`/api/issues/${id}`, data);
       await refetchBoard();
       showToast("Issue updated", "success");
     } catch {
@@ -972,7 +960,7 @@ export function BoardPage() {
     setMutating(true);
     setError(null);
     try {
-      await apiFetch(`/api/issues/${id}`, { method: "DELETE" });
+      await apiDelete(`/api/issues/${id}`);
       setSelectedIssue(null);
       await refetchBoard();
       showToast("Issue deleted", "success");
@@ -1038,7 +1026,7 @@ export function BoardPage() {
     }
 
     try {
-      await apiFetch(`/api/issues/${issueId}`, { method: "PATCH", body: JSON.stringify(updateBody) });
+      await apiPatch(`/api/issues/${issueId}`, updateBody);
       if (optimistic) {
         scheduleRefetch();
       } else {
@@ -1073,7 +1061,7 @@ export function BoardPage() {
           confirm: async () => {
             const body: UpdateIssueRequest = { statusId: targetStatusId };
             if (sortOrder !== undefined) body.sortOrder = sortOrder;
-            await apiFetch(`/api/issues/${issueId}`, { method: "PATCH", body: JSON.stringify(body) });
+            await apiPatch(`/api/issues/${issueId}`, body);
             await refetchBoard();
             setMoveToDonePending(null);
           },
@@ -1102,10 +1090,7 @@ export function BoardPage() {
     try {
       const body: UpdateIssueRequest = { statusId: targetStatusId };
       if (sortOrder !== undefined) body.sortOrder = sortOrder;
-      await apiFetch(`/api/issues/${issueId}`, {
-        method: "PATCH",
-        body: JSON.stringify(body),
-      });
+      await apiPatch(`/api/issues/${issueId}`, body);
       if (optimistic) {
         scheduleRefetch();
       } else {
@@ -1128,10 +1113,7 @@ export function BoardPage() {
         .sort((a, b) => a.sortOrder - b.sortOrder),
     );
     try {
-      await apiFetch(`/api/projects/${activeProjectId}/statuses/${columnId}`, {
-        method: "PATCH",
-        body: JSON.stringify({ sortOrder: newSortOrder }),
-      });
+      await apiPatch(`/api/projects/${activeProjectId}/statuses/${columnId}`, { sortOrder: newSortOrder });
       await refetchBoard();
     } catch {
       setColumns(snapshot);
@@ -1151,7 +1133,7 @@ export function BoardPage() {
           setMoveToDonePending({
             issue,
             confirm: async () => {
-              await apiFetch(`/api/issues/${issue.id}`, { method: "PATCH", body: JSON.stringify({ statusId: nextStatusId }) });
+              await apiPatch(`/api/issues/${issue.id}`, { statusId: nextStatusId });
               await refetchBoard();
               setMoveToDonePending(null);
             },
@@ -1169,7 +1151,7 @@ export function BoardPage() {
         optimistic = true;
       }
       try {
-        await apiFetch(`/api/issues/${issue.id}`, { method: "PATCH", body: JSON.stringify({ statusId: nextStatusId }) });
+        await apiPatch(`/api/issues/${issue.id}`, { statusId: nextStatusId });
         if (optimistic) {
           scheduleRefetch();
         } else {
@@ -1218,10 +1200,7 @@ export function BoardPage() {
   async function handlePromoteBacklogIssue(issue: IssueWithStatus, targetStatus: StatusWithIssues) {
     moveIssueLocally(issue, targetStatus);
     try {
-      await apiFetch(`/api/issues/${issue.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ statusId: targetStatus.id }),
-      });
+      await apiPatch(`/api/issues/${issue.id}`, { statusId: targetStatus.id });
     } catch (err) {
       await refetchBoard();
       throw err;
@@ -1323,10 +1302,7 @@ export function BoardPage() {
       };
       if (s.default_model) body.model = s.default_model;
 
-      const result = await apiFetch<{ id: string; sessionId?: string }>("/api/workspaces", {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
+      const result = await apiPost<{ id: string; sessionId?: string }>("/api/workspaces", body);
       await refetchBoard();
       // Open the new workspace in the panel
       setWorkspaceIssue(issue);
@@ -1514,10 +1490,7 @@ export function BoardPage() {
 
   async function handleDuplicateIssue(issue: IssueWithStatus) {
     try {
-      const result = await apiFetch<{ id: string; issueNumber: number; title: string }>(
-        `/api/issues/${issue.id}/duplicate`,
-        { method: "POST" },
-      );
+      const result = await apiPost<{ id: string; issueNumber: number; title: string }>(`/api/issues/${issue.id}/duplicate`);
       await refetchBoard();
       showToast(`Duplicated as #${result.issueNumber}`, "success");
       openIssueById(result.id);

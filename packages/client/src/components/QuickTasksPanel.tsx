@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost } from "../lib/api.js";
 import { getSettings } from "../lib/settingsStore.js";
 import { showToast } from "./Toast.js";
 import TicketMentionInput from "./TicketMentionInput.js";
@@ -141,10 +141,7 @@ export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPa
     const profileProvider = resolveProviderFromProfile(selectedProfile, defaultProfileProvider);
     try {
       // Create a temporary issue for this task, then a direct workspace
-      const issue = await apiFetch<{ id: string }>("/api/issues", {
-        method: "POST",
-        body: JSON.stringify({ title: fullPrompt.slice(0, 100), projectId }),
-      });
+      const issue = await apiPost<{ id: string }>("/api/issues", { title: fullPrompt.slice(0, 100), projectId });
       const isDisk = skill?.source === "disk";
       const body: Record<string, unknown> = {
         issueId: issue.id,
@@ -157,10 +154,7 @@ export function QuickTasksPanel({ projectId, onClose, onLaunched }: QuickTasksPa
         body.model = selectedModel;
       }
 
-      await apiFetch("/api/workspaces", {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
+      await apiPost("/api/workspaces", body);
       showToast("Task launched", "success");
       onLaunched();
       onClose();

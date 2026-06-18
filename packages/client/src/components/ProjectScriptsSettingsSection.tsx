@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ProjectScriptShortcutResponse } from "@agentic-kanban/shared";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost, apiPatch, apiDelete } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 
 interface ProjectScriptsSettingsSectionProps {
@@ -52,15 +52,9 @@ export function ProjectScriptsSettingsSection({ projectId }: ProjectScriptsSetti
         workingDir: draft.cwdMode === "custom" ? draft.workingDir.trim() : null,
       };
       if (draft.id) {
-        await apiFetch(`/api/projects/${projectId}/scripts/${draft.id}`, {
-          method: "PATCH",
-          body: JSON.stringify(payload),
-        });
+        await apiPatch(`/api/projects/${projectId}/scripts/${draft.id}`, payload);
       } else {
-        await apiFetch(`/api/projects/${projectId}/scripts`, {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
+        await apiPost(`/api/projects/${projectId}/scripts`, payload);
       }
       setDraft(EMPTY_DRAFT);
       await loadScripts();
@@ -75,7 +69,7 @@ export function ProjectScriptsSettingsSection({ projectId }: ProjectScriptsSetti
   async function deleteScript(script: ProjectScriptShortcutResponse) {
     setSaving(true);
     try {
-      await apiFetch(`/api/projects/${projectId}/scripts/${script.id}`, { method: "DELETE" });
+      await apiDelete(`/api/projects/${projectId}/scripts/${script.id}`);
       if (draft.id === script.id) setDraft(EMPTY_DRAFT);
       await loadScripts();
       showToast("Script shortcut deleted", "success");

@@ -9,7 +9,7 @@
  * agent-blocking questions.
  */
 import { useEffect, useRef, useState } from "react";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost, apiDelete } from "../lib/api.js";
 import { getAgentQuestions, invalidateAgentQuestions } from "../lib/agentQuestionsStore.js";
 import { startStaggeredPoll } from "../lib/pollScheduler.js";
 import { BOARD_WS_EVENT, type BoardWsEventDetail } from "../lib/useBoardEvents.js";
@@ -219,14 +219,11 @@ function QuestionCard({
     if (!canSubmit || submitting) return;
     setSubmitting(true);
     try {
-      await apiFetch(`/api/projects/${encodeURIComponent(projectIdFromHash())}/agent-questions/${encodeURIComponent(set.toolUseId)}/answer`, {
-        method: "POST",
-        body: JSON.stringify({
+      await apiPost(`/api/projects/${encodeURIComponent(projectIdFromHash())}/agent-questions/${encodeURIComponent(set.toolUseId)}/answer`, {
           workspaceId: set.workspaceId,
           questions: set.questions,
           answers,
-        }),
-      });
+        });
       invalidateAgentQuestions(projectIdFromHash());
       onAnswered();
     } catch (err) {
@@ -455,7 +452,7 @@ export function AgentQuestionsPanel({ projectId, issueId, workspaceId, title, on
   async function dismissOne(toolUseId: string) {
     removeSet(toolUseId);
     try {
-      await apiFetch(`/api/projects/${projectId}/agent-questions/${encodeURIComponent(toolUseId)}`, { method: "DELETE" });
+      await apiDelete(`/api/projects/${projectId}/agent-questions/${encodeURIComponent(toolUseId)}`);
       invalidateAgentQuestions(projectId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to dismiss question");
@@ -469,7 +466,7 @@ export function AgentQuestionsPanel({ projectId, issueId, workspaceId, title, on
     const ids = sets.map((s) => s.toolUseId);
     try {
       await Promise.all(
-        ids.map((id) => apiFetch(`/api/projects/${projectId}/agent-questions/${encodeURIComponent(id)}`, { method: "DELETE" })),
+        ids.map((id) => apiDelete(`/api/projects/${projectId}/agent-questions/${encodeURIComponent(id)}`)),
       );
       invalidateAgentQuestions(projectId);
       setSets([]);

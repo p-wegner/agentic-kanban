@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 import type { IssueWithStatus, ShowdownResponse } from "@agentic-kanban/shared";
 import { CLAUDE_MODEL_OPTIONS } from "@agentic-kanban/shared";
@@ -65,15 +65,12 @@ export function ShowdownDialog({ issue, skills, onCreated, onCancel }: ShowdownD
     if (loading) return;
     setLoading(true);
     try {
-      const result = await apiFetch<ShowdownResponse>(`/api/issues/${issue.id}/showdown`, {
-        method: "POST",
-        body: JSON.stringify({
+      const result = await apiPost<ShowdownResponse>(`/api/issues/${issue.id}/showdown`, {
           contestants: contestants.map(c => ({
             skillId: c.skillId || undefined,
             model: c.model || undefined,
           })),
-        }),
-      });
+        });
       showToast(`Showdown started with ${result.contestants.length} contestants`, "success");
       onCreated(result);
     } catch (err) {

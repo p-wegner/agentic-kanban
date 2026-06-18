@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost } from "../lib/api.js";
 import {
   getVoiceLanguageLabel,
   loadVoiceLanguage,
@@ -105,17 +105,11 @@ export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButton
     const speechRecognitionLanguage = resolveVoiceLanguage(voiceLanguage);
     setState("processing");
     try {
-      const result = await apiFetch<VoiceCaptureResult>(
-        `/api/projects/${projectId}/voice-capture`,
-        {
-          method: "POST",
-          body: JSON.stringify({
+      const result = await apiPost<VoiceCaptureResult>(`/api/projects/${projectId}/voice-capture`, {
             transcript,
             speechLanguage: speechRecognitionLanguage || null,
             speechLanguageLabel: getVoiceLanguageLabel(speechRecognitionLanguage),
-          }),
-        },
-      );
+          });
       if (result.type === "action") {
         showToast(result.message, "success");
         onIssueCreated?.();

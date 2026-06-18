@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
-import { apiFetch } from "../lib/api.js";
+import { apiFetch, apiPost } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 
 interface ChildProposal {
@@ -40,10 +40,7 @@ export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecompo
     setStage("loading");
     setError(null);
     try {
-      const result = await apiFetch<DecomposeProposal>(`/api/issues/${issue.id}/decompose`, {
-        method: "POST",
-        body: JSON.stringify({ projectId: issue.projectId }),
-      });
+      const result = await apiPost<DecomposeProposal>(`/api/issues/${issue.id}/decompose`, { projectId: issue.projectId });
       setProposal(result);
       setChildren(result.children);
       setDependencies(result.dependencies);
@@ -59,10 +56,7 @@ export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecompo
     setRegenerating(true);
     setError(null);
     try {
-      const result = await apiFetch<DecomposeProposal>(`/api/issues/${issue.id}/decompose`, {
-        method: "POST",
-        body: JSON.stringify({ projectId: issue.projectId }),
-      });
+      const result = await apiPost<DecomposeProposal>(`/api/issues/${issue.id}/decompose`, { projectId: issue.projectId });
       setProposal(result);
       setChildren(result.children);
       setDependencies(result.dependencies);
@@ -77,14 +71,11 @@ export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecompo
     if (children.length === 0) return;
     setStage("confirming");
     try {
-      await apiFetch(`/api/issues/${issue.id}/decompose/confirm`, {
-        method: "POST",
-        body: JSON.stringify({
+      await apiPost(`/api/issues/${issue.id}/decompose/confirm`, {
           projectId: issue.projectId,
           children: children.filter(c => c.title.trim()),
           dependencies,
-        }),
-      });
+        });
       showToast(`Created ${children.length} child tickets`, "success");
       onConfirmed();
       onClose();
