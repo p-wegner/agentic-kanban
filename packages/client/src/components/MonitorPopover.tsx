@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { StatusWithIssues } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
+import { setSettings, setProjectPref } from "../lib/settingsStore.js";
 import type { OrchestratorStatus } from "../hooks/useOrchestrator.js";
 import { MonitorActionReplayDrawer, type ReplayTarget } from "./MonitorActionReplayDrawer.js";
 
@@ -254,7 +255,7 @@ export function MonitorPopover({
   async function putSettings(patch: Record<string, string>) {
     setStartModeSaving(true);
     try {
-      await apiFetch(`/api/preferences/settings`, { method: "PUT", body: JSON.stringify(patch) });
+      await setSettings(patch);
       loadTunables();
     } catch { /* surfaced by the unchanged read-out */ }
     finally { setStartModeSaving(false); }
@@ -267,7 +268,7 @@ export function MonitorPopover({
     if (!projectId) return;
     setStartModeSaving(true);
     try {
-      await apiFetch(`/api/preferences/settings`, { method: "PUT", body: JSON.stringify({ [`start_mode_${projectId}`]: m }) });
+      await setProjectPref(projectId, "start_mode", m);
       if (orchestrator?.available) {
         await apiFetch(`/api/projects/${projectId}/conductor`, { method: "POST", body: JSON.stringify({ action: m === "conductor" ? "start" : "stop" }) }).catch(() => {});
       }

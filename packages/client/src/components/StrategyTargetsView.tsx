@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { ACCENT, BRAND, PRIORITY_META, TYPE_COLORS } from "../lib/chartColors";
 import { apiFetch } from "../lib/api.js";
-import { invalidateSettings } from "../lib/settingsStore.js";
+import { setSettings } from "../lib/settingsStore.js";
 import { showToast } from "./Toast.js";
 
 type SegmentKind = "work-type" | "provider" | "area" | "custom";
@@ -278,11 +278,7 @@ function MonitorPolicyPresets({
     };
     const next = [...customPresets, newPreset];
     try {
-      await apiFetch("/api/preferences/settings", {
-        method: "PUT",
-        body: JSON.stringify({ [key]: JSON.stringify(next) }),
-      });
-      invalidateSettings();
+      await setSettings({ [key]: JSON.stringify(next) });
       setCustomPresets(next);
       setSavingName("");
       setShowSaveForm(false);
@@ -297,11 +293,7 @@ function MonitorPolicyPresets({
   async function deletePreset(id: string) {
     const next = customPresets.filter((p) => p.id !== id);
     try {
-      await apiFetch("/api/preferences/settings", {
-        method: "PUT",
-        body: JSON.stringify({ [key]: JSON.stringify(next) }),
-      });
-      invalidateSettings();
+      await setSettings({ [key]: JSON.stringify(next) });
       setCustomPresets(next);
     } catch {
       showToast("Failed to delete preset", "error");
@@ -768,11 +760,7 @@ export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQu
     setSaving(true);
     try {
       const payload = normalizeConfig(config);
-      await apiFetch("/api/preferences/settings", {
-        method: "PUT",
-        body: JSON.stringify({ [key]: JSON.stringify(payload) }),
-      });
-      invalidateSettings();
+      await setSettings({ [key]: JSON.stringify(payload) });
       setConfig(payload);
       setSavedConfig(payload);
       setDirty(false);
@@ -808,11 +796,7 @@ export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQu
     });
     setSaving(true);
     try {
-      await apiFetch("/api/preferences/settings", {
-        method: "PUT",
-        body: JSON.stringify({ [key]: JSON.stringify(next) }),
-      });
-      invalidateSettings();
+      await setSettings({ [key]: JSON.stringify(next) });
       setConfig(next);
       setSavedConfig(next);
       setDirty(false);

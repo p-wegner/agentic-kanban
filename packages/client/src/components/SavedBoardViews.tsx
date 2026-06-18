@@ -11,8 +11,7 @@ import {
   type SavedBoardView,
   type SavedViewReference,
 } from "../lib/boardSavedViews.js";
-import { apiFetch } from "../lib/api.js";
-import { getSettings, invalidateSettings } from "../lib/settingsStore.js";
+import { getSettings, setSettings } from "../lib/settingsStore.js";
 import { showToast } from "./Toast.js";
 
 interface SavedBoardViewsProps {
@@ -72,11 +71,7 @@ export function SavedBoardViews({
   async function persist(nextViews: SavedBoardView[], message: string) {
     setSaving(true);
     try {
-      await apiFetch("/api/preferences/settings", {
-        method: "PUT",
-        body: JSON.stringify({ [settingsKey]: JSON.stringify(nextViews) }),
-      });
-      invalidateSettings();
+      await setSettings({ [settingsKey]: JSON.stringify(nextViews) });
       setViews(nextViews);
       showToast(message, "success");
       return true;
