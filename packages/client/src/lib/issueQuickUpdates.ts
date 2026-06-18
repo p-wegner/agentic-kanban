@@ -1,6 +1,6 @@
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
-import { apiFetch } from "./api.js";
+import { apiPost, apiPatch, apiDelete } from "./api.js";
 import { showToast } from "../components/Toast.js";
 
 interface QuickUpdateTag {
@@ -38,10 +38,7 @@ export function createQuickUpdateHandlers({ columnsRef, setColumns, allTags, ref
     const prev = columnsRef.current.flatMap((c) => c.issues).find((i) => i.id === issueId);
     applyOptimisticIssueUpdate(issueId, (iss) => ({ ...iss, priority }));
     try {
-      await apiFetch(`/api/issues/${issueId}`, {
-        method: "PATCH",
-        body: JSON.stringify({ priority }),
-      });
+      await apiPatch(`/api/issues/${issueId}`, { priority });
       await refetchBoard();
     } catch {
       if (prev) applyOptimisticIssueUpdate(issueId, () => prev);
@@ -57,10 +54,7 @@ export function createQuickUpdateHandlers({ columnsRef, setColumns, allTags, ref
       tags: [...(iss.tags ?? []), tag],
     }));
     try {
-      await apiFetch(`/api/issues/${issueId}/tags`, {
-        method: "POST",
-        body: JSON.stringify({ tagId }),
-      });
+      await apiPost(`/api/issues/${issueId}/tags`, { tagId });
       await refetchBoard();
     } catch {
       applyOptimisticIssueUpdate(issueId, (iss) => ({
@@ -77,7 +71,7 @@ export function createQuickUpdateHandlers({ columnsRef, setColumns, allTags, ref
       tags: (iss.tags ?? []).filter((t) => t.id !== tagId),
     }));
     try {
-      await apiFetch(`/api/issues/${issueId}/tags/${tagId}`, { method: "DELETE" });
+      await apiDelete(`/api/issues/${issueId}/tags/${tagId}`);
       await refetchBoard();
     } catch {
       const tag = allTags.find((t) => t.id === tagId);
@@ -94,10 +88,7 @@ export function createQuickUpdateHandlers({ columnsRef, setColumns, allTags, ref
   async function handleQuickTogglePinned(issueId: string, pinned: boolean) {
     applyOptimisticIssueUpdate(issueId, (iss) => ({ ...iss, pinned }));
     try {
-      await apiFetch(`/api/issues/${issueId}`, {
-        method: "PATCH",
-        body: JSON.stringify({ pinned }),
-      });
+      await apiPatch(`/api/issues/${issueId}`, { pinned });
     } catch {
       applyOptimisticIssueUpdate(issueId, (iss) => ({ ...iss, pinned: !pinned }));
       showToast("Failed to update pin", "error");

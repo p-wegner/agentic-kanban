@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from "react";
-import { apiFetch } from "../../lib/api.js";
+import { apiPost, apiPatch, apiDelete } from "../../lib/api.js";
 import { showToast } from "../Toast.js";
 import type { TagSetting } from "../SettingsPanel.shared.js";
 
@@ -71,10 +71,7 @@ export function TagsSettings({ tagsList, setTagsList, editingTag, setEditingTag,
                               onClick={async () => {
                                 if (!editTagName.trim()) return;
                                 try {
-                                  await apiFetch(`/api/tags/${tag.id}`, {
-                                    method: "PATCH",
-                                    body: JSON.stringify({ name: editTagName.trim(), color: editTagColor || null }),
-                                  });
+                                  await apiPatch(`/api/tags/${tag.id}`, { name: editTagName.trim(), color: editTagColor || null });
                                   setTagsList((t) => t.map((tg) => tg.id === tag.id ? { ...tg, name: editTagName.trim(), color: editTagColor || null } : tg));
                                   setEditingTag(null);
                                   showToast("Tag updated", "success");
@@ -113,7 +110,7 @@ export function TagsSettings({ tagsList, setTagsList, editingTag, setEditingTag,
                                   onClick={async () => {
                                     if (!confirm(`Delete tag "${tag.name}"? This will remove it from all issues.`)) return;
                                     try {
-                                      await apiFetch(`/api/tags/${tag.id}`, { method: "DELETE" });
+                                      await apiDelete(`/api/tags/${tag.id}`);
                                       setTagsList((t) => t.filter((tg) => tg.id !== tag.id));
                                       setSelectedTagIds((s) => { const n = new Set(s); n.delete(tag.id); return n; });
                                       showToast("Tag deleted", "success");
@@ -161,10 +158,7 @@ export function TagsSettings({ tagsList, setTagsList, editingTag, setEditingTag,
                             const sourceIds = [...selectedTagIds].filter((id) => id !== mergeTargetId);
                             setMergingTags(true);
                             try {
-                              await apiFetch("/api/tags/merge", {
-                                method: "POST",
-                                body: JSON.stringify({ targetId: mergeTargetId, sourceIds }),
-                              });
+                              await apiPost("/api/tags/merge", { targetId: mergeTargetId, sourceIds });
                               setTagsList((t) => t.filter((tg) => tg.id === mergeTargetId || !selectedTagIds.has(tg.id)));
                               setSelectedTagIds(new Set());
                               setMergeTargetId("");
@@ -202,10 +196,7 @@ export function TagsSettings({ tagsList, setTagsList, editingTag, setEditingTag,
                         onKeyDown={async (e) => {
                           if (e.key === "Enter" && newTagName.trim()) {
                             try {
-                              const created = await apiFetch<{ id: string; name: string; color: string | null }>("/api/tags", {
-                                method: "POST",
-                                body: JSON.stringify({ name: newTagName.trim(), color: newTagColor }),
-                              });
+                              const created = await apiPost<{ id: string; name: string; color: string | null }>("/api/tags", { name: newTagName.trim(), color: newTagColor });
                               setTagsList((t) => [...t, { ...created, isBuiltin: false }]);
                               setNewTagName("");
                               setNewTagColor("#6B7280");
@@ -221,10 +212,7 @@ export function TagsSettings({ tagsList, setTagsList, editingTag, setEditingTag,
                         onClick={async () => {
                           if (!newTagName.trim()) return;
                           try {
-                            const created = await apiFetch<{ id: string; name: string; color: string | null }>("/api/tags", {
-                              method: "POST",
-                              body: JSON.stringify({ name: newTagName.trim(), color: newTagColor }),
-                            });
+                            const created = await apiPost<{ id: string; name: string; color: string | null }>("/api/tags", { name: newTagName.trim(), color: newTagColor });
                             setTagsList((t) => [...t, { ...created, isBuiltin: false }]);
                             setNewTagName("");
                             setNewTagColor("#6B7280");
