@@ -1,6 +1,11 @@
-import { and, eq } from "drizzle-orm";
-import { sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { workspaces } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
+import {
+  getWorkspaceCloseState,
+  applyWorkspaceClosePatch,
+  getRunningSessionIdsForWorkspace,
+  stopRunningSessionsForWorkspace,
+} from "../repositories/workspace-lifecycle-reconcile.repository.js";
 
 export interface CloseWorkspaceInput {
   database: Database;
@@ -35,17 +40,7 @@ export async function closeWorkspace(input: CloseWorkspaceInput): Promise<CloseW
   const now = input.now ?? new Date().toISOString();
   const shouldMarkMerged = input.markMerged ?? true;
 
-  const [workspace] = await input.database
-    .select({
-      status: workspaces.status,
-      closedAt: workspaces.closedAt,
-      mergedAt: workspaces.mergedAt,
-      readyForMerge: workspaces.readyForMerge,
-      workingDir: workspaces.workingDir,
-    })
-    .from(workspaces)
-    .where(eq(workspaces.id, input.workspaceId))
-    .limit(1);
+  const [workspace] = await getWorkspaceCloseState(input.workspaceId, input.database);
 
   if (!workspace) {
     throw new Error(`Workspace not found: ${input.workspaceId}`);
@@ -73,10 +68,7 @@ export async function closeWorkspace(input: CloseWorkspaceInput): Promise<CloseW
     (input.clearWorkingDir === true && workspace.workingDir !== null);
 
   if (workspaceUpdated) {
-    await input.database
-      .update(workspaces)
-      .set(patch)
-      .where(eq(workspaces.id, input.workspaceId));
+    await applyWorkspaceClosePatch(input.workspaceId, patch, input.database);
   }
 
   return {
@@ -98,17 +90,11 @@ export async function stopWorkspaceSessions(
   workspaceId: string,
   endedAt: string,
 ): Promise<boolean> {
-  const runningRows = await database
-    .select({ id: sessions.id })
-    .from(sessions)
-    .where(and(eq(sessions.workspaceId, workspaceId), eq(sessions.status, "running")));
+  const runningRows = await getRunningSessionIdsForWorkspace(workspaceId, database);
 
   if (runningRows.length === 0) return false;
 
-  await database
-    .update(sessions)
-    .set({ status: "stopped", endedAt })
-    .where(and(eq(sessions.workspaceId, workspaceId), eq(sessions.status, "running")));
+  await stopRunningSessionsForWorkspace(workspaceId, endedAt, database);
 
   return true;
 }

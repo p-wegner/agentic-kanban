@@ -12,11 +12,14 @@
  */
 
 import { execFile } from "node:child_process";
-import { eq, and, ne, like, or } from "drizzle-orm";
 import { isTerminalStatusView } from "@agentic-kanban/shared";
-import { issues, projectStatuses, workspaces, agentSkills, workflowNodes } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import { buildPhaseArtifactsContext } from "./phase-artifacts.service.js";
+import {
+  getCandidateIssuesForProject,
+  getIssuesMatchingFileBaseNames,
+  getBuiltinAgentSkills,
+} from "../repositories/context-packer.repository.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -151,20 +154,7 @@ export async function buildContextPrimer(
   interface IssueSummary { issueNumber: number | null; title: string; description: string | null }
   let priorIssues: IssueSummary[] = [];
   try {
-    const candidates = await database
-      .select({
-        issueNumber: issues.issueNumber,
-        title: issues.title,
-        description: issues.description,
-        statusName: projectStatuses.name,
-        currentNodeId: issues.currentNodeId,
-        currentNodeType: workflowNodes.nodeType,
-      })
-      .from(issues)
-      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-      .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
-      .where(and(eq(issues.projectId, projectId), ne(issues.id, issueId)))
-      .limit(100);
+    const candidates = await getCandidateIssuesForProject(projectId, issueId, database);
 
     priorIssues = candidates
       .filter((c) => isTerminalStatusView(c))
@@ -189,27 +179,7 @@ export async function buildContextPrimer(
       .filter((n) => n.length >= 4);
 
     if (fileBaseNames.length > 0) {
-      const nameConditions = fileBaseNames
-        .slice(0, 5)
-        .map((n) => or(like(issues.title, `%${n}%`), like(issues.description, `%${n}%`)));
-
-      const orCondition = nameConditions.length === 1
-        ? nameConditions[0]!
-        : or(...nameConditions as [ReturnType<typeof like>, ...ReturnType<typeof like>[]]);
-
-      const rows = await database
-        .select({
-          issueNumber: issues.issueNumber,
-          title: issues.title,
-          statusName: projectStatuses.name,
-          currentNodeId: issues.currentNodeId,
-          currentNodeType: workflowNodes.nodeType,
-        })
-        .from(issues)
-        .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-        .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
-        .where(and(eq(issues.projectId, projectId), ne(issues.id, issueId), orCondition))
-        .limit(20);
+      const rows = await getIssuesMatchingFileBaseNames(projectId, issueId, fileBaseNames, database);
       openNeighbors = rows.filter((row) => !isTerminalStatusView(row)).slice(0, 5);
     }
   } catch { /* best-effort */ }
@@ -217,10 +187,7 @@ export async function buildContextPrimer(
   // ---- 5. Skills hint -------------------------------------------------
   let skillHints: string[] = [];
   try {
-    const skills = await database
-      .select({ name: agentSkills.name, description: agentSkills.description })
-      .from(agentSkills)
-      .where(eq(agentSkills.isBuiltin, true));
+    const skills = await getBuiltinAgentSkills(database);
 
     skillHints = skills
       .filter((s) => {

@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, gte, sql } from "drizzle-orm";
-import { qualityMetrics } from "@agentic-kanban/shared/schema";
+import type { qualityMetrics } from "@agentic-kanban/shared/schema";
 import { getProjectById } from "../repositories/project.repository.js";
+import {
+  insertQualityMetrics,
+  listQualityMetrics,
+  listLatestQualityMetrics,
+  getPreviousQualityMetricSnapshot,
+} from "../repositories/quality-metrics.repository.js";
 import type { QualityMetricRecord } from "@agentic-kanban/shared/types";
 import type { Database } from "../db/index.js";
 import { NotFoundError, ValidationError } from "../errors/index.js";
@@ -102,7 +107,7 @@ export function createQualityMetricsService(database: Database) {
       };
     });
 
-    await database.insert(qualityMetrics).values(rows);
+    await insertQualityMetrics(rows, database);
     return { inserted: rows.length, metrics: rows.map((row) => serialize(row)) };
   }
 
@@ -110,17 +115,7 @@ export function createQualityMetricsService(database: Database) {
     await assertProject(projectId);
     if (filters.since) validateIsoDate(filters.since, "since");
 
-    const conditions = [
-      eq(qualityMetrics.projectId, projectId),
-      filters.metricKey ? eq(qualityMetrics.metricKey, filters.metricKey) : undefined,
-      filters.since ? gte(qualityMetrics.collectedAt, filters.since) : undefined,
-    ].filter(Boolean);
-
-    const rows = await database
-      .select()
-      .from(qualityMetrics)
-      .where(and(...conditions))
-      .orderBy(qualityMetrics.metricKey, qualityMetrics.collectedAt);
+    const rows = await listQualityMetrics(projectId, filters, database);
 
     const trend = rows.map(serialize);
     const latestByKey = new Map<string, QualityMetricRecord>();
@@ -136,11 +131,7 @@ export function createQualityMetricsService(database: Database) {
 
   async function latest(projectId: string): Promise<QualityMetricRecord[]> {
     await assertProject(projectId);
-    const rows = await database
-      .select()
-      .from(qualityMetrics)
-      .where(eq(qualityMetrics.projectId, projectId))
-      .orderBy(qualityMetrics.metricKey, desc(qualityMetrics.collectedAt));
+    const rows = await listLatestQualityMetrics(projectId, database);
 
     const latestByKey = new Map<string, QualityMetricRecord>();
     for (const row of rows) {
@@ -151,17 +142,8 @@ export function createQualityMetricsService(database: Database) {
   }
 
   async function previousSnapshot(projectId: string, metricKey: string, collectedAt: string): Promise<QualityMetricRecord | null> {
-    const rows = await database
-      .select()
-      .from(qualityMetrics)
-      .where(and(
-        eq(qualityMetrics.projectId, projectId),
-        eq(qualityMetrics.metricKey, metricKey),
-        sql`${qualityMetrics.collectedAt} < ${collectedAt}`,
-      ))
-      .orderBy(desc(qualityMetrics.collectedAt))
-      .limit(1);
-    return rows[0] ? serialize(rows[0]) : null;
+    const row = await getPreviousQualityMetricSnapshot(projectId, metricKey, collectedAt, database);
+    return row ? serialize(row) : null;
   }
 
   return { recordBatch, list, latest, previousSnapshot };

@@ -1,6 +1,10 @@
-import { eq, asc, inArray } from "drizzle-orm";
-import { issues, workspaces, workflowTransitions, workflowNodes, projectStatuses } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
+import {
+  getIssueWithStatusName,
+  getWorkspaceIdsForIssue,
+  getWorkflowTransitionsForWorkspaces,
+  getWorkflowNodeStatusNames,
+} from "../repositories/cycle-time.repository.js";
 
 export interface StatusDuration {
   statusName: string;
@@ -18,17 +22,7 @@ export interface CycleTimeResult {
 export async function getIssueCycleTime(issueId: string, database: Database, nowOverride?: string): Promise<CycleTimeResult | null> {
   const now = nowOverride ?? new Date().toISOString();
 
-  const issueRows = await database
-    .select({
-      id: issues.id,
-      createdAt: issues.createdAt,
-      statusChangedAt: issues.statusChangedAt,
-      statusName: projectStatuses.name,
-    })
-    .from(issues)
-    .leftJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-    .where(eq(issues.id, issueId))
-    .limit(1);
+  const issueRows = await getIssueWithStatusName(issueId, database);
 
   if (issueRows.length === 0) return null;
 
@@ -41,10 +35,7 @@ export async function getIssueCycleTime(issueId: string, database: Database, now
   const totalAgeMs = new Date(endTime).getTime() - new Date(issue.createdAt).getTime();
 
   // Collect all workflow transitions across all workspaces for this issue, ordered by time
-  const wsRows = await database
-    .select({ id: workspaces.id })
-    .from(workspaces)
-    .where(eq(workspaces.issueId, issueId));
+  const wsRows = await getWorkspaceIdsForIssue(issueId, database);
 
   if (wsRows.length === 0) {
     return {
@@ -59,15 +50,7 @@ export async function getIssueCycleTime(issueId: string, database: Database, now
   const workspaceIds = wsRows.map((w) => w.id);
 
   // Fetch transitions for all workspaces in a single query
-  const allTransitions = await database
-    .select({
-      workspaceId: workflowTransitions.workspaceId,
-      toNodeId: workflowTransitions.toNodeId,
-      createdAt: workflowTransitions.createdAt,
-    })
-    .from(workflowTransitions)
-    .where(inArray(workflowTransitions.workspaceId, workspaceIds))
-    .orderBy(asc(workflowTransitions.createdAt));
+  const allTransitions = await getWorkflowTransitionsForWorkspaces(workspaceIds, database);
 
   if (allTransitions.length === 0) {
     return {
@@ -83,10 +66,7 @@ export async function getIssueCycleTime(issueId: string, database: Database, now
   const nodeIds = [...new Set(allTransitions.map((t) => t.toNodeId))];
   const nodeStatusMap = new Map<string, string>();
   if (nodeIds.length > 0) {
-    const nodeRows = await database
-      .select({ id: workflowNodes.id, statusName: workflowNodes.statusName })
-      .from(workflowNodes)
-      .where(inArray(workflowNodes.id, nodeIds));
+    const nodeRows = await getWorkflowNodeStatusNames(nodeIds, database);
     for (const row of nodeRows) {
       if (row.statusName) nodeStatusMap.set(row.id, row.statusName);
     }
