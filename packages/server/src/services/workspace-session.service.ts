@@ -3,9 +3,14 @@ import { tmpdir } from "node:os";
 import { writeFileSync, readFileSync, existsSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
-import { issues, sessions, sessionMessages, workspaces } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
+import {
+  applyPlanImplementWorkspaceUpdate,
+  applyPlanRejectWorkspaceUpdate,
+  getIssueTitleAndDescription,
+  getSessionsForWorkspace,
+  insertPlanGateAuditMessage,
+} from "../repositories/workspace-session.repository.js";
 import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
 import { loadAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
@@ -79,15 +84,10 @@ export function createWorkspaceSessionService(deps: {
 
     let prompt = body.prompt as string | undefined;
     if (!prompt) {
-      const issueRows = await database
-        .select({ title: issues.title, description: issues.description })
-        .from(issues)
-        .where(eq(issues.id, ws0.issueId))
-        .limit(1);
-      if (issueRows.length === 0) {
+      const iss = await getIssueTitleAndDescription(ws0.issueId, database);
+      if (!iss) {
         throw new WorkspaceError("Cannot build prompt: issue not found", "NOT_FOUND");
       }
-      const iss = issueRows[0];
       prompt = iss.description ? `${iss.title}\n\n${iss.description}` : iss.title;
     }
 
@@ -245,10 +245,7 @@ export function createWorkspaceSessionService(deps: {
 
   async function stopWorkspace(id: string): Promise<{ stopped: boolean }> {
     const ws0 = await getWorkspaceById(id, database);
-    const runningSessions = await database
-      .select()
-      .from(sessions)
-      .where(eq(sessions.workspaceId, id));
+    const runningSessions = await getSessionsForWorkspace(id, database);
 
     let stopped = false;
     if (getSessionManager) {
@@ -310,22 +307,19 @@ export function createWorkspaceSessionService(deps: {
     });
 
     const now = new Date().toISOString();
-    await database.update(workspaces).set({
-      status: "active", pendingPlanPath: null,
-      claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null,
-      provider: agentProvider, updatedAt: now,
-    }).where(eq(workspaces.id, id));
+    await applyPlanImplementWorkspaceUpdate(id, {
+      claudeProfile: claudeProfile ?? null,
+      agentCommand: agentCommand ?? null,
+      provider: agentProvider,
+      now,
+    }, database);
 
     // Audit trail: record approval as a session message
     const approvalMsg = updatedPlanContent !== undefined
       ? "[Plan gate] User approved plan with edits and started implementation."
       : "[Plan gate] User approved plan and started implementation.";
-    await database.insert(sessionMessages).values({
-      sessionId,
-      type: "stdout",
-      data: approvalMsg,
-      exitCode: null,
-    }).catch((err) => console.warn("[plan-gate] audit message insert failed:", err));
+    await insertPlanGateAuditMessage(sessionId, approvalMsg, database)
+      .catch((err) => console.warn("[plan-gate] audit message insert failed:", err));
 
     const projectId = await resolveProjectId(id, database);
     if (projectId) boardEvents?.broadcast(projectId, "session_launched");
@@ -349,19 +343,16 @@ export function createWorkspaceSessionService(deps: {
     });
 
     const now = new Date().toISOString();
-    await database.update(workspaces).set({
-      status: "active", pendingPlanPath: null, planMode: true,
-      claudeProfile: claudeProfile ?? null, agentCommand: agentCommand ?? null,
-      provider: agentProvider, updatedAt: now,
-    }).where(eq(workspaces.id, id));
+    await applyPlanRejectWorkspaceUpdate(id, {
+      claudeProfile: claudeProfile ?? null,
+      agentCommand: agentCommand ?? null,
+      provider: agentProvider,
+      now,
+    }, database);
 
     // Audit trail: record rejection as a session message
-    await database.insert(sessionMessages).values({
-      sessionId,
-      type: "stdout",
-      data: `[Plan gate] User rejected plan. Feedback: ${feedback}`,
-      exitCode: null,
-    }).catch((err) => console.warn("[plan-gate] audit message insert failed:", err));
+    await insertPlanGateAuditMessage(sessionId, `[Plan gate] User rejected plan. Feedback: ${feedback}`, database)
+      .catch((err) => console.warn("[plan-gate] audit message insert failed:", err));
 
     const projectId = await resolveProjectId(id, database);
     if (projectId) boardEvents?.broadcast(projectId, "session_launched");

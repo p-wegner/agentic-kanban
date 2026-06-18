@@ -1,10 +1,15 @@
-import { workspaces, issues, projectStatuses, sessions, sessionMessages } from "@agentic-kanban/shared/schema";
 import { getProjectById } from "../repositories/project.repository.js";
-import { eq, inArray, and, desc } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { isAnalyticsNoise } from "./session-filter.js";
 import { getChangedFileNames } from "./git.service.js";
 import { readSessionStdoutFile } from "../repositories/session.repository.js";
+import {
+  getProjectIssueRows,
+  getProjectStatusRows,
+  getRiskSessionRowsDesc,
+  getSessionMessageDataForSessions,
+  getWorkspaceRiskRowsForIssues,
+} from "../repositories/workspace-risk.repository.js";
 
 export type RiskLevel = "high" | "medium" | "low" | "none";
 
@@ -206,19 +211,13 @@ export async function getWorkspaceRisk(
   if (!project) throw new Error(`Project ${projectId} not found`);
   const defaultBranch = project.defaultBranch;
 
-  const statusRows = await database
-    .select({ id: projectStatuses.id, name: projectStatuses.name })
-    .from(projectStatuses)
-    .where(eq(projectStatuses.projectId, projectId));
+  const statusRows = await getProjectStatusRows(projectId, database);
   const terminalStatusIds = new Set(
     statusRows.filter((s) => s.name === "Done" || s.name === "Cancelled").map((s) => s.id),
   );
   const statusNameById = new Map(statusRows.map((s) => [s.id, s.name]));
 
-  const issueRows = await database
-    .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, statusId: issues.statusId })
-    .from(issues)
-    .where(eq(issues.projectId, projectId));
+  const issueRows = await getProjectIssueRows(projectId, database);
 
   const activeIssues = issueRows.filter((i) => !terminalStatusIds.has(i.statusId));
   if (activeIssues.length === 0) {
@@ -228,28 +227,7 @@ export async function getWorkspaceRisk(
   const issueById = new Map(activeIssues.map((i) => [i.id, i]));
 
   // Get active/idle workspaces — these are the candidates for risk scoring
-  const workspaceRows = await database
-    .select({
-      id: workspaces.id,
-      issueId: workspaces.issueId,
-      branch: workspaces.branch,
-      workingDir: workspaces.workingDir,
-      baseBranch: workspaces.baseBranch,
-      isDirect: workspaces.isDirect,
-      status: workspaces.status,
-      conflictCacheCheckedAt: workspaces.conflictCacheCheckedAt,
-      conflictCacheHasConflicts: workspaces.conflictCacheHasConflicts,
-      conflictCacheFiles: workspaces.conflictCacheFiles,
-      diffStatCacheCheckedAt: workspaces.diffStatCacheCheckedAt,
-      diffStatCacheFilesChanged: workspaces.diffStatCacheFilesChanged,
-      diffStatCacheInsertions: workspaces.diffStatCacheInsertions,
-      diffStatCacheDeletions: workspaces.diffStatCacheDeletions,
-      updatedAt: workspaces.updatedAt,
-    })
-    .from(workspaces)
-    .where(and(
-      inArray(workspaces.issueId, activeIssueIds),
-    ));
+  const workspaceRows = await getWorkspaceRiskRowsForIssues(activeIssueIds, database);
 
   // Filter to active/review/idle workspaces (exclude closed)
   const scoredWorkspaces = workspaceRows.filter((w) => ACTIVE_STATUSES.has(w.status));
@@ -260,20 +238,7 @@ export async function getWorkspaceRisk(
   const wsIds = scoredWorkspaces.map((w) => w.id);
 
   // Fetch sessions for failure count and last session timing
-  const sessionRows = await database
-    .select({
-      id: sessions.id,
-      workspaceId: sessions.workspaceId,
-      status: sessions.status,
-      startedAt: sessions.startedAt,
-      endedAt: sessions.endedAt,
-      exitCode: sessions.exitCode,
-      stats: sessions.stats,
-      triggerType: sessions.triggerType,
-    })
-    .from(sessions)
-    .where(inArray(sessions.workspaceId, wsIds))
-    .orderBy(desc(sessions.startedAt));
+  const sessionRows = await getRiskSessionRowsDesc(wsIds, database);
 
   const latestSessionByWs = new Map<string, typeof sessionRows[0]>();
   const failureCountByWs = new Map<string, number>();
@@ -324,10 +289,7 @@ export async function getWorkspaceRisk(
       // For sessions without a .out file, fall back to DB
       const missingFromFile = runningSessionIds.filter((sid) => !sessionDataMap.has(sid));
       if (missingFromFile.length > 0) {
-        const dbRows = await database
-          .select({ sessionId: sessionMessages.sessionId, data: sessionMessages.data })
-          .from(sessionMessages)
-          .where(inArray(sessionMessages.sessionId, missingFromFile));
+        const dbRows = await getSessionMessageDataForSessions(missingFromFile, database);
         for (const row of dbRows) {
           if (!row.data) continue;
           sessionDataMap.set(row.sessionId, (sessionDataMap.get(row.sessionId) ?? "") + row.data);
