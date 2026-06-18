@@ -1,11 +1,13 @@
-import { projects, projectStatuses, issues } from "@agentic-kanban/shared/schema";
-import { eq, sql } from "drizzle-orm";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { getDirtyTrackedSourceFiles } from "./dirty-main-checkout.js";
 import { getPreference } from "../repositories/preferences.repository.js";
+import {
+  getProjectHealthRows,
+  getIssueCountsByStatus,
+} from "../repositories/project-health.repository.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -43,23 +45,9 @@ async function validateGitRepo(repoPath: string): Promise<string | null> {
 }
 
 export async function getProjectHealth(database: Database = db): Promise<ProjectHealthResult> {
-  const projectRows = await database.select({
-    id: projects.id,
-    name: projects.name,
-    color: projects.color,
-    repoPath: projects.repoPath,
-    defaultBranch: projects.defaultBranch,
-  }).from(projects);
+  const projectRows = await getProjectHealthRows(database);
 
-  const issueCountRows = await database
-    .select({
-      projectId: issues.projectId,
-      statusName: projectStatuses.name,
-      count: sql<number>`count(*)`,
-    })
-    .from(issues)
-    .leftJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-    .groupBy(issues.projectId, projectStatuses.name);
+  const issueCountRows = await getIssueCountsByStatus(database);
 
   const countsByProject = new Map<string, Record<string, number>>();
   for (const row of issueCountRows) {
