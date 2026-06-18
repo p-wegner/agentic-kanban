@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
-import { projects, projectStatuses, issues, agentSkills, scheduledRunHistory } from "@agentic-kanban/shared/schema";
+import { projects, projectStatuses, issues, agentSkills, scheduledRunHistory, preferences } from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createScheduledRunService } from "../services/scheduled-run.service.js";
 import { createScheduledRun } from "../repositories/scheduled-run.repository.js";
@@ -165,6 +165,9 @@ describe("createScheduledRunService", () => {
     it("records failed launch history rows with a visible reason", async () => {
       const { projectId, statusId } = await seedProject(db);
       const systemIssueId = await seedIssue(db, projectId, statusId);
+      // Permit scheduler-triggered runs (decision 008 Start Mode), otherwise the cron
+      // trigger is skipped (start-mode-manual) before the no-prompt failure can record.
+      await db.insert(preferences).values({ key: `start_mode_${projectId}`, value: "monitor" });
 
       const createWorkspace = vi.fn();
       const service = createScheduledRunService({ database: db, createWorkspace });
