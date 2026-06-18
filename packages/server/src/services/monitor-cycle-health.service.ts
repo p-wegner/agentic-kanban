@@ -1,7 +1,6 @@
-import { boardHealthEvents } from "@agentic-kanban/shared/schema";
-import { desc, eq, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { getMonitorCycleRows } from "../repositories/monitor-cycle-health.repository.js";
 
 export type CycleHealthState = "healthy" | "warning" | "error";
 
@@ -22,16 +21,6 @@ export interface MonitorCycleSummary {
   issueNumbers: number[];
   /** Human-readable label summarising the cycle health. */
   label: string;
-}
-
-interface RawCycleRow {
-  cycleId: string;
-  minCreatedAt: string;
-  maxCreatedAt: string;
-  eventTypes: string;
-  categories: string;
-  summaries: string;
-  issueNumbers: string;
 }
 
 /**
@@ -122,22 +111,7 @@ export async function listMonitorCycles(
 ): Promise<MonitorCycleSummary[]> {
   const limit = Math.min(50, Math.max(1, opts.limit ?? 20));
 
-  // Use a subquery to get the most-recent `limit` cycleIds first, then aggregate.
-  const cycleRows = await database
-    .select({
-      cycleId: boardHealthEvents.cycleId,
-      minCreatedAt: sql<string>`min(${boardHealthEvents.createdAt})`,
-      maxCreatedAt: sql<string>`max(${boardHealthEvents.createdAt})`,
-      eventTypes: sql<string>`group_concat(${boardHealthEvents.eventType}, '||')`,
-      categories: sql<string>`group_concat(coalesce(${boardHealthEvents.category}, ''), '||')`,
-      summaries: sql<string>`group_concat(${boardHealthEvents.summary}, '||')`,
-      issueNumbers: sql<string>`group_concat(coalesce(${boardHealthEvents.issueNumber}, ''))`,
-    })
-    .from(boardHealthEvents)
-    .where(eq(boardHealthEvents.projectId, projectId))
-    .groupBy(boardHealthEvents.cycleId)
-    .orderBy(desc(sql`min(${boardHealthEvents.createdAt})`))
-    .limit(limit) as RawCycleRow[];
+  const cycleRows = await getMonitorCycleRows(projectId, limit, database);
 
   return cycleRows.map((row) => {
     const summaries = (row.summaries ?? "").split("||").map((s) => s.trim()).filter(Boolean);
