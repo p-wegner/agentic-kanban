@@ -11,6 +11,7 @@ import {
 import { isResolvedDependencyStatusView } from "@agentic-kanban/shared/lib/status-view";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { branchHash, BASE_SERVER_PORT, BASE_CLIENT_PORT } from "./worktree-ports.js";
+import { buildAgentPrompt } from "./workspace-create/policy.js";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
@@ -389,73 +390,9 @@ export function createWorkspaceCrudService(deps: {
     return { branch, worktreePath, baseBranch, baseCommitSha, latestSetup, setupCompletion, symlinkRun };
   }
 
-  function buildAgentPrompt(
-    issue: { title: string; description: string | null },
-    input: Pick<CreateWorkspaceInput, "customPrompt" | "includeVisualProof" | "clarifications">,
-    issueId: string,
-  ): string {
-    let prompt: string;
-    if (input.customPrompt) {
-      prompt = input.customPrompt;
-    } else {
-      prompt = issue.title;
-      if (issue.description) {
-        prompt += `\n\n${issue.description}`;
-      }
-    }
-    // Prepend answered preflight clarifications so the agent starts with the resolved
-    // Q&A as part of its spec (the user already reconciled these ambiguities).
-    if (input.clarifications?.trim()) {
-      prompt = `${input.clarifications.trim()}\n\n${prompt}`;
-    }
-    prompt = neutralizeBuildTimeVisualVerification(prompt);
-    if (input.includeVisualProof) {
-      prompt += `\n\n## Board-Owned Visual Verification\n\nThis workspace is marked for visual proof, but visual verification is a board step, not a builder step. Do not run Playwright, install browsers, take screenshots, or attach visual artifacts during implementation. Finish the code change, run the relevant non-visual tests, commit, and let the board handle visual verification according to \`visual_verification_mode\` and \`after_merge_verify_agent\`.`;
-    }
-    // Claude Code treats prompts that start with `/` as slash-command invocations
-    // (e.g. ticket title "/merge endpoint ..." → "Unknown command: /merge", agent exits in 3s).
-    // Prefix a space to neutralize without altering meaning.
-    if (prompt.startsWith("/")) {
-      prompt = " " + prompt;
-    }
-    return prompt;
-  }
-
-  function neutralizeBuildTimeVisualVerification(prompt: string): string {
-    const lines = prompt.split(/\r?\n/);
-    const kept = lines.filter(line => !isBuildTimeVisualVerificationInstruction(line));
-    if (kept.length === lines.length) return prompt;
-    return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
-  }
-
-  function isBuildTimeVisualVerificationInstruction(line: string): boolean {
-    const normalized = line.trim().toLowerCase();
-    if (!normalized) return false;
-    if (/\bnpx\s+playwright\s+install\b/.test(normalized)) return true;
-    if (/\bplaywright\s+install\b/.test(normalized)) return true;
-    if (/\binstall\b.*\b(browser|browsers|runtime|runtimes|global package|playwright)\b/.test(normalized)) return true;
-
-    if (/\b(playwright-cli|run playwright|playwright directly)\b/.test(normalized)) return true;
-
-    const lifecycleInstruction =
-      /\b(after completing|after completion|before finishing|before completion|when done|before submitting|before review|before proposing review)\b/.test(normalized);
-    const productRequirement =
-      /\b(implement|add|create|build|support|display|render|save|upload|download|button|component|endpoint|api|user|users|customer|client|canvas|image|attachment|attachments)\b/.test(normalized);
-    if (productRequirement && !lifecycleInstruction) return false;
-
-    const proofInstruction =
-      /\b(attach|provide|include|submit|upload|capture|take)\b.*\b(proof|evidence|screenshot|screenshots|visual proof)\b/.test(normalized) ||
-      /\b(screenshot|screenshots|visual proof)\b.*\b(proof|evidence|showing it working|before finishing|after completing)\b/.test(normalized);
-    const verificationInstruction =
-      /\b(visual verification|visually verify|verify visually)\b/.test(normalized) &&
-      /\b(must|should|required|run|perform|complete|do|use|before|after|verify)\b/.test(normalized);
-
-    return (
-      (lifecycleInstruction && (proofInstruction || verificationInstruction)) ||
-      proofInstruction ||
-      verificationInstruction
-    );
-  }
+  // buildAgentPrompt / neutralizeBuildTimeVisualVerification /
+  // isBuildTimeVisualVerificationInstruction are pure policy — extracted to
+  // ./workspace-create/policy.ts and unit-tested there. Imported at top of file.
 
   async function resolveSkillFile(
     skillId: string | null,
