@@ -15,7 +15,7 @@ import {
   setCachedRecommendations,
 } from "../services/agent-questions.service.js";
 import { readSessionStdoutFileTail } from "../repositories/session.repository.js";
-import { sessionOutputPath } from "../services/agent.service.js";
+import { sessionOutputPath } from "../lib/session-paths.js";
 import { createTestDb } from "./helpers/test-db.js";
 import { setPreference } from "../repositories/preferences.repository.js";
 import {

@@ -5,7 +5,7 @@ import { readFileSync, existsSync, openSync, readSync, closeSync, fstatSync } fr
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import type { AgentOutputMessage, SessionSummary } from "@agentic-kanban/shared";
-import { sessionOutputPath } from "../services/agent.service.js";
+import { sessionOutputPath } from "../lib/session-paths.js";
 
 /**
  * Read stdout content from the per-session .out file, or null when absent.
