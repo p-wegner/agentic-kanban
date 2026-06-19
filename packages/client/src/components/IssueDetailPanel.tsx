@@ -30,6 +30,7 @@ import { getIssueArtifactRenderer, issueArtifactAuthor, issueArtifactKind } from
 import { issueArtifactRenderers } from "./ArtifactRenderers.js";
 import { DependencyDisplay } from "./DependencyDisplay.js";
 import { IssueDetailComments, type IssueComment } from "./IssueDetailComments.js";
+import { IssueChecklistSection } from "./IssueChecklistSection.js";
 
 // Re-exported so existing importers/tests keep working after the helpers moved
 // into lib/artifact-utils.ts and lib/artifact-classifiers.ts.
@@ -442,9 +443,6 @@ export function IssueDetailPanel({
   const [activityLoading, setActivityLoading] = useState(true);
   const [mergedCommits, setMergedCommits] = useState<MergedCommitsResponse | null>(null);
   const [mergedCommitsLoading, setMergedCommitsLoading] = useState(true);
-  const [checklist, setChecklist] = useState<{ id: string; text: string; completed: boolean }[]>(issue.checklist ?? []);
-  const [newChecklistItem, setNewChecklistItem] = useState("");
-  const [savingChecklist, setSavingChecklist] = useState(false);
   const [milestoneId, setMilestoneId] = useState<string | null>(issue.milestoneId ?? null);
   const [milestones, setMilestones] = useState<MilestoneResponse[]>([]);
 
@@ -571,7 +569,6 @@ export function IssueDetailPanel({
       setExternalKey(issue.externalKey ?? "");
       setExternalUrl(issue.externalUrl ?? "");
       setSkipAutoReview(issue.skipAutoReview ?? false);
-      setChecklist(issue.checklist ?? []);
       setMilestoneId(issue.milestoneId ?? null);
     }
     if (!inlineEditingTitle) setInlineTitleValue(issue.title);
@@ -851,40 +848,6 @@ export function IssueDetailPanel({
     }
   }
 
-  async function persistChecklist(updated: { id: string; text: string; completed: boolean }[]) {
-    setSavingChecklist(true);
-    try {
-      await apiPatch(`/api/issues/${issue.id}`, { checklist: updated });
-    } catch {
-      showToast("Failed to save checklist", "error");
-    } finally {
-      setSavingChecklist(false);
-    }
-  }
-
-  async function handleAddChecklistItem() {
-    const text = newChecklistItem.trim();
-    if (!text || savingChecklist) return;
-    const newItem = { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, text, completed: false };
-    const updated = [...checklist, newItem];
-    setChecklist(updated);
-    setNewChecklistItem("");
-    await persistChecklist(updated);
-  }
-
-  async function handleToggleChecklistItem(itemId: string) {
-    const updated = checklist.map((item) =>
-      item.id === itemId ? { ...item, completed: !item.completed } : item,
-    );
-    setChecklist(updated);
-    await persistChecklist(updated);
-  }
-
-  async function handleRemoveChecklistItem(itemId: string) {
-    const updated = checklist.filter((item) => item.id !== itemId);
-    setChecklist(updated);
-    await persistChecklist(updated);
-  }
 
   async function handleSave() {
     if (saving) return;
@@ -1877,77 +1840,7 @@ export function IssueDetailPanel({
             </div>
 
           {/* Acceptance Criteria Checklist section */}
-          <div className="border-t border-gray-100 dark:border-gray-800 pt-3">
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                Acceptance Criteria
-              </label>
-              {checklist.length > 0 && (
-                <span className={`inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded ${
-                  checklist.every((i) => i.completed)
-                    ? "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300"
-                    : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
-                }`}>
-                  {checklist.filter((i) => i.completed).length}/{checklist.length}
-                </span>
-              )}
-            </div>
-            {checklist.length > 0 && (
-              <ul className="space-y-1 mb-2">
-                {checklist.map((item) => (
-                  <li key={item.id} className="flex items-start gap-2 group">
-                    <button
-                      type="button"
-                      onClick={() => handleToggleChecklistItem(item.id)}
-                      disabled={savingChecklist}
-                      title={item.completed ? "Mark incomplete" : "Mark complete"}
-                      className={`mt-0.5 h-4 w-4 shrink-0 rounded border transition-colors disabled:opacity-50 flex items-center justify-center ${
-                        item.completed
-                          ? "bg-green-500 border-green-500 text-white"
-                          : "border-gray-300 dark:border-gray-600 hover:border-green-400"
-                      }`}
-                    >
-                      {item.completed && (
-                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                        </svg>
-                      )}
-                    </button>
-                    <span className={`flex-1 text-sm leading-tight ${item.completed ? "line-through text-gray-400 dark:text-gray-500" : "text-gray-700 dark:text-gray-300"}`}>
-                      {item.text}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveChecklistItem(item.id)}
-                      disabled={savingChecklist}
-                      className="opacity-0 group-hover:opacity-100 text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 transition-opacity disabled:opacity-0 shrink-0"
-                      title="Remove item"
-                    >
-                      &times;
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <div className="flex gap-1.5">
-              <input
-                type="text"
-                value={newChecklistItem}
-                onChange={(e) => setNewChecklistItem(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddChecklistItem(); } }}
-                placeholder="Add acceptance criterion..."
-                className="flex-1 text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
-              />
-              <button
-                type="button"
-                onClick={handleAddChecklistItem}
-                disabled={!newChecklistItem.trim() || savingChecklist}
-                className="text-xs px-2 py-1 bg-brand-600 text-white rounded hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Add
-              </button>
-            </div>
-          </div>
+          <IssueChecklistSection issueId={issue.id} initialChecklist={issue.checklist} />
 
           {/* Dependencies section */}
           <DependencyDisplay
