@@ -1,46 +1,18 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Layout } from "../components/Layout.js";
 import { useTheme } from "../hooks/useTheme.js";
-// Code-split: every non-kanban view below is rendered only behind a `viewMode` guard,
-// so it is loaded on demand. This keeps the heaviest chunks off the initial kanban
-// paint — most notably WorkflowsView (which pulls in @xyflow/react + @dagrejs/dagre)
-// and the markdown/chart-heavy analytics views. The explicit `.then(m => ({ default:
-// m.X }))` form preserves each component's prop types through React.lazy.
-const GraphView = lazy(() => import("../components/GraphView.js").then((m) => ({ default: m.GraphView })));
-const TableView = lazy(() => import("../components/TableView.js").then((m) => ({ default: m.TableView })));
-const AgentGrid = lazy(() => import("../components/AgentGrid.js").then((m) => ({ default: m.AgentGrid })));
-const TimelineView = lazy(() => import("../components/TimelineView.js").then((m) => ({ default: m.TimelineView })));
-const MetricsView = lazy(() => import("../components/MetricsView.js").then((m) => ({ default: m.MetricsView })));
-const CrimeSceneCityView = lazy(() => import("../components/CrimeSceneCityView.js").then((m) => ({ default: m.CrimeSceneCityView })));
-const QualityMetricsView = lazy(() => import("../components/QualityMetricsView.js").then((m) => ({ default: m.QualityMetricsView })));
-const MilestonesOverview = lazy(() => import("../components/MilestonesOverview.js").then((m) => ({ default: m.MilestonesOverview })));
-const ButlerView = lazy(() => import("../components/ButlerView.js").then((m) => ({ default: m.ButlerView })));
-const WorkflowsView = lazy(() => import("../components/WorkflowsView.js").then((m) => ({ default: m.WorkflowsView })));
-const WorkflowAnalyticsDashboard = lazy(() => import("../components/WorkflowAnalyticsDashboard.js").then((m) => ({ default: m.WorkflowAnalyticsDashboard })));
-const InsightsPanel = lazy(() => import("../components/InsightsPanel.js").then((m) => ({ default: m.InsightsPanel })));
-const DigestView = lazy(() => import("../components/DigestView.js").then((m) => ({ default: m.DigestView })));
-const ActivityFeedView = lazy(() => import("../components/ActivityFeedView.js").then((m) => ({ default: m.ActivityFeedView })));
-const FocusView = lazy(() => import("../components/FocusView.js").then((m) => ({ default: m.FocusView })));
-const StrategyTargetsView = lazy(() => import("../components/StrategyTargetsView.js").then((m) => ({ default: m.StrategyTargetsView })));
-const SwimlaneView = lazy(() => import("../components/SwimlaneView.js").then((m) => ({ default: m.SwimlaneView })));
-const FlakyTestsPanel = lazy(() => import("../components/FlakyTestsPanel.js").then((m) => ({ default: m.FlakyTestsPanel })));
-const MonitorCycleHistoryPanel = lazy(() => import("../components/MonitorCycleHistoryPanel.js").then((m) => ({ default: m.MonitorCycleHistoryPanel })));
-const BoardHealthNotificationCenter = lazy(() => import("../components/BoardHealthNotificationCenter.js").then((m) => ({ default: m.BoardHealthNotificationCenter })));
-const RunbooksView = lazy(() => import("../components/RunbooksView.js").then((m) => ({ default: m.RunbooksView })));
-const SprintCapacityPlanner = lazy(() => import("../components/SprintCapacityPlanner.js").then((m) => ({ default: m.SprintCapacityPlanner })));
-const ConstellationView = lazy(() => import("../components/ConstellationView.js").then((m) => ({ default: m.ConstellationView })));
-const MomentumView = lazy(() => import("../components/MomentumView.js").then((m) => ({ default: m.MomentumView })));
-const FireworksView = lazy(() => import("../components/FireworksView.js").then((m) => ({ default: m.FireworksView })));
-const StaleWorkDashboard = lazy(() => import("../components/StaleWorkDashboard.js").then((m) => ({ default: m.StaleWorkDashboard })));
-const ThroughputChart = lazy(() => import("../components/ThroughputChart.js").then((m) => ({ default: m.ThroughputChart })));
-const ProviderMixChart = lazy(() => import("../components/ProviderMixChart.js").then((m) => ({ default: m.ProviderMixChart })));
-const LeadTimeTrendChart = lazy(() => import("../components/LeadTimeTrendChart.js").then((m) => ({ default: m.LeadTimeTrendChart })));
-const ScorecardDistributionChart = lazy(() => import("../components/ScorecardDistributionChart.js").then((m) => ({ default: m.ScorecardDistributionChart })));
-const ProviderCostOverTimeChart = lazy(() => import("../components/ProviderCostOverTimeChart.js").then((m) => ({ default: m.ProviderCostOverTimeChart })));
-const CalendarView = lazy(() => import("../components/CalendarView.js").then((m) => ({ default: m.CalendarView })));
-const AgentThroughputLeaderboard = lazy(() => import("../components/AgentThroughputLeaderboard.js").then((m) => ({ default: m.AgentThroughputLeaderboard })));
-const BurndownChart = lazy(() => import("../components/BurndownChart.js").then((m) => ({ default: m.BurndownChart })));
-const DriveDashboard = lazy(() => import("../components/DriveDashboard.js").then((m) => ({ default: m.DriveDashboard })));
+// Code-split board views (rendered behind `viewMode` guards) live in their own
+// barrel so they load on demand and don't bloat this file.
+import {
+  GraphView, TableView, AgentGrid, TimelineView, MetricsView, CrimeSceneCityView,
+  QualityMetricsView, MilestonesOverview, ButlerView, WorkflowsView,
+  WorkflowAnalyticsDashboard, InsightsPanel, DigestView, ActivityFeedView, FocusView,
+  StrategyTargetsView, SwimlaneView, FlakyTestsPanel, MonitorCycleHistoryPanel,
+  BoardHealthNotificationCenter, RunbooksView, SprintCapacityPlanner, ConstellationView,
+  MomentumView, FireworksView, StaleWorkDashboard, ThroughputChart, ProviderMixChart,
+  LeadTimeTrendChart, ScorecardDistributionChart, ProviderCostOverTimeChart, CalendarView,
+  AgentThroughputLeaderboard, BurndownChart, DriveDashboard,
+} from "../components/boardLazyViews.js";
 import { useAgentQuestionsCount } from "../components/AgentQuestionsPanel.js";
 import { BoardErrorBoundary } from "../components/BoardErrorBoundary.js";
 import { BacklogView } from "../components/BacklogView.js";
