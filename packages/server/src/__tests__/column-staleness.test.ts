@@ -46,7 +46,13 @@ beforeAll(async () => {
 });
 
 function daysAgo(days: number): string {
-  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  // Subtract a small extra buffer (5s) beyond the exact day boundary. `now` in a test
+  // is often captured a moment BEFORE these seeds are evaluated, so the true elapsed span
+  // lands a few ms UNDER `days`, which Math.floor() then rounds DOWN (e.g. 1 day → 0). That
+  // produced a load-dependent boundary flake on `columnAgeDays >= N`. The buffer guarantees
+  // the floor is a clean >= N regardless of capture order, and 5s is far below any
+  // day-granularity staleness threshold so it changes no stale/fresh outcome.
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000 - 5_000).toISOString();
 }
 
 describe("column age badge", () => {
