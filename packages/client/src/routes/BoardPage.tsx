@@ -9,7 +9,13 @@ import { useBoardFilters } from "../hooks/useBoardFilters.js";
 import { useBoardIssueActions } from "../hooks/useBoardIssueActions.js";
 import { useBoardMiscHandlers } from "../hooks/useBoardMiscHandlers.js";
 import { BoardPageView } from "../components/BoardPageView.js";
-import { stringifyForIssueCard, deferUntilIdle } from "../lib/boardCardSnapshot.js";
+import { deferUntilIdle } from "../lib/boardCardSnapshot.js";
+import {
+  reconcileBoardIssueIdentity,
+  deriveInactiveIssueIds,
+  prunePendingWorkspaceIssueIds,
+  pruneRecordKeys,
+} from "../lib/boardDataReconcile.js";
 import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
 import { SkeletonBoard } from "../components/SkeletonBoard.js";
 import { showToast } from "../components/Toast.js";
@@ -223,62 +229,19 @@ export function BoardPage() {
     lastAppliedSeqRef.current = seq;
     const etag = res.headers.get("ETag");
     if (etag) boardEtagRef.current[pid] = etag;
-    // Reconcile object identity: reuse unchanged issue refs so IssueCard.memo skips re-render
-    const prevCols = columnsRef.current;
-    if (prevCols.length > 0) {
-      const prevByIssueId = new Map(prevCols.flatMap(c => c.issues).map(i => [i.id, i]));
-      const prevIssueSignatures = new Map<string, string>(Array.from(prevByIssueId, ([issueId, issue]) => [issueId, stringifyForIssueCard(issue)]));
-      for (const col of board) {
-        col.issues = col.issues.map(issue => {
-          const prev = prevByIssueId.get(issue.id);
-          if (!prev) return issue;
-          const prevSignature = prevIssueSignatures.get(issue.id);
-          if (prevSignature !== undefined && prevSignature === stringifyForIssueCard(issue)) return prev;
-          return issue;
-        });
-      }
-    }
-    setColumns(board);
-    columnsRef.current = board;
-    const inactiveIssueIds = new Set<string>();
-    for (const col of board) {
-      for (const issue of col.issues) {
-        const ws = issue.workspaceSummary?.main;
-        if (!ws || (ws.status !== "active" && ws.status !== "fixing")) {
-          inactiveIssueIds.add(issue.id);
-        }
-      }
-    }
-    setPendingWorkspaceIssueIds((prev) => {
-      if (prev.size === 0) return prev;
-      const next = new Set(prev);
-      for (const col of board) {
-        for (const issue of col.issues) {
-          const ws = issue.workspaceSummary?.main;
-          if (ws && ws.status !== "closed") next.delete(issue.id);
-        }
-      }
-      return next.size === prev.size ? prev : next;
-    });
+    // Reconcile the fresh payload against live state (all pure, tested in
+    // lib/boardDataReconcile): reuse unchanged issue refs so IssueCard.memo can
+    // skip re-render, then prune live-session bookkeeping for now-inactive issues.
+    const reconciled = reconcileBoardIssueIdentity(columnsRef.current, board);
+    setColumns(reconciled);
+    columnsRef.current = reconciled;
+    const inactiveIssueIds = deriveInactiveIssueIds(reconciled);
+    setPendingWorkspaceIssueIds((prev) => prunePendingWorkspaceIssueIds(prev, reconciled));
     if (inactiveIssueIds.size > 0) {
-      setLiveStats((prev) => {
-        const next = { ...prev };
-        let changed = false;
-        for (const id of inactiveIssueIds) {
-          if (id in next) { delete next[id]; changed = true; }
-        }
-        return changed ? next : prev;
-      });
-      setSessionActivityRaw((prev) => {
-        const next = { ...prev };
-        let changed = false;
-        for (const id of inactiveIssueIds) {
-          if (id in next) { delete next[id]; changed = true; }
-        }
-        return changed ? next : prev;
-      });
+      setLiveStats((prev) => pruneRecordKeys(prev, inactiveIssueIds));
+      setSessionActivityRaw((prev) => pruneRecordKeys(prev, inactiveIssueIds));
     }
-    return board;
+    return reconciled;
   }, [activeProjectId]);
 
   // Coalesced board refetch: agent merge/exit cascades broadcast 3-6
