@@ -27,6 +27,12 @@ import {
 import { WorkspaceQuickLaunch } from "./WorkspaceQuickLaunch.js";
 import { useWorkspaceGithubHandoff } from "../hooks/useWorkspaceGithubHandoff.js";
 import { useWorkspaceActions } from "../hooks/useWorkspaceActions.js";
+import {
+  fetchLatestCommits,
+  fetchGithubDrafts,
+  fetchPlanContents,
+  pickInitialWorkspaceId,
+} from "../lib/workspace-secondary-data.js";
 import type { LiveSessionStats } from "../lib/useBoardEvents.js";
 import type {
   AgentOutputMessage,
@@ -253,59 +259,19 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
         `/api/issues/${issue.id}/workspaces`,
       );
       setWorkspaces(data);
-      if (data.length > 0 && !selectedWorkspace) {
-        const targetId = autoSelectId ?? (data.length === 1 ? data[0].id : undefined);
-        if (targetId) {
-          setSelectedWorkspace(targetId);
-        }
-      }
-      const commits: Record<string, { sha: string; message: string } | null> = {};
-      await Promise.all(
-        data.filter(ws => ws.workingDir).map(async (ws) => {
-          try {
-            const result = await apiFetch<{ sha: string | null; message: string | null }>(
-              `/api/workspaces/${ws.id}/latest-commit`,
-            );
-            commits[ws.id] = result.sha && result.message ? { sha: result.sha, message: result.message } : null;
-          } catch {
-            commits[ws.id] = null;
-          }
-        }),
-      );
+      const initialId = pickInitialWorkspaceId(data, selectedWorkspace, autoSelectId);
+      if (initialId) setSelectedWorkspace(initialId);
+      // Hydrate the three independent secondary maps in parallel. (The former
+      // per-workspace `/handoff` GET never existed on the server — only
+      // `/handoff-bundle` and `/github-handoff-draft` do — so it was dropped to kill
+      // the 404 noise; wiring handoff display to a real endpoint is tracked separately.)
+      const [commits, drafts, plans] = await Promise.all([
+        fetchLatestCommits(data, apiFetch),
+        fetchGithubDrafts(data, apiFetch),
+        fetchPlanContents(data, apiFetch),
+      ]);
       setLatestCommits(commits);
-      // NOTE: the per-workspace `/handoff` GET endpoint does not exist on the server
-      // (only `/handoff-bundle` and `/github-handoff-draft` do), so this loop always
-      // 404'd and `handoffContent` was never populated. Removed to kill the redundant
-      // per-workspace requests + console 404 noise on every panel open. Wiring the
-      // handoff display to a real endpoint is tracked separately.
-      const drafts: Record<string, string | null> = {};
-      await Promise.all(
-        data.filter(ws => ws.status === "closed").map(async (ws) => {
-          try {
-            const result = await apiFetch<{ content: string | null }>(
-              `/api/workspaces/${ws.id}/github-handoff-draft`,
-            );
-            drafts[ws.id] = result.content;
-          } catch {
-            drafts[ws.id] = null;
-          }
-        }),
-      );
       setGithubDrafts(drafts);
-      // Fetch plan content for workspaces awaiting plan approval
-      const plans: Record<string, string | null> = {};
-      await Promise.all(
-        data.filter(ws => ws.pendingPlanPath && ws.workingDir).map(async (ws) => {
-          try {
-            const result = await apiFetch<{ content: string | null }>(
-              `/api/workspaces/${ws.id}/plan`,
-            );
-            plans[ws.id] = result.content;
-          } catch {
-            plans[ws.id] = null;
-          }
-        }),
-      );
       setPlanContent(plans);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load workspaces");
