@@ -8,7 +8,13 @@ import { wrapAiOperation } from "../middleware/ai-operation.js";
 import { checkIssueOverlap } from "../services/issue-ai.service.js";
 import { getFileContention } from "../services/file-contention.service.js";
 import { getProjectActivity } from "../services/project-activity.service.js";
-import { listBoardHealthEvents, getBoardHealthEvent, type BoardHealthEventType, type BoardHealthEventCategory } from "../repositories/board-health-events.repository.js";
+import { listBoardHealthEvents, getBoardHealthEvent } from "../repositories/board-health-events.repository.js";
+import {
+  parseBoardHealthEventsLimit,
+  parseBoardHealthEventTypes,
+  parseBoardHealthCategories,
+  compactBoardHealthEventDetails,
+} from "../lib/board-health-events-format.js";
 import { listMonitorCycles } from "../services/monitor-cycle-health.service.js";
 import { buildDependencyWavePlan, startNextDependencyWave } from "../services/dependency-wave.service.js";
 import { buildSprintCapacityPlan } from "../services/sprint-capacity.service.js";
@@ -22,52 +28,6 @@ import { createHash } from "node:crypto";
 import { createWorkspaceSummaryCache } from "../services/workspace-summary-cache.service.js";
 import { getStackProfile, populateStackProfile, saveStackProfile } from "../services/stack-profile.service.js";
 import type { StackProfile } from "@agentic-kanban/shared";
-
-function parseBoardHealthEventsLimit(raw: string | undefined): number {
-  const parsed = Number.parseInt(raw ?? "", 10);
-  if (!Number.isFinite(parsed)) return 20;
-  return Math.min(50, Math.max(1, parsed));
-}
-
-const VALID_EVENT_TYPES: Set<string> = new Set(["cycle_start", "cycle_end", "observation", "action", "error"]);
-const VALID_CATEGORIES: Set<string> = new Set(["merge", "launch", "server", "refill", "smoke_check"]);
-
-function parseBoardHealthEventTypes(raw: string | undefined): BoardHealthEventType[] | undefined {
-  if (!raw) return undefined;
-  const types = raw.split(",").map((t) => t.trim()).filter((t) => VALID_EVENT_TYPES.has(t));
-  return types.length > 0 ? (types as BoardHealthEventType[]) : undefined;
-}
-
-function parseBoardHealthCategories(raw: string | undefined): BoardHealthEventCategory[] | undefined {
-  if (!raw) return undefined;
-  const cats = raw.split(",").map((t) => t.trim()).filter((t) => VALID_CATEGORIES.has(t));
-  return cats.length > 0 ? (cats as BoardHealthEventCategory[]) : undefined;
-}
-
-function compactBoardHealthEventDetails(raw: string | null): string | null {
-  if (!raw) return null;
-  try {
-    const details = JSON.parse(raw) as unknown;
-    if (details === null || details === undefined) return null;
-    if (typeof details !== "object") return String(details);
-    if (Array.isArray(details)) return `${details.length} item${details.length === 1 ? "" : "s"}`;
-
-    const entries = Object.entries(details as Record<string, unknown>)
-      .filter(([, value]) => value !== null && value !== undefined)
-      .slice(0, 4);
-    if (entries.length === 0) return null;
-
-    return entries
-      .map(([key, value]) => {
-        if (Array.isArray(value)) return `${key}: ${value.length} item${value.length === 1 ? "" : "s"}`;
-        if (typeof value === "object") return `${key}: ${Object.keys(value as Record<string, unknown>).length} fields`;
-        return `${key}: ${String(value)}`;
-      })
-      .join(", ");
-  } catch {
-    return raw.slice(0, 160);
-  }
-}
 
 // Conditional-GET fast path for GET /:id/board: memo of the last served response per
 // (projectId + query shape). A request whose If-None-Match equals the memoized ETag can
