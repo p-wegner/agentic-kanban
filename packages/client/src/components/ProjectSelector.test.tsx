@@ -57,7 +57,8 @@ describe("ActiveAgentsBadge", () => {
   it("renders just the number in compact mode", () => {
     const html = renderToStaticMarkup(<ActiveAgentsBadge count={2} compact />);
     expect(html).toContain(">2<");
-    expect(html).not.toContain("active agents");
+    // The spelled-out label appears only in the tooltip (title), never as visible text.
+    expect(html).not.toContain(">2 active agent");
     expect(html).toContain('title="2 active agents"');
   });
 });

@@ -37,14 +37,14 @@ describe("getWorkspacePreviewUrl", () => {
   it("explains when the branch is missing", () => {
     expect(getWorkspacePreviewUrl({ branch: "" })).toEqual({
       ok: false,
-      reason: "Preview port unavailable: workspace branch is missing.",
+      reason: "Dev ports unavailable: workspace branch is missing.",
     });
   });
 
   it("explains when a parsed issue number would exceed the supported port range", () => {
     expect(getWorkspacePreviewUrl({ branch: "feature/ak-55000-too-high" })).toEqual({
       ok: false,
-      reason: "Preview port 60173 is outside the supported dev range.",
+      reason: "Dev ports 58001/60173 are outside the supported range.",
     });
   });
 });
