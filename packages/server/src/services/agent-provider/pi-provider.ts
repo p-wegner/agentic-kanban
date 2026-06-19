@@ -64,6 +64,139 @@ function hasParsedFields(result: ParsedStreamEvent): boolean {
     result.rateLimitInfo !== undefined;
 }
 
+// --- parseStreamEvent extractors ---
+// Each mutates the shared `result` for one Pi stream-event shape. parseStreamEvent
+// runs them in order; types are disjoint enough that ordering only matters where a
+// block both sets liveStats and stats on turn_end (live stats first, then stats).
+
+function applyPiSession(result: ParsedStreamEvent, type: string | undefined, obj: Record<string, unknown>): void {
+  if (type !== "session") return;
+  const sessionId = stringValue(obj.id);
+  if (sessionId) result.providerSessionId = sessionId;
+}
+
+function applyPiMessageUpdate(result: ParsedStreamEvent, type: string | undefined, assistantEvent: Record<string, unknown>): void {
+  if (type !== "message_update") return;
+  if (assistantEvent.type === "text_delta") {
+    const text = stringValue(assistantEvent.delta);
+    if (text) result.assistantText = text;
+  } else if (assistantEvent.type === "text_start" || assistantEvent.type === "text_end") {
+    const text = stringValue(assistantEvent.content);
+    if (text) result.assistantText = text;
+  } else if (assistantEvent.type === "toolcall_start" || assistantEvent.type === "toolcall_end") {
+    let toolCall = objectValue(assistantEvent.toolCall);
+    if (Object.keys(toolCall).length === 0) {
+      const partialContent = objectValue(assistantEvent.partial).content;
+      if (Array.isArray(partialContent)) {
+        toolCall = objectValue(partialContent[0]);
+      }
+    }
+    const name = stringValue(toolCall.name);
+    if (name) {
+      result.toolActivity = {
+        name,
+        input: objectValue(toolCall.arguments),
+        toolUseId: stringValue(toolCall.id),
+      };
+    }
+  }
+}
+
+function applyPiMessageBoundary(result: ParsedStreamEvent, type: string | undefined, message: Record<string, unknown>): void {
+  if (type !== "message_start" && type !== "message_end") return;
+  if (message.role === "toolResult") {
+    const toolUseId = stringValue(message.toolCallId);
+    if (toolUseId) {
+      const resultText = extractContentText(message.content);
+      result.toolResult = {
+        toolUseId,
+        ...(resultText ? { agentResultText: resultText } : {}),
+      };
+    }
+  } else if (message.role === "assistant") {
+    const text = extractContentText(message.content);
+    if (text) result.assistantText = text;
+  }
+}
+
+function applyPiToolExecution(result: ParsedStreamEvent, type: string | undefined, obj: Record<string, unknown>): void {
+  if (type === "tool_execution_start") {
+    const name = stringValue(obj.toolName);
+    if (name) {
+      result.toolActivity = {
+        name,
+        input: objectValue(obj.args),
+        toolUseId: stringValue(obj.toolCallId),
+      };
+    }
+  }
+
+  if (type === "tool_execution_end") {
+    const toolUseId = stringValue(obj.toolCallId);
+    if (toolUseId) {
+      const resultText = extractContentText(objectValue(obj.result).content);
+      result.toolResult = {
+        toolUseId,
+        ...(resultText ? { agentResultText: resultText } : {}),
+      };
+    }
+  }
+}
+
+function applyPiLiveStats(result: ParsedStreamEvent, type: string | undefined, message: Record<string, unknown>): void {
+  if ((type === "message_start" || type === "message_update" || type === "message_end" || type === "turn_end") && Object.keys(message).length > 0) {
+    const model = stringValue(message.model) ?? "";
+    const usage = extractUsage(message);
+    if (model || usage.contextTokens > 0) {
+      result.liveStats = { model, contextTokens: usage.contextTokens };
+    }
+  }
+}
+
+function applyPiTurnEnd(result: ParsedStreamEvent, type: string | undefined, message: Record<string, unknown>, obj: Record<string, unknown>): void {
+  if (type !== "turn_end") return;
+  const usageMessage = Object.keys(message).length > 0 ? message : objectValue(obj.message);
+  const usage = extractUsage(usageMessage);
+  result.stats = {
+    durationMs: 0,
+    totalCostUsd: usage.totalCostUsd,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    contextTokens: usage.contextTokens,
+    numTurns: 1,
+    model: stringValue(usageMessage.model) ?? "",
+    success: usageMessage.stopReason !== "error",
+    agentSummary: extractContentText(usageMessage.content),
+  };
+  result.turnComplete = true;
+
+  if (usageMessage.stopReason === "error") {
+    const errorMessage = stringValue(usageMessage.errorMessage);
+    if (errorMessage && /rate.?limit|usage.?limit|quota/i.test(errorMessage)) {
+      result.rateLimitInfo = {
+        status: "limited",
+        rateLimitType: "usage_limit",
+        message: errorMessage,
+      };
+    }
+  }
+}
+
+function applyPiRateLimit(result: ParsedStreamEvent, type: string | undefined, obj: Record<string, unknown>): void {
+  if (type !== "rate_limit_event" && type !== "rate_limit") return;
+  const info = objectValue(obj.rate_limit_info ?? obj.rateLimitInfo ?? obj);
+  result.rateLimitInfo = {
+    status: stringValue(info.status) ?? "limited",
+    rateLimitType: stringValue(info.rateLimitType ?? info.rate_limit_type) ?? "usage_limit",
+    resetsAt: numberValue(info.resetsAt ?? info.resets_at) || undefined,
+    retryAfter: stringValue(info.retryAfter ?? info.retry_after),
+    message: stringValue(info.message),
+    overageStatus: stringValue(info.overageStatus),
+    overageDisabledReason: stringValue(info.overageDisabledReason),
+    isUsingOverage: typeof info.isUsingOverage === "boolean" ? info.isUsingOverage : undefined,
+  };
+}
+
 export class PiProvider implements AgentProvider {
   readonly name = "pi";
   readonly profilePrefKey = "pi_profile";
@@ -171,128 +304,16 @@ export class PiProvider implements AgentProvider {
 
     const result: ParsedStreamEvent = {};
     const type = stringValue(obj.type);
-
-    if (type === "session") {
-      const sessionId = stringValue(obj.id);
-      if (sessionId) result.providerSessionId = sessionId;
-    }
-
     const message = objectValue(obj.message);
     const assistantEvent = objectValue(obj.assistantMessageEvent);
 
-    if (type === "message_update") {
-      if (assistantEvent.type === "text_delta") {
-        const text = stringValue(assistantEvent.delta);
-        if (text) result.assistantText = text;
-      } else if (assistantEvent.type === "text_start" || assistantEvent.type === "text_end") {
-        const text = stringValue(assistantEvent.content);
-        if (text) result.assistantText = text;
-      } else if (assistantEvent.type === "toolcall_start" || assistantEvent.type === "toolcall_end") {
-        let toolCall = objectValue(assistantEvent.toolCall);
-        if (Object.keys(toolCall).length === 0) {
-          const partialContent = objectValue(assistantEvent.partial).content;
-          if (Array.isArray(partialContent)) {
-            toolCall = objectValue(partialContent[0]);
-          }
-        }
-        const name = stringValue(toolCall.name);
-        if (name) {
-          result.toolActivity = {
-            name,
-            input: objectValue(toolCall.arguments),
-            toolUseId: stringValue(toolCall.id),
-          };
-        }
-      }
-    }
-
-    if (type === "message_start" || type === "message_end") {
-      if (message.role === "toolResult") {
-        const toolUseId = stringValue(message.toolCallId);
-        if (toolUseId) {
-          const resultText = extractContentText(message.content);
-          result.toolResult = {
-            toolUseId,
-            ...(resultText ? { agentResultText: resultText } : {}),
-          };
-        }
-      } else if (message.role === "assistant") {
-        const text = extractContentText(message.content);
-        if (text) result.assistantText = text;
-      }
-    }
-
-    if (type === "tool_execution_start") {
-      const name = stringValue(obj.toolName);
-      if (name) {
-        result.toolActivity = {
-          name,
-          input: objectValue(obj.args),
-          toolUseId: stringValue(obj.toolCallId),
-        };
-      }
-    }
-
-    if (type === "tool_execution_end") {
-      const toolUseId = stringValue(obj.toolCallId);
-      if (toolUseId) {
-        const resultText = extractContentText(objectValue(obj.result).content);
-        result.toolResult = {
-          toolUseId,
-          ...(resultText ? { agentResultText: resultText } : {}),
-        };
-      }
-    }
-
-    if ((type === "message_start" || type === "message_update" || type === "message_end" || type === "turn_end") && Object.keys(message).length > 0) {
-      const model = stringValue(message.model) ?? "";
-      const usage = extractUsage(message);
-      if (model || usage.contextTokens > 0) {
-        result.liveStats = { model, contextTokens: usage.contextTokens };
-      }
-    }
-
-    if (type === "turn_end") {
-      const usageMessage = Object.keys(message).length > 0 ? message : objectValue(obj.message);
-      const usage = extractUsage(usageMessage);
-      result.stats = {
-        durationMs: 0,
-        totalCostUsd: usage.totalCostUsd,
-        inputTokens: usage.inputTokens,
-        outputTokens: usage.outputTokens,
-        contextTokens: usage.contextTokens,
-        numTurns: 1,
-        model: stringValue(usageMessage.model) ?? "",
-        success: usageMessage.stopReason !== "error",
-        agentSummary: extractContentText(usageMessage.content),
-      };
-      result.turnComplete = true;
-
-      if (usageMessage.stopReason === "error") {
-        const errorMessage = stringValue(usageMessage.errorMessage);
-        if (errorMessage && /rate.?limit|usage.?limit|quota/i.test(errorMessage)) {
-          result.rateLimitInfo = {
-            status: "limited",
-            rateLimitType: "usage_limit",
-            message: errorMessage,
-          };
-        }
-      }
-    }
-
-    if (type === "rate_limit_event" || type === "rate_limit") {
-      const info = objectValue(obj.rate_limit_info ?? obj.rateLimitInfo ?? obj);
-      result.rateLimitInfo = {
-        status: stringValue(info.status) ?? "limited",
-        rateLimitType: stringValue(info.rateLimitType ?? info.rate_limit_type) ?? "usage_limit",
-        resetsAt: numberValue(info.resetsAt ?? info.resets_at) || undefined,
-        retryAfter: stringValue(info.retryAfter ?? info.retry_after),
-        message: stringValue(info.message),
-        overageStatus: stringValue(info.overageStatus),
-        overageDisabledReason: stringValue(info.overageDisabledReason),
-        isUsingOverage: typeof info.isUsingOverage === "boolean" ? info.isUsingOverage : undefined,
-      };
-    }
+    applyPiSession(result, type, obj);
+    applyPiMessageUpdate(result, type, assistantEvent);
+    applyPiMessageBoundary(result, type, message);
+    applyPiToolExecution(result, type, obj);
+    applyPiLiveStats(result, type, message);
+    applyPiTurnEnd(result, type, message, obj);
+    applyPiRateLimit(result, type, obj);
 
     return hasParsedFields(result) ? result : undefined;
   }
