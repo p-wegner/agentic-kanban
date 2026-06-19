@@ -105,6 +105,14 @@ const HISTORY_WEEKS = 12;
 const MAX_SOURCE_FILES = 6000;
 const MAX_SOURCE_BYTES = 750_000;
 const MAX_HOTSPOTS = 8;
+// Per-commit `--numstat` is the expensive part of the history scan. On a very
+// active repo (thousands of commits inside the HISTORY_WEEKS window) the full
+// scan can run ~8s+, blowing a tight timeout — which silently emptied the
+// hotspots / Crime Scene views. Give the windowed scan a generous (off-event-loop)
+// budget, and cap the full-history fallback to a bounded, fast commit count so it
+// always returns *something* even on repos whose windowed scan times out.
+const HISTORY_LOG_TIMEOUT_MS = 15_000;
+const HOTSPOT_FALLBACK_COMMIT_LIMIT = 1500;
 const GIT_SEP = "\x1f";
 const SKIP_DIRS = new Set([
   ".git",
@@ -332,14 +340,17 @@ function historyLogArgs(since: string, branch: string): string[] {
   return ["log", branch, `--since=${since}`, `--format=commit${GIT_SEP}%aI${GIT_SEP}%an`, "--numstat", "--"];
 }
 
+/** Exported for tests: the commit cap that keeps the fallback hotspot scan bounded/fast. */
+export const HOTSPOT_FALLBACK_COMMIT_LIMIT_FOR_TEST = HOTSPOT_FALLBACK_COMMIT_LIMIT;
+
 /**
- * Full-history (no `--since`) variant used to populate hotspots for dormant repos.
+ * Full-history (capped) variant used to populate hotspots for dormant repos.
  * The windowed weekly chart still drives off `historyLogArgs`, but a project whose
  * latest commit is older than HISTORY_WEEKS would otherwise yield zero hotspots —
  * leaving the Crime Scene / Hot Files views empty even though there's churn to show.
  */
 function hotspotLogArgs(branch: string): string[] {
-  return ["log", branch, `--format=commit${GIT_SEP}%aI${GIT_SEP}%an`, "--numstat", "--"];
+  return ["log", branch, `--max-count=${HOTSPOT_FALLBACK_COMMIT_LIMIT}`, `--format=commit${GIT_SEP}%aI${GIT_SEP}%an`, "--numstat", "--"];
 }
 
 /**
@@ -375,7 +386,7 @@ function collectHistoryMetrics(repoPath: string, branch: string): Pick<ProjectGi
     logOut = execFileSync(
       "git",
       historyLogArgs(weeks[0].week, branch),
-      { cwd: repoPath, timeout: 7000, maxBuffer: 4 * 1024 * 1024 },
+      { cwd: repoPath, timeout: HISTORY_LOG_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 },
     ).toString();
   } catch {
     // Git history is best-effort. Current LOC still makes the metrics view useful.
@@ -387,7 +398,7 @@ function collectHistoryMetrics(repoPath: string, branch: string): Pick<ProjectGi
       const fullOut = execFileSync(
         "git",
         hotspotLogArgs(branch),
-        { cwd: repoPath, timeout: 7000, maxBuffer: 4 * 1024 * 1024 },
+        { cwd: repoPath, timeout: HISTORY_LOG_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 },
       ).toString();
       result.hotspots = parseHotspotsLog(fullOut);
     } catch {
@@ -403,7 +414,7 @@ async function collectHistoryMetricsAsync(repoPath: string, branch: string): Pro
   let logOut = "";
 
   try {
-    logOut = await execGitCapture(historyLogArgs(weeks[0].week, branch), repoPath, 7000, 4 * 1024 * 1024);
+    logOut = await execGitCapture(historyLogArgs(weeks[0].week, branch), repoPath, HISTORY_LOG_TIMEOUT_MS, 4 * 1024 * 1024);
   } catch {
     // Git history is best-effort. Current LOC still makes the metrics view useful.
   }
@@ -411,7 +422,7 @@ async function collectHistoryMetricsAsync(repoPath: string, branch: string): Pro
   const result = parseHistoryLog(weeks, logOut);
   if (result.hotspots.length === 0) {
     try {
-      const fullOut = await execGitCapture(hotspotLogArgs(branch), repoPath, 7000, 4 * 1024 * 1024);
+      const fullOut = await execGitCapture(hotspotLogArgs(branch), repoPath, HISTORY_LOG_TIMEOUT_MS, 4 * 1024 * 1024);
       result.hotspots = parseHotspotsLog(fullOut);
     } catch {
       // Fallback is best-effort; an empty hotspot list is acceptable.
