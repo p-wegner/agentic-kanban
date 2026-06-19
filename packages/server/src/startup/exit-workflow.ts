@@ -504,18 +504,14 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     return;
   }
 
-  async function handleReviewSessionExit(ctx: ExitContext): Promise<void> {
-    const { workspace, projectId, issueId, sessionId, now, prefMap, statuses, findStatus, autoMergeEnabled, defaultBranch, autoMergeDisabledProjectIds } = ctx;
+  /**
+   * #531 pre-merge verify gate. Runs the project verify_script (build/test/run) in
+   * the worktree, after committing any #812 build-approval repair onto the branch.
+   * Returns false to WITHHOLD readyForMerge (no-op/pass returns true).
+   */
+  async function runVerifyGate(ctx: ExitContext): Promise<boolean> {
+    const { workspace, projectId, prefMap } = ctx;
     const workspaceId = workspace.id;
-    reviewSessionIds.delete(sessionId);
-    const currentIssueRows = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId)).limit(1);
-    const currentStatus = currentIssueRows.length > 0 ? statuses.find((s) => s.id === currentIssueRows[0].statusId) : null;
-    const autoFix = prefMap.get("review_auto_fix") !== "false";
-    if (currentStatus?.name === "In Progress" && !autoFix) {
-      console.log("[workflow] reviewer flagged issues (non-auto-fix mode)  skipping auto-merge, leaving in In Progress");
-      boardEvents.broadcast(projectId, "issue_updated");
-      return;
-    }
     // #531 quality gate: run the project's verify_script (build/test/run) in the
     // worktree before approving for merge. Opt-in per project via the
     // verify_script_<projectId> preference — a pure no-op when unset, so existing
@@ -540,7 +536,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     if (verifyConfigured && !workspace.workingDir) {
       console.log(`[workflow] verify_script configured but workspace ${workspaceId} has no worktree — withholding readyForMerge (cannot verify; #826)`);
       boardEvents.broadcast(projectId, "workflow_error");
-      return;
+      return false;
     }
     if (verifyScript && verifyScript.trim() && workspace.workingDir) {
       // #783/#789/#812: a builder that created the build manifest may not have approved
@@ -598,16 +594,26 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
         console.log(`[workflow] verify_script failed (exit ${result.exitCode}) for workspace ${workspaceId} — withholding readyForMerge`);
         boardEvents.broadcast(projectId, "workflow_error");
         emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Verify script failed (exit ${result.exitCode}) for workspace ${workspaceId}; not approved for merge. ${(result.stderr || result.stdout || "").slice(0, 300)}` });
-        return;
+        return false;
       }
       console.log(`[workflow] verify_script passed for workspace ${workspaceId}`);
     }
+    return true;
+  }
+
+  /**
+   * #791 run/smoke gate. For a web/service stack profile, boots the dev server and
+   * confirms it responds; a clean no-op for library/CLI projects. A harness error is
+   * non-fatal (returns true); only an actual failed boot withholds readyForMerge.
+   */
+  async function runSmokeGate(ctx: ExitContext): Promise<boolean> {
+    const { workspace, projectId } = ctx;
+    const workspaceId = workspace.id;
     // #791 run/smoke gate: for a web/service project, boot the dev server and confirm it
     // responds (HTTP-200 + render). Derived entirely from the project's stack profile, so a
     // library/CLI project (no `isWeb`/dev command/health URL) yields no SmokeCheck and this is
     // a clean no-op. A failed boot/response WITHHOLDS readyForMerge — the diff-only LLM review
     // can't catch "compiles but doesn't boot". Generalizes the old `frontend-smoke.ps1`.
-    {
       try {
         const profile = await getStackProfile(projectId, db);
         const smokeCheck = buildSmokeCheck(profile);
@@ -618,7 +624,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
           if (!workspace.workingDir) {
             console.log(`[workflow] smoke/UI gate applies (web project) but workspace ${workspaceId} has no worktree — withholding readyForMerge (#826)`);
             boardEvents.broadcast(projectId, "workflow_error");
-            return;
+            return false;
           }
           console.log(`[workflow] running smoke check for workspace ${workspaceId}: ${smokeCheck.devCommand} -> ${smokeCheck.healthUrl}`);
           const smoke = await runUnderBuildGate(() => runSmokeCheck(workspace.workingDir!, smokeCheck));
@@ -626,7 +632,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
             console.log(`[workflow] smoke check failed for workspace ${workspaceId} — withholding readyForMerge: ${smoke.message}`);
             boardEvents.broadcast(projectId, "workflow_error");
             emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Smoke check failed for workspace ${workspaceId}; not approved for merge. ${smoke.message}` });
-            return;
+            return false;
           }
           console.log(`[workflow] smoke check passed for workspace ${workspaceId}: ${smoke.message}`);
         }
@@ -634,7 +640,17 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
         // Non-fatal: a harness error must not block an otherwise-passing review. Log and proceed.
         console.warn(`[workflow] smoke check errored (non-fatal) for workspace ${workspaceId}:`, smokeErr instanceof Error ? smokeErr.message : String(smokeErr));
       }
-    }
+    return true;
+  }
+
+  /**
+   * #792 cold-clone build gate. Opt-in per project; verifies a FRESH clone of the
+   * branch builds (the worktree warm-store can hide #783-class breakage). Returns
+   * false to WITHHOLD readyForMerge.
+   */
+  async function runColdCloneGate(ctx: ExitContext): Promise<boolean> {
+    const { workspace, projectId } = ctx;
+    const workspaceId = workspace.id;
     // #792 cold-clone build check: the in-worktree verify gate above runs in a
     // dependency-symlinked worktree with a warm pnpm store, so it can pass even
     // when a FRESH clone of the branch would not build (the #783 class: unapproved
@@ -659,11 +675,31 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
           console.log(`[workflow] cold-clone build check failed (${coldResult.reason}) for workspace ${workspaceId} — withholding readyForMerge (#792)`);
           boardEvents.broadcast(projectId, "workflow_error");
           emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Cold-clone build check failed for workspace ${workspaceId}: ${detail}. Builds in the worktree but not on a fresh clone (the #783 class); not approved for merge. ${(coldResult.output || "").slice(0, 300)}` });
-          return;
+          return false;
         }
         console.log(`[workflow] cold-clone build check passed for workspace ${workspaceId} (#792)`);
       }
     }
+    return true;
+  }
+
+  async function handleReviewSessionExit(ctx: ExitContext): Promise<void> {
+    const { workspace, projectId, issueId, sessionId, now, prefMap, statuses, findStatus, autoMergeEnabled, defaultBranch, autoMergeDisabledProjectIds } = ctx;
+    const workspaceId = workspace.id;
+    reviewSessionIds.delete(sessionId);
+    const currentIssueRows = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId)).limit(1);
+    const currentStatus = currentIssueRows.length > 0 ? statuses.find((s) => s.id === currentIssueRows[0].statusId) : null;
+    const autoFix = prefMap.get("review_auto_fix") !== "false";
+    if (currentStatus?.name === "In Progress" && !autoFix) {
+      console.log("[workflow] reviewer flagged issues (non-auto-fix mode)  skipping auto-merge, leaving in In Progress");
+      boardEvents.broadcast(projectId, "issue_updated");
+      return;
+    }
+    // Pre-merge gates (#531 verify, #791 smoke, #792 cold-clone): each withholds
+    // readyForMerge on failure. A returned false means "do not approve" — stop here.
+    if (!(await runVerifyGate(ctx))) return;
+    if (!(await runSmokeGate(ctx))) return;
+    if (!(await runColdCloneGate(ctx))) return;
     // #629 Guard: re-verify the branch still has committed changes ahead of base.
     // A race (e.g. branch reset/rebased to equal base between review start and exit)
     // can leave a 0-commit branch incorrectly marked ready-for-merge.
