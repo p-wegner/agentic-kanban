@@ -42,7 +42,7 @@ import type {
 import type { BoardViewState, SavedViewReference } from "../lib/boardSavedViews.js";
 
 
-interface Project {
+export interface Project {
   id: string;
   name: string;
   repoPath: string;
@@ -58,11 +58,29 @@ interface Project {
   activeWorkspaceCount?: number;
 }
 
-interface Tag {
+export interface Tag {
   id: string;
   name: string;
   color: string | null;
 }
+
+/** Pending "move to Done" confirmation (issue + the deferred mutation). */
+export type MoveToDonePending = { issue: IssueWithStatus; confirm: () => Promise<void> } | null;
+
+/** Pending dependency-impact confirmation when moving an issue across statuses. */
+export type DependencyImpactPending = {
+  issue: IssueWithStatus;
+  toStatusId: string;
+  toStatusName: string;
+  dependencies: DependencyInfo["dependencies"];
+  confirm: () => Promise<void>;
+} | null;
+
+/** Inline create-issue panel expanded under a column. */
+export type ExpandedCreatePanel = { statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null;
+
+/** Workspace panel deep-link target (open a specific workspace/session). */
+export type WorkspaceInitial = { workspaceId: string; sessionId: string } | null;
 
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
 const BACKLOG_STATUS_NAME = "Backlog";
@@ -98,7 +116,7 @@ export function BoardPage() {
   const [error, setError] = useState<string | null>(null);
   const [mutating, setMutating] = useState(false);
   const [workspaceIssue, setWorkspaceIssue] = useState<IssueWithStatus | null>(null);
-  const [workspaceInitial, setWorkspaceInitial] = useState<{ workspaceId: string; sessionId: string } | null>(null);
+  const [workspaceInitial, setWorkspaceInitial] = useState<WorkspaceInitial>(null);
   const [workspaceInitialDiff, setWorkspaceInitialDiff] = useState(false);
   const [workspaceOpenCreate, setWorkspaceOpenCreate] = useState(false);
   // A prompt to seed the butler with when entering its view via "Chat about this
@@ -141,7 +159,7 @@ export function BoardPage() {
   const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>([]);
   const pendingBoardRefreshRef = useRef(false);
   const loadProjectsRef = useRef<() => Promise<string | undefined>>(async () => undefined);
-  const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
+  const [expandedCreatePanel, setExpandedCreatePanel] = useState<ExpandedCreatePanel>(null);
   const [keyboardCursorIssueId, setKeyboardCursorIssueId] = useState<string | null>(null);
   const keyboardCursorIssueIdRef = useRef<string | null>(null);
   keyboardCursorIssueIdRef.current = keyboardCursorIssueId;
@@ -162,14 +180,8 @@ export function BoardPage() {
   const agentQuestionsCount = useAgentQuestionsCount(activeProjectId);
   const { columnWidths, handleColumnResizeStart, resetColumnWidth } = useColumnResize();
 
-  const [moveToDonePending, setMoveToDonePending] = useState<{ issue: IssueWithStatus; confirm: () => Promise<void> } | null>(null);
-  const [dependencyImpactPending, setDependencyImpactPending] = useState<{
-    issue: IssueWithStatus;
-    toStatusId: string;
-    toStatusName: string;
-    dependencies: DependencyInfo["dependencies"];
-    confirm: () => Promise<void>;
-  } | null>(null);
+  const [moveToDonePending, setMoveToDonePending] = useState<MoveToDonePending>(null);
+  const [dependencyImpactPending, setDependencyImpactPending] = useState<DependencyImpactPending>(null);
   const [pendingIssueIds, setPendingIssueIds] = useState<Set<string>>(new Set());
   const [pendingWorkspaceIssueIds, setPendingWorkspaceIssueIds] = useState<Set<string>>(new Set());
   const [allTags, setAllTags] = useState<Tag[]>([]);

@@ -1,5 +1,6 @@
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
+import type { ViewMode } from "../lib/viewRegistry.js";
 import { BoardErrorBoundary } from "./BoardErrorBoundary.js";
 import {
   GraphView, TableView, AgentGrid, TimelineView, MetricsView, CrimeSceneCityView,
@@ -27,12 +28,12 @@ interface BoardSecondaryViewsProps {
   butlerInitialPrompt: string | null;
   onIssueClick: (issue: IssueWithStatus) => void;
   onManageWorkspaces: (issue: IssueWithStatus, workspaceId?: string, sessionId?: string) => void;
-  onViewModeChange: (mode: string) => void;
+  onViewModeChange: (mode: ViewMode) => void;
   onMilestoneClick: (milestoneId: string) => void;
-  onOpenWorkspaceById: (id: string) => void;
+  onOpenWorkspaceById: (workspaceId: string, issueId: string) => void | Promise<void>;
   onCreatedDateClick: (date: string) => void;
   onClearCreatedDateFilter: () => void;
-  onDropIssue?: (e: React.DragEvent, statusId: string) => void;
+  onDropIssue?: (issue: IssueWithStatus) => void;
   onRefresh: () => void;
   onButlerPromptConsumed: () => void;
   setSelectedIssue: (issue: IssueWithStatus | null) => void;
