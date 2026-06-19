@@ -9,6 +9,7 @@ import { BoardSecondaryViews } from "../components/BoardSecondaryViews.js";
 import { useBoardLiveHandlers } from "../hooks/useBoardLiveHandlers.js";
 import { useBoardPanelNavigation } from "../hooks/useBoardPanelNavigation.js";
 import { useProjectManagement } from "../hooks/useProjectManagement.js";
+import { useBoardFilters } from "../hooks/useBoardFilters.js";
 import { stringifyForIssueCard, deferUntilIdle } from "../lib/boardCardSnapshot.js";
 import { BoardKanbanView } from "../components/BoardKanbanView.js";
 import { RecentlyMergedStrip } from "../components/RecentlyMergedStrip.js";
@@ -140,11 +141,19 @@ export function BoardPage() {
     try { return sessionStorage.getItem("board-focus-mode") === "1"; } catch { return false; }
   });
   const [statusFilterId, setStatusFilterId] = useState<string | null>(null);
-  const [activeTagIds, setActiveTagIds] = useState<Set<string>>(new Set());
+  const {
+    activeTagIds,
+    setActiveTagIds,
+    issueTypeFilter,
+    priorityFilter,
+    handleIssueTypeFilterChange,
+    handlePriorityFilterChange,
+    handleTagFilterToggle,
+    handleClearTagFilter,
+    handleSetTagFilterIds,
+  } = useBoardFilters(activeProjectId);
   const [milestoneFilterId, setMilestoneFilterId] = useState<string | null>(null);
   const [milestones, setMilestones] = useState<MilestoneResponse[]>([]);
-  const [issueTypeFilter, setIssueTypeFilter] = useState<string | null>(null);
-  const [priorityFilter, setPriorityFilter] = useState<string | null>(null);
   const [createdDateFilter, setCreatedDateFilter] = useState<string | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
     new Set(["archive"]),
@@ -470,115 +479,6 @@ export function BoardPage() {
     });
   }, [activeProjectId]);
 
-  useEffect(() => {
-    if (!activeProjectId) return;
-    try {
-      const stored = localStorage.getItem(`board-type-filter-${activeProjectId}`);
-      setIssueTypeFilter(stored || null);
-    } catch {
-      // ignore
-    }
-  }, [activeProjectId]);
-
-  const handleIssueTypeFilterChange = useCallback((type: string | null) => {
-    setIssueTypeFilter(type);
-    if (activeProjectId) {
-      try {
-        if (type) {
-          localStorage.setItem(`board-type-filter-${activeProjectId}`, type);
-        } else {
-          localStorage.removeItem(`board-type-filter-${activeProjectId}`);
-        }
-      } catch {
-        // ignore
-      }
-    }
-  }, [activeProjectId]);
-
-  useEffect(() => {
-    if (!activeProjectId) return;
-    try {
-      const stored = localStorage.getItem(`board-priority-filter-${activeProjectId}`);
-      setPriorityFilter(stored || null);
-    } catch {
-      // ignore
-    }
-  }, [activeProjectId]);
-
-  const handlePriorityFilterChange = useCallback((priority: string | null) => {
-    setPriorityFilter(priority);
-    if (activeProjectId) {
-      try {
-        if (priority) {
-          localStorage.setItem(`board-priority-filter-${activeProjectId}`, priority);
-        } else {
-          localStorage.removeItem(`board-priority-filter-${activeProjectId}`);
-        }
-      } catch {
-        // ignore
-      }
-    }
-  }, [activeProjectId]);
-
-  useEffect(() => {
-    if (!activeProjectId) return;
-    try {
-      const stored = localStorage.getItem(`board-tag-filter-${activeProjectId}`);
-      setActiveTagIds(stored ? new Set(stored.split(",").filter(Boolean)) : new Set());
-    } catch {
-      // ignore
-    }
-  }, [activeProjectId]);
-
-  const handleTagFilterToggle = useCallback((tagId: string) => {
-    setActiveTagIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(tagId)) {
-        next.delete(tagId);
-      } else {
-        next.add(tagId);
-      }
-      if (activeProjectId) {
-        try {
-          if (next.size > 0) {
-            localStorage.setItem(`board-tag-filter-${activeProjectId}`, [...next].join(","));
-          } else {
-            localStorage.removeItem(`board-tag-filter-${activeProjectId}`);
-          }
-        } catch {
-          // ignore
-        }
-      }
-      return next;
-    });
-  }, [activeProjectId]);
-
-  const handleClearTagFilter = useCallback(() => {
-    setActiveTagIds(new Set());
-    if (activeProjectId) {
-      try {
-        localStorage.removeItem(`board-tag-filter-${activeProjectId}`);
-      } catch {
-        // ignore
-      }
-    }
-  }, [activeProjectId]);
-
-  const handleSetTagFilterIds = useCallback((tagIds: string[]) => {
-    const next = new Set(tagIds);
-    setActiveTagIds(next);
-    if (activeProjectId) {
-      try {
-        if (next.size > 0) {
-          localStorage.setItem(`board-tag-filter-${activeProjectId}`, [...next].join(","));
-        } else {
-          localStorage.removeItem(`board-tag-filter-${activeProjectId}`);
-        }
-      } catch {
-        // ignore
-      }
-    }
-  }, [activeProjectId]);
 
   const {
     handleProjectChange,
