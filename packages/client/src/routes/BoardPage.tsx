@@ -8,6 +8,7 @@ import { MilestoneFilterBanner } from "../components/MilestoneFilterBanner.js";
 import { BoardSecondaryViews } from "../components/BoardSecondaryViews.js";
 import { useBoardLiveHandlers } from "../hooks/useBoardLiveHandlers.js";
 import { useBoardPanelNavigation } from "../hooks/useBoardPanelNavigation.js";
+import { useProjectManagement } from "../hooks/useProjectManagement.js";
 import { stringifyForIssueCard, deferUntilIdle } from "../lib/boardCardSnapshot.js";
 import { BoardKanbanView } from "../components/BoardKanbanView.js";
 import { RecentlyMergedStrip } from "../components/RecentlyMergedStrip.js";
@@ -25,7 +26,7 @@ import { SkeletonBoard } from "../components/SkeletonBoard.js";
 import { ToastContainer, showToast } from "../components/Toast.js";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { MentionProvider } from "../lib/MentionContext.js";
-import { apiFetch, apiPost, apiPut, apiPatch, apiDelete } from "../lib/api.js";
+import { apiFetch, apiPost, apiPatch, apiDelete } from "../lib/api.js";
 import { getSettings } from "../lib/settingsStore.js";
 import { setBoardDragData, getBoardDragData } from "../lib/dragData.js";
 import { matchesBoardFilters } from "../lib/boardFiltering.js";
@@ -579,78 +580,26 @@ export function BoardPage() {
     }
   }, [activeProjectId]);
 
-  async function handleProjectChange(id: string) {
-    setActiveProjectId(id);
-    setColumns([]);
-    columnsRef.current = [];
-    setSelectedIssue(null);
-    setWorkspaceIssue(null);
-    setSwitchingProject(true);
-    try {
-      await apiPut("/api/preferences/active-project", { projectId: id });
-      await refetchBoard(id, { force: true });
-    } catch {
-      showToast("Failed to switch project", "error");
-    } finally {
-      setSwitchingProject(false);
-    }
-  }
-
-  async function handleRegisterProject({ repoPath, gitignoreTemplate, generateReadme }: { repoPath: string; gitignoreTemplate: string; generateReadme: boolean }) {
-    const result = await apiPost<{ id: string; name: string; error?: string }>("/api/projects", { repoPath, gitignoreTemplate: gitignoreTemplate || undefined, generateReadme: generateReadme || undefined });
-    if (result.error) throw new Error(result.error);
-    await loadProjects();
-    await handleProjectChange(result.id);
-    showToast(`Registered "${result.name}"`, "success");
-  }
-
-  async function handleCreateProject(name: string, path: string, gitignoreTemplate: string, generateReadme: boolean) {
-    const body: Record<string, unknown> = { name };
-    if (path) body.path = path;
-    if (gitignoreTemplate) body.gitignoreTemplate = gitignoreTemplate;
-    if (generateReadme) body.generateReadme = generateReadme;
-    const result = await apiPost<{ id: string; name: string; error?: string }>("/api/projects/create", body);
-    if (result.error) throw new Error(result.error);
-    await loadProjects();
-    await handleProjectChange(result.id);
-    showToast(`Created "${result.name}"`, "success");
-  }
-
-  async function handleUnregisterProject(id: string) {
-    const project = projects.find((p) => p.id === id);
-    await apiDelete(`/api/projects/${id}`);
-    const remaining = projects.filter((p) => p.id !== id);
-    if (remaining.length > 0) {
-      await handleProjectChange(remaining[0].id);
-    } else {
-      setActiveProjectId(null);
-    }
-    await loadProjects();
-    showToast(`Removed "${project?.name ?? "project"}"`, "success");
-  }
-
-  async function handleArchiveProject(id: string) {
-    const project = projects.find((p) => p.id === id);
-    await apiPost(`/api/projects/${id}/archive`);
-    if (activeProjectId === id) {
-      const remaining = projects.filter((p) => p.id !== id);
-      if (remaining.length > 0) {
-        await handleProjectChange(remaining[0].id);
-      } else {
-        setActiveProjectId(null);
-      }
-    }
-    await loadProjects();
-    showToast(`Archived "${project?.name ?? "project"}"`, "success");
-  }
-
-  async function handleUnarchiveProject(id: string) {
-    const project = archivedProjects.find((p) => p.id === id);
-    await apiPost(`/api/projects/${id}/unarchive`);
-    await loadProjects();
-    await handleProjectChange(id);
-    showToast(`Restored "${project?.name ?? "project"}"`, "success");
-  }
+  const {
+    handleProjectChange,
+    handleRegisterProject,
+    handleCreateProject,
+    handleUnregisterProject,
+    handleArchiveProject,
+    handleUnarchiveProject,
+  } = useProjectManagement({
+    activeProjectId,
+    projects,
+    archivedProjects,
+    setActiveProjectId,
+    setColumns,
+    columnsRef,
+    setSelectedIssue,
+    setWorkspaceIssue,
+    setSwitchingProject,
+    refetchBoard,
+    loadProjects,
+  });
 
   async function handleCreateIssue(data: CreateIssuePayload) {
     await runCreateIssueFlow(data, {
