@@ -25,24 +25,14 @@ export interface ProjectActivityResult {
   generatedAt: string;
 }
 
-export async function getProjectActivity(
-  projectId: string,
-  database: Database,
-  limit = 100,
-): Promise<ProjectActivityResult> {
-  // Fetch all issues for the project
-  const issueRows = await getProjectActivityIssues(projectId, database);
+type IssueRow = Awaited<ReturnType<typeof getProjectActivityIssues>>[number];
+type WsRow = Awaited<ReturnType<typeof getProjectActivityWorkspaces>>[number];
+type SessionRow = Awaited<ReturnType<typeof getProjectActivitySessions>>[number];
+type CommentRow = Awaited<ReturnType<typeof getProjectActivityComments>>[number];
 
-  if (issueRows.length === 0) {
-    return { events: [], generatedAt: new Date().toISOString() };
-  }
-
-  const issueIds = issueRows.map((i) => i.id);
-  const issueMap = new Map(issueRows.map((i) => [i.id, i]));
-
+/** Issue-created + status-changed events. */
+function collectIssueEvents(issueRows: IssueRow[]): ProjectActivityEvent[] {
   const events: ProjectActivityEvent[] = [];
-
-  // Issue created events
   for (const issue of issueRows) {
     events.push({
       id: `issue-created-${issue.id}`,
@@ -68,12 +58,12 @@ export async function getProjectActivity(
       });
     }
   }
+  return events;
+}
 
-  // Workspace events
-  const wsRows = await getProjectActivityWorkspaces(issueIds, database);
-
-  const wsIds = wsRows.map((w) => w.id);
-
+/** Workspace-created + merged/closed events. */
+function collectWorkspaceEvents(wsRows: WsRow[], issueMap: Map<string, IssueRow>): ProjectActivityEvent[] {
+  const events: ProjectActivityEvent[] = [];
   for (const ws of wsRows) {
     const issue = issueMap.get(ws.issueId)!;
     const provider = ws.provider ?? ws.claudeProfile ?? null;
@@ -116,62 +106,65 @@ export async function getProjectActivity(
       });
     }
   }
+  return events;
+}
 
-  // Session events (batch load all sessions for project workspaces)
-  if (wsIds.length > 0) {
-    const wsIssueMap = new Map(wsRows.map((w) => [w.id, w.issueId]));
-    const sessionRows = await getProjectActivitySessions(wsIds, database);
+/** Session-started + session-ended (completed/failed/stopped) events. */
+function collectSessionEvents(sessionRows: SessionRow[], wsRows: WsRow[], issueMap: Map<string, IssueRow>): ProjectActivityEvent[] {
+  const events: ProjectActivityEvent[] = [];
+  const wsIssueMap = new Map(wsRows.map((w) => [w.id, w.issueId]));
 
-    for (const sess of sessionRows) {
-      const issueId = wsIssueMap.get(sess.workspaceId ?? "");
-      if (!issueId) continue;
-      const issue = issueMap.get(issueId);
-      if (!issue) continue;
-      const ws = wsRows.find((w) => w.id === sess.workspaceId);
-      const provider = ws?.provider ?? ws?.claudeProfile ?? null;
-      const actor = sess.executor ?? provider;
+  for (const sess of sessionRows) {
+    const issueId = wsIssueMap.get(sess.workspaceId ?? "");
+    if (!issueId) continue;
+    const issue = issueMap.get(issueId);
+    if (!issue) continue;
+    const ws = wsRows.find((w) => w.id === sess.workspaceId);
+    const provider = ws?.provider ?? ws?.claudeProfile ?? null;
+    const actor = sess.executor ?? provider;
 
-      const skillLabel = sess.skillName ? ` (${sess.skillName})` : "";
+    const skillLabel = sess.skillName ? ` (${sess.skillName})` : "";
+    events.push({
+      id: `session-started-${sess.id}`,
+      type: "session_started",
+      summary: `Agent session started${skillLabel}`,
+      actor,
+      timestamp: sess.startedAt,
+      issueId: issue.id,
+      issueNumber: issue.issueNumber ?? null,
+      issueTitle: issue.title,
+      workspaceId: sess.workspaceId,
+      sessionId: sess.id,
+    });
+
+    if (sess.endedAt) {
+      const exitCode = sess.exitCode;
+      const failed = exitCode !== null && exitCode !== "0";
+      const stopped = sess.status === "stopped";
       events.push({
-        id: `session-started-${sess.id}`,
-        type: "session_started",
-        summary: `Agent session started${skillLabel}`,
+        id: `session-ended-${sess.id}`,
+        type: failed ? "session_failed" : stopped ? "session_stopped" : "session_completed",
+        summary: failed
+          ? `Session failed (exit ${exitCode})`
+          : stopped
+          ? "Session stopped"
+          : "Session completed",
         actor,
-        timestamp: sess.startedAt,
+        timestamp: sess.endedAt,
         issueId: issue.id,
         issueNumber: issue.issueNumber ?? null,
         issueTitle: issue.title,
         workspaceId: sess.workspaceId,
         sessionId: sess.id,
       });
-
-      if (sess.endedAt) {
-        const exitCode = sess.exitCode;
-        const failed = exitCode !== null && exitCode !== "0";
-        const stopped = sess.status === "stopped";
-        events.push({
-          id: `session-ended-${sess.id}`,
-          type: failed ? "session_failed" : stopped ? "session_stopped" : "session_completed",
-          summary: failed
-            ? `Session failed (exit ${exitCode})`
-            : stopped
-            ? "Session stopped"
-            : "Session completed",
-          actor,
-          timestamp: sess.endedAt,
-          issueId: issue.id,
-          issueNumber: issue.issueNumber ?? null,
-          issueTitle: issue.title,
-          workspaceId: sess.workspaceId,
-          sessionId: sess.id,
-        });
-      }
     }
   }
+  return events;
+}
 
-  // Comment events
-  const commentRows = await getProjectActivityComments(issueIds, database);
-
+/** Comment events. */
+function collectCommentEvents(commentRows: CommentRow[], issueMap: Map<string, IssueRow>): ProjectActivityEvent[] {
+  const events: ProjectActivityEvent[] = [];
   for (const cmt of commentRows) {
     const issue = issueMap.get(cmt.issueId);
     if (!issue) continue;
@@ -188,6 +181,34 @@ export async function getProjectActivity(
       commentKind: cmt.kind,
     });
   }
+  return events;
+}
+
+export async function getProjectActivity(
+  projectId: string,
+  database: Database,
+  limit = 100,
+): Promise<ProjectActivityResult> {
+  const issueRows = await getProjectActivityIssues(projectId, database);
+
+  if (issueRows.length === 0) {
+    return { events: [], generatedAt: new Date().toISOString() };
+  }
+
+  const issueIds = issueRows.map((i) => i.id);
+  const issueMap = new Map(issueRows.map((i) => [i.id, i]));
+
+  const wsRows = await getProjectActivityWorkspaces(issueIds, database);
+  const wsIds = wsRows.map((w) => w.id);
+  const sessionRows = wsIds.length > 0 ? await getProjectActivitySessions(wsIds, database) : [];
+  const commentRows = await getProjectActivityComments(issueIds, database);
+
+  const events: ProjectActivityEvent[] = [
+    ...collectIssueEvents(issueRows),
+    ...collectWorkspaceEvents(wsRows, issueMap),
+    ...collectSessionEvents(sessionRows, wsRows, issueMap),
+    ...collectCommentEvents(commentRows, issueMap),
+  ];
 
   // Sort newest-first, take top N
   events.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
