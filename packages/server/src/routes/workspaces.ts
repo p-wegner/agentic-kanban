@@ -11,6 +11,11 @@ import {
   getScorecardScores,
   listWorkspacesSlim,
 } from "../repositories/workspace.repository.js";
+import {
+  aggregateProviderMix,
+  aggregateCostOverTime,
+  bucketScorecardScores,
+} from "../lib/workspace-stats.js";
 
 export function createWorkspacesRoute(
   database: Database,
@@ -46,30 +51,7 @@ export function createWorkspacesRoute(
       dates.push(d.toISOString().slice(0, 10));
     }
 
-    // Collect all provider+profile combos
-    const seriesSet = new Set<string>();
-    for (const r of rows) {
-      const key = r.provider ?? "unknown";
-      seriesSet.add(key);
-    }
-    const series = [...seriesSet].sort();
-
-    // Count per day per series
-    const counts: Record<string, Record<string, number>> = {};
-    for (const date of dates) {
-      counts[date] = {};
-      for (const s of series) counts[date][s] = 0;
-    }
-    for (const r of rows) {
-      if (!r.createdAt) continue;
-      const day = r.createdAt.slice(0, 10);
-      if (!counts[day]) continue;
-      const key = r.provider ?? "unknown";
-      counts[day][key] = (counts[day][key] ?? 0) + 1;
-    }
-
-    const points = dates.map((date) => ({ date, counts: counts[date] ?? {} }));
-    return c.json({ series, points });
+    return c.json(aggregateProviderMix(rows, dates));
   });
 
   // GET /api/workspaces/cost-over-time?projectId=&days= — estimated token cost per provider per day
@@ -97,38 +79,7 @@ export function createWorkspacesRoute(
       dates.push(d.toISOString().slice(0, 10));
     }
 
-    // Collect provider keys present in the window (stable, sorted).
-    const seriesSet = new Set<string>();
-    for (const r of rows) {
-      seriesSet.add(r.provider ?? "unknown");
-    }
-    const series = [...seriesSet].sort();
-
-    // Sum cost per day per provider.
-    const costs: Record<string, Record<string, number>> = {};
-    for (const date of dates) {
-      costs[date] = {};
-      for (const s of series) costs[date][s] = 0;
-    }
-    for (const r of rows) {
-      if (!r.startedAt || !r.stats) continue;
-      let sessionCost = 0;
-      try {
-        const parsed = JSON.parse(r.stats) as { totalCostUsd?: unknown };
-        const value = Number(parsed.totalCostUsd ?? 0);
-        if (Number.isFinite(value)) sessionCost = value;
-      } catch {
-        continue;
-      }
-      if (sessionCost === 0) continue;
-      const day = r.startedAt.slice(0, 10);
-      if (!costs[day]) continue; // session outside the axis window (shouldn't happen post-filter)
-      const key = r.provider ?? "unknown";
-      costs[day][key] = (costs[day][key] ?? 0) + sessionCost;
-    }
-
-    const points = dates.map((date) => ({ date, costs: costs[date] ?? {} }));
-    return c.json({ series, points });
+    return c.json(aggregateCostOverTime(rows, dates));
   });
 
   // GET /api/workspaces/scorecard-distribution?projectId=&days= — scorecard score histogram (5 buckets: 0-20, 20-40, 40-60, 60-80, 80-100)
@@ -144,22 +95,7 @@ export function createWorkspacesRoute(
     const cutoffDay = cutoffDate.toISOString().slice(0, 10);
 
     const rows = await getScorecardScores(projectId, cutoffDay, database);
-
-    const buckets = [
-      { range: "0-20", min: 0, max: 20, count: 0 },
-      { range: "20-40", min: 20, max: 40, count: 0 },
-      { range: "40-60", min: 40, max: 60, count: 0 },
-      { range: "60-80", min: 60, max: 80, count: 0 },
-      { range: "80-100", min: 80, max: 100, count: 0 },
-    ];
-
-    for (const row of rows) {
-      const score = row.score ?? 0;
-      const idx = score >= 100 ? 4 : Math.min(Math.floor(score / 20), 4);
-      buckets[idx].count++;
-    }
-
-    return c.json({ buckets: buckets.map(({ range, count }) => ({ range, count })), total: rows.length });
+    return c.json(bucketScorecardScores(rows));
   });
 
   // GET /api/workspaces/stale-worktrees — list closed workspaces with directories still on disk
