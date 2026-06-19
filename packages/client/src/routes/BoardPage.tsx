@@ -6,6 +6,7 @@ import { BoardErrorBoundary } from "../components/BoardErrorBoundary.js";
 import { BacklogView } from "../components/BacklogView.js";
 import { MilestoneFilterBanner } from "../components/MilestoneFilterBanner.js";
 import { BoardSecondaryViews } from "../components/BoardSecondaryViews.js";
+import { useBoardLiveHandlers } from "../hooks/useBoardLiveHandlers.js";
 import { stringifyForIssueCard, deferUntilIdle } from "../lib/boardCardSnapshot.js";
 import { BoardKanbanView } from "../components/BoardKanbanView.js";
 import { RecentlyMergedStrip } from "../components/RecentlyMergedStrip.js";
@@ -31,8 +32,7 @@ import { runCreateIssueFlow, type CreateIssuePayload } from "../lib/createIssueS
 import { applyLocalReorder, moveIssueToStatus } from "../lib/issueMoveHelpers.js";
 import { createQuickUpdateHandlers } from "../lib/issueQuickUpdates.js";
 import { useColumnResize } from "../lib/columnResizeHandler.js";
-import { useBoardEvents, type LiveSessionStats, type TodoItem, type ApprovalRequest } from "../lib/useBoardEvents.js";
-import { sendDesktopNotification } from "../lib/desktop.js";
+import { type LiveSessionStats, type TodoItem, type ApprovalRequest } from "../lib/useBoardEvents.js";
 import { useActivityNotifications, type NotificationEvent } from "../hooks/useActivityNotifications.js";
 import { buildRunQueueForecast } from "../components/RunQueueForecastPanel.js";
 import { useBoardPageRoute } from "./useBoardPageRoute.js";
@@ -371,155 +371,23 @@ export function BoardPage() {
     }
     setSelectedIssue(null);
   }, [columns, selectedIssue]);
-
-  // Real-time board updates via WebSocket
-  const handleBoardChange = useCallback((reason: string) => {
-    // `project_created/updated/deleted` are project-lifecycle reasons that require a
-    // project-list reload. `project_completed` (#848) shares the `project_` prefix but is
-    // a board notification, NOT a lifecycle change — let it fall through to the
-    // notification handling below instead of swallowing it with an early return.
-    if (reason.startsWith("project_") && reason !== "project_completed") {
-      void (async () => {
-        try {
-          const nextProjectId = await loadProjectsRef.current();
-          if (nextProjectId) {
-            await refetchBoard(nextProjectId);
-          } else {
-            setColumns([]);
-            columnsRef.current = [];
-          }
-        } catch {
-          showToast("Failed to refresh projects", "error");
-        }
-      })();
-      return;
-    }
-
-    if (reason === "session_completed") {
-      sendDesktopNotification("Agentic Kanban", "Agent session completed");
-    } else if (reason === "workspace_merged") {
-      sendDesktopNotification("Agentic Kanban", "Workspace merged successfully");
-    } else if (reason === "project_completed") {
-      sendDesktopNotification("Agentic Kanban", "🎉 Project complete — the backlog is fully implemented");
-    }
-
-    // Activity notification bell — capture issue context from current board snapshot
-    const relevantReasons = new Set([
-      "workspace_merged", "workspace_ready_for_merge",
-      "session_completed", "session_launched",
-      "workflow_error", "workflow_transition",
-      "project_completed",
-    ]);
-    if (relevantReasons.has(reason)) {
-      // Find the most relevant issue from the current board snapshot.
-      // Match the most recently-active workspace for any event tied to a workspace.
-      // Workflow transitions and project-completion are not tied to a single issue, so skip matching.
-      let bestIssue: { id: string; issueNumber?: number; title?: string; workspaceId?: string } | undefined;
-      if (reason !== "workflow_transition" && reason !== "project_completed") {
-        // Pick the issue with the most recently-active workspace
-        let bestTime = 0;
-        for (const col of columnsRef.current) {
-          for (const iss of col.issues) {
-            const ws = iss.workspaceSummary?.main;
-            if (ws) {
-              const wsTime = ws.lastSessionAt ? new Date(ws.lastSessionAt).getTime() : 0;
-              if (wsTime > bestTime) {
-                bestTime = wsTime;
-                bestIssue = {
-                  id: iss.id,
-                  issueNumber: iss.issueNumber ?? undefined,
-                  title: iss.title,
-                  workspaceId: ws.id,
-                };
-              }
-            }
-          }
-        }
-      }
-      addNotificationBoardEvent(reason, bestIssue);
-    }
-
-    if (creatingInColumnId) {
-      pendingBoardRefreshRef.current = true;
-      return;
-    }
-    scheduleRefetch();
-  }, [refetchBoard, scheduleRefetch, creatingInColumnId, addNotificationBoardEvent]);
-
-  const handleSessionActivity = useCallback((issueId: string, sessionId: string, activity: string) => {
-    const isActive = columnsRef.current.some(col =>
-      col.issues.some(iss => iss.id === issueId && (iss.workspaceSummary?.main?.status === "active" || iss.workspaceSummary?.main?.status === "fixing"))
-    );
-    if (!isActive) {
-      setSessionActivityRaw((prev) => {
-        if (!(issueId in prev)) return prev;
-        const next = { ...prev };
-        delete next[issueId];
-        setLiveStats((prev2) => {
-          if (!(issueId in prev2)) return prev2;
-          const next2 = { ...prev2 };
-          delete next2[issueId];
-          return next2;
-        });
-        return next;
-      });
-      return;
-    }
-    setSessionActivityRaw((prev) => {
-      const sessions = { ...(prev[issueId] ?? {}) };
-      if (!activity) {
-        delete sessions[sessionId];
-      } else {
-        if (sessions[sessionId] === activity) return prev;
-        sessions[sessionId] = activity;
-      }
-      if (Object.keys(sessions).length === 0) {
-        const next = { ...prev };
-        delete next[issueId];
-        setLiveStats((prev) => {
-          if (!(issueId in prev)) return prev;
-          const next = { ...prev };
-          delete next[issueId];
-          return next;
-        });
-        return next;
-      }
-      return { ...prev, [issueId]: sessions };
-    });
-  }, []);
-
-  const handleSessionStats = useCallback((issueId: string, stats: LiveSessionStats) => {
-    const isActive = columnsRef.current.some(col =>
-      col.issues.some(iss => iss.id === issueId && (iss.workspaceSummary?.main?.status === "active" || iss.workspaceSummary?.main?.status === "fixing"))
-    );
-    if (!isActive) return;
-    setLiveStats((prev) => {
-      if (prev[issueId]?.model === stats.model && prev[issueId]?.contextTokens === stats.contextTokens && prev[issueId]?.toolUses === stats.toolUses && prev[issueId]?.subagentCount === stats.subagentCount) return prev;
-      return { ...prev, [issueId]: stats };
-    });
-  }, []);
-
-  const handleSessionTodos = useCallback((issueId: string, todos: TodoItem[]) => {
-    setSessionTodos((prev) => ({ ...prev, [issueId]: todos }));
-  }, []);
-
-  const handleApprovalRequested = useCallback((req: ApprovalRequest) => {
-    setApprovalRequests((prev) => [...prev, req]);
-    // Find the issue corresponding to this workspace for the notification
-    let approvalIssue: { id: string; issueNumber?: number; title?: string } | undefined;
-    if (req.workspaceId) {
-      for (const col of columnsRef.current) {
-        const iss = col.issues.find((i) => i.workspaceSummary?.main?.id === req.workspaceId);
-        if (iss) {
-          approvalIssue = { id: iss.id, issueNumber: iss.issueNumber ?? undefined, title: iss.title };
-          break;
-        }
-      }
-    }
-    addNotificationApprovalEvent(req.workspaceId ?? req.sessionId, approvalIssue);
-  }, [addNotificationApprovalEvent]);
-
-  useBoardEvents(activeProjectId, handleBoardChange, handleSessionActivity, handleSessionStats, handleSessionTodos, handleApprovalRequested);
+  // Real-time board updates via WebSocket (handlers + subscription)
+  useBoardLiveHandlers({
+    activeProjectId,
+    columnsRef,
+    loadProjectsRef,
+    pendingBoardRefreshRef,
+    refetchBoard,
+    scheduleRefetch,
+    setColumns,
+    creatingInColumnId,
+    setSessionActivityRaw,
+    setLiveStats,
+    setSessionTodos,
+    setApprovalRequests,
+    addNotificationBoardEvent,
+    addNotificationApprovalEvent,
+  });
 
   // Process pending board refresh when create form closes
   useEffect(() => {
