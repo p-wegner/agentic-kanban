@@ -1,6 +1,7 @@
 import type { Database } from "../db/index.js";
 import { createProjectService } from "../services/project.service.js";
 import { getProjectById, getDoneIssueProviderAttribution } from "../repositories/project.repository.js";
+import { computeThroughputByProvider } from "../services/dashboard-analytics.service.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../middleware/ai-operation.js";
@@ -510,63 +511,7 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
     // provider attribution. If multiple workspaces merged for the same issue, the first
     // merged workspace wins (deduplicated by issue ID).
     const rows = await getDoneIssueProviderAttribution(projectId, cutoffDay, database);
-
-    function percentile(sorted: number[], p: number): number | null {
-      if (sorted.length === 0) return null;
-      const idx = (p / 100) * (sorted.length - 1);
-      const lo = Math.floor(idx);
-      const hi = Math.ceil(idx);
-      return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
-    }
-
-    // Group by provider:profile composite key.
-    // Deduplicate by issue ID — first merged workspace per issue wins.
-    const groups = new Map<string, { count: number; leadTimes: number[] }>();
-    const seenIssueIds = new Set<string>();
-    const allLeadTimes: number[] = [];
-
-    for (const r of rows) {
-      if (!r.mergedAt) continue;
-      if (!r.statusChangedAt || !r.issueCreatedAt) continue;
-
-      // Deduplicate: each issue counts only once
-      if (seenIssueIds.has(r.issueId)) continue;
-      seenIssueIds.add(r.issueId);
-
-      const provider = r.provider ?? "unknown";
-      const profile = r.claudeProfile ?? "";
-      const key = profile ? `${provider}:${profile}` : provider;
-
-      const leadMs = new Date(r.statusChangedAt).getTime() - new Date(r.issueCreatedAt).getTime();
-      if (leadMs < 0) continue;
-
-      allLeadTimes.push(leadMs);
-
-      if (!groups.has(key)) {
-        groups.set(key, { count: 0, leadTimes: [] });
-      }
-      const g = groups.get(key)!;
-      g.count++;
-      g.leadTimes.push(leadMs);
-    }
-
-    const providers = [...groups.entries()]
-      .map(([key, data]) => {
-        const sorted = [...data.leadTimes].sort((a, b) => a - b);
-        const parts = key.split(":");
-        return {
-          provider: parts[0],
-          profile: parts.length > 1 ? parts.slice(1).join(":") : "",
-          count: data.count,
-          medianLeadTimeMs: percentile(sorted, 50),
-        };
-      })
-      .sort((a, b) => b.count - a.count);
-
-    const sortedAll = [...allLeadTimes].sort((a, b) => a - b);
-    const overallMedianLeadTimeMs = percentile(sortedAll, 50);
-
-    return c.json({ providers, window: `${days}d`, overallMedianLeadTimeMs });
+    return c.json(computeThroughputByProvider(rows, days));
   });
 
   // GET /api/projects/:id/stack-profile — the durable per-project stack descriptor (#786).
