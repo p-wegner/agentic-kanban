@@ -13,6 +13,7 @@ import {
 } from "./WorkspaceCard.js";
 import { useWorkspaceSession } from "../hooks/useWorkspaceSession.js";
 import { usePanelLayout } from "../hooks/usePanelLayout.js";
+import { useWorkspacePanelDrag } from "../hooks/useWorkspacePanelDrag.js";
 import { useProfileSelection } from "../hooks/useProfileSelection.js";
 import { SessionReplay } from "./SessionReplay.js";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
@@ -80,10 +81,10 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     minWidth: 460,
     maxWidth: 1200,
   });
-  const [sidebarSide, setSidebarSide] = useState<"left" | "right">("right");
-  const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
-  const [snapZone, setSnapZone] = useState<"left" | "right" | null>(null);
-  const dragStartRef = useRef<{ mouseX: number; mouseY: number; panelX: number; panelY: number } | null>(null);
+  const { sidebarSide, dragPos, setDragPos, snapZone, handleHeaderMouseDown } = useWorkspacePanelDrag({
+    panelMode,
+    setPanelMode,
+  });
   const [diff, setDiff] = useState<DiffResponse | null>(null);
   const [diffComments, setDiffComments] = useState<DiffComment[]>([]);
   const [scorecard, setScorecard] = useState<ScorecardResult | null>(null);
@@ -384,80 +385,6 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     setQuickDropdownOpen, setRejectFeedback, setRejectMode, setSelectedHistoryId,
     setSelectedWorkspace, setShowCreate, setViewMode, setWorkspaceSessions,
   });
-
-  function handleHeaderMouseDown(e: React.MouseEvent) {
-    if ((e.target as HTMLElement).closest("button")) return;
-    const panel = (e.currentTarget as HTMLElement).closest("[data-panel]") as HTMLElement;
-    if (!panel) return;
-    const rect = panel.getBoundingClientRect();
-    dragStartRef.current = { mouseX: e.clientX, mouseY: e.clientY, panelX: rect.left, panelY: rect.top };
-
-    const EDGE_SNAP_THRESHOLD = 80;
-    let currentDragMode: "sidebar" | "modal" = panelMode === "modal" ? "modal" : "sidebar";
-    let cleanup: (() => void) | null = null;
-
-    if (currentDragMode === "sidebar") {
-      const isLeftSidebar = sidebarSide === "left";
-      const modalWidth = Math.min(1200, window.innerWidth * 0.96);
-      const modalX = isLeftSidebar
-        ? Math.max(0, Math.min(window.innerWidth - modalWidth, 200))
-        : Math.max(0, Math.min(window.innerWidth - modalWidth, dragStartRef.current.panelX - 10));
-      const modalY = Math.max(0, dragStartRef.current.panelY + 40);
-      currentDragMode = "modal";
-      setPanelMode("modal");
-      setDragPos({ x: modalX, y: modalY });
-      dragStartRef.current = { ...dragStartRef.current, panelX: modalX, panelY: modalY };
-    }
-
-    const onMove = (ev: MouseEvent) => {
-      if (!dragStartRef.current) return;
-      const dx = ev.clientX - dragStartRef.current.mouseX;
-      const dy = ev.clientY - dragStartRef.current.mouseY;
-      const newX = dragStartRef.current.panelX + dx;
-      const newY = dragStartRef.current.panelY + dy;
-      if (currentDragMode === "modal") {
-        const panelRect = panel.getBoundingClientRect();
-        const nearRightEdge = newX + panelRect.width >= window.innerWidth - EDGE_SNAP_THRESHOLD;
-        const nearLeftEdge = newX <= EDGE_SNAP_THRESHOLD;
-        if (nearRightEdge) {
-          currentDragMode = "sidebar";
-          setPanelMode("sidebar");
-          setSidebarSide("right");
-          setSnapZone(null);
-          setDragPos(null);
-          dragStartRef.current = null;
-          cleanup?.();
-          return;
-        }
-        if (nearLeftEdge) {
-          currentDragMode = "sidebar";
-          setPanelMode("sidebar");
-          setSidebarSide("left");
-          setSnapZone(null);
-          setDragPos(null);
-          dragStartRef.current = null;
-          cleanup?.();
-          return;
-        }
-        const SNAP_PREVIEW_THRESHOLD = EDGE_SNAP_THRESHOLD + 60;
-        const approachingRight = newX + panelRect.width >= window.innerWidth - SNAP_PREVIEW_THRESHOLD;
-        const approachingLeft = newX <= SNAP_PREVIEW_THRESHOLD;
-        setSnapZone(approachingRight ? "right" : approachingLeft ? "left" : null);
-        setDragPos({ x: newX, y: newY });
-      }
-    };
-    const onUp = () => {
-      dragStartRef.current = null;
-      setSnapZone(null);
-      cleanup?.();
-    };
-    cleanup = () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  }
 
   return (
     <>
