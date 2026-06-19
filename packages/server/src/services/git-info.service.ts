@@ -349,7 +349,7 @@ export const HOTSPOT_FALLBACK_COMMIT_LIMIT_FOR_TEST = HOTSPOT_FALLBACK_COMMIT_LI
  * latest commit is older than HISTORY_WEEKS would otherwise yield zero hotspots —
  * leaving the Crime Scene / Hot Files views empty even though there's churn to show.
  */
-function hotspotLogArgs(branch: string): string[] {
+export function hotspotLogArgs(branch: string): string[] {
   return ["log", branch, `--max-count=${HOTSPOT_FALLBACK_COMMIT_LIMIT}`, `--format=commit${GIT_SEP}%aI${GIT_SEP}%an`, "--numstat", "--"];
 }
 

@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
-import { getProjectGitStats, getProjectGitStatsAsync } from "../services/git-info.service.js";
+import { getProjectGitStats, getProjectGitStatsAsync, hotspotLogArgs, HOTSPOT_FALLBACK_COMMIT_LIMIT_FOR_TEST } from "../services/git-info.service.js";
 
 function exec(cmd: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -176,6 +176,16 @@ describe("getProjectGitStatsAsync", () => {
     } finally {
       await rm(oldDir, { recursive: true, force: true });
     }
+  });
+
+  it("bounds the full-history hotspot fallback to a fixed commit count (so a hyperactive repo's scan can't time out and silently empty the Crime Scene view)", () => {
+    // Regression for #844: on a very active repo, an unbounded `git log --numstat`
+    // over thousands of commits runs ~8s+, blowing the timeout — both the windowed
+    // scan and the (previously unbounded) fallback got killed, leaving 0 hotspots.
+    // The fallback must cap the commits it scans so it always returns fast.
+    const args = hotspotLogArgs("main");
+    expect(args).toContain(`--max-count=${HOTSPOT_FALLBACK_COMMIT_LIMIT_FOR_TEST}`);
+    expect(HOTSPOT_FALLBACK_COMMIT_LIMIT_FOR_TEST).toBeGreaterThan(0);
   });
 
   it("serves warm requests from the shared HEAD-keyed cache (sync and async share it)", async () => {
