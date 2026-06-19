@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { IssueArtifact, IssueWithStatus, UpdateIssueRequest, DependencyInfo, MilestoneResponse } from "@agentic-kanban/shared";
 import { apiFetch, apiPost, apiPatch, apiDelete } from "../lib/api.js";
-import { getCachedBundle, revalidateBundle } from "../lib/issueDetailBundleCache.js";
 import { isHttpUrl } from "../lib/url.js";
 import { formatRelativeTime, formatAbsoluteTime } from "../lib/formatRelativeTime.js";
 import { IssueActivitySection, type ActivityEvent } from "./IssueActivitySection.js";
@@ -20,6 +19,7 @@ import { ShowdownPanel } from "./ShowdownPanel.js";
 import { CompareAttemptsPanel } from "./CompareAttemptsPanel.js";
 import { usePanelLayout } from "../hooks/usePanelLayout.js";
 import { useIssueEditForm } from "../hooks/useIssueEditForm.js";
+import { useIssueDetailData, invalidateAvailableIssuesCache } from "../hooks/useIssueDetailData.js";
 import type { TrailEntry } from "../hooks/useTicketTrail.js";
 import { TicketTrailStrip } from "./TicketTrailStrip.js";
 import { IssueCycleTimeBadge } from "./IssueCycleTimeBadge.js";
@@ -42,42 +42,6 @@ import { CopyButton, CopyLinkButton } from "./IssueCopyButtons.js";
 // into lib/artifact-utils.ts and lib/artifact-classifiers.ts.
 export { issueArtifactPreview } from "../lib/artifact-utils.js";
 export { issueArtifactKind, issueArtifactAuthor } from "../lib/artifact-classifiers.js";
-
-// Module-level cache for the project-wide issue list feeding the dependency
-// picker (it only needs id/issueNumber/title). The list is project-scoped, not
-// issue-scoped, so switching cards reuses it instead of refetching the largest
-// payload in the app on every panel open. slim=1 omits descriptions (~60% of
-// the bytes) — the picker never renders them. Invalidated explicitly when this
-// panel creates issues; the short TTL covers out-of-band mutations.
-const AVAILABLE_ISSUES_TTL_MS = 30_000;
-const availableIssuesCache = new Map<string, { data: IssueWithStatus[]; ts: number }>();
-
-function fetchAvailableIssues(projectId: string): Promise<IssueWithStatus[]> {
-  const cached = availableIssuesCache.get(projectId);
-  if (cached && Date.now() - cached.ts < AVAILABLE_ISSUES_TTL_MS) {
-    return Promise.resolve(cached.data);
-  }
-  return apiFetch<IssueWithStatus[]>(`/api/issues?projectId=${projectId}&slim=1`).then((data) => {
-    availableIssuesCache.set(projectId, { data, ts: Date.now() });
-    return data;
-  });
-}
-
-// Shape of GET /api/issues/:id/detail-bundle — the per-issue panel data folded
-// into one response (server-side parallel fetch).
-interface IssueDetailBundle {
-  issue: { id: string; description: string | null };
-  workspaces: { id: string }[];
-  tags: { id: string; name: string; color: string | null }[];
-  dependencies: DependencyInfo | null;
-  artifacts: IssueArtifact[];
-  comments: IssueComment[];
-  activity: { events: ActivityEvent[] };
-}
-
-function invalidateAvailableIssuesCache(projectId: string) {
-  availableIssuesCache.delete(projectId);
-}
 
 interface StatusOption {
   id: string;
@@ -152,6 +116,24 @@ export function IssueDetailPanel({
     handleCancelEdit, handleEnhance, handleUndoEnhance, handleAiEstimate, handleSave,
   } = useIssueEditForm(issue, onUpdate);
   const {
+    workspaceCount,
+    issueTags, setIssueTags,
+    allTags,
+    dependencies, setDependencies,
+    availableIssues,
+    availableSkills,
+    comments, setComments,
+    artifacts, setArtifacts,
+    artifactsLoading,
+    expandedArtifactId, setExpandedArtifactId,
+    deletingArtifactId, setDeletingArtifactId,
+    activityEvents,
+    activityLoading,
+    milestones,
+    activeShowdownId, setActiveShowdownId,
+    descriptionFetching,
+  } = useIssueDetailData(issue, onIssueUpdate);
+  const {
     mode: panelMode,
     setMode: setPanelMode,
     cycleMode: cyclePanelMode,
@@ -180,27 +162,12 @@ export function IssueDetailPanel({
     toStatusName: string;
     confirm: () => Promise<void>;
   } | null>(null);
-  const [workspaceCount, setWorkspaceCount] = useState(0);
-  const [issueTags, setIssueTags] = useState<{ id: string; name: string; color: string | null }[]>([]);
-  const [allTags, setAllTags] = useState<{ id: string; name: string; color: string | null }[]>([]);
-  const [dependencies, setDependencies] = useState<DependencyInfo>({ dependencies: [] });
-  const [availableIssues, setAvailableIssues] = useState<IssueWithStatus[]>([]);
   const [showDecomposeModal, setShowDecomposeModal] = useState(false);
   const [showShowdownDialog, setShowShowdownDialog] = useState(false);
-  const [activeShowdownId, setActiveShowdownId] = useState<string | null>(null);
   const [showCompareAttempts, setShowCompareAttempts] = useState(false);
-  const [availableSkills, setAvailableSkills] = useState<{ id: string; name: string; description: string }[]>([]);
-  const [comments, setComments] = useState<IssueComment[]>([]);
   const [newNoteBody, setNewNoteBody] = useState("");
   const [submittingNote, setSubmittingNote] = useState(false);
   const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null);
-  const [artifacts, setArtifacts] = useState<IssueArtifact[]>([]);
-  const [artifactsLoading, setArtifactsLoading] = useState(true);
-  const [expandedArtifactId, setExpandedArtifactId] = useState<string | null>(null);
-  const [deletingArtifactId, setDeletingArtifactId] = useState<string | null>(null);
-  const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
-  const [activityLoading, setActivityLoading] = useState(true);
-  const [milestones, setMilestones] = useState<MilestoneResponse[]>([]);
 
   // Inline edit state (independent of the full edit form)
   const [inlineEditingTitle, setInlineEditingTitle] = useState(false);
@@ -209,77 +176,9 @@ export function IssueDetailPanel({
   const [inlineDescriptionValue, setInlineDescriptionValue] = useState(issue.description ?? "");
   const [inlineSaving, setInlineSaving] = useState<"title" | "description" | null>(null);
   const [inlineError, setInlineError] = useState<string | null>(null);
-  const [descriptionFetching, setDescriptionFetching] = useState(false);
   const inlineTitleRef = useRef<HTMLInputElement>(null);
   const inlineDescriptionRef = useRef<HTMLTextAreaElement>(null);
 
-  useEffect(() => {
-    async function loadData() {
-      setArtifactsLoading(true);
-      setActivityLoading(true);
-      setArtifacts([]);
-      setExpandedArtifactId(null);
-      // Description is stripped from the board payload; the bundle re-supplies it.
-      if (issue.description === undefined) setDescriptionFetching(true);
-      try {
-        // Per-issue data comes in ONE round-trip via the detail-bundle endpoint
-        // (workspaces, issue tags, dependencies, comments, artifacts, activity,
-        // and the lazy-loaded description), behind a stale-while-revalidate cache
-        // (issueDetailBundleCache) that also dedupes concurrent/prefetch fetches.
-        const applyBundle = (bundle: IssueDetailBundle) => {
-          setWorkspaceCount(bundle.workspaces.length);
-          setIssueTags(bundle.tags);
-          setDependencies(bundle.dependencies ?? { dependencies: [] });
-          setComments(bundle.comments);
-          setArtifacts(bundle.artifacts);
-          setActivityEvents(bundle.activity.events);
-          setArtifactsLoading(false);
-          setActivityLoading(false);
-          // Feed the lazy-loaded description up to the shared issue object so the
-          // separate description fetch is no longer needed.
-          if (issue.description === undefined && bundle.issue.description !== undefined) {
-            onIssueUpdate({ ...issue, description: bundle.issue.description });
-          }
-          setDescriptionFetching(false);
-        };
-
-        // Instant paint from a cached bundle (recently-viewed ticket / hover
-        // prefetch), then always revalidate in the background.
-        const cached = getCachedBundle(issue.id);
-        if (cached) applyBundle(cached.data as unknown as IssueDetailBundle);
-
-        // Project-scoped data (all tags, available issues, skills, milestones) is
-        // the same across every issue in the project — its own cacheable
-        // endpoints, fetched in parallel with the bundle revalidation.
-        const [bundle, allTags, available, skills, milestonesResp] = await Promise.all([
-          revalidateBundle(issue.id) as unknown as Promise<IssueDetailBundle>,
-          apiFetch<{ id: string; name: string; color: string | null }[]>(`/api/tags`),
-          fetchAvailableIssues(issue.projectId),
-          apiFetch<{ id: string; name: string; description: string }[]>(`/api/agent-skills?projectId=${issue.projectId}`).catch(() => [] as { id: string; name: string; description: string }[]),
-          apiFetch<MilestoneResponse[]>(`/api/projects/${issue.projectId}/milestones`).catch(() => [] as MilestoneResponse[]),
-        ]);
-        applyBundle(bundle);
-        setAllTags(allTags);
-        setAvailableIssues(available.filter(i => i.id !== issue.id));
-        setAvailableSkills(skills);
-        setMilestones(milestonesResp);
-        // Check for active showdown
-        apiFetch<{ id: string }>(`/api/issues/${issue.id}/showdown`)
-          .then(sd => setActiveShowdownId(sd.id))
-          .catch(() => {});
-      } catch {
-        setArtifactsLoading(false);
-        setActivityLoading(false);
-        setDescriptionFetching(false);
-        // Ignore — non-critical
-      }
-      // Touched-files, related-issues, and merged-commits are now owned by their
-      // own self-fetching section components (IssueTouchedFilesSection,
-      // IssueRelatedIssuesSection, IssueMergedCommitsSection) — each fetches on
-      // mount, so they no longer ride along in this effect.
-    }
-    loadData();
-  }, [issue.id]);
 
   // (Description is now supplied by the detail-bundle fetch above — no separate
   // lazy-load round-trip.)
