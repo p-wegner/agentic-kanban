@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DisplayEvent } from "../lib/agent-output-parser.js";
-import { buildTranscriptSearchEntries, truncateEventsForDisplay, MAX_DISPLAY_EVENTS } from "./TerminalView.js";
+import { buildTranscriptSearchEntries, truncateEventsForDisplay, MAX_DISPLAY_EVENTS } from "../lib/terminal-transcript.js";
 
 const makeAssistant = (text: string): DisplayEvent => ({ kind: "assistant", text, model: "claude" });
 const makeToolUse = (name: string, id: string, filePath?: string): DisplayEvent => ({
