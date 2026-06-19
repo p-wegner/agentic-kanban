@@ -4,9 +4,9 @@ import type { IssueArtifact } from "@agentic-kanban/shared";
 import {
   copyIssueArtifactContent,
   IssueArtifactsSection,
-  issueArtifactPreview,
   openIssueArtifact,
-} from "./IssueDetailPanel.js";
+} from "./IssueArtifactsSection.js";
+import { issueArtifactPreview } from "../lib/artifact-utils.js";
 
 function artifact(overrides: Partial<IssueArtifact> = {}): IssueArtifact {
   return {
