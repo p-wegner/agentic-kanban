@@ -3,8 +3,7 @@ import ReactMarkdown from "react-markdown";
 import type { IssueArtifact, IssueWithStatus, UpdateIssueRequest, DependencyInfo, MilestoneResponse } from "@agentic-kanban/shared";
 import { isHttpUrl } from "../lib/url.js";
 import { MarkdownToolbar } from "./MarkdownToolbar.js";
-import { WorkflowProgress } from "./WorkflowProgress.js";
-import { isSpecPlanningPhase, SpecPhasePanel } from "./SpecPhasePanel.js";
+import { IssueWorkspacesSection } from "./IssueWorkspacesSection.js";
 import { IssueDetailDialogs, type MoveToDonePending, type DependencyImpactPending } from "./IssueDetailDialogs.js";
 import { usePanelLayout } from "../hooks/usePanelLayout.js";
 import { useIssueEditForm } from "../hooks/useIssueEditForm.js";
@@ -718,134 +717,15 @@ export function IssueDetailPanel({
 
           {/* Workspaces section — placed directly below status/metadata for contextual proximity */}
           {!editing && (
-            <div>
-              <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">
-                Workspaces
-              </label>
-              {issue.workspaceSummary?.main ? (
-                <div className="flex flex-col gap-1">
-                  <button
-                    onClick={() => onManageWorkspaces(issue, issue.workspaceSummary!.main!.id)}
-                    className={`w-full flex flex-col gap-1 p-2 rounded border transition-colors text-left ${
-                      issue.workspaceSummary.main.conflicts?.hasConflicts
-                        ? "border-red-200 dark:border-red-800 hover:border-red-300 dark:hover:border-red-700 hover:bg-red-50 dark:hover:bg-red-950"
-                        : "border-gray-200 dark:border-gray-700 hover:border-brand-300 dark:hover:border-brand-600 hover:bg-brand-50 dark:hover:bg-brand-950"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 w-full">
-                      <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${
-                        issue.workspaceSummary.main.status === "active" ? "bg-green-500" :
-                        issue.workspaceSummary.main.status === "reviewing" ? "bg-accent-500 animate-pulse" :
-                        issue.workspaceSummary.main.status === "fixing" ? "bg-orange-500 animate-pulse" :
-                        issue.workspaceSummary.main.status === "error" ? "bg-red-500" :
-                        issue.workspaceSummary.main.conflicts?.hasConflicts ? "bg-red-500" :
-                        issue.workspaceSummary.main.status === "idle" ? "bg-amber-500" :
-                        "bg-gray-400"
-                      }`} />
-                      <span className="text-sm font-mono text-gray-700 dark:text-gray-300 truncate">{issue.workspaceSummary.main.branch}</span>
-                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${
-                        issue.workspaceSummary.main.status === "active" ? "bg-green-100 text-green-700" :
-                        issue.workspaceSummary.main.status === "reviewing" ? "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300" :
-                        issue.workspaceSummary.main.status === "fixing" ? "bg-orange-100 text-orange-700" :
-                        issue.workspaceSummary.main.status === "error" ? "bg-red-100 text-red-700" :
-                        issue.workspaceSummary.main.conflicts?.hasConflicts ? "bg-red-100 text-red-700" :
-                        issue.workspaceSummary.main.status === "idle" ? "bg-amber-100 text-amber-700" :
-                        issue.workspaceSummary.main.status === "closed" && issue.workspaceSummary.main.lastSessionTriggerType === "fix-conflicts" ? "bg-orange-100 text-orange-700" :
-                        "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400"
-                      }`}>
-                        {issue.workspaceSummary.main.status === "reviewing" ? "AI Reviewing" :
-                         issue.workspaceSummary.main.status === "fixing" ? "AI Fixing Conflicts" :
-                         issue.workspaceSummary.main.status === "error" ? "Preflight Error" :
-                         issue.workspaceSummary.main.conflicts?.hasConflicts ? "Merge Conflicts" :
-                         issue.workspaceSummary.main.status === "closed" && issue.workspaceSummary.main.lastSessionTriggerType === "fix-conflicts" ? "merged conflicts" :
-                         issue.workspaceSummary.main.status}
-                      </span>
-                      {issue.workspaceSummary.main.conflicts?.hasConflicts && issue.workspaceSummary.main.status !== "fixing" && (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-red-100 text-red-700 text-[10px] font-medium shrink-0">
-                          {issue.workspaceSummary.main.conflicts.conflictingFiles.length} file{issue.workspaceSummary.main.conflicts.conflictingFiles.length !== 1 ? "s" : ""}
-                        </span>
-                      )}
-                      {issue.workspaceSummary!.total > 1 && (
-                        <button
-                          type="button"
-                          onClick={e => { e.stopPropagation(); setShowCompareAttempts(true); }}
-                          className="ml-auto text-xs text-blue-600 dark:text-blue-400 hover:underline shrink-0"
-                          title={`Compare all ${issue.workspaceSummary!.total} attempts`}
-                        >
-                          +{issue.workspaceSummary!.total - 1} more
-                        </button>
-                      )}
-                    </div>
-                    {(issue.workspaceSummary.main.status === "active" || issue.workspaceSummary.main.status === "fixing") && (issue.workspaceSummary.main.contextTokens || issue.workspaceSummary.main.lastTool) && (
-                      <div className="flex items-center gap-2 pl-4">
-                        {issue.workspaceSummary.main.contextTokens ? (
-                          <span className="text-[10px] text-gray-400 dark:text-gray-500">
-                            {issue.workspaceSummary.main.contextTokens >= 1000
-                              ? `${Math.round(issue.workspaceSummary.main.contextTokens / 1000)}k ctx`
-                              : `${issue.workspaceSummary.main.contextTokens} ctx`}
-                          </span>
-                        ) : null}
-                        {issue.workspaceSummary.main.lastTool ? (
-                          <span className="text-[10px] text-gray-400 dark:text-gray-500 truncate" title={issue.workspaceSummary.main.lastTool}>
-                            {issue.workspaceSummary.main.lastTool}
-                          </span>
-                        ) : null}
-                      </div>
-                    )}
-                  </button>
-                  {issue.workspaceSummary.main.conflicts?.hasConflicts && (
-                    <button
-                      onClick={() => onManageWorkspaces(issue, issue.workspaceSummary!.main!.id)}
-                      className="flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded bg-red-600 text-white hover:bg-red-700 transition-colors self-start"
-                    >
-                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                      </svg>
-                      Fix with AI
-                    </button>
-                  )}
-                  <WorkflowProgress
-                    workspaceId={issue.workspaceSummary.main.id}
-                    projectId={issue.projectId}
-                    workspaceStatus={issue.workspaceSummary.main.mergedAt ? "merged" : issue.workspaceSummary.main.status}
-                  />
-                  {isSpecPlanningPhase(issue.workspaceSummary.main.workflow?.currentNodeName) && (
-                    <SpecPhasePanel
-                      issue={issue}
-                      workspace={issue.workspaceSummary.main}
-                      onApproved={() => onIssueUpdate(issue)}
-                    />
-                  )}
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 flex-wrap">
-                  {onStartWorkspace && (
-                    <button
-                      onClick={() => onStartWorkspace(issue)}
-                      className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded bg-brand-600 text-white hover:bg-brand-700 transition-colors"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                      </svg>
-                      Start Workspace
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setShowShowdownDialog(true)}
-                    className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
-                    title="Run this ticket with different skill/model combos in parallel"
-                  >
-                    ⚔️ Showdown…
-                  </button>
-                  <button
-                    onClick={() => onManageWorkspaces(issue)}
-                    className="text-sm text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
-                  >
-                    {workspaceCount === 0 ? "Custom options..." : "View Workspaces"}
-                  </button>
-                </div>
-              )}
-            </div>
+            <IssueWorkspacesSection
+              issue={issue}
+              workspaceCount={workspaceCount}
+              onManageWorkspaces={onManageWorkspaces}
+              onStartWorkspace={onStartWorkspace}
+              onIssueUpdate={onIssueUpdate}
+              onShowCompareAttempts={() => setShowCompareAttempts(true)}
+              onShowShowdown={() => setShowShowdownDialog(true)}
+            />
           )}
 
           {/* ── Secondary detail sections ── */}
