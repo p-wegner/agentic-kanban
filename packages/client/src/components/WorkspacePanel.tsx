@@ -22,10 +22,9 @@ import {
   COPILOT_DEFAULT_PROFILE,
   humanizeSkillName,
   profileOptionValue,
-  profileSelectionFromValue,
   providerLabel,
-  resolveQuickLaunchDefault,
 } from "../lib/workspace-helpers.js";
+import { buildQuickLaunchBody } from "../lib/workspace-launch.js";
 import type { LiveSessionStats } from "../lib/useBoardEvents.js";
 import type {
   AgentOutputMessage,
@@ -372,23 +371,16 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     setQuickDropdownOpen(false);
     onWorkspaceCreating?.(issue.id);
     try {
-      const body: Record<string, unknown> = {
+      const body = buildQuickLaunchBody({
         issueId: issue.id,
-        isDirect: false,
         requiresReview,
         planMode: withPlanMode,
         branch: suggestion,
-      };
-      const profile = profileSelectionFromValue(selectedProfile);
-      if (profile) {
-        body.profile = profile;
-      } else {
-        // "Default" selected — resolve to explicit global default so the label
-        // the user saw matches what actually runs.
-        const resolved = resolveQuickLaunchDefault(prefs);
-        if (resolved) body.profile = resolved;
-      }
-      if ((isClaudeQuickLaunch || isCodexQuickLaunch) && selectedModel) body.model = selectedModel;
+        selectedProfile,
+        prefs,
+        includeModel: isClaudeQuickLaunch || isCodexQuickLaunch,
+        model: selectedModel,
+      });
       const result = await apiPost<WorkspaceResponse & { sessionId?: string }>("/api/workspaces", body);
       setShowCreate(false);
       if (result.sessionId) {
@@ -413,22 +405,17 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     setQuickDropdownOpen(false);
     onWorkspaceCreating?.(issue.id);
     try {
-      const body: Record<string, unknown> = {
+      const body = buildQuickLaunchBody({
         issueId: issue.id,
-        isDirect: false,
         requiresReview,
         planMode: false,
         branch: suggestion,
         skillId,
-      };
-      const profile = profileSelectionFromValue(selectedProfile);
-      if (profile) {
-        body.profile = profile;
-      } else {
-        const resolved = resolveQuickLaunchDefault(prefs);
-        if (resolved) body.profile = resolved;
-      }
-      if ((isClaudeQuickLaunch || isCodexQuickLaunch) && selectedModel) body.model = selectedModel;
+        selectedProfile,
+        prefs,
+        includeModel: isClaudeQuickLaunch || isCodexQuickLaunch,
+        model: selectedModel,
+      });
       const result = await apiPost<WorkspaceResponse & { sessionId?: string }>("/api/workspaces", body);
       setShowCreate(false);
       if (result.sessionId) {
