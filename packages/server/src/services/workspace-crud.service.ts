@@ -49,8 +49,16 @@ import type { BudgetEstimate } from "./budget-estimator.service.js";
 import { kill as killAgent } from "./agent.service.js";
 import { teardownWorktree, killProcessTree, removeDirWithRetry } from "./workspace-teardown.service.js";
 import { runSetupScript } from "./setup-script.js";
-import type { SetupScriptResult } from "./setup-script.js";
-import type { WorkspaceSymlinkRun } from "@agentic-kanban/shared";
+import {
+  buildSetupRunFromResult,
+  buildSetupRunFromError,
+  skippedSetupRun,
+  disabledSymlinkRun,
+  buildSymlinkRun,
+  buildSymlinkErrorRun,
+  type LatestSetupRun,
+  type LatestSymlinkRun,
+} from "./workspace-run-records.js";
 import { writeAgentSkillFile, readLocalSkillPrompt, copySkillToWorktree } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { writeTicketContextFile } from "@agentic-kanban/shared/lib/ticket-context";
 import { bootstrapSymlinks, parseSymlinkDirs } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
@@ -91,121 +99,8 @@ export function createWorkspaceCrudService(deps: {
   const { database, getSessionManager, boardEvents } = deps;
   const gitService = deps.gitService ?? realGitService;
 
-  type SetupRunState = "running" | "success" | "failed" | "skipped";
-  type LatestSetupRun = {
-    command: string | null;
-    state: SetupRunState;
-    startedAt: string | null;
-    endedAt: string | null;
-    exitCode: number | null;
-    durationMs: number | null;
-    stdoutTail: string | null;
-    stderrTail: string | null;
-  };
-  type LatestSymlinkRun = WorkspaceSymlinkRun;
-
   function stringifyJson(value: unknown): string {
     return JSON.stringify(value);
-  }
-
-  function tailOutput(output: string): string | null {
-    const trimmed = output.trim();
-    if (!trimmed) return null;
-    const lines = trimmed.split(/\r?\n/).slice(-8).join("\n");
-    return lines.length > 2000 ? lines.slice(-2000) : lines;
-  }
-
-  function buildSetupRunFromResult(command: string, startedAt: string, result: SetupScriptResult): LatestSetupRun {
-    const endedAt = new Date().toISOString();
-    return {
-      command,
-      state: result.exitCode === 0 ? "success" : "failed",
-      startedAt,
-      endedAt,
-      exitCode: result.exitCode,
-      durationMs: Math.max(0, new Date(endedAt).getTime() - new Date(startedAt).getTime()),
-      stdoutTail: tailOutput(result.stdout),
-      stderrTail: tailOutput(result.stderr),
-    };
-  }
-
-  function buildSetupRunFromError(command: string, startedAt: string, err: unknown): LatestSetupRun {
-    const endedAt = new Date().toISOString();
-    return {
-      command,
-      state: "failed",
-      startedAt,
-      endedAt,
-      exitCode: null,
-      durationMs: Math.max(0, new Date(endedAt).getTime() - new Date(startedAt).getTime()),
-      stdoutTail: null,
-      stderrTail: tailOutput(err instanceof Error ? err.message : String(err)),
-    };
-  }
-
-  function skippedSetupRun(command: string | null): LatestSetupRun {
-    const now = new Date().toISOString();
-    return {
-      command,
-      state: "skipped",
-      startedAt: now,
-      endedAt: now,
-      exitCode: null,
-      durationMs: 0,
-      stdoutTail: null,
-      stderrTail: null,
-    };
-  }
-
-  function disabledSymlinkRun(): LatestSymlinkRun {
-    const now = new Date().toISOString();
-    return {
-      state: "disabled",
-      dirs: [],
-      linked: [],
-      skipped: [],
-      failed: [],
-      startedAt: now,
-      endedAt: now,
-      error: null,
-    };
-  }
-
-  function buildSymlinkRun(
-    dirs: string[],
-    startedAt: string,
-    result: { linked: string[]; skipped: string[]; failed: Array<{ dir: string; error: string }> },
-  ): LatestSymlinkRun {
-    const endedAt = new Date().toISOString();
-    const state = result.failed.length > 0
-      ? "failed"
-      : result.linked.length > 0
-        ? "linked"
-        : "skipped";
-    return {
-      state,
-      dirs,
-      linked: result.linked,
-      skipped: result.skipped,
-      failed: result.failed,
-      startedAt,
-      endedAt,
-      error: null,
-    };
-  }
-
-  function buildSymlinkErrorRun(dirs: string[], startedAt: string, err: unknown): LatestSymlinkRun {
-    const endedAt = new Date().toISOString();
-    return {
-      state: "failed",
-      dirs,
-      linked: [],
-      skipped: [],
-      failed: [],
-      startedAt,
-      endedAt,
-      error: err instanceof Error ? err.message : String(err),
-    };
   }
 
   async function updateLatestSetupRun(workspaceId: string, run: LatestSetupRun, projectId?: string): Promise<void> {
