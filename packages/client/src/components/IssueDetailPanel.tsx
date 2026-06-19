@@ -16,6 +16,7 @@ import { CompareAttemptsPanel } from "./CompareAttemptsPanel.js";
 import { usePanelLayout } from "../hooks/usePanelLayout.js";
 import { useIssueEditForm } from "../hooks/useIssueEditForm.js";
 import { useIssueDetailData, invalidateAvailableIssuesCache } from "../hooks/useIssueDetailData.js";
+import { useIssueInlineEdit } from "../hooks/useIssueInlineEdit.js";
 import { IssueSecondaryDetails } from "./IssueSecondaryDetails.js";
 import type { TrailEntry } from "../hooks/useTicketTrail.js";
 import { TicketTrailStrip } from "./TicketTrailStrip.js";
@@ -162,14 +163,18 @@ export function IssueDetailPanel({
   const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null);
 
   // Inline edit state (independent of the full edit form)
-  const [inlineEditingTitle, setInlineEditingTitle] = useState(false);
-  const [inlineTitleValue, setInlineTitleValue] = useState(issue.title);
-  const [inlineEditingDescription, setInlineEditingDescription] = useState(false);
-  const [inlineDescriptionValue, setInlineDescriptionValue] = useState(issue.description ?? "");
-  const [inlineSaving, setInlineSaving] = useState<"title" | "description" | null>(null);
-  const [inlineError, setInlineError] = useState<string | null>(null);
-  const inlineTitleRef = useRef<HTMLInputElement>(null);
-  const inlineDescriptionRef = useRef<HTMLTextAreaElement>(null);
+  const {
+    inlineEditingTitle, setInlineEditingTitle,
+    inlineTitleValue, setInlineTitleValue,
+    inlineEditingDescription, setInlineEditingDescription,
+    inlineDescriptionValue, setInlineDescriptionValue,
+    inlineSaving,
+    inlineError, setInlineError,
+    inlineTitleRef,
+    inlineDescriptionRef,
+    handleInlineTitleSave,
+    handleInlineDescriptionSave,
+  } = useIssueInlineEdit(issue, onIssueUpdate, descriptionFetching);
 
 
   // (Description is now supplied by the detail-bundle fetch above — no separate
@@ -188,17 +193,7 @@ export function IssueDetailPanel({
       setSkipAutoReview(issue.skipAutoReview ?? false);
       setMilestoneId(issue.milestoneId ?? null);
     }
-    if (!inlineEditingTitle) setInlineTitleValue(issue.title);
-    if (!inlineEditingDescription) setInlineDescriptionValue(issue.description ?? "");
   }, [issue, editing]);
-
-  useEffect(() => {
-    if (inlineEditingTitle) inlineTitleRef.current?.focus();
-  }, [inlineEditingTitle]);
-
-  useEffect(() => {
-    if (inlineEditingDescription) inlineDescriptionRef.current?.focus();
-  }, [inlineEditingDescription]);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -380,52 +375,6 @@ export function IssueDetailPanel({
   }
 
 
-
-  async function handleInlineTitleSave() {
-    const trimmed = inlineTitleValue.trim();
-    if (!trimmed || inlineSaving) return;
-    if (trimmed === issue.title) {
-      setInlineEditingTitle(false);
-      return;
-    }
-    setInlineSaving("title");
-    setInlineError(null);
-    const prev = issue.title;
-    onIssueUpdate({ ...issue, title: trimmed });
-    try {
-      await apiPatch(`/api/issues/${issue.id}`, { title: trimmed });
-      setInlineEditingTitle(false);
-    } catch (err) {
-      onIssueUpdate({ ...issue, title: prev });
-      setInlineTitleValue(prev);
-      setInlineError(err instanceof Error ? err.message : "Failed to save title");
-    } finally {
-      setInlineSaving(null);
-    }
-  }
-
-  async function handleInlineDescriptionSave() {
-    if (inlineSaving || descriptionFetching) return;
-    const value = inlineDescriptionValue.trim();
-    const prev = issue.description ?? "";
-    if (value === prev) {
-      setInlineEditingDescription(false);
-      return;
-    }
-    setInlineSaving("description");
-    setInlineError(null);
-    onIssueUpdate({ ...issue, description: value || undefined });
-    try {
-      await apiPatch(`/api/issues/${issue.id}`, { description: value || undefined });
-      setInlineEditingDescription(false);
-    } catch (err) {
-      onIssueUpdate({ ...issue, description: prev || undefined });
-      setInlineDescriptionValue(prev);
-      setInlineError(err instanceof Error ? err.message : "Failed to save description");
-    } finally {
-      setInlineSaving(null);
-    }
-  }
 
   async function handleStatusChange(newStatusId: string) {
     if (newStatusId === issue.statusId) return;
