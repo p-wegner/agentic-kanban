@@ -2,15 +2,10 @@ import React, { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { IssueArtifact, IssueWithStatus, UpdateIssueRequest, DependencyInfo, MilestoneResponse } from "@agentic-kanban/shared";
 import { isHttpUrl } from "../lib/url.js";
-import { MoveToDoneDialog } from "./MoveToDoneDialog.js";
-import { DependencyImpactDialog } from "./DependencyImpactDialog.js";
 import { MarkdownToolbar } from "./MarkdownToolbar.js";
 import { WorkflowProgress } from "./WorkflowProgress.js";
 import { isSpecPlanningPhase, SpecPhasePanel } from "./SpecPhasePanel.js";
-import { EpicDecomposerModal } from "./EpicDecomposerModal.js";
-import { ShowdownDialog } from "./ShowdownDialog.js";
-import { ShowdownPanel } from "./ShowdownPanel.js";
-import { CompareAttemptsPanel } from "./CompareAttemptsPanel.js";
+import { IssueDetailDialogs, type MoveToDonePending, type DependencyImpactPending } from "./IssueDetailDialogs.js";
 import { usePanelLayout } from "../hooks/usePanelLayout.js";
 import { useIssueEditForm } from "../hooks/useIssueEditForm.js";
 import { useIssueDetailData, invalidateAvailableIssuesCache } from "../hooks/useIssueDetailData.js";
@@ -147,12 +142,8 @@ export function IssueDetailPanel({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [togglingVisualVerify, setTogglingVisualVerify] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
-  const [moveToDonePending, setMoveToDonePending] = useState<{ confirm: () => Promise<void> } | null>(null);
-  const [dependencyImpactPending, setDependencyImpactPending] = useState<{
-    toStatusId: string;
-    toStatusName: string;
-    confirm: () => Promise<void>;
-  } | null>(null);
+  const [moveToDonePending, setMoveToDonePending] = useState<MoveToDonePending | null>(null);
+  const [dependencyImpactPending, setDependencyImpactPending] = useState<DependencyImpactPending | null>(null);
   const [showDecomposeModal, setShowDecomposeModal] = useState(false);
   const [showShowdownDialog, setShowShowdownDialog] = useState(false);
   const [showCompareAttempts, setShowCompareAttempts] = useState(false);
@@ -943,58 +934,26 @@ export function IssueDetailPanel({
           </div>
         )}
       </div>
-      {moveToDonePending && (
-        <MoveToDoneDialog
-          issue={issue}
-          onConfirm={moveToDonePending.confirm}
-          onCancel={() => setMoveToDonePending(null)}
-        />
-      )}
-      {dependencyImpactPending && (
-        <DependencyImpactDialog
-          issueId={issue.id}
-          fromStatusName={statuses.find((s) => s.id === issue.statusId)?.name ?? ""}
-          toStatusName={dependencyImpactPending.toStatusName}
-          dependencies={dependencies.dependencies}
-          onConfirm={dependencyImpactPending.confirm}
-          onCancel={() => setDependencyImpactPending(null)}
-        />
-      )}
-      {showDecomposeModal && (
-        <EpicDecomposerModal
-          issue={issue}
-          onClose={() => setShowDecomposeModal(false)}
-          onConfirmed={() => {
-            setShowDecomposeModal(false);
-            onIssueUpdate(issue);
-          }}
-        />
-      )}
-      {showShowdownDialog && (
-        <ShowdownDialog
-          issue={issue}
-          skills={availableSkills}
-          onCreated={(sd) => {
-            setShowShowdownDialog(false);
-            setActiveShowdownId(sd.id);
-          }}
-          onCancel={() => setShowShowdownDialog(false)}
-        />
-      )}
-      {activeShowdownId && (
-        <ShowdownPanel
-          showdownId={activeShowdownId}
-          onClose={() => setActiveShowdownId(null)}
-          onWinnerPicked={() => setActiveShowdownId(null)}
-        />
-      )}
-      {showCompareAttempts && (
-        <CompareAttemptsPanel
-          issueId={issue.id}
-          onClose={() => setShowCompareAttempts(false)}
-          onOpenWorkspace={(workspaceId) => onManageWorkspaces(issue, workspaceId)}
-        />
-      )}
+      <IssueDetailDialogs
+        issue={issue}
+        statuses={statuses}
+        dependencies={dependencies}
+        availableSkills={availableSkills}
+        moveToDonePending={moveToDonePending}
+        setMoveToDonePending={setMoveToDonePending}
+        dependencyImpactPending={dependencyImpactPending}
+        setDependencyImpactPending={setDependencyImpactPending}
+        showDecomposeModal={showDecomposeModal}
+        setShowDecomposeModal={setShowDecomposeModal}
+        showShowdownDialog={showShowdownDialog}
+        setShowShowdownDialog={setShowShowdownDialog}
+        activeShowdownId={activeShowdownId}
+        setActiveShowdownId={setActiveShowdownId}
+        showCompareAttempts={showCompareAttempts}
+        setShowCompareAttempts={setShowCompareAttempts}
+        onIssueUpdate={onIssueUpdate}
+        onManageWorkspaces={onManageWorkspaces}
+      />
     </>
   );
 }
