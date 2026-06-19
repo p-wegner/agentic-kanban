@@ -7,6 +7,15 @@ import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats } from "../lib/useBoardEvents.js";
 import { AgentQuestionsPanel } from "./AgentQuestionsPanel.js";
 import { ButlerVoiceButton, type ButlerVoiceButtonHandle } from "./ButlerVoiceButton.js";
+import {
+  reduceButlerEvent,
+  emptyAssistantBuf,
+  formatToolLabel,
+  type ButlerEvent,
+  type AssistantBuf,
+  type ButlerChatMessage as ChatMessage,
+  type ButlerToolCall as ToolCall,
+} from "../lib/butler-event-reducer.js";
 
 interface ButlerState {
   backend?: "claude" | "codex" | "mock";
@@ -26,38 +35,9 @@ interface ButlerCommand {
   argumentHint?: string;
 }
 
-/** Event shape emitted by the server butler SSE stream (butler-sdk.service.ts). */
-type ButlerEvent =
-  | { type: "ready" }
-  | { type: "session"; sessionId: string }
-  | { type: "turn-start" }
-  | { type: "user"; text: string }
-  | { type: "text"; text: string }
-  | { type: "tool"; name: string; toolId?: string; input?: Record<string, unknown> }
-  | { type: "tool-result"; toolId?: string; output?: string; isError?: boolean }
-  | { type: "result"; text?: string; isError?: boolean }
-  | { type: "usage"; contextTokens: number }
-  | { type: "meta"; model?: string; contextWindow?: number; mcpConnected?: boolean }
-  | { type: "error"; message: string };
-
 /** Format a context-window size: 1000000 -> "1M", 200000 -> "200k". */
 function formatWindow(n: number): string {
   return n >= 1_000_000 ? `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M` : `${Math.round(n / 1000)}k`;
-}
-
-interface ToolCall {
-  name: string;
-  input?: Record<string, unknown>;
-  output?: string;
-  status: "pending" | "done" | "error";
-}
-
-interface ChatMessage {
-  id: string;
-  role: "user" | "assistant" | "activity" | "tool";
-  text: string;
-  ts: number;
-  tool?: ToolCall;
 }
 
 interface ButlerSessionSummary {
@@ -100,17 +80,6 @@ function formatRelativeTs(ts: number): string {
   if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(mins / 60);
   return `${hrs}h ago`;
-}
-
-function formatToolLabel(name: string): string {
-  if (name === "Read") return "Reading a file";
-  if (name === "Write" || name === "Edit") return "Editing a file";
-  if (name === "Bash") return "Running a command";
-  if (name === "Glob" || name === "Grep") return "Searching the project";
-  if (name === "WebSearch" || name === "WebFetch") return "Searching the web";
-  if (name.includes("list_issues")) return "Listing board issues";
-  if (name.includes("get_board_status")) return "Checking board status";
-  return name.replace(/^mcp__[^_]+__/, "").replace(/_/g, " ");
 }
 
 function toolHint(name: string, input?: Record<string, unknown>): string {
@@ -555,7 +524,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   // Per-tab SSE streams: kept outside React state to avoid re-render churn.
   const eventSourcesRef = useRef<Record<string, EventSource>>({});
   // Per-tab streaming buffer state (outside React state for the same reason).
-  const assistantBufsRef = useRef<Record<string, { buf: string; msgId: string | null; textSeen: boolean }>>({});
+  const assistantBufsRef = useRef<Record<string, AssistantBuf>>({});
   // Per-tab input value refs (mirrors tab.input for closure access).
   const inputValuesRef = useRef<Record<string, string>>({});
 
@@ -599,182 +568,22 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     });
   }, []);
 
-  function appendAssistantText(butlerId: string, delta: string) {
-    if (!delta) return;
-    const buf = getOrInitBuf(butlerId);
-    buf.textSeen = true;
-    buf.buf += delta;
-    const text = buf.buf;
-    if (!buf.msgId) {
-      buf.msgId = `asst-${Date.now()}-${Math.random()}`;
-    }
-    const id = buf.msgId;
-    setTabStates((prev) => {
-      const cur = prev[butlerId];
-      if (!cur) return prev;
-      const msgs = cur.chatMessages;
-      const last = msgs[msgs.length - 1];
-      const newMsgs = last && last.id === id
-        ? [...msgs.slice(0, -1), { ...last, text }]
-        : [...msgs, { id, role: "assistant" as const, text, ts: Date.now() }];
-      return { ...prev, [butlerId]: { ...cur, chatMessages: newMsgs } };
-    });
-  }
-
-  function settlePendingTools(butlerId: string) {
-    setTabStates((prev) => {
-      const cur = prev[butlerId];
-      if (!cur) return prev;
-      if (!cur.chatMessages.some((m) => m.role === "tool" && m.tool?.status === "pending")) return prev;
-      return {
-        ...prev,
-        [butlerId]: {
-          ...cur,
-          chatMessages: cur.chatMessages.map((m) =>
-            m.role === "tool" && m.tool?.status === "pending"
-              ? { ...m, tool: { ...m.tool, status: "done" } }
-              : m,
-          ),
-        },
-      };
-    });
-  }
-
+  // Apply one SSE event via the pure reducer (lib/butler-event-reducer.ts). The
+  // per-tab assistant-text buffer stays in a ref; we capture it before the state
+  // update and write back the reducer's new buffer. No StrictMode here, and the
+  // captured prevBuf keeps the write idempotent regardless.
   function handleButlerEvent(butlerId: string, e: ButlerEvent) {
-    const buf = getOrInitBuf(butlerId);
-    switch (e.type) {
-      case "session":
-        updateTab(butlerId, { butlerState: { active: true, sessionId: e.sessionId } });
-        break;
-      case "usage":
-        updateTab(butlerId, { contextTokens: e.contextTokens });
-        break;
-      case "meta":
-        setTabStates((prev) => {
-          const cur = prev[butlerId];
-          if (!cur) return prev;
-          return {
-            ...prev,
-            [butlerId]: {
-              ...cur,
-              ...(e.model ? { model: e.model } : {}),
-              ...(e.contextWindow ? { contextWindow: e.contextWindow } : {}),
-              ...(e.mcpConnected !== undefined ? { mcpConnected: e.mcpConnected } : {}),
-            },
-          };
-        });
-        break;
-      case "turn-start":
-        buf.buf = "";
-        buf.msgId = null;
-        buf.textSeen = false;
-        updateTab(butlerId, { sending: true });
-        break;
-      case "user":
-        setTabStates((prev) => {
-          const cur = prev[butlerId];
-          if (!cur) return prev;
-          const recentDup = cur.chatMessages.slice(-4).some((m) => m.role === "user" && m.text === e.text);
-          if (recentDup) return prev;
-          return {
-            ...prev,
-            [butlerId]: {
-              ...cur,
-              chatMessages: [...cur.chatMessages, { id: `user-ext-${Date.now()}`, role: "user", text: e.text, ts: Date.now() }],
-            },
-          };
-        });
-        break;
-      case "text":
-        appendAssistantText(butlerId, e.text);
-        break;
-      case "tool": {
-        buf.buf = "";
-        buf.msgId = null;
-        const id = e.toolId ? `tool-${e.toolId}` : `tool-${Date.now()}-${Math.random()}`;
-        setTabStates((prev) => {
-          const cur = prev[butlerId];
-          if (!cur) return prev;
-          return {
-            ...prev,
-            [butlerId]: {
-              ...cur,
-              chatMessages: [...cur.chatMessages, {
-                id,
-                role: "tool",
-                text: formatToolLabel(e.name),
-                ts: Date.now(),
-                tool: { name: e.name, input: e.input, status: "pending" },
-              }],
-            },
-          };
-        });
-        break;
-      }
-      case "tool-result": {
-        const targetId = e.toolId ? `tool-${e.toolId}` : undefined;
-        setTabStates((prev) => {
-          const cur = prev[butlerId];
-          if (!cur) return prev;
-          let idx = -1;
-          if (targetId) {
-            idx = cur.chatMessages.findIndex((m) => m.id === targetId);
-          } else {
-            for (let i = cur.chatMessages.length - 1; i >= 0; i--) {
-              if (cur.chatMessages[i].role === "tool" && cur.chatMessages[i].tool?.status === "pending") { idx = i; break; }
-            }
-          }
-          if (idx === -1) return prev;
-          const msg = cur.chatMessages[idx];
-          const next = [...cur.chatMessages];
-          next[idx] = { ...msg, tool: { ...msg.tool!, output: e.output, status: e.isError ? "error" : "done" } };
-          return { ...prev, [butlerId]: { ...cur, chatMessages: next } };
-        });
-        break;
-      }
-      case "result":
-        if (e.text && !buf.textSeen) {
-          if (e.isError) {
-            setTabStates((prev) => {
-              const cur = prev[butlerId];
-              if (!cur) return prev;
-              return {
-                ...prev,
-                [butlerId]: {
-                  ...cur,
-                  chatMessages: [...cur.chatMessages, { id: `err-${Date.now()}`, role: "activity", text: `Error: ${e.text}`, ts: Date.now() }],
-                },
-              };
-            });
-          } else {
-            appendAssistantText(butlerId, e.text);
-          }
-        }
-        buf.buf = "";
-        buf.msgId = null;
-        buf.textSeen = false;
-        settlePendingTools(butlerId);
-        updateTab(butlerId, { sending: false });
-        break;
-      case "error":
-        setTabStates((prev) => {
-          const cur = prev[butlerId];
-          if (!cur) return prev;
-          return {
-            ...prev,
-            [butlerId]: {
-              ...cur,
-              chatMessages: [...cur.chatMessages, { id: `err-${Date.now()}`, role: "activity", text: `Error: ${e.message}`, ts: Date.now() }],
-              sending: false,
-            },
-          };
-        });
-        settlePendingTools(butlerId);
-        break;
-      case "ready":
-      default:
-        break;
-    }
+    const prevBuf = getOrInitBuf(butlerId);
+    setTabStates((prev) => {
+      const cur = prev[butlerId];
+      if (!cur) return prev;
+      const { state: next, buf: nextBuf } = reduceButlerEvent(cur, prevBuf, e, {
+        now: () => Date.now(),
+        rand: () => String(Math.random()),
+      });
+      assistantBufsRef.current[butlerId] = nextBuf;
+      return { ...prev, [butlerId]: next };
+    });
   }
 
   function openStream(butlerId: string) {
