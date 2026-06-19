@@ -33,6 +33,7 @@ import { IssueDetailComments, type IssueComment } from "./IssueDetailComments.js
 import { IssueChecklistSection } from "./IssueChecklistSection.js";
 import { IssueRelatedIssuesSection } from "./IssueRelatedIssuesSection.js";
 import { IssueTouchedFilesSection, type TouchedFile } from "./IssueTouchedFilesSection.js";
+import { IssueFollowUpSection } from "./IssueFollowUpSection.js";
 
 // Re-exported so existing importers/tests keep working after the helpers moved
 // into lib/artifact-utils.ts and lib/artifact-classifiers.ts.
@@ -433,9 +434,6 @@ export function IssueDetailPanel({
   const [allTags, setAllTags] = useState<{ id: string; name: string; color: string | null }[]>([]);
   const [dependencies, setDependencies] = useState<DependencyInfo>({ dependencies: [] });
   const [availableIssues, setAvailableIssues] = useState<IssueWithStatus[]>([]);
-  const [showFollowUp, setShowFollowUp] = useState(false);
-  const [followUpTitle, setFollowUpTitle] = useState("");
-  const [followUpCreating, setFollowUpCreating] = useState(false);
   const [showDecomposeModal, setShowDecomposeModal] = useState(false);
   const [showShowdownDialog, setShowShowdownDialog] = useState(false);
   const [activeShowdownId, setActiveShowdownId] = useState<string | null>(null);
@@ -808,22 +806,6 @@ export function IssueDetailPanel({
     }
   }
 
-  async function handleCreateFollowUp() {
-    if (!followUpTitle.trim() || followUpCreating) return;
-    setFollowUpCreating(true);
-    try {
-      const newIssue = await apiPost<{ id: string }>("/api/issues", { title: followUpTitle.trim(), description: "", priority: "medium", projectId: issue.projectId });
-      await apiPost(`/api/issues/${newIssue.id}/dependencies`, { dependsOnId: issue.id, type: "depends_on" }).catch(() => {});
-      invalidateAvailableIssuesCache(issue.projectId);
-      setFollowUpTitle("");
-      setShowFollowUp(false);
-      showToast("Follow-up task created", "success");
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to create follow-up", "error");
-    } finally {
-      setFollowUpCreating(false);
-    }
-  }
 
 
   async function handleSave() {
@@ -1840,34 +1822,11 @@ export function IssueDetailPanel({
           <IssueRelatedIssuesSection issueId={issue.id} onNavigateToIssue={onNavigateToIssue} />
 
           {/* Follow-up task creation */}
-          <div className="pt-2">
-            {!showFollowUp ? (
-              <button
-                onClick={() => setShowFollowUp(true)}
-                className="text-xs text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300 flex items-center gap-1"
-              >
-                <span className="font-bold text-sm leading-none">+</span> Create follow-up task
-              </button>
-            ) : (
-              <div className="flex gap-1.5 items-center">
-                <input
-                  autoFocus
-                  type="text"
-                  value={followUpTitle}
-                  onChange={(e) => setFollowUpTitle(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") handleCreateFollowUp(); if (e.key === "Escape") { setShowFollowUp(false); setFollowUpTitle(""); } }}
-                  placeholder="Follow-up task title..."
-                  className="flex-1 text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                />
-                <button
-                  onClick={handleCreateFollowUp}
-                  disabled={!followUpTitle.trim() || followUpCreating}
-                  className="text-xs bg-brand-600 text-white px-2 py-1 rounded hover:bg-brand-700 disabled:opacity-50 whitespace-nowrap"
-                >{followUpCreating ? "…" : "Create"}</button>
-                <button onClick={() => { setShowFollowUp(false); setFollowUpTitle(""); }} className="text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300">✕</button>
-              </div>
-            )}
-          </div>
+          <IssueFollowUpSection
+            parentIssueId={issue.id}
+            projectId={issue.projectId}
+            onCreated={() => invalidateAvailableIssuesCache(issue.projectId)}
+          />
 
           {!editing && (
             <IssueArtifactsSection
