@@ -589,7 +589,8 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     icon: ICON.capacity,
     paletteIcon: "⬡",
     paletteDescription: "Show agent capacity, open slots, and next issues to launch",
-    shortcut: "c",
+    // No single-key shortcut: "c" is a reserved global board action (see
+    // useBoardKeyboardShortcuts). Reachable via the More menu and Ctrl+K palette.
     group: "secondary",
   },
   {
@@ -635,7 +636,8 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     icon: ICON.activity,
     paletteIcon: "⏱",
     paletteDescription: "Project-wide activity: status transitions, merges, sessions in reverse-chronological order",
-    shortcut: "x",
+    // No single-key shortcut: "x" is a reserved global board action (see
+    // useBoardKeyboardShortcuts). Reachable via the More menu and Ctrl+K palette.
     group: "secondary",
   },
   {

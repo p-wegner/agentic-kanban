@@ -4,7 +4,7 @@ import {
   CapabilityMatrixTable,
   CAPABILITY_DEFS,
   getProviderCapabilities,
-} from "./SettingsPanel.js";
+} from "./SettingsPanel.shared.js";
 
 describe("getProviderCapabilities", () => {
   it("returns all capabilities supported for claude", () => {

@@ -8,6 +8,7 @@ function column(name: string, count: number): StatusWithIssues {
     projectId: "project-1",
     name,
     sortOrder: 0,
+    count,
     issues: Array.from({ length: count }, (_, index) => ({ id: `${name}-${index}` }) as any),
   } as StatusWithIssues;
 }
