@@ -1,22 +1,11 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Layout } from "../components/Layout.js";
 import { useTheme } from "../hooks/useTheme.js";
-// Code-split board views (rendered behind `viewMode` guards) live in their own
-// barrel so they load on demand and don't bloat this file.
-import {
-  GraphView, TableView, AgentGrid, TimelineView, MetricsView, CrimeSceneCityView,
-  QualityMetricsView, MilestonesOverview, ButlerView, WorkflowsView,
-  WorkflowAnalyticsDashboard, InsightsPanel, DigestView, ActivityFeedView, FocusView,
-  StrategyTargetsView, SwimlaneView, FlakyTestsPanel, MonitorCycleHistoryPanel,
-  BoardHealthNotificationCenter, RunbooksView, SprintCapacityPlanner, ConstellationView,
-  MomentumView, FireworksView, StaleWorkDashboard, ThroughputChart, ProviderMixChart,
-  LeadTimeTrendChart, ScorecardDistributionChart, ProviderCostOverTimeChart, CalendarView,
-  AgentThroughputLeaderboard, BurndownChart, DriveDashboard,
-} from "../components/boardLazyViews.js";
 import { useAgentQuestionsCount } from "../components/AgentQuestionsPanel.js";
 import { BoardErrorBoundary } from "../components/BoardErrorBoundary.js";
 import { BacklogView } from "../components/BacklogView.js";
 import { MilestoneFilterBanner } from "../components/MilestoneFilterBanner.js";
+import { BoardSecondaryViews } from "../components/BoardSecondaryViews.js";
 import { stringifyForIssueCard, deferUntilIdle } from "../lib/boardCardSnapshot.js";
 import { BoardKanbanView } from "../components/BoardKanbanView.js";
 import { RecentlyMergedStrip } from "../components/RecentlyMergedStrip.js";
@@ -1424,302 +1413,34 @@ export function BoardPage() {
             switch since exactly one view renders at a time. The kanban board itself is
             eager and lives outside this boundary, so it never shows the fallback. */}
         <Suspense fallback={<ViewLoadingFallback />}>
-        {viewMode === "graph" && activeProjectId ? (
-          <div className="flex-1 min-h-0">
-            <BoardErrorBoundary columnName="Graph View">
-              <GraphView
-                columns={columns}
-                projectId={activeProjectId}
-                onIssueClick={handleIssueClick}
-                searchQuery={searchQuery}
-                focusIssueId={graphFocusIssueId}
-              />
-            </BoardErrorBoundary>
-          </div>
-        ) : null}
-        {viewMode === "table" && (
-          <BoardErrorBoundary columnName="Table View">
-            <TableView
-              columns={columns}
-              onIssueClick={handleIssueClick}
-              searchQuery={searchQuery}
-              onRefresh={() => refetchBoard()}
-              createdDateFilter={createdDateFilter}
-              onClearCreatedDateFilter={() => setCreatedDateFilter(null)}
-            />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "agents" && (
-          <BoardErrorBoundary columnName="Agents View">
-            <AgentGrid
-              columns={columns}
-              liveActivity={sessionActivity}
-              liveStats={liveStats}
-              sessionTodos={sessionTodos}
-              onIssueClick={handleIssueClick}
-              onWorkspaceClick={handleManageWorkspaces}
-              onGoToBoard={() => handleViewModeChange("kanban")}
-              activeAgentsTarget={activeAgentsTarget}
-              onDropIssue={canStartWorkspace ? handleDropOnAgentSlot : undefined}
-            />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "timeline" && (
-          <BoardErrorBoundary columnName="Timeline View">
-            <TimelineView
-              columns={columns}
-              onIssueClick={handleIssueClick}
-              searchQuery={searchQuery}
-            />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "metrics" && (
-          <BoardErrorBoundary columnName="Metrics View">
-            <MetricsView
-              columns={columns}
-              projectId={activeProjectId}
-              onIssueClick={handleIssueClick}
-              onCreatedDateClick={handleCreatedDateDrilldown}
-            />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "crime-scene" && activeProjectId && (
-          <BoardErrorBoundary columnName="Code Crime Scene">
-            <CrimeSceneCityView projectId={activeProjectId} />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "quality-metrics" && activeProjectId && (
-          <BoardErrorBoundary columnName="Quality Metrics View">
-            <QualityMetricsView projectId={activeProjectId} />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "milestones" && activeProjectId && (
-          <BoardErrorBoundary columnName="Milestones View">
-            <MilestonesOverview
-              projectId={activeProjectId}
-              onMilestoneClick={handleMilestoneOverviewClick}
-            />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "butler" && activeProjectId && (
-          <BoardErrorBoundary columnName="Butler View">
-            <ButlerView
-              projectId={activeProjectId}
-              columns={columns}
-              liveActivity={sessionActivity}
-              liveStats={liveStats}
-              onIssueClick={handleIssueClick}
-              onExit={() => handleViewModeChange("kanban")}
-              initialPrompt={butlerInitialPrompt ?? undefined}
-              onInitialPromptConsumed={() => setButlerInitialPrompt(null)}
-            />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "workflows" && activeProjectId && (
-          <BoardErrorBoundary columnName="Workflows View">
-            <WorkflowsView projectId={activeProjectId} onOpenWorkspace={handleOpenWorkspaceById} />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "workflow-analytics" && activeProjectId && (
-          <BoardErrorBoundary columnName="Workflow Analytics">
-            <WorkflowAnalyticsDashboard projectId={activeProjectId} />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "insights" && activeProjectId && (
-          <BoardErrorBoundary columnName="Insights View">
-            <InsightsPanel
-              projectId={activeProjectId}
-              onSessionClick={(sessionId, workspaceId, issueId) => {
-                const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
-                if (issue) {
-                  setSelectedIssue(null);
-                  setWorkspaceIssue(issue);
-                  setWorkspaceOpenCreate(false);
-                  setWorkspaceInitial({ workspaceId, sessionId });
-                }
-              }}
-            />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "digest" && activeProjectId && (
-          <BoardErrorBoundary columnName="Digest View">
-            <DigestView
-              projectId={activeProjectId}
-              onIssueClick={(issueId) => {
-                const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
-                if (issue) handleIssueClick(issue);
-              }}
-            />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "focus" && activeProjectId && (
-          <BoardErrorBoundary columnName="Focus View">
-            <FocusView
-              projectId={activeProjectId}
-              onIssueClick={(issueId) => {
-                const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
-                if (issue) handleIssueClick(issue);
-              }}
-            />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "activity" && activeProjectId && (
-          <BoardErrorBoundary columnName="Activity Feed">
-            <ActivityFeedView
-              projectId={activeProjectId}
-              onIssueClick={(issueId) => {
-                const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
-                if (issue) handleIssueClick(issue);
-              }}
-            />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "stale-work" && activeProjectId && (
-          <BoardErrorBoundary columnName="Stale Work">
-            <StaleWorkDashboard
-              projectId={activeProjectId}
-              onIssueClick={handleIssueClick}
-            />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "throughput" && activeProjectId && (
-          <BoardErrorBoundary columnName="Throughput">
-            <ThroughputChart projectId={activeProjectId} />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "provider-mix" && activeProjectId && (
-          <BoardErrorBoundary columnName="Provider Mix">
-            <ProviderMixChart projectId={activeProjectId} />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "lead-time" && activeProjectId && (
-          <BoardErrorBoundary columnName="Lead Time Trend">
-            <LeadTimeTrendChart projectId={activeProjectId} />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "scorecard-distribution" && activeProjectId && (
-          <BoardErrorBoundary columnName="Score Distribution">
-            <ScorecardDistributionChart projectId={activeProjectId} />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "provider-cost" && activeProjectId && (
-          <BoardErrorBoundary columnName="Provider Cost Over Time">
-            <ProviderCostOverTimeChart projectId={activeProjectId} />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "agent-throughput" && activeProjectId && (
-          <BoardErrorBoundary columnName="Agent Throughput Leaderboard">
-            <AgentThroughputLeaderboard projectId={activeProjectId} />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "burndown" && activeProjectId && (
-          <BoardErrorBoundary columnName="Burndown">
-            <BurndownChart projectId={activeProjectId} />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "calendar" && (
-          <BoardErrorBoundary columnName="Calendar">
-            <CalendarView
-              columns={columns}
-              onIssueClick={handleIssueClick}
-              searchQuery={searchQuery}
-            />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "strategy" && activeProjectId && (
-          <BoardErrorBoundary columnName="Strategic Targets">
-            <StrategyTargetsView
-              columns={columns}
-              projectId={activeProjectId}
-              onIssueClick={handleIssueClick}
-              searchQuery={searchQuery}
-            />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "swimlane" && (
-          <BoardErrorBoundary columnName="Swimlane View">
-            <SwimlaneView
-              columns={columns}
-              onIssueClick={handleIssueClick}
-              searchQuery={searchQuery}
-            />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "flaky-tests" && activeProjectId && (
-          <BoardErrorBoundary columnName="Flaky Tests">
-            <FlakyTestsPanel projectId={activeProjectId} />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "runbooks" && (
-          <BoardErrorBoundary columnName="Runbooks">
-            <RunbooksView projectId={activeProjectId} />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "monitor-history" && activeProjectId && (
-          <BoardErrorBoundary columnName="Monitor History">
-            <MonitorCycleHistoryPanel projectId={activeProjectId} />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "health-events" && activeProjectId && (
-          <BoardErrorBoundary columnName="Board Health Events">
-            <BoardHealthNotificationCenter
-              projectId={activeProjectId}
-              onOpenIssue={(issueNumber) => {
-                const issue = columns.flatMap(c => c.issues).find(i => i.issueNumber === issueNumber);
-                if (issue) {
-                  handleViewModeChange("kanban");
-                  handleIssueClick(issue);
-                }
-              }}
-            />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "drive" && activeProjectId && (
-          <BoardErrorBoundary columnName="Drive Dashboard">
-            <DriveDashboard
-              projectId={activeProjectId}
-              onIssueClick={(issueId) => {
-                const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
-                if (issue) {
-                  handleViewModeChange("kanban");
-                  handleIssueClick(issue);
-                }
-              }}
-            />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "capacity" && activeProjectId && (
-          <BoardErrorBoundary columnName="Sprint Capacity Planner">
-            <SprintCapacityPlanner projectId={activeProjectId} />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "constellation" && (
-          <BoardErrorBoundary columnName="Constellation View">
-            <ConstellationView
-              columns={columns}
-              onIssueClick={handleIssueClick}
-              searchQuery={searchQuery}
-            />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "momentum" && (
-          <BoardErrorBoundary columnName="Momentum View">
-            <MomentumView
-              columns={columns}
-              onIssueClick={handleIssueClick}
-              searchQuery={searchQuery}
-            />
-          </BoardErrorBoundary>
-        )}
-        {viewMode === "fireworks" && (
-          <BoardErrorBoundary columnName="Fireworks View">
-            <FireworksView
-              columns={columns}
-              onIssueClick={handleIssueClick}
-              searchQuery={searchQuery}
-            />
-          </BoardErrorBoundary>
-        )}
+        <BoardSecondaryViews
+          viewMode={viewMode}
+          activeProjectId={activeProjectId}
+          columns={columns}
+          searchQuery={searchQuery}
+          liveActivity={sessionActivity}
+          liveStats={liveStats}
+          sessionTodos={sessionTodos}
+          graphFocusIssueId={graphFocusIssueId}
+          createdDateFilter={createdDateFilter}
+          activeAgentsTarget={activeAgentsTarget}
+          canStartWorkspace={canStartWorkspace}
+          butlerInitialPrompt={butlerInitialPrompt}
+          onIssueClick={handleIssueClick}
+          onManageWorkspaces={handleManageWorkspaces}
+          onViewModeChange={handleViewModeChange}
+          onMilestoneClick={handleMilestoneOverviewClick}
+          onOpenWorkspaceById={handleOpenWorkspaceById}
+          onCreatedDateClick={handleCreatedDateDrilldown}
+          onClearCreatedDateFilter={() => setCreatedDateFilter(null)}
+          onDropIssue={handleDropOnAgentSlot}
+          onRefresh={() => refetchBoard()}
+          onButlerPromptConsumed={() => setButlerInitialPrompt(null)}
+          setSelectedIssue={setSelectedIssue}
+          setWorkspaceIssue={setWorkspaceIssue}
+          setWorkspaceOpenCreate={setWorkspaceOpenCreate}
+          setWorkspaceInitial={setWorkspaceInitial}
+        />
         {viewMode === "backlog" && (
           <BoardErrorBoundary columnName="Backlog View">
             <BacklogView
