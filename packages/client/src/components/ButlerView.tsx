@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { apiFetch, apiPost, apiPut, apiDelete } from "../lib/api.js";
-import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats } from "../lib/useBoardEvents.js";
 import { AgentQuestionsPanel } from "./AgentQuestionsPanel.js";
@@ -16,6 +15,7 @@ import {
   type ButlerChatMessage as ChatMessage,
   type ButlerToolCall as ToolCall,
 } from "../lib/butler-event-reducer.js";
+import { formatWindow, formatRelativeTs, toolHint, backendLabel, modelOptionsForBackend, modelLabel } from "../lib/butler-format.js";
 
 interface ButlerState {
   backend?: "claude" | "codex" | "mock";
@@ -36,10 +36,6 @@ interface ButlerCommand {
 }
 
 /** Format a context-window size: 1000000 -> "1M", 200000 -> "200k". */
-function formatWindow(n: number): string {
-  return n >= 1_000_000 ? `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M` : `${Math.round(n / 1000)}k`;
-}
-
 interface ButlerSessionSummary {
   sessionId: string;
   startedAt: string;
@@ -71,30 +67,6 @@ interface ButlerViewProps {
   initialPrompt?: string;
   /** Called after `initialPrompt` has been prefilled, so the parent can clear it. */
   onInitialPromptConsumed?: () => void;
-}
-
-function formatRelativeTs(ts: number): string {
-  const diff = Date.now() - ts;
-  if (diff < 60_000) return "just now";
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  return `${hrs}h ago`;
-}
-
-function toolHint(name: string, input?: Record<string, unknown>): string {
-  if (!input) return "";
-  const str = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : JSON.stringify(v));
-  const base = (p: string) => p.replace(/\\/g, "/").split("/").pop() || p;
-  if (name === "Read" || name === "Write" || name === "Edit") return base(str(input.file_path));
-  if (name === "Bash") return str(input.command);
-  if (name === "Glob" || name === "Grep") return str(input.pattern);
-  if (name === "WebSearch") return str(input.query);
-  if (name === "WebFetch") return str(input.url);
-  for (const v of Object.values(input)) {
-    if (typeof v === "string" && v.length <= 80) return v;
-  }
-  return "";
 }
 
 const toolIcon = (status: ToolCall["status"]) => {
@@ -259,20 +231,6 @@ interface ButlerListItem {
   sessionId: string | null;
   mcpConnected?: boolean;
   backend?: "claude" | "codex" | "mock";
-}
-
-function backendLabel(backend?: string): string {
-  if (backend === "codex") return "Codex";
-  if (backend === "mock") return "Mock";
-  return "Claude";
-}
-
-function modelOptionsForBackend(backend?: "claude" | "codex" | "mock") {
-  return backend === "codex" ? CODEX_MODEL_OPTIONS : CLAUDE_MODEL_OPTIONS;
-}
-
-function modelLabel(value: string, backend?: "claude" | "codex" | "mock"): string {
-  return modelOptionsForBackend(backend).find((m) => m.value === value)?.label ?? value;
 }
 
 interface ButlerDef { id: string; name: string; model: string; provider?: "claude" | "codex" | null; }
