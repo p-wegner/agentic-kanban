@@ -72,5 +72,5 @@ export function useWorkspaceGithubHandoff({ setActionLoading, setError, onWorksp
     }
   }
 
-  return { githubDrafts, handleGenerateGithubDraft, handleCopyGithubDraft, handleExportHandoffBundle };
+  return { githubDrafts, setGithubDrafts, handleGenerateGithubDraft, handleCopyGithubDraft, handleExportHandoffBundle };
 }
