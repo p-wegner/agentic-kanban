@@ -1,33 +1,18 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Layout } from "../components/Layout.js";
 import { useTheme } from "../hooks/useTheme.js";
 import { useAgentQuestionsCount } from "../components/AgentQuestionsPanel.js";
-import { BoardErrorBoundary } from "../components/BoardErrorBoundary.js";
-import { BacklogView } from "../components/BacklogView.js";
-import { MilestoneFilterBanner } from "../components/MilestoneFilterBanner.js";
-import { BoardSecondaryViews } from "../components/BoardSecondaryViews.js";
 import { useBoardLiveHandlers } from "../hooks/useBoardLiveHandlers.js";
 import { useBoardPanelNavigation } from "../hooks/useBoardPanelNavigation.js";
 import { useProjectManagement } from "../hooks/useProjectManagement.js";
 import { useBoardFilters } from "../hooks/useBoardFilters.js";
 import { useBoardIssueActions } from "../hooks/useBoardIssueActions.js";
 import { useBoardMiscHandlers } from "../hooks/useBoardMiscHandlers.js";
+import { BoardPageView } from "../components/BoardPageView.js";
 import { stringifyForIssueCard, deferUntilIdle } from "../lib/boardCardSnapshot.js";
-import { BoardKanbanView } from "../components/BoardKanbanView.js";
-import { RecentlyMergedStrip } from "../components/RecentlyMergedStrip.js";
-import { BoardStats } from "../components/BoardStats.js";
-import { BoardToolbar } from "../components/BoardToolbar.js";
-import { BoardFilterMenu } from "../components/BoardFilterMenu.js";
-import { SavedBoardViews } from "../components/SavedBoardViews.js";
-import { ExportImportMenu } from "../components/ExportImportMenu.js";
 import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
-// Lazy: opened on user action (issue click / workspace open), and they pull in
-// react-markdown — no need to ship them on the initial board paint.
-const IssueDetailPanel = lazy(() => import("../components/IssueDetailPanel.js").then((m) => ({ default: m.IssueDetailPanel })));
-const WorkspacePanel = lazy(() => import("../components/WorkspacePanel.js").then((m) => ({ default: m.WorkspacePanel })));
 import { SkeletonBoard } from "../components/SkeletonBoard.js";
-import { ToastContainer, showToast } from "../components/Toast.js";
-import { MentionProvider } from "../lib/MentionContext.js";
+import { showToast } from "../components/Toast.js";
 import { apiFetch } from "../lib/api.js";
 import { setBoardDragData, getBoardDragData } from "../lib/dragData.js";
 import { matchesBoardFilters } from "../lib/boardFiltering.js";
@@ -44,13 +29,6 @@ import { useBoardNavigation } from "../hooks/useBoardNavigation.js";
 import { useBoardBulkSelection } from "../hooks/useBoardBulkSelection.js";
 import { useBoardIssueMovement } from "../hooks/useBoardIssueMovement.js";
 import { useBoardKeyboardShortcuts } from "../hooks/useBoardKeyboardShortcuts.js";
-import { BoardBulkActionBar } from "../components/BoardBulkActionBar.js";
-// Lazy: aggregates ~20 user-action panels (Settings, Codemod, MergeQueue,
-// TranscriptSearch, CommandPalette, …). Rendered unconditionally though, and it hosts
-// the event-driven ApprovalDialog, so the chunk is prefetched on idle after first
-// paint (see effect below) to avoid a cold-fetch delay when an agent approval arrives.
-const BoardOverlayPanels = lazy(() => import("../components/BoardOverlayPanels.js").then((m) => ({ default: m.BoardOverlayPanels })));
-import { AgentLiveTickerPanel } from "../components/AgentLiveTickerPanel.js";
 import { useAgentLiveTicker } from "../hooks/useAgentLiveTicker.js";
 import type {
   DependencyInfo,
@@ -61,14 +39,6 @@ import type {
 } from "@agentic-kanban/shared";
 import type { BoardViewState, SavedViewReference } from "../lib/boardSavedViews.js";
 
-/** Lightweight fallback shown for the ~1 frame it takes to fetch a lazy view chunk. */
-function ViewLoadingFallback() {
-  return (
-    <div className="flex-1 min-h-0 flex items-center justify-center text-gray-400 dark:text-gray-500">
-      <div className="h-6 w-6 animate-spin rounded-full border-2 border-current border-t-transparent" aria-label="Loading view" />
-    </div>
-  );
-}
 
 interface Project {
   id: string;
@@ -820,417 +790,140 @@ export function BoardPage() {
     }
     handleIssueClick(issue);
   };
-
   return (
-    <MentionProvider value={{ issues: allMentionIssues, onMentionClick: handleMentionClick }}>
-    <Layout
-      projects={projects}
-      activeProjectId={activeProjectId}
-      onProjectChange={handleProjectChange}
-      onUnregisterProject={handleUnregisterProject}
-      onArchiveProject={handleArchiveProject}
-      onUnarchiveProject={handleUnarchiveProject}
-      archivedProjects={archivedProjects}
-      searchQuery={searchQuery}
-      onSearchChange={setSearchQuery}
-      onRegisterProject={handleRegisterProject}
-      onCreateProject={handleCreateProject}
-      onSettingsClick={() => panels.setShowSettings(true)}
-      onAllWorkspacesClick={() => panels.setShowAllWorkspaces(true)}
-      onLaunchFailuresClick={() => panels.setShowLaunchFailures(true)}
-      onWorktreeOverviewClick={() => panels.setShowWorktreeOverview(true)}
-      onProjectHealthClick={() => panels.setShowProjectHealth(true)}
-      isDark={isDark}
-      onThemeToggle={() => setTheme(isDark ? "light" : "dark")}
-      notificationEvents={notifications.events}
-      notificationUnreadCount={notifications.unreadCount}
-      notificationOpen={notifications.isOpen}
-      onNotificationOpen={notifications.openDropdown}
-      onNotificationClose={notifications.closeDropdown}
-      onNotificationMarkRead={notifications.markRead}
-      onNotificationEventClick={handleNotificationEventClick}
-    >
-      {error && (
-        <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-md flex items-center justify-between">
-          <span className="text-sm text-red-700">{error}</span>
-          <button
-            onClick={() => setError(null)}
-            className="text-red-400 dark:text-red-500 hover:text-red-600 text-sm"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
-      {mutating && (
-        <div className="fixed bottom-4 right-4 z-50">
-          <div className="bg-brand-600 text-white rounded-lg px-4 py-2 flex items-center gap-2 shadow-lg">
-            <svg className="animate-spin h-4 w-4 text-white" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
-            <span className="text-sm font-medium">Saving...</span>
-          </div>
-        </div>
-      )}
-      <div className="flex flex-col gap-2 p-2 sm:p-4 h-full overflow-hidden">
-        <div className="flex flex-wrap items-center gap-2">
-        {viewMode !== "butler" && (
-          <BoardStats
-            activeColumns={activeColumns}
-            archiveColumns={archiveColumns}
-            searchQuery={searchQuery}
-            projectId={activeProjectId}
-          />
-        )}
-        <BoardToolbar
-          activeColumns={activeColumns}
-          focusMode={focusMode}
-          onFocusModeChange={(v) => {
-            setFocusMode(v);
-            try { sessionStorage.setItem("board-focus-mode", v ? "1" : "0"); } catch { /* ignore */ }
-          }}
-          onShowQuickTasks={() => panels.setShowQuickTasks(true)}
-          autoMonitor={prefs.autoMonitor}
-          monitorRunning={prefs.monitorRunning}
-          onMonitorRunNow={prefs.handleMonitorRunNow}
-          monitorStatus={prefs.monitorStatus}
-          onToggleAutoMonitor={prefs.toggleAutoMonitor}
-          autoMonitorInterval={prefs.autoMonitorInterval}
-          onIntervalChange={prefs.handleIntervalChange}
-          nudgeAutoStart={prefs.nudgeAutoStart}
-          onNudgeAutoStartChange={prefs.handleNudgeAutoStartChange}
-          nudgeWipLimit={prefs.nudgeWipLimit}
-          onNudgeWipLimitChange={prefs.handleNudgeWipLimitChange}
-          columns={columns}
-          onOpenWorkspace={handleOpenWorkspaceById}
-          viewMode={viewMode}
-          onViewModeChange={handleViewModeChange}
-          butlerBadgeCount={agentQuestionsCount}
-          projectId={activeProjectId}
-          onVoiceIssueCreated={() => refetchBoard()}
-          onShowTimeReport={activeProjectId ? () => panels.setShowTimeReport(true) : undefined}
-          onShowMergeQueue={() => panels.setShowMergeQueue(true)}
-          mergeQueueCount={columns.flatMap(c => c.issues).filter(i => {
-            const ws = i.workspaceSummary?.main;
-            return i.statusName === "In Review" && ws && ws.status !== "closed";
-          }).length}
-          onShowRunQueueForecast={() => panels.setShowRunQueueForecast(true)}
-          runQueueOpenSlots={runQueueForecast.openSlots}
-          onShowLiveActivityTicker={() => panels.setShowLiveActivityTicker((prev) => !prev)}
-          liveActivityCount={tickerEntries.length}
-          onViewAllHealthEvents={() => handleViewModeChange("health-events")}
-          cardDensity={prefs.cardDensity}
-          onCardDensityChange={prefs.handleCardDensityChange}
-          visibilityColumns={visibilityColumns}
-          hiddenColumns={prefs.hiddenColumns}
-          onHiddenColumnsChange={prefs.handleHiddenColumnsChange}
-          showPriorityLegend={prefs.showPriorityLegend}
-          onShowPriorityLegendChange={prefs.handleShowPriorityLegendChange}
-          showCardAgingHeatmap={prefs.showCardAgingHeatmap}
-          onShowCardAgingHeatmapChange={prefs.handleShowCardAgingHeatmapChange}
-          agingWarmDays={prefs.agingWarmDays}
-          agingHotDays={prefs.agingHotDays}
-          onAgingThresholdsChange={prefs.handleAgingThresholdsChange}
-          swimlaneDimension={swimlaneDimension}
-          onSwimlaneChange={handleSwimlaneChange}
-        />
-        </div>
-        {viewMode === "kanban" && (
-          <BoardBulkActionBar
-            selectedIssues={bulk.selectedBoardIssues}
-            hasArchivedSelection={bulk.hasArchivedBoardSelection}
-            boardBulkUpdating={bulk.boardBulkUpdating}
-            columns={columns}
-            allTags={allTags}
-            onBulkUpdate={bulk.handleBoardBulkUpdate}
-            onBulkAddTag={bulk.handleBoardBulkAddTag}
-            onLoadTags={loadTags}
-            onClearSelection={bulk.clearSelection}
-          />
-        )}
-        {switchingProject ? <SkeletonBoard /> : <>
-        {/* All non-kanban views are lazy-loaded; one Suspense boundary covers the whole
-            switch since exactly one view renders at a time. The kanban board itself is
-            eager and lives outside this boundary, so it never shows the fallback. */}
-        <Suspense fallback={<ViewLoadingFallback />}>
-        <BoardSecondaryViews
-          viewMode={viewMode}
-          activeProjectId={activeProjectId}
-          columns={columns}
-          searchQuery={searchQuery}
-          liveActivity={sessionActivity}
-          liveStats={liveStats}
-          sessionTodos={sessionTodos}
-          graphFocusIssueId={graphFocusIssueId}
-          createdDateFilter={createdDateFilter}
-          activeAgentsTarget={activeAgentsTarget}
-          canStartWorkspace={canStartWorkspace}
-          butlerInitialPrompt={butlerInitialPrompt}
-          onIssueClick={handleIssueClick}
-          onManageWorkspaces={handleManageWorkspaces}
-          onViewModeChange={handleViewModeChange}
-          onMilestoneClick={handleMilestoneOverviewClick}
-          onOpenWorkspaceById={handleOpenWorkspaceById}
-          onCreatedDateClick={handleCreatedDateDrilldown}
-          onClearCreatedDateFilter={() => setCreatedDateFilter(null)}
-          onDropIssue={handleDropOnAgentSlot}
-          onRefresh={() => refetchBoard()}
-          onButlerPromptConsumed={() => setButlerInitialPrompt(null)}
-          setSelectedIssue={setSelectedIssue}
-          setWorkspaceIssue={setWorkspaceIssue}
-          setWorkspaceOpenCreate={setWorkspaceOpenCreate}
-          setWorkspaceInitial={setWorkspaceInitial}
-        />
-        {viewMode === "backlog" && (
-          <BoardErrorBoundary columnName="Backlog View">
-            <BacklogView
-              backlogColumn={backlogColumn}
-              activeColumns={activeColumns}
-              projectId={activeProjectId}
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
-              sessionActivity={sessionActivity}
-              liveStats={liveStats}
-              sessionTodos={sessionTodos}
-              pendingIssueIds={pendingIssueIds}
-              pendingWorkspaceIssueIds={pendingWorkspaceIssueIds}
-              canStartWorkspace={canStartWorkspace}
-              onIssueClick={handleIssueClick}
-              onWorkspaceClick={handleManageWorkspaces}
-              onOpenDiff={handleOpenDiff}
-              onStartWorkspace={handleStartWorkspace}
-              onDryRun={panels.setDryRunIssue}
-              onDragStart={handleBoardDragStart}
-              onDrop={handleDrop}
-              onPromoteToTodo={handlePromoteBacklogIssue}
-              onCreateIssue={handleCreateIssue}
-              onExpandCreate={(statusId, statusName, state) => setExpandedCreatePanel({ statusId, statusName, state })}
-            />
-          </BoardErrorBoundary>
-        )}
-        </Suspense>
-        {viewMode === "kanban" && milestoneFilterId && (
-          <MilestoneFilterBanner
-            milestoneId={milestoneFilterId}
-            milestones={milestones}
-            columns={columns}
-            onClear={() => setMilestoneFilterId(null)}
-          />
-        )}
-        {viewMode === "kanban" && (
-          <RecentlyMergedStrip
-            columns={columns}
-            collapsed={prefs.recentMergesCollapsed}
-            onToggleCollapsed={() => prefs.handleRecentMergesCollapsedChange(!prefs.recentMergesCollapsed)}
-            onOpenDiff={handleOpenDiff}
-          />
-        )}
-        {viewMode === "kanban" && (
-          <BoardKanbanView
-            activeColumns={activeColumns}
-            archiveColumns={archiveColumns}
-            allColumns={columns}
-            focusMode={focusMode}
-            projectId={activeProjectId}
-            columnWidths={columnWidths}
-            dynamicColumnScaling={prefs.dynamicColumnScaling}
-            cardDensity={prefs.cardDensity}
-            creatingInColumnId={creatingInColumnId}
-            searchQuery={searchQuery}
-            sessionActivity={sessionActivity}
-            liveStats={liveStats}
-            sessionTodos={sessionTodos}
-            pendingIssueIds={pendingIssueIds}
-            pendingWorkspaceIssueIds={pendingWorkspaceIssueIds}
-            collapsedArchive={collapsedGroups.has("archive")}
-            canStartWorkspace={canStartWorkspace}
-            onToggleArchive={() => toggleGroup("archive")}
-            onCreateClick={setCreatingInColumnId}
-            onCreateCancel={() => setCreatingInColumnId(null)}
-            onIssueClick={handleBoardIssueClick}
-            onWorkspaceClick={handleManageWorkspaces}
-            onOpenDiff={handleOpenDiff}
-            onStartWorkspace={handleStartWorkspace}
-            onDryRun={panels.setDryRunIssue}
-            onDragStart={handleBoardDragStart}
-            onDrop={handleDrop}
-            swimlaneDimension={swimlaneDimension}
-            onDropWithLane={handleDropWithLane}
-            onDuplicate={handleDuplicateIssue}
-            onMoveToNext={handleMoveToNext}
-            onDeleteIssue={handleDeleteIssue}
-            onColumnResizeStart={handleColumnResizeStart}
-            onColumnResizeReset={resetColumnWidth}
-            onCreateIssue={handleCreateIssue}
-            onExpandCreate={(statusId, statusName, state) => setExpandedCreatePanel({ statusId, statusName, state })}
-            selectedIssueIds={bulk.selectedBoardIssueIds}
-            keyboardCursorIssueId={keyboardCursorIssueId}
-            allProjectTags={allTags}
-            quickUpdate={{
-              onPriorityChange: handleQuickPriorityChange,
-              onAddTag: handleQuickAddTag,
-              onRemoveTag: handleQuickRemoveTag,
-              onTogglePinned: handleQuickTogglePinned,
-            }}
-            wipLimits={prefs.wipLimits}
-            onSetWipLimit={prefs.handleSetWipLimit}
-            onColumnReorder={handleColumnReorder}
-            showAgingHeatmap={prefs.showCardAgingHeatmap}
-            agingWarmDays={prefs.agingWarmDays}
-            agingHotDays={prefs.agingHotDays}
-          />
-        )}
-        </>}
-      </div>
-      {selectedIssue && (
-        // Error boundary so a render throw inside the panel can't unmount the
-        // whole app (blank-screen "frontend crash"). It contains the error to
-        // the panel and surfaces the message instead, the same way every board
-        // view is guarded. `key` resets the boundary when switching issues so a
-        // crash on one ticket doesn't stick when opening another.
-        <BoardErrorBoundary key={selectedIssue.id} columnName="Issue Details">
-        <Suspense fallback={null}>
-        <IssueDetailPanel
-          issue={selectedIssue}
-          statuses={columns.map((col) => ({ id: col.id, name: col.name }))}
-          onUpdate={handleUpdateIssue}
-          onDelete={handleDeleteIssue}
-          onClose={() => setSelectedIssue(null)}
-          onManageWorkspaces={handleManageWorkspaces}
-          onStartWorkspace={handleStartWorkspace}
-          onIssueUpdate={setSelectedIssue}
-          onChatAboutTicket={handleChatAboutTicket}
-          onNavigateToIssue={(issueId) => openIssueById(issueId)}
-          onViewInGraph={(issueId) => {
-            setGraphFocusIssueId(issueId);
-            handleViewModeChange("graph");
-            setSelectedIssue(null);
-          }}
-          trail={trailControls}
-        />
-        </Suspense>
-        </BoardErrorBoundary>
-      )}
-      {workspaceIssue && (
-        <BoardErrorBoundary key={workspaceIssue.id} columnName="Workspace">
-          <Suspense fallback={null}>
-            <WorkspacePanel
-              key={`${workspaceIssue.id}:${workspaceInitial?.workspaceId ?? "new"}:${workspaceOpenCreate ? "create" : "view"}`}
-              issue={workspaceIssue}
-              project={activeProject ?? null}
-              onClose={() => { setWorkspaceIssue(null); setWorkspaceInitial(null); setWorkspaceOpenCreate(false); setWorkspaceInitialDiff(false); }}
-              onWorkspaceChange={() => refetchBoard()}
-              onWorkspaceCreating={(issueId) => setPendingWorkspaceIssueIds((prev) => new Set([...prev, issueId]))}
-              onWorkspaceCreateSettled={(issueId) => setPendingWorkspaceIssueIds((prev) => {
-                const next = new Set(prev);
-                next.delete(issueId);
-                return next;
-              })}
-              initialWorkspaceId={workspaceInitial?.workspaceId}
-              initialSessionId={workspaceInitial?.sessionId}
-              initialShowCreate={workspaceOpenCreate}
-              initialShowDiff={workspaceInitialDiff}
-              liveStats={liveStats[workspaceIssue.id] ?? null}
-            />
-          </Suspense>
-        </BoardErrorBoundary>
-      )}
-      <ToastContainer />
-      {panels.showLiveActivityTicker && (
-        <AgentLiveTickerPanel
-          entries={tickerEntries}
-          columns={columns}
-          onClose={() => panels.setShowLiveActivityTicker(false)}
-          onWorkspaceClick={(issue, workspaceId) => {
-            setWorkspaceIssue(issue);
-            setWorkspaceInitial({ workspaceId, sessionId: "" });
-            setWorkspaceOpenCreate(false);
-            panels.setShowLiveActivityTicker(false);
-          }}
-        />
-      )}
-      <Suspense fallback={null}>
-      <BoardOverlayPanels
-        {...panels.overlayPanelProps}
-        onWorkspaceStarted={(workspaceId, issue) => {
-          panels.closeStartWorkspacePicker();
-          setWorkspaceIssue(issue);
-          setWorkspaceInitial({ workspaceId, sessionId: "" });
-          setWorkspaceOpenCreate(false);
-          refetchBoard();
-        }}
-        activeProjectId={activeProjectId}
-        columns={columns}
-        nudgeWipLimit={prefs.nudgeWipLimit}
-        viewMode={viewMode}
-        columnsRef={columnsRef}
-        workspaceIssue={workspaceIssue}
-        workspaceInitial={workspaceInitial}
-        workspaceOpenCreate={workspaceOpenCreate}
-        selectedIssue={selectedIssue}
-        handleStartWorkspace={handleStartWorkspace}
-        approvalRequests={approvalRequests}
-        setApprovalRequests={setApprovalRequests}
-        moveToDonePending={moveToDonePending}
-        setMoveToDonePending={setMoveToDonePending}
-        dependencyImpactPending={dependencyImpactPending}
-        setDependencyImpactPending={setDependencyImpactPending}
-        expandedCreatePanel={expandedCreatePanel}
-        setExpandedCreatePanel={setExpandedCreatePanel}
-        backlogColumn={backlogColumn}
-        activeColumns={activeColumns}
-        handleCreateIssue={handleCreateIssue}
-        canStartWorkspace={canStartWorkspace}
-        refetchBoard={refetchBoard}
-        handleProjectChange={handleProjectChange}
-        onSettingsReloaded={(s, monitorStatus) => {
-          prefs.setAutoReview(s.auto_review !== "false");
-          prefs.setAutoMerge(s.auto_merge !== "false");
-          if (monitorStatus) {
-            // monitorStatus is set by the hook's internal interval but we can trigger a re-read
-          }
-        }}
-        setWorkspaceIssue={setWorkspaceIssue}
-        setWorkspaceInitial={setWorkspaceInitial}
-        setWorkspaceOpenCreate={setWorkspaceOpenCreate}
-        setSelectedIssue={setSelectedIssue}
-        settingsBoardTools={
-          <>
-            {activeProjectId && (
-              <SavedBoardViews
-                projectId={activeProjectId}
-                currentState={boardViewState}
-                tags={boardTagOptions}
-                onApply={applyBoardViewState}
-                onLoadTags={loadSavedViewTags}
-              />
-            )}
-            <BoardFilterMenu
-              statuses={boardStatusOptions}
-              statusFilterId={statusFilterId}
-              onStatusFilterChange={setStatusFilterId}
-              issueTypeFilter={issueTypeFilter}
-              onIssueTypeFilterChange={handleIssueTypeFilterChange}
-              priorityFilter={priorityFilter}
-              onPriorityFilterChange={handlePriorityFilterChange}
-              milestones={milestones}
-              milestoneFilterId={milestoneFilterId}
-              onMilestoneFilterChange={setMilestoneFilterId}
-              showBlocked={showBlocked}
-              onToggleBlocked={() => setShowBlocked((v) => !v)}
-              showStaleOnly={showStaleOnly}
-              onToggleStaleOnly={() => setShowStaleOnly((v) => !v)}
-              tags={allTags}
-              activeTagIds={activeTagIds}
-              onTagFilterToggle={handleTagFilterToggle}
-              onClearTagFilter={handleClearTagFilter}
-            />
-            <ExportImportMenu projectId={activeProjectId} />
-          </>
-        }
-      />
-      </Suspense>
-    </Layout>
-    </MentionProvider>
+    <BoardPageView
+      {...{
+        activeAgentsTarget,
+        activeColumns,
+        activeProject,
+        activeProjectId,
+        activeTagIds,
+        agentQuestionsCount,
+        allMentionIssues,
+        allTags,
+        applyBoardViewState,
+        approvalRequests,
+        archiveColumns,
+        archivedProjects,
+        backlogColumn,
+        boardStatusOptions,
+        boardTagOptions,
+        boardViewState,
+        bulk,
+        butlerInitialPrompt,
+        canStartWorkspace,
+        collapsedGroups,
+        columnWidths,
+        columns,
+        columnsRef,
+        createdDateFilter,
+        creatingInColumnId,
+        dependencyImpactPending,
+        error,
+        expandedCreatePanel,
+        focusMode,
+        graphFocusIssueId,
+        handleArchiveProject,
+        handleBoardDragStart,
+        handleBoardIssueClick,
+        handleChatAboutTicket,
+        handleClearTagFilter,
+        handleColumnReorder,
+        handleColumnResizeStart,
+        handleCreateIssue,
+        handleCreateProject,
+        handleCreatedDateDrilldown,
+        handleDeleteIssue,
+        handleDrop,
+        handleDropOnAgentSlot,
+        handleDropWithLane,
+        handleDuplicateIssue,
+        handleIssueClick,
+        handleIssueTypeFilterChange,
+        handleManageWorkspaces,
+        handleMentionClick,
+        handleMilestoneOverviewClick,
+        handleMoveToNext,
+        handleNotificationEventClick,
+        handleOpenDiff,
+        handleOpenWorkspaceById,
+        handlePriorityFilterChange,
+        handleProjectChange,
+        handlePromoteBacklogIssue,
+        handleQuickAddTag,
+        handleQuickPriorityChange,
+        handleQuickRemoveTag,
+        handleQuickTogglePinned,
+        handleRegisterProject,
+        handleStartWorkspace,
+        handleSwimlaneChange,
+        handleTagFilterToggle,
+        handleUnarchiveProject,
+        handleUnregisterProject,
+        handleUpdateIssue,
+        handleViewModeChange,
+        isDark,
+        issueTypeFilter,
+        keyboardCursorIssueId,
+        liveStats,
+        loadSavedViewTags,
+        loadTags,
+        milestoneFilterId,
+        milestones,
+        moveToDonePending,
+        mutating,
+        notifications,
+        openIssueById,
+        panels,
+        pendingIssueIds,
+        pendingWorkspaceIssueIds,
+        prefs,
+        priorityFilter,
+        projects,
+        refetchBoard,
+        resetColumnWidth,
+        runQueueForecast,
+        searchQuery,
+        selectedIssue,
+        sessionActivity,
+        sessionTodos,
+        setApprovalRequests,
+        setButlerInitialPrompt,
+        setCreatedDateFilter,
+        setCreatingInColumnId,
+        setDependencyImpactPending,
+        setError,
+        setExpandedCreatePanel,
+        setFocusMode,
+        setGraphFocusIssueId,
+        setMilestoneFilterId,
+        setMoveToDonePending,
+        setPendingWorkspaceIssueIds,
+        setSearchQuery,
+        setSelectedIssue,
+        setShowBlocked,
+        setShowStaleOnly,
+        setStatusFilterId,
+        setTheme,
+        setWorkspaceInitial,
+        setWorkspaceInitialDiff,
+        setWorkspaceIssue,
+        setWorkspaceOpenCreate,
+        showBlocked,
+        showStaleOnly,
+        statusFilterId,
+        swimlaneDimension,
+        switchingProject,
+        tickerEntries,
+        toggleGroup,
+        trailControls,
+        viewMode,
+        visibilityColumns,
+        workspaceInitial,
+        workspaceInitialDiff,
+        workspaceIssue,
+        workspaceOpenCreate,
+      }}
+    />
   );
 }
