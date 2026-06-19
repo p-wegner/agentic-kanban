@@ -110,7 +110,7 @@ export function createWorkspaceCrudService(deps: {
 
   async function resolveIssueAndProject(issueId: string): Promise<{
     issue: { projectId: string; issueNumber: number | null; title: string; description: string | null; priority: string | null };
-    project: { repoPath: string; defaultBranch: string | null };
+    project: { repoPath: string; defaultBranch: string | null; defaultSkillId: string | null };
     setupConfig: { setupScript: string | null; setupBlocking: boolean; setupEnabled: boolean };
     symlinkConfig: { enabled: boolean; dirs: string[] };
   }> {
@@ -131,7 +131,7 @@ export function createWorkspaceCrudService(deps: {
     const projectRow = projectRows[0];
     return {
       issue,
-      project: { repoPath: projectRow.repoPath, defaultBranch: projectRow.defaultBranch },
+      project: { repoPath: projectRow.repoPath, defaultBranch: projectRow.defaultBranch, defaultSkillId: projectRow.defaultSkillId ?? null },
       setupConfig: {
         setupScript: projectRow.setupScript ?? null,
         setupBlocking: projectRow.setupBlocking ?? true,

@@ -18,7 +18,7 @@ const EXPORT_COLUMNS = [
 ] as const;
 
 interface ExportRow {
-  number: number;
+  number: number | null;
   title: string;
   description: string;
   status: string;

@@ -8,7 +8,7 @@ import { parseStrategyBullseyeConfig, selectProviderFromStrategy } from "./strat
 import { cooldownKey as claudeCooldownKey } from "./claude-subscription-ring.js";
 import { cooldownKey as codexCooldownKey } from "./codex-license-ring.js";
 import { autodrivePrefKey, autoMergeDisabledPrefKey, getDriveStatus, setDriveEnabled } from "./drive.service.js";
-import type { DriveStatus } from "./drive.service.js";
+import type { DriveEnablementStatus } from "./drive.service.js";
 
 /**
  * Drive preflight (#807): assert the hands-off prerequisites BEFORE a drive starts.
@@ -58,7 +58,7 @@ export interface DrivePreflightResult {
   repaired: boolean;
   checks: PreflightCheck[];
   /** Current Drive status (post-repair when repaired). */
-  drive: DriveStatus;
+  drive: DriveEnablementStatus;
 }
 
 function ok(id: string, label: string, message: string): PreflightCheck {
@@ -172,7 +172,7 @@ export async function runDrivePreflight(
 ): Promise<DrivePreflightResult> {
   const now = options.now ? new Date(options.now) : new Date();
 
-  const evaluate = async (): Promise<{ checks: PreflightCheck[]; drive: DriveStatus }> => {
+  const evaluate = async (): Promise<{ checks: PreflightCheck[]; drive: DriveEnablementStatus }> => {
     const prefRows = await getAllPreferences(database);
     const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
     const checks: PreflightCheck[] = [];

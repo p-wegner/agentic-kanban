@@ -134,10 +134,10 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
     monitorState.lastHealthCheckAt = new Date().toISOString();
     const warningFingerprint = warnings
       .map((warning) => {
-        if ("type" in warning && warning.type === "autodrive_stall") {
-          return `${warning.type}:${warning.projectId}:${warning.cause}:${warning.lastProgressAt}:${warning.workspaceIds.join("|")}`;
+        if ("files" in warning) {
+          return `dirty_main:${warning.projectId}:${warning.files.join("|")}`;
         }
-        return `dirty_main:${warning.projectId}:${warning.files.join("|")}`;
+        return `${warning.type}:${warning.projectId}:${warning.cause}:${warning.lastProgressAt}:${warning.workspaceIds.join("|")}`;
       })
       .join(";");
     if (warningFingerprint && warningFingerprint !== lastWarningFingerprint) {
