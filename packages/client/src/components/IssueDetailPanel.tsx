@@ -31,6 +31,8 @@ import { issueArtifactRenderers } from "./ArtifactRenderers.js";
 import { DependencyDisplay } from "./DependencyDisplay.js";
 import { IssueDetailComments, type IssueComment } from "./IssueDetailComments.js";
 import { IssueChecklistSection } from "./IssueChecklistSection.js";
+import { IssueRelatedIssuesSection } from "./IssueRelatedIssuesSection.js";
+import { IssueTouchedFilesSection, type TouchedFile } from "./IssueTouchedFilesSection.js";
 
 // Re-exported so existing importers/tests keep working after the helpers moved
 // into lib/artifact-utils.ts and lib/artifact-classifiers.ts.
@@ -185,13 +187,26 @@ export function IssueArtifactsSection({
 }
 
 interface IssueMergedCommitsSectionProps {
-  loading: boolean;
-  data: MergedCommitsResponse | null;
+  issueId: string;
   /** Open the workspace panel (where the diff is viewable) for a merged commit. */
   onOpenDiff: (commit: MergedCommit) => void;
 }
 
-export function IssueMergedCommitsSection({ loading, data, onOpenDiff }: IssueMergedCommitsSectionProps) {
+export function IssueMergedCommitsSection({ issueId, onOpenDiff }: IssueMergedCommitsSectionProps) {
+  // Self-contained best-effort fetch — moved out of the panel's loadData
+  // mega-effect. Owns its own loading + data state.
+  const [data, setData] = useState<MergedCommitsResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setData(null);
+    setLoading(true);
+    apiFetch<MergedCommitsResponse>(`/api/issues/${issueId}/merged-commits`)
+      .then((mc) => setData(mc))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  }, [issueId]);
+
   // Hide entirely until we know there's something to show or are still loading —
   // an un-merged issue shouldn't add a noisy empty panel to every detail view.
   if (!loading && (!data || !data.merged)) return null;
@@ -418,11 +433,6 @@ export function IssueDetailPanel({
   const [allTags, setAllTags] = useState<{ id: string; name: string; color: string | null }[]>([]);
   const [dependencies, setDependencies] = useState<DependencyInfo>({ dependencies: [] });
   const [availableIssues, setAvailableIssues] = useState<IssueWithStatus[]>([]);
-  const [touchedFiles, setTouchedFiles] = useState<{ path: string; reason: string; confidence: "high" | "medium" | "low" }[] | null>(null);
-  const [analyzingTouchedFiles, setAnalyzingTouchedFiles] = useState(false);
-  const [relatedIssues, setRelatedIssues] = useState<{ id: string; issueNumber: number | null; title: string; sharedFileCount: number }[] | null>(null);
-  const [relatedIssuesLoading, setRelatedIssuesLoading] = useState(false);
-  const [showRelatedIssues, setShowRelatedIssues] = useState(false);
   const [showFollowUp, setShowFollowUp] = useState(false);
   const [followUpTitle, setFollowUpTitle] = useState("");
   const [followUpCreating, setFollowUpCreating] = useState(false);
@@ -441,8 +451,6 @@ export function IssueDetailPanel({
   const [deletingArtifactId, setDeletingArtifactId] = useState<string | null>(null);
   const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
   const [activityLoading, setActivityLoading] = useState(true);
-  const [mergedCommits, setMergedCommits] = useState<MergedCommitsResponse | null>(null);
-  const [mergedCommitsLoading, setMergedCommitsLoading] = useState(true);
   const [milestoneId, setMilestoneId] = useState<string | null>(issue.milestoneId ?? null);
   const [milestones, setMilestones] = useState<MilestoneResponse[]>([]);
 
@@ -530,28 +538,11 @@ export function IssueDetailPanel({
         setDescriptionFetching(false);
         // Ignore — non-critical
       }
-      // Secondary, best-effort data. These were previously awaited one after
-      // another (touched-files -> related-issues -> merged-commits), a 3-deep
-      // serial chain on top of the main batch. Fire them in parallel instead;
-      // each updates its own state as it resolves.
-      setRelatedIssuesLoading(true);
-      setMergedCommitsLoading(true);
-      await Promise.allSettled([
-        apiFetch<{ files: { path: string; reason: string; confidence: "high" | "medium" | "low" }[]; cached: boolean }>(`/api/issues/${issue.id}/touched-files`)
-          .then((tf) => { if (tf.files.length > 0) setTouchedFiles(tf.files); })
-          .catch(() => { /* No cached prediction yet — that's fine */ }),
-        apiFetch<{ related: { id: string; issueNumber: number | null; title: string; sharedFileCount: number }[] }>(`/api/issues/${issue.id}/related-issues`)
-          .then((ri) => setRelatedIssues(ri.related))
-          .catch(() => setRelatedIssues([]))
-          .finally(() => setRelatedIssuesLoading(false)),
-        apiFetch<MergedCommitsResponse>(`/api/issues/${issue.id}/merged-commits`)
-          .then((mc) => setMergedCommits(mc))
-          .catch(() => setMergedCommits(null))
-          .finally(() => setMergedCommitsLoading(false)),
-      ]);
+      // Touched-files, related-issues, and merged-commits are now owned by their
+      // own self-fetching section components (IssueTouchedFilesSection,
+      // IssueRelatedIssuesSection, IssueMergedCommitsSection) — each fetches on
+      // mount, so they no longer ride along in this effect.
     }
-    setMergedCommits(null);
-    setMergedCommitsLoading(true);
     loadData();
   }, [issue.id]);
 
@@ -695,22 +686,8 @@ export function IssueDetailPanel({
     }
   }
 
-  async function handleAnalyzeTouchedFiles(refresh = false) {
-    if (analyzingTouchedFiles) return;
-    setAnalyzingTouchedFiles(true);
-    try {
-      const result = await apiPost<{ files: { path: string; reason: string; confidence: "high" | "medium" | "low" }[]; cached: boolean }>(`/api/issues/${issue.id}/analyze-touched-files`, { refresh });
-      setTouchedFiles(result.files);
-      showToast(result.cached ? "Showing cached prediction" : `Predicted ${result.files.length} file${result.files.length === 1 ? "" : "s"}`, "success");
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Analysis failed", "error");
-    } finally {
-      setAnalyzingTouchedFiles(false);
-    }
-  }
-
-  async function handleAppendTouchedFilesToDescription() {
-    if (!touchedFiles || touchedFiles.length === 0) return;
+  function handleAppendTouchedFilesToDescription(touchedFiles: TouchedFile[]) {
+    if (touchedFiles.length === 0) return;
     const section = "\n\n## Files touched\n" + touchedFiles.map(f => `- ${f.path}`).join("\n");
     const newDescription = (description || "") + section;
     setDescription(newDescription);
@@ -1854,115 +1831,13 @@ export function IssueDetailPanel({
           />
 
           {/* Touched Files section */}
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                Touched Files
-              </label>
-              <div className="flex items-center gap-1">
-                {touchedFiles && touchedFiles.length > 0 && (
-                  <button
-                    onClick={handleAppendTouchedFilesToDescription}
-                    className="text-[10px] text-gray-500 hover:text-gray-700 font-medium px-1.5 py-0.5 rounded border border-gray-200 hover:bg-gray-50"
-                    title="Append file list to description"
-                  >
-                    Append to desc
-                  </button>
-                )}
-                {touchedFiles && (
-                  <button
-                    onClick={() => handleAnalyzeTouchedFiles(true)}
-                    disabled={analyzingTouchedFiles}
-                    className="text-[10px] text-blue-500 hover:text-blue-700 font-medium px-1.5 py-0.5 rounded border border-blue-200 hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="Refresh prediction"
-                  >
-                    ↺
-                  </button>
-                )}
-                <button
-                  onClick={() => handleAnalyzeTouchedFiles(false)}
-                  disabled={analyzingTouchedFiles}
-                  className="text-[10px] text-blue-600 hover:text-blue-700 font-medium px-1.5 py-0.5 rounded border border-blue-200 hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
-                  title="Predict files this issue will touch"
-                >
-                  {analyzingTouchedFiles && (
-                    <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                    </svg>
-                  )}
-                  {analyzingTouchedFiles ? "Analyzing..." : "Predict Files"}
-                </button>
-              </div>
-            </div>
-            {touchedFiles && touchedFiles.length > 0 && (
-              <div className="space-y-0.5">
-                {touchedFiles.map((f, i) => (
-                  <div key={i} className="flex items-start gap-1.5 text-xs">
-                    <span className={`shrink-0 mt-0.5 px-1 py-px rounded text-[9px] font-medium ${
-                      f.confidence === "high" ? "bg-green-100 text-green-700" :
-                      f.confidence === "medium" ? "bg-yellow-100 text-yellow-700" :
-                      "bg-gray-100 text-gray-500"
-                    }`}>
-                      {f.confidence}
-                    </span>
-                    <span className="font-mono text-gray-700 dark:text-gray-300 break-all">{f.path}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            {touchedFiles && touchedFiles.length === 0 && (
-              <p className="text-xs text-gray-400 dark:text-gray-500">No files predicted.</p>
-            )}
-          </div>
+          <IssueTouchedFilesSection
+            issueId={issue.id}
+            onAppendToDescription={handleAppendTouchedFilesToDescription}
+          />
 
           {/* Related Issues section */}
-          <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
-            <div className="flex items-center justify-between mb-1">
-              <div className="flex items-center gap-2">
-                <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                  Related Issues
-                </label>
-                {!relatedIssuesLoading && relatedIssues && relatedIssues.length > 0 && (
-                  <span className="inline-flex items-center text-xs font-medium px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">
-                    {relatedIssues.length}
-                  </span>
-                )}
-              </div>
-              {(relatedIssues && relatedIssues.length > 0) && (
-                <button
-                  onClick={() => setShowRelatedIssues((v) => !v)}
-                  className="text-xs text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
-                >
-                  {showRelatedIssues ? "Hide" : "Show"}
-                </button>
-              )}
-            </div>
-            {relatedIssuesLoading && (
-              <p className="text-xs text-gray-400 dark:text-gray-500">Loading…</p>
-            )}
-            {!relatedIssuesLoading && relatedIssues && relatedIssues.length === 0 && (
-              <p className="text-xs text-gray-400 dark:text-gray-500">No related issues found.</p>
-            )}
-            {!relatedIssuesLoading && relatedIssues && relatedIssues.length > 0 && showRelatedIssues && (
-              <ul className="space-y-1">
-                {relatedIssues.map((ri) => (
-                  <li key={ri.id} className="flex items-center justify-between gap-2 text-xs">
-                    <button
-                      onClick={() => onNavigateToIssue?.(ri.id)}
-                      className="text-left text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300 hover:underline truncate"
-                      title={ri.title}
-                    >
-                      {ri.issueNumber != null ? `#${ri.issueNumber} ` : ""}{ri.title}
-                    </button>
-                    <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 whitespace-nowrap">
-                      {ri.sharedFileCount} shared {ri.sharedFileCount === 1 ? "file" : "files"}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+          <IssueRelatedIssuesSection issueId={issue.id} onNavigateToIssue={onNavigateToIssue} />
 
           {/* Follow-up task creation */}
           <div className="pt-2">
@@ -2029,8 +1904,7 @@ export function IssueDetailPanel({
           {/* Merged commits that landed on the default branch for this issue */}
           {!editing && (
             <IssueMergedCommitsSection
-              loading={mergedCommitsLoading}
-              data={mergedCommits}
+              issueId={issue.id}
               onOpenDiff={(commit) => onManageWorkspaces(issue, commit.workspaceId)}
             />
           )}
