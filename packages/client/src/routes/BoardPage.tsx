@@ -7,6 +7,7 @@ import { BacklogView } from "../components/BacklogView.js";
 import { MilestoneFilterBanner } from "../components/MilestoneFilterBanner.js";
 import { BoardSecondaryViews } from "../components/BoardSecondaryViews.js";
 import { useBoardLiveHandlers } from "../hooks/useBoardLiveHandlers.js";
+import { useBoardPanelNavigation } from "../hooks/useBoardPanelNavigation.js";
 import { stringifyForIssueCard, deferUntilIdle } from "../lib/boardCardSnapshot.js";
 import { BoardKanbanView } from "../components/BoardKanbanView.js";
 import { RecentlyMergedStrip } from "../components/RecentlyMergedStrip.js";
@@ -57,7 +58,6 @@ import type {
   StatusWithIssues,
   UpdateIssueRequest,
 } from "@agentic-kanban/shared";
-import { buildTicketChatPrompt } from "@agentic-kanban/shared";
 import type { BoardViewState, SavedViewReference } from "../lib/boardSavedViews.js";
 
 /** Lightweight fallback shown for the ~1 frame it takes to fetch a lazy view chunk. */
@@ -723,64 +723,26 @@ export function BoardPage() {
     setDependencyImpactPending,
   });
 
-  function handleIssueClick(issue: IssueWithStatus) {
-    if (pendingIssueIds.has(issue.id)) return;
-    setSelectedIssue(issue);
-    setKeyboardCursorIssueId(null);
-  }
-
-  function handleManageWorkspaces(issue: IssueWithStatus, workspaceId?: string, sessionId = "") {
-    setSelectedIssue(null);
-    setWorkspaceIssue(issue);
-    setWorkspaceOpenCreate(false);
-    setWorkspaceInitialDiff(false);
-    if (workspaceId) {
-      setWorkspaceInitial({ workspaceId, sessionId });
-    }
-  }
-
-  function handleChatAboutTicket(issue: IssueWithStatus) {
-    setButlerInitialPrompt(buildTicketChatPrompt({
-      issueNumber: issue.issueNumber,
-      title: issue.title,
-      description: issue.description,
-      statusName: issue.statusName,
-      issueType: issue.issueType,
-    }));
-    setSelectedIssue(null);
-    handleViewModeChange("butler");
-  }
-
-  function handleOpenDiff(issue: IssueWithStatus, workspaceId: string) {
-    setSelectedIssue(null);
-    setWorkspaceIssue(issue);
-    setWorkspaceOpenCreate(false);
-    setWorkspaceInitialDiff(true);
-    setWorkspaceInitial({ workspaceId, sessionId: "" });
-  }
-
-  async function handleOpenWorkspaceById(workspaceId: string, issueId: string) {
-    let issue = columnsRef.current.flatMap((c) => c.issues).find((i) => i.id === issueId);
-    if (!issue) {
-      const board = await refetchBoard();
-      issue = (board ?? []).flatMap((c) => c.issues).find((i) => i.id === issueId);
-    }
-    if (!issue) {
-      showToast("Issue is not visible on the current board", "error");
-      return;
-    }
-    setSelectedIssue(null);
-    setWorkspaceIssue(issue);
-    setWorkspaceOpenCreate(false);
-    setWorkspaceInitial({ workspaceId, sessionId: "" });
-  }
-
-  function handleStartWorkspace(issue: IssueWithStatus) {
-    setSelectedIssue(null);
-    setWorkspaceIssue(issue);
-    setWorkspaceInitial(null);
-    setWorkspaceOpenCreate(true);
-  }
+  const {
+    handleIssueClick,
+    handleManageWorkspaces,
+    handleChatAboutTicket,
+    handleOpenDiff,
+    handleOpenWorkspaceById,
+    handleStartWorkspace,
+  } = useBoardPanelNavigation({
+    pendingIssueIds,
+    columnsRef,
+    refetchBoard,
+    setSelectedIssue,
+    setKeyboardCursorIssueId,
+    setWorkspaceIssue,
+    setWorkspaceOpenCreate,
+    setWorkspaceInitialDiff,
+    setWorkspaceInitial,
+    setButlerInitialPrompt,
+    handleViewModeChange,
+  });
 
   async function handleDropOnAgentSlot(issue: IssueWithStatus) {
     if (!activeProject) return;
