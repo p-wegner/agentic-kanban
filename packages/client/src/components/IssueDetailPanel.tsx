@@ -19,6 +19,7 @@ import { ShowdownDialog } from "./ShowdownDialog.js";
 import { ShowdownPanel } from "./ShowdownPanel.js";
 import { CompareAttemptsPanel } from "./CompareAttemptsPanel.js";
 import { usePanelLayout } from "../hooks/usePanelLayout.js";
+import { useIssueEditForm } from "../hooks/useIssueEditForm.js";
 import type { TrailEntry } from "../hooks/useTicketTrail.js";
 import { TicketTrailStrip } from "./TicketTrailStrip.js";
 import { IssueCycleTimeBadge } from "./IssueCycleTimeBadge.js";
@@ -132,8 +133,24 @@ export function IssueDetailPanel({
   onChatAboutTicket,
   trail,
 }: IssueDetailPanelProps) {
-  const [editing, setEditing] = useState(false);
-  const [descriptionMode, setDescriptionMode] = useState<"edit" | "preview">("edit");
+  const {
+    editing, setEditing,
+    descriptionMode, setDescriptionMode,
+    title, setTitle,
+    description, setDescription,
+    pastedImages, setPastedImages,
+    issueType, setIssueType,
+    estimate, setEstimate,
+    dueDate, setDueDate,
+    externalKey, setExternalKey,
+    externalUrl, setExternalUrl,
+    skipAutoReview, setSkipAutoReview,
+    milestoneId, setMilestoneId,
+    saving, setSaving, enhancing, preEnhanceSnapshot, estimating,
+    descriptionRef,
+    hasChanges,
+    handleCancelEdit, handleEnhance, handleUndoEnhance, handleAiEstimate, handleSave,
+  } = useIssueEditForm(issue, onUpdate);
   const {
     mode: panelMode,
     setMode: setPanelMode,
@@ -154,20 +171,6 @@ export function IssueDetailPanel({
     setPanelMode,
     setSidebarSide,
   });
-  const [title, setTitle] = useState(issue.title);
-  const [description, setDescription] = useState(issue.description ?? "");
-  const [pastedImages, setPastedImages] = useState<string[]>([]);
-  const [issueType, setIssueType] = useState(issue.issueType ?? "task");
-  const [estimate, setEstimate] = useState<string>(issue.estimate ?? "");
-  const [dueDate, setDueDate] = useState<string>(issue.dueDate ?? "");
-  const [externalKey, setExternalKey] = useState<string>(issue.externalKey ?? "");
-  const [externalUrl, setExternalUrl] = useState<string>(issue.externalUrl ?? "");
-  const [skipAutoReview, setSkipAutoReview] = useState(issue.skipAutoReview ?? false);
-  const [saving, setSaving] = useState(false);
-  const descriptionRef = useRef<HTMLTextAreaElement>(null);
-  const [enhancing, setEnhancing] = useState(false);
-  const [preEnhanceSnapshot, setPreEnhanceSnapshot] = useState<{ title: string; description: string } | null>(null);
-  const [estimating, setEstimating] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [togglingVisualVerify, setTogglingVisualVerify] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
@@ -197,7 +200,6 @@ export function IssueDetailPanel({
   const [deletingArtifactId, setDeletingArtifactId] = useState<string | null>(null);
   const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
   const [activityLoading, setActivityLoading] = useState(true);
-  const [milestoneId, setMilestoneId] = useState<string | null>(issue.milestoneId ?? null);
   const [milestones, setMilestones] = useState<MilestoneResponse[]>([]);
 
   // Inline edit state (independent of the full edit form)
@@ -210,19 +212,6 @@ export function IssueDetailPanel({
   const [descriptionFetching, setDescriptionFetching] = useState(false);
   const inlineTitleRef = useRef<HTMLInputElement>(null);
   const inlineDescriptionRef = useRef<HTMLTextAreaElement>(null);
-
-  // Track unsaved changes for warning
-  const hasChanges = editing && (
-    title !== issue.title ||
-    description !== (issue.description ?? "") ||
-    issueType !== (issue.issueType ?? "task") ||
-    estimate !== (issue.estimate ?? "") ||
-    dueDate !== (issue.dueDate ?? "") ||
-    externalKey !== (issue.externalKey ?? "") ||
-    externalUrl !== (issue.externalUrl ?? "") ||
-    skipAutoReview !== (issue.skipAutoReview ?? false) ||
-    milestoneId !== (issue.milestoneId ?? null)
-  );
 
   useEffect(() => {
     async function loadData() {
@@ -353,47 +342,6 @@ export function IssueDetailPanel({
     return () => document.removeEventListener("mousedown", handleClick);
   }, [confirmDelete]);
 
-  function handleCancelEdit() {
-    if (hasChanges) {
-      if (!window.confirm("You have unsaved changes. Discard?")) return;
-    }
-    setEditing(false);
-    setDescriptionMode("edit");
-    setPreEnhanceSnapshot(null);
-    setTitle(issue.title);
-    setDescription(issue.description ?? "");
-    setIssueType(issue.issueType ?? "task");
-    setEstimate(issue.estimate ?? "");
-    setDueDate(issue.dueDate ?? "");
-    setExternalKey(issue.externalKey ?? "");
-    setExternalUrl(issue.externalUrl ?? "");
-    setSkipAutoReview(issue.skipAutoReview ?? false);
-    setMilestoneId(issue.milestoneId ?? null);
-  }
-
-  async function handleEnhance() {
-    if (!title.trim() || enhancing) return;
-    setEnhancing(true);
-    try {
-      setPreEnhanceSnapshot({ title, description });
-      const result = await apiPost<{ title: string; description: string }>("/api/issues/enhance", { title, description, projectId: issue.projectId });
-      setTitle(result.title);
-      setDescription(result.description);
-    } catch (err) {
-      setPreEnhanceSnapshot(null);
-      showToast(err instanceof Error ? err.message : "Enhancement failed", "error");
-    } finally {
-      setEnhancing(false);
-    }
-  }
-
-  function handleUndoEnhance() {
-    if (!preEnhanceSnapshot) return;
-    setTitle(preEnhanceSnapshot.title);
-    setDescription(preEnhanceSnapshot.description);
-    setPreEnhanceSnapshot(null);
-  }
-
   async function handleQuickEstimate(value: string) {
     const newEstimate = (value === issue.estimate ? null : value) as UpdateIssueRequest["estimate"];
     await onUpdate(issue.id, { estimate: newEstimate });
@@ -415,20 +363,6 @@ export function IssueDetailPanel({
       showToast(err instanceof Error ? err.message : "Duplicate failed", "error");
     } finally {
       setDuplicating(false);
-    }
-  }
-
-  async function handleAiEstimate() {
-    if (estimating) return;
-    setEstimating(true);
-    try {
-      const result = await apiPost<{ estimate: string; reasoning: string }>("/api/issues/ai-estimate", { issueId: issue.id });
-      await onUpdate(issue.id, { estimate: result.estimate as UpdateIssueRequest["estimate"] });
-      showToast(`AI suggested: ${result.estimate}${result.reasoning ? ` — ${result.reasoning}` : ""}`, "success");
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "AI estimate failed", "error");
-    } finally {
-      setEstimating(false);
     }
   }
 
@@ -555,37 +489,6 @@ export function IssueDetailPanel({
   }
 
 
-
-  async function handleSave() {
-    if (saving) return;
-    const trimmedUrl = externalUrl.trim();
-    if (trimmedUrl && !isHttpUrl(trimmedUrl)) {
-      showToast("External URL must start with http:// or https://", "error");
-      return;
-    }
-    setSaving(true);
-    try {
-      const imageMarkdown = pastedImages.map((url, i) => `![screenshot-${i + 1}](${url})`).join("\n");
-      const fullDescription = [description.trim(), imageMarkdown].filter(Boolean).join("\n\n");
-      await onUpdate(issue.id, {
-        title: title.trim(),
-        description: fullDescription || undefined,
-        issueType: issueType as UpdateIssueRequest["issueType"],
-        estimate: (estimate || null) as UpdateIssueRequest["estimate"],
-        skipAutoReview,
-        dueDate: dueDate || null,
-        externalKey: externalKey.trim() || null,
-        externalUrl: trimmedUrl || null,
-        milestoneId: milestoneId || null,
-      });
-      setPastedImages([]);
-      setEditing(false);
-      setDescriptionMode("edit");
-      // Don't close panel — F1 fix. Parent will re-render with updated data.
-    } finally {
-      setSaving(false);
-    }
-  }
 
   async function handleInlineTitleSave() {
     const trimmed = inlineTitleValue.trim();
