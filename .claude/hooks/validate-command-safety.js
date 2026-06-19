@@ -373,6 +373,19 @@ function backupDatabase() {
 /** Keep only the newest `keep` backup sets (by timestamp prefix). */
 function pruneBackups(dir, keep) {
   try {
+    // Reap scratch (`*.db.tmp`/`*.db.promote`/journals) left by interrupted
+    // VACUUM-INTO backups in the server path that share this directory. The
+    // stamp-based rotation below never matched these, so they leaked without
+    // bound and filled the disk (#856). Always safe to delete.
+    for (const f of fs.readdirSync(dir)) {
+      if (/\.db\.(?:tmp|promote)(?:-journal|-wal|-shm)?$/.test(f)) {
+        try {
+          fs.unlinkSync(path.join(dir, f));
+        } catch {
+          /* non-fatal */
+        }
+      }
+    }
     const stamps = new Set();
     for (const f of fs.readdirSync(dir)) {
       const m = f.match(/^kanban-(.+?)\.db(?:-wal|-shm)?$/);

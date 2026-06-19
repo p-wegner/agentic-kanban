@@ -25,6 +25,28 @@ import { DATA_DIR, getDbUrl } from "./data-dir.js";
 /** Number of most-recent verified backups to retain. */
 export const KEEP_LAST = 5;
 
+/**
+ * Hard cap on the total bytes the `.db-backups` directory may consume.
+ * If the verified backups alone exceed this, the oldest are pruned (down to a
+ * floor of one) until the directory fits. Prevents a slow leak of large valid
+ * backups from filling the disk even when scratch is clean.
+ * Override with AGENTIC_KANBAN_BACKUP_MAX_BYTES.
+ */
+export const BACKUP_DIR_MAX_BYTES = (() => {
+  const raw = Number(process.env.AGENTIC_KANBAN_BACKUP_MAX_BYTES);
+  return Number.isFinite(raw) && raw > 0 ? raw : 5 * 1024 * 1024 * 1024; // 5 GB
+})();
+
+/**
+ * Matches the scratch/write-garbage a VACUUM-INTO backup leaves behind when a
+ * write is interrupted (e.g. low disk): the `.tmp` snapshot target, the
+ * `.promote` copy used for the atomic rename, and any SQLite sidecar journals
+ * (`-journal`, `-wal`, `-shm`) opened against those scratch files. These are
+ * NEVER final backups and are always safe to reap — unlike `kanban-*.db`
+ * sidecars, which belong to a retained good backup.
+ */
+const SCRATCH_RE = /\.db\.(?:tmp|promote)(?:-journal|-wal|-shm)?$/;
+
 const BACKUP_DIR =
   process.env.AGENTIC_KANBAN_BACKUP_DIR || resolve(DATA_DIR, ".db-backups");
 const DB_PATH = resolve(DATA_DIR, "kanban.db");
@@ -185,23 +207,91 @@ export async function verifyBackup(path: string): Promise<true> {
 }
 
 /**
+ * Reap stale scratch artifacts (`*.db.tmp`, `*.db.promote`, and their journal
+ * sidecars) left by interrupted/failed VACUUM-INTO backup writes. The final
+ * backup rotation (`pruneBackups`) only ever matched `kanban-*.db`, so this
+ * garbage accumulated without bound and could fill the disk — which then made
+ * EVERY subsequent backup fail and leak MORE scratch (the runaway that took the
+ * dev server down). Always safe to delete: these are never a usable backup.
+ *
+ * @returns the number of scratch files removed.
+ */
+export function pruneScratchArtifacts(): number {
+  let removed = 0;
+  try {
+    if (!existsSync(BACKUP_DIR)) return 0;
+    for (const f of readdirSync(BACKUP_DIR)) {
+      if (!SCRATCH_RE.test(f)) continue;
+      try {
+        unlinkSync(join(BACKUP_DIR, f));
+        removed++;
+      } catch {
+        /* non-fatal */
+      }
+    }
+  } catch {
+    /* non-fatal */
+  }
+  return removed;
+}
+
+/**
  * Keep the `keep` most recent `kanban-*.db` files; delete the rest.
- * Never deletes if doing so would leave zero backups.
+ * Never deletes if doing so would leave zero backups. Also reaps any interrupted
+ * write scratch (`*.db.tmp`/`*.db.promote`/journals) and enforces a hard cap on
+ * the total size of retained backups.
  */
 export function pruneBackups(keep: number): void {
+  // Always clear interrupted-write scratch first — these are the largest and
+  // most dangerous leak, and they are unconditionally safe to remove.
+  pruneScratchArtifacts();
   try {
     if (!existsSync(BACKUP_DIR)) return;
     const files = readdirSync(BACKUP_DIR)
       .filter((f) => /^kanban-.+\.db$/.test(f))
       .map((f) => ({ f, m: statSync(join(BACKUP_DIR, f)).mtimeMs }))
       .sort((a, b) => b.m - a.m); // newest first
-    if (files.length <= keep) return;
+    if (files.length <= keep) {
+      enforceSizeCap();
+      return;
+    }
     const toDelete = files.slice(Math.max(keep, 0));
     // Safety: never delete down to zero.
     if (files.length - toDelete.length < 1) return;
     for (const { f } of toDelete) {
       try {
         unlinkSync(join(BACKUP_DIR, f));
+      } catch {
+        /* non-fatal */
+      }
+    }
+  } catch {
+    /* non-fatal */
+  }
+  enforceSizeCap();
+}
+
+/**
+ * Hard cap on total backup-directory size: while the retained `kanban-*.db`
+ * backups exceed BACKUP_DIR_MAX_BYTES, delete the oldest — but never the last
+ * one. A backstop against a slow leak of large valid backups filling the disk.
+ */
+function enforceSizeCap(): void {
+  try {
+    if (!existsSync(BACKUP_DIR)) return;
+    const files = readdirSync(BACKUP_DIR)
+      .filter((f) => /^kanban-.+\.db$/.test(f))
+      .map((f) => {
+        const st = statSync(join(BACKUP_DIR, f));
+        return { f, m: st.mtimeMs, size: st.size };
+      })
+      .sort((a, b) => b.m - a.m); // newest first
+    let total = files.reduce((sum, x) => sum + x.size, 0);
+    // Delete oldest-first while over cap, keeping at least one backup.
+    for (let i = files.length - 1; i > 0 && total > BACKUP_DIR_MAX_BYTES; i--) {
+      try {
+        unlinkSync(join(BACKUP_DIR, files[i].f));
+        total -= files[i].size;
       } catch {
         /* non-fatal */
       }
@@ -222,6 +312,10 @@ export async function createBackup(
 ): Promise<BackupResult | null> {
   if (!existsSync(DB_PATH) || statSync(DB_PATH).size === 0) return null;
   mkdirSync(BACKUP_DIR, { recursive: true });
+  // Reap any scratch left by a previously interrupted backup BEFORE writing the
+  // next snapshot — otherwise a low-disk failure leaks tmp on every cycle and
+  // the leftovers themselves make this write fail (the runaway that filled C:).
+  pruneScratchArtifacts();
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const safeReason = reason.replace(/[^a-zA-Z0-9_-]/g, "-");
   const dest = join(BACKUP_DIR, `kanban-${stamp}-${safeReason}.db`);
