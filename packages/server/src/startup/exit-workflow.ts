@@ -789,7 +789,18 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     if (prefMap.get("learning_step_after_agent") === "true" && workspace.workingDir) await launchLearningStep(db, sessionManager, learningSessionIds, workspace, prefMap, "after agent");
     const autoReview = !skipAutoReview && (workspace.requiresReview || prefMap.get("auto_review") !== "false");
     if (!autoReview) return;
+    await launchAutoReview(ctx);
+  }
 
+  /**
+   * Launch the auto-review session for a builder that produced committed changes.
+   * Runs on the same provider/profile the workspace was built with; on launch
+   * failure resets the workspace to idle so the stranded-review reconciler can
+   * recover it (#529) rather than leaving it stuck at "reviewing".
+   */
+  async function launchAutoReview(ctx: ExitContext): Promise<void> {
+    const { workspace, projectId, issueId, now, prefMap, defaultBranch } = ctx;
+    const workspaceId = workspace.id;
     // Review on the same provider/profile the workspace was built with (e.g. its
     // Codex OAuth license), not the global default which may have rotated since.
     const reviewPrefs = applyWorkspaceProfileToPrefs(prefMap, workspace);
