@@ -12,6 +12,7 @@ import { useIssueDisplayData } from "../hooks/useIssueDisplayData.js";
 import { PRIORITY_META } from "../lib/chartColors.js";
 import { priorityColors } from "../lib/issueCardColorMap.js";
 import { getActiveAgentState, type ActiveAgentState } from "../lib/sessionBadgeHelpers.js";
+import { deriveAgingBucket, deriveIssueCardActions } from "../lib/issueCardDisplay.js";
 import { HighlightedText, TodoProgress } from "./IssueBadges.js";
 import { InlineTagEditor, PriorityDropdown } from "./BadgeEditors.js";
 import { IssueCardContextMenu } from "./IssueCardContextMenu.js";
@@ -509,14 +510,10 @@ function IssueCardActions({
 function IssueCardImpl({ issue, onClick, onWorkspaceClick, onOpenDiff, onStartWorkspace, onDryRun, onDragStart, onDuplicate, onMoveToNext, nextStatusName, tags, allProjectTags, quickUpdate, allStatuses, onDeleteIssue, searchQuery, liveActivity, liveStats, todos, isPendingIssue, isPendingWorkspace, isSelected, isKeyboardFocused, cardDensity = "comfortable", showAgingHeatmap = false, agingWarmDays = 3, agingHotDays = 7 }: IssueCardProps) {
   const compact = cardDensity === "compact";
   const agingDays = issue.columnAgeDays ?? 0;
-  const agingBucket = !showAgingHeatmap || agingDays < agingWarmDays
-    ? "fresh"
-    : agingDays < agingHotDays
-    ? "warm"
-    : "hot";
+  const agingBucket = deriveAgingBucket(agingDays, { showAgingHeatmap, agingWarmDays, agingHotDays });
   const priorityAccentColor = issue.priority ? (PRIORITY_META.find((p) => p.key === issue.priority)?.color ?? null) : null;
   const ws = issue.workspaceSummary;
-  const hasActiveWorkspace = ws?.main && ws.main.status !== "closed";
+  const hasActiveWorkspace = !!(ws?.main && ws.main.status !== "closed");
   const activeAgent = getActiveAgentState(issue);
 
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -525,13 +522,19 @@ function IssueCardImpl({ issue, onClick, onWorkspaceClick, onOpenDiff, onStartWo
 
   const { isDragging, depDragOver, handleDragStart, handleDragEnd, handleDragOver, handleDragLeave, handleDrop } = useIssueCardDrag(issue, isPendingIssue, onDragStart);
 
-  const showActionRow = !isPendingIssue && issue.statusName !== "Done" && issue.statusName !== "Cancelled";
-  const showResume = showActionRow && hasActiveWorkspace && !!onWorkspaceClick;
-  const showDiff = !isPendingIssue && hasActiveWorkspace && !!onOpenDiff && !!ws?.main?.id;
-  const showStartWorkspace = showActionRow && !hasActiveWorkspace && !!onStartWorkspace;
-  const showDryRun = showActionRow && !hasActiveWorkspace && !!onDryRun;
-  const showMoveToNext = showActionRow && !!onMoveToNext && !!nextStatusName;
-  const hasAnyAction = showResume || showDiff || showStartWorkspace || showDryRun || showMoveToNext;
+  const { showResume, showDiff, showStartWorkspace, showDryRun, showMoveToNext, hasAnyAction } =
+    deriveIssueCardActions({
+      statusName: issue.statusName,
+      isPendingIssue: !!isPendingIssue,
+      hasActiveWorkspace,
+      hasMainWorkspaceId: !!ws?.main?.id,
+      nextStatusName,
+      canResume: !!onWorkspaceClick,
+      canOpenDiff: !!onOpenDiff,
+      canStartWorkspace: !!onStartWorkspace,
+      canDryRun: !!onDryRun,
+      canMoveToNext: !!onMoveToNext,
+    });
 
   function openContextMenu(x: number, y: number) {
     setContextMenu({
