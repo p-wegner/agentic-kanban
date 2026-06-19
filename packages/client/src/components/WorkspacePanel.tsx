@@ -17,14 +17,8 @@ import { useWorkspacePanelDrag } from "../hooks/useWorkspacePanelDrag.js";
 import { useProfileSelection } from "../hooks/useProfileSelection.js";
 import { SessionReplay } from "./SessionReplay.js";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
-import {
-  CODEX_DEFAULT_PROFILE,
-  COPILOT_DEFAULT_PROFILE,
-  humanizeSkillName,
-  profileOptionValue,
-  providerLabel,
-} from "../lib/workspace-helpers.js";
 import { WorkspaceQuickLaunch } from "./WorkspaceQuickLaunch.js";
+import { WorkspaceEmptyState } from "./WorkspaceEmptyState.js";
 import { useWorkspaceGithubHandoff } from "../hooks/useWorkspaceGithubHandoff.js";
 import { useWorkspaceActions } from "../hooks/useWorkspaceActions.js";
 import {
@@ -43,7 +37,6 @@ import type {
   DiffComment,
   SessionSummaryResponse,
 } from "@agentic-kanban/shared";
-import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
 
 interface WorkspacePanelProps {
   issue: IssueWithStatus;
@@ -454,108 +447,22 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
           {loading ? (
             <div className="text-sm text-gray-500 dark:text-gray-400">Loading workspaces...</div>
           ) : workspaces.length === 0 && !showCreate ? (
-            <div className="text-center py-6">
-              <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">No workspaces yet</p>
-              <div className="inline-flex relative">
-                <button
-                  onClick={() => handleQuickLaunch(false)}
-                  disabled={actionLoading}
-                  className="text-sm bg-brand-600 text-white px-4 py-1.5 rounded-l hover:bg-brand-700 disabled:opacity-50"
-                >
-                  {actionLoading ? "Creating..." : "New Workspace"}
-                </button>
-                <button
-                  onClick={() => setQuickDropdownOpen((o) => !o)}
-                  disabled={actionLoading}
-                  className="text-sm bg-brand-600 text-white px-2 py-1.5 rounded-r border-l border-brand-500 hover:bg-brand-700 disabled:opacity-50"
-                  title="More options"
-                >
-                  &#9662;
-                </button>
-                {quickDropdownOpen && (
-                  <div className="absolute top-full left-0 mt-1 w-52 bg-surface-raised dark:bg-surface-raised-dark border border-gray-200 dark:border-gray-700 rounded shadow-lg z-10">
-                    {availableProfileOptions.length > 0 && (
-                      <>
-                        <div className="px-3 py-1.5">
-                          <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Profile</label>
-                          <select
-                            value={selectedProfile}
-                            onChange={(e) => setSelectedProfile(e.target.value)}
-                            className="w-full text-sm border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <option value="">Default</option>
-                            {availableProfileOptions.map((option) => (
-                              <option key={profileOptionValue(option)} value={profileOptionValue(option)}>
-                                {providerLabel(option.provider)}: {(option.provider === "copilot" && option.name === COPILOT_DEFAULT_PROFILE) || (option.provider === "codex" && option.name === CODEX_DEFAULT_PROFILE) ? "Default" : option.name}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="border-t border-gray-100 dark:border-gray-800" />
-                      </>
-                    )}
-                    {(isClaudeQuickLaunch || isCodexQuickLaunch) && (
-                      <>
-                        <div className="px-3 py-1.5">
-                          <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Model</label>
-                          <select
-                            value={selectedModel}
-                            onChange={(e) => setSelectedModel(e.target.value)}
-                            className="w-full text-sm border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            {(isCodexQuickLaunch ? CODEX_MODEL_OPTIONS : CLAUDE_MODEL_OPTIONS).map((m) => (
-                              <option key={m.value} value={m.value}>{m.label}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="border-t border-gray-100 dark:border-gray-800" />
-                      </>
-                    )}
-                    <button
-                      onClick={() => handleQuickLaunch(false)}
-                      className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800"
-                    >
-                      New Workspace
-                    </button>
-                    <button
-                      onClick={() => handleQuickLaunch(true)}
-                      className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800"
-                    >
-                      New Workspace with Plan Mode
-                    </button>
-                    {availableSkills.length > 0 && (
-                      <>
-                        <div className="border-t border-gray-100 dark:border-gray-800" />
-                        <div className="px-3 py-1 text-[10px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide">Skills</div>
-                        {availableSkills.map((skill) => (
-                          <button
-                            key={skill.id}
-                            onClick={() => handleSkillQuickLaunch(skill.id)}
-                            className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-2"
-                            title={skill.description}
-                          >
-                            <span className="text-brand-600 dark:text-brand-400">✨</span>
-                            {humanizeSkillName(skill.name)}
-                          </button>
-                        ))}
-                      </>
-                    )}
-                    <div className="border-t border-gray-100 dark:border-gray-800" />
-                    <button
-                      onClick={() => {
-                        setQuickDropdownOpen(false);
-                        setShowCreate(true);
-                      }}
-                      className="w-full text-left text-sm px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400"
-                    >
-                      Custom options...
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
+            <WorkspaceEmptyState
+              actionLoading={actionLoading}
+              open={quickDropdownOpen}
+              setOpen={setQuickDropdownOpen}
+              availableProfileOptions={availableProfileOptions}
+              selectedProfile={selectedProfile}
+              onSelectedProfileChange={setSelectedProfile}
+              selectedModel={selectedModel}
+              onSelectedModelChange={setSelectedModel}
+              isClaudeQuickLaunch={isClaudeQuickLaunch}
+              isCodexQuickLaunch={isCodexQuickLaunch}
+              availableSkills={availableSkills}
+              onQuickLaunch={handleQuickLaunch}
+              onSkillQuickLaunch={handleSkillQuickLaunch}
+              onCustomOptions={() => { setQuickDropdownOpen(false); setShowCreate(true); }}
+            />
           ) : null}
 
           {showCreate && (
