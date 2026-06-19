@@ -10,12 +10,7 @@ import { useBoardIssueActions } from "../hooks/useBoardIssueActions.js";
 import { useBoardMiscHandlers } from "../hooks/useBoardMiscHandlers.js";
 import { BoardPageView } from "../components/BoardPageView.js";
 import { deferUntilIdle } from "../lib/boardCardSnapshot.js";
-import {
-  reconcileBoardIssueIdentity,
-  deriveInactiveIssueIds,
-  prunePendingWorkspaceIssueIds,
-  pruneRecordKeys,
-} from "../lib/boardDataReconcile.js";
+import { useBoardRefetch } from "../hooks/useBoardRefetch.js";
 import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
 import { SkeletonBoard } from "../components/SkeletonBoard.js";
 import { showToast } from "../components/Toast.js";
@@ -71,9 +66,6 @@ interface Tag {
 
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
 const BACKLOG_STATUS_NAME = "Backlog";
-
-/** Trailing-debounce window for coalescing WS-triggered board refetches. */
-const REFETCH_DEBOUNCE_MS = 250;
 
 /**
  * Run `cb` once the browser is idle (`requestIdleCallback`, with a setTimeout
@@ -148,16 +140,6 @@ export function BoardPage() {
   const [sessionTodos, setSessionTodos] = useState<Record<string, TodoItem[]>>({});
   const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>([]);
   const pendingBoardRefreshRef = useRef(false);
-  const boardEtagRef = useRef<Record<string, string>>({});
-  // Coalesced-refetch bookkeeping: monotonic sequence guard (discard responses
-  // that resolve after a newer one was applied), trailing-debounce timer, and
-  // in-flight dedupe with a dirty flag for one follow-up fetch.
-  const refetchSeqRef = useRef(0);
-  const lastAppliedSeqRef = useRef(0);
-  const refetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const refetchInFlightRef = useRef(false);
-  const refetchDirtyRef = useRef(false);
-  const runCoalescedRefetchRef = useRef<() => void>(() => {});
   const loadProjectsRef = useRef<() => Promise<string | undefined>>(async () => undefined);
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>(null);
   const [keyboardCursorIssueId, setKeyboardCursorIssueId] = useState<string | null>(null);
@@ -193,95 +175,14 @@ export function BoardPage() {
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [tagsLoaded, setTagsLoaded] = useState(false);
 
-  const refetchBoard = useCallback(async (projectId?: string, options?: { force?: boolean }) => {
-    const pid = projectId || activeProjectId;
-    if (!pid) return;
-    // Monotonic sequence guard: overlapping refetches can resolve out of
-    // order; only the response of the newest request may be applied. The
-    // 304 path is covered too — it applies nothing and leaves the newer
-    // state (and its ETag) untouched.
-    const seq = ++refetchSeqRef.current;
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    // On a forced refetch (e.g. project switch, where columns were just
-    // cleared) we must NOT send If-None-Match: a 304 would early-return the
-    // now-empty columnsRef and leave the board blank. Skip the conditional so
-    // the server always sends the full board back.
-    const cachedEtag = options?.force ? undefined : boardEtagRef.current[pid];
-    if (cachedEtag) headers["If-None-Match"] = cachedEtag;
-    const res = await fetch(`/api/projects/${pid}/board`, { headers });
-    if (res.status === 304) {
-      return columnsRef.current;
-    }
-    if (!res.ok) {
-      let message = `API error: ${res.status} ${res.statusText}`;
-      try {
-        const body: unknown = await res.json();
-        if ((body as any).error) message = (body as any).error;
-      } catch {}
-      throw new Error(message);
-    }
-    const board = await res.json() as StatusWithIssues[];
-    if (seq <= lastAppliedSeqRef.current) {
-      // A newer refetch already applied its response — discard this stale
-      // one so it can't clobber fresher columns or the fresher ETag.
-      return columnsRef.current;
-    }
-    lastAppliedSeqRef.current = seq;
-    const etag = res.headers.get("ETag");
-    if (etag) boardEtagRef.current[pid] = etag;
-    // Reconcile the fresh payload against live state (all pure, tested in
-    // lib/boardDataReconcile): reuse unchanged issue refs so IssueCard.memo can
-    // skip re-render, then prune live-session bookkeeping for now-inactive issues.
-    const reconciled = reconcileBoardIssueIdentity(columnsRef.current, board);
-    setColumns(reconciled);
-    columnsRef.current = reconciled;
-    const inactiveIssueIds = deriveInactiveIssueIds(reconciled);
-    setPendingWorkspaceIssueIds((prev) => prunePendingWorkspaceIssueIds(prev, reconciled));
-    if (inactiveIssueIds.size > 0) {
-      setLiveStats((prev) => pruneRecordKeys(prev, inactiveIssueIds));
-      setSessionActivityRaw((prev) => pruneRecordKeys(prev, inactiveIssueIds));
-    }
-    return reconciled;
-  }, [activeProjectId]);
-
-  // Coalesced board refetch: agent merge/exit cascades broadcast 3-6
-  // board_changed events within 1-2s, and each used to trigger its own full
-  // /board fetch. runCoalescedRefetch dedupes against an in-flight fetch
-  // (dirty flag -> exactly one follow-up on completion); scheduleRefetch
-  // collapses an event burst into one trailing fetch per 250ms window.
-  const runCoalescedRefetch = useCallback(() => {
-    if (refetchInFlightRef.current) {
-      refetchDirtyRef.current = true;
-      return;
-    }
-    refetchInFlightRef.current = true;
-    void refetchBoard()
-      .catch(() => {
-        // WS-triggered refreshes were previously fire-and-forget; keep
-        // failures non-fatal (the next board event retries).
-      })
-      .finally(() => {
-        refetchInFlightRef.current = false;
-        if (refetchDirtyRef.current) {
-          refetchDirtyRef.current = false;
-          runCoalescedRefetchRef.current();
-        }
-      });
-  }, [refetchBoard]);
-  runCoalescedRefetchRef.current = runCoalescedRefetch;
-
-  const scheduleRefetch = useCallback(() => {
-    if (refetchTimerRef.current !== null) clearTimeout(refetchTimerRef.current);
-    refetchTimerRef.current = setTimeout(() => {
-      refetchTimerRef.current = null;
-      runCoalescedRefetchRef.current();
-    }, REFETCH_DEBOUNCE_MS);
-  }, []);
-
-  // Drop any pending coalesced refetch on unmount.
-  useEffect(() => () => {
-    if (refetchTimerRef.current !== null) clearTimeout(refetchTimerRef.current);
-  }, []);
+  const { refetchBoard, scheduleRefetch } = useBoardRefetch({
+    activeProjectId,
+    columnsRef,
+    setColumns,
+    setPendingWorkspaceIssueIds,
+    setLiveStats,
+    setSessionActivityRaw,
+  });
 
   // Keep selectedIssue in sync with board data (F6 stale data fix). The pure
   // reconcile logic (incl. the stripped-description edge case) lives in
