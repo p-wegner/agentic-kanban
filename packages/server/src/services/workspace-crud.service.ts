@@ -557,6 +557,148 @@ exit 1
     }
   }
 
+  /**
+   * Best-effort context-packer run. Returns the primer text, or null when packing
+   * is empty or fails — packing must never block workspace creation.
+   */
+  async function packContextPrimer(
+    input: CreateWorkspaceInput,
+    issue: { title: string; description: string | null; projectId: string },
+    project: { repoPath: string },
+  ): Promise<string | null> {
+    try {
+      const packed = await buildContextPrimer(
+        {
+          issueId: input.issueId,
+          issueTitle: issue.title,
+          issueDescription: issue.description,
+          projectId: issue.projectId,
+          repoPath: project.repoPath,
+        },
+        database,
+      );
+      if (packed.primer.trim()) return packed.primer;
+    } catch (err) {
+      console.warn(`[workspaces] context-packer failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return null;
+  }
+
+  /**
+   * Inject ticket details (+ optional context primer + detected stack profile) into
+   * the worktree as a gitignored CLAUDE.local.md so the agent's first turn has the
+   * spec without foraging. Returns the file path. The stack-profile read is
+   * best-effort — a failure there must not block creation.
+   */
+  async function writeWorktreeTicketContext(
+    worktreePath: string,
+    issue: { issueNumber: number | null; title: string; description: string | null; projectId: string },
+    contextPrimer: string | null,
+  ): Promise<string | null> {
+    let stackProfile = null;
+    try {
+      stackProfile = await getStackProfile(issue.projectId, database);
+    } catch (err) {
+      console.warn(`[workspaces] stack-profile read failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return writeTicketContextFile(worktreePath, {
+      issueNumber: issue.issueNumber,
+      title: issue.title,
+      description: issue.description,
+      contextPrimer,
+      stackProfile,
+    });
+  }
+
+  /**
+   * Build the agent prompt and resolve the effective skill. Merges the base prompt
+   * with the issue's configurable workflow (start-node guidance + transitions) and
+   * resolves the skill from explicit input → workflow node → project default,
+   * materializing the chosen skill file into the worktree. Returns the prompt, the
+   * resolved skill name (for session attribution), and the effective skill id (for
+   * the workspace row).
+   */
+  async function resolveAgentPromptAndSkill(params: {
+    issue: { projectId: string; issueNumber: number | null; title: string; description: string | null; priority: string | null };
+    input: CreateWorkspaceInput;
+    includeVisualProof: boolean;
+    workspaceId: string;
+    worktreePath: string | null;
+    project: { repoPath: string; defaultSkillId: string | null };
+    skillId: string | null;
+  }): Promise<{ agentPrompt: string; skillName: string | null; effectiveSkillId: string | null; hasWorkflowStart: boolean }> {
+    const { issue, input, includeVisualProof, workspaceId, worktreePath, project, skillId } = params;
+    let agentPrompt = buildAgentPrompt(issue, { ...input, includeVisualProof }, input.issueId);
+
+    // Resolve the issue's configurable workflow (if any). The start node's
+    // guidance + valid transitions are injected into the prompt, and its
+    // attached skill is used when the caller didn't pick one explicitly.
+    const workflowStart = await resolveWorkflowStart(database, input.issueId);
+    let effectiveSkillId = skillId;
+    let effectiveDiskSkill = input.skillName ?? null;
+    if (workflowStart) {
+      agentPrompt += `\n\n${buildTransitionBlock(workflowStart.node, workflowStart.transitions, workspaceId)}`;
+      if (!effectiveSkillId && !effectiveDiskSkill) {
+        effectiveSkillId = workflowStart.node.skillId ?? null;
+        effectiveDiskSkill = workflowStart.node.skillName ?? null;
+      }
+    }
+
+    // Fall back to the project-level default skill so Insights "By Skill" can
+    // attribute sessions even when no explicit skill was chosen and the issue has
+    // no workflow that provides one.
+    if (!effectiveSkillId && !effectiveDiskSkill && project.defaultSkillId) {
+      effectiveSkillId = project.defaultSkillId;
+    }
+
+    const skillName = worktreePath
+      ? await resolveSkillFile(effectiveSkillId, effectiveDiskSkill, worktreePath, project.repoPath)
+      : null;
+
+    return { agentPrompt, skillName, effectiveSkillId, hasWorkflowStart: Boolean(workflowStart) };
+  }
+
+  /**
+   * Launch the builder agent OFF the hot path (setImmediate) so the HTTP response
+   * flushes before any long-running git/binary work begins (same pattern as the
+   * merge endpoint, #578). A deferred launch failure can't reach createWorkspace's
+   * catch block, so it's handled here: persist the error + downgrade the workspace
+   * status, and surface a Butler event when a stale safety policy blocked it.
+   */
+  function scheduleDeferredAgentLaunch(
+    agentLaunchArgs: Parameters<typeof launchAgent>[0],
+    ctx: { workspaceId: string; projectId: string; timing: (phase: string, startMs: number) => void },
+  ): void {
+    const { workspaceId, projectId, timing } = ctx;
+    setImmediate(() => {
+      const t = Date.now();
+      void launchAgent(agentLaunchArgs)
+        .then(() => timing("agent-launch", t))
+        .catch((err: unknown) => {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          const staleSafetyPolicy =
+            err instanceof WorkspaceError && err.data?.code === "STALE_SAFETY_POLICY";
+          const persistedError = staleSafetyPolicy ? `STALE_SAFETY_POLICY: ${errorMsg}` : errorMsg;
+          const nextStatus = staleSafetyPolicy ? "error" : "idle";
+          console.error(`[workspaces] deferred agent launch failed for workspace ${workspaceId}: ${errorMsg}`);
+          if (staleSafetyPolicy) {
+            emitButlerSystemEvent({
+              projectId,
+              kind: "workspace_error",
+              workspaceId,
+              text: `Workspace launch blocked by stale safety policy for ${workspaceId}: ${errorMsg.slice(0, 200)}`,
+            });
+          }
+          crudRepo.updateWorkspaceLaunchFailure(workspaceId, {
+            status: nextStatus,
+            latestLaunchError: persistedError,
+            updatedAt: new Date().toISOString(),
+          }, database)
+            .catch((dbErr: unknown) => console.warn(`[workspaces] failed to update workspace status after deferred launch failure: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`));
+        });
+    });
+  }
+
   async function createWorkspace(input: CreateWorkspaceInput): Promise<CreateWorkspaceResult> {
     const isDirect = input.isDirect === true;
     const requiresReview = input.requiresReview === true;
@@ -613,73 +755,19 @@ exit 1
       let contextPrimer: string | null = null;
       if (!isDirect && !input.skipContextPacker) {
         t = Date.now();
-        try {
-          const packed = await buildContextPrimer(
-            {
-              issueId: input.issueId,
-              issueTitle: issue.title,
-              issueDescription: issue.description,
-              projectId: issue.projectId,
-              repoPath: project.repoPath,
-            },
-            database,
-          );
-          if (packed.primer.trim()) contextPrimer = packed.primer;
-        } catch (err) {
-          console.warn(`[workspaces] context-packer failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
-        }
+        contextPrimer = await packContextPrimer(input, issue, project);
         timing("context-packer", t);
       }
 
-      // Inject ticket details (+ optional context primer) into the worktree as
-      // `CLAUDE.local.md` so the agent's first turn has the spec without foraging.
-      // Gitignored — never enters the merge. Best-effort: a write failure must not
-      // block workspace creation. Skipped for direct workspaces.
-      let ticketContextPath: string | null = null;
-      if (!isDirect && worktreePath) {
-        // Inject the project's detected stack profile so the builder runs the real
-        // build/test/dev commands from turn 1 instead of guessing them (best-effort).
-        let stackProfile = null;
-        try {
-          stackProfile = await getStackProfile(issue.projectId, database);
-        } catch (err) {
-          console.warn(`[workspaces] stack-profile read failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
-        }
-        ticketContextPath = await writeTicketContextFile(worktreePath, {
-          issueNumber: issue.issueNumber,
-          title: issue.title,
-          description: issue.description,
-          contextPrimer,
-          stackProfile,
-        });
-      }
-
-      let agentPrompt = buildAgentPrompt(issue, { ...input, includeVisualProof }, input.issueId);
-
-      // Resolve the issue's configurable workflow (if any). The start node's
-      // guidance + valid transitions are injected into the prompt, and its
-      // attached skill is used when the caller didn't pick one explicitly.
-      const workflowStart = await resolveWorkflowStart(database, input.issueId);
-      let effectiveSkillId = skillId;
-      let effectiveDiskSkill = input.skillName ?? null;
-      if (workflowStart) {
-        agentPrompt += `\n\n${buildTransitionBlock(workflowStart.node, workflowStart.transitions, id)}`;
-        if (!effectiveSkillId && !effectiveDiskSkill) {
-          effectiveSkillId = workflowStart.node.skillId ?? null;
-          effectiveDiskSkill = workflowStart.node.skillName ?? null;
-        }
-      }
-
-      // Fall back to the project-level default skill so Insights "By Skill" can
-      // attribute sessions even when no explicit skill was chosen and the issue has
-      // no workflow that provides one.
-      if (!effectiveSkillId && !effectiveDiskSkill && project.defaultSkillId) {
-        effectiveSkillId = project.defaultSkillId;
-      }
-
-      const skillName = worktreePath
-        ? await resolveSkillFile(effectiveSkillId, effectiveDiskSkill, worktreePath, project.repoPath)
+      // Inject ticket details (+ optional context primer + stack profile) into the
+      // worktree as a gitignored `CLAUDE.local.md`. Skipped for direct workspaces.
+      const ticketContextPath = !isDirect && worktreePath
+        ? await writeWorktreeTicketContext(worktreePath, issue, contextPrimer)
         : null;
+
+      const { agentPrompt, skillName, effectiveSkillId, hasWorkflowStart } = await resolveAgentPromptAndSkill({
+        issue, input, includeVisualProof, workspaceId: id, worktreePath, project, skillId,
+      });
 
       const agentConfig = await buildAgentConfig(input, issue.projectId);
       claudeProfile = agentConfig.claudeProfile;
@@ -708,7 +796,7 @@ exit 1
 
       // Place the workspace on the workflow start node + sync the derived status.
       // Falls back to the legacy "In Progress" move when the issue has no workflow.
-      if (workflowStart) {
+      if (hasWorkflowStart) {
         await initWorkspaceWorkflow(database, { workspaceId: id, issueId: input.issueId }).catch(() =>
           moveIssueToInProgress(input.issueId, issue.projectId, now, database),
         );
@@ -736,33 +824,7 @@ exit 1
         contextFiles: ticketContextPath ? [ticketContextPath] : undefined,
         skillName,
       };
-      setImmediate(() => {
-        const t = Date.now();
-        void launchAgent(agentLaunchArgs)
-          .then(() => timing("agent-launch", t))
-          .catch((err: unknown) => {
-            const errorMsg = err instanceof Error ? err.message : String(err);
-            const staleSafetyPolicy =
-              err instanceof WorkspaceError && err.data?.code === "STALE_SAFETY_POLICY";
-            const persistedError = staleSafetyPolicy ? `STALE_SAFETY_POLICY: ${errorMsg}` : errorMsg;
-            const nextStatus = staleSafetyPolicy ? "error" : "idle";
-            console.error(`[workspaces] deferred agent launch failed for workspace ${id}: ${errorMsg}`);
-            if (staleSafetyPolicy) {
-              emitButlerSystemEvent({
-                projectId: issue.projectId,
-                kind: "workspace_error",
-                workspaceId: id,
-                text: `Workspace launch blocked by stale safety policy for ${id}: ${errorMsg.slice(0, 200)}`,
-              });
-            }
-            crudRepo.updateWorkspaceLaunchFailure(id, {
-              status: nextStatus,
-              latestLaunchError: persistedError,
-              updatedAt: new Date().toISOString(),
-            }, database)
-              .catch((dbErr: unknown) => console.warn(`[workspaces] failed to update workspace status after deferred launch failure: ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`));
-          });
-      });
+      scheduleDeferredAgentLaunch(agentLaunchArgs, { workspaceId: id, projectId: issue.projectId, timing });
 
       return {
         id,
