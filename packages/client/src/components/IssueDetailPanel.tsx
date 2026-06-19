@@ -3,16 +3,12 @@ import ReactMarkdown from "react-markdown";
 import type { IssueArtifact, IssueWithStatus, UpdateIssueRequest, DependencyInfo, MilestoneResponse } from "@agentic-kanban/shared";
 import { apiFetch, apiPost, apiPatch, apiDelete } from "../lib/api.js";
 import { isHttpUrl } from "../lib/url.js";
-import { formatRelativeTime, formatAbsoluteTime } from "../lib/formatRelativeTime.js";
-import { IssueActivitySection, type ActivityEvent } from "./IssueActivitySection.js";
-import { StatusTransitionTimeline } from "./StatusTransitionTimeline.js";
 import { showToast } from "./Toast.js";
 import { MoveToDoneDialog } from "./MoveToDoneDialog.js";
 import { DependencyImpactDialog } from "./DependencyImpactDialog.js";
 import { MarkdownToolbar } from "./MarkdownToolbar.js";
 import { WorkflowProgress } from "./WorkflowProgress.js";
 import { isSpecPlanningPhase, SpecPhasePanel } from "./SpecPhasePanel.js";
-import { WorkspaceArtifactsBrowser } from "./WorkspaceArtifactsBrowser.js";
 import { EpicDecomposerModal } from "./EpicDecomposerModal.js";
 import { ShowdownDialog } from "./ShowdownDialog.js";
 import { ShowdownPanel } from "./ShowdownPanel.js";
@@ -20,6 +16,7 @@ import { CompareAttemptsPanel } from "./CompareAttemptsPanel.js";
 import { usePanelLayout } from "../hooks/usePanelLayout.js";
 import { useIssueEditForm } from "../hooks/useIssueEditForm.js";
 import { useIssueDetailData, invalidateAvailableIssuesCache } from "../hooks/useIssueDetailData.js";
+import { IssueSecondaryDetails } from "./IssueSecondaryDetails.js";
 import type { TrailEntry } from "../hooks/useTicketTrail.js";
 import { TicketTrailStrip } from "./TicketTrailStrip.js";
 import { IssueCycleTimeBadge } from "./IssueCycleTimeBadge.js";
@@ -28,14 +25,9 @@ import { useIssueDisplayData } from "../hooks/useIssueDisplayData.js";
 import { useModalDrag } from "../hooks/useModalDrag.js";
 import { normalizeMarkdown } from "../lib/artifact-utils.js";
 import { issueArtifactKind } from "../lib/artifact-classifiers.js";
-import { DependencyDisplay } from "./DependencyDisplay.js";
-import { IssueDetailComments, type IssueComment } from "./IssueDetailComments.js";
-import { IssueChecklistSection } from "./IssueChecklistSection.js";
-import { IssueRelatedIssuesSection } from "./IssueRelatedIssuesSection.js";
-import { IssueTouchedFilesSection, type TouchedFile } from "./IssueTouchedFilesSection.js";
-import { IssueFollowUpSection } from "./IssueFollowUpSection.js";
-import { IssueArtifactsSection, copyIssueArtifactContent, openIssueArtifact } from "./IssueArtifactsSection.js";
-import { IssueMergedCommitsSection } from "./IssueMergedCommitsSection.js";
+import { type IssueComment } from "./IssueDetailComments.js";
+import { type TouchedFile } from "./IssueTouchedFilesSection.js";
+import { copyIssueArtifactContent, openIssueArtifact } from "./IssueArtifactsSection.js";
 import { CopyButton, CopyLinkButton } from "./IssueCopyButtons.js";
 
 // Re-exported so existing importers/tests keep working after the helpers moved
@@ -1293,169 +1285,37 @@ export function IssueDetailPanel({
           )}
 
           {/* ── Secondary detail sections ── */}
-          {/* Tags section - visible in both view and edit mode */}
-          <div className="border-t border-gray-100 dark:border-gray-800 pt-3">
-              <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">
-                Tags
-              </label>
-              <div className="flex flex-wrap gap-1.5">
-                {issueTags.map((tag) => (
-                  <span
-                    key={tag.id}
-                    className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300"
-                    style={tag.color ? { backgroundColor: tag.color + "22", color: tag.color } : undefined}
-                  >
-                    {tag.name}
-                    <button
-                      onClick={async () => {
-                        try {
-                          await apiDelete(`/api/issues/${issue.id}/tags/${tag.id}`);
-                          setIssueTags((prev) => prev.filter((t) => t.id !== tag.id));
-                        } catch {
-                          showToast("Failed to remove tag", "error");
-                        }
-                      }}
-                      className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
-                    >
-                      &times;
-                    </button>
-                  </span>
-                ))}
-                {allTags.filter((t) => !issueTags.some((it) => it.id === t.id)).length > 0 && (
-                  <select
-                    className="text-xs border border-gray-300 dark:border-gray-600 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                    value=""
-                    onChange={async (e) => {
-                      const tagId = e.target.value;
-                      if (!tagId) return;
-                      try {
-                        await apiPost(`/api/issues/${issue.id}/tags`, { tagId });
-                        const tag = allTags.find((t) => t.id === tagId);
-                        if (tag) setIssueTags((prev) => [...prev, tag]);
-                      } catch {
-                        showToast("Failed to add tag", "error");
-                      }
-                    }}
-                  >
-                    <option value="">+ Add tag</option>
-                    {allTags
-                      .filter((t) => !issueTags.some((it) => it.id === t.id))
-                      .map((tag) => (
-                        <option key={tag.id} value={tag.id}>{tag.name}</option>
-                      ))}
-                  </select>
-                )}
-              </div>
-            </div>
-
-          {/* Acceptance Criteria Checklist section */}
-          <IssueChecklistSection issueId={issue.id} initialChecklist={issue.checklist} />
-
-          {/* Dependencies section */}
-          <DependencyDisplay
+          <IssueSecondaryDetails
             issue={issue}
+            editing={editing}
+            issueTags={issueTags}
+            setIssueTags={setIssueTags}
+            allTags={allTags}
             dependencies={dependencies}
             setDependencies={setDependencies}
             availableIssues={availableIssues}
             onIssueUpdate={onIssueUpdate}
             onNavigateToIssue={onNavigateToIssue}
             onViewInGraph={onViewInGraph}
-          />
-
-          {/* Touched Files section */}
-          <IssueTouchedFilesSection
-            issueId={issue.id}
-            onAppendToDescription={handleAppendTouchedFilesToDescription}
-          />
-
-          {/* Related Issues section */}
-          <IssueRelatedIssuesSection issueId={issue.id} onNavigateToIssue={onNavigateToIssue} />
-
-          {/* Follow-up task creation */}
-          <IssueFollowUpSection
-            parentIssueId={issue.id}
-            projectId={issue.projectId}
-            onCreated={() => invalidateAvailableIssuesCache(issue.projectId)}
-          />
-
-          {!editing && (
-            <IssueArtifactsSection
-              artifacts={artifacts}
-              loading={artifactsLoading}
-              expandedArtifactId={expandedArtifactId}
-              deletingArtifactId={deletingArtifactId}
-              onOpen={handleOpenArtifact}
-              onCopy={handleCopyArtifact}
-              onDelete={handleDeleteArtifact}
-            />
-          )}
-
-          {/* Status transition timeline */}
-          {!editing && (
-            <StatusTransitionTimeline
-              events={activityEvents}
-              loading={activityLoading}
-              currentStatusName={issue.statusName}
-            />
-          )}
-
-          {/* Activity feed */}
-          {!editing && (
-            <IssueActivitySection
-              events={activityEvents}
-              loading={activityLoading}
-              issueTitle={issue.title}
-              issueNumber={issue.issueNumber}
-              currentStatusName={issue.statusName}
-            />
-          )}
-
-          {/* Merged commits that landed on the default branch for this issue */}
-          {!editing && (
-            <IssueMergedCommitsSection
-              issueId={issue.id}
-              onOpenDiff={(commit) => onManageWorkspaces(issue, commit.workspaceId)}
-            />
-          )}
-
-          {/* Workspace Files section — browses the latest workspace's working directory */}
-          {!editing && (
-            <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
-              <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-2">
-                Workspace Files
-              </label>
-              {issue.workspaceSummary?.main ? (
-                <WorkspaceArtifactsBrowser workspaceId={issue.workspaceSummary.main.id} />
-              ) : (
-                <p className="text-xs text-gray-400 dark:text-gray-500">No workspace yet. Start a workspace to see generated files.</p>
-              )}
-            </div>
-          )}
-
-          {/* System comments + user discussion — extracted to IssueDetailComments */}
-          <IssueDetailComments
-            issue={issue}
-            editing={editing}
+            onAppendTouchedFiles={handleAppendTouchedFilesToDescription}
+            artifacts={artifacts}
+            artifactsLoading={artifactsLoading}
+            expandedArtifactId={expandedArtifactId}
+            deletingArtifactId={deletingArtifactId}
+            onOpenArtifact={handleOpenArtifact}
+            onCopyArtifact={handleCopyArtifact}
+            onDeleteArtifact={handleDeleteArtifact}
+            activityEvents={activityEvents}
+            activityLoading={activityLoading}
+            onManageWorkspaces={onManageWorkspaces}
             comments={comments}
             newNoteBody={newNoteBody}
             submittingNote={submittingNote}
             deletingCommentId={deletingCommentId}
-            onManageWorkspaces={onManageWorkspaces}
             onDeleteComment={handleDeleteComment}
             onAddNote={handleAddNote}
             onNewNoteBodyChange={setNewNoteBody}
           />
-
-          {/* Timestamps */}
-          <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
-            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-400 dark:text-gray-500">
-              <span title={formatAbsoluteTime(issue.createdAt)}>Created {formatRelativeTime(issue.createdAt)}</span>
-              <span title={formatAbsoluteTime(issue.updatedAt)}>Updated {formatRelativeTime(issue.updatedAt)}</span>
-              {issue.statusChangedAt && (
-                <span title={formatAbsoluteTime(issue.statusChangedAt)}>Moved to <span className="text-gray-500 dark:text-gray-400 font-medium">{issue.statusName}</span> {formatRelativeTime(issue.statusChangedAt)}</span>
-              )}
-            </div>
-          </div>
         </div>
 
         {/* Edit mode actions — shown in footer when editing */}
