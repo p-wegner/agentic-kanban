@@ -10,6 +10,7 @@ import { useBoardLiveHandlers } from "../hooks/useBoardLiveHandlers.js";
 import { useBoardPanelNavigation } from "../hooks/useBoardPanelNavigation.js";
 import { useProjectManagement } from "../hooks/useProjectManagement.js";
 import { useBoardFilters } from "../hooks/useBoardFilters.js";
+import { useBoardIssueActions } from "../hooks/useBoardIssueActions.js";
 import { stringifyForIssueCard, deferUntilIdle } from "../lib/boardCardSnapshot.js";
 import { BoardKanbanView } from "../components/BoardKanbanView.js";
 import { RecentlyMergedStrip } from "../components/RecentlyMergedStrip.js";
@@ -25,13 +26,10 @@ const IssueDetailPanel = lazy(() => import("../components/IssueDetailPanel.js").
 const WorkspacePanel = lazy(() => import("../components/WorkspacePanel.js").then((m) => ({ default: m.WorkspacePanel })));
 import { SkeletonBoard } from "../components/SkeletonBoard.js";
 import { ToastContainer, showToast } from "../components/Toast.js";
-import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { MentionProvider } from "../lib/MentionContext.js";
-import { apiFetch, apiPost, apiPatch, apiDelete } from "../lib/api.js";
-import { getSettings } from "../lib/settingsStore.js";
+import { apiFetch, apiPost } from "../lib/api.js";
 import { setBoardDragData, getBoardDragData } from "../lib/dragData.js";
 import { matchesBoardFilters } from "../lib/boardFiltering.js";
-import { runCreateIssueFlow, type CreateIssuePayload } from "../lib/createIssueService.js";
 import { applyLocalReorder, moveIssueToStatus } from "../lib/issueMoveHelpers.js";
 import { createQuickUpdateHandlers } from "../lib/issueQuickUpdates.js";
 import { useColumnResize } from "../lib/columnResizeHandler.js";
@@ -501,53 +499,6 @@ export function BoardPage() {
     loadProjects,
   });
 
-  async function handleCreateIssue(data: CreateIssuePayload) {
-    await runCreateIssueFlow(data, {
-      columns,
-      columnsRef,
-      pendingBoardRefreshRef,
-      activeProject,
-      setMutating,
-      setError,
-      setColumns,
-      setCreatingInColumnId,
-      setExpandedCreatePanel,
-      setPendingIssueIds,
-      setPendingWorkspaceIssueIds,
-      setWorkspaceIssue,
-      setWorkspaceInitial,
-      refetchBoard,
-    });
-  }
-
-  async function handleUpdateIssue(id: string, data: UpdateIssueRequest) {
-    setMutating(true);
-    setError(null);
-    try {
-      await apiPatch(`/api/issues/${id}`, data);
-      await refetchBoard();
-      showToast("Issue updated", "success");
-    } catch {
-      showToast("Failed to update issue", "error");
-    } finally {
-      setMutating(false);
-    }
-  }
-
-  async function handleDeleteIssue(id: string) {
-    setMutating(true);
-    setError(null);
-    try {
-      await apiDelete(`/api/issues/${id}`);
-      setSelectedIssue(null);
-      await refetchBoard();
-      showToast("Issue deleted", "success");
-    } catch {
-      showToast("Failed to delete issue", "error");
-    } finally {
-      setMutating(false);
-    }
-  }
 
   const { handleQuickPriorityChange, handleQuickAddTag, handleQuickRemoveTag, handleQuickTogglePinned } =
     createQuickUpdateHandlers({ columnsRef, setColumns, allTags, refetchBoard });
@@ -593,58 +544,6 @@ export function BoardPage() {
     handleViewModeChange,
   });
 
-  async function handleDropOnAgentSlot(issue: IssueWithStatus) {
-    if (!activeProject) return;
-
-    // Guard: reject if already at or over capacity
-    const activeCount = columns
-      .flatMap((col) => col.issues)
-      .filter((i) => {
-        const s = i.workspaceSummary?.main?.status;
-        return s === "active" || s === "fixing";
-      }).length;
-    if (activeAgentsTarget !== undefined && activeCount >= activeAgentsTarget) {
-      showToast(`Agent capacity reached (${activeAgentsTarget} active). Stop a running workspace first.`, "error");
-      return;
-    }
-
-    setPendingWorkspaceIssueIds((prev) => new Set([...prev, issue.id]));
-    try {
-      const s = await getSettings();
-      const provider = (s.provider as "claude" | "codex" | "copilot") || "claude";
-      const profileName = provider === "codex"
-        ? (s.codex_profile || "default")
-        : provider === "copilot"
-        ? (s.copilot_profile || "default")
-        : (s.claude_profile || "default");
-
-      const branch = suggestBranchName(issue);
-      const body: Record<string, unknown> = {
-        issueId: issue.id,
-        branch,
-        requiresReview: s.auto_review !== "false",
-        planMode: issue.priority === "high" || issue.priority === "critical",
-        isDirect: false,
-        profile: { provider, name: profileName },
-      };
-      if (s.default_model) body.model = s.default_model;
-
-      const result = await apiPost<{ id: string; sessionId?: string }>("/api/workspaces", body);
-      await refetchBoard();
-      // Open the new workspace in the panel
-      setWorkspaceIssue(issue);
-      setWorkspaceInitial({ workspaceId: result.id, sessionId: result.sessionId ?? "" });
-      setWorkspaceOpenCreate(false);
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to start workspace", "error");
-    } finally {
-      setPendingWorkspaceIssueIds((prev) => {
-        const next = new Set(prev);
-        next.delete(issue.id);
-        return next;
-      });
-    }
-  }
 
   const [showBlocked, setShowBlocked] = useState(false);
   const [showStaleOnly, setShowStaleOnly] = useState(false);
@@ -923,6 +822,12 @@ export function BoardPage() {
   }
 
   const activeProject = projects.find((p) => p.id === activeProjectId);
+  const { handleCreateIssue, handleUpdateIssue, handleDeleteIssue, handleDropOnAgentSlot } = useBoardIssueActions({
+    activeProject: activeProject ?? null, activeAgentsTarget, columns, columnsRef, pendingBoardRefreshRef,
+    refetchBoard, setColumns, setCreatingInColumnId, setError, setExpandedCreatePanel,
+    setMutating, setPendingIssueIds, setPendingWorkspaceIssueIds, setSelectedIssue,
+    setWorkspaceInitial, setWorkspaceIssue, setWorkspaceOpenCreate,
+  });
   const canStartWorkspace = !!activeProject?.repoPath;
 
   function handleNotificationEventClick(event: NotificationEvent) {
