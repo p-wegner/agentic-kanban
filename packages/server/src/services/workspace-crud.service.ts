@@ -855,11 +855,19 @@ exit 1
     }
   }
 
-  async function deleteWorkspace(workspaceId: string): Promise<void> {
+  /**
+   * Stop (graceful) then hard-kill the process TREE for every RUNNING session of a
+   * workspace. The graceful stop only kills the main agent process; its descendants
+   * (git / powershell / node) keep open file handles inside the worktree, which makes
+   * the recursive directory removal race and fail on Windows (EBUSY/EPERM/ENOTEMPTY).
+   * So the whole tree must die BEFORE the worktree is removed.
+   */
+  async function stopAndKillWorkspaceSessions(workspaceId: string): Promise<void> {
     const wsSessions = await crudRepo.getSessionsForWorkspace(workspaceId, database);
-
     const runningSessions = wsSessions.filter(s => s.status === "running");
-    if (getSessionManager && runningSessions.length > 0) {
+    if (runningSessions.length === 0) return;
+
+    if (getSessionManager) {
       for (const s of runningSessions) {
         // Graceful stop first (lets the agent flush + lets the session manager
         // mark the DB status as user-stopped).
@@ -867,12 +875,6 @@ exit 1
       }
     }
 
-    // Hard-kill the agent process TREE for every running session BEFORE removing the
-    // worktree. The graceful stop above only kills the main agent process; its
-    // descendant processes (git / powershell / node spawned by the agent) keep
-    // running and hold open file handles inside the worktree, which makes the
-    // recursive directory removal race and fail on Windows (EBUSY/EPERM/ENOTEMPTY),
-    // leaving the worktree + branch registration behind.
     for (const s of runningSessions) {
       try {
         // `kill` taskkills the whole process tree (taskkill /T /F on Windows) using
@@ -886,6 +888,69 @@ exit 1
         console.warn(`[workspaces] failed to hard-kill session ${s.id} (pid=${s.pid ?? "?"})`, err);
       }
     }
+  }
+
+  /**
+   * Tear down and remove a workspace's worktree + its feature branch. Frees dir/port
+   * holders first (teardownWorktree) to avoid the Windows EBUSY removal race, then
+   * removes via git (authoritative — also deletes the directory) with a retrying
+   * directory-removal + prune fallback, and finally deletes the feature branch so the
+   * next create re-cuts it from an up-to-date base (#781/#778). Every step is
+   * best-effort and never throws.
+   */
+  async function removeWorktreeAndBranch(params: {
+    workingDir: string;
+    repoPath: string;
+    isDirect: boolean;
+    branch?: string | null;
+    teardownScript?: string | null;
+    setupEnabled?: boolean | null;
+  }): Promise<void> {
+    const { workingDir, repoPath, isDirect, branch, teardownScript, setupEnabled } = params;
+
+    // Free everything the worktree spun up BEFORE removing it: dir procs + the
+    // worktree's dev ports + the project's generic teardownScript. Killing the
+    // dir/port holders first also prevents the EBUSY/ENOTEMPTY removal race.
+    await teardownWorktree({ workingDir, branch, isDirect, teardownScript, setupEnabled, label: "delete" });
+
+    // Use git as the authoritative step to drop the worktree registration + branch
+    // (`git worktree remove --force` also deletes the directory). This succeeds even
+    // when a stray file handle survives, and unlike `git worktree prune` it does not
+    // require the directory to already be gone.
+    let removed = false;
+    try {
+      await gitService.removeWorktree(repoPath, workingDir);
+      removed = true;
+    } catch (err) {
+      console.warn(`[workspaces] git worktree remove failed for ${workingDir} — retrying directory removal`, err);
+    }
+
+    // Fall back to (or follow up with) a retrying directory removal. Windows releases
+    // file handles asynchronously after a process dies, so a transient lock right
+    // after the kill should not be treated as a permanent failure.
+    const dirRemoved = await removeDirWithRetry(workingDir);
+
+    // Final fallback: prune dangling registrations whose directory is now gone.
+    await gitService.pruneWorktrees(repoPath).catch(() => {});
+
+    if (!removed && !dirRemoved) {
+      console.warn(`[workspaces] failed to fully clean up worktree at ${workingDir} — manual cleanup may be required`);
+    }
+
+    // Drop the feature branch too (#781). Removing only the worktree leaves the
+    // branch behind; if a dependent issue is later recreated, createWorktree's reuse
+    // path keeps that existing branch as-is and never re-cuts it from an up-to-date
+    // base — reproducing the #778 "built against a pre-merge base" symptom. Only for
+    // non-direct workspaces (direct ones run on the project's own branch, never delete it).
+    if (branch) {
+      await gitService.deleteBranch(repoPath, branch, { force: true }).catch((err) => {
+        console.warn(`[workspaces] could not delete branch ${branch} after worktree removal (non-fatal)`, err);
+      });
+    }
+  }
+
+  async function deleteWorkspace(workspaceId: string): Promise<void> {
+    await stopAndKillWorkspaceSessions(workspaceId);
 
     const wsRow = await crudRepo.getWorkspaceDeletionContext(workspaceId, database);
     const workingDir = wsRow[0]?.workingDir;
@@ -908,56 +973,14 @@ exit 1
     }
 
     if (workingDir && !isDirect && repoPath && !sharedByOthers) {
-      // Free everything the worktree spun up BEFORE removing it: dir procs + the
-      // worktree's dev ports + the project's generic teardownScript. Killing the
-      // dir/port holders first also prevents the EBUSY/ENOTEMPTY removal race.
-      await teardownWorktree({
+      await removeWorktreeAndBranch({
         workingDir,
-        branch: wsRow[0]?.branch,
+        repoPath,
         isDirect,
+        branch: wsRow[0]?.branch,
         teardownScript: wsRow[0]?.teardownScript,
         setupEnabled: wsRow[0]?.setupEnabled,
-        label: "delete",
       });
-
-      // Use git as the authoritative step to drop the worktree registration + branch
-      // (`git worktree remove --force` also deletes the directory). This succeeds even
-      // when a stray file handle survives, and unlike `git worktree prune` it does not
-      // require the directory to already be gone.
-      let removed = false;
-      try {
-        await gitService.removeWorktree(repoPath, workingDir);
-        removed = true;
-      } catch (err) {
-        console.warn(`[workspaces] git worktree remove failed for ${workingDir} — retrying directory removal`, err);
-      }
-
-      // Fall back to (or follow up with) a retrying directory removal. Windows releases
-      // file handles asynchronously after a process dies, so a transient lock right
-      // after the kill should not be treated as a permanent failure.
-      const dirRemoved = await removeDirWithRetry(workingDir);
-
-      // Final fallback: prune dangling registrations whose directory is now gone.
-      await gitService.pruneWorktrees(repoPath).catch(() => {});
-
-      if (!removed && !dirRemoved) {
-        console.warn(`[workspaces] failed to fully clean up worktree at ${workingDir} — manual cleanup may be required`);
-      }
-
-      // Drop the feature branch too (#781). Removing only the worktree leaves the
-      // branch behind; if a dependent issue is later recreated, createWorktree's
-      // reuse path keeps that existing branch as-is and never re-cuts it from an
-      // up-to-date base — reproducing the #778 "built against a pre-merge base"
-      // symptom. Deleting the branch here forces the next create onto the
-      // fresh-branch path (cut from the resolved base). Best-effort: a failure to
-      // delete must never block workspace deletion. Only for non-direct workspaces
-      // (direct ones run on the project's own branch, e.g. master — never delete it).
-      const branchToDelete = wsRow[0]?.branch;
-      if (branchToDelete) {
-        await gitService.deleteBranch(repoPath, branchToDelete, { force: true }).catch((err) => {
-          console.warn(`[workspaces] could not delete branch ${branchToDelete} after worktree removal (non-fatal)`, err);
-        });
-      }
     }
 
     if (deletedProjectId) boardEvents?.broadcast(deletedProjectId, "workspace_closed");
