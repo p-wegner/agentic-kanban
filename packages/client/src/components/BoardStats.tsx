@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { StatusWithIssues } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
+import { computeBoardStats } from "../lib/boardStats.js";
 
 interface BoardStatsProps {
   activeColumns: StatusWithIssues[];
@@ -35,33 +36,17 @@ export function BoardStats({
   projectId,
 }: BoardStatsProps) {
   const isFiltered = !!searchQuery;
-  const allColumns = [...activeColumns, ...archiveColumns];
-  const totalActive = activeColumns.reduce((sum, col) => sum + col.count, 0);
-  const totalArchive = archiveColumns.reduce((sum, col) => sum + col.count, 0);
-  const total = totalActive + totalArchive;
-
-  const doneCount = archiveColumns.find((c) => c.name === "Done")?.count ?? 0;
-  const cancelledCount = archiveColumns.find((c) => c.name === "Cancelled")?.count ?? 0;
-  const nonCancelledTotal = total - cancelledCount;
-  const completionPct = nonCancelledTotal > 0 ? Math.round((doneCount / nonCancelledTotal) * 100) : 0;
-
-  // Active workspace counts
-  const activeWorkspaces = activeColumns.reduce((sum, col) => {
-    return sum + col.issues.filter((i) => {
-      const ws = i.workspaceSummary?.main;
-      return ws?.status === "active" || ws?.status === "reviewing";
-    }).length;
-  }, 0);
-
-  const profileCounts = new Map<string, number>();
-  for (const col of activeColumns) {
-    for (const issue of col.issues) {
-      const wsMain = (issue as any).workspaceSummary?.main;
-      // Prefer tagged profile, fall back to legacy claudeProfile string
-      const profile = wsMain?.profile?.name ?? wsMain?.claudeProfile;
-      if (profile) profileCounts.set(profile, (profileCounts.get(profile) ?? 0) + 1);
-    }
-  }
+  const {
+    allColumns,
+    totalActive,
+    total,
+    doneCount,
+    cancelledCount,
+    nonCancelledTotal,
+    completionPct,
+    activeWorkspaces,
+    profileCounts,
+  } = computeBoardStats(activeColumns, archiveColumns);
 
   const [commitCount, setCommitCount] = useState<number | null>(null);
   const [commitBranch, setCommitBranch] = useState<string | null>(null);
