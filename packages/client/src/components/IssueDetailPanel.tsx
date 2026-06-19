@@ -1,9 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { IssueArtifact, IssueWithStatus, UpdateIssueRequest, DependencyInfo, MilestoneResponse } from "@agentic-kanban/shared";
-import { apiFetch, apiPost, apiPatch, apiDelete } from "../lib/api.js";
 import { isHttpUrl } from "../lib/url.js";
-import { showToast } from "./Toast.js";
 import { MoveToDoneDialog } from "./MoveToDoneDialog.js";
 import { DependencyImpactDialog } from "./DependencyImpactDialog.js";
 import { MarkdownToolbar } from "./MarkdownToolbar.js";
@@ -17,6 +15,7 @@ import { usePanelLayout } from "../hooks/usePanelLayout.js";
 import { useIssueEditForm } from "../hooks/useIssueEditForm.js";
 import { useIssueDetailData, invalidateAvailableIssuesCache } from "../hooks/useIssueDetailData.js";
 import { useIssueInlineEdit } from "../hooks/useIssueInlineEdit.js";
+import { useIssueActions } from "../hooks/useIssueActions.js";
 import { IssueSecondaryDetails } from "./IssueSecondaryDetails.js";
 import type { TrailEntry } from "../hooks/useTicketTrail.js";
 import { TicketTrailStrip } from "./TicketTrailStrip.js";
@@ -25,7 +24,6 @@ import { IssueWorkLogSection } from "./IssueWorkLogSection.js";
 import { useIssueDisplayData } from "../hooks/useIssueDisplayData.js";
 import { useModalDrag } from "../hooks/useModalDrag.js";
 import { normalizeMarkdown } from "../lib/artifact-utils.js";
-import { issueArtifactKind } from "../lib/artifact-classifiers.js";
 import { type IssueComment } from "./IssueDetailComments.js";
 import { type TouchedFile } from "./IssueTouchedFilesSection.js";
 import { copyIssueArtifactContent, openIssueArtifact } from "./IssueArtifactsSection.js";
@@ -111,7 +109,7 @@ export function IssueDetailPanel({
   const {
     workspaceCount,
     issueTags, setIssueTags,
-    allTags,
+    allTags, setAllTags,
     dependencies, setDependencies,
     availableIssues,
     availableSkills,
@@ -228,205 +226,21 @@ export function IssueDetailPanel({
     return () => document.removeEventListener("mousedown", handleClick);
   }, [confirmDelete]);
 
-  async function handleQuickEstimate(value: string) {
-    const newEstimate = (value === issue.estimate ? null : value) as UpdateIssueRequest["estimate"];
-    await onUpdate(issue.id, { estimate: newEstimate });
-  }
-
-  async function handleTogglePinned() {
-    await onUpdate(issue.id, { pinned: !issue.pinned });
-  }
-
-  async function handleDuplicate() {
-    if (duplicating) return;
-    setDuplicating(true);
-    try {
-      const result = await apiPost<{ id: string; issueNumber: number; title: string }>(`/api/issues/${issue.id}/duplicate`);
-      invalidateAvailableIssuesCache(issue.projectId);
-      showToast(`Duplicated as #${result.issueNumber}`, "success");
-      onNavigateToIssue?.(result.id);
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Duplicate failed", "error");
-    } finally {
-      setDuplicating(false);
-    }
-  }
-
-  function handleAppendTouchedFilesToDescription(touchedFiles: TouchedFile[]) {
-    if (touchedFiles.length === 0) return;
-    const section = "\n\n## Files touched\n" + touchedFiles.map(f => `- ${f.path}`).join("\n");
-    const newDescription = (description || "") + section;
-    setDescription(newDescription);
-    setEditing(true);
-    showToast("Appended to description — save to persist");
-  }
-
-  async function handleCopyArtifact(artifact: IssueArtifact) {
-    try {
-      const copied = await copyIssueArtifactContent(artifact);
-      if (!copied) throw new Error("Clipboard API unavailable");
-      showToast("Artifact copied", "success");
-    } catch {
-      window.prompt("Copy artifact", artifact.content);
-    }
-  }
-
-  function handleOpenArtifact(artifact: IssueArtifact) {
-    if (artifact.type === "text") {
-      setExpandedArtifactId((current) => current === artifact.id ? null : artifact.id);
-      return;
-    }
-    if (!openIssueArtifact(artifact)) {
-      setExpandedArtifactId((current) => current === artifact.id ? null : artifact.id);
-    }
-  }
-
-  async function handleDeleteArtifact(artifact: IssueArtifact) {
-    if (deletingArtifactId) return;
-    if (!window.confirm(`Delete artifact "${issueArtifactKind(artifact)}"? This cannot be undone.`)) return;
-    setDeletingArtifactId(artifact.id);
-    try {
-      await apiDelete(`/api/issues/${issue.id}/artifacts/${artifact.id}`);
-      setArtifacts((prev) => prev.filter((item) => item.id !== artifact.id));
-      setExpandedArtifactId((current) => current === artifact.id ? null : current);
-      showToast("Artifact deleted", "success");
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to delete artifact", "error");
-    } finally {
-      setDeletingArtifactId(null);
-    }
-  }
-
-  async function handleAddNote() {
-    const body = newNoteBody.trim();
-    if (!body || submittingNote) return;
-    const optimisticId = `optimistic-${Date.now()}`;
-    const optimistic: IssueComment = {
-      id: optimisticId,
-      issueId: issue.id,
-      workspaceId: null,
-      kind: "note",
-      author: "user",
-      body,
-      payload: null,
-      createdAt: new Date().toISOString(),
-    };
-    setComments((prev) => [...prev, optimistic]);
-    setNewNoteBody("");
-    setSubmittingNote(true);
-    try {
-      const created = await apiPost<IssueComment>(`/api/issues/${issue.id}/comments`, { body, kind: "note", author: "user" });
-      setComments((prev) => prev.map((c) => c.id === optimisticId ? created : c));
-    } catch (err) {
-      setComments((prev) => prev.filter((c) => c.id !== optimisticId));
-      setNewNoteBody(body);
-      showToast(err instanceof Error ? err.message : "Failed to add comment", "error");
-    } finally {
-      setSubmittingNote(false);
-    }
-  }
-
-  async function handleDeleteComment(commentId: string) {
-    if (deletingCommentId) return;
-    setDeletingCommentId(commentId);
-    try {
-      await apiDelete(`/api/issues/${issue.id}/comments/${commentId}`);
-      setComments((prev) => prev.filter((c) => c.id !== commentId));
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to delete comment", "error");
-    } finally {
-      setDeletingCommentId(null);
-    }
-  }
-
-  const VISUAL_VERIFY_TAG = "needs-visual-verification";
-  const isVisualVerify = issueTags.some((t) => t.name === VISUAL_VERIFY_TAG);
-
-  async function toggleVisualVerify() {
-    if (togglingVisualVerify) return;
-    setTogglingVisualVerify(true);
-    try {
-      if (isVisualVerify) {
-        const tag = issueTags.find((t) => t.name === VISUAL_VERIFY_TAG)!;
-        await apiDelete(`/api/issues/${issue.id}/tags/${tag.id}`);
-        setIssueTags((prev) => prev.filter((t) => t.name !== VISUAL_VERIFY_TAG));
-        showToast("Removed visual verify tag");
-      } else {
-        // The needs-visual-verification tag is a builtin always present after server start.
-        // Re-fetch from API if it's somehow missing from the local cache.
-        let tag = allTags.find((t) => t.name === VISUAL_VERIFY_TAG);
-        if (!tag) {
-          const freshTags = await apiFetch<{ id: string; name: string; color: string | null }[]>("/api/tags");
-          setAllTags(freshTags);
-          tag = freshTags.find((t) => t.name === VISUAL_VERIFY_TAG);
-        }
-        if (!tag) {
-          throw new Error(`Built-in tag "${VISUAL_VERIFY_TAG}" not found`);
-        }
-        await apiPost(`/api/issues/${issue.id}/tags`, { tagId: tag.id });
-        setIssueTags((prev) => [...prev, tag!]);
-        showToast("Marked for visual verification", "success");
-      }
-    } catch {
-      showToast("Failed to toggle visual verify tag", "error");
-    } finally {
-      setTogglingVisualVerify(false);
-    }
-  }
-
-
-
-  async function handleStatusChange(newStatusId: string) {
-    if (newStatusId === issue.statusId) return;
-    const targetStatus = statuses.find((s) => s.id === newStatusId);
-    const hasDeps = dependencies.dependencies.length > 0;
-
-    const doMove = async () => {
-      const isArchive = targetStatus && ["Done", "Cancelled"].includes(targetStatus.name);
-      const ws = issue.workspaceSummary?.main;
-      if (isArchive && ws && ws.status !== "closed") {
-        setMoveToDonePending({
-          confirm: async () => {
-            await onUpdate(issue.id, { statusId: newStatusId });
-            setMoveToDonePending(null);
-          },
-        });
-        return;
-      }
-      try {
-        await onUpdate(issue.id, { statusId: newStatusId });
-      } catch {
-        showToast("Failed to change status", "error");
-      }
-    };
-
-    if (hasDeps && targetStatus) {
-      setDependencyImpactPending({
-        toStatusId: newStatusId,
-        toStatusName: targetStatus.name,
-        confirm: async () => {
-          setDependencyImpactPending(null);
-          await doMove();
-        },
-      });
-      return;
-    }
-
-    await doMove();
-  }
-
-  async function handleDelete() {
-    if (!confirmDelete) {
-      setConfirmDelete(true);
-      return;
-    }
-    setSaving(true);
-    try {
-      await onDelete(issue.id);
-    } finally {
-      setSaving(false);
-    }
-  }
+  const {
+    handleQuickEstimate, handleTogglePinned, handleDuplicate,
+    handleAppendTouchedFilesToDescription, handleCopyArtifact, handleOpenArtifact,
+    handleDeleteArtifact, handleAddNote, handleDeleteComment, handleStatusChange,
+    handleDelete, isVisualVerify, toggleVisualVerify,
+  } = useIssueActions({
+    issue, statuses, dependencies, allTags, issueTags, description, confirmDelete,
+    duplicating, submittingNote, togglingVisualVerify, deletingArtifactId,
+    deletingCommentId, newNoteBody, onUpdate, onDelete, onNavigateToIssue,
+    copyIssueArtifactContent, openIssueArtifact,
+    setAllTags, setArtifacts, setComments, setConfirmDelete, setDeletingArtifactId,
+    setDeletingCommentId, setDependencyImpactPending, setDescription, setDuplicating,
+    setEditing, setExpandedArtifactId, setIssueTags, setMoveToDonePending,
+    setNewNoteBody, setSaving, setSubmittingNote, setTogglingVisualVerify,
+  });
 
   function handleBackdropClick() {
     if (wasDraggingRef.current) return;
