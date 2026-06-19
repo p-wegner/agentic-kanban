@@ -33,6 +33,31 @@ import type { RateLimitProvider } from "./rate-limit-exit-decision.js";
 
 type WorkspaceRow = typeof workspaces.$inferSelect;
 
+/** Project status row, used by the session-exit workflow handlers. */
+type StatusRow = typeof projectStatuses.$inferSelect;
+
+/**
+ * Per-call context for the session-exit workflow. Loaded once by the dispatcher
+ * (`runWorkflowOnExit`) after the early short-circuits, then threaded to each
+ * scenario handler so they all share one snapshot of the workspace, prefs,
+ * project statuses and merge policy.
+ */
+interface ExitContext {
+  workspace: WorkspaceRow;
+  projectId: string;
+  issueId: string;
+  skipAutoReview: boolean;
+  sessionId: string;
+  exitCode: number | null;
+  now: string;
+  prefMap: Map<string, string>;
+  statuses: StatusRow[];
+  findStatus: (name: string) => StatusRow | undefined;
+  autoMergeEnabled: boolean;
+  defaultBranch: string | null;
+  autoMergeDisabledProjectIds: Set<string>;
+}
+
 /** Structural view of a profile-ring rotation result (shared by the Codex/Claude rings). */
 type RingRotationResult = { rotated: boolean; fromProfile: string; toProfile?: string; reason: string };
 
@@ -402,271 +427,309 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
           .map(([key]) => key.replace("auto_merge_disabled_", "")),
       );
 
-      if (fixAndMergeSessionIds.has(sessionId)) {
-        fixAndMergeSessionIds.delete(sessionId);
-        if (exitCode === 0) {
-          if (autoMergeDisabledProjectIds.has(projectId)) {
-            console.log(`[workflow] fix-and-merge session ${sessionId} completed but auto_merge_disabled for project ${projectId} — skipping retry merge`);
-            boardEvents.broadcast(projectId, "workspace_idle");
-          } else {
-            console.log(`[workflow] fix-and-merge session ${sessionId} completed  retrying merge`);
-            // autoMerge swallows its own conflict errors, so its return tells us nothing.
-            // The landing guard below is what verifies the branch actually merged.
-            await autoMerge(workspace, projectId, issueId, findStatus("Done")?.id ?? null, now);
-          }
-        } else {
-          console.log(`[workflow] fix-and-merge session ${sessionId} exited with code ${exitCode}  not retrying merge`);
-          boardEvents.broadcast(projectId, "workflow_error");
-          emitButlerSystemEvent({ projectId, kind: "merge_failed", workspaceId, text: `Fix-and-merge session for workspace ${workspaceId} exited with code ${exitCode}.` });
-        }
-        // #764: stranded-resolver guard. A fix-and-merge resolver can exit (any code) WITHOUT
-        // the branch landing — the concurrent-merge LOSER whose conflict against the moved base
-        // is real, so autoMerge's plumbing merge throws and is swallowed. Left unchecked the
-        // ticket ends up conflicted with NO open workspace to retry from (manual git recovery).
-        // Verify the branch actually landed; if it did NOT, KEEP the workspace OPEN and idle
-        // (retryable) and clear the stale readyForMerge flag so nothing treats a conflicted
-        // branch as mergeable. Never close/strand it. (Acceptance for the concurrent-merge-loser
-        // path; complements #761/#762.)
-        await keepResolverWorkspaceRetryableIfUnlanded(workspace, projectId, issueId, defaultBranch, sessionId);
-        return;
-      }
+      const ctx: ExitContext = { workspace, projectId, issueId, skipAutoReview, sessionId, exitCode, now, prefMap, statuses, findStatus, autoMergeEnabled, defaultBranch, autoMergeDisabledProjectIds };
+      if (fixAndMergeSessionIds.has(sessionId)) { await handleFixAndMergeExit(ctx); return; }
       if (learningSessionIds.has(sessionId)) { learningSessionIds.delete(sessionId); console.log(`[workflow] learning step session ${sessionId} completed  no further workflow action`); return; }
-      if (exitCode !== 0) {
-        emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Agent session for workspace ${workspaceId} ended with non-zero exit code ${exitCode}.` });
-        // Surface similar past failures as a board comment
-        try {
-          const { extractSessionStderr, findSimilarFailures } = await import("../services/failure-pattern.service.js");
-          const stderrText = await extractSessionStderr(sessionId);
-          if (stderrText.trim()) {
-            const matches = await findSimilarFailures(stderrText);
-            if (matches.length > 0) {
-              const commentLines = [
-                `🔍 **Failure pattern memory**: this session's errors resemble past incidents:`,
-                ...matches.map((m, i) =>
-                  `${i + 1}. **${m.pattern.title}** (${Math.round(m.score * 100)}% match)` +
-                  (m.pattern.rootCause ? `\n   _Root cause_: ${m.pattern.rootCause.slice(0, 200)}` : "") +
-                  (m.pattern.fix ? `\n   _Fix_: ${m.pattern.fix.slice(0, 200)}` : "") +
-                  (m.pattern.sourceRef ? `\n   _Source_: ${m.pattern.sourceRef}` : ""),
-                ),
-              ];
-              const { createDiffComment } = await import("../repositories/session.repository.js");
-              await createDiffComment(
-                workspaceId,
-                { filePath: ".failure-patterns", body: commentLines.join("\n\n"), lineNumOld: null, lineNumNew: null },
-                db,
-              );
-              boardEvents.broadcast(projectId, "issue_updated");
-            }
-          }
-        } catch (fpErr) {
-          console.warn("[workflow] failure-pattern match failed (non-fatal):", fpErr instanceof Error ? fpErr.message : String(fpErr));
+      if (exitCode !== 0) { await handleFailedSessionExit(ctx); return; }
+      if (reviewSessionIds.has(sessionId)) { await handleReviewSessionExit(ctx); return; }
+      await handleBuilderSessionExit(ctx);
+    } catch (err) {
+      console.error("[workflow] onSessionExit error:", err);
+    }
+  }
+
+  async function handleFixAndMergeExit(ctx: ExitContext): Promise<void> {
+    const { workspace, projectId, issueId, sessionId, exitCode, now, findStatus, defaultBranch, autoMergeDisabledProjectIds } = ctx;
+    const workspaceId = workspace.id;
+    fixAndMergeSessionIds.delete(sessionId);
+    if (exitCode === 0) {
+      if (autoMergeDisabledProjectIds.has(projectId)) {
+        console.log(`[workflow] fix-and-merge session ${sessionId} completed but auto_merge_disabled for project ${projectId} — skipping retry merge`);
+        boardEvents.broadcast(projectId, "workspace_idle");
+      } else {
+        console.log(`[workflow] fix-and-merge session ${sessionId} completed  retrying merge`);
+        // autoMerge swallows its own conflict errors, so its return tells us nothing.
+        // The landing guard below is what verifies the branch actually merged.
+        await autoMerge(workspace, projectId, issueId, findStatus("Done")?.id ?? null, now);
+      }
+    } else {
+      console.log(`[workflow] fix-and-merge session ${sessionId} exited with code ${exitCode}  not retrying merge`);
+      boardEvents.broadcast(projectId, "workflow_error");
+      emitButlerSystemEvent({ projectId, kind: "merge_failed", workspaceId, text: `Fix-and-merge session for workspace ${workspaceId} exited with code ${exitCode}.` });
+    }
+    // #764: stranded-resolver guard. A fix-and-merge resolver can exit (any code) WITHOUT
+    // the branch landing — the concurrent-merge LOSER whose conflict against the moved base
+    // is real, so autoMerge's plumbing merge throws and is swallowed. Left unchecked the
+    // ticket ends up conflicted with NO open workspace to retry from (manual git recovery).
+    // Verify the branch actually landed; if it did NOT, KEEP the workspace OPEN and idle
+    // (retryable) and clear the stale readyForMerge flag so nothing treats a conflicted
+    // branch as mergeable. Never close/strand it. (Acceptance for the concurrent-merge-loser
+    // path; complements #761/#762.)
+    await keepResolverWorkspaceRetryableIfUnlanded(workspace, projectId, issueId, defaultBranch, sessionId);
+    return;
+  }
+
+  async function handleFailedSessionExit(ctx: ExitContext): Promise<void> {
+    const { workspace, projectId, sessionId, exitCode } = ctx;
+    const workspaceId = workspace.id;
+    emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Agent session for workspace ${workspaceId} ended with non-zero exit code ${exitCode}.` });
+    // Surface similar past failures as a board comment
+    try {
+      const { extractSessionStderr, findSimilarFailures } = await import("../services/failure-pattern.service.js");
+      const stderrText = await extractSessionStderr(sessionId);
+      if (stderrText.trim()) {
+        const matches = await findSimilarFailures(stderrText);
+        if (matches.length > 0) {
+          const commentLines = [
+            `🔍 **Failure pattern memory**: this session's errors resemble past incidents:`,
+            ...matches.map((m, i) =>
+              `${i + 1}. **${m.pattern.title}** (${Math.round(m.score * 100)}% match)` +
+              (m.pattern.rootCause ? `\n   _Root cause_: ${m.pattern.rootCause.slice(0, 200)}` : "") +
+              (m.pattern.fix ? `\n   _Fix_: ${m.pattern.fix.slice(0, 200)}` : "") +
+              (m.pattern.sourceRef ? `\n   _Source_: ${m.pattern.sourceRef}` : ""),
+            ),
+          ];
+          const { createDiffComment } = await import("../repositories/session.repository.js");
+          await createDiffComment(
+            workspaceId,
+            { filePath: ".failure-patterns", body: commentLines.join("\n\n"), lineNumOld: null, lineNumNew: null },
+            db,
+          );
+          boardEvents.broadcast(projectId, "issue_updated");
         }
+      }
+    } catch (fpErr) {
+      console.warn("[workflow] failure-pattern match failed (non-fatal):", fpErr instanceof Error ? fpErr.message : String(fpErr));
+    }
+    return;
+  }
+
+  async function handleReviewSessionExit(ctx: ExitContext): Promise<void> {
+    const { workspace, projectId, issueId, sessionId, now, prefMap, statuses, findStatus, autoMergeEnabled, defaultBranch, autoMergeDisabledProjectIds } = ctx;
+    const workspaceId = workspace.id;
+    reviewSessionIds.delete(sessionId);
+    const currentIssueRows = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId)).limit(1);
+    const currentStatus = currentIssueRows.length > 0 ? statuses.find((s) => s.id === currentIssueRows[0].statusId) : null;
+    const autoFix = prefMap.get("review_auto_fix") !== "false";
+    if (currentStatus?.name === "In Progress" && !autoFix) {
+      console.log("[workflow] reviewer flagged issues (non-auto-fix mode)  skipping auto-merge, leaving in In Progress");
+      boardEvents.broadcast(projectId, "issue_updated");
+      return;
+    }
+    // #531 quality gate: run the project's verify_script (build/test/run) in the
+    // worktree before approving for merge. Opt-in per project via the
+    // verify_script_<projectId> preference — a pure no-op when unset, so existing
+    // projects/the dev board are unaffected. A non-zero exit WITHHOLDS readyForMerge
+    // so code that doesn't compile/test/run can't be auto-approved and merged
+    // (the diff-only LLM review can't catch that on its own).
+    //
+    // #821: this same verify+smoke gate is extracted into `runPreMergeGate`
+    // (pre-merge-gate.service.ts) so the monitor's auto_merge_in_review path runs it too
+    // (it previously bypassed the gate entirely). The inline version below stays here because
+    // it interleaves the #812 build-approval repair (which must commit onto the branch BEFORE
+    // the verify build) and #826 diagnostics; keep the two in sync.
+    const verifyScript = prefMap.get(`verify_script_${projectId}`);
+    // #826 diagnostic: capture the gate decision inputs. On the ktor-gallery drive verify+smoke
+    // ran 0× while readyForMerge was still set — this reveals exactly why (unset pref vs missing
+    // worktree vs profile) on the next drive.
+    const verifyConfigured = Boolean(verifyScript && verifyScript.trim());
+    console.log(`[workflow] verify gate eval ws=${workspaceId} project=${projectId}: verify_script=${verifyConfigured ? "set" : "UNSET"}, workingDir=${workspace.workingDir ? "present" : "MISSING"}`);
+    // #826 fail-closed: a CONFIGURED verify gate that cannot run (no worktree) must withhold
+    // readyForMerge — previously it skipped silently and still approved the code, so unverified
+    // work merged. Never set readyForMerge when the gate we were told to run didn't run.
+    if (verifyConfigured && !workspace.workingDir) {
+      console.log(`[workflow] verify_script configured but workspace ${workspaceId} has no worktree — withholding readyForMerge (cannot verify; #826)`);
+      boardEvents.broadcast(projectId, "workflow_error");
+      return;
+    }
+    if (verifyScript && verifyScript.trim() && workspace.workingDir) {
+      // #783/#789/#812: a builder that created the build manifest may not have approved
+      // native build scripts or pinned a package-manager version that honors the approval —
+      // so a fresh clone of master can fail to install even though the per-worktree gate
+      // passes (the warm store hides it). `ensureBuildableFromClean` dispatches per stack
+      // (#812): pnpm → onlyBuiltDependencies, bun → trustedDependencies, npm/yarn → pin only,
+      // and cargo/go/python/java → a clean no-op. Repair and COMMIT onto the branch BEFORE
+      // the verify build, so the fix merges to master and clones build clean.
+      //
+      // BUILD_APPROVAL_REPAIR_PATHS is the complete set of files the repair can ever touch
+      // (any stack); we stage/revert only the ones that actually exist, so a non-pnpm project
+      // (no pnpm-workspace.yaml) or a non-Node project (no package.json) is a clean no-op
+      // rather than failing on a missing pathspec.
+      const BUILD_APPROVAL_REPAIR_PATHS = ["package.json", "pnpm-workspace.yaml"];
+      try {
+        const approvalChanged = ensureBuildableFromClean(workspace.workingDir);
+        if (approvalChanged) {
+          // Only stage files that actually exist — `git add -- <missing>` fails the WHOLE
+          // command on a missing pathspec (e.g. a single-package app has no
+          // pnpm-workspace.yaml), which would otherwise throw and leave the manifest dirty.
+          const candidatePaths = BUILD_APPROVAL_REPAIR_PATHS.filter((p) =>
+            existsSync(join(workspace.workingDir!, p)),
+          );
+          const committed = candidatePaths.length
+            ? await gitService.commitPaths(
+                workspace.workingDir,
+                candidatePaths,
+                "chore: make project buildable from a clean clone (verify gate #812)",
+              )
+            : false;
+          if (committed) console.log(`[workflow] committed build-approval repair for workspace ${workspaceId} (#812)`);
+        }
+      } catch (e) {
+        // Never let a repair failure leave the worktree dirty — an uncommitted manifest
+        // change would block the auto-merge (silent merge loss). Revert and continue.
+        console.warn(`[workflow] build-approval repair failed for workspace ${workspaceId}: ${e instanceof Error ? e.message : String(e)}`);
+        const revertPaths = BUILD_APPROVAL_REPAIR_PATHS.filter((p) =>
+          existsSync(join(workspace.workingDir!, p)),
+        );
+        if (revertPaths.length) {
+          try {
+            await new Promise<void>((resolve) =>
+              execFile("git", ["checkout", "--", ...revertPaths], { cwd: workspace.workingDir! }, () => resolve()),
+            );
+          } catch { /* best-effort cleanup */ }
+        }
+      }
+      // Run under the build-concurrency gate (#823): parallel reviews on a JVM stack would
+      // otherwise spawn many gradle daemons at once and starve the host / crash the backend.
+      const result = await runUnderBuildGate(() =>
+        runSetupScript(workspace.workingDir!, verifyScript).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e) })),
+      );
+      if (result.exitCode !== 0) {
+        console.log(`[workflow] verify_script failed (exit ${result.exitCode}) for workspace ${workspaceId} — withholding readyForMerge`);
+        boardEvents.broadcast(projectId, "workflow_error");
+        emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Verify script failed (exit ${result.exitCode}) for workspace ${workspaceId}; not approved for merge. ${(result.stderr || result.stdout || "").slice(0, 300)}` });
         return;
       }
-      if (reviewSessionIds.has(sessionId)) {
-        reviewSessionIds.delete(sessionId);
-        const currentIssueRows = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId)).limit(1);
-        const currentStatus = currentIssueRows.length > 0 ? statuses.find((s) => s.id === currentIssueRows[0].statusId) : null;
-        const autoFix = prefMap.get("review_auto_fix") !== "false";
-        if (currentStatus?.name === "In Progress" && !autoFix) {
-          console.log("[workflow] reviewer flagged issues (non-auto-fix mode)  skipping auto-merge, leaving in In Progress");
-          boardEvents.broadcast(projectId, "issue_updated");
-          return;
-        }
-        // #531 quality gate: run the project's verify_script (build/test/run) in the
-        // worktree before approving for merge. Opt-in per project via the
-        // verify_script_<projectId> preference — a pure no-op when unset, so existing
-        // projects/the dev board are unaffected. A non-zero exit WITHHOLDS readyForMerge
-        // so code that doesn't compile/test/run can't be auto-approved and merged
-        // (the diff-only LLM review can't catch that on its own).
-        //
-        // #821: this same verify+smoke gate is extracted into `runPreMergeGate`
-        // (pre-merge-gate.service.ts) so the monitor's auto_merge_in_review path runs it too
-        // (it previously bypassed the gate entirely). The inline version below stays here because
-        // it interleaves the #812 build-approval repair (which must commit onto the branch BEFORE
-        // the verify build) and #826 diagnostics; keep the two in sync.
-        const verifyScript = prefMap.get(`verify_script_${projectId}`);
-        // #826 diagnostic: capture the gate decision inputs. On the ktor-gallery drive verify+smoke
-        // ran 0× while readyForMerge was still set — this reveals exactly why (unset pref vs missing
-        // worktree vs profile) on the next drive.
-        const verifyConfigured = Boolean(verifyScript && verifyScript.trim());
-        console.log(`[workflow] verify gate eval ws=${workspaceId} project=${projectId}: verify_script=${verifyConfigured ? "set" : "UNSET"}, workingDir=${workspace.workingDir ? "present" : "MISSING"}`);
-        // #826 fail-closed: a CONFIGURED verify gate that cannot run (no worktree) must withhold
-        // readyForMerge — previously it skipped silently and still approved the code, so unverified
-        // work merged. Never set readyForMerge when the gate we were told to run didn't run.
-        if (verifyConfigured && !workspace.workingDir) {
-          console.log(`[workflow] verify_script configured but workspace ${workspaceId} has no worktree — withholding readyForMerge (cannot verify; #826)`);
-          boardEvents.broadcast(projectId, "workflow_error");
-          return;
-        }
-        if (verifyScript && verifyScript.trim() && workspace.workingDir) {
-          // #783/#789/#812: a builder that created the build manifest may not have approved
-          // native build scripts or pinned a package-manager version that honors the approval —
-          // so a fresh clone of master can fail to install even though the per-worktree gate
-          // passes (the warm store hides it). `ensureBuildableFromClean` dispatches per stack
-          // (#812): pnpm → onlyBuiltDependencies, bun → trustedDependencies, npm/yarn → pin only,
-          // and cargo/go/python/java → a clean no-op. Repair and COMMIT onto the branch BEFORE
-          // the verify build, so the fix merges to master and clones build clean.
-          //
-          // BUILD_APPROVAL_REPAIR_PATHS is the complete set of files the repair can ever touch
-          // (any stack); we stage/revert only the ones that actually exist, so a non-pnpm project
-          // (no pnpm-workspace.yaml) or a non-Node project (no package.json) is a clean no-op
-          // rather than failing on a missing pathspec.
-          const BUILD_APPROVAL_REPAIR_PATHS = ["package.json", "pnpm-workspace.yaml"];
-          try {
-            const approvalChanged = ensureBuildableFromClean(workspace.workingDir);
-            if (approvalChanged) {
-              // Only stage files that actually exist — `git add -- <missing>` fails the WHOLE
-              // command on a missing pathspec (e.g. a single-package app has no
-              // pnpm-workspace.yaml), which would otherwise throw and leave the manifest dirty.
-              const candidatePaths = BUILD_APPROVAL_REPAIR_PATHS.filter((p) =>
-                existsSync(join(workspace.workingDir!, p)),
-              );
-              const committed = candidatePaths.length
-                ? await gitService.commitPaths(
-                    workspace.workingDir,
-                    candidatePaths,
-                    "chore: make project buildable from a clean clone (verify gate #812)",
-                  )
-                : false;
-              if (committed) console.log(`[workflow] committed build-approval repair for workspace ${workspaceId} (#812)`);
-            }
-          } catch (e) {
-            // Never let a repair failure leave the worktree dirty — an uncommitted manifest
-            // change would block the auto-merge (silent merge loss). Revert and continue.
-            console.warn(`[workflow] build-approval repair failed for workspace ${workspaceId}: ${e instanceof Error ? e.message : String(e)}`);
-            const revertPaths = BUILD_APPROVAL_REPAIR_PATHS.filter((p) =>
-              existsSync(join(workspace.workingDir!, p)),
-            );
-            if (revertPaths.length) {
-              try {
-                await new Promise<void>((resolve) =>
-                  execFile("git", ["checkout", "--", ...revertPaths], { cwd: workspace.workingDir! }, () => resolve()),
-                );
-              } catch { /* best-effort cleanup */ }
-            }
-          }
-          // Run under the build-concurrency gate (#823): parallel reviews on a JVM stack would
-          // otherwise spawn many gradle daemons at once and starve the host / crash the backend.
-          const result = await runUnderBuildGate(() =>
-            runSetupScript(workspace.workingDir!, verifyScript).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e) })),
-          );
-          if (result.exitCode !== 0) {
-            console.log(`[workflow] verify_script failed (exit ${result.exitCode}) for workspace ${workspaceId} — withholding readyForMerge`);
+      console.log(`[workflow] verify_script passed for workspace ${workspaceId}`);
+    }
+    // #791 run/smoke gate: for a web/service project, boot the dev server and confirm it
+    // responds (HTTP-200 + render). Derived entirely from the project's stack profile, so a
+    // library/CLI project (no `isWeb`/dev command/health URL) yields no SmokeCheck and this is
+    // a clean no-op. A failed boot/response WITHHOLDS readyForMerge — the diff-only LLM review
+    // can't catch "compiles but doesn't boot". Generalizes the old `frontend-smoke.ps1`.
+    {
+      try {
+        const profile = await getStackProfile(projectId, db);
+        const smokeCheck = buildSmokeCheck(profile);
+        if (smokeCheck) {
+          // #826 fail-closed: a web project's smoke (UI) gate that can't run for lack of a
+          // worktree must withhold readyForMerge, not silently approve. (Profile load needs no
+          // worktree, so we can detect "gate applies" before checking workingDir.)
+          if (!workspace.workingDir) {
+            console.log(`[workflow] smoke/UI gate applies (web project) but workspace ${workspaceId} has no worktree — withholding readyForMerge (#826)`);
             boardEvents.broadcast(projectId, "workflow_error");
-            emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Verify script failed (exit ${result.exitCode}) for workspace ${workspaceId}; not approved for merge. ${(result.stderr || result.stdout || "").slice(0, 300)}` });
             return;
           }
-          console.log(`[workflow] verify_script passed for workspace ${workspaceId}`);
-        }
-        // #791 run/smoke gate: for a web/service project, boot the dev server and confirm it
-        // responds (HTTP-200 + render). Derived entirely from the project's stack profile, so a
-        // library/CLI project (no `isWeb`/dev command/health URL) yields no SmokeCheck and this is
-        // a clean no-op. A failed boot/response WITHHOLDS readyForMerge — the diff-only LLM review
-        // can't catch "compiles but doesn't boot". Generalizes the old `frontend-smoke.ps1`.
-        {
-          try {
-            const profile = await getStackProfile(projectId, db);
-            const smokeCheck = buildSmokeCheck(profile);
-            if (smokeCheck) {
-              // #826 fail-closed: a web project's smoke (UI) gate that can't run for lack of a
-              // worktree must withhold readyForMerge, not silently approve. (Profile load needs no
-              // worktree, so we can detect "gate applies" before checking workingDir.)
-              if (!workspace.workingDir) {
-                console.log(`[workflow] smoke/UI gate applies (web project) but workspace ${workspaceId} has no worktree — withholding readyForMerge (#826)`);
-                boardEvents.broadcast(projectId, "workflow_error");
-                return;
-              }
-              console.log(`[workflow] running smoke check for workspace ${workspaceId}: ${smokeCheck.devCommand} -> ${smokeCheck.healthUrl}`);
-              const smoke = await runUnderBuildGate(() => runSmokeCheck(workspace.workingDir!, smokeCheck));
-              if (!smoke.passed) {
-                console.log(`[workflow] smoke check failed for workspace ${workspaceId} — withholding readyForMerge: ${smoke.message}`);
-                boardEvents.broadcast(projectId, "workflow_error");
-                emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Smoke check failed for workspace ${workspaceId}; not approved for merge. ${smoke.message}` });
-                return;
-              }
-              console.log(`[workflow] smoke check passed for workspace ${workspaceId}: ${smoke.message}`);
-            }
-          } catch (smokeErr) {
-            // Non-fatal: a harness error must not block an otherwise-passing review. Log and proceed.
-            console.warn(`[workflow] smoke check errored (non-fatal) for workspace ${workspaceId}:`, smokeErr instanceof Error ? smokeErr.message : String(smokeErr));
+          console.log(`[workflow] running smoke check for workspace ${workspaceId}: ${smokeCheck.devCommand} -> ${smokeCheck.healthUrl}`);
+          const smoke = await runUnderBuildGate(() => runSmokeCheck(workspace.workingDir!, smokeCheck));
+          if (!smoke.passed) {
+            console.log(`[workflow] smoke check failed for workspace ${workspaceId} — withholding readyForMerge: ${smoke.message}`);
+            boardEvents.broadcast(projectId, "workflow_error");
+            emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Smoke check failed for workspace ${workspaceId}; not approved for merge. ${smoke.message}` });
+            return;
           }
+          console.log(`[workflow] smoke check passed for workspace ${workspaceId}: ${smoke.message}`);
         }
-        // #792 cold-clone build check: the in-worktree verify gate above runs in a
-        // dependency-symlinked worktree with a warm pnpm store, so it can pass even
-        // when a FRESH clone of the branch would not build (the #783 class: unapproved
-        // native build scripts, an unpinned package manager, an uncommitted generated
-        // file). Opt-in per project via `cold_clone_check_<projectId>` — a pure no-op
-        // when unset. Runs AFTER the verify block so it picks up any pnpm-approval
-        // repair just committed onto the branch. A non-zero clean-build exit WITHHOLDS
-        // readyForMerge so the #783 class is caught at review, not after merge.
-        if (await isColdCloneCheckEnabled(projectId, db)) {
-          const repoRows = await db.select({ repoPath: projects.repoPath }).from(projects).where(eq(projects.id, projectId)).limit(1);
-          const repoPath = repoRows[0]?.repoPath;
-          if (repoPath && workspace.branch) {
-            const coldResult: ColdCloneCheckResult = await runUnderBuildGate(() =>
-              runColdCloneBuildCheckForProject(
-                projectId,
-                { repoPath, branch: workspace.branch },
-                db,
-              ).catch((e) => ({ ok: false, reason: "build-failed" as const, output: e instanceof Error ? e.message : String(e) })),
-            );
-            if (!coldResult.ok) {
-              const detail = coldResult.failedCommand ? `${coldResult.failedCommand} (exit ${coldResult.exitCode})` : coldResult.reason;
-              console.log(`[workflow] cold-clone build check failed (${coldResult.reason}) for workspace ${workspaceId} — withholding readyForMerge (#792)`);
-              boardEvents.broadcast(projectId, "workflow_error");
-              emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Cold-clone build check failed for workspace ${workspaceId}: ${detail}. Builds in the worktree but not on a fresh clone (the #783 class); not approved for merge. ${(coldResult.output || "").slice(0, 300)}` });
-              return;
-            }
-            console.log(`[workflow] cold-clone build check passed for workspace ${workspaceId} (#792)`);
-          }
-        }
-        // #629 Guard: re-verify the branch still has committed changes ahead of base.
-        // A race (e.g. branch reset/rebased to equal base between review start and exit)
-        // can leave a 0-commit branch incorrectly marked ready-for-merge.
-        const stillHasChanges = await hasCommittedChanges(workspace, defaultBranch, workspaceId);
-        if (!stillHasChanges) {
-          console.log(`[workflow] review session ${sessionId} completed but branch has no committed changes — withholding readyForMerge (issue #629)`);
-          boardEvents.broadcast(projectId, "issue_updated");
+      } catch (smokeErr) {
+        // Non-fatal: a harness error must not block an otherwise-passing review. Log and proceed.
+        console.warn(`[workflow] smoke check errored (non-fatal) for workspace ${workspaceId}:`, smokeErr instanceof Error ? smokeErr.message : String(smokeErr));
+      }
+    }
+    // #792 cold-clone build check: the in-worktree verify gate above runs in a
+    // dependency-symlinked worktree with a warm pnpm store, so it can pass even
+    // when a FRESH clone of the branch would not build (the #783 class: unapproved
+    // native build scripts, an unpinned package manager, an uncommitted generated
+    // file). Opt-in per project via `cold_clone_check_<projectId>` — a pure no-op
+    // when unset. Runs AFTER the verify block so it picks up any pnpm-approval
+    // repair just committed onto the branch. A non-zero clean-build exit WITHHOLDS
+    // readyForMerge so the #783 class is caught at review, not after merge.
+    if (await isColdCloneCheckEnabled(projectId, db)) {
+      const repoRows = await db.select({ repoPath: projects.repoPath }).from(projects).where(eq(projects.id, projectId)).limit(1);
+      const repoPath = repoRows[0]?.repoPath;
+      if (repoPath && workspace.branch) {
+        const coldResult: ColdCloneCheckResult = await runUnderBuildGate(() =>
+          runColdCloneBuildCheckForProject(
+            projectId,
+            { repoPath, branch: workspace.branch },
+            db,
+          ).catch((e) => ({ ok: false, reason: "build-failed" as const, output: e instanceof Error ? e.message : String(e) })),
+        );
+        if (!coldResult.ok) {
+          const detail = coldResult.failedCommand ? `${coldResult.failedCommand} (exit ${coldResult.exitCode})` : coldResult.reason;
+          console.log(`[workflow] cold-clone build check failed (${coldResult.reason}) for workspace ${workspaceId} — withholding readyForMerge (#792)`);
+          boardEvents.broadcast(projectId, "workflow_error");
+          emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Cold-clone build check failed for workspace ${workspaceId}: ${detail}. Builds in the worktree but not on a fresh clone (the #783 class); not approved for merge. ${(coldResult.output || "").slice(0, 300)}` });
           return;
         }
-        await db.update(workspaces).set({ readyForMerge: true, updatedAt: now }).where(eq(workspaces.id, workspaceId));
-        boardEvents.broadcast(projectId, "workspace_ready_for_merge");
-        const learningAfterReview = prefMap.get("learning_step_after_review") === "true" && workspace.workingDir ? launchLearningStep(db, sessionManager, learningSessionIds, workspace, prefMap, "after review", true) : Promise.resolve();
-        if (autoMergeEnabled) {
-          await learningAfterReview;
-          // #797 synchronous foundational merge. A no-dependency scaffold/shell ticket that
-          // gates open tier-1 work must land PROMPTLY — not sit Done-but-unmerged until the
-          // next 30s auto-merge-orchestrator tick — or a dependent could be cut from the
-          // pre-merge (empty) base on the very first cascade cycle. #784's read-side mergedAt
-          // gate makes dependents WAIT; this makes the foundational merge land NOW so the wait
-          // is short. Non-foundational tickets keep deferring to the scheduled orchestrator
-          // (its batch/cluster reconciliation handles overlap/conflict residue).
-          const autoMergeDisabledHere = autoMergeDisabledProjectIds.has(projectId);
-          if (!autoMergeDisabledHere && await isFoundationalBlocker(db, issueId)) {
-            console.log(`[workflow] review session ${sessionId} completed  foundational blocker — merging synchronously (#797)`);
-            await autoMerge(workspace, projectId, issueId, findStatus("Done")?.id ?? null, now);
-          } else {
-            console.log(`[workflow] review session ${sessionId} completed  queued for scheduled auto-merge`);
-          }
-        } else {
-          await db.update(workspaces).set({ readyForMerge: true, updatedAt: now }).where(eq(workspaces.id, workspaceId));
-          boardEvents.broadcast(projectId, "workspace_ready_for_merge");
-          console.log(`[workflow] review session ${sessionId} completed  auto-merge disabled, marked ready_for_merge and left in In Review`);
-          await learningAfterReview;
-        }
-        return;
+        console.log(`[workflow] cold-clone build check passed for workspace ${workspaceId} (#792)`);
       }
+    }
+    // #629 Guard: re-verify the branch still has committed changes ahead of base.
+    // A race (e.g. branch reset/rebased to equal base between review start and exit)
+    // can leave a 0-commit branch incorrectly marked ready-for-merge.
+    const stillHasChanges = await hasCommittedChanges(workspace, defaultBranch, workspaceId);
+    if (!stillHasChanges) {
+      console.log(`[workflow] review session ${sessionId} completed but branch has no committed changes — withholding readyForMerge (issue #629)`);
+      boardEvents.broadcast(projectId, "issue_updated");
+      return;
+    }
+    await db.update(workspaces).set({ readyForMerge: true, updatedAt: now }).where(eq(workspaces.id, workspaceId));
+    boardEvents.broadcast(projectId, "workspace_ready_for_merge");
+    const learningAfterReview = prefMap.get("learning_step_after_review") === "true" && workspace.workingDir ? launchLearningStep(db, sessionManager, learningSessionIds, workspace, prefMap, "after review", true) : Promise.resolve();
+    if (autoMergeEnabled) {
+      await learningAfterReview;
+      // #797 synchronous foundational merge. A no-dependency scaffold/shell ticket that
+      // gates open tier-1 work must land PROMPTLY — not sit Done-but-unmerged until the
+      // next 30s auto-merge-orchestrator tick — or a dependent could be cut from the
+      // pre-merge (empty) base on the very first cascade cycle. #784's read-side mergedAt
+      // gate makes dependents WAIT; this makes the foundational merge land NOW so the wait
+      // is short. Non-foundational tickets keep deferring to the scheduled orchestrator
+      // (its batch/cluster reconciliation handles overlap/conflict residue).
+      const autoMergeDisabledHere = autoMergeDisabledProjectIds.has(projectId);
+      if (!autoMergeDisabledHere && await isFoundationalBlocker(db, issueId)) {
+        console.log(`[workflow] review session ${sessionId} completed  foundational blocker — merging synchronously (#797)`);
+        await autoMerge(workspace, projectId, issueId, findStatus("Done")?.id ?? null, now);
+      } else {
+        console.log(`[workflow] review session ${sessionId} completed  queued for scheduled auto-merge`);
+      }
+    } else {
+      await db.update(workspaces).set({ readyForMerge: true, updatedAt: now }).where(eq(workspaces.id, workspaceId));
+      boardEvents.broadcast(projectId, "workspace_ready_for_merge");
+      console.log(`[workflow] review session ${sessionId} completed  auto-merge disabled, marked ready_for_merge and left in In Review`);
+      await learningAfterReview;
+    }
+    return;
+  }
 
-      const committedChanges = await hasCommittedChanges(workspace, defaultBranch, workspaceId);
-      if (await isSpecPlanningNode(db, workspace.currentNodeId)) {
-        console.log(`[workflow] planning phase session ${sessionId} completed; waiting for explicit user approval before advancing`);
-        boardEvents.broadcast(projectId, "issue_updated");
-        return;
+  async function handleBuilderSessionExit(ctx: ExitContext): Promise<void> {
+    const { workspace, projectId, issueId, sessionId, skipAutoReview, now, prefMap, statuses, findStatus, defaultBranch } = ctx;
+    const workspaceId = workspace.id;
+    const committedChanges = await hasCommittedChanges(workspace, defaultBranch, workspaceId);
+    if (await isSpecPlanningNode(db, workspace.currentNodeId)) {
+      console.log(`[workflow] planning phase session ${sessionId} completed; waiting for explicit user approval before advancing`);
+      boardEvents.broadcast(projectId, "issue_updated");
+      return;
+    }
+    // Direct workspaces with no committed changes: close immediately (nothing to review).
+    // Direct workspaces WITH changes fall through to the review flow below.
+    if (workspace.isDirect && !committedChanges) {
+      const doneStatus = findStatus("Done");
+      await db.update(workspaces).set({ status: "closed", workingDir: null, updatedAt: now }).where(eq(workspaces.id, workspaceId));
+      if (doneStatus) {
+        await db.update(issues).set({ statusId: doneStatus.id, updatedAt: now }).where(eq(issues.id, issueId));
+        await syncCurrentNodeToStatus(db, issueId);
       }
-      // Direct workspaces with no committed changes: close immediately (nothing to review).
-      // Direct workspaces WITH changes fall through to the review flow below.
-      if (workspace.isDirect && !committedChanges) {
+      boardEvents.broadcast(projectId, "workspace_merged");
+      console.log(`[workflow] direct workspace ${workspaceId} closed on agent exit (no committed changes)  issue moved to Done`);
+      return;
+    }
+    if (!committedChanges) {
+      // If the issue is already In Review with no committed changes, the workspace
+      // is a zero-diff dead-end: no code to review, no merge possible. Close it and
+      // move to Done so it doesn't block the Done transition (issue #603).
+      const currentIssueRows2 = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId)).limit(1);
+      const currentStatusName2 = currentIssueRows2.length > 0 ? statuses.find((s) => s.id === currentIssueRows2[0].statusId)?.name : undefined;
+      if (currentStatusName2 === "In Review") {
         const doneStatus = findStatus("Done");
         await db.update(workspaces).set({ status: "closed", workingDir: null, updatedAt: now }).where(eq(workspaces.id, workspaceId));
         if (doneStatus) {
@@ -674,83 +737,63 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
           await syncCurrentNodeToStatus(db, issueId);
         }
         boardEvents.broadcast(projectId, "workspace_merged");
-        console.log(`[workflow] direct workspace ${workspaceId} closed on agent exit (no committed changes)  issue moved to Done`);
+        console.log(`[workflow] non-direct workspace ${workspaceId} closed on agent exit (no committed changes, was In Review)  issue moved to Done`);
         return;
       }
-      if (!committedChanges) {
-        // If the issue is already In Review with no committed changes, the workspace
-        // is a zero-diff dead-end: no code to review, no merge possible. Close it and
-        // move to Done so it doesn't block the Done transition (issue #603).
-        const currentIssueRows2 = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId)).limit(1);
-        const currentStatusName2 = currentIssueRows2.length > 0 ? statuses.find((s) => s.id === currentIssueRows2[0].statusId)?.name : undefined;
-        if (currentStatusName2 === "In Review") {
-          const doneStatus = findStatus("Done");
-          await db.update(workspaces).set({ status: "closed", workingDir: null, updatedAt: now }).where(eq(workspaces.id, workspaceId));
-          if (doneStatus) {
-            await db.update(issues).set({ statusId: doneStatus.id, updatedAt: now }).where(eq(issues.id, issueId));
-            await syncCurrentNodeToStatus(db, issueId);
-          }
-          boardEvents.broadcast(projectId, "workspace_merged");
-          console.log(`[workflow] non-direct workspace ${workspaceId} closed on agent exit (no committed changes, was In Review)  issue moved to Done`);
-          return;
-        }
-        console.log(`[workflow] agent session ${sessionId} completed but no committed changes  leaving issue in current status`);
-        return;
-      }
-      console.log(`[workflow] agent session ${sessionId} completed with committed changes  moving to In Review`);
-      const inReview = findStatus("In Review");
-      if (inReview) {
-        await db.update(issues).set({ statusId: inReview.id, updatedAt: now }).where(eq(issues.id, issueId));
-        await syncCurrentNodeToStatus(db, issueId);
-      }
-      boardEvents.broadcast(projectId, "issue_updated");
-      if (prefMap.get("learning_step_after_agent") === "true" && workspace.workingDir) await launchLearningStep(db, sessionManager, learningSessionIds, workspace, prefMap, "after agent");
-      const autoReview = !skipAutoReview && (workspace.requiresReview || prefMap.get("auto_review") !== "false");
-      if (!autoReview) return;
+      console.log(`[workflow] agent session ${sessionId} completed but no committed changes  leaving issue in current status`);
+      return;
+    }
+    console.log(`[workflow] agent session ${sessionId} completed with committed changes  moving to In Review`);
+    const inReview = findStatus("In Review");
+    if (inReview) {
+      await db.update(issues).set({ statusId: inReview.id, updatedAt: now }).where(eq(issues.id, issueId));
+      await syncCurrentNodeToStatus(db, issueId);
+    }
+    boardEvents.broadcast(projectId, "issue_updated");
+    if (prefMap.get("learning_step_after_agent") === "true" && workspace.workingDir) await launchLearningStep(db, sessionManager, learningSessionIds, workspace, prefMap, "after agent");
+    const autoReview = !skipAutoReview && (workspace.requiresReview || prefMap.get("auto_review") !== "false");
+    if (!autoReview) return;
 
-      // Review on the same provider/profile the workspace was built with (e.g. its
-      // Codex OAuth license), not the global default which may have rotated since.
-      const reviewPrefs = applyWorkspaceProfileToPrefs(prefMap, workspace);
-      const reviewProvider = parseProviderPref(reviewPrefs), reviewProfile = reviewPrefs.get("claude_profile") || undefined;
-      const agentCommand = isMockProfile(reviewProfile) ? MOCK_AGENT_COMMAND : (reviewPrefs.get("agent_command") || undefined);
-      const claudeProfile = isMockProfile(reviewProfile) ? undefined : reviewProfile;
-      const effectiveReviewProfile = getEffectiveProfile(reviewPrefs, reviewProvider, claudeProfile);
-      const profileSelection = effectiveReviewProfile ? { provider: reviewProvider, name: effectiveReviewProfile } : undefined;
-      const reviewArgs = buildReviewArgs(reviewPrefs, reviewProvider), autoFix = workspace.isDirect ? false : reviewPrefs.get("review_auto_fix") !== "false";
-      let diffRef = workspace.baseBranch || defaultBranch, conflictingFiles: string[] | undefined, uncommittedChanges: string[] | undefined;
-      if (workspace.isDirect) diffRef = workspace.baseCommitSha || defaultBranch;
-      else if (workspace.workingDir) {
-        const baseBranch = workspace.baseBranch || defaultBranch;
-        if (!baseBranch) { console.warn(`[workflow] cannot launch review for workspace ${workspaceId}: no base/default branch configured`); return; }
-        const prep = await gitService.prepareForReview(workspace.workingDir, baseBranch);
-        diffRef = prep.diffRef;
-        if (!prep.success) {
-          conflictingFiles = prep.conflictingFiles; uncommittedChanges = prep.uncommittedChanges;
-          console.warn(`[workflow] rebase failed for workspace ${workspaceId}: ${prep.error}  reviewer will resolve conflicts`);
-        }
+    // Review on the same provider/profile the workspace was built with (e.g. its
+    // Codex OAuth license), not the global default which may have rotated since.
+    const reviewPrefs = applyWorkspaceProfileToPrefs(prefMap, workspace);
+    const reviewProvider = parseProviderPref(reviewPrefs), reviewProfile = reviewPrefs.get("claude_profile") || undefined;
+    const agentCommand = isMockProfile(reviewProfile) ? MOCK_AGENT_COMMAND : (reviewPrefs.get("agent_command") || undefined);
+    const claudeProfile = isMockProfile(reviewProfile) ? undefined : reviewProfile;
+    const effectiveReviewProfile = getEffectiveProfile(reviewPrefs, reviewProvider, claudeProfile);
+    const profileSelection = effectiveReviewProfile ? { provider: reviewProvider, name: effectiveReviewProfile } : undefined;
+    const reviewArgs = buildReviewArgs(reviewPrefs, reviewProvider), autoFix = workspace.isDirect ? false : reviewPrefs.get("review_auto_fix") !== "false";
+    let diffRef = workspace.baseBranch || defaultBranch, conflictingFiles: string[] | undefined, uncommittedChanges: string[] | undefined;
+    if (workspace.isDirect) diffRef = workspace.baseCommitSha || defaultBranch;
+    else if (workspace.workingDir) {
+      const baseBranch = workspace.baseBranch || defaultBranch;
+      if (!baseBranch) { console.warn(`[workflow] cannot launch review for workspace ${workspaceId}: no base/default branch configured`); return; }
+      const prep = await gitService.prepareForReview(workspace.workingDir, baseBranch);
+      diffRef = prep.diffRef;
+      if (!prep.success) {
+        conflictingFiles = prep.conflictingFiles; uncommittedChanges = prep.uncommittedChanges;
+        console.warn(`[workflow] rebase failed for workspace ${workspaceId}: ${prep.error}  reviewer will resolve conflicts`);
       }
-      const reviewSkillName = workspace.thoroughReview ? "code-review-thorough" : "code-review";
-      const verifyAgent = prefMap.get("after_merge_verify_agent") || "none";
-      const { prompt, model } = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, conflictingFiles, uncommittedChanges, workspaceId, reviewSkillName, verifyAgent);
-      const reviewArgsWithModel = model && reviewProvider === "claude" ? `${reviewArgs ?? ""} --model ${model}`.trim() : reviewArgs;
-      try {
-        await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
-        boardEvents.broadcast(projectId, "issue_updated");
-        const reviewSessionId = await sessionManager.startSession({ workspaceId, prompt, agentCommand, agentArgs: reviewArgsWithModel, claudeProfile: effectiveReviewProfile, provider: toExecutorProvider(reviewProvider), triggerType: "review", profile: profileSelection, extraEnv: { KANBAN_SESSION_TYPE: "review", KANBAN_AFTER_MERGE_VERIFY: verifyAgent } });
-        reviewSessionIds.add(reviewSessionId);
-        console.log(`[workflow] launched ${reviewSkillName} session ${reviewSessionId} for workspace ${workspaceId} (verifyAgent=${verifyAgent})`);
-      } catch (err) {
-        console.error("[workflow] Failed to launch review session:", err);
-        // Do NOT swallow this and leave the workspace stuck at "reviewing" with no
-        // running session (the #529 stranding). Reset to idle and surface the failure;
-        // the stranded-review reconciler then re-launches it instead of it sitting
-        // forever as never-reviewed / not-mergeable.
-        await db.update(workspaces).set({ status: "idle", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, workspaceId)).catch(() => {});
-        boardEvents.broadcast(projectId, "workflow_error");
-        emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Auto-review failed to launch for workspace ${workspaceId}; reset to idle for recovery.` });
-      }
+    }
+    const reviewSkillName = workspace.thoroughReview ? "code-review-thorough" : "code-review";
+    const verifyAgent = prefMap.get("after_merge_verify_agent") || "none";
+    const { prompt, model } = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, conflictingFiles, uncommittedChanges, workspaceId, reviewSkillName, verifyAgent);
+    const reviewArgsWithModel = model && reviewProvider === "claude" ? `${reviewArgs ?? ""} --model ${model}`.trim() : reviewArgs;
+    try {
+      await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
+      boardEvents.broadcast(projectId, "issue_updated");
+      const reviewSessionId = await sessionManager.startSession({ workspaceId, prompt, agentCommand, agentArgs: reviewArgsWithModel, claudeProfile: effectiveReviewProfile, provider: toExecutorProvider(reviewProvider), triggerType: "review", profile: profileSelection, extraEnv: { KANBAN_SESSION_TYPE: "review", KANBAN_AFTER_MERGE_VERIFY: verifyAgent } });
+      reviewSessionIds.add(reviewSessionId);
+      console.log(`[workflow] launched ${reviewSkillName} session ${reviewSessionId} for workspace ${workspaceId} (verifyAgent=${verifyAgent})`);
     } catch (err) {
-      console.error("[workflow] onSessionExit error:", err);
+      console.error("[workflow] Failed to launch review session:", err);
+      // Do NOT swallow this and leave the workspace stuck at "reviewing" with no
+      // running session (the #529 stranding). Reset to idle and surface the failure;
+      // the stranded-review reconciler then re-launches it instead of it sitting
+      // forever as never-reviewed / not-mergeable.
+      await db.update(workspaces).set({ status: "idle", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, workspaceId)).catch(() => {});
+      boardEvents.broadcast(projectId, "workflow_error");
+      emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Auto-review failed to launch for workspace ${workspaceId}; reset to idle for recovery.` });
     }
   }
   return { runWorkflowOnExit, reviewSessionIds, fixAndMergeSessionIds, learningSessionIds };
