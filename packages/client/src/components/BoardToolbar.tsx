@@ -310,9 +310,11 @@ export function BoardToolbar({
     if (!wrap || !measure) return;
 
     function recompute() {
-      const avail = wrap.clientWidth;
+      // wrap/measure are guarded non-null above and are const refs; the guard's
+      // narrowing isn't carried into this nested closure, so assert it.
+      const avail = wrap!.clientWidth;
       if (avail <= 0) return;
-      const children = Array.from(measure.children) as HTMLElement[];
+      const children = Array.from(measure!.children) as HTMLElement[];
       if (children.length === 0) return;
       // Last measured child is the "More" trigger; the rest are primary tabs.
       const moreWidth = children[children.length - 1].offsetWidth;

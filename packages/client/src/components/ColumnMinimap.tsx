@@ -6,7 +6,7 @@ const MAX_TICKS = 60;
 interface ColumnMinimapProps {
   issues: IssueWithStatus[];
   totalScrollHeight: number;
-  scrollContainerRef: React.RefObject<HTMLDivElement>;
+  scrollContainerRef: React.RefObject<HTMLDivElement | null>;
 }
 
 export function ColumnMinimap({ issues, totalScrollHeight, scrollContainerRef }: ColumnMinimapProps) {

@@ -9,7 +9,7 @@ import {
   buildTranscriptSearchEntries,
   type SearchFilter,
 } from "../lib/terminal-transcript.js";
-import { renderParsedEvent, type RenderContext } from "./TerminalEventRenderer.js";
+import { renderParsedEvent, highlightText, type RenderContext } from "./TerminalEventRenderer.js";
 
 interface TerminalViewProps {
   messages: AgentOutputMessage[];

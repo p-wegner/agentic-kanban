@@ -42,7 +42,7 @@ export function useBoardIssueActions(deps: BoardIssueActionsDeps) {
       columns,
       columnsRef,
       pendingBoardRefreshRef,
-      activeProject,
+      activeProject: activeProject ? { defaultBranch: activeProject.defaultBranch ?? null } : undefined,
       setMutating,
       setError,
       setColumns,
@@ -100,7 +100,7 @@ export function useBoardIssueActions(deps: BoardIssueActionsDeps) {
       return;
     }
 
-    setPendingWorkspaceIssueIds((prev) => new Set([...prev, issue.id]));
+    setPendingWorkspaceIssueIds((prev: Set<string>) => new Set([...prev, issue.id]));
     try {
       const s = await getSettings();
       const provider = (s.provider as "claude" | "codex" | "copilot") || "claude";
@@ -130,7 +130,7 @@ export function useBoardIssueActions(deps: BoardIssueActionsDeps) {
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to start workspace", "error");
     } finally {
-      setPendingWorkspaceIssueIds((prev) => {
+      setPendingWorkspaceIssueIds((prev: Set<string>) => {
         const next = new Set(prev);
         next.delete(issue.id);
         return next;

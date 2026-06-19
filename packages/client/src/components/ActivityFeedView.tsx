@@ -122,9 +122,8 @@ export function ActivityFeedView({ projectId, onIssueClick }: ActivityFeedViewPr
     setLoading(true);
     setError(null);
 
-    apiFetch(`/api/projects/${projectId}/activity?limit=100`)
-      .then((res) => res.json())
-      .then((json: ProjectActivityResult) => {
+    apiFetch<ProjectActivityResult>(`/api/projects/${projectId}/activity?limit=100`)
+      .then((json) => {
         if (!cancelled) {
           setData(json);
           setLoading(false);

@@ -309,7 +309,7 @@ function EventView({ event, projectId, onClose }: {
       )}
 
       {/* Raw details fallback */}
-      {detail?.details && !actionDetails && (
+      {detail?.details != null && !actionDetails && (
         <section>
           <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1.5">Details</div>
           <pre className="rounded-md bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 px-3 py-2 text-xs text-gray-700 dark:text-gray-300 overflow-auto max-h-48 whitespace-pre-wrap">
