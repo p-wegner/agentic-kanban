@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import type { IssueArtifact, IssueWithStatus, UpdateIssueRequest, DependencyInfo, MilestoneResponse, MergedCommit, MergedCommitsResponse } from "@agentic-kanban/shared";
+import type { IssueArtifact, IssueWithStatus, UpdateIssueRequest, DependencyInfo, MilestoneResponse } from "@agentic-kanban/shared";
 import { apiFetch, apiPost, apiPatch, apiDelete } from "../lib/api.js";
 import { getCachedBundle, revalidateBundle } from "../lib/issueDetailBundleCache.js";
 import { isHttpUrl } from "../lib/url.js";
@@ -34,6 +34,8 @@ import { IssueRelatedIssuesSection } from "./IssueRelatedIssuesSection.js";
 import { IssueTouchedFilesSection, type TouchedFile } from "./IssueTouchedFilesSection.js";
 import { IssueFollowUpSection } from "./IssueFollowUpSection.js";
 import { IssueArtifactsSection, copyIssueArtifactContent, openIssueArtifact } from "./IssueArtifactsSection.js";
+import { IssueMergedCommitsSection } from "./IssueMergedCommitsSection.js";
+import { CopyButton, CopyLinkButton } from "./IssueCopyButtons.js";
 
 // Re-exported so existing importers/tests keep working after the helpers moved
 // into lib/artifact-utils.ts and lib/artifact-classifiers.ts.
@@ -81,86 +83,6 @@ interface StatusOption {
   name: string;
 }
 
-interface IssueMergedCommitsSectionProps {
-  issueId: string;
-  /** Open the workspace panel (where the diff is viewable) for a merged commit. */
-  onOpenDiff: (commit: MergedCommit) => void;
-}
-
-export function IssueMergedCommitsSection({ issueId, onOpenDiff }: IssueMergedCommitsSectionProps) {
-  // Self-contained best-effort fetch — moved out of the panel's loadData
-  // mega-effect. Owns its own loading + data state.
-  const [data, setData] = useState<MergedCommitsResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    setData(null);
-    setLoading(true);
-    apiFetch<MergedCommitsResponse>(`/api/issues/${issueId}/merged-commits`)
-      .then((mc) => setData(mc))
-      .catch(() => setData(null))
-      .finally(() => setLoading(false));
-  }, [issueId]);
-
-  // Hide entirely until we know there's something to show or are still loading —
-  // an un-merged issue shouldn't add a noisy empty panel to every detail view.
-  if (!loading && (!data || !data.merged)) return null;
-
-  return (
-    <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
-          Merged commits
-        </label>
-        {!loading && data && data.commits.length > 0 && (
-          <span className="text-[11px] text-gray-400 dark:text-gray-500">
-            {data.commits.length}
-            {data.defaultBranch ? ` on ${data.defaultBranch}` : ""}
-          </span>
-        )}
-      </div>
-      {loading ? (
-        <p className="text-xs text-gray-400 dark:text-gray-500">Loading merged commits...</p>
-      ) : !data || data.commits.length === 0 ? (
-        <p className="text-xs text-gray-400 dark:text-gray-500">
-          Merged, but no distinct commits were found for this issue.
-        </p>
-      ) : (
-        <ul className="space-y-1.5">
-          {data.commits.map((commit) => (
-            <li
-              key={commit.sha}
-              className="border border-gray-200 dark:border-gray-700 rounded px-2.5 py-2 bg-gray-50 dark:bg-gray-800/50"
-            >
-              <div className="flex items-center gap-2 text-[11px]">
-                <code className="font-mono px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
-                  {commit.shortSha}
-                </code>
-                <span className="text-gray-500 dark:text-gray-400 truncate">{commit.author}</span>
-                <span className="text-gray-400 dark:text-gray-500 ml-auto whitespace-nowrap">
-                  {formatRelativeTime(commit.date)}
-                </span>
-              </div>
-              <p className="mt-1 text-xs text-gray-700 dark:text-gray-300 break-words">
-                {commit.message}
-              </p>
-              <div className="mt-1.5 text-[11px]">
-                <button
-                  type="button"
-                  onClick={() => onOpenDiff(commit)}
-                  className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
-                >
-                  View diff
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
 interface IssueDetailPanelProps {
   issue: IssueWithStatus;
   statuses: StatusOption[];
@@ -195,74 +117,6 @@ export interface TicketTrailControls {
   onRemove: (id: string) => void;
 }
 
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  const handleCopy = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  };
-  return (
-    <button
-      onClick={handleCopy}
-      title={copied ? "Copied!" : "Copy issue reference"}
-      className="text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400 p-0.5 rounded transition-colors relative"
-    >
-      {copied ? (
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-        </svg>
-      ) : (
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-        </svg>
-      )}
-      {copied && (
-        <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-xs bg-gray-800 dark:bg-gray-200 text-white dark:text-gray-800 px-1.5 py-0.5 rounded whitespace-nowrap pointer-events-none">
-          Copied!
-        </span>
-      )}
-    </button>
-  );
-}
-
-function CopyLinkButton({ issueNumber }: { issueNumber: number }) {
-  const [copied, setCopied] = useState(false);
-  const handleCopy = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const url = new URL(window.location.href);
-    url.search = `?issue=${issueNumber}`;
-    navigator.clipboard.writeText(url.toString()).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  };
-  return (
-    <button
-      onClick={handleCopy}
-      title={copied ? "Link copied!" : "Copy shareable link"}
-      aria-label={copied ? "Link copied!" : "Copy shareable link"}
-      className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 p-0.5 rounded transition-colors relative"
-    >
-      {copied ? (
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-        </svg>
-      ) : (
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-        </svg>
-      )}
-      {copied && (
-        <span className="absolute -bottom-7 left-1/2 -translate-x-1/2 text-xs bg-gray-800 dark:bg-gray-200 text-white dark:text-gray-800 px-1.5 py-0.5 rounded whitespace-nowrap pointer-events-none z-10">
-          Copied!
-        </span>
-      )}
-    </button>
-  );
-}
 
 export function IssueDetailPanel({
   issue,
