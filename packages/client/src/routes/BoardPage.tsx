@@ -16,6 +16,7 @@ import { showToast } from "../components/Toast.js";
 import { apiFetch } from "../lib/api.js";
 import { setBoardDragData, getBoardDragData } from "../lib/dragData.js";
 import { matchesBoardFilters } from "../lib/boardFiltering.js";
+import { reconcileSelectedIssue } from "../lib/selectedIssueSync.js";
 import { applyLocalReorder, moveIssueToStatus } from "../lib/issueMoveHelpers.js";
 import { createQuickUpdateHandlers } from "../lib/issueQuickUpdates.js";
 import { useColumnResize } from "../lib/columnResizeHandler.js";
@@ -319,36 +320,13 @@ export function BoardPage() {
     if (refetchTimerRef.current !== null) clearTimeout(refetchTimerRef.current);
   }, []);
 
-  // Keep selectedIssue in sync with board data (F6 stale data fix)
+  // Keep selectedIssue in sync with board data (F6 stale data fix). The pure
+  // reconcile logic (incl. the stripped-description edge case) lives in
+  // lib/selectedIssueSync.ts and is unit-tested there.
   useEffect(() => {
     if (!selectedIssue) return;
-    for (const col of columns) {
-      const found = col.issues.find((i) => i.id === selectedIssue.id);
-      if (found) {
-        // The board payload strips `description` (the panel lazy-loads it). A
-        // background board refresh must NOT count the stripped (undefined)
-        // description as a change, nor clobber the loaded one — otherwise the
-        // open panel's body vanishes on the next board_changed/poll tick.
-        const boardDescDiffers = found.description !== undefined && found.description !== selectedIssue.description;
-        if (found.title !== selectedIssue.title ||
-            boardDescDiffers ||
-            found.issueType !== selectedIssue.issueType ||
-            found.statusId !== selectedIssue.statusId ||
-            found.statusName !== selectedIssue.statusName ||
-            found.updatedAt !== selectedIssue.updatedAt ||
-            found.workspaceSummary?.main?.contextTokens !== selectedIssue.workspaceSummary?.main?.contextTokens ||
-            found.workspaceSummary?.main?.lastTool !== selectedIssue.workspaceSummary?.main?.lastTool ||
-            found.workspaceSummary?.main?.status !== selectedIssue.workspaceSummary?.main?.status) {
-          setSelectedIssue(
-            found.description === undefined && selectedIssue.description !== undefined
-              ? { ...found, description: selectedIssue.description }
-              : found,
-          );
-        }
-        return;
-      }
-    }
-    setSelectedIssue(null);
+    const result = reconcileSelectedIssue(columns, selectedIssue);
+    if (result.changed) setSelectedIssue(result.next);
   }, [columns, selectedIssue]);
   // Real-time board updates via WebSocket (handlers + subscription)
   useBoardLiveHandlers({
