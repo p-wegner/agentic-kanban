@@ -11,6 +11,7 @@ import { useBoardPanelNavigation } from "../hooks/useBoardPanelNavigation.js";
 import { useProjectManagement } from "../hooks/useProjectManagement.js";
 import { useBoardFilters } from "../hooks/useBoardFilters.js";
 import { useBoardIssueActions } from "../hooks/useBoardIssueActions.js";
+import { useBoardMiscHandlers } from "../hooks/useBoardMiscHandlers.js";
 import { stringifyForIssueCard, deferUntilIdle } from "../lib/boardCardSnapshot.js";
 import { BoardKanbanView } from "../components/BoardKanbanView.js";
 import { RecentlyMergedStrip } from "../components/RecentlyMergedStrip.js";
@@ -27,7 +28,7 @@ const WorkspacePanel = lazy(() => import("../components/WorkspacePanel.js").then
 import { SkeletonBoard } from "../components/SkeletonBoard.js";
 import { ToastContainer, showToast } from "../components/Toast.js";
 import { MentionProvider } from "../lib/MentionContext.js";
-import { apiFetch, apiPost } from "../lib/api.js";
+import { apiFetch } from "../lib/api.js";
 import { setBoardDragData, getBoardDragData } from "../lib/dragData.js";
 import { matchesBoardFilters } from "../lib/boardFiltering.js";
 import { applyLocalReorder, moveIssueToStatus } from "../lib/issueMoveHelpers.js";
@@ -714,55 +715,10 @@ export function BoardPage() {
 
   const { openIssueById, navigateTrail, trailControls, ticketTrail } = useBoardNavigation(columns, setSelectedIssue);
 
-  async function handleDuplicateIssue(issue: IssueWithStatus) {
-    try {
-      const result = await apiPost<{ id: string; issueNumber: number; title: string }>(`/api/issues/${issue.id}/duplicate`);
-      await refetchBoard();
-      showToast(`Duplicated as #${result.issueNumber}`, "success");
-      openIssueById(result.id);
-    } catch {
-      showToast("Failed to duplicate issue", "error");
-    }
-  }
-
-  const handleMentionClick = useCallback(
-    (issueId: string) => {
-      openIssueById(issueId);
-    },
-    [openIssueById],
-  );
-
-  useEffect(() => {
-    if (!selectedIssue) return;
-    ticketTrail.visit({
-      id: selectedIssue.id,
-      number: selectedIssue.issueNumber ?? null,
-      title: selectedIssue.title,
-    });
-  }, [selectedIssue?.id, selectedIssue?.issueNumber, selectedIssue?.title, ticketTrail.visit]);
-
-  useEffect(() => {
-    if (!keyboardCursorIssueId) return;
-    const el = document.querySelector(`[aria-current="true"]`);
-    el?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [keyboardCursorIssueId]);
-
-  function toggleGroup(group: string) {
-    setCollapsedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(group)) {
-        next.delete(group);
-      } else {
-        next.add(group);
-      }
-      return next;
-    });
-  }
-
-  const handleCreatedDateDrilldown = useCallback((dateKey: string) => {
-    setCreatedDateFilter(dateKey);
-    handleViewModeChange("table");
-  }, [handleViewModeChange]);
+  const { handleDuplicateIssue, handleMentionClick, toggleGroup, handleCreatedDateDrilldown } = useBoardMiscHandlers({
+    selectedIssue, keyboardCursorIssueId, ticketTrail, openIssueById,
+    handleViewModeChange, refetchBoard, setCollapsedGroups, setCreatedDateFilter,
+  });
 
   // Keyboard shortcuts
   useBoardKeyboardShortcuts(
