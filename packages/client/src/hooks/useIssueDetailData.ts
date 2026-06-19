@@ -119,9 +119,9 @@ export function useIssueDetailData(issue: IssueWithStatus, onIssueUpdate: (issue
         setAvailableIssues(available.filter(i => i.id !== issue.id));
         setAvailableSkills(skills);
         setMilestones(milestonesResp);
-        // Check for active showdown
-        apiFetch<{ id: string }>(`/api/issues/${issue.id}/showdown`)
-          .then(sd => setActiveShowdownId(sd.id))
+        // Check for active showdown (endpoint returns null when none exists)
+        apiFetch<{ id: string } | null>(`/api/issues/${issue.id}/showdown`)
+          .then(sd => setActiveShowdownId(sd?.id ?? null))
           .catch(() => {});
       } catch {
         setArtifactsLoading(false);

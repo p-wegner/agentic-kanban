@@ -6,7 +6,7 @@ import type { BoardEvents } from "./board-events.js";
 import type { WebhookIssueStatusPayload } from "@agentic-kanban/shared/lib";
 import { buildIssueStatusPayload } from "@agentic-kanban/shared/lib";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
-import { getStartNode, resolveStatusId, syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { isTerminalStatusView } from "@agentic-kanban/shared";
 import {
   resolveNewIssueDefaults,
@@ -208,6 +208,13 @@ export function createIssueService(deps: {
       updatedAt: now,
     }, database);
 
+    // Align currentNodeId with the status the issue was actually created in.
+    // No-op without a workflow template; for one, it sets currentNodeId to the
+    // node mapping to that status (null for statuses with no node, e.g. "Todo").
+    if (input.workflowTemplateId) {
+      await syncCurrentNodeToStatus(database, id).catch(() => {});
+    }
+
     if (input.projectId) boardEvents?.broadcast(input.projectId, "issue_created");
 
     return (await getIssueDescription(id, database))!;
@@ -216,22 +223,19 @@ export function createIssueService(deps: {
   async function resolveInitialWorkflowState(
     projectId: string,
     templateId: string,
-    fallbackStatusId: string,
+    requestedStatusId: string,
   ): Promise<{ currentNodeId: string | null; statusId: string }> {
     const template = await getWorkflowTemplateForProject(templateId, database);
     if (!template || (template.projectId !== null && template.projectId !== projectId)) {
       throw new IssueError("Workflow template not found for project", "BAD_REQUEST");
     }
 
-    const startNode = await getStartNode(database as any, templateId);
-    if (!startNode) return { currentNodeId: null, statusId: fallbackStatusId };
-    const mappedStatusId = startNode.statusName
-      ? await resolveStatusId(database as any, projectId, startNode.statusName)
-      : null;
-    return {
-      currentNodeId: startNode.id,
-      statusId: mappedStatusId ?? fallbackStatusId,
-    };
+    // Honor the status the issue is created in (e.g. the column whose "+" the user
+    // clicked). currentNodeId is aligned to that status by syncCurrentNodeToStatus
+    // after the insert. Previously this forced every new issue onto the workflow's
+    // start node — whose status is usually "In Progress" — overriding the chosen
+    // column, so creating an issue in "Todo" silently landed it in "In Progress".
+    return { currentNodeId: null, statusId: requestedStatusId };
   }
 
   async function createIssuesBatch(

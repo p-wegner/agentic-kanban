@@ -793,12 +793,14 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     }
   });
 
-  // GET /api/issues/:id/showdown — get active showdown for this issue
+  // GET /api/issues/:id/showdown — get active showdown for this issue.
+  // Returns 200 with `null` when none exists: most issues never have a showdown,
+  // so "no showdown" is a normal state, not a client error. (A 404 here floods
+  // the browser console with errors every time an issue detail panel opens.)
   router.get("/:id/showdown", async (c) => {
     const issueId = c.req.param("id");
     const result = await showdownService.getShowdownByIssue(issueId);
-    if (!result) return c.json({ error: "No showdown found for this issue" }, 404);
-    return c.json(result);
+    return c.json(result ?? null);
   });
 
   return router;

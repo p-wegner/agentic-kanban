@@ -672,6 +672,21 @@ describe("Issues API", () => {
     expect(showdownRows).toHaveLength(0);
   });
 
+  it("GET /api/issues/:id/showdown returns 200 with null when no showdown exists", async () => {
+    // The issue detail panel probes this on every open. "No showdown" is the
+    // normal case, so it must NOT 404 (a 404 floods the browser console).
+    const createRes = await app.request("/api/issues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "No showdown here", statusId, projectId }),
+    });
+    const issue = await createRes.json() as any;
+
+    const res = await app.request(`/api/issues/${issue.id}/showdown`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toBeNull();
+  });
+
   it("POST /api/issues creates issue with estimate", async () => {
     const res = await app.request("/api/issues", {
       method: "POST",
