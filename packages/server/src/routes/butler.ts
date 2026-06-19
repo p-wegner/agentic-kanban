@@ -83,7 +83,7 @@ function butlerProfilePrefKey(projectId: string): string {
   return `butler_profile_${projectId}`;
 }
 
-function normalizeModelForBackend(model: string | null | undefined, backend: "claude" | "codex"): string {
+function normalizeModelForBackend(model: string | null | undefined, backend: "claude" | "codex" | "mock"): string {
   const value = model?.trim() ?? "";
   if (!value) return "";
   const options = backend === "codex" ? CODEX_MODEL_OPTIONS : CLAUDE_MODEL_OPTIONS;

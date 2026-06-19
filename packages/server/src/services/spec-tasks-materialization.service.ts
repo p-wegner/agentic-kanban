@@ -20,7 +20,7 @@ interface ParsedTask {
   explicitDependsOn: string[];
 }
 
-interface MaterializeResult {
+export interface MaterializeResult {
   created: Array<{ id: string; issueNumber: number; title: string; tempId: string }>;
   dependencyEdges: number;
   skipped: boolean;

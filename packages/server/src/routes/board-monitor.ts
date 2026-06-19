@@ -58,7 +58,9 @@ export function createBoardMonitorRoute(database: Database) {
     const projectId = c.req.param("id");
     const project = await getProjectById(projectId, database);
     if (!project) return c.json({ error: "project not found" }, 404);
-    const body = await c.req.json<{ action?: "start" | "stop"; agent?: "claude" | "codex" }>().catch(() => ({}));
+    const body = await c.req
+      .json<{ action?: "start" | "stop"; agent?: "claude" | "codex" }>()
+      .catch((): { action?: "start" | "stop"; agent?: "claude" | "codex" } => ({}));
     const repoPath = project.repoPath || "";
     if (body.action === "start") {
       const result = startConductor(repoPath, body.agent === "codex" ? "codex" : "claude");

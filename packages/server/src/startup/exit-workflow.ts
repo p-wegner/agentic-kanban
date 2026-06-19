@@ -256,7 +256,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
               agentArgs: rotationPrefMap.get("agent_args") || undefined,
               provider: "codex",
               triggerType: "agent",
-              profile: { provider: "codex", name: rotation.toProfile },
+              profile: { provider: "codex", name: rotation.toProfile ?? "" },
             });
             boardEvents.broadcastActivity(projectId, { issueId, sessionId, activity: "" });
             boardEvents.broadcast(projectId, "issue_updated");
@@ -302,7 +302,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
               claudeProfile: rotation.toProfile,
               provider: "claude-code",
               triggerType: "agent",
-              profile: { provider: "claude", name: rotation.toProfile },
+              profile: { provider: "claude", name: rotation.toProfile ?? "" },
             });
             boardEvents.broadcastActivity(projectId, { issueId, sessionId, activity: "" });
             boardEvents.broadcast(projectId, "issue_updated");

@@ -55,6 +55,7 @@ export async function getProjectForWorkspaceCreate(
     .select({
       repoPath: projects.repoPath,
       defaultBranch: projects.defaultBranch,
+      defaultSkillId: projects.defaultSkillId,
       setupScript: projects.setupScript,
       setupBlocking: projects.setupBlocking,
       setupEnabled: projects.setupEnabled,

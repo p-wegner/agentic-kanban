@@ -5,7 +5,7 @@ export type RiskCategory = "merge_blocker" | "stale_session" | "low_backlog" | "
 export type RiskSeverity = "high" | "medium" | "low";
 
 export interface RiskItem {
-  issueNumber: number;
+  issueNumber: number | null;
   issueTitle: string;
   reason: string;
   category: RiskCategory;
@@ -135,7 +135,7 @@ export async function generateBoardRiskDigest(
   allItems.sort((a, b) => {
     const sv = severityOrder[a.severity] - severityOrder[b.severity];
     if (sv !== 0) return sv;
-    return a.issueNumber - b.issueNumber;
+    return (a.issueNumber ?? 0) - (b.issueNumber ?? 0);
   });
 
   const topItems = allItems.slice(0, 3);
