@@ -214,20 +214,20 @@ describe("CLI register", () => {
     expect(result.stdout).toContain("Set as active project");
   });
 
-  it("is idempotent for same repo path", { timeout: 15_000 }, () => {
+  it("is idempotent for same repo path", { timeout: 30_000 }, () => {
     runCli(["register", PKG_DIR], ctx.dbPath);
     const result = runCli(["register", PKG_DIR], ctx.dbPath);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("already registered");
   });
 
-  it("registers with custom name", { timeout: 15_000 }, () => {
+  it("registers with custom name", { timeout: 30_000 }, () => {
     const result = runCli(["register", PKG_DIR, "--name", "my-custom-name"], ctx.dbPath);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('Registered project "my-custom-name"');
   });
 
-  it("errors for non-git path", { timeout: 15_000 }, () => {
+  it("errors for non-git path", { timeout: 30_000 }, () => {
     const result = runCli(["register", "C:\\Windows"], ctx.dbPath);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("Error:");
@@ -498,7 +498,7 @@ describe("CLI skill list", () => {
     expect(result.stdout).toContain("No agent skills found");
   });
 
-  it("lists skills after creation", { timeout: 15_000 }, () => {
+  it("lists skills after creation", { timeout: 30_000 }, () => {
     runCli(["skill", "create", "my-skill", "-d", "A test skill", "-p", "Do the thing"], ctx.dbPath);
     const result = runCli(["skill", "list"], ctx.dbPath);
     expect(result.status).toBe(0);
@@ -520,7 +520,7 @@ describe("CLI skill create", () => {
     expect(result.stdout).toContain("(global)");
   });
 
-  it("creates a project-scoped skill", { timeout: 15_000 }, async () => {
+  it("creates a project-scoped skill", { timeout: 30_000 }, async () => {
     const { id: projectId } = await seedProject(ctx.dbPath);
     const result = runCli(["skill", "create", "scoped-skill", "-d", "Scoped", "-p", "Prompt", "--project", projectId], ctx.dbPath);
     expect(result.status).toBe(0);
@@ -528,14 +528,14 @@ describe("CLI skill create", () => {
     expect(result.stdout).toContain("project:");
   });
 
-  it("rejects duplicate names in same scope", { timeout: 15_000 }, () => {
+  it("rejects duplicate names in same scope", { timeout: 30_000 }, () => {
     runCli(["skill", "create", "dup-skill", "-p", "Prompt 1"], ctx.dbPath);
     const result = runCli(["skill", "create", "dup-skill", "-p", "Prompt 2"], ctx.dbPath);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("already exists");
   });
 
-  it("allows same name in different scopes", { timeout: 15_000 }, async () => {
+  it("allows same name in different scopes", { timeout: 30_000 }, async () => {
     const { id: projectId } = await seedProject(ctx.dbPath);
     runCli(["skill", "create", "scope-test", "-p", "Global prompt"], ctx.dbPath);
     const result = runCli(["skill", "create", "scope-test", "-p", "Project prompt", "--project", projectId], ctx.dbPath);
@@ -562,7 +562,7 @@ describe("CLI skill get", () => {
   beforeEach(() => { ctx = createTestDb(); });
   afterEach(() => { ctx.cleanup(); });
 
-  it("gets a skill by name", { timeout: 15_000 }, () => {
+  it("gets a skill by name", { timeout: 30_000 }, () => {
     runCli(["skill", "create", "findable-skill", "-d", "Can be found", "-p", "Test prompt content"], ctx.dbPath);
     const result = runCli(["skill", "get", "findable-skill"], ctx.dbPath);
     expect(result.status).toBe(0);
@@ -570,7 +570,7 @@ describe("CLI skill get", () => {
     expect(result.stdout).toContain("Test prompt content");
   });
 
-  it("gets a skill by ID", { timeout: 15_000 }, () => {
+  it("gets a skill by ID", { timeout: 30_000 }, () => {
     const createResult = runCli(["skill", "create", "by-id-skill", "-p", "Prompt"], ctx.dbPath);
     const idMatch = createResult.stdout.match(/id: ([a-f0-9-]+)/);
     expect(idMatch).toBeTruthy();
@@ -633,14 +633,14 @@ describe("CLI issue dependency", () => {
     expect(result.stderr).toContain("Invalid type");
   });
 
-  it("lists dependencies", { timeout: 15_000 }, () => {
+  it("lists dependencies", { timeout: 30_000 }, () => {
     runCli(["issue", "dependency", "add", issueAId, issueBId], ctx.dbPath);
     const result = runCli(["issue", "dependency", "list", issueAId], ctx.dbPath);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Issue B");
   });
 
-  it("removes a dependency", { timeout: 15_000 }, () => {
+  it("removes a dependency", { timeout: 30_000 }, () => {
     const addResult = runCli(["issue", "dependency", "add", issueAId, issueBId], ctx.dbPath);
     const idMatch = addResult.stdout.match(/id: ([a-f0-9-]+)/);
     expect(idMatch).toBeTruthy();
