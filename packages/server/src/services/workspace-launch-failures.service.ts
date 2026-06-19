@@ -138,6 +138,70 @@ export async function getWorkspaceLaunchFailures(
     ).length;
   }
 
+  type WsRow = typeof workspaceRows[number];
+  type SessionRow = typeof sessionRows[number];
+  type IssueRow = typeof activeIssues[number];
+  type FailureClassification = Pick<WorkspaceLaunchFailure, "failureCategory" | "lastMessage" | "failedAt">;
+
+  /**
+   * Decide whether (and how) a workspace counts as a launch failure. Checks run in
+   * priority order; the first match wins. Returns null when the workspace launched
+   * cleanly. Order matters — preflight/worktree/setup failures are reported even
+   * when a later session also looks off.
+   */
+  function classifyWorkspaceFailure(ws: WsRow, latestSession: SessionRow | null): FailureClassification | null {
+    if (ws.latestLaunchError) {
+      return { failureCategory: "preflight-failed", lastMessage: ws.latestLaunchError, failedAt: ws.updatedAt };
+    }
+    if (!ws.isDirect && !ws.workingDir) {
+      return { failureCategory: "missing-worktree", lastMessage: extractFailureMessage(latestSession, null), failedAt: ws.updatedAt };
+    }
+    if (ws.latestSetupState === "failed") {
+      return { failureCategory: "setup-failed", lastMessage: extractFailureMessage(null, ws.latestSetupStderrTail), failedAt: ws.latestSetupEndedAt ?? ws.updatedAt };
+    }
+    if (!latestSession) return null;
+    if (isRateLimitedSession(latestSession)) {
+      return { failureCategory: "rate-limited", lastMessage: extractFailureMessage(latestSession, null), failedAt: latestSession.endedAt ?? latestSession.startedAt };
+    }
+    if (isZeroOutputSession(latestSession)) {
+      return { failureCategory: "zero-output", lastMessage: extractFailureMessage(latestSession, null), failedAt: latestSession.endedAt ?? latestSession.startedAt };
+    }
+    if (latestSession.status === "stopped" && latestSession.exitCode !== null && latestSession.exitCode !== "0") {
+      return { failureCategory: "session-error", lastMessage: extractFailureMessage(latestSession, null), failedAt: latestSession.endedAt ?? latestSession.startedAt };
+    }
+    return null;
+  }
+
+  /** Assemble a WorkspaceLaunchFailure from the common workspace/issue/session fields + the classification. */
+  function buildFailure(
+    ws: WsRow,
+    issue: IssueRow,
+    issueStatusName: string,
+    latestSession: SessionRow | null,
+    classification: FailureClassification,
+  ): WorkspaceLaunchFailure {
+    return {
+      workspaceId: ws.id,
+      workspaceBranch: ws.branch,
+      workspaceStatus: ws.status,
+      workingDir: ws.workingDir,
+      issueId: issue.id,
+      issueNumber: issue.issueNumber,
+      issueTitle: issue.title,
+      issueStatusName,
+      provider: ws.provider ?? null,
+      profile: ws.claudeProfile ?? null,
+      sessionId: latestSession?.id ?? null,
+      sessionStatus: latestSession?.status ?? null,
+      sessionStartedAt: latestSession?.startedAt ?? null,
+      sessionEndedAt: latestSession?.endedAt ?? null,
+      failureCategory: classification.failureCategory,
+      lastMessage: classification.lastMessage,
+      failedAt: classification.failedAt,
+      recentFailureCount: countRecentFailures(ws.id),
+    };
+  }
+
   const failures: WorkspaceLaunchFailure[] = [];
 
   for (const ws of workspaceRows) {
@@ -147,158 +211,10 @@ export async function getWorkspaceLaunchFailures(
     const issueStatusName = statusNameById.get(issue.statusId) ?? "Unknown";
     const latestSession = latestSessionByWs.get(ws.id) ?? null;
 
-    if (ws.latestLaunchError) {
-      failures.push({
-        workspaceId: ws.id,
-        workspaceBranch: ws.branch,
-        workspaceStatus: ws.status,
-        workingDir: ws.workingDir,
-        issueId: issue.id,
-        issueNumber: issue.issueNumber,
-        issueTitle: issue.title,
-        issueStatusName,
-        provider: ws.provider ?? null,
-        profile: ws.claudeProfile ?? null,
-        sessionId: latestSession?.id ?? null,
-        sessionStatus: latestSession?.status ?? null,
-        sessionStartedAt: latestSession?.startedAt ?? null,
-        sessionEndedAt: latestSession?.endedAt ?? null,
-        failureCategory: "preflight-failed",
-        lastMessage: ws.latestLaunchError,
-        failedAt: ws.updatedAt,
-        recentFailureCount: countRecentFailures(ws.id),
-      });
-      continue;
-    }
+    const classification = classifyWorkspaceFailure(ws, latestSession);
+    if (!classification) continue;
 
-    // Check: missing worktree path
-    if (!ws.isDirect && !ws.workingDir) {
-      failures.push({
-        workspaceId: ws.id,
-        workspaceBranch: ws.branch,
-        workspaceStatus: ws.status,
-        workingDir: ws.workingDir,
-        issueId: issue.id,
-        issueNumber: issue.issueNumber,
-        issueTitle: issue.title,
-        issueStatusName,
-        provider: ws.provider ?? null,
-        profile: ws.claudeProfile ?? null,
-        sessionId: latestSession?.id ?? null,
-        sessionStatus: latestSession?.status ?? null,
-        sessionStartedAt: latestSession?.startedAt ?? null,
-        sessionEndedAt: latestSession?.endedAt ?? null,
-        failureCategory: "missing-worktree",
-        lastMessage: extractFailureMessage(latestSession, null),
-        failedAt: ws.updatedAt,
-        recentFailureCount: countRecentFailures(ws.id),
-      });
-      continue;
-    }
-
-    // Check: setup script failure
-    if (ws.latestSetupState === "failed") {
-      failures.push({
-        workspaceId: ws.id,
-        workspaceBranch: ws.branch,
-        workspaceStatus: ws.status,
-        workingDir: ws.workingDir,
-        issueId: issue.id,
-        issueNumber: issue.issueNumber,
-        issueTitle: issue.title,
-        issueStatusName,
-        provider: ws.provider ?? null,
-        profile: ws.claudeProfile ?? null,
-        sessionId: latestSession?.id ?? null,
-        sessionStatus: latestSession?.status ?? null,
-        sessionStartedAt: latestSession?.startedAt ?? null,
-        sessionEndedAt: latestSession?.endedAt ?? null,
-        failureCategory: "setup-failed",
-        lastMessage: extractFailureMessage(null, ws.latestSetupStderrTail),
-        failedAt: ws.latestSetupEndedAt ?? ws.updatedAt,
-        recentFailureCount: countRecentFailures(ws.id),
-      });
-      continue;
-    }
-
-    if (!latestSession) continue;
-
-    if (isRateLimitedSession(latestSession)) {
-      failures.push({
-        workspaceId: ws.id,
-        workspaceBranch: ws.branch,
-        workspaceStatus: ws.status,
-        workingDir: ws.workingDir,
-        issueId: issue.id,
-        issueNumber: issue.issueNumber,
-        issueTitle: issue.title,
-        issueStatusName,
-        provider: ws.provider ?? null,
-        profile: ws.claudeProfile ?? null,
-        sessionId: latestSession.id,
-        sessionStatus: latestSession.status,
-        sessionStartedAt: latestSession.startedAt,
-        sessionEndedAt: latestSession.endedAt,
-        failureCategory: "rate-limited",
-        lastMessage: extractFailureMessage(latestSession, null),
-        failedAt: latestSession.endedAt ?? latestSession.startedAt,
-        recentFailureCount: countRecentFailures(ws.id),
-      });
-      continue;
-    }
-
-    // Check: zero-output session (1-second or zero-token provider failure)
-    if (isZeroOutputSession(latestSession)) {
-      failures.push({
-        workspaceId: ws.id,
-        workspaceBranch: ws.branch,
-        workspaceStatus: ws.status,
-        workingDir: ws.workingDir,
-        issueId: issue.id,
-        issueNumber: issue.issueNumber,
-        issueTitle: issue.title,
-        issueStatusName,
-        provider: ws.provider ?? null,
-        profile: ws.claudeProfile ?? null,
-        sessionId: latestSession.id,
-        sessionStatus: latestSession.status,
-        sessionStartedAt: latestSession.startedAt,
-        sessionEndedAt: latestSession.endedAt,
-        failureCategory: "zero-output",
-        lastMessage: extractFailureMessage(latestSession, null),
-        failedAt: latestSession.endedAt ?? latestSession.startedAt,
-        recentFailureCount: countRecentFailures(ws.id),
-      });
-      continue;
-    }
-
-    // Check: session exited with non-zero exit code
-    if (
-      latestSession.status === "stopped"
-      && latestSession.exitCode !== null
-      && latestSession.exitCode !== "0"
-    ) {
-      failures.push({
-        workspaceId: ws.id,
-        workspaceBranch: ws.branch,
-        workspaceStatus: ws.status,
-        workingDir: ws.workingDir,
-        issueId: issue.id,
-        issueNumber: issue.issueNumber,
-        issueTitle: issue.title,
-        issueStatusName,
-        provider: ws.provider ?? null,
-        profile: ws.claudeProfile ?? null,
-        sessionId: latestSession.id,
-        sessionStatus: latestSession.status,
-        sessionStartedAt: latestSession.startedAt,
-        sessionEndedAt: latestSession.endedAt,
-        failureCategory: "session-error",
-        lastMessage: extractFailureMessage(latestSession, null),
-        failedAt: latestSession.endedAt ?? latestSession.startedAt,
-        recentFailureCount: countRecentFailures(ws.id),
-      });
-    }
+    failures.push(buildFailure(ws, issue, issueStatusName, latestSession, classification));
   }
 
   // Sort by failedAt descending (most recent first)
