@@ -1,6 +1,7 @@
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { buildTicketChatPrompt } from "@agentic-kanban/shared";
 import { showToast } from "../lib/toast.js";
+import type { ViewMode } from "../lib/viewRegistry.js";
 
 interface UseBoardPanelNavigationDeps {
   pendingIssueIds: Set<string>;
@@ -13,7 +14,7 @@ interface UseBoardPanelNavigationDeps {
   setWorkspaceInitialDiff: (v: boolean) => void;
   setWorkspaceInitial: (init: { workspaceId: string; sessionId: string } | null) => void;
   setButlerInitialPrompt: (prompt: string | null) => void;
-  handleViewModeChange: (mode: string) => void;
+  handleViewModeChange: (mode: ViewMode) => void;
 }
 
 /**

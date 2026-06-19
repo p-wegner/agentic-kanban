@@ -208,12 +208,12 @@ export function useWorkspaceActions(deps: WorkspaceActionsDeps) {
       await apiPost(`/api/workspaces/${wsId}/stop`);
       disconnect();
       if (activeSession) {
-        setLastSessionPerWorkspace((prev) => ({ ...prev, [wsId]: activeSession }));
+        setLastSessionPerWorkspace((prev: Record<string, string>) => ({ ...prev, [wsId]: activeSession }));
         setCompletedMessages(messages);
       }
       setActiveSession(null);
       await fetchWorkspaces();
-      setWorkspaceSessions((prev) => {
+      setWorkspaceSessions((prev: Record<string, unknown>) => {
         const next = { ...prev };
         delete next[wsId];
         return next;
@@ -521,8 +521,8 @@ export function useWorkspaceActions(deps: WorkspaceActionsDeps) {
       });
       setActiveSession(result.sessionId);
       setCompletedMessages([]);
-      setPlanEditMode((prev) => ({ ...prev, [wsId]: false }));
-      setPlanEditText((prev) => ({ ...prev, [wsId]: "" }));
+      setPlanEditMode((prev: Record<string, boolean>) => ({ ...prev, [wsId]: false }));
+      setPlanEditText((prev: Record<string, string>) => ({ ...prev, [wsId]: "" }));
       await fetchWorkspaces();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start implementation");
@@ -538,8 +538,8 @@ export function useWorkspaceActions(deps: WorkspaceActionsDeps) {
       const result = await apiPost<{ sessionId: string }>(`/api/workspaces/${wsId}/reject-plan`, { feedback });
       setActiveSession(result.sessionId);
       setCompletedMessages([]);
-      setRejectMode((prev) => ({ ...prev, [wsId]: false }));
-      setRejectFeedback((prev) => ({ ...prev, [wsId]: "" }));
+      setRejectMode((prev: Record<string, boolean>) => ({ ...prev, [wsId]: false }));
+      setRejectFeedback((prev: Record<string, string>) => ({ ...prev, [wsId]: "" }));
       await fetchWorkspaces();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to reject plan");

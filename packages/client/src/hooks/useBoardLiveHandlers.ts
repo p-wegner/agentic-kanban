@@ -11,7 +11,7 @@ interface UseBoardLiveHandlersDeps {
   columnsRef: React.RefObject<StatusWithIssues[]>;
   loadProjectsRef: React.RefObject<() => Promise<string | undefined>>;
   pendingBoardRefreshRef: React.RefObject<boolean>;
-  refetchBoard: (projectId?: string) => Promise<void> | void;
+  refetchBoard: (projectId?: string) => Promise<StatusWithIssues[] | undefined> | void;
   scheduleRefetch: () => void;
   setColumns: React.Dispatch<React.SetStateAction<StatusWithIssues[]>>;
   creatingInColumnId: string | null;

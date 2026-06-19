@@ -1,4 +1,5 @@
-import type { AvailableSkill, ProfileOption } from "../lib/workspace-helpers.js";
+import type { ProfileOption } from "../lib/workspace-helpers.js";
+import type { AvailableSkill } from "./WorkspaceCard.js";
 import {
   CODEX_DEFAULT_PROFILE,
   COPILOT_DEFAULT_PROFILE,

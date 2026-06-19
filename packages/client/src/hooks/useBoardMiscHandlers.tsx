@@ -6,15 +6,17 @@ import { useCallback, useEffect } from "react";
 import { apiPost } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
+import type { useTicketTrail } from "./useTicketTrail.js";
+import type { ViewMode } from "../lib/viewRegistry.js";
 
 type Setter = (value: any) => void;
 
 interface BoardMiscHandlersDeps {
   selectedIssue: IssueWithStatus | null;
   keyboardCursorIssueId: string | null;
-  ticketTrail: unknown;
+  ticketTrail: ReturnType<typeof useTicketTrail>;
   openIssueById: (id: string) => void;
-  handleViewModeChange: (mode: string) => void;
+  handleViewModeChange: (mode: ViewMode) => void;
   refetchBoard: (projectId?: string, options?: { force?: boolean }) => Promise<unknown>;
   setCollapsedGroups: Setter;
   setCreatedDateFilter: Setter;
@@ -59,7 +61,7 @@ export function useBoardMiscHandlers(deps: BoardMiscHandlersDeps) {
   }, [keyboardCursorIssueId]);
 
   function toggleGroup(group: string) {
-    setCollapsedGroups((prev) => {
+    setCollapsedGroups((prev: Set<string>) => {
       const next = new Set(prev);
       if (next.has(group)) {
         next.delete(group);

@@ -242,7 +242,7 @@ export function ButlerViewBody({
                   title="Model for this butler. Ctrl+M cycles models without losing context."
                   className="rounded border border-gray-300 dark:border-gray-600 bg-surface-raised dark:bg-surface-raised-dark px-1.5 py-1 text-xs text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-brand-500"
                 >
-                  {activeModelOptions.map((m) => (
+                  {activeModelOptions.map((m: any) => (
                     <option key={m.value} value={m.value}>{m.label}</option>
                   ))}
                 </select>
@@ -258,7 +258,7 @@ export function ButlerViewBody({
                   className="rounded border border-gray-300 dark:border-gray-600 bg-surface-raised dark:bg-surface-raised-dark px-1.5 py-1 text-xs text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
                 >
                   <option value="">{tab.globalProfile ? `Default (${tab.globalProfile})` : "Default"}</option>
-                  {tab.profiles.map((p) => (
+                  {tab.profiles.map((p: any) => (
                     <option key={p} value={p}>{p}</option>
                   ))}
                 </select>
@@ -339,7 +339,7 @@ export function ButlerViewBody({
                       <p className="text-xs text-gray-400 dark:text-gray-500 text-center py-4">No messages found in this session.</p>
                     ) : (
                       <div className="max-w-3xl mx-auto">
-                        {tab.historyTranscript.messages.map((msg, i) => (
+                        {tab.historyTranscript.messages.map((msg: any, i: number) => (
                           <ChatBubble key={i} msg={{ id: `hist-${i}`, role: msg.role, text: msg.text, ts: msg.ts }} />
                         ))}
                       </div>
@@ -360,7 +360,7 @@ export function ButlerViewBody({
                     <p className="text-xs text-gray-400 dark:text-gray-500 py-2">No past butler sessions found.</p>
                   ) : (
                     <div className="space-y-1">
-                      {tab.historySessions.map((s) => (
+                      {tab.historySessions.map((s: any) => (
                         <button
                           key={s.sessionId}
                           onClick={() => void openHistoryTranscript(s)}
@@ -390,7 +390,7 @@ export function ButlerViewBody({
               </div>
             )}
             <div className="max-w-3xl mx-auto">
-              {tab.chatMessages.map((msg) => (
+              {tab.chatMessages.map((msg: any) => (
                 <ChatBubble key={msg.id} msg={msg} />
               ))}
               {tab.sending && (
@@ -412,7 +412,7 @@ export function ButlerViewBody({
                 {commandMenuOpen && (
                   <div className="absolute bottom-full mb-2 left-0 right-0 max-h-60 overflow-y-auto rounded-xl border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark shadow-lg z-10 py-1">
                     <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-gray-400 dark:text-gray-500">Commands</div>
-                    {filteredCommands.map((cmd, i) => (
+                    {filteredCommands.map((cmd: any, i: number) => (
                       <button
                         key={cmd.name}
                         type="button"

@@ -25,7 +25,7 @@ export interface RenderContext {
   searchQuery: string;
 }
 
-function highlightText(text: string, query: string): React.ReactNode {
+export function highlightText(text: string, query: string): React.ReactNode {
   const needle = query.trim();
   if (!needle) return text;
 

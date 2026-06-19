@@ -6,11 +6,13 @@ import { apiFetch, apiPost, apiPatch, apiDelete } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
 import { issueArtifactKind } from "../lib/artifact-classifiers.js";
 import { invalidateAvailableIssuesCache } from "./useIssueDetailData.js";
+import type { Dispatch, SetStateAction } from "react";
 import type { IssueArtifact, IssueWithStatus, DependencyInfo, UpdateIssueRequest } from "@agentic-kanban/shared";
 import type { IssueComment } from "../components/IssueDetailComments.js";
 import type { TouchedFile } from "../components/IssueTouchedFilesSection.js";
+import type { MoveToDonePending, DependencyImpactPending } from "../components/IssueDetailDialogs.js";
 
-type Setter = (value: any) => void;
+type Setter<T> = Dispatch<SetStateAction<T>>;
 type Tag = { id: string; name: string; color: string | null };
 
 interface IssueActionsDeps {
@@ -32,23 +34,23 @@ interface IssueActionsDeps {
   onNavigateToIssue?: (issueId: string) => void;
   copyIssueArtifactContent: (artifact: IssueArtifact) => Promise<boolean>;
   openIssueArtifact: (artifact: IssueArtifact) => boolean;
-  setAllTags: Setter;
-  setArtifacts: Setter;
-  setComments: Setter;
-  setConfirmDelete: Setter;
-  setDeletingArtifactId: Setter;
-  setDeletingCommentId: Setter;
-  setDependencyImpactPending: Setter;
-  setDescription: Setter;
-  setDuplicating: Setter;
-  setEditing: Setter;
-  setExpandedArtifactId: Setter;
-  setIssueTags: Setter;
-  setMoveToDonePending: Setter;
-  setNewNoteBody: Setter;
-  setSaving: Setter;
-  setSubmittingNote: Setter;
-  setTogglingVisualVerify: Setter;
+  setAllTags: Setter<Tag[]>;
+  setArtifacts: Setter<IssueArtifact[]>;
+  setComments: Setter<IssueComment[]>;
+  setConfirmDelete: Setter<boolean>;
+  setDeletingArtifactId: Setter<string | null>;
+  setDeletingCommentId: Setter<string | null>;
+  setDependencyImpactPending: Setter<DependencyImpactPending | null>;
+  setDescription: Setter<string>;
+  setDuplicating: Setter<boolean>;
+  setEditing: Setter<boolean>;
+  setExpandedArtifactId: Setter<string | null>;
+  setIssueTags: Setter<Tag[]>;
+  setMoveToDonePending: Setter<MoveToDonePending | null>;
+  setNewNoteBody: Setter<string>;
+  setSaving: Setter<boolean>;
+  setSubmittingNote: Setter<boolean>;
+  setTogglingVisualVerify: Setter<boolean>;
 }
 
 export function useIssueActions(deps: IssueActionsDeps) {

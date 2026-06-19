@@ -1,4 +1,5 @@
 import ReactMarkdown from "react-markdown";
+import type { JSX } from "react";
 import type { IssueArtifact } from "@agentic-kanban/shared";
 import { DEFAULT_ARTIFACT_PREVIEW_LENGTH, issueArtifactPreview, normalizeMarkdown } from "../lib/artifact-utils.js";
 import type { IssueArtifactRendererType } from "../lib/artifact-classifiers.js";
