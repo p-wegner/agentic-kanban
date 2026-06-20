@@ -8,6 +8,7 @@ import { ACTIVE_WORKSPACE_STATUSES, workspaceStatusPriority } from "@agentic-kan
 import { readSessionStdoutFile } from "../repositories/session.repository.js";
 import { extractAssistantMessage, extractToolName, safeParseStringArray } from "../lib/session-message-extraction.js";
 import { selectLatestSessionsByWorkspace, parseContextTokensFromStats } from "../lib/workspace-summary-session.js";
+import { selectCachedDiffStats, isPlanOnlySession, isDiffCacheStale } from "../lib/workspace-diff-cache.js";
 import {
   aggregateWorkspaceCountRows,
   fetchWorkspaceDetailRows,
@@ -263,34 +264,15 @@ function applyDiffStats(
   mainRef: MainWorkspaceInfo,
   database: Database,
 ): void {
-  // Serve cached diff stats immediately
-  if (mainWs.diffStatCacheCheckedAt && mainWs.diffStatCacheFilesChanged !== null) {
-    if (mainWs.diffStatCacheFilesChanged > 0 || (mainWs.diffStatCacheInsertions ?? 0) > 0 || (mainWs.diffStatCacheDeletions ?? 0) > 0) {
-      mainRef.diffStats = {
-        filesChanged: mainWs.diffStatCacheFilesChanged,
-        insertions: mainWs.diffStatCacheInsertions ?? 0,
-        deletions: mainWs.diffStatCacheDeletions ?? 0,
-      };
-    }
-  }
+  // Serve cached diff stats immediately (null = no usable cache entry yet)
+  const cached = selectCachedDiffStats(mainWs);
+  if (cached) mainRef.diffStats = cached;
 
-  // Detect plan-only sessions: idle workspace with 0 diff changes that wasn't explicitly in plan mode
-  if (mainWs.status === "idle" && !mainWs.planMode && mainWs.diffStatCacheCheckedAt) {
-    const hasChanges = (mainWs.diffStatCacheFilesChanged ?? 0) > 0
-      || (mainWs.diffStatCacheInsertions ?? 0) > 0
-      || (mainWs.diffStatCacheDeletions ?? 0) > 0;
-    if (!hasChanges) {
-      mainRef.planOnlyWarning = true;
-    }
-  }
+  // Flag plan-only sessions: idle, not plan-mode, computed diff shows zero changes
+  if (isPlanOnlySession(mainWs)) mainRef.planOnlyWarning = true;
 
   // Background refresh when HEAD advanced or cache is missing/stale
-  const headChanged = currentHeadSha !== null && currentHeadSha !== mainWs.diffStatCacheHeadSha;
-  const diffCacheAge = mainWs.diffStatCacheCheckedAt
-    ? Date.now() - new Date(mainWs.diffStatCacheCheckedAt).getTime()
-    : Infinity;
-  const cacheStale = headChanged || diffCacheAge >= DIFF_STAT_CACHE_TTL_MS;
-  if (cacheStale) {
+  if (isDiffCacheStale(mainWs, currentHeadSha, DIFF_STAT_CACHE_TTL_MS, Date.now())) {
     const wsId = mainWs.id;
     const workingDir = mainWs.workingDir!;
     const headShaAtRefresh = currentHeadSha;
