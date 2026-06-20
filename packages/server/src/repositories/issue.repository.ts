@@ -605,3 +605,9 @@ export async function getIssueStatusNameRowsForProject(projectId: string, databa
     .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
     .where(eq(issues.projectId, projectId));
 }
+
+/** The first issue id linked to a status (used to block status deletion), or null. */
+export async function getFirstIssueIdWithStatus(statusId: string, database: Database = db): Promise<string | null> {
+  const rows = await database.select({ id: issues.id }).from(issues).where(eq(issues.statusId, statusId)).limit(1);
+  return rows[0]?.id ?? null;
+}
