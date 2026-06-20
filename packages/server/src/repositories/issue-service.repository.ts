@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { issues, issueTags, issueDependencies, issueArtifacts, issueComments, showdowns, workspaces, projectStatuses, workflowTemplates, workflowNodes, sessions } from "@agentic-kanban/shared/schema";
+import { issues, issueTags, issueDependencies, issueArtifacts, issueComments, showdowns, workspaces, projectStatuses, workflowTemplates, workflowNodes, sessions, tags } from "@agentic-kanban/shared/schema";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
 import { eq, and, or, sql, inArray, desc } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database, TransactionClient } from "../db/index.js";
+import { deleteWorkspaceCascade } from "./workspace.repository.js";
+import { hasPath } from "../lib/dependency-graph.js";
+import type { BatchIssueInput, BatchDependencyInput } from "../lib/batch-create-issues.js";
 
 /** A drizzle connection that is either the base db or an open transaction. */
 type DbOrTx = Database | TransactionClient;
@@ -280,6 +283,20 @@ export async function deleteDependencyById(
   await database.delete(issueDependencies).where(eq(issueDependencies.id, id));
 }
 
+/**
+ * Delete a dependency by id, returning the number of rows removed (0 = not
+ * found). Uses `.returning().length` rather than a driver row-count because
+ * libsql reports `rowsAffected`/`changes` unreliably for the not-found check
+ * (CLI `issue dependency remove`).
+ */
+export async function deleteDependencyByIdReturning(
+  id: string,
+  database: DbOrTx = db,
+): Promise<number> {
+  const deleted = await database.delete(issueDependencies).where(eq(issueDependencies.id, id)).returning();
+  return deleted.length;
+}
+
 export async function insertIssueArtifact(
   values: {
     id: string;
@@ -375,4 +392,219 @@ export async function archiveIssuesByIds(
     .update(issues)
     .set({ statusId: archivedStatusId, statusChangedAt: now, updatedAt: now })
     .where(inArray(issues.id, issueIds));
+}
+
+/**
+ * Apply a batch of dependency add/remove edges atomically (CLI `issue dependency
+ * update-batch`). The caller pre-builds the project/adjacency/edge-key maps from
+ * already-fetched rows; this owns the TRANSACTION. Idempotent (existing adds /
+ * missing removes are skipped) with in-memory cycle detection. On a cycle it sets
+ * `cycleError` and throws to roll back; the outer catch swallows ONLY then and
+ * surfaces `cycleError` in the result. The passed maps are mutated in place as
+ * bookkeeping (harmless — the CLI does not read them afterward).
+ */
+export async function applyDependencyEdgeBatch(
+  args: {
+    edges: Array<{ issueId: string; dependsOnId: string; type?: string; action: "add" | "remove" }>;
+    projectByIssue: Map<string, string>;
+    adjByProject: Map<string, Map<string, Set<string>>>;
+    edgeKeyToRow: Map<string, { id: string; projectId: string }>;
+    directional: Set<string>;
+  },
+  database: Database = db,
+): Promise<{ added: number; removed: number; skipped: { edge: (typeof args.edges)[number]; reason: string }[]; cycleError: string | null }> {
+  const { edges, projectByIssue, adjByProject, edgeKeyToRow, directional } = args;
+  const skipped: { edge: (typeof edges)[number]; reason: string }[] = [];
+  let added = 0;
+  let removed = 0;
+  let cycleError: string | null = null;
+
+  await database
+    .transaction(async (tx) => {
+      for (let i = 0; i < edges.length; i++) {
+        const e = edges[i];
+        const type = (e.type ?? "depends_on") as DependencyType;
+        const srcProj = projectByIssue.get(e.issueId);
+        const tgtProj = projectByIssue.get(e.dependsOnId);
+
+        if (e.action === "add") {
+          if (!srcProj) { skipped.push({ edge: e, reason: "source issue not found" }); continue; }
+          if (!tgtProj) { skipped.push({ edge: e, reason: "target issue not found" }); continue; }
+          if (srcProj !== tgtProj) { skipped.push({ edge: e, reason: "cross-project dependency" }); continue; }
+
+          const key = `${e.issueId}|${e.dependsOnId}|${type}`;
+          if (edgeKeyToRow.has(key)) { skipped.push({ edge: e, reason: "already exists" }); continue; }
+
+          if (directional.has(type)) {
+            let adj = adjByProject.get(srcProj);
+            if (!adj) { adj = new Map(); adjByProject.set(srcProj, adj); }
+            if (hasPath(adj, e.dependsOnId, e.issueId)) {
+              cycleError = `edges[${i}]: would create a cycle (${e.issueId} -> ${e.dependsOnId})`;
+              throw new Error(cycleError);
+            }
+            let set = adj.get(e.issueId);
+            if (!set) { set = new Set(); adj.set(e.issueId, set); }
+            set.add(e.dependsOnId);
+          }
+
+          const id = randomUUID();
+          await tx.insert(issueDependencies).values({
+            id,
+            issueId: e.issueId,
+            dependsOnId: e.dependsOnId,
+            type,
+            createdAt: new Date().toISOString(),
+          });
+          edgeKeyToRow.set(`${e.issueId}|${e.dependsOnId}|${type}`, { id, projectId: srcProj });
+          added++;
+        } else {
+          const key = `${e.issueId}|${e.dependsOnId}|${type}`;
+          const row = edgeKeyToRow.get(key);
+          if (!row) { skipped.push({ edge: e, reason: "dependency does not exist" }); continue; }
+          await tx.delete(issueDependencies).where(eq(issueDependencies.id, row.id));
+          edgeKeyToRow.delete(key);
+          if (directional.has(type)) {
+            const adj = adjByProject.get(row.projectId);
+            adj?.get(e.issueId)?.delete(e.dependsOnId);
+          }
+          removed++;
+        }
+      }
+    })
+    .catch((err) => {
+      if (cycleError) return;
+      throw err;
+    });
+
+  return { added, removed, skipped, cycleError };
+}
+
+/**
+ * Cascade-delete an issue and all its data (CLI `issue delete`): every workspace
+ * via deleteWorkspaceCascade (which clears that workspace's transitions / retry
+ * decisions / diff-comments / artifacts / comments / repos / session-messages /
+ * sessions inside its own tx), then the issue's tags, then the issue row. Order
+ * preserved (workspaces+children first). NOTE: deleteWorkspaceCascade clears a
+ * SUPERSET of the old hand-rolled CLI loop — it additionally removes
+ * workflowTransitions/testRetryDecisions/issueArtifacts/issueComments/repos that
+ * the previous CLI cascade leaked, mirroring the deleteProjectCascade fix.
+ */
+export async function deleteIssueCascade(issueId: string, database: Database = db): Promise<void> {
+  const wsRows = await database.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.issueId, issueId));
+  for (const ws of wsRows) {
+    await deleteWorkspaceCascade(ws.id, database);
+  }
+  await deleteIssueTagsForIssue(issueId, database);
+  await deleteIssueRow(issueId, database);
+}
+
+/**
+ * Atomically create a batch of issues with sequential per-project numbers,
+ * optional case-insensitive tags, optional parent `child_of` links, and
+ * index-based inter-issue dependency edges (CLI `issue create-batch`). Owns the
+ * TRANSACTION. Replicates the CLI body verbatim — deliberately NOT routed through
+ * issue.service.createIssuesBatch (which drops tags / sibling-deps / statusName).
+ * `startNumber` + `now` are computed by the caller before the tx, as before.
+ */
+export async function createIssuesBatchWithDepsAndTags(
+  args: {
+    projectId: string;
+    startNumber: number;
+    now: string;
+    issueInputs: BatchIssueInput[];
+    dependencyInputs: BatchDependencyInput[];
+    statuses: Array<{ id: string; name: string }>;
+    parentIssueId?: string;
+  },
+  database: Database = db,
+): Promise<{ created: { id: string; issueNumber: number; title: string }[] }> {
+  const { projectId, startNumber, now, issueInputs, dependencyInputs, statuses, parentIssueId } = args;
+  let nextNumber = startNumber;
+  const created: { id: string; issueNumber: number; title: string }[] = [];
+
+  await database.transaction(async (tx) => {
+    const tagIdByName = new Map<string, string>();
+    const resolveTagId = async (name: string): Promise<string> => {
+      const key = name.toLowerCase();
+      const cached = tagIdByName.get(key);
+      if (cached) return cached;
+      const existing = await tx
+        .select({ id: tags.id })
+        .from(tags)
+        .where(sql`lower(${tags.name}) = lower(${name})`)
+        .limit(1);
+      let tagId: string;
+      if (existing.length > 0) {
+        tagId = existing[0].id;
+      } else {
+        tagId = randomUUID();
+        await tx.insert(tags).values({ id: tagId, name, color: null, createdAt: now });
+      }
+      tagIdByName.set(key, tagId);
+      return tagId;
+    };
+
+    const idByIndex: string[] = [];
+    for (const input of issueInputs) {
+      const id = randomUUID();
+      const statusId = input.statusName
+        ? statuses.find((s) => s.name === input.statusName)!.id
+        : statuses[0].id;
+      const issueNumber = nextNumber++;
+      await tx.insert(issues).values({
+        id,
+        issueNumber,
+        title: input.title,
+        description: input.description ?? null,
+        priority: input.priority ?? "medium",
+        issueType: input.issueType ?? "task",
+        sortOrder: input.sortOrder ?? 0,
+        estimate: input.estimate ?? null,
+        statusId,
+        projectId,
+        createdAt: now,
+        updatedAt: now,
+      });
+      if (parentIssueId) {
+        await tx.insert(issueDependencies).values({
+          id: randomUUID(),
+          issueId: id,
+          dependsOnId: parentIssueId,
+          type: "child_of",
+          createdAt: now,
+        });
+      }
+      if (input.tags && input.tags.length > 0) {
+        const seenTagIds = new Set<string>();
+        for (const tagName of input.tags) {
+          const trimmed = tagName.trim();
+          if (!trimmed) continue;
+          const tagId = await resolveTagId(trimmed);
+          if (seenTagIds.has(tagId)) continue;
+          seenTagIds.add(tagId);
+          await tx.insert(issueTags).values({ id: randomUUID(), issueId: id, tagId });
+        }
+      }
+      idByIndex.push(id);
+      created.push({ id, issueNumber, title: input.title });
+    }
+
+    for (const e of dependencyInputs) {
+      if (e.issueIndex < 0 || e.issueIndex >= issueInputs.length) {
+        throw new Error(`dependencies: issueIndex ${e.issueIndex} out of range (0..${issueInputs.length - 1})`);
+      }
+      if (e.dependsOnIndex < 0 || e.dependsOnIndex >= issueInputs.length) {
+        throw new Error(`dependencies: dependsOnIndex ${e.dependsOnIndex} out of range (0..${issueInputs.length - 1})`);
+      }
+      await tx.insert(issueDependencies).values({
+        id: randomUUID(),
+        issueId: idByIndex[e.issueIndex],
+        dependsOnId: idByIndex[e.dependsOnIndex],
+        type: (e.type ?? "depends_on") as DependencyType,
+        createdAt: now,
+      });
+    }
+  });
+
+  return { created };
 }

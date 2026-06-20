@@ -708,3 +708,28 @@ export async function getLatestSessionIdForWorkspace(
     .limit(1);
   return rows[0]?.id ?? null;
 }
+
+/**
+ * Full session-message rows for one session, NEWEST-first by id, DB-only (no
+ * .out-file fallback). CLI `issue status` needs this exact order for
+ * extractLastAgentMessageFromRows — do NOT swap for getSessionMessageRows.
+ */
+export async function getSessionMessagesByIdDesc(sessionId: string, database: Database = db) {
+  return database
+    .select()
+    .from(sessionMessages)
+    .where(eq(sessionMessages.sessionId, sessionId))
+    .orderBy(desc(sessionMessages.id));
+}
+
+/**
+ * Full session-message rows for one session, OLDEST-first by id, DB-only. CLI
+ * `issue summary` feeds these to parseSessionSummary in ascending order.
+ */
+export async function getSessionMessagesByIdAsc(sessionId: string, database: Database = db) {
+  return database
+    .select()
+    .from(sessionMessages)
+    .where(eq(sessionMessages.sessionId, sessionId))
+    .orderBy(sessionMessages.id);
+}
