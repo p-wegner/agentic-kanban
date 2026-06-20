@@ -23,6 +23,7 @@ import {
   presetProfileToken,
   type AgentPreset,
 } from "../lib/agentPresets.js";
+import { buildCreateWorkspaceBody } from "../lib/createWorkspaceBody.js";
 
 interface Project {
   id: string;
@@ -60,20 +61,6 @@ function defaultProfileLabel(prefs: Record<string, string>): string {
   if (prefs.provider === "copilot") return `copilot:${prefs.copilot_profile || COPILOT_DEFAULT_PROFILE}`;
   if (prefs.provider === "pi") return `pi:${prefs.pi_profile || PI_DEFAULT_PROFILE}`;
   return `claude:${prefs.claude_profile || "default"}`;
-}
-
-/**
- * Resolve the "Default" profile selection to an explicit {provider, name}
- * so the server doesn't fall through to Strategy Bullseye — keeping the
- * displayed label ("Will use: claude:anth") in sync with what actually runs.
- * Returns undefined when no specific default exists (pure Claude, no profile).
- */
-function resolveDefaultProfile(prefs: Record<string, string>): { provider: AgentProvider; name: string } | undefined {
-  if (prefs.provider === "codex") return { provider: "codex", name: prefs.codex_profile || CODEX_DEFAULT_PROFILE };
-  if (prefs.provider === "copilot") return { provider: "copilot", name: prefs.copilot_profile || COPILOT_DEFAULT_PROFILE };
-  if (prefs.provider === "pi") return { provider: "pi", name: prefs.pi_profile || PI_DEFAULT_PROFILE };
-  if (prefs.claude_profile) return { provider: "claude", name: prefs.claude_profile };
-  return undefined; // No explicit default — let server/strategy decide
 }
 
 function profileOptionLabel(provider: AgentProvider, name: string): string {
@@ -201,30 +188,15 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
   async function handleSubmit() {
     if (!isDirect && !branchName.trim()) return;
 
-    const body: Record<string, unknown> = { issueId: issue.id, isDirect, requiresReview, planMode, tddMode, includeVisualProof, skipSetup, skipContextPacker };
-    if (selectedSkillId) body.skillId = selectedSkillId;
-    if (selectedProfile) {
-      const colonIdx = selectedProfile.indexOf(":");
-      if (colonIdx !== -1) {
-        const provider = selectedProfile.slice(0, colonIdx) as AgentProvider;
-        const name = selectedProfile.slice(colonIdx + 1);
-        if ((provider === "claude" || provider === "codex" || provider === "copilot" || provider === "pi") && name) body.profile = { provider, name };
-      }
-    } else {
-      // "Default" selected — resolve to the explicit global default so the
-      // displayed label ("Will use: claude:anth") matches what actually runs.
-      // Without this, the server's Strategy Bullseye may pick a different
-      // provider/profile, making the label misleading.
-      const resolved = resolveDefaultProfile(prefs);
-      if (resolved) body.profile = resolved;
-    }
-    if ((isClaudeSelected || isCodexSelected) && selectedModel) body.model = selectedModel;
-    if (!isDirect) {
-      body.branch = branchName.trim();
-      if (baseBranch.trim()) {
-        body.baseBranch = baseBranch.trim();
-      }
-    }
+    const body = buildCreateWorkspaceBody({
+      issueId: issue.id,
+      isDirect, requiresReview, planMode, tddMode, includeVisualProof, skipSetup, skipContextPacker,
+      selectedSkillId,
+      selectedProfile,
+      selectedModel,
+      modelApplies: isClaudeSelected || isCodexSelected,
+      branchName, baseBranch, prefs,
+    });
 
     // Skip preflight if opted out for this launch (defaults to the inherited setting)
     if (!runPreflight || !project) {
