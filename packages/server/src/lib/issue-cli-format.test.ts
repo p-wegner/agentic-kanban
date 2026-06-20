@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 import type { SessionSummary } from "@agentic-kanban/shared";
-import { buildIssueSummaryLines, buildIssueStatusLines } from "./issue-cli-format.js";
+import {
+  buildIssueSummaryLines,
+  buildIssueStatusLines,
+  validateAttachArtifactOptions,
+  formatAttachArtifactOutput,
+} from "./issue-cli-format.js";
 
 function summary(over: Partial<SessionSummary> = {}): SessionSummary {
   return {
@@ -204,5 +209,48 @@ describe("buildIssueStatusLines", () => {
     expect(lines).toContain("\n  Last agent message:");
     const msgLine = lines.find((l) => l.startsWith("    x"))!;
     expect(msgLine).toBe("    " + "x".repeat(197) + "...");
+  });
+});
+
+describe("validateAttachArtifactOptions", () => {
+  it("rejects a non-positive / non-integer issue number first", () => {
+    expect(validateAttachArtifactOptions("0", { type: "text", content: "x" })).toEqual({ ok: false, error: "Invalid issue number: 0" });
+    expect(validateAttachArtifactOptions("abc", { type: "text", content: "x" })).toEqual({ ok: false, error: "Invalid issue number: abc" });
+  });
+
+  it("requires --type, then a valid type", () => {
+    expect(validateAttachArtifactOptions("5", { content: "x" })).toEqual({ ok: false, error: "--type is required. Valid: text, link, image" });
+    expect(validateAttachArtifactOptions("5", { type: "video", content: "x" })).toEqual({ ok: false, error: "Invalid type 'video'. Valid: text, link, image" });
+  });
+
+  it("requires non-empty content", () => {
+    expect(validateAttachArtifactOptions("5", { type: "text" })).toEqual({ ok: false, error: "--content is required and cannot be empty." });
+    expect(validateAttachArtifactOptions("5", { type: "text", content: "   " })).toEqual({ ok: false, error: "--content is required and cannot be empty." });
+  });
+
+  it("returns parsed values for valid input", () => {
+    expect(validateAttachArtifactOptions("42", { type: "link", content: "https://x" })).toEqual({ ok: true, num: 42, type: "link", content: "https://x" });
+  });
+});
+
+describe("formatAttachArtifactOutput", () => {
+  const result = { id: "id1", issueId: "i1", workspaceId: null, type: "text", mimeType: null, caption: null };
+
+  it("returns a single JSON line in json mode", () => {
+    const lines = formatAttachArtifactOutput(result, 7, true);
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0])).toEqual(result);
+  });
+
+  it("returns the human confirmation without caption", () => {
+    expect(formatAttachArtifactOutput(result, 7, false)).toEqual([
+      "Attached text artifact to issue #7.",
+      "  id: id1",
+    ]);
+  });
+
+  it("includes the caption line when present", () => {
+    const lines = formatAttachArtifactOutput({ ...result, caption: "a note" }, 7, false);
+    expect(lines).toContain("  caption: a note");
   });
 });
