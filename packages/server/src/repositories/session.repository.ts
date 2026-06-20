@@ -1,5 +1,5 @@
 import { sessions, sessionMessages, diffComments, agentSkills, workspaces, issues, projects, projectStatuses } from "@agentic-kanban/shared/schema";
-import { eq, and, sql, desc, inArray, gte } from "drizzle-orm";
+import { eq, and, sql, desc, inArray, gte, isNotNull } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { readFileSync, existsSync, openSync, readSync, closeSync, fstatSync } from "node:fs";
 import { db } from "../db/index.js";
@@ -494,6 +494,8 @@ export async function getSessionSummaryData(
 export interface TranscriptSearchParams {
   q: string;
   projectId?: string;
+  /** Restrict to a single issue by its per-project issue number (CLI `--issue`). */
+  issueNumber?: number;
   statusFilter?: string;
   providerFilter?: string;
   limit: number;
@@ -508,13 +510,16 @@ export async function searchTranscriptMessages(
   params: TranscriptSearchParams,
   database: Database = db,
 ) {
-  const { q, projectId, statusFilter, providerFilter, limit } = params;
+  const { q, projectId, issueNumber, statusFilter, providerFilter, limit } = params;
   const conditions = [
     sql`${sessionMessages.data} IS NOT NULL`,
     sql`${sessionMessages.data} LIKE ${"%" + q + "%"}`,
     sql`${sessionMessages.type} != 'exit'`,
   ];
   if (projectId) conditions.push(eq(issues.projectId, projectId));
+  if (typeof issueNumber === "number" && !Number.isNaN(issueNumber)) {
+    conditions.push(eq(issues.issueNumber, issueNumber));
+  }
   if (statusFilter) conditions.push(eq(projectStatuses.name, statusFilter));
   if (providerFilter) conditions.push(eq(sessions.executor, providerFilter));
 
@@ -524,6 +529,7 @@ export async function searchTranscriptMessages(
       messageData: sessionMessages.data,
       messageCreatedAt: sessionMessages.createdAt,
       sessionId: sessions.id,
+      providerSessionId: sessions.providerSessionId,
       sessionStartedAt: sessions.startedAt,
       sessionStatus: sessions.status,
       executor: sessions.executor,
@@ -546,4 +552,159 @@ export async function searchTranscriptMessages(
     .where(and(...conditions))
     .orderBy(desc(sessionMessages.id))
     .limit(limit);
+}
+
+/** A full session row by id, or null. (CLI `session analyze` / `session stats`.) */
+export async function getSessionById(sessionId: string, database: Database = db) {
+  const rows = await database.select().from(sessions).where(eq(sessions.id, sessionId)).limit(1);
+  return rows[0] ?? null;
+}
+
+/** Most recent sessions across all workspaces, joined to workspace + issue context. */
+export async function getRecentSessionsWithContext(limit: number, database: Database = db) {
+  return database
+    .select({
+      sessionId: sessions.id,
+      sessionStatus: sessions.status,
+      startedAt: sessions.startedAt,
+      endedAt: sessions.endedAt,
+      executor: sessions.executor,
+      triggerType: sessions.triggerType,
+      workspaceId: workspaces.id,
+      branch: workspaces.branch,
+      wsStatus: workspaces.status,
+      issueNumber: issues.issueNumber,
+      issueTitle: issues.title,
+    })
+    .from(sessions)
+    .innerJoin(workspaces, eq(sessions.workspaceId, workspaces.id))
+    .innerJoin(issues, eq(workspaces.issueId, issues.id))
+    .orderBy(desc(sessions.startedAt))
+    .limit(limit);
+}
+
+/**
+ * Ended sessions eligible for friction backfill: all of them, or only those
+ * started since `sinceIso`. Returns id + stats (the backfill recomputes friction
+ * from the session's stored messages).
+ */
+export async function getSessionsForFrictionBackfill(
+  params: { includeAll: boolean; sinceIso?: string },
+  database: Database = db,
+) {
+  const whereClause =
+    params.includeAll || !params.sinceIso
+      ? isNotNull(sessions.endedAt)
+      : and(isNotNull(sessions.endedAt), gte(sessions.startedAt, params.sinceIso));
+  return database
+    .select({ id: sessions.id, stats: sessions.stats })
+    .from(sessions)
+    .where(whereClause);
+}
+
+/** Overwrite a session's serialized stats JSON. */
+export async function updateSessionStats(
+  sessionId: string,
+  statsJson: string,
+  database: Database = db,
+) {
+  await database.update(sessions).set({ stats: statsJson }).where(eq(sessions.id, sessionId));
+}
+
+/**
+ * Sessions for a project since `sinceIso`, joined to workspace + issue, carrying
+ * the git/merge columns the reviewer-fixes analysis attributes commits against.
+ */
+export async function getReviewerFixSessionRows(
+  params: { projectId: string; sinceIso: string },
+  database: Database = db,
+) {
+  return database
+    .select({
+      sessionId: sessions.id,
+      triggerType: sessions.triggerType,
+      executor: sessions.executor,
+      startedAt: sessions.startedAt,
+      endedAt: sessions.endedAt,
+      workspaceId: workspaces.id,
+      branch: workspaces.branch,
+      wsStatus: workspaces.status,
+      provider: workspaces.provider,
+      baseCommitSha: workspaces.baseCommitSha,
+      mergedHeadSha: workspaces.mergedHeadSha,
+      mergedAt: workspaces.mergedAt,
+      issueNumber: issues.issueNumber,
+      issueTitle: issues.title,
+    })
+    .from(sessions)
+    .innerJoin(workspaces, eq(sessions.workspaceId, workspaces.id))
+    .innerJoin(issues, eq(workspaces.issueId, issues.id))
+    .where(and(eq(issues.projectId, params.projectId), gte(sessions.startedAt, params.sinceIso)))
+    .orderBy(sessions.startedAt);
+}
+
+/** Full session metadata for the transcript view: session + workspace + issue + project. */
+export async function getSessionTranscriptContext(sessionId: string, database: Database = db) {
+  const rows = await database
+    .select({
+      sessionId: sessions.id,
+      providerSessionId: sessions.providerSessionId,
+      executor: sessions.executor,
+      sessionStatus: sessions.status,
+      startedAt: sessions.startedAt,
+      endedAt: sessions.endedAt,
+      exitCode: sessions.exitCode,
+      triggerType: sessions.triggerType,
+      skillId: sessions.skillId,
+      skillName: sessions.skillName,
+      workspaceId: workspaces.id,
+      branch: workspaces.branch,
+      workspaceStatus: workspaces.status,
+      issueId: issues.id,
+      issueNumber: issues.issueNumber,
+      issueTitle: issues.title,
+      projectId: projects.id,
+      projectName: projects.name,
+    })
+    .from(sessions)
+    .innerJoin(workspaces, eq(sessions.workspaceId, workspaces.id))
+    .innerJoin(issues, eq(workspaces.issueId, issues.id))
+    .innerJoin(projects, eq(issues.projectId, projects.id))
+    .where(eq(sessions.id, sessionId))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/** The newest `limit` messages for a session (returned newest-first; caller reverses). */
+export async function getNewestSessionMessages(
+  sessionId: string,
+  limit: number,
+  database: Database = db,
+) {
+  return database
+    .select({
+      id: sessionMessages.id,
+      type: sessionMessages.type,
+      data: sessionMessages.data,
+      exitCode: sessionMessages.exitCode,
+      createdAt: sessionMessages.createdAt,
+    })
+    .from(sessionMessages)
+    .where(eq(sessionMessages.sessionId, sessionId))
+    .orderBy(desc(sessionMessages.id))
+    .limit(limit);
+}
+
+/** The id of the most recently started session for a workspace, or null. */
+export async function getLatestSessionIdForWorkspace(
+  workspaceId: string,
+  database: Database = db,
+): Promise<string | null> {
+  const rows = await database
+    .select({ id: sessions.id })
+    .from(sessions)
+    .where(eq(sessions.workspaceId, workspaceId))
+    .orderBy(desc(sessions.startedAt))
+    .limit(1);
+  return rows[0]?.id ?? null;
 }

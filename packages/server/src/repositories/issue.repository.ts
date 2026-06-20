@@ -611,3 +611,34 @@ export async function getFirstIssueIdWithStatus(statusId: string, database: Data
   const rows = await database.select({ id: issues.id }).from(issues).where(eq(issues.statusId, statusId)).limit(1);
   return rows[0]?.id ?? null;
 }
+
+/** Issue identity + status name by issue id (CLI `session analyze` context), or null. */
+export async function getIssueWithStatusById(issueId: string, database: Database = db) {
+  const rows = await database
+    .select({
+      id: issues.id,
+      issueNumber: issues.issueNumber,
+      title: issues.title,
+      statusName: projectStatuses.name,
+      priority: issues.priority,
+      issueType: issues.issueType,
+    })
+    .from(issues)
+    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+    .where(eq(issues.id, issueId))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/**
+ * Title + description for the first issue with this issue number (NOT project-
+ * scoped — matches the CLI `session find-similar` global lookup), or null.
+ */
+export async function getIssueTitleDescriptionByNumber(issueNumber: number, database: Database = db) {
+  const rows = await database
+    .select({ title: issues.title, description: issues.description })
+    .from(issues)
+    .where(eq(issues.issueNumber, issueNumber))
+    .limit(1);
+  return rows[0] ?? null;
+}
