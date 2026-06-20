@@ -2,6 +2,9 @@ import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import {
   createWorkflowTemplate,
+  listWorkflowTemplates,
+  getTemplateGraph,
+  deleteWorkflowTemplate,
   proposeTransition,
   resolveTemplateForIssue,
   getOutgoingTransitions,
@@ -664,4 +667,38 @@ export async function cliProposeTransition(
     triggeredBy: "agent",
     signals,
   });
+}
+
+/**
+ * CLI-facing wrappers over the shared workflow-engine that bind the default
+ * server `db` handle, so the `cli/` transport never imports `db/index` or the
+ * engine directly (the `cli-not-down-to-persistence` arch gate). Same default-db
+ * pattern as {@link cliProposeTransition}.
+ */
+export async function cliListWorkflowTemplates(
+  projectId: Parameters<typeof listWorkflowTemplates>[1],
+  database: Database = db,
+) {
+  return listWorkflowTemplates(database, projectId);
+}
+
+export async function cliGetWorkflowTemplateGraph(
+  templateId: Parameters<typeof getTemplateGraph>[1],
+  database: Database = db,
+) {
+  return getTemplateGraph(database, templateId);
+}
+
+export async function cliCreateWorkflowTemplate(
+  input: Parameters<typeof createWorkflowTemplate>[1],
+  database: Database = db,
+) {
+  return createWorkflowTemplate(database, input);
+}
+
+export async function cliDeleteWorkflowTemplate(
+  templateId: Parameters<typeof deleteWorkflowTemplate>[1],
+  database: Database = db,
+) {
+  return deleteWorkflowTemplate(database, templateId);
 }

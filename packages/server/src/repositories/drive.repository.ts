@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { drives } from "@agentic-kanban/shared/schema";
 import type { DriveStatus } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
+import { db } from "../db/index.js";
 
 export type DriveRow = typeof drives.$inferSelect;
 
@@ -14,7 +15,7 @@ export async function listDrivesByProject(projectId: string, database: Database)
     .orderBy(desc(drives.startedAt));
 }
 
-export async function getDriveById(id: string, database: Database) {
+export async function getDriveById(id: string, database: Database = db) {
   const rows = await database.select().from(drives).where(eq(drives.id, id)).limit(1);
   return rows[0] ?? null;
 }

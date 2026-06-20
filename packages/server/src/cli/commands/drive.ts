@@ -1,5 +1,4 @@
 import type { Command } from "commander";
-import { db } from "../../db/index.js";
 import { runMigrations, getActiveProjectId } from "../shared.js";
 import { getDriveById } from "../../repositories/drive.repository.js";
 import {
@@ -237,7 +236,7 @@ Examples:
       try {
         await runMigrations();
 
-        const drive = await getDriveById(driveId, db);
+        const drive = await getDriveById(driveId);
         if (!drive) {
           console.error(`Drive '${driveId}' not found.`);
           process.exit(1);
@@ -249,12 +248,15 @@ Examples:
 
         const issueIds = options.wholeProject
           ? null
-          : await resolveDriveIssueIds(drive.metaIssueId, drive.projectId, db);
+          : await resolveDriveIssueIds(drive.metaIssueId, drive.projectId);
 
-        const report = await computeReviewEffectiveness(
-          { projectId: drive.projectId, sinceIso, untilIso, issueIds, deep: options.deep },
-          db,
-        );
+        const report = await computeReviewEffectiveness({
+          projectId: drive.projectId,
+          sinceIso,
+          untilIso,
+          issueIds,
+          deep: options.deep,
+        });
 
         if (options.json) {
           console.log(

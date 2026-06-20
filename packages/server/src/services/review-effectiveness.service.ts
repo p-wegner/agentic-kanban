@@ -1,5 +1,6 @@
 import { parseSessionSummary } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
+import { db } from "../db/index.js";
 import { getSessionMessageRows } from "../repositories/session.repository.js";
 import {
   getAllDependencyEdges,
@@ -145,7 +146,7 @@ export interface ReviewEffectivenessReport {
  */
 export async function computeReviewEffectiveness(
   scope: ReviewEffectivenessScope,
-  database: Database,
+  database: Database = db,
 ): Promise<ReviewEffectivenessReport> {
   const { projectId, sinceIso, untilIso, issueIds, deep } = scope;
 
@@ -370,7 +371,7 @@ export async function computeReviewEffectiveness(
 export async function resolveDriveIssueIds(
   metaIssueId: string | null,
   projectId: string,
-  database: Database,
+  database: Database = db,
 ): Promise<string[] | null> {
   if (!metaIssueId) return null;
 
