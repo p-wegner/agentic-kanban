@@ -10,6 +10,7 @@ import TicketMentionInput from "./TicketMentionInput.js";
 import TicketMentionRenderer from "./TicketMentionRenderer.js";
 import { MarkdownToolbar } from "./MarkdownToolbar.js";
 import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
+import { buildCreateIssuePayload } from "../lib/createIssuePayload.js";
 
 interface Skill {
   id: string;
@@ -143,24 +144,6 @@ export function CreateIssuePanel({
     });
   }, [startWorkspace, projectId]);
 
-  function profileSelection(): ProfileSelection | undefined {
-    if (selectedProfile) {
-      const colonIdx = selectedProfile.indexOf(":");
-      if (colonIdx === -1) return undefined;
-      const provider = selectedProfile.slice(0, colonIdx) as AgentProvider;
-      const name = selectedProfile.slice(colonIdx + 1);
-      if ((provider !== "claude" && provider !== "codex" && provider !== "copilot" && provider !== "pi") || !name) return undefined;
-      return { provider, name };
-    }
-    // "Default" selected — resolve to explicit global default so the displayed
-    // label matches what actually runs (avoids Strategy Bullseye mismatch).
-    if (settings.provider === "codex") return { provider: "codex", name: settings.codex_profile || CODEX_DEFAULT_PROFILE };
-    if (settings.provider === "copilot") return { provider: "copilot", name: settings.copilot_profile || COPILOT_DEFAULT_PROFILE };
-    if (settings.provider === "pi") return { provider: "pi", name: settings.pi_profile || PI_DEFAULT_PROFILE };
-    if (settings.claude_profile) return { provider: "claude", name: settings.claude_profile };
-    return undefined;
-  }
-
   const isClaudeSelected = selectedProfile === ""
     ? (settings.provider !== "codex" && settings.provider !== "copilot" && settings.provider !== "pi")
     : selectedProfile.startsWith("claude:");
@@ -182,21 +165,14 @@ export function CreateIssuePanel({
     const start = startWorkspace || forceStart;
     setSubmitting(true);
     try {
-      await onSubmit({
-        title: title.trim(),
-        description: description.trim() || undefined,
-        issueType,
-        estimate: estimate || undefined,
-        statusId: selectedStatusId,
-        projectId,
-        startWorkspace: start || undefined,
-        planMode: (start && planMode) || undefined,
-        skipAutoReview: (start && skipAutoReview) || undefined,
-        profile: start ? profileSelection() : undefined,
-        model: (start && (isClaudeSelected || isCodexSelected) && selectedModel) || undefined,
-        isDirect: (start && isDirect) || undefined,
-        skillId: (start && skillId) || undefined,
-      });
+      await onSubmit(buildCreateIssuePayload({
+        title, description, issueType, estimate,
+        statusId: selectedStatusId, projectId,
+        start, planMode, skipAutoReview, isDirect,
+        selectedProfile, selectedModel, skillId,
+        modelApplies: isClaudeSelected || isCodexSelected,
+        settings,
+      }));
     } finally {
       setSubmitting(false);
     }
