@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { type AgentOutputFormat } from "../lib/agent-output-parser.js";
+import { detectQuickLaunchProvider, canResumeWorkspace, canRestartWorkspace, type RelaunchContext } from "../lib/workspaceLaunchState.js";
 import { useWebSocket } from "../lib/useWebSocket.js";
 import { CreateWorkspaceForm } from "./CreateWorkspaceForm.js";
 import { WorkspaceDiffPanel } from "./WorkspaceDiffPanel.js";
@@ -187,20 +188,11 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
 
   const isRunning = activeSession !== null && !messages.some(m => m.type === "exit");
   const isSessionAlive = activeSession !== null && isRunning;
-  const isClaudeQuickLaunch = selectedProfile === ""
-    ? (prefs.provider !== "codex" && prefs.provider !== "copilot")
-    : selectedProfile.startsWith("claude:");
-  const isCodexQuickLaunch = selectedProfile === ""
-    ? prefs.provider === "codex"
-    : selectedProfile.startsWith("codex:");
-  const canResume = (ws: WorkspaceResponse, sessions: SessionInfo[]) =>
-    (ws.status === "active" || ws.status === "idle") && !isRunning && !activeSession &&
-    !!lastSessionPerWorkspace[ws.id] &&
-    sessions.some(s => s.id === lastSessionPerWorkspace[ws.id] && s.providerSessionId);
-  const canRestart = (ws: WorkspaceResponse, sessions: SessionInfo[]) =>
-    (ws.status === "active" || ws.status === "idle") && !isRunning && !activeSession &&
-    !!lastSessionPerWorkspace[ws.id] &&
-    sessions.some(s => s.id === lastSessionPerWorkspace[ws.id] && !s.providerSessionId);
+  const { isClaude: isClaudeQuickLaunch, isCodex: isCodexQuickLaunch } = detectQuickLaunchProvider(selectedProfile, prefs.provider);
+  const relaunchCtx = (ws: WorkspaceResponse): RelaunchContext =>
+    ({ isRunning, hasActiveSession: activeSession !== null, lastSessionId: lastSessionPerWorkspace[ws.id] });
+  const canResume = (ws: WorkspaceResponse, sessions: SessionInfo[]) => canResumeWorkspace(ws, sessions, relaunchCtx(ws));
+  const canRestart = (ws: WorkspaceResponse, sessions: SessionInfo[]) => canRestartWorkspace(ws, sessions, relaunchCtx(ws));
 
   useEffect(() => {
     if (!activeSession) return;
