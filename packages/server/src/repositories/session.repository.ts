@@ -74,6 +74,38 @@ function readStdoutFromFile(sessionId: string): AgentOutputMessage[] {
 }
 
 /**
+ * Load each session's output as message rows, preferring the on-disk .out file
+ * (where detached agents stream stdout) and falling back to persisted
+ * session_messages for historical sessions. The returned rows are ready to feed
+ * to parseSessionSummary. Consolidates the file-or-DB loader that was duplicated
+ * across the github-handoff and workspace-handoff-bundle services.
+ */
+export async function loadSessionMessageRowsWithFileFallback(
+  sessionIds: string[],
+  database: Database = db,
+): Promise<Array<{ type: string; data: string | null; sessionId: string }>> {
+  if (sessionIds.length === 0) return [];
+  const rows: Array<{ type: string; data: string | null; sessionId: string }> = [];
+  const needsDb: string[] = [];
+  for (const sid of sessionIds) {
+    const fileContent = readSessionStdoutFile(sid);
+    if (fileContent !== null) {
+      rows.push({ type: "stdout", data: fileContent, sessionId: sid });
+    } else {
+      needsDb.push(sid);
+    }
+  }
+  if (needsDb.length > 0) {
+    const dbRows = await database
+      .select({ type: sessionMessages.type, data: sessionMessages.data, sessionId: sessionMessages.sessionId })
+      .from(sessionMessages)
+      .where(inArray(sessionMessages.sessionId, needsDb));
+    rows.push(...dbRows);
+  }
+  return rows;
+}
+
+/**
  * Get session message rows for a single session, with .out file fallback for stdout.
  * When the .out file exists, stdout is served from it; non-stdout rows come from DB.
  * Falls back to DB-only for historical sessions without a .out file.

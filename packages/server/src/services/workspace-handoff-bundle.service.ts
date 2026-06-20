@@ -2,11 +2,10 @@ import { parseSessionSummary } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
 import * as realGitService from "./git.service.js";
 import { WorkspaceError, type GitService } from "./workspace-internals.js";
-import { readSessionStdoutFile } from "../repositories/session.repository.js";
+import { loadSessionMessageRowsWithFileFallback } from "../repositories/session.repository.js";
 import {
   getHandoffBundleRow,
   getHandoffBundleSessions,
-  getHandoffBundleSessionMessages,
   getHandoffBundleDiffComments,
 } from "../repositories/workspace-handoff-bundle.repository.js";
 
@@ -69,23 +68,7 @@ export async function exportWorkspaceHandoffBundle(args: {
   const sessionRows = await getHandoffBundleSessions(workspaceId, database);
 
   const sessionIds = sessionRows.map((s) => s.id);
-  let messageRows: Array<{ type: string; data: string | null; sessionId: string }> = [];
-  if (sessionIds.length > 0) {
-    // Build per-session stdout from .out file; fall back to DB for historical sessions
-    const needsDb: string[] = [];
-    for (const sid of sessionIds) {
-      const fileContent = readSessionStdoutFile(sid);
-      if (fileContent !== null) {
-        messageRows.push({ type: "stdout", data: fileContent, sessionId: sid });
-      } else {
-        needsDb.push(sid);
-      }
-    }
-    if (needsDb.length > 0) {
-      const dbRows = await getHandoffBundleSessionMessages(needsDb, database);
-      messageRows = messageRows.concat(dbRows);
-    }
-  }
+  const messageRows = await loadSessionMessageRowsWithFileFallback(sessionIds, database);
 
   const summary = parseSessionSummary(messageRows);
 
