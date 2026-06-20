@@ -1,9 +1,12 @@
 import type { Command } from "commander";
-import { db } from "../../db/index.js";
-import { agentSkills } from "@agentic-kanban/shared/schema";
-import { eq, sql, and, isNull } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
 import { runMigrations } from "../shared.js";
+import {
+  listAgentSkills,
+  getAgentSkillById,
+  getAgentSkillByName,
+  findSkillByName,
+  createAgentSkill,
+} from "../../repositories/agent-skill.repository.js";
 
 export function registerSkillCommand(program: Command) {
   const skillCmd = program.command("skill").description("Manage agent skills.\n\nSkills are prompt templates that can be injected into agent context when creating workspaces. Built-in skills (board-navigator, code-review, dependency-analyzer, ticket-enhancer) are seeded on first run and cannot be modified.\n\nSkills can be global (available to all projects) or project-scoped.\n\nSubcommands: list, get, create, export");
@@ -20,14 +23,7 @@ Examples:
     .action(async (options: { project?: string }) => {
       try {
         await runMigrations();
-        let rows;
-        if (options.project) {
-          rows = await db.select().from(agentSkills)
-            .where(sql`${agentSkills.projectId} IS NULL OR ${agentSkills.projectId} = ${options.project}`)
-            .orderBy(agentSkills.name);
-        } else {
-          rows = await db.select().from(agentSkills).orderBy(agentSkills.name);
-        }
+        const rows = await listAgentSkills(options.project, false);
         if (rows.length === 0) {
           console.log("No agent skills found.");
           process.exit(0);
@@ -58,15 +54,11 @@ Examples:
     .action(async (nameOrId: string) => {
       try {
         await runMigrations();
-        let rows = await db.select().from(agentSkills).where(eq(agentSkills.name, nameOrId)).limit(1);
-        if (rows.length === 0) {
-          rows = await db.select().from(agentSkills).where(eq(agentSkills.id, nameOrId)).limit(1);
-        }
-        if (rows.length === 0) {
+        const s = (await getAgentSkillByName(nameOrId)) ?? (await getAgentSkillById(nameOrId));
+        if (!s) {
           console.error(`Skill '${nameOrId}' not found.`);
           process.exit(1);
         }
-        const s = rows[0];
         console.log(`Name: ${s.name}`);
         console.log(`ID: ${s.id}`);
         console.log(`Description: ${s.description}`);
@@ -102,34 +94,21 @@ Examples:
           process.exit(1);
         }
         const scopeProjectId = options.project || null;
-        const scopeCondition = scopeProjectId
-          ? and(eq(agentSkills.name, name), eq(agentSkills.projectId, scopeProjectId))
-          : and(eq(agentSkills.name, name), isNull(agentSkills.projectId));
-        const existing = await db.select().from(agentSkills).where(scopeCondition).limit(1);
-        if (existing.length === 0) {
-          // Check by ID if name didn't match
-        } else {
+        const existing = await findSkillByName(name, scopeProjectId);
+        if (existing) {
           console.error(`Skill '${name}' already exists in this scope.`);
           process.exit(1);
         }
-        const prompt = options.prompt ?? "No prompt provided.";
-        const description = options.description ?? name;
-        const id = randomUUID();
-        const now = new Date().toISOString();
-        await db.insert(agentSkills).values({
-          id,
+        const created = await createAgentSkill({
           name,
-          description,
-          prompt,
+          description: options.description ?? name,
+          prompt: options.prompt ?? "No prompt provided.",
           model: options.model ?? null,
           projectId: scopeProjectId,
-          isBuiltin: false,
-          createdAt: now,
-          updatedAt: now,
         });
         const scope = scopeProjectId ? ` (project: ${scopeProjectId})` : " (global)";
         console.log(`Created skill '${name}'${scope}`);
-        console.log(`  id: ${id}`);
+        console.log(`  id: ${created.id}`);
         process.exit(0);
       } catch (err) {
         console.error("Error:", err instanceof Error ? err.message : String(err));
@@ -162,14 +141,7 @@ Examples:
           process.exit(1);
         }
 
-        let rows;
-        if (options.project) {
-          rows = await db.select().from(agentSkills)
-            .where(sql`${agentSkills.projectId} IS NULL OR ${agentSkills.projectId} = ${options.project}`)
-            .orderBy(agentSkills.name);
-        } else {
-          rows = await db.select().from(agentSkills).orderBy(agentSkills.name);
-        }
+        let rows = await listAgentSkills(options.project, false);
 
         if (options.names) {
           const nameSet = new Set(options.names.split(",").map(n => n.trim()));
