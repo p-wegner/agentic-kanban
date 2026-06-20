@@ -3,6 +3,7 @@ import { workspaces } from "@agentic-kanban/shared/schema";
 import { isTerminalStatusIdView, ACTIVE_WORKSPACE_STATUSES, workspaceStatusPriority } from "@agentic-kanban/shared";
 import type { BoardStatusResponse, BoardStatusIssue } from "@agentic-kanban/shared";
 import { isAnalyticsNoise } from "./session-filter.js";
+import { NotFoundError } from "../errors/index.js";
 import {
   classifyBoardStatusIssueAttention,
   classifyBoardStatusIssueMergeState,
@@ -91,7 +92,7 @@ export async function getBoardStatus(
   }
 
   const project = await getBoardStatusProject(projectId, database);
-  if (!project) throw new Error(`Project ${projectId} not found`);
+  if (!project) throw new NotFoundError(`Project ${projectId} not found`);
 
   const preferenceRows = await getAutoMergePreferences(database);
   const preferenceMap = new Map(preferenceRows.map((pref) => [pref.key, pref.value]));
