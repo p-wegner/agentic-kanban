@@ -332,7 +332,8 @@ export async function deleteWorkspaceCascade(
 
 // WorkspaceDetails + its pure row->DTO projection live in lib/workspace-details-projection.
 // Re-exported here so existing importers keep their `from "../repositories/..."` path.
-export type { WorkspaceDetails } from "../lib/workspace-details-projection.js";
+import type { WorkspaceDetails } from "../lib/workspace-details-projection.js";
+export type { WorkspaceDetails };
 
 export async function getWorkspaceDetails(
   workspaceId: string,

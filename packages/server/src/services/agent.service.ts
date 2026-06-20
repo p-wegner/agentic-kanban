@@ -210,7 +210,7 @@ function closeSessionWatchers(sessionId: string): void {
 function writeInitialStdin(
   proc: ChildProcess,
   sessionId: string,
-  suppressStdinPrompt: boolean,
+  suppressStdinPrompt: boolean | undefined,
   keepAlive: boolean | undefined,
   stdinPrompt: string,
 ): void {
