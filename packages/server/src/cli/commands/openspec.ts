@@ -1,7 +1,5 @@
 import type { Command } from "commander";
-import { eq } from "drizzle-orm";
-import { db } from "../../db/index.js";
-import { projects } from "@agentic-kanban/shared/schema";
+import { getProjectById } from "../../repositories/project.repository.js";
 import { runMigrations, getActiveProjectId } from "../shared.js";
 import {
   listOpenSpecs,
@@ -10,12 +8,8 @@ import {
 } from "@agentic-kanban/shared/lib/openspec";
 
 async function resolveRepoPath(projectId: string): Promise<string | null> {
-  const rows = await db
-    .select({ repoPath: projects.repoPath })
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .limit(1);
-  return rows.length > 0 ? rows[0].repoPath : null;
+  const project = await getProjectById(projectId);
+  return project?.repoPath ?? null;
 }
 
 export function registerOpenspecCommand(program: Command) {

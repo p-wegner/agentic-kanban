@@ -1,7 +1,5 @@
 import type { Command } from "commander";
-import { db } from "../../db/index.js";
-import { preferences } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
+import { getPreference } from "../../repositories/preferences.repository.js";
 
 const SERVER_PORT = Number(process.env.SERVER_PORT) || Number(process.env.KANBAN_SERVER_PORT) || 3001;
 
@@ -9,8 +7,7 @@ async function resolveProjectId(explicit?: string): Promise<string | null> {
   if (explicit) return explicit;
   // Match the rest of the CLI (shared.ts uses "activeProjectId"); the previous
   // butler-ask used "active_project" which never matched anything written by `register`.
-  const rows = await db.select().from(preferences).where(eq(preferences.key, "activeProjectId")).limit(1);
-  return rows[0]?.value || null;
+  return (await getPreference("activeProjectId")) || null;
 }
 
 async function withProject<T>(
