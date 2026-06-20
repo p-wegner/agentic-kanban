@@ -287,14 +287,8 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
   // GET /api/projects/:id/board/summary — column counts only, no issue bodies
   router.get("/:id/board/summary", async (c) => {
     const projectId = c.req.param("id");
-    try {
-      const result = await projectService.getBoardSummary(projectId);
-      return c.json(result);
-    } catch (err: any) {
-      const msg = err?.message ?? "";
-      if (msg.includes("not found")) return c.json({ error: msg }, 404);
-      throw err;
-    }
+    const result = await projectService.getBoardSummary(projectId);
+    return c.json(result);
   });
 
   // GET /api/projects/:id/board
@@ -346,40 +340,22 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
   // GET /api/projects/:id/workspace-launch-failures
   router.get("/:id/workspace-launch-failures", async (c) => {
     const projectId = c.req.param("id");
-    try {
-      const result = await getWorkspaceLaunchFailures(projectId, database);
-      return c.json(result);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("not found")) return c.json({ error: msg }, 404);
-      return c.json({ error: msg }, 500);
-    }
+    const result = await getWorkspaceLaunchFailures(projectId, database);
+    return c.json(result);
   });
 
   // GET /api/projects/:id/board-risk-digest
   router.get("/:id/board-risk-digest", async (c) => {
     const projectId = c.req.param("id");
-    try {
-      const digest = await generateBoardRiskDigest(projectId, database);
-      return c.json(digest);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("not found")) return c.json({ error: msg }, 404);
-      return c.json({ error: msg }, 500);
-    }
+    const digest = await generateBoardRiskDigest(projectId, database);
+    return c.json(digest);
   });
 
   // GET /api/projects/:id/workspace-risk — risk heatmap for active/review workspaces
   router.get("/:id/workspace-risk", async (c) => {
     const projectId = c.req.param("id");
-    try {
-      const result = await getWorkspaceRisk(projectId, database);
-      return c.json(result);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("not found")) return c.json({ error: msg }, 404);
-      return c.json({ error: msg }, 500);
-    }
+    const result = await getWorkspaceRisk(projectId, database);
+    return c.json(result);
   });
 
   // POST /api/projects/:id/check-overlap — check for file overlap between issues using cached predictions
@@ -394,14 +370,8 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
   // GET /api/projects/:id/file-contention — live file contention heatmap for active/reviewing workspaces
   router.get("/:id/file-contention", async (c) => {
     const projectId = c.req.param("id");
-    try {
-      const result = await getFileContention(projectId, database);
-      return c.json(result);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("not found")) return c.json({ error: msg }, 404);
-      return c.json({ error: msg }, 500);
-    }
+    const result = await getFileContention(projectId, database);
+    return c.json(result);
   });
 
   // GET /api/projects/:id/graph
@@ -431,26 +401,15 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
     const rawLimit = c.req.query("limit");
     const parsed = Number.parseInt(rawLimit ?? "", 10);
     const limit = Number.isFinite(parsed) ? Math.min(200, Math.max(1, parsed)) : 100;
-    try {
-      const result = await getProjectActivity(projectId, database, limit);
-      return c.json(result);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("not found")) return c.json({ error: msg }, 404);
-      return c.json({ error: msg }, 500);
-    }
+    const result = await getProjectActivity(projectId, database, limit);
+    return c.json(result);
   });
 
   // GET /api/projects/:id/sprint-capacity
   router.get("/:id/sprint-capacity", async (c) => {
     const projectId = c.req.param("id");
-    try {
-      const result = await buildSprintCapacityPlan(database, projectId);
-      return c.json(result);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return c.json({ error: msg }, 500);
-    }
+    const result = await buildSprintCapacityPlan(database, projectId);
+    return c.json(result);
   });
 
   // GET /api/projects/:id/dashboard/throughput-by-provider?days=14

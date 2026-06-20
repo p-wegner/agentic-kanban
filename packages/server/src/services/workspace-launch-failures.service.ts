@@ -1,4 +1,5 @@
 import type { Database } from "../db/index.js";
+import { NotFoundError } from "../errors/index.js";
 import { isAnalyticsNoise } from "./session-filter.js";
 import { isCodexUsageLimitStats } from "./codex-rate-limit.js";
 import {
@@ -85,7 +86,7 @@ export async function getWorkspaceLaunchFailures(
 ): Promise<WorkspaceLaunchFailuresResponse> {
   // Resolve project
   const projectIdResolved = await getProjectIdOrNull(projectId, database);
-  if (!projectIdResolved) throw new Error(`Project ${projectId} not found`);
+  if (!projectIdResolved) throw new NotFoundError(`Project ${projectId} not found`);
 
   // Get non-terminal issue statuses
   const statusRows = await getProjectStatusRows(projectId, database);
