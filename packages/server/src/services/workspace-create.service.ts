@@ -1,22 +1,19 @@
 /**
  * Workspace creation + launch-preview, extracted from workspace-crud.service.ts.
  *
- * This owns the constructive side of a workspace lifecycle: resolving the issue/
- * project, setting up the worktree (+ symlink bootstrap + setup script), resolving
- * the agent config/skill/prompt, inserting the DB row, and deferring the agent
- * launch off the hot path. computeLaunchPreview is the read-only dry-run of that
- * same pipeline. Both share the create-only helpers below. The crud service
- * instantiates this factory and delegates the two public methods, passing the same
- * injected deps so gitService stays substitutable in tests.
+ * This owns the create ORCHESTRATION: resolving the issue/project, inserting the
+ * DB row, moving the issue to In Progress, and deferring the agent launch off the
+ * hot path. The side-effecting worktree provisioning + agent-config/prompt/skill
+ * resolution it sequences live in workspace-provision.service.ts (instantiated
+ * below). computeLaunchPreview is the read-only dry-run of that same pipeline. The
+ * crud service instantiates this factory and delegates the two public methods,
+ * passing the same injected deps so gitService stays substitutable in tests.
  */
 
 import { randomUUID } from "node:crypto";
-import { mkdirSync, writeFileSync, chmodSync } from "node:fs";
-import { join } from "node:path";
 import { isResolvedDependencyStatusView } from "@agentic-kanban/shared/lib/status-view";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { derivePortsFromBranch } from "./worktree-ports.js";
-import { buildAgentPrompt } from "./workspace-create/policy.js";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
@@ -24,31 +21,17 @@ import * as crudRepo from "../repositories/workspace-crud.repository.js";
 import type { ProviderName } from "./agent-provider.js";
 import { estimateBudget } from "./budget-estimator.service.js";
 import type { BudgetEstimate } from "./budget-estimator.service.js";
-import { runSetupScript } from "./setup-script.js";
 import {
-  buildSetupRunFromResult,
-  buildSetupRunFromError,
   skippedSetupRun,
   disabledSymlinkRun,
-  buildSymlinkRun,
-  buildSymlinkErrorRun,
   type LatestSetupRun,
   type LatestSymlinkRun,
 } from "./workspace-run-records.js";
-import { writeAgentSkillFile, readLocalSkillPrompt, copySkillToWorktree } from "@agentic-kanban/shared/lib/agent-skill-files";
-import { writeTicketContextFile } from "@agentic-kanban/shared/lib/ticket-context";
-import { bootstrapSymlinks, parseSymlinkDirs } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
-import {
-  resolveWorkflowStart,
-  initWorkspaceWorkflow,
-  buildTransitionBlock,
-} from "@agentic-kanban/shared/lib/workflow-engine";
+import { parseSymlinkDirs } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
+import { initWorkspaceWorkflow } from "@agentic-kanban/shared/lib/workflow-engine";
 import { toExecutorProvider } from "./agent-settings.service.js";
-import { resolveStrategyProviderSelection } from "./strategy-objective.service.js";
-import { resolveProviderConfig } from "./provider-config-resolution.js";
 import { preflightAgentProfile } from "./agent-profile-health.service.js";
 import { emitButlerSystemEvent } from "./butler-event-feed.js";
-import { DEFAULT_BUILDER_GUARDRAILS, PREF_BUILDER_GUARDRAILS } from "../constants/preference-keys.js";
 import { moveIssueToInProgress } from "../repositories/workspace.repository.js";
 import {
   WorkspaceError,
@@ -56,8 +39,7 @@ import {
   type CreateWorkspaceResult,
   type GitService,
 } from "./workspace-internals.js";
-import { buildContextPrimer } from "./context-packer.service.js";
-import { getStackProfile } from "./stack-profile.service.js";
+import { createWorkspaceProvisionService } from "./workspace-provision.service.js";
 
 export function createWorkspaceCreateService(deps: {
   database: Database;
@@ -66,6 +48,18 @@ export function createWorkspaceCreateService(deps: {
   gitService: GitService;
 }) {
   const { database, getSessionManager, boardEvents, gitService } = deps;
+
+  // Worktree provisioning + agent-config/prompt/skill resolution live in a sibling
+  // service sharing database + gitService.
+  const provision = createWorkspaceProvisionService({ database, gitService });
+  const {
+    setupWorktree,
+    buildAgentConfig,
+    installTddHook,
+    packContextPrimer,
+    writeWorktreeTicketContext,
+    resolveAgentPromptAndSkill,
+  } = provision;
 
   function stringifyJson(value: unknown): string {
     return JSON.stringify(value);
@@ -109,192 +103,6 @@ export function createWorkspaceCreateService(deps: {
         enabled: projectRow.symlinkEnabled ?? false,
         dirs: parseSymlinkDirs(projectRow.symlinkDirs),
       },
-    };
-  }
-
-  async function setupWorktree(
-    isDirect: boolean,
-    repoPath: string,
-    defaultBranch: string | null,
-    input: Pick<CreateWorkspaceInput, "branch" | "baseBranch" | "skipSetup">,
-    setupConfig: { setupScript: string | null; setupBlocking: boolean; setupEnabled: boolean },
-    symlinkConfig: { enabled: boolean; dirs: string[] },
-    workspaceId: string,
-    issue?: { issueNumber?: number | null; title: string },
-  ): Promise<{
-    branch: string;
-    worktreePath: string;
-    baseBranch: string | null;
-    baseCommitSha: string | null;
-    latestSetup: LatestSetupRun;
-    setupCompletion?: Promise<LatestSetupRun>;
-    symlinkRun: LatestSymlinkRun;
-  }> {
-    let branch: string;
-    let worktreePath: string;
-    let baseBranch: string | null;
-    let baseCommitSha: string | null;
-    let symlinkRun = disabledSymlinkRun();
-
-    if (isDirect) {
-      branch = await gitService.getCurrentBranch(repoPath);
-      worktreePath = repoPath;
-      baseBranch = null;
-      baseCommitSha = await gitService.getHeadCommitSha(repoPath);
-    } else {
-      baseBranch = input.baseBranch || defaultBranch;
-      if (!baseBranch) {
-        throw new WorkspaceError(
-          "No default branch configured for this project. Set a default branch in project settings or choose a base branch.",
-          "BAD_REQUEST",
-        );
-      }
-      branch = input.branch || (issue ? suggestBranchName(issue) : "");
-      baseCommitSha = await gitService.revParse(repoPath, baseBranch);
-      worktreePath = await gitService.createWorktree(repoPath, branch, baseBranch);
-    }
-
-    // Symlink dependency directories from the main checkout into the worktree.
-    // Best-effort: never blocks workspace creation on failure.
-    if (!isDirect && symlinkConfig.enabled && symlinkConfig.dirs.length > 0) {
-      const symlinkStartedAt = new Date().toISOString();
-      try {
-        const symlinkResult = await bootstrapSymlinks(repoPath, worktreePath, symlinkConfig.dirs);
-        symlinkRun = buildSymlinkRun(symlinkConfig.dirs, symlinkStartedAt, symlinkResult);
-        if (symlinkResult.linked.length > 0) {
-          console.log(`[workspaces] symlink bootstrap: linked [${symlinkResult.linked.join(", ")}] for workspaceId=${workspaceId}`);
-        }
-        if (symlinkResult.failed.length > 0) {
-          console.warn(`[workspaces] symlink bootstrap: failed [${symlinkResult.failed.map(f => `${f.dir}: ${f.error}`).join(", ")}] for workspaceId=${workspaceId}`);
-        }
-      } catch (err) {
-        symlinkRun = buildSymlinkErrorRun(symlinkConfig.dirs, symlinkStartedAt, err);
-        console.warn(`[workspaces] symlink bootstrap error (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
-
-    const { setupScript, setupBlocking, setupEnabled } = setupConfig;
-    let latestSetup = skippedSetupRun(setupScript);
-    let setupCompletion: Promise<LatestSetupRun> | undefined;
-    if (!isDirect && setupScript && setupEnabled && !input.skipSetup) {
-      const startedAt = new Date().toISOString();
-      if (setupBlocking) {
-        try {
-          const result = await runSetupScript(worktreePath, setupScript);
-          latestSetup = buildSetupRunFromResult(setupScript, startedAt, result);
-          if (result.exitCode === 0) {
-            console.log(`[workspaces] setup complete: workspaceId=${workspaceId}`);
-          } else {
-            console.warn(`[workspaces] setup failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`);
-          }
-        } catch (err) {
-          latestSetup = buildSetupRunFromError(setupScript, startedAt, err);
-          console.warn(`[workspaces] setup error: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      } else {
-        latestSetup = {
-          command: setupScript,
-          state: "running",
-          startedAt,
-          endedAt: null,
-          exitCode: null,
-          durationMs: null,
-          stdoutTail: null,
-          stderrTail: null,
-        };
-        setupCompletion = runSetupScript(worktreePath, setupScript).then(result => {
-          if (result.exitCode === 0) {
-            console.log(`[workspaces] parallel setup complete: workspaceId=${workspaceId}`);
-          } else {
-            console.warn(`[workspaces] parallel setup failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`);
-          }
-          return buildSetupRunFromResult(setupScript, startedAt, result);
-        }).catch(err => {
-          console.warn(`[workspaces] parallel setup error: ${err instanceof Error ? err.message : String(err)}`);
-          return buildSetupRunFromError(setupScript, startedAt, err);
-        });
-      }
-    }
-
-    return { branch, worktreePath, baseBranch, baseCommitSha, latestSetup, setupCompletion, symlinkRun };
-  }
-
-  // buildAgentPrompt / neutralizeBuildTimeVisualVerification /
-  // isBuildTimeVisualVerificationInstruction are pure policy — extracted to
-  // ./workspace-create/policy.ts and unit-tested there. Imported at top of file.
-
-  async function resolveSkillFile(
-    skillId: string | null,
-    diskSkillName: string | null,
-    worktreePath: string,
-    repoPath: string,
-  ): Promise<string | null> {
-    if (skillId) {
-      const skillRows = await crudRepo.getAgentSkillById(skillId, database);
-      if (skillRows.length === 0) return null;
-      const skill = skillRows[0];
-      const localPrompt = await readLocalSkillPrompt(repoPath, skill.name);
-      const effectiveSkill = localPrompt ? { ...skill, prompt: localPrompt } : skill;
-      await writeAgentSkillFile(worktreePath, effectiveSkill);
-      return skill.name;
-    }
-    if (diskSkillName) {
-      const copied = await copySkillToWorktree(repoPath, diskSkillName, worktreePath);
-      return copied ? diskSkillName : null;
-    }
-    return null;
-  }
-
-  async function buildAgentConfig(
-    input: Pick<CreateWorkspaceInput, "profile" | "claudeProfile" | "model">,
-    projectId?: string,
-  ): Promise<{
-    agentCommand: string | undefined;
-    agentArgs: string | undefined;
-    claudeProfile: string | undefined;
-    resolvedProfile: string | undefined;
-    resolvedProvider: ProviderName;
-    resolvedProfileSelection: { provider: ProviderName; name: string } | undefined;
-    permissionPromptTool: string | undefined;
-    model: string | undefined;
-    systemInstructions: string;
-  }> {
-    const prefRows = await crudRepo.getAllPreferences(database);
-    const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
-
-    // Impure inputs: an explicit profile/claudeProfile override takes precedence;
-    // otherwise consult the project's strategy config (DB + live quota) for the
-    // provider policy. The pure decision below consumes the resolved selection.
-    const hasOverride = Boolean(input.profile?.name) || Boolean(input.claudeProfile);
-    const strategySelection = !hasOverride && projectId
-      ? await resolveStrategyProviderSelection(database, projectId)
-      : null;
-
-    const resolved = resolveProviderConfig({
-      prefMap,
-      profileOverride: input.profile,
-      legacyProfileOverride: input.claudeProfile,
-      strategySelection,
-      // Precedence: an explicit per-workspace model wins; otherwise honor the strategy policy's
-      // pinned model (#818) so a project can run e.g. claude/sonnet without the global
-      // default_model footgun. resolveProviderConfig still falls back to default_model when both
-      // are unset, and drops a model that doesn't belong to the resolved provider.
-      requestedModel: input.model ?? strategySelection?.model,
-    });
-    for (const note of resolved.notes) {
-      console.log(`[workspaces] ${note}`);
-    }
-
-    return {
-      agentCommand: resolved.agentCommand,
-      agentArgs: resolved.agentArgs,
-      claudeProfile: resolved.profileName,
-      resolvedProfile: resolved.profileName,
-      resolvedProvider: resolved.provider,
-      resolvedProfileSelection: resolved.profileSelection,
-      permissionPromptTool: resolved.permissionPromptTool,
-      model: resolved.model,
-      systemInstructions: prefMap.get(PREF_BUILDER_GUARDRAILS) ?? DEFAULT_BUILDER_GUARDRAILS,
     };
   }
 
@@ -491,139 +299,6 @@ export function createWorkspaceCreateService(deps: {
       updatedAt: params.now,
       error: errorMsg,
     };
-  }
-
-  function installTddHook(worktreePath: string): void {
-    try {
-      const hooksDir = join(worktreePath, ".git", "hooks");
-      mkdirSync(hooksDir, { recursive: true });
-      const hookPath = join(hooksDir, "commit-msg");
-      const hookScript = `#!/bin/sh
-# TDD mode: ensure AC test commit comes before implementation commits.
-MSG=$(cat "$1")
-# If this commit is the AC test commit, allow it.
-if echo "$MSG" | grep -qE '^test: AC for #[0-9]+'; then
-  exit 0
-fi
-# Check if an AC test commit already exists on this branch.
-if git log --oneline | grep -qE ' test: AC for #[0-9]+'; then
-  exit 0
-fi
-echo "TDD mode: write failing AC tests first." >&2
-echo "  Commit your tests with: git commit -m 'test: AC for #<issue-number>'" >&2
-exit 1
-`;
-      writeFileSync(hookPath, hookScript, { encoding: "utf-8" });
-      try {
-        chmodSync(hookPath, 0o755);
-      } catch {
-        // chmod may fail on Windows; hook still runs via Git for Windows bash
-      }
-      console.log(`[workspaces] TDD commit-msg hook installed: ${hookPath}`);
-    } catch (err) {
-      console.warn(`[workspaces] failed to install TDD hook: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-
-  /**
-   * Best-effort context-packer run. Returns the primer text, or null when packing
-   * is empty or fails — packing must never block workspace creation.
-   */
-  async function packContextPrimer(
-    input: CreateWorkspaceInput,
-    issue: { title: string; description: string | null; projectId: string },
-    project: { repoPath: string },
-  ): Promise<string | null> {
-    try {
-      const packed = await buildContextPrimer(
-        {
-          issueId: input.issueId,
-          issueTitle: issue.title,
-          issueDescription: issue.description,
-          projectId: issue.projectId,
-          repoPath: project.repoPath,
-        },
-        database,
-      );
-      if (packed.primer.trim()) return packed.primer;
-    } catch (err) {
-      console.warn(`[workspaces] context-packer failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
-    }
-    return null;
-  }
-
-  /**
-   * Inject ticket details (+ optional context primer + detected stack profile) into
-   * the worktree as a gitignored CLAUDE.local.md so the agent's first turn has the
-   * spec without foraging. Returns the file path. The stack-profile read is
-   * best-effort — a failure there must not block creation.
-   */
-  async function writeWorktreeTicketContext(
-    worktreePath: string,
-    issue: { issueNumber: number | null; title: string; description: string | null; projectId: string },
-    contextPrimer: string | null,
-  ): Promise<string | null> {
-    let stackProfile = null;
-    try {
-      stackProfile = await getStackProfile(issue.projectId, database);
-    } catch (err) {
-      console.warn(`[workspaces] stack-profile read failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
-    }
-    return writeTicketContextFile(worktreePath, {
-      issueNumber: issue.issueNumber,
-      title: issue.title,
-      description: issue.description,
-      contextPrimer,
-      stackProfile,
-    });
-  }
-
-  /**
-   * Build the agent prompt and resolve the effective skill. Merges the base prompt
-   * with the issue's configurable workflow (start-node guidance + transitions) and
-   * resolves the skill from explicit input → workflow node → project default,
-   * materializing the chosen skill file into the worktree. Returns the prompt, the
-   * resolved skill name (for session attribution), and the effective skill id (for
-   * the workspace row).
-   */
-  async function resolveAgentPromptAndSkill(params: {
-    issue: { projectId: string; issueNumber: number | null; title: string; description: string | null; priority: string | null };
-    input: CreateWorkspaceInput;
-    includeVisualProof: boolean;
-    workspaceId: string;
-    worktreePath: string | null;
-    project: { repoPath: string; defaultSkillId: string | null };
-    skillId: string | null;
-  }): Promise<{ agentPrompt: string; skillName: string | null; effectiveSkillId: string | null; hasWorkflowStart: boolean }> {
-    const { issue, input, includeVisualProof, workspaceId, worktreePath, project, skillId } = params;
-    let agentPrompt = buildAgentPrompt(issue, { ...input, includeVisualProof }, input.issueId);
-
-    // Resolve the issue's configurable workflow (if any). The start node's
-    // guidance + valid transitions are injected into the prompt, and its
-    // attached skill is used when the caller didn't pick one explicitly.
-    const workflowStart = await resolveWorkflowStart(database, input.issueId);
-    let effectiveSkillId = skillId;
-    let effectiveDiskSkill = input.skillName ?? null;
-    if (workflowStart) {
-      agentPrompt += `\n\n${buildTransitionBlock(workflowStart.node, workflowStart.transitions, workspaceId)}`;
-      if (!effectiveSkillId && !effectiveDiskSkill) {
-        effectiveSkillId = workflowStart.node.skillId ?? null;
-        effectiveDiskSkill = workflowStart.node.skillName ?? null;
-      }
-    }
-
-    // Fall back to the project-level default skill so Insights "By Skill" can
-    // attribute sessions even when no explicit skill was chosen and the issue has
-    // no workflow that provides one.
-    if (!effectiveSkillId && !effectiveDiskSkill && project.defaultSkillId) {
-      effectiveSkillId = project.defaultSkillId;
-    }
-
-    const skillName = worktreePath
-      ? await resolveSkillFile(effectiveSkillId, effectiveDiskSkill, worktreePath, project.repoPath)
-      : null;
-
-    return { agentPrompt, skillName, effectiveSkillId, hasWorkflowStart: Boolean(workflowStart) };
   }
 
   /**
