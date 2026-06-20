@@ -96,7 +96,7 @@ if (!hasArgs) {
       }
 
       // Auto-register CWD if it's a git repo and no project exists yet
-      const allProjects = await getAllProjects();
+      const allProjects = await getAllProjects(undefined, { includeArchived: true });
       if (allProjects.length === 0) {
         try {
           const { promisify } = await import("node:util");

@@ -239,3 +239,9 @@ export async function getProjectStatusById(statusId: string, database: Database 
 export async function deleteProjectStatusById(statusId: string, database: Database = db): Promise<void> {
   await database.delete(projectStatuses).where(eq(projectStatuses.id, statusId));
 }
+
+/** A project by its exact name (first match), or null. */
+export async function getProjectByName(name: string, database: Database = db) {
+  const rows = await database.select().from(projects).where(eq(projects.name, name)).limit(1);
+  return rows[0] ?? null;
+}
