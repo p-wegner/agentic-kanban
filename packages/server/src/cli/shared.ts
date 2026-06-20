@@ -1,7 +1,7 @@
-import { db } from "../db/index.js";
-import { preferences } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
-import { applyMigrations } from "../db/manual-migrate.js";
+import { getPreference } from "../repositories/preferences.repository.js";
+
+// Migration bootstrap lives in the db layer so cli/ never imports db/index directly.
+export { runMigrations } from "../db/manual-migrate.js";
 
 export const DEFAULT_STATUSES = [
   { name: "Todo", sortOrder: 0, isDefault: true },
@@ -21,15 +21,10 @@ export function logDefaultBranch(defaultBranch: string | null | undefined, inden
   console.warn(`${indent}Set it manually in project settings before creating worktrees.`);
 }
 
-export async function runMigrations() {
-  const { rawClient } = await import("../db/index.js");
-  await applyMigrations(rawClient);
-}
-
 export async function getActiveProjectId(): Promise<string> {
-  const pref = await db.select().from(preferences).where(eq(preferences.key, "activeProjectId")).limit(1);
-  if (pref.length === 0) throw new Error("No active project. Run `pnpm cli -- register <path>` first.");
-  return pref[0].value;
+  const value = await getPreference("activeProjectId");
+  if (value === null) throw new Error("No active project. Run `pnpm cli -- register <path>` first.");
+  return value;
 }
 
 export function timeSince(date: Date): string {

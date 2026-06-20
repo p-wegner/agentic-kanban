@@ -3,8 +3,7 @@ import { Command } from "commander";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { db } from "../db/index.js";
-import { projects } from "@agentic-kanban/shared/schema";
+import { getAllProjects } from "../repositories/project.repository.js";
 import { registerRegisterCommand } from "./commands/register.js";
 import { registerCreateCommand } from "./commands/create.js";
 import { registerPreferencesCommand } from "./commands/preferences.js";
@@ -97,7 +96,7 @@ if (!hasArgs) {
       }
 
       // Auto-register CWD if it's a git repo and no project exists yet
-      const allProjects = await db.select().from(projects);
+      const allProjects = await getAllProjects();
       if (allProjects.length === 0) {
         try {
           const { promisify } = await import("node:util");

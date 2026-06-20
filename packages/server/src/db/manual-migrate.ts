@@ -107,3 +107,13 @@ export async function applyMigrations(client: Client): Promise<void> {
     }
   }
 }
+
+/**
+ * Bootstrap helper: apply all pending migrations against the live raw client.
+ * Lives in the db layer (not cli/) so CLI command modules can run migrations
+ * without importing db/index directly. Imported by cli/shared.ts.
+ */
+export async function runMigrations(): Promise<void> {
+  const { rawClient } = await import("./index.js");
+  await applyMigrations(rawClient);
+}
