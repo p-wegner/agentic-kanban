@@ -59,6 +59,7 @@ import {
 } from "../repositories/issue-service.repository.js";
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
 import { enrichWorkspacesWithSessionData, wouldCreateCycle } from "./board-aggregation.service.js";
+import { hasPath } from "../lib/dependency-graph.js";
 import { materializePhaseArtifactToWorktree } from "./phase-artifacts.service.js";
 
 function parseJsonArray<T>(raw: string | null | undefined, fallback: T[]): T[] {
@@ -589,20 +590,6 @@ export function createIssueService(deps: {
         }
         edgeKeyToRow.set(`${dep.issueId}|${dep.dependsOnId}|${dep.type}`, { id: dep.id, projectId: dep.projectId });
       }
-
-      const hasPath = (adj: Map<string, Set<string>>, from: string, to: string): boolean => {
-        const visited = new Set<string>();
-        const stack = [from];
-        while (stack.length) {
-          const cur = stack.pop()!;
-          if (cur === to) return true;
-          if (visited.has(cur)) continue;
-          visited.add(cur);
-          const ns = adj.get(cur);
-          if (ns) for (const n of ns) stack.push(n);
-        }
-        return false;
-      };
 
       for (let i = 0; i < edges.length; i++) {
         const e = edges[i];
