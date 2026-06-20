@@ -8,6 +8,7 @@ import { getCommitsForBranch } from "@agentic-kanban/shared/lib/git-service";
 import { runMigrations, getActiveProjectId } from "../shared.js";
 import { getSessionMessageRows } from "../../repositories/session.repository.js";
 import { computeReviewEffectiveness, renderReviewEffectivenessReport } from "../../services/review-effectiveness.service.js";
+import { buildReviewWorkspaces, buildReviewResult, summarizeReviewEffectiveness, reviewPct, computeDeepReviewSignals, type ReviewResult, type ReviewTranscriptSummary } from "../../lib/review-effectiveness-report.js";
 
 const DEFAULT_PORT = process.env.KANBAN_SERVER_PORT ?? "3001";
 const BASE_URL = `http://127.0.0.1:${DEFAULT_PORT}`;
@@ -287,71 +288,11 @@ export function registerSessionCommand(program: Command) {
           .where(and(eq(issues.projectId, projectId), gte(sessions.startedAt, sinceIso)))
           .orderBy(sessions.startedAt);
 
-        const classify = (t: string | null): "review" | "build" | "rework" | "noise" | "other" => {
-          if (!t) return "build";
-          if (t === "review" || t.startsWith("skill:code-review")) return "review";
-          if (t.startsWith("skill:board-monitor") || t.startsWith("skill:board-navigator")) return "noise";
-          if (t === "chat" || t === "fix-and-merge" || t === "fix-conflicts" || t === "plan-reject") return "rework";
-          if (t === "verify" || t === "learning" || t === "bisect" || t === "reconcile") return "other";
-          return "build";
-        };
-
-        // start/end are epoch-ms so we can compare against git author dates safely. git's %aI
-        // carries a local tz offset (e.g. +02:00) while session timestamps are UTC 'Z' — string
-        // comparison across the two is WRONG; only numeric instant comparison is correct.
-        type Sess = { id: string; kind: ReturnType<typeof classify>; start: number; end: number };
-        type WS = {
-          workspaceId: string;
-          issueNumber: number;
-          issueTitle: string;
-          provider: string | null;
-          wsStatus: string;
-          merged: boolean;
-          baseCommitSha: string | null;
-          headRef: string | null;
-          sessions: Sess[];
-          hasReview: boolean;
-        };
-        const byWs = new Map<string, WS>();
         const GRACE_MS = 2 * 60 * 1000; // a commit can land just after the session's recorded endedAt
-        const nowMs = Date.now();
-
-        for (const r of rows) {
-          const kind = classify(r.triggerType);
-          if (kind === "noise") continue;
-          let ws = byWs.get(r.workspaceId);
-          if (!ws) {
-            ws = {
-              workspaceId: r.workspaceId,
-              issueNumber: r.issueNumber ?? 0,
-              issueTitle: r.issueTitle,
-              provider: r.provider,
-              wsStatus: r.wsStatus,
-              merged: !!r.mergedAt,
-              baseCommitSha: r.baseCommitSha,
-              headRef: r.mergedHeadSha ?? r.branch,
-              sessions: [],
-              hasReview: false,
-            };
-            byWs.set(r.workspaceId, ws);
-          }
-          if (kind === "review") ws.hasReview = true;
-          ws.sessions.push({
-            id: r.sessionId,
-            kind,
-            start: new Date(r.startedAt).getTime(),
-            end: r.endedAt ? new Date(r.endedAt).getTime() : nowMs,
-          });
-        }
-
-        // Close open-ended session windows with the next session's start so windows don't overlap.
-        for (const ws of byWs.values()) {
-          ws.sessions.sort((a, b) => a.start - b.start);
-          for (let i = 0; i < ws.sessions.length - 1; i++) {
-            const next = ws.sessions[i + 1].start;
-            if (ws.sessions[i].end > next) ws.sessions[i].end = next;
-          }
-        }
+        // Classification, epoch-ms session windows (closed so they don't overlap), and
+        // strict timezone-safe commit attribution all live in the pure, tested
+        // review-effectiveness-report lib — see its tests for the edge cases.
+        const byWs = buildReviewWorkspaces(rows, Date.now());
 
         // Every reviewed workspace is a candidate. The transcript method works on all of them;
         // the git method additionally needs a baseCommitSha + a reachable head.
@@ -360,165 +301,38 @@ export function registerSessionCommand(program: Command) {
         const gitEligible = targets.filter((w) => w.baseCommitSha && w.headRef).length;
         if (limit > 0) targets = targets.slice(0, limit);
 
-        type Result = {
-          issue: number;
-          title: string;
-          provider: string | null;
-          merged: boolean;
-          wsStatus: string;
-          gitResolved: boolean;
-          implementerCommits: number;
-          reviewerCommits: number;
-          reviewerCommitsNamingIssue: number; // reviewer commit whose subject references THIS issue (#N / ak-N) — high confidence, filters cross-branch noise
-          reworkCommits: number;
-          unattributedCommits: number;
-          reviewerCommitSubjects: string[];
-          reviewSessionIds: string[];
-          // deep (transcript) signals
-          reviewEdited?: boolean;
-          reviewCommitted?: boolean;
-          reviewMentionedMajorCritical?: boolean;
-          reviewFixedMajorCritical?: boolean;
-        };
-        const results: Result[] = [];
-
-        // Strict attribution: a commit belongs to a session ONLY if its author-time falls
-        // inside that session's [start, end+grace] window. No fallback — commits authored in
-        // gaps between sessions, or rebased-in from master (their original author-time lies
-        // outside every window of THIS workspace), are left unattributed on purpose. This is
-        // what keeps base..tip's rebase pollution out of the implementer/reviewer tallies.
-        const attribute = (commitDateIso: string, sess: Sess[]): Sess | null => {
-          const t = new Date(commitDateIso).getTime();
-          if (!Number.isFinite(t)) return null;
-          for (const s of sess) {
-            if (t >= s.start && t <= s.end + GRACE_MS) return s;
-          }
-          return null;
-        };
-
+        const results: ReviewResult[] = [];
         for (const ws of targets) {
           const commits = ws.baseCommitSha && ws.headRef ? await getCommitsForBranch(repoPath, ws.baseCommitSha, ws.headRef) : [];
-          const res: Result = {
-            issue: ws.issueNumber,
-            title: ws.issueTitle.slice(0, 48),
-            provider: ws.provider,
-            merged: ws.merged,
-            wsStatus: ws.wsStatus,
-            gitResolved: commits.length > 0,
-            implementerCommits: 0,
-            reviewerCommits: 0,
-            reviewerCommitsNamingIssue: 0,
-            reworkCommits: 0,
-            unattributedCommits: 0,
-            reviewerCommitSubjects: [],
-            reviewSessionIds: ws.sessions.filter((s) => s.kind === "review").map((s) => s.id),
-          };
-          const namesIssue = (msg: string) => {
-            const m = msg.toLowerCase();
-            return m.includes(`#${ws.issueNumber}`) || m.includes(`ak-${ws.issueNumber}`) || m.includes(`(${ws.issueNumber})`);
-          };
-          for (const c of commits) {
-            const s = attribute(c.date, ws.sessions);
-            const kind = s?.kind ?? null;
-            if (kind === "review") {
-              res.reviewerCommits++;
-              if (namesIssue(c.message)) res.reviewerCommitsNamingIssue++;
-              if (res.reviewerCommitSubjects.length < 5) res.reviewerCommitSubjects.push(c.message.slice(0, 60));
-            } else if (kind === "rework") res.reworkCommits++;
-            else if (kind === "build") res.implementerCommits++;
-            else res.unattributedCommits++;
-          }
-          results.push(res);
+          results.push(buildReviewResult(ws, commits, GRACE_MS));
         }
 
         // Deep transcript pass: per review session, did it change code / commit / cite MAJOR-CRITICAL.
         if (options.deep) {
           for (const res of results) {
-            let edited = false, committed = false, majorCritical = false;
+            const summaries: ReviewTranscriptSummary[] = [];
             for (const sid of res.reviewSessionIds) {
-              const msgRows = await getSessionMessageRows(sid);
-              const summary = parseSessionSummary(msgRows) as unknown as {
-                agentSummary?: string;
-                filesEdited?: string[];
-                filesWritten?: string[];
-                commandsRun?: string[];
-              };
-              if ((summary.filesEdited?.length ?? 0) > 0 || (summary.filesWritten?.length ?? 0) > 0) edited = true;
-              if ((summary.commandsRun ?? []).some((c) => /git\s+commit/i.test(c))) committed = true;
-              if (hasPositiveSeverity(summary.agentSummary ?? "")) majorCritical = true;
+              summaries.push(parseSessionSummary(await getSessionMessageRows(sid)) as unknown as ReviewTranscriptSummary);
             }
-            res.reviewEdited = edited;
-            res.reviewCommitted = committed;
-            res.reviewMentionedMajorCritical = majorCritical;
-            res.reviewFixedMajorCritical = majorCritical && (edited || committed || res.reviewerCommits > 0);
+            Object.assign(res, computeDeepReviewSignals(summaries, res.reviewerCommits));
           }
         }
 
-        const gitResolved = results.filter((r) => r.gitResolved);
-        const reviewerCommittedWs = gitResolved.filter((r) => r.reviewerCommits > 0);
-        const highConfReviewerWs = gitResolved.filter((r) => r.reviewerCommitsNamingIssue > 0);
-        const totalReviewerCommits = results.reduce((s, r) => s + r.reviewerCommits, 0);
-        const totalImplCommits = results.reduce((s, r) => s + r.implementerCommits, 0);
-        const totalReworkCommits = results.reduce((s, r) => s + r.reworkCommits, 0);
-        const pct = (n: number, d: number) => (d ? Math.round((n / d) * 1000) / 10 : 0);
-
-        const report: Record<string, unknown> = {
+        const reviewedInWindow = [...byWs.values()].filter((w) => w.hasReview).length;
+        const {
+          report,
+          gitResolvedCount,
+          reviewerCommittedCount,
+          highConfReviewerCount,
+          totalReviewerCommits,
+          totalImplCommits,
+          totalReworkCommits,
+        } = summarizeReviewEffectiveness(results, {
+          reviewedWorkspacesInWindow: reviewedInWindow,
+          gitEligible,
+          deep: !!options.deep,
           window: { days, since: sinceIso, projectId, repoPath },
-          scope: {
-            reviewedWorkspacesInWindow: [...byWs.values()].filter((w) => w.hasReview).length,
-            inspected: results.length,
-            gitEligible,
-            gitHistoryResolved: gitResolved.length,
-            primaryMethod: options.deep ? "transcript (--deep)" : "git (run with --deep for the reliable transcript-based MAJOR/CRITICAL numbers)",
-          },
-          gitMethod: {
-            caveat:
-              "APPROXIMATE / lower bound. base..mergedHeadSha is polluted by the board's pre-merge rebases (stale baseCommitSha pulls in master commits), and mergedHeadSha is often null/unreachable. We strictly attribute a commit only when its author-time falls inside a review session's window, so this under-counts. Use --deep (transcript) as the source of truth.",
-            workspacesWhereReviewerCommitted: reviewerCommittedWs.length,
-            pctOfGitResolvedWhereReviewerCommitted: pct(reviewerCommittedWs.length, gitResolved.length),
-            highConfidenceReviewerFixes: highConfReviewerWs.length,
-            pctOfGitResolvedHighConfidence: pct(highConfReviewerWs.length, gitResolved.length),
-            highConfidenceNote: "reviewer commit subject references its own issue (#N / ak-N) — filters out cross-branch attribution noise",
-            totalReviewerCommits,
-            totalImplementerCommits: totalImplCommits,
-            totalReworkCommits,
-            reviewerFixesThatMerged: reviewerCommittedWs.filter((r) => r.merged).length,
-          },
-        };
-
-        if (options.deep) {
-          const reviewEdited = results.filter((r) => r.reviewEdited);
-          const reviewMajorCrit = results.filter((r) => r.reviewMentionedMajorCritical);
-          const fixedMajorCrit = results.filter((r) => r.reviewFixedMajorCritical);
-          // agreement between the two methods
-          const bothAgreeFix = results.filter((r) => r.reviewerCommits > 0 && (r.reviewEdited || r.reviewCommitted)).length;
-          const gitOnly = results.filter((r) => r.reviewerCommits > 0 && !(r.reviewEdited || r.reviewCommitted)).length;
-          const sessionOnly = results.filter((r) => r.reviewerCommits === 0 && (r.reviewEdited || r.reviewCommitted)).length;
-          report.deepMethod = {
-            note: "Severity is a heuristic transcript scan; treat as approximate.",
-            reviewsThatEditedCode: reviewEdited.length,
-            reviewsCitingMajorOrCritical: reviewMajorCrit.length,
-            reviewsThatFixedAMajorOrCriticalFinding: fixedMajorCrit.length,
-            pctOfReviewedThatFixedMajorCritical: pct(fixedMajorCrit.length, results.length),
-            fixedMajorCriticalIssues: fixedMajorCrit.map((r) => r.issue),
-          };
-          report.methodAgreement = { bothAgreeReviewerFixed: bothAgreeFix, gitOnly, sessionTranscriptOnly: sessionOnly };
-        }
-
-        report.perWorkspace = results.map((r) => ({
-          issue: r.issue,
-          title: r.title,
-          provider: r.provider,
-          implCommits: r.implementerCommits,
-          reviewerCommits: r.reviewerCommits,
-          reviewerCommitsNamingIssue: r.reviewerCommitsNamingIssue,
-          reworkCommits: r.reworkCommits,
-          merged: r.merged,
-          ...(options.deep
-            ? { reviewEdited: r.reviewEdited, reviewFixedMajorCritical: r.reviewFixedMajorCritical }
-            : {}),
-          reviewerCommitSubjects: r.reviewerCommitSubjects,
-        }));
+        });
 
         if (options.json) {
           console.log(JSON.stringify(report, null, 2));
@@ -528,12 +342,12 @@ export function registerSessionCommand(program: Command) {
         const g = report.gitMethod as Record<string, number>;
         const L: string[] = [];
         L.push(`\n=== Reviewer-fixes analysis — last ${days}d (project ${projectId.slice(0, 8)}) ===`);
-        L.push(`Reviewed workspaces in window: ${[...byWs.values()].filter((w) => w.hasReview).length}  |  inspected: ${results.length}  |  git-eligible: ${gitEligible}  |  git history resolved: ${gitResolved.length}`);
+        L.push(`Reviewed workspaces in window: ${reviewedInWindow}  |  inspected: ${results.length}  |  git-eligible: ${gitEligible}  |  git history resolved: ${gitResolvedCount}`);
         if (options.deep) {
           const d = report.deepMethod as Record<string, unknown>;
           const m = report.methodAgreement as Record<string, number>;
           L.push(`\n-- TRANSCRIPT method [PRIMARY] (what each review session actually did) --`);
-          L.push(`  Reviews that edited code themselves:      ${d.reviewsThatEditedCode}/${results.length}  (${pct(d.reviewsThatEditedCode as number, results.length)}%)`);
+          L.push(`  Reviews that edited code themselves:      ${d.reviewsThatEditedCode}/${results.length}  (${reviewPct(d.reviewsThatEditedCode as number, results.length)}%)`);
           L.push(`  Reviews citing a MAJOR/CRITICAL finding:  ${d.reviewsCitingMajorOrCritical}/${results.length}`);
           L.push(`  Reviews that FIXED a MAJOR/CRITICAL:      ${d.reviewsThatFixedAMajorOrCriticalFinding}/${results.length}  (${d.pctOfReviewedThatFixedMajorCritical}%)`);
           L.push(`  └ severity is a heuristic text scan; treat as approximate`);
@@ -545,10 +359,10 @@ export function registerSessionCommand(program: Command) {
         }
         L.push(`\n-- GIT method [corroboration, APPROX] (commit author-time inside a review window) --`);
         L.push(`  ⚠ under-counts: base..mergedHeadSha is rebase-polluted & mergedHeadSha often null; strict windowing drops ambiguous commits`);
-        L.push(`  Reviewer committed within a review window in:  ${reviewerCommittedWs.length}/${gitResolved.length} git-resolved workspaces  (${g.pctOfGitResolvedWhereReviewerCommitted}%)`);
-        L.push(`  └ HIGH-CONFIDENCE (commit names its own issue, noise-filtered): ${highConfReviewerWs.length}/${gitResolved.length}  (${g.pctOfGitResolvedHighConfidence}%)`);
+        L.push(`  Reviewer committed within a review window in:  ${reviewerCommittedCount}/${gitResolvedCount} git-resolved workspaces  (${g.pctOfGitResolvedWhereReviewerCommitted}%)`);
+        L.push(`  └ HIGH-CONFIDENCE (commit names its own issue, noise-filtered): ${highConfReviewerCount}/${gitResolvedCount}  (${g.pctOfGitResolvedHighConfidence}%)`);
         L.push(`  Window-attributed commits by role:  implementer=${totalImplCommits}  reviewer=${totalReviewerCommits}  rework=${totalReworkCommits}`);
-        L.push(`  Reviewer-fixed workspaces that merged: ${g.reviewerFixesThatMerged}/${reviewerCommittedWs.length}`);
+        L.push(`  Reviewer-fixed workspaces that merged: ${g.reviewerFixesThatMerged}/${reviewerCommittedCount}`);
         L.push(`\n-- Workspaces where a commit landed in a review window (git; ✓ = commit names its own issue) --`);
         const fixed = results.filter((r) => r.reviewerCommits > 0).sort((a, b) => b.reviewerCommitsNamingIssue - a.reviewerCommitsNamingIssue || b.reviewerCommits - a.reviewerCommits);
         if (!fixed.length) L.push("  (none)");
@@ -1063,21 +877,4 @@ Examples:
         process.exit(1);
       }
     });
-}
-
-/**
- * Heuristic: does the review text cite at least one CRITICAL/MAJOR finding that is
- * NOT negated? Reviewers very commonly write "No CRITICAL or MAJOR issues", so a raw
- * keyword match over-counts. We accept an occurrence only when the ~16 chars before it
- * contain no negation cue ("no", "zero", "0", "without", "not", "n't").
- */
-function hasPositiveSeverity(text: string): boolean {
-  if (!text) return false;
-  const re = /\b(critical|major)\b/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    const before = text.slice(Math.max(0, m.index - 16), m.index).toLowerCase();
-    if (!/\b(no|zero|without|not|n't)\b|0\s*$/.test(before)) return true;
-  }
-  return false;
 }
