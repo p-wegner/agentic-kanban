@@ -12,6 +12,9 @@ import { WorkspaceTimelinePanel } from "./WorkspaceTimelinePanel.js";
 import { FailurePatternHint } from "./FailurePatternHint.js";
 import TicketMentionInput from "./TicketMentionInput.js";
 import { SetupStatusPanel } from "./SetupStatusPanel.js";
+import { WorkspaceClosedActions } from "./WorkspaceClosedActions.js";
+import { WorkspaceFixingStatus } from "./WorkspaceFixingStatus.js";
+import { WorkspaceArtifactsView } from "./WorkspaceArtifactsView.js";
 import { WorkspaceSessionList } from "./WorkspaceSessionList.js";
 import { WorkspaceActionBar } from "./WorkspaceActionBar.js";
 import { WorkspacePlanApprovalCard } from "./WorkspacePlanApprovalCard.js";
@@ -649,72 +652,21 @@ export function WorkspaceCard({
         </div>
       )}
 
-      {isSelected && ws.status === "fixing" && (() => {
-        const fixSession = sessions.find(s => s.triggerType === "fix-and-merge" && s.status === "running")
-          ?? sessions.filter(s => s.triggerType === "fix-and-merge").at(-1);
-        const conflictFiles = ws.conflicts?.conflictingFiles ?? [];
-        const watchingLive = !!fixSession && activeSession === fixSession.id;
-        const noOutputYet = watchingLive && messages.length === 0;
-        return (
-          <div className="mt-2 p-2 bg-orange-50 dark:bg-orange-950 border border-orange-200 dark:border-orange-800 rounded space-y-1.5" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-sm font-medium text-orange-700 dark:text-orange-400 animate-pulse">AI Fixing Conflicts</span>
-              {ws.baseBranch && (
-                <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">
-                  target: {ws.baseBranch}
-                </span>
-              )}
-              {watchingLive && (
-                <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${wsState === "open" ? "bg-green-100 text-green-700" : "bg-gray-200 text-gray-600"}`}>
-                  {wsState === "open" ? "● live" : wsState}
-                </span>
-              )}
-            </div>
-            {conflictFiles.length > 0 && (
-              <div>
-                <div className="text-[10px] font-semibold text-orange-600 dark:text-orange-400 uppercase tracking-wide mb-0.5">
-                  {conflictFiles.length} conflicting file{conflictFiles.length !== 1 ? "s" : ""}
-                </div>
-                <ul className="text-xs text-orange-700 dark:text-orange-300 space-y-0.5">
-                  {conflictFiles.map(f => (
-                    <li key={f} className="font-mono truncate">{f}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {noOutputYet && (
-              <div className="text-xs text-orange-600 dark:text-orange-400">
-                Connected — waiting for the agent's first output. If nothing appears after a minute or two the session may be stuck; use Stop and retry.
-              </div>
-            )}
-            <div className="flex items-center gap-3">
-              {fixSession && !watchingLive && (
-                <button
-                  onClick={() => { setSelectedHistoryId(null); setActiveSession(fixSession.id); setViewMode("output"); }}
-                  className="text-xs text-orange-700 dark:text-orange-300 hover:text-orange-900 dark:hover:text-orange-100 underline font-medium"
-                >
-                  Watch live output
-                </button>
-              )}
-              {fixSession && (
-                <button
-                  onClick={() => handleViewHistory(fixSession.id)}
-                  className="text-xs text-orange-600 dark:text-orange-400 hover:text-orange-800 dark:hover:text-orange-200 underline"
-                >
-                  View session log
-                </button>
-              )}
-              <button
-                onClick={() => handleStop(ws.id)}
-                disabled={actionLoading}
-                className="text-xs text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200 underline disabled:opacity-50 ml-auto"
-              >
-                Stop fix session
-              </button>
-            </div>
-          </div>
-        );
-      })()}
+      {isSelected && ws.status === "fixing" && (
+        <WorkspaceFixingStatus
+          ws={ws}
+          sessions={sessions}
+          activeSession={activeSession}
+          messages={messages}
+          wsState={wsState}
+          actionLoading={actionLoading}
+          setSelectedHistoryId={setSelectedHistoryId}
+          setActiveSession={setActiveSession}
+          setViewMode={setViewMode}
+          handleViewHistory={handleViewHistory}
+          handleStop={handleStop}
+        />
+      )}
 
       {isSelected && !launchingFix && ws.status === "idle" && (() => {
         const lastFixAndMerge = completedSessions.filter(s => s.triggerType === "fix-and-merge").at(-1);
@@ -952,54 +904,12 @@ export function WorkspaceCard({
           )}
 
           {viewMode === "artifacts" && ws.workingDir && (
-            <div className="space-y-3">
-              {visualProofArtifacts.length > 0 && (
-                <div className="border border-amber-200 dark:border-amber-800 rounded overflow-hidden">
-                  <div className="px-3 py-1.5 bg-amber-50 dark:bg-amber-900/30 border-b border-amber-200 dark:border-amber-800 text-[10px] font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wide">
-                    Visual Proof ({visualProofArtifacts.length})
-                  </div>
-                  <div className="divide-y divide-amber-100 dark:divide-amber-900">
-                    {visualProofArtifacts.map((a) => (
-                      <div key={a.id} className="p-3 space-y-2">
-                        {a.caption && (
-                          <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">{a.caption}</p>
-                        )}
-                        {a.type === "image" && (
-                          <img
-                            src={a.content}
-                            alt={a.caption ?? "visual proof"}
-                            className="max-w-full rounded border border-gray-200 dark:border-gray-700 cursor-pointer hover:opacity-90"
-                            onClick={() => window.open(a.content, "_blank")}
-                          />
-                        )}
-                        {a.type === "link" && (
-                          <a href={a.content} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 dark:text-blue-400 underline break-all">{a.content}</a>
-                        )}
-                        {a.type === "text" && (
-                          <pre className="text-[11px] font-mono text-gray-800 dark:text-gray-200 bg-gray-50 dark:bg-gray-900 rounded p-2 overflow-auto max-h-40 whitespace-pre-wrap break-all">{a.content}</pre>
-                        )}
-                        {a.type === "video" && (
-                          <video
-                            src={a.content}
-                            controls
-                            className="max-h-80 w-full rounded border border-gray-200 dark:border-gray-700"
-                          >
-                            Your browser does not support the video tag.
-                          </video>
-                        )}
-                        <p className="text-[10px] text-gray-400 dark:text-gray-500">{new Date(a.createdAt).toLocaleString("en-US")}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {!visualProofLoading && visualProofArtifacts.length === 0 && ws.includeVisualProof && (
-                <div className="text-xs text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800 rounded p-3 bg-amber-50 dark:bg-amber-900/20">
-                  Visual proof requested — agent has not attached proof yet.
-                </div>
-              )}
-              <WorkspaceArtifactsBrowser workspaceId={ws.id} />
-            </div>
+            <WorkspaceArtifactsView
+              wsId={ws.id}
+              includeVisualProof={ws.includeVisualProof}
+              visualProofArtifacts={visualProofArtifacts}
+              visualProofLoading={visualProofLoading}
+            />
           )}
 
           {viewMode === "diagnostics" && (
@@ -1158,57 +1068,15 @@ export function WorkspaceCard({
           )}
 
           {!selectedHistoryId && ws.status === "closed" && (
-            <div className="pt-2 border-t border-gray-200 dark:border-gray-700 space-y-2">
-              <div className="flex gap-2 flex-wrap items-center rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-900/40 p-2">
-                <WorkspaceActionButton
-                  intent="info"
-                  className="flex-1"
-                  onClick={() => handleGenerateGithubDraft(ws.id)}
-                  disabled={actionLoading}
-                  title="Generate a local GitHub PR or release-note draft and save it as an issue artifact"
-                >
-                  Generate GitHub Draft
-                </WorkspaceActionButton>
-                <WorkspaceActionButton
-                  intent="warn"
-                  onClick={() => void handleExportHandoffBundle(ws.id)}
-                  disabled={actionLoading}
-                  title="Download a Markdown handoff bundle for this workspace"
-                >
-                  Export Handoff
-                </WorkspaceActionButton>
-                <WorkspaceActionButton
-                  intent="danger"
-                  onClick={() => handleDeleteWorkspace(ws.id)}
-                  disabled={actionLoading}
-                  title="Delete this workspace permanently"
-                >
-                  Delete
-                </WorkspaceActionButton>
-              </div>
-              {githubDrafts[ws.id] && (
-                <details className="text-xs">
-                  <summary className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide cursor-pointer hover:text-gray-600 dark:hover:text-gray-300 flex items-center gap-2">
-                    <span>GitHub Draft</span>
-                    <button
-                      onClick={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        void handleCopyGithubDraft(githubDrafts[ws.id]!);
-                      }}
-                      className="ml-auto text-[10px] text-blue-600 hover:text-blue-700"
-                    >
-                      Copy
-                    </button>
-                  </summary>
-                  <div className="mt-1 bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded p-2 max-h-56 overflow-y-auto">
-                    <div className="prose prose-xs max-w-none text-[11px] leading-relaxed text-gray-700 dark:text-gray-300">
-                      <ReactMarkdown>{githubDrafts[ws.id]!}</ReactMarkdown>
-                    </div>
-                  </div>
-                </details>
-              )}
-            </div>
+            <WorkspaceClosedActions
+              wsId={ws.id}
+              actionLoading={actionLoading}
+              githubDrafts={githubDrafts}
+              handleGenerateGithubDraft={handleGenerateGithubDraft}
+              handleExportHandoffBundle={handleExportHandoffBundle}
+              handleDeleteWorkspace={handleDeleteWorkspace}
+              handleCopyGithubDraft={handleCopyGithubDraft}
+            />
           )}
         </div>
       )}
