@@ -14,6 +14,7 @@ import { getIssueIdsAndProjectsForBatch, getDependencyRowsForProjects } from "..
 import { buildIssueSummaryLines, buildIssueStatusLines, validateAttachArtifactOptions, formatAttachArtifactOutput } from "../../lib/issue-cli-format.js";
 import { extractLastAgentMessageFromRows } from "../../lib/session-message-extraction.js";
 import { validateBatchEdges, formatBatchEdgeResult } from "../../lib/dependency-batch.js";
+import { normalizeBatchInput, validateBatchIssueInputs, formatBatchCreateResult } from "../../lib/batch-create-issues.js";
 
 export function registerIssueCommand(program: Command) {
   const issueCmd = program.command("issue").description("Manage issues on the board.\n\nSubcommands: list, create, update, move, summary, dependency");
@@ -1331,29 +1332,12 @@ Each dependency: issueIndex, dependsOnIndex (0-based indices), type (optional, d
           process.exit(1);
         }
 
-        // Accept either { issues: [...], dependencies: [...] } or bare array
-        let issueInputs: Array<{
-          title: string;
-          description?: string;
-          priority?: "low" | "medium" | "high" | "critical";
-          issueType?: string;
-          estimate?: string | null;
-          sortOrder?: number;
-          statusName?: string;
-          tags?: string[];
-        }>;
-        let dependencyInputs: Array<{ issueIndex: number; dependsOnIndex: number; type?: string }> = [];
-
-        if (Array.isArray(parsed)) {
-          issueInputs = parsed as typeof issueInputs;
-        } else if (parsed && typeof parsed === "object" && "issues" in parsed && Array.isArray((parsed as { issues: unknown }).issues)) {
-          const p = parsed as { issues: typeof issueInputs; dependencies?: typeof dependencyInputs };
-          issueInputs = p.issues;
-          dependencyInputs = p.dependencies ?? [];
-        } else {
-          console.error("JSON must be an array of issues or an object with an 'issues' array.");
+        const normalized = normalizeBatchInput(parsed);
+        if (!normalized.ok) {
+          console.error(normalized.error);
           process.exit(1);
         }
+        const { issueInputs, dependencyInputs } = normalized;
 
         const statuses = await db
           .select()
@@ -1366,15 +1350,10 @@ Each dependency: issueIndex, dependsOnIndex (0-based indices), type (optional, d
           process.exit(1);
         }
 
-        for (let i = 0; i < issueInputs.length; i++) {
-          if (!issueInputs[i].title?.trim()) {
-            console.error(`issues[${i}].title is required.`);
-            process.exit(1);
-          }
-          if (issueInputs[i].statusName && !statuses.find((s) => s.name === issueInputs[i].statusName)) {
-            console.error(`issues[${i}].statusName '${issueInputs[i].statusName}' not found. Available: ${statuses.map((s) => s.name).join(", ")}`);
-            process.exit(1);
-          }
+        const validationError = validateBatchIssueInputs(issueInputs, statuses.map((s) => s.name));
+        if (validationError) {
+          console.error(validationError);
+          process.exit(1);
         }
 
         let parentIssueId: string | undefined;
@@ -1487,14 +1466,8 @@ Each dependency: issueIndex, dependsOnIndex (0-based indices), type (optional, d
           }
         });
 
-        const result = { issues: created, dependenciesCreated: dependencyInputs.length };
-        if (options.json) {
-          console.log(JSON.stringify(result, null, 2));
-        } else {
-          console.log(`Created ${created.length} issue(s)${dependencyInputs.length > 0 ? ` with ${dependencyInputs.length} dependency edge(s)` : ""}.`);
-          for (const c of created) {
-            console.log(`  #${c.issueNumber} ${c.title} (${c.id})`);
-          }
+        for (const line of formatBatchCreateResult(created, dependencyInputs.length, options.json ?? false)) {
+          console.log(line);
         }
         process.exit(0);
       } catch (err) {
