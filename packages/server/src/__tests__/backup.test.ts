@@ -199,6 +199,85 @@ describe("db backup", () => {
     expect(afterZero.length).toBeGreaterThanOrEqual(1);
   }, 30000);
 
+  it("reaps orphan .tmp/.promote/journal scratch from an interrupted backup (#856)", async () => {
+    const { pruneScratchArtifacts, pruneBackups } = await loadBackupModule();
+    mkdirSync(backupDir, { recursive: true });
+
+    // Simulate an interrupted VACUUM-INTO: large orphan .tmp + .promote +
+    // their journal sidecars, plus a valid final backup that must survive.
+    const scratch = [
+      "kanban-2026-06-20T00-00-00-000Z-monitor.db.tmp",
+      "kanban-2026-06-20T00-00-00-000Z-monitor.db.tmp-journal",
+      "kanban-2026-06-20T00-00-00-000Z-monitor.db.tmp-wal",
+      "kanban-2026-06-20T00-00-00-000Z-monitor.db.tmp-shm",
+      "kanban-2026-06-20T00-00-01-000Z-boot.db.promote",
+    ];
+    for (const f of scratch) writeFileSync(join(backupDir, f), "x".repeat(1024));
+    const goodBackup = "kanban-2026-06-20T00-00-02-000Z-good.db";
+    writeFileSync(join(backupDir, goodBackup), "valid backup");
+    // A legitimate sidecar of a final backup must NOT be mistaken for scratch.
+    const goodSidecar = "kanban-2026-06-20T00-00-02-000Z-good.db-wal";
+    writeFileSync(join(backupDir, goodSidecar), "wal");
+
+    const removed = pruneScratchArtifacts();
+    expect(removed).toBe(scratch.length);
+
+    const after = readdirSync(backupDir);
+    for (const f of scratch) expect(after).not.toContain(f);
+    expect(after).toContain(goodBackup);
+    expect(after).toContain(goodSidecar);
+
+    // pruneBackups must also reap scratch (idempotent / belt-and-suspenders).
+    writeFileSync(join(backupDir, scratch[0]), "again");
+    pruneBackups(5);
+    expect(readdirSync(backupDir)).not.toContain(scratch[0]);
+  }, 30000);
+
+  it("createBackup clears pre-existing scratch and leaves none behind (#856)", async () => {
+    await seedDb(process.env.DB_URL!, 1, 1);
+    mkdirSync(backupDir, { recursive: true });
+    // Pre-existing orphan scratch from a prior interrupted run.
+    const orphan = join(backupDir, "kanban-2026-06-19T23-59-59-000Z-old.db.tmp");
+    writeFileSync(orphan, "y".repeat(2048));
+
+    const { createBackup } = await loadBackupModule();
+    const result = await createBackup("clean-scratch");
+    expect(result).not.toBeNull();
+
+    expect(existsSync(orphan)).toBe(false);
+    const leftoverScratch = readdirSync(backupDir).filter(
+      (f) => /\.db\.(?:tmp|promote)/.test(f),
+    );
+    expect(leftoverScratch).toEqual([]);
+  }, 30000);
+
+  it("enforces a hard size cap on retained backups, keeping at least one (#856)", async () => {
+    process.env.AGENTIC_KANBAN_BACKUP_MAX_BYTES = "3000";
+    const { pruneBackups } = await loadBackupModule();
+    mkdirSync(backupDir, { recursive: true });
+
+    // 4 valid backups, ~1KB each (4KB total) > 3KB cap; KEEP_LAST won't trim
+    // them (only 4 ≤ 5), so the size cap must.
+    const names: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      const p = join(backupDir, `kanban-2026-05-27T00-00-0${i}-000Z-b${i}.db`);
+      writeFileSync(p, "z".repeat(1024));
+      const t = new Date(Date.now() + i * 1000);
+      utimesSync(p, t, t);
+      names.push(`kanban-2026-05-27T00-00-0${i}-000Z-b${i}.db`);
+    }
+
+    pruneBackups(5);
+
+    const remaining = readdirSync(backupDir).filter((f) => /^kanban-.+\.db$/.test(f));
+    // Some oldest were pruned to fit the cap, but never down to zero.
+    expect(remaining.length).toBeGreaterThanOrEqual(1);
+    expect(remaining.length).toBeLessThan(4);
+    // The newest survives.
+    expect(remaining).toContain(names[names.length - 1]);
+    delete process.env.AGENTIC_KANBAN_BACKUP_MAX_BYTES;
+  }, 30000);
+
   it("db restore round-trip: seed -> backup -> wipe -> restore -> counts match", async () => {
     // Seed the live db and back it up.
     await seedDb(process.env.DB_URL!, 2, 4);
