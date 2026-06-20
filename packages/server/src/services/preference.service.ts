@@ -11,6 +11,7 @@ import { PREF_BUILDER_GUARDRAILS, PREF_MERGE_STRATEGY, PREF_PI_PROFILE, PREF_COD
 import { parseCodexLicenseRing, ringProfileNames, discoverCodexHomeProfiles } from "./codex-license-ring.js";
 import { parseClaudeSubscriptionRing, ringProfileNames as claudeRingProfileNames, discoverClaudeConfigDirProfiles } from "./claude-subscription-ring.js";
 import { getProfilePrefKey } from "./agent-provider.js";
+import { isProjectScopedDynamicKey } from "../lib/dynamic-preference-keys.js";
 
 export const SETTINGS_KEYS = [
   "agent_command", "agent_args", "output_parser", "skip_permissions", "claude_profile",
@@ -49,31 +50,13 @@ export const SETTINGS_KEYS = [
   ...allHarnessSettingKeys(),
 ];
 
-/** Per-project override keys (no fixed list — project IDs are dynamic). */
+/**
+ * Per-project / per-name override keys (no fixed list — project IDs are dynamic).
+ * The prefix table lives in lib/dynamic-preference-keys.ts; the board-strategy key
+ * is ORed in here because its predicate is normalize-aware (kept out of the leaf).
+ */
 function isAllowedDynamicKey(key: string): boolean {
-  return /^butler_event_feed_[0-9a-f-]+$/.test(key) ||
-    /^tdd_mode_[0-9a-f-]+$/.test(key) ||
-    /^backlog_filter_presets_[0-9a-f-]+$/.test(key) ||
-    /^board_saved_views_[0-9a-f-]+$/.test(key) ||
-    /^board_hidden_columns_[0-9a-f-]+$/.test(key) ||
-    /^board_show_priority_legend_[0-9a-f-]+$/.test(key) ||
-    /^board_recent_merges_collapsed_[0-9a-f-]+$/.test(key) ||
-    /^launch_templates_[0-9a-f-]+$/.test(key) ||
-    /^agent_presets_[0-9a-f-]+$/.test(key) ||
-    /^monitor_policy_presets_[0-9a-f-]+$/.test(key) ||
-    /^wip_limit_[0-9a-f-]+$/.test(key) ||
-    /^outbound_webhook_url_[0-9a-f-]+$/.test(key) ||
-    /^board_autodrive_[0-9a-f-]+$/.test(key) ||
-    /^start_mode_[0-9a-f-]+$/.test(key) ||
-    /^board_conductor_[0-9a-f-]+$/.test(key) ||
-    /^conductor_cron_[0-9a-f-]+$/.test(key) ||
-    /^verify_script_[0-9a-f-]+$/.test(key) ||
-    /^cold_clone_check_[0-9a-f-]+$/.test(key) ||
-    /^project_stack_profile_[0-9a-f-]+$/.test(key) ||
-    /^auto_merge_disabled_[0-9a-f-]+$/.test(key) ||
-    /^codex_cooldown_.+$/.test(key) ||
-    /^claude_cooldown_.+$/.test(key) ||
-    isBoardStrategyKey(key);
+  return isProjectScopedDynamicKey(key) || isBoardStrategyKey(key);
 }
 
 function isConductorEnabledPreference(value: string | null | undefined): boolean {
