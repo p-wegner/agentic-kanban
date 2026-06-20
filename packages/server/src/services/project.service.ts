@@ -17,6 +17,7 @@ import { populateStackProfile, populateVerifyScript, detectStackProfile } from "
 import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
 import type { WorkspaceSummaryCache } from "./workspace-summary-cache.service.js";
 import type { WorkspaceSummary } from "./workspace-summary.service.js";
+import { buildBoardColumns } from "../lib/board-view.js";
 
 export class ProjectError extends Error {
   constructor(
@@ -637,94 +638,17 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     const staleDays = parseInt(staleDaysRow[0]?.value ?? "14", 10) || 14;
     const inProgressStaleDays = parseInt(inProgressStaleDaysRow[0]?.value ?? "3", 10) || 3;
     const now = new Date(nowOverride ?? new Date().toISOString()).getTime();
-    const staleMs = staleDays * 24 * 60 * 60 * 1000;
-    const inProgressStaleMs = inProgressStaleDays * 24 * 60 * 60 * 1000;
-    const backlogStatusNames = new Set(statuses.filter((s) => s.name.toLowerCase() === "backlog").map((s) => s.id));
-    const inProgressStatusNames = new Set(statuses.filter((s) => s.name.toLowerCase() === "in progress").map((s) => s.id));
 
-    const statusByName = new Map(statuses.map((status) => [status.name.toLowerCase(), status]));
-    const TERMINAL_STATUS_NAMES = new Set(["done", "cancelled"]);
-    const issuesWithBlocked = projectIssues.map((issue) => {
-      const wsSummary = workspaceSummaryMap.get(issue.id);
-      const blocked = blockedMap.get(issue.id);
-      // Never let a stale workspace workflow node override an issue that is already in a
-      // terminal status (Done/Cancelled). The issue's DB statusId is the canonical source
-      // of truth; a workspace's currentNodeStatusName reflects where the workspace was in
-      // its workflow, but if the issue has been moved to Done the board must honour that.
-      const issueIsTerminal = TERMINAL_STATUS_NAMES.has(issue.statusName?.toLowerCase() ?? "");
-      const workflowStatusName = !issueIsTerminal && wsSummary?.main?.status !== "closed"
-        ? wsSummary?.main?.workflow?.currentNodeStatusName
-        : null;
-      const workflowStatus = workflowStatusName
-        ? statusByName.get(workflowStatusName.toLowerCase())
-        : null;
-      const effectiveStatusId = workflowStatus ? workflowStatus.id : issue.statusId;
-      const isInBacklog = backlogStatusNames.has(effectiveStatusId);
-      const isInProgress = inProgressStatusNames.has(effectiveStatusId);
-      let isStale: boolean | undefined;
-      let staleDaysActual: number | undefined;
-      if (isInBacklog) {
-        const lastActivity = new Date(issue.statusChangedAt ?? issue.updatedAt).getTime();
-        const elapsed = now - lastActivity;
-        if (elapsed >= staleMs) {
-          isStale = true;
-          staleDaysActual = Math.floor(elapsed / (24 * 60 * 60 * 1000));
-        }
-      }
-      const columnEnteredAt = new Date(issue.statusChangedAt ?? issue.createdAt).getTime();
-      const columnElapsed = now - columnEnteredAt;
-      const columnAgeDays = Math.floor(columnElapsed / (24 * 60 * 60 * 1000));
-      const isColumnStale = isInProgress && columnElapsed >= inProgressStaleMs;
-      return {
-        ...issue,
-        ...(workflowStatus ? { statusId: workflowStatus.id, statusName: workflowStatus.name } : {}),
-        ...(wsSummary ? { workspaceSummary: wsSummary } : {}),
-        ...(blocked ? { isBlocked: blocked.isBlocked, dependencyCount: blocked.dependencyCount } : {}),
-        ...(isStale ? { isStale: true, staleDays: staleDaysActual } : {}),
-        columnAgeDays,
-        ...(isColumnStale ? { isColumnStale: true } : {}),
-      };
-    });
-
-    const TERMINAL_COLUMN_NAMES = new Set(["done", "cancelled"]);
-    const TERMINAL_COLUMN_CAP = 50;
-
-    return visibleStatuses.map((s) => {
-      const isTerminal = TERMINAL_COLUMN_NAMES.has(s.name.toLowerCase());
-      let columnIssues = issuesWithBlocked.filter((i) => i.statusId === s.id);
-      const totalCount = columnIssues.length;
-
-      if (isTerminal && columnIssues.length > TERMINAL_COLUMN_CAP) {
-        // Sort by statusChangedAt desc, falling back to updatedAt, then take top N
-        columnIssues = columnIssues
-          .slice()
-          .sort((a, b) => {
-            const ta = new Date(a.statusChangedAt ?? a.updatedAt).getTime();
-            const tb = new Date(b.statusChangedAt ?? b.updatedAt).getTime();
-            return tb - ta;
-          })
-          .slice(0, TERMINAL_COLUMN_CAP);
-      }
-
-      return {
-        id: s.id,
-        name: s.name,
-        projectId: s.projectId,
-        sortOrder: s.sortOrder,
-        count: totalCount,
-        issues: columnIssues.map((i) => {
-          const { checklistJson, ...rest } = i;
-          let checklist: { id: string; text: string; completed: boolean }[] | undefined;
-          if (checklistJson) {
-            try { checklist = JSON.parse(checklistJson); } catch { checklist = undefined; }
-          }
-          return {
-            ...rest,
-            tags: issueTagMap.get(i.id) ?? [],
-            ...(checklist && checklist.length > 0 ? { checklist } : {}),
-          };
-        }),
-      };
+    return buildBoardColumns({
+      statuses,
+      visibleStatuses,
+      projectIssues,
+      workspaceSummaryMap,
+      blockedMap,
+      issueTagMap,
+      now,
+      staleDays,
+      inProgressStaleDays,
     });
   }
 
