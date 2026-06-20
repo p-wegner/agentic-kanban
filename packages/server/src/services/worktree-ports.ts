@@ -21,6 +21,28 @@ export function branchHash(branchName: string): number {
 }
 
 /**
+ * The deterministic port offset encoded in a worktree branch (or path leaf): the issue
+ * number for an `ak-<N>` / `feature/<N>` branch, otherwise a stable hash of the name.
+ */
+export function portOffsetFromName(name: string): number {
+  const issueMatch = name.match(/(?:^|[_/-])ak-(\d+)-/i) ?? name.match(/^feature[_/-](\d+)-/i);
+  return issueMatch ? Number(issueMatch[1]) : branchHash(name);
+}
+
+/** The server/client dev ports for a given offset. */
+export function portsForOffset(offset: number): { serverPort: number; clientPort: number } {
+  return {
+    serverPort: BASE_SERVER_PORT + offset,
+    clientPort: BASE_CLIENT_PORT + offset,
+  };
+}
+
+/** The dev ports this app's convention assigns to a worktree on the given branch. */
+export function derivePortsFromBranch(branch: string): { serverPort: number; clientPort: number } {
+  return portsForOffset(portOffsetFromName(branch));
+}
+
+/**
  * The dev ports this app's convention would have assigned to the given worktree path,
  * or null when the path is not a worktree (so no app-managed ports to free).
  */
@@ -31,10 +53,5 @@ export function resolveWorktreeDevPorts(
   if (!normalized.includes("/.worktrees/")) return null;
 
   const leaf = normalized.split("/").filter(Boolean).at(-1) ?? "";
-  const issueMatch = leaf.match(/(?:^|[_/-])ak-(\d+)-/i) ?? leaf.match(/^feature[_/-](\d+)-/i);
-  const offset = issueMatch ? Number(issueMatch[1]) : branchHash(leaf);
-  return {
-    serverPort: BASE_SERVER_PORT + offset,
-    clientPort: BASE_CLIENT_PORT + offset,
-  };
+  return portsForOffset(portOffsetFromName(leaf));
 }
