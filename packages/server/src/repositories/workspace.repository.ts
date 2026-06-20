@@ -30,6 +30,11 @@ export async function getWorkspaceById(
   return rows[0] ?? null;
 }
 
+/** All workspaces (full rows) for an issue (CLI `issue status` / `issue summary`). */
+export async function getWorkspacesByIssueId(issueId: string, database: Database = db): Promise<Workspace[]> {
+  return database.select().from(workspaces).where(eq(workspaces.issueId, issueId));
+}
+
 // ───────────────────────── Workspace analytics reads ─────────────────────────
 // Pure aggregation-source reads for the dashboard routes; the route owns the
 // date-axis / bucketing / rollup computation over the returned rows.
