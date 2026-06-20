@@ -1,12 +1,13 @@
 import { issues, workspaces, sessions, sessionMessages, projectStatuses, workflowNodes, tags, issueTags, issueDependencies, issueArtifacts, agentSkills } from "@agentic-kanban/shared/schema";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
-import { parseSessionSummary, formatDurationStr } from "@agentic-kanban/shared";
+import { parseSessionSummary } from "@agentic-kanban/shared";
 import { eq, inArray, desc, sql, and, gte } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { ValidationError } from "../errors/index.js";
 import { getSessionMessageRows } from "./session.repository.js";
+import { parseStatsBlob, projectSessionStats, computeSessionDuration } from "../lib/issue-summary-projection.js";
 
 type Issue = typeof issues.$inferSelect;
 type Workspace = typeof workspaces.$inferSelect;
@@ -136,16 +137,8 @@ export async function getIssueSummary(
 
   const msgRows = await getSessionMessageRows(completedSession.id, database);
 
-  let parsedStats: Record<string, unknown> | null = null;
-  if (completedSession.stats) {
-    try { parsedStats = JSON.parse(completedSession.stats); } catch { /* ignore */ }
-  }
-
-  let duration: string | null = null;
-  if (completedSession.endedAt && completedSession.startedAt) {
-    const diffMs = new Date(completedSession.endedAt).getTime() - new Date(completedSession.startedAt).getTime();
-    duration = formatDurationStr(diffMs);
-  }
+  const parsedStats = parseStatsBlob(completedSession.stats);
+  const duration = computeSessionDuration(completedSession.startedAt, completedSession.endedAt);
 
   const summary = parseSessionSummary(msgRows);
   if (!summary.agentSummary && parsedStats && typeof parsedStats.agentSummary === "string") {
@@ -160,15 +153,7 @@ export async function getIssueSummary(
     title: issue.title,
     workspace: matchingWorkspace ? { id: matchingWorkspace.id, branch: matchingWorkspace.branch, status: matchingWorkspace.status } : null,
     session: { id: completedSession.id, status: completedSession.status, startedAt: completedSession.startedAt, endedAt: completedSession.endedAt, duration },
-    stats: parsedStats ? {
-      durationMs: (parsedStats as any).durationMs ?? 0,
-      totalCostUsd: (parsedStats as any).totalCostUsd ?? 0,
-      inputTokens: (parsedStats as any).inputTokens ?? 0,
-      outputTokens: (parsedStats as any).outputTokens ?? 0,
-      numTurns: (parsedStats as any).numTurns ?? 1,
-      model: (parsedStats as any).model ?? summary.model,
-      success: (parsedStats as any).success ?? false,
-    } : null,
+    stats: projectSessionStats(parsedStats, summary.model),
     ...summary,
   };
 }
