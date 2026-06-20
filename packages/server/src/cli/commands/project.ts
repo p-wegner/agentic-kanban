@@ -1,7 +1,7 @@
 import type { Command } from "commander";
-import { db } from "../../db/index.js";
-import { projects, projectStatuses, preferences, workspaces, issues, issueTags, sessions } from "@agentic-kanban/shared/schema";
-import { eq, inArray } from "drizzle-orm";
+import { getProjectByName, getProjectById, getAllProjects, deleteProjectCascade } from "../../repositories/project.repository.js";
+import { getClosedWorkspaces } from "../../repositories/workspace.repository.js";
+import { getPreference } from "../../repositories/preferences.repository.js";
 import { runMigrations } from "../shared.js";
 
 export function registerProjectCommands(program: Command) {
@@ -18,54 +18,13 @@ Examples:
       try {
         await runMigrations();
 
-        let rows = await db
-          .select()
-          .from(projects)
-          .where(eq(projects.name, nameOrId))
-          .limit(1);
-
-        if (rows.length === 0) {
-          rows = await db
-            .select()
-            .from(projects)
-            .where(eq(projects.id, nameOrId))
-            .limit(1);
-        }
-
-        if (rows.length === 0) {
+        const project = (await getProjectByName(nameOrId)) ?? (await getProjectById(nameOrId));
+        if (!project) {
           console.error(`Project "${nameOrId}" not found.`);
           process.exit(1);
         }
 
-        const project = rows[0];
-        const projectId = project.id;
-
-        const projectIssues = await db
-          .select({ id: issues.id })
-          .from(issues)
-          .where(eq(issues.projectId, projectId));
-
-        if (projectIssues.length > 0) {
-          const issueIds = projectIssues.map((i) => i.id);
-
-          await db.delete(issueTags).where(inArray(issueTags.issueId, issueIds));
-
-          const wsRows = await db
-            .select({ id: workspaces.id })
-            .from(workspaces)
-            .where(inArray(workspaces.issueId, issueIds));
-
-          if (wsRows.length > 0) {
-            const wsIds = wsRows.map((w) => w.id);
-            await db.delete(sessions).where(inArray(sessions.workspaceId, wsIds));
-            await db.delete(workspaces).where(inArray(workspaces.id, wsIds));
-          }
-
-          await db.delete(issues).where(inArray(issues.id, issueIds));
-        }
-
-        await db.delete(projectStatuses).where(eq(projectStatuses.projectId, projectId));
-        await db.delete(projects).where(eq(projects.id, projectId));
+        await deleteProjectCascade(project.id);
 
         console.log(`Unregistered project "${project.name}" (${project.id})`);
         process.exit(0);
@@ -86,7 +45,7 @@ Example:
       try {
         await runMigrations();
 
-        const allProjects = await db.select().from(projects);
+        const allProjects = await getAllProjects(undefined, { includeArchived: true });
 
         if (allProjects.length === 0) {
           console.log("No projects registered.");
@@ -94,12 +53,7 @@ Example:
           process.exit(0);
         }
 
-        const activePref = await db
-          .select()
-          .from(preferences)
-          .where(eq(preferences.key, "activeProjectId"))
-          .limit(1);
-        const activeId = activePref.length > 0 ? activePref[0].value : null;
+        const activeId = await getPreference("activeProjectId");
 
         for (const p of allProjects) {
           const marker = p.id === activeId ? " (active)" : "";
@@ -130,10 +84,7 @@ Example:
       try {
         await runMigrations();
 
-        const closedWorkspaces = await db
-          .select()
-          .from(workspaces)
-          .where(eq(workspaces.status, "closed"));
+        const closedWorkspaces = await getClosedWorkspaces();
 
         const withWorktrees = closedWorkspaces.filter((ws) => ws.workingDir);
 

@@ -435,3 +435,8 @@ export async function getActiveWorkspaceCount(database: Database = db): Promise<
   const rows = await database.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.status, "active"));
   return rows.length;
 }
+
+/** All workspaces in the "closed" state (across projects). */
+export async function getClosedWorkspaces(database: Database = db) {
+  return database.select().from(workspaces).where(eq(workspaces.status, "closed"));
+}
