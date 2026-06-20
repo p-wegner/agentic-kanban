@@ -7,6 +7,7 @@ import {
   formatAttachArtifactOutput,
   selectSummarySession,
   buildIssueSummaryJson,
+  buildIssueStatusJson,
 } from "./issue-cli-format.js";
 
 function summary(over: Partial<SessionSummary> = {}): SessionSummary {
@@ -319,5 +320,31 @@ describe("buildIssueSummaryJson", () => {
     expect(json.workspace).toBeNull();
     expect(json.stats).toBeNull();
     expect(json.issueNumber).toBeNull();
+  });
+});
+
+describe("buildIssueStatusJson", () => {
+  it("maps fields and nulls absent workspace/session", () => {
+    const json = buildIssueStatusJson({
+      issueNumber: 7, title: "T", statusName: "Done", priority: "high",
+      workspace: null, session: null, lastAgentMessage: null,
+      fileChanges: null, diffStats: null,
+    }) as any;
+    expect(json).toEqual({
+      issueNumber: 7, title: "T", status: "Done", priority: "high",
+      workspace: null, session: null, lastAgentMessage: null, fileChanges: null, diffStats: null,
+    });
+  });
+
+  it("projects workspace + session sub-objects", () => {
+    const json = buildIssueStatusJson({
+      issueNumber: 1, title: "T", statusName: "In Progress", priority: null,
+      workspace: { id: "w1", branch: "b", status: "active", isDirect: true, provider: "claude" },
+      session: { id: "s1", status: "running", startedAt: "2026-06-20T10:00:00.000Z", endedAt: null },
+      lastAgentMessage: "hi", fileChanges: { read: 1, edited: 2, written: 0 }, diffStats: null,
+    }) as any;
+    expect(json.workspace).toEqual({ id: "w1", branch: "b", status: "active", isDirect: true, provider: "claude" });
+    expect(json.session).toEqual({ id: "s1", status: "running", startedAt: "2026-06-20T10:00:00.000Z", endedAt: null });
+    expect(json.lastAgentMessage).toBe("hi");
   });
 });

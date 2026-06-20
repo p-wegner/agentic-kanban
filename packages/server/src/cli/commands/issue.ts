@@ -11,7 +11,7 @@ import { isAnalyticsNoise } from "../../services/session-filter.js";
 import { getWorkspaceDiffStats, type WorkspaceDiffStats } from "../../services/workspace-diff-stats.js";
 import { hasPath } from "../../lib/dependency-graph.js";
 import { getIssueIdsAndProjectsForBatch, getDependencyRowsForProjects } from "../../repositories/issue-service.repository.js";
-import { buildIssueSummaryLines, buildIssueStatusLines, validateAttachArtifactOptions, formatAttachArtifactOutput, selectSummarySession, buildIssueSummaryJson } from "../../lib/issue-cli-format.js";
+import { buildIssueSummaryLines, buildIssueStatusLines, validateAttachArtifactOptions, formatAttachArtifactOutput, selectSummarySession, buildIssueSummaryJson, buildIssueStatusJson } from "../../lib/issue-cli-format.js";
 import { computeSessionDuration } from "../../lib/issue-summary-projection.js";
 import { extractLastAgentMessageFromRows } from "../../lib/session-message-extraction.js";
 import { validateBatchEdges, formatBatchEdgeResult } from "../../lib/dependency-batch.js";
@@ -446,28 +446,17 @@ Examples:
         }
 
         if (options.json) {
-          console.log(JSON.stringify({
+          console.log(JSON.stringify(buildIssueStatusJson({
             issueNumber: issue.issueNumber,
             title: issue.title,
-            status: issue.statusName,
+            statusName: issue.statusName,
             priority: issue.priority,
-            workspace: matchingWs ? {
-              id: matchingWs.id,
-              branch: matchingWs.branch,
-              status: matchingWs.status,
-              isDirect: matchingWs.isDirect,
-              provider: matchingWs.provider,
-            } : null,
-            session: latestSession ? {
-              id: latestSession.id,
-              status: latestSession.status,
-              startedAt: latestSession.startedAt,
-              endedAt: latestSession.endedAt,
-            } : null,
+            workspace: matchingWs ?? null,
+            session: latestSession,
             lastAgentMessage: lastAgentMsg,
             fileChanges,
             diffStats,
-          }, null, 2));
+          }), null, 2));
           process.exit(0);
         }
 

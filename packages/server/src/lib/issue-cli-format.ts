@@ -253,3 +253,42 @@ export function buildIssueSummaryJson(input: IssueSummaryJsonInput): Record<stri
     ...summary,
   };
 }
+
+export interface IssueStatusJsonInput {
+  issueNumber: number | null;
+  title: string;
+  statusName: string;
+  priority: string | null;
+  workspace: { id: string; branch: string | null; status: string; isDirect: boolean; provider: string | null } | null;
+  session: { id: string; status: string; startedAt: string; endedAt: string | null } | null;
+  lastAgentMessage: string | null;
+  fileChanges: { read: number; edited: number; written: number } | null;
+  diffStats: { filesChanged: number; insertions: number; deletions: number } | null;
+}
+
+/** Build the `issue status --json` payload object (caller JSON.stringifies it). */
+export function buildIssueStatusJson(input: IssueStatusJsonInput): Record<string, unknown> {
+  const { issueNumber, title, statusName, priority, workspace, session, lastAgentMessage, fileChanges, diffStats } = input;
+  return {
+    issueNumber,
+    title,
+    status: statusName,
+    priority,
+    workspace: workspace ? {
+      id: workspace.id,
+      branch: workspace.branch,
+      status: workspace.status,
+      isDirect: workspace.isDirect,
+      provider: workspace.provider,
+    } : null,
+    session: session ? {
+      id: session.id,
+      status: session.status,
+      startedAt: session.startedAt,
+      endedAt: session.endedAt,
+    } : null,
+    lastAgentMessage,
+    fileChanges,
+    diffStats,
+  };
+}
