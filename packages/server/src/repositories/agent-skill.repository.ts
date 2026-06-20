@@ -186,3 +186,9 @@ export async function deleteButlerOverride(
     sql`${agentSkills.name} = 'butler' AND ${agentSkills.projectId} = ${projectId}`,
   );
 }
+
+/** Find a skill by name in ANY scope (global or any project), first match. */
+export async function getAgentSkillByName(name: string, database: Database = db) {
+  const rows = await database.select().from(agentSkills).where(eq(agentSkills.name, name)).limit(1);
+  return rows[0] ?? null;
+}
