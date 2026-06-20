@@ -5,9 +5,7 @@ import { buildAgentLaunchConfig, type ProviderId, type ProviderName } from "./ag
 import { sessionOutputPath, sessionErrorPath } from "../lib/session-paths.js";
 import { guardProcessKill, auditProcessEvent } from "./process-guard.js";
 import { resolveWorktreeDevPorts as resolveWorktreeDevPortsShared } from "./worktree-ports.js";
-
-const DEFAULT_BOARD_SERVER_PORT = "3001";
-const DEFAULT_BOARD_CLIENT_PORT = "5173";
+import { shouldDetachAgent, resolveLaunchPorts, buildAgentSpawnEnv } from "../lib/agent-launch-env.js";
 
 function resolveWorktreeDevPorts(worktreePath: string): { serverPort: string; clientPort: string } | null {
   const ports = resolveWorktreeDevPortsShared(worktreePath);
@@ -196,6 +194,118 @@ function startPidWatcher(
   };
 }
 
+/** Close + forget this session's output/pid watchers (shared by the exit/error handlers). */
+function closeSessionWatchers(sessionId: string): void {
+  const watcher = agentState.outputWatchers.get(sessionId);
+  if (watcher) { watcher.close(); agentState.outputWatchers.delete(sessionId); }
+  const pidW = agentState.pidWatchers.get(sessionId);
+  if (pidW) { pidW.close(); agentState.pidWatchers.delete(sessionId); }
+}
+
+/**
+ * Send the initial prompt to the child's stdin. suppressStdinPrompt (prompt passed
+ * via argv) closes stdin; keepAlive (multi-turn) keeps it open for follow-ups;
+ * otherwise write-and-close — on Windows claude.exe buffers stdout until stdin closes.
+ */
+function writeInitialStdin(
+  proc: ChildProcess,
+  sessionId: string,
+  suppressStdinPrompt: boolean,
+  keepAlive: boolean | undefined,
+  stdinPrompt: string,
+): void {
+  if (suppressStdinPrompt) {
+    proc.stdin?.end();
+  } else if (keepAlive) {
+    proc.stdin?.write(stdinPrompt + "\n");
+    agentState.stdinOpen.set(sessionId, true);
+  } else {
+    proc.stdin?.end(stdinPrompt + "\n");
+  }
+}
+
+/**
+ * Wire up child output: detached agents are read via a watcher on the .out file
+ * (survives server restarts); attached agents read stdout/stderr pipes directly and
+ * mirror stdout to the .out file so replay serves from the same path.
+ */
+function setupChildOutput(
+  proc: ChildProcess,
+  sessionId: string,
+  shouldDetach: boolean,
+  onOutput: AgentOutputCallback,
+): void {
+  if (shouldDetach) {
+    const outPath = sessionOutputPath(sessionId);
+    const watcher = startOutputFileWatcher(sessionId, outPath, onOutput);
+    agentState.outputWatchers.set(sessionId, watcher);
+    return;
+  }
+  const pipedOutPath = sessionOutputPath(sessionId);
+  try { writeFileSync(pipedOutPath, ""); } catch { /* ignore */ }
+
+  proc.stdout?.on("data", (chunk: Buffer) => {
+    try {
+      const data = chunk.toString();
+      try { appendFileSync(pipedOutPath, data); } catch { /* ignore */ }
+      onOutput({ type: "stdout", sessionId, data });
+    } catch (err) {
+      console.error(`[agent] stdout callback error: sessionId=${sessionId}`, err);
+    }
+  });
+
+  proc.stderr?.on("data", (chunk: Buffer) => {
+    try {
+      onOutput({ type: "stderr", sessionId, data: chunk.toString() });
+    } catch (err) {
+      console.error(`[agent] stderr callback error: sessionId=${sessionId}`, err);
+    }
+  });
+}
+
+/** Attach exit/error handlers that clear runtime state, drain stderr, and emit the exit event. */
+function attachProcessHandlers(
+  proc: ChildProcess,
+  sessionId: string,
+  shouldDetach: boolean,
+  onOutput: AgentOutputCallback,
+): void {
+  proc.on("exit", (code, signal) => {
+    console.log(`[agent] exited: sessionId=${sessionId} code=${code} signal=${signal ?? "none"} pid=${proc.pid}`);
+    agentState.activeProcesses.delete(sessionId);
+    agentState.activePids.delete(sessionId);
+    agentState.stdinOpen.delete(sessionId);
+    closeSessionWatchers(sessionId);
+    // Drain any captured stderr (detached agents) and surface it BEFORE the exit event,
+    // so a process that died with zero stdout but a stderr reason is no longer an invisible
+    // "0-token zombie" (#779). Emitted as a stderr event so it lands in session_messages and
+    // the launch-failure handler can attribute the crash.
+    if (shouldDetach) drainCapturedStderr(sessionId, onOutput);
+    try {
+      onOutput({ type: "exit", sessionId, exitCode: code });
+    } catch (err) {
+      console.error(`[agent] exit callback error: sessionId=${sessionId}`, err);
+    }
+  });
+
+  proc.on("error", (err) => {
+    console.error(`[agent] process error: sessionId=${sessionId} err=${err.message}`);
+    try {
+      onOutput({ type: "stderr", sessionId, data: `Process error: ${err.message}` });
+    } catch (cbErr) {
+      console.error(`[agent] error callback error: sessionId=${sessionId}`, cbErr);
+    }
+    agentState.activeProcesses.delete(sessionId);
+    agentState.activePids.delete(sessionId);
+    closeSessionWatchers(sessionId);
+    try {
+      onOutput({ type: "exit", sessionId, exitCode: 1 });
+    } catch (cbErr) {
+      console.error(`[agent] error-exit callback error: sessionId=${sessionId}`, cbErr);
+    }
+  });
+}
+
 /**
  * Launch an agent subprocess in the given worktree directory.
  * Uses AGENT_COMMAND env var for test substitution.
@@ -244,18 +354,14 @@ export function launch(
   });
   const { command, args, useShell, isMockAgent, env: spawnEnv, promptPrefix, suppressStdinPrompt } = launchConfig;
   const stdinPrompt = promptPrefix ? `${promptPrefix}\n\n${effectivePrompt}` : effectivePrompt;
-  const boardServerPort = process.env.KANBAN_SERVER_PORT || process.env.PORT || DEFAULT_BOARD_SERVER_PORT;
-  const boardClientPort = process.env.KANBAN_CLIENT_PORT || process.env.VITE_PORT || DEFAULT_BOARD_CLIENT_PORT;
-  const worktreePorts = resolveWorktreeDevPorts(worktreePath);
-  const worktreeServerPort = worktreePorts?.serverPort || boardServerPort;
-  const worktreeClientPort = worktreePorts?.clientPort || boardClientPort;
+  const ports = resolveLaunchPorts(process.env, resolveWorktreeDevPorts(worktreePath));
 
   console.log(`[agent] launching: command=${command} provider=${provider ?? "auto"} worktree=${worktreePath} sessionId=${sessionId} resume=${providerSessionId ?? "none"}`);
 
   // Agents that don't need a shell can be detached — they survive tsx watch hot-reloads.
   // shell: true on Windows is used by mock agents and Codex (.cmd shim) — detaching those
   // breaks stdout pipes, so they stay attached (sacrificing hot-reload survival for output).
-  const shouldDetach = !(useShell && process.platform === "win32");
+  const shouldDetach = shouldDetachAgent(useShell, process.platform);
 
   // For detached agents, redirect stdout to a file so the output survives server restarts.
   // Non-detached agents use pipes as before.
@@ -288,25 +394,14 @@ export function launch(
     shell: useShell,
     windowsHide: true,
     detached: shouldDetach,
-    env: {
-      ...spawnEnv,
-      FORCE_COLOR: "0",
-      NO_COLOR: "1",
-      KANBAN_BOARD_SERVER_PORT: boardServerPort,
-      KANBAN_BOARD_CLIENT_PORT: boardClientPort,
-      KANBAN_BOARD_SERVER_PID: String(process.pid),
-      KANBAN_PROTECTED_PIDS: [process.env.KANBAN_PROTECTED_PIDS, String(process.pid)].filter(Boolean).join(","),
-      KANBAN_SESSION_ID: sessionId,
-      AGENTIC_KANBAN_SESSION_ID: sessionId,
-      KANBAN_SERVER_PORT: worktreeServerPort,
-      KANBAN_CLIENT_PORT: worktreeClientPort,
-      KANBAN_WORKTREE_SERVER_PORT: worktreeServerPort,
-      KANBAN_WORKTREE_CLIENT_PORT: worktreeClientPort,
-      SERVER_PORT: worktreeServerPort,
-      PORT: worktreeServerPort,
-      VITE_PORT: worktreeClientPort,
-      ...extraEnv,
-    },
+    env: buildAgentSpawnEnv({
+      spawnEnv,
+      ports,
+      serverPid: String(process.pid),
+      protectedPidsEnv: process.env.KANBAN_PROTECTED_PIDS,
+      sessionId,
+      extraEnv,
+    }),
     stdio: stdioConfig,
   });
   // Allow server to exit/restart without waiting for real agents
@@ -323,91 +418,15 @@ export function launch(
 
   // In keepAlive (multi-turn) mode, keep stdin open so follow-ups can be sent via sendInput.
   // Otherwise close stdin immediately — on Windows, claude.exe buffers stdout until stdin closes.
-  if (suppressStdinPrompt) {
-    proc.stdin?.end();
-  } else if (keepAlive) {
-    proc.stdin?.write(stdinPrompt + "\n");
-    agentState.stdinOpen.set(sessionId, true);
-  } else {
-    proc.stdin?.end(stdinPrompt + "\n");
-  }
+  writeInitialStdin(proc, sessionId, suppressStdinPrompt, keepAlive, stdinPrompt);
 
   agentState.activeProcesses.set(sessionId, proc);
   if (proc.pid) {
     agentState.activePids.set(sessionId, proc.pid);
   }
 
-  if (shouldDetach) {
-    // File-based output: watch the output file for new content
-    const outPath = sessionOutputPath(sessionId);
-    const watcher = startOutputFileWatcher(sessionId, outPath, onOutput);
-    agentState.outputWatchers.set(sessionId, watcher);
-  } else {
-    // Pipe-based output: read directly from stdout and mirror to the .out file
-    // so replay can serve from file (same path as detached agents).
-    const pipedOutPath = sessionOutputPath(sessionId);
-    try { writeFileSync(pipedOutPath, ""); } catch { /* ignore */ }
-
-    proc.stdout?.on("data", (chunk: Buffer) => {
-      try {
-        const data = chunk.toString();
-        try { appendFileSync(pipedOutPath, data); } catch { /* ignore */ }
-        onOutput({ type: "stdout", sessionId, data });
-      } catch (err) {
-        console.error(`[agent] stdout callback error: sessionId=${sessionId}`, err);
-      }
-    });
-
-    proc.stderr?.on("data", (chunk: Buffer) => {
-      try {
-        onOutput({ type: "stderr", sessionId, data: chunk.toString() });
-      } catch (err) {
-        console.error(`[agent] stderr callback error: sessionId=${sessionId}`, err);
-      }
-    });
-  }
-
-  proc.on("exit", (code, signal) => {
-    console.log(`[agent] exited: sessionId=${sessionId} code=${code} signal=${signal ?? "none"} pid=${proc.pid}`);
-    agentState.activeProcesses.delete(sessionId);
-    agentState.activePids.delete(sessionId);
-    agentState.stdinOpen.delete(sessionId);
-    // Close watchers but keep the .out file for post-session replay
-    const watcher = agentState.outputWatchers.get(sessionId);
-    if (watcher) { watcher.close(); agentState.outputWatchers.delete(sessionId); }
-    const pidW = agentState.pidWatchers.get(sessionId);
-    if (pidW) { pidW.close(); agentState.pidWatchers.delete(sessionId); }
-    // Drain any captured stderr (detached agents) and surface it BEFORE the exit event,
-    // so a process that died with zero stdout but a stderr reason is no longer an invisible
-    // "0-token zombie" (#779). Emitted as a stderr event so it lands in session_messages and
-    // the launch-failure handler can attribute the crash.
-    if (shouldDetach) drainCapturedStderr(sessionId, onOutput);
-    try {
-      onOutput({ type: "exit", sessionId, exitCode: code });
-    } catch (err) {
-      console.error(`[agent] exit callback error: sessionId=${sessionId}`, err);
-    }
-  });
-
-  proc.on("error", (err) => {
-    console.error(`[agent] process error: sessionId=${sessionId} err=${err.message}`);
-    try {
-      onOutput({ type: "stderr", sessionId, data: `Process error: ${err.message}` });
-    } catch (cbErr) {
-      console.error(`[agent] error callback error: sessionId=${sessionId}`, cbErr);
-    }
-    agentState.activeProcesses.delete(sessionId);
-    agentState.activePids.delete(sessionId);
-    const watcher = agentState.outputWatchers.get(sessionId);
-    if (watcher) { watcher.close(); agentState.outputWatchers.delete(sessionId); }
-    const pidW = agentState.pidWatchers.get(sessionId);
-    if (pidW) { pidW.close(); agentState.pidWatchers.delete(sessionId); }
-    try {
-      onOutput({ type: "exit", sessionId, exitCode: 1 });
-    } catch (cbErr) {
-      console.error(`[agent] error-exit callback error: sessionId=${sessionId}`, cbErr);
-    }
-  });
+  setupChildOutput(proc, sessionId, shouldDetach, onOutput);
+  attachProcessHandlers(proc, sessionId, shouldDetach, onOutput);
 
   return proc;
 }
