@@ -4,6 +4,7 @@ import { NotFoundError } from "../errors/index.js";
 import { isAnalyticsNoise } from "./session-filter.js";
 import { getChangedFileNames } from "./git.service.js";
 import { readSessionStdoutFile } from "../repositories/session.repository.js";
+import { countAskFollowupQuestions, computeFileOverlapCounts } from "../lib/workspace-risk-signals.js";
 import {
   getProjectIssueRows,
   getProjectStatusRows,
@@ -298,21 +299,10 @@ export async function getWorkspaceRisk(
       }
 
       for (const [sid, data] of sessionDataMap) {
-        for (const line of data.split("\n")) {
-          const trimmed = line.trim();
-          if (!trimmed) continue;
-          try {
-            const obj = JSON.parse(trimmed) as Record<string, unknown>;
-            if (obj.type === "assistant") {
-              const content = ((obj.message as { content?: unknown[] })?.content ?? []) as { type: string; name?: string }[];
-              for (const block of content) {
-                if (block.type === "tool_use" && block.name === "ask_followup_question") {
-                  const wsId = runningWsIds.find((id) => latestSessionByWs.get(id)?.id === sid);
-                  if (wsId) pendingQuestionsByWs.set(wsId, (pendingQuestionsByWs.get(wsId) ?? 0) + 1);
-                }
-              }
-            }
-          } catch { /* ignore */ }
+        const count = countAskFollowupQuestions(data);
+        if (count > 0) {
+          const wsId = runningWsIds.find((id) => latestSessionByWs.get(id)?.id === sid);
+          if (wsId) pendingQuestionsByWs.set(wsId, (pendingQuestionsByWs.get(wsId) ?? 0) + count);
         }
       }
     }
@@ -342,19 +332,7 @@ export async function getWorkspaceRisk(
   }
 
   // Compute per-workspace overlap counts
-  const allWsFiles = [...changedFilesByWs.entries()];
-  const overlapCountByWs = new Map<string, number>();
-  for (const [wsId, files] of allWsFiles) {
-    const fileSet = new Set(files);
-    let overlap = 0;
-    for (const [otherWsId, otherFiles] of allWsFiles) {
-      if (otherWsId === wsId) continue;
-      for (const f of otherFiles) {
-        if (fileSet.has(f)) { overlap++; break; }
-      }
-    }
-    overlapCountByWs.set(wsId, overlap);
-  }
+  const overlapCountByWs = computeFileOverlapCounts(changedFilesByWs);
 
   // Build risk entries
   const now = Date.now();
