@@ -116,13 +116,13 @@ module.exports = {
         "The CLI (cli/) is a second inbound transport adapter, like routes/ — it must go " +
         "through services/repositories, NOT run persistence inline (no VALUE import of " +
         "db/index, drizzle-orm, or @agentic-kanban/shared/schema). Type-only imports are " +
-        "erased (tsPreCompilationDeps:false), so `import type { Database }` is fine. This " +
-        "is an ACTIVE drain backlog (kept at warn so it never blocks): migrate each cli " +
-        "command file to call repositories, and when the backlog hits 0 flip this to error " +
-        "(a TOTAL gate, like routes-not-down-to-persistence). Backlog as of 2026-06-20: " +
-        "~15 files (issue/session/workspace/project/skill/board/create/register/system/" +
-        "preferences/openspec/butler/workspace-wait/shared/index).",
-      severity: "warn",
+        "erased (tsPreCompilationDeps:false), so `import type { Database }` is fine. " +
+        "Originally a ~46-edge / 16-file warn backlog; fully DRAINED — every cli command " +
+        "file now composes the repository/service layer (the 3 transactions + the cascade " +
+        "delete moved wholesale into repo fns). This is a TOTAL error gate now (no pathNot " +
+        "exceptions): a new inline persistence import in ANY cli command fails " +
+        "`pnpm lint:arch`. Backlog: 0.",
+      severity: "error",
       from: { path: "^packages/server/src/cli/" },
       to: {
         path: [
