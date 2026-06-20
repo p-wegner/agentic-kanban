@@ -5,6 +5,8 @@ import {
   buildIssueStatusLines,
   validateAttachArtifactOptions,
   formatAttachArtifactOutput,
+  selectSummarySession,
+  buildIssueSummaryJson,
 } from "./issue-cli-format.js";
 
 function summary(over: Partial<SessionSummary> = {}): SessionSummary {
@@ -252,5 +254,70 @@ describe("formatAttachArtifactOutput", () => {
   it("includes the caption line when present", () => {
     const lines = formatAttachArtifactOutput({ ...result, caption: "a note" }, 7, false);
     expect(lines).toContain("  caption: a note");
+  });
+});
+
+describe("selectSummarySession", () => {
+  const noise = (s: { status: string; noise?: boolean }) => !!s.noise;
+
+  it("returns null for no sessions", () => {
+    expect(selectSummarySession([], noise)).toBeNull();
+  });
+
+  it("prefers a completed/stopped non-noise session", () => {
+    const rows = [
+      { id: "a", status: "running", noise: false },
+      { id: "b", status: "completed", noise: false },
+    ];
+    expect(selectSummarySession(rows, noise)?.id).toBe("b");
+  });
+
+  it("falls back to the first relevant session when none completed/stopped", () => {
+    const rows = [
+      { id: "a", status: "running", noise: false },
+      { id: "b", status: "running", noise: false },
+    ];
+    expect(selectSummarySession(rows, noise)?.id).toBe("a");
+  });
+
+  it("uses all sessions when every one is noise", () => {
+    const rows = [
+      { id: "a", status: "completed", noise: true },
+      { id: "b", status: "running", noise: true },
+    ];
+    expect(selectSummarySession(rows, noise)?.id).toBe("a");
+  });
+});
+
+describe("buildIssueSummaryJson", () => {
+  const session = { id: "s1", status: "completed", startedAt: "2026-06-20T10:00:00.000Z", endedAt: "2026-06-20T10:01:00.000Z" };
+
+  it("includes workspace, session, stats (with defaults) and spreads the summary", () => {
+    const json = buildIssueSummaryJson({
+      issueId: "i1",
+      issueNumber: 9,
+      title: "T",
+      workspace: { id: "w1", branch: "b", status: "active" },
+      session,
+      duration: "1m 0s",
+      stats: { durationMs: 5, totalCostUsd: 1, inputTokens: 10, outputTokens: 5 },
+      summary: summary({ model: "opus", overview: "ov" }),
+    }) as any;
+    expect(json.issueId).toBe("i1");
+    expect(json.workspace).toEqual({ id: "w1", branch: "b", status: "active" });
+    expect(json.session).toEqual({ ...session, duration: "1m 0s" });
+    // numTurns defaults to 1, model falls back to summary.model, success to false
+    expect(json.stats).toEqual({ durationMs: 5, totalCostUsd: 1, inputTokens: 10, outputTokens: 5, numTurns: 1, model: "opus", success: false });
+    expect(json.overview).toBe("ov"); // spread from summary
+  });
+
+  it("nulls workspace and stats when absent", () => {
+    const json = buildIssueSummaryJson({
+      issueId: "i1", issueNumber: null, title: "T",
+      workspace: null, session, duration: null, stats: null, summary: summary(),
+    }) as any;
+    expect(json.workspace).toBeNull();
+    expect(json.stats).toBeNull();
+    expect(json.issueNumber).toBeNull();
   });
 });

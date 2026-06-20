@@ -196,3 +196,60 @@ export function formatAttachArtifactOutput(result: AttachArtifactResult, num: nu
   if (result.caption) lines.push(`  caption: ${result.caption}`);
   return lines;
 }
+
+/**
+ * Pick the session to summarize: prefer non-noise sessions, then the first
+ * completed/stopped one, falling back to the most recent (input is desc by
+ * startedAt). Pure given the noise predicate.
+ */
+export function selectSummarySession<T extends { status: string }>(
+  sessionRows: T[],
+  isNoise: (s: T) => boolean,
+): T | null {
+  const nonNoise = sessionRows.filter((s) => !isNoise(s));
+  const relevant = nonNoise.length > 0 ? nonNoise : sessionRows;
+  return relevant.find((s) => s.status === "completed" || s.status === "stopped") ?? relevant[0] ?? null;
+}
+
+export interface IssueSummaryJsonInput {
+  issueId: string;
+  issueNumber: number | null;
+  title: string;
+  workspace: { id: string; branch: string | null; status: string } | null;
+  session: { id: string; status: string; startedAt: string; endedAt: string | null };
+  duration: string | null;
+  stats: Record<string, unknown> | null;
+  summary: SessionSummary;
+}
+
+/** Build the `issue summary --json` payload object (caller JSON.stringifies it). */
+export function buildIssueSummaryJson(input: IssueSummaryJsonInput): Record<string, unknown> {
+  const { issueId, issueNumber, title, workspace, session, duration, stats, summary } = input;
+  return {
+    issueId,
+    issueNumber,
+    title,
+    workspace: workspace ? {
+      id: workspace.id,
+      branch: workspace.branch,
+      status: workspace.status,
+    } : null,
+    session: {
+      id: session.id,
+      status: session.status,
+      startedAt: session.startedAt,
+      endedAt: session.endedAt,
+      duration,
+    },
+    stats: stats ? {
+      durationMs: (stats as any).durationMs ?? 0,
+      totalCostUsd: (stats as any).totalCostUsd ?? 0,
+      inputTokens: (stats as any).inputTokens ?? 0,
+      outputTokens: (stats as any).outputTokens ?? 0,
+      numTurns: (stats as any).numTurns ?? 1,
+      model: (stats as any).model ?? summary.model,
+      success: (stats as any).success ?? false,
+    } : null,
+    ...summary,
+  };
+}

@@ -11,7 +11,8 @@ import { isAnalyticsNoise } from "../../services/session-filter.js";
 import { getWorkspaceDiffStats, type WorkspaceDiffStats } from "../../services/workspace-diff-stats.js";
 import { hasPath } from "../../lib/dependency-graph.js";
 import { getIssueIdsAndProjectsForBatch, getDependencyRowsForProjects } from "../../repositories/issue-service.repository.js";
-import { buildIssueSummaryLines, buildIssueStatusLines, validateAttachArtifactOptions, formatAttachArtifactOutput } from "../../lib/issue-cli-format.js";
+import { buildIssueSummaryLines, buildIssueStatusLines, validateAttachArtifactOptions, formatAttachArtifactOutput, selectSummarySession, buildIssueSummaryJson } from "../../lib/issue-cli-format.js";
+import { computeSessionDuration } from "../../lib/issue-summary-projection.js";
 import { extractLastAgentMessageFromRows } from "../../lib/session-message-extraction.js";
 import { validateBatchEdges, formatBatchEdgeResult } from "../../lib/dependency-batch.js";
 import { normalizeBatchInput, validateBatchIssueInputs, formatBatchCreateResult } from "../../lib/batch-create-issues.js";
@@ -542,11 +543,7 @@ Examples:
           .where(inArray(sessions.workspaceId, wsIds))
           .orderBy(desc(sessions.startedAt));
 
-        const nonNoiseSessions = sessionRows.filter(s => !isAnalyticsNoise(s));
-        const relevantSessions = nonNoiseSessions.length > 0 ? nonNoiseSessions : sessionRows;
-        const completedSession = relevantSessions.find(s => s.status === "completed" || s.status === "stopped")
-          ?? relevantSessions[0]
-          ?? null;
+        const completedSession = selectSummarySession(sessionRows, isAnalyticsNoise);
 
         if (!completedSession) {
           console.log(`#${num} ${issue.title}`);
@@ -565,11 +562,7 @@ Examples:
           try { stats = JSON.parse(completedSession.stats); } catch { /* ignore */ }
         }
 
-        let duration: string | null = null;
-        if (completedSession.endedAt && completedSession.startedAt) {
-          const diffMs = new Date(completedSession.endedAt).getTime() - new Date(completedSession.startedAt).getTime();
-          duration = formatDurationStr(diffMs);
-        }
+        const duration = computeSessionDuration(completedSession.startedAt, completedSession.endedAt);
 
         const summary = parseSessionSummary(msgRows);
         if (!summary.agentSummary && stats && typeof (stats as any).agentSummary === "string") {
@@ -579,33 +572,16 @@ Examples:
         const matchingWorkspace = wsRows.find(w => w.id === completedSession.workspaceId);
 
         if (options.json) {
-          console.log(JSON.stringify({
+          console.log(JSON.stringify(buildIssueSummaryJson({
             issueId: issue.id,
             issueNumber: issue.issueNumber,
             title: issue.title,
-            workspace: matchingWorkspace ? {
-              id: matchingWorkspace.id,
-              branch: matchingWorkspace.branch,
-              status: matchingWorkspace.status,
-            } : null,
-            session: {
-              id: completedSession.id,
-              status: completedSession.status,
-              startedAt: completedSession.startedAt,
-              endedAt: completedSession.endedAt,
-              duration,
-            },
-            stats: stats ? {
-              durationMs: (stats as any).durationMs ?? 0,
-              totalCostUsd: (stats as any).totalCostUsd ?? 0,
-              inputTokens: (stats as any).inputTokens ?? 0,
-              outputTokens: (stats as any).outputTokens ?? 0,
-              numTurns: (stats as any).numTurns ?? 1,
-              model: (stats as any).model ?? summary.model,
-              success: (stats as any).success ?? false,
-            } : null,
-            ...summary,
-          }, null, 2));
+            workspace: matchingWorkspace ?? null,
+            session: completedSession,
+            duration,
+            stats,
+            summary,
+          }), null, 2));
           process.exit(0);
         }
 
