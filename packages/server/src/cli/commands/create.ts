@@ -1,10 +1,9 @@
 import type { Command } from "commander";
-import { db } from "../../db/index.js";
-import { projects, preferences } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
+import { getProjectByRepoPath, insertProject } from "../../repositories/project.repository.js";
+import { getPreference, setPreference } from "../../repositories/preferences.repository.js";
 import { randomUUID } from "node:crypto";
 import { getCurrentBranch } from "../../services/git.service.js";
-import { initializeProjectStatuses, DEFAULT_STATUSES } from "../../repositories/issue.repository.js";
+import { DEFAULT_STATUSES } from "../../repositories/issue.repository.js";
 import { runMigrations, logDefaultBranch } from "../shared.js";
 import { getDefaultSkillId, ensureAgentGitignore, ensureStarterClaudeMd, ensureStarterAgentsMd, ensureHookScaffold } from "../../services/project-scaffold.js";
 import { detectStackProfile } from "../../services/stack-profile.service.js";
@@ -45,9 +44,9 @@ Setup:
 
         let baseFolder = options.path;
         if (!baseFolder) {
-          const pref = await db.select().from(preferences).where(eq(preferences.key, "projects_base_path")).limit(1);
-          if (pref.length > 0 && pref[0].value) {
-            baseFolder = pref[0].value;
+          const configured = await getPreference("projects_base_path");
+          if (configured) {
+            baseFolder = configured;
           }
         }
 
@@ -119,35 +118,27 @@ Setup:
         const repoInfo = await detectInfo(repoPath);
         const projectName = options.name || folderName;
 
-        const existing = await db.select().from(projects).where(eq(projects.repoPath, repoInfo.repoPath)).limit(1);
-        if (existing.length > 0) {
-          console.log(`Project "${existing[0].name}" already registered at ${repoInfo.repoPath}`);
+        const existing = await getProjectByRepoPath(repoInfo.repoPath);
+        if (existing) {
+          console.log(`Project "${existing.name}" already registered at ${repoInfo.repoPath}`);
           process.exit(0);
         }
 
-        const now = new Date().toISOString();
         const projectId = randomUUID();
         const defaultBranch = await resolveCliDefaultBranch(repoInfo.repoPath, repoInfo.defaultBranch);
 
-        await db.insert(projects).values({
-          id: projectId,
+        // insertProject also creates the canonical 7-status set (incl. Backlog at -1) so
+        // auto-driven Backlog-pull works (#772).
+        await insertProject(projectId, {
           name: projectName,
           repoPath: repoInfo.repoPath,
           repoName: repoInfo.repoName,
           defaultBranch,
           remoteUrl: repoInfo.remoteUrl,
           defaultSkillId: await getDefaultSkillId(),
-          createdAt: now,
-          updatedAt: now,
         });
 
-        // Canonical 7-status set (incl. Backlog at -1) so auto-driven Backlog-pull works (#772).
-        await initializeProjectStatuses(projectId, now);
-
-        await db
-          .insert(preferences)
-          .values({ key: "activeProjectId", value: projectId, updatedAt: now })
-          .onConflictDoUpdate({ target: preferences.key, set: { value: projectId, updatedAt: now } });
+        await setPreference("activeProjectId", projectId);
 
         // Scaffold the fresh repo: generic agent-artifact ignores + a starter CLAUDE.md + hooks.
         // A fresh empty repo has no stack markers yet (stack === null ⇒ no per-stack block); detect
