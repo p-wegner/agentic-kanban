@@ -13,6 +13,7 @@ import { hasPath } from "../../lib/dependency-graph.js";
 import { getIssueIdsAndProjectsForBatch, getDependencyRowsForProjects } from "../../repositories/issue-service.repository.js";
 import { buildIssueSummaryLines, buildIssueStatusLines, validateAttachArtifactOptions, formatAttachArtifactOutput } from "../../lib/issue-cli-format.js";
 import { extractLastAgentMessageFromRows } from "../../lib/session-message-extraction.js";
+import { validateBatchEdges, formatBatchEdgeResult } from "../../lib/dependency-batch.js";
 
 export function registerIssueCommand(program: Command) {
   const issueCmd = program.command("issue").description("Manage issues on the board.\n\nSubcommands: list, create, update, move, summary, dependency");
@@ -897,24 +898,10 @@ Valid actions: add, remove
         const VALID_TYPES = ["depends_on", "blocked_by", "related_to", "duplicates", "parent_of", "child_of"] as const;
         const DIRECTIONAL = new Set<string>(["depends_on", "blocked_by", "parent_of", "child_of"]);
 
-        for (let i = 0; i < edges.length; i++) {
-          const e = edges[i];
-          if (!e.issueId || !e.dependsOnId || !e.action) {
-            console.error(`edges[${i}]: missing required fields (issueId, dependsOnId, action).`);
-            process.exit(1);
-          }
-          if (!["add", "remove"].includes(e.action)) {
-            console.error(`edges[${i}]: action must be 'add' or 'remove'.`);
-            process.exit(1);
-          }
-          if (e.type && !(VALID_TYPES as readonly string[]).includes(e.type)) {
-            console.error(`edges[${i}]: invalid type '${e.type}'. Valid: ${VALID_TYPES.join(", ")}`);
-            process.exit(1);
-          }
-          if (e.action === "add" && e.issueId === e.dependsOnId) {
-            console.error(`edges[${i}]: an issue cannot depend on itself.`);
-            process.exit(1);
-          }
+        const validationError = validateBatchEdges(edges, VALID_TYPES);
+        if (validationError) {
+          console.error(validationError);
+          process.exit(1);
         }
 
         const issueIds = [...new Set(edges.flatMap((e) => [e.issueId, e.dependsOnId]))];
@@ -1003,15 +990,8 @@ Valid actions: add, remove
         }
 
         const result = { added, removed, skipped };
-        if (options.json) {
-          console.log(JSON.stringify(result, null, 2));
-        } else {
-          console.log(`Added: ${added}, Removed: ${removed}, Skipped: ${skipped.length}`);
-          if (skipped.length > 0) {
-            for (const s of skipped) {
-              console.log(`  Skipped: ${s.edge.issueId} -> ${s.edge.dependsOnId} (${s.reason})`);
-            }
-          }
+        for (const line of formatBatchEdgeResult(result, options.json ?? false)) {
+          console.log(line);
         }
         process.exit(0);
       } catch (err) {
