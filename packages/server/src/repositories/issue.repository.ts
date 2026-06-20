@@ -582,3 +582,26 @@ export async function getTagsForIssues(issueIds: string[], database: Database = 
     .innerJoin(tags, eq(issueTags.tagId, tags.id))
     .where(inArray(issueTags.issueId, issueIds));
 }
+
+/** Resolve an issue id by its per-project issue number (scoped to the project). */
+export async function getIssueIdByNumberInProject(
+  issueNumber: number,
+  projectId: string,
+  database: Database = db,
+): Promise<string | null> {
+  const rows = await database
+    .select({ id: issues.id })
+    .from(issues)
+    .where(and(eq(issues.issueNumber, issueNumber), eq(issues.projectId, projectId)))
+    .limit(1);
+  return rows[0]?.id ?? null;
+}
+
+/** {statusId, statusName} for every issue in a project (board status-count source). */
+export async function getIssueStatusNameRowsForProject(projectId: string, database: Database = db) {
+  return database
+    .select({ statusId: issues.statusId, statusName: projectStatuses.name })
+    .from(issues)
+    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+    .where(eq(issues.projectId, projectId));
+}

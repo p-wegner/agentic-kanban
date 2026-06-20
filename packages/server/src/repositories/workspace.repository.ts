@@ -415,3 +415,23 @@ export async function getWorkspaceDetails(
 
   return mapWorkspaceDetailsRow(row, sess);
 }
+
+/** The most-recently-updated workspace for an issue (or null). */
+export async function getLatestWorkspaceForIssue(
+  issueId: string,
+  database: Database = db,
+): Promise<Workspace | null> {
+  const rows = await database
+    .select()
+    .from(workspaces)
+    .where(eq(workspaces.issueId, issueId))
+    .orderBy(desc(workspaces.updatedAt))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/** Count of globally-active workspaces (status = "active"), across all projects. */
+export async function getActiveWorkspaceCount(database: Database = db): Promise<number> {
+  const rows = await database.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.status, "active"));
+  return rows.length;
+}

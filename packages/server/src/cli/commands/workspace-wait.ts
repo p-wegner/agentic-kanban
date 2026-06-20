@@ -1,6 +1,5 @@
-import { db } from "../../db/index.js";
-import { issues, workspaces } from "@agentic-kanban/shared/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { getIssueIdByNumberInProject } from "../../repositories/issue.repository.js";
+import { getLatestWorkspaceForIssue, getWorkspaceById } from "../../repositories/workspace.repository.js";
 import { runMigrations, getActiveProjectId } from "../shared.js";
 
 /**
@@ -48,31 +47,20 @@ export async function runWorkspaceWait(issueNumberArg: string, options: WaitOpti
     return 1;
   }
 
-  const issueRows = await db
-    .select({ id: issues.id })
-    .from(issues)
-    .where(and(eq(issues.issueNumber, num), eq(issues.projectId, projectId)))
-    .limit(1);
-
-  if (issueRows.length === 0) {
+  const issueId = await getIssueIdByNumberInProject(num, projectId);
+  if (issueId === null) {
     console.error(`Issue #${num} not found.`);
     return 1;
   }
 
-  const wsRows = await db
-    .select({ id: workspaces.id, status: workspaces.status })
-    .from(workspaces)
-    .where(eq(workspaces.issueId, issueRows[0].id))
-    .orderBy(desc(workspaces.updatedAt))
-    .limit(1);
-
-  if (wsRows.length === 0) {
+  const ws = await getLatestWorkspaceForIssue(issueId);
+  if (!ws) {
     console.error(`No workspace found for issue #${num}. Create one first.`);
     return 1;
   }
 
-  const workspaceId = wsRows[0].id;
-  let lastStatus = wsRows[0].status;
+  const workspaceId = ws.id;
+  let lastStatus = ws.status;
 
   // Fast path: already terminal, no need to open a socket.
   const already = classifyStatus(lastStatus);
@@ -87,12 +75,8 @@ export async function runWorkspaceWait(issueNumberArg: string, options: WaitOpti
   // carries only { reason } — not the per-workspace status — so each event is a
   // trigger to re-query here.
   const readStatus = async (): Promise<string | null> => {
-    const rows = await db
-      .select({ status: workspaces.status })
-      .from(workspaces)
-      .where(eq(workspaces.id, workspaceId))
-      .limit(1);
-    return rows.length > 0 ? rows[0].status : null;
+    const ws = await getWorkspaceById(workspaceId);
+    return ws?.status ?? null;
   };
 
   const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
