@@ -19,6 +19,7 @@ import { buildSpawnEnv, getMcpServersConfig } from "./agent-provider/helpers.js"
 import { ensureBoardGuideFile } from "../butler/board-guide.js";
 import { isTransientNetworkError } from "../startup/transient-errors.js";
 import { getProvider, type ProviderId, type ProviderName } from "./agent-provider.js";
+import { classifyButlerLoopError } from "../lib/butler-loop-classify.js";
 
 /** Compact slash-command descriptor surfaced to the UI autocomplete. */
 export interface ButlerCommand {
@@ -617,6 +618,92 @@ function stringifyToolResult(content: unknown): string | undefined {
   return text.length > MAX ? `${text.slice(0, MAX)}\n… (${text.length - MAX} more chars)` : text;
 }
 
+// ── runLoop message dispatch ──────────────────────────────────────────────────
+// One handler per SDK message type. Each mutates session state and/or broadcasts
+// events exactly as the inline branch did; kept as small functions so runLoop is a
+// flat dispatch instead of a CC-38 if/else wall.
+
+function handleButlerInit(session: ButlerSession, msg: Record<string, unknown>): void {
+  const init = msg as { session_id?: string; model?: string; mcp_servers?: { name: string; status: string }[] };
+  if (init.session_id) {
+    session.sessionId = init.session_id;
+    broadcast(session, { type: "session", sessionId: init.session_id });
+  }
+  if (init.model) session.model = init.model;
+  const kanbanMcp = init.mcp_servers?.find((s) => s.name === "agentic-kanban");
+  if (kanbanMcp) session.mcpConnected = kanbanMcp.status === "connected";
+  broadcast(session, { type: "meta", model: session.model, contextWindow: session.contextWindow, mcpConnected: session.mcpConnected });
+}
+
+function handleButlerStreamEvent(session: ButlerSession, msg: Record<string, unknown>): void {
+  const ev = (msg as { event?: { type?: string; delta?: { type?: string; text?: string } } }).event;
+  if (ev?.type === "content_block_delta" && ev.delta?.type === "text_delta" && ev.delta.text) {
+    broadcast(session, { type: "text", text: ev.delta.text });
+  }
+}
+
+function handleButlerAssistant(session: ButlerSession, msg: Record<string, unknown>): void {
+  const content = (msg as { message?: { content?: Array<{ type?: string; name?: string; id?: string; input?: Record<string, unknown> }> } }).message?.content ?? [];
+  for (const block of content) {
+    if (block.type === "tool_use" && block.name) {
+      broadcast(session, { type: "tool", name: block.name, toolId: block.id, input: block.input });
+    }
+  }
+}
+
+function handleButlerToolResults(session: ButlerSession, msg: Record<string, unknown>): void {
+  // Tool results arrive as a synthetic user message whose content holds
+  // tool_result blocks. Surface each so the UI can pair it with its tool call.
+  const content = (msg as { message?: { content?: Array<{ type?: string; tool_use_id?: string; is_error?: boolean; content?: unknown }> } }).message?.content ?? [];
+  for (const block of content) {
+    if (block.type === "tool_result") {
+      broadcast(session, { type: "tool-result", toolId: block.tool_use_id, output: stringifyToolResult(block.content), isError: block.is_error });
+    }
+  }
+}
+
+function handleButlerResult(session: ButlerSession, msg: Record<string, unknown>, q: Query): void {
+  session.busy = false;
+  const subtype = (msg as { subtype?: string }).subtype;
+  const result = (msg as { result?: string }).result;
+  if (subtype === "success" && result) {
+    session.transcript.push({ role: "assistant", text: result, ts: Date.now() });
+  }
+  broadcast(session, { type: "result", text: subtype === "success" ? result : undefined, isError: subtype !== "success" });
+  // Report the true context-window occupancy (not the cache-inflated turn usage sum).
+  void broadcastContextUsage(session, q);
+}
+
+function dispatchButlerMessage(session: ButlerSession, msg: Record<string, unknown>, q: Query): void {
+  const type = msg.type as string;
+  if (type === "system" && (msg as { subtype?: string }).subtype === "init") handleButlerInit(session, msg);
+  else if (type === "stream_event") handleButlerStreamEvent(session, msg);
+  else if (type === "assistant") handleButlerAssistant(session, msg);
+  else if (type === "user") handleButlerToolResults(session, msg);
+  else if (type === "result") handleButlerResult(session, msg, q);
+}
+
+/**
+ * Recover from a thrown SDK loop error whose outcome is `resume-reset`: drop the
+ * dead resume id, restart the loop fresh, and re-send any in-flight turn (the
+ * fresh session has no prior thinking blocks, so it can't re-hit the signature
+ * error that surfaced the failure). Returns true if it restarted the loop.
+ */
+function recoverButlerResume(session: ButlerSession, input: Pushable<SDKUserMessage>, options: Options, message: string): boolean {
+  const reason = isStaleResumeError(message) ? "not found" : "had an invalid thinking-block signature";
+  console.warn(`[butler-sdk] resume session ${(options as Record<string, unknown>).resume} ${reason}, starting fresh: project=${session.projectId}`);
+  delete (options as Record<string, unknown>).resume;
+  session.sessionId = undefined;
+  const pendingTurn = session.busy
+    ? [...session.transcript].reverse().find((t) => t.role === "user")?.text
+    : undefined;
+  void runLoop(session, input, options);
+  if (pendingTurn) {
+    input.push({ type: "user", message: { role: "user", content: pendingTurn }, parent_tool_use_id: null });
+  }
+  return true;
+}
+
 async function runLoop(session: ButlerSession, input: Pushable<SDKUserMessage>, options: Options): Promise<void> {
   let retrying = false;
   try {
@@ -627,91 +714,41 @@ async function runLoop(session: ButlerSession, input: Pushable<SDKUserMessage>, 
     void fetchSessionCapabilities(session, q);
     void broadcastContextUsage(session, q);
     for await (const msg of q as AsyncIterable<Record<string, unknown>>) {
-      const type = msg.type as string;
-      if (type === "system" && (msg as { subtype?: string }).subtype === "init") {
-        const init = msg as { session_id?: string; model?: string; mcp_servers?: { name: string; status: string }[] };
-        if (init.session_id) {
-          session.sessionId = init.session_id;
-          broadcast(session, { type: "session", sessionId: init.session_id });
-        }
-        if (init.model) session.model = init.model;
-        const kanbanMcp = init.mcp_servers?.find((s) => s.name === "agentic-kanban");
-        if (kanbanMcp) session.mcpConnected = kanbanMcp.status === "connected";
-        broadcast(session, { type: "meta", model: session.model, contextWindow: session.contextWindow, mcpConnected: session.mcpConnected });
-      } else if (type === "stream_event") {
-        const ev = (msg as { event?: { type?: string; delta?: { type?: string; text?: string } } }).event;
-        if (ev?.type === "content_block_delta" && ev.delta?.type === "text_delta" && ev.delta.text) {
-          broadcast(session, { type: "text", text: ev.delta.text });
-        }
-      } else if (type === "assistant") {
-        const content = (msg as { message?: { content?: Array<{ type?: string; name?: string; id?: string; input?: Record<string, unknown> }> } }).message?.content ?? [];
-        for (const block of content) {
-          if (block.type === "tool_use" && block.name) {
-            broadcast(session, { type: "tool", name: block.name, toolId: block.id, input: block.input });
-          }
-        }
-      } else if (type === "user") {
-        // Tool results arrive as a synthetic user message whose content holds
-        // tool_result blocks. Surface each so the UI can pair it with its tool call.
-        const content = (msg as { message?: { content?: Array<{ type?: string; tool_use_id?: string; is_error?: boolean; content?: unknown }> } }).message?.content ?? [];
-        for (const block of content) {
-          if (block.type === "tool_result") {
-            broadcast(session, { type: "tool-result", toolId: block.tool_use_id, output: stringifyToolResult(block.content), isError: block.is_error });
-          }
-        }
-      } else if (type === "result") {
-        session.busy = false;
-        const subtype = (msg as { subtype?: string }).subtype;
-        const result = (msg as { result?: string }).result;
-        if (subtype === "success" && result) {
-          session.transcript.push({ role: "assistant", text: result, ts: Date.now() });
-        }
-        broadcast(session, { type: "result", text: subtype === "success" ? result : undefined, isError: subtype !== "success" });
-        // Report the true context-window occupancy (not the cache-inflated turn usage sum).
-        void broadcastContextUsage(session, q);
-      }
+      dispatchButlerMessage(session, msg, q);
     }
     console.log(`[butler-sdk] session loop ended: project=${session.projectId}`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    if (session.abort.signal.aborted) {
-      // Deliberate teardown (clear-context, profile switch, server stop) aborts the
-      // SDK query, surfacing as an "operation aborted" throw. This is expected — do
-      // NOT broadcast it as an error, or a stream reconnecting right after the stop
-      // (the clear-context flow reopens immediately) would render a spurious error.
-      console.log(`[butler-sdk] session aborted (intentional): project=${session.projectId}`);
-    } else if (isTransientNetworkError(err)) {
-      // Anthropic HTTPS socket got killed (tsx hot-reload, network blip, manual stop).
-      // Don't propagate or surface as a hard error — the dev loop must keep running and
-      // the next ensureButlerSession() call will reopen a warm connection.
-      console.warn(`[butler-sdk] transient network error (ignored): project=${session.projectId} ${message}`);
-    } else if (
-      (options as Record<string, unknown>).resume &&
-      (isStaleResumeError(message) || isInvalidThinkingSignatureError(message))
-    ) {
-      // The persisted session can't be resumed: either it no longer exists (server
-      // restart, cache eviction) or its transcript has an unverifiable thinking-block
-      // signature (profile/endpoint changed under it). Either way the only recovery is
-      // to drop the resume id and start a fresh conversation — no user-facing error.
-      const reason = isStaleResumeError(message) ? "not found" : "had an invalid thinking-block signature";
-      console.warn(`[butler-sdk] resume session ${(options as Record<string, unknown>).resume} ${reason}, starting fresh: project=${session.projectId}`);
-      delete (options as Record<string, unknown>).resume;
-      session.sessionId = undefined;
-      // If a turn was in flight when the resumed transcript was rejected (the signature
-      // error only fires once a request is made), re-send it on the fresh session so the
-      // user's message isn't silently dropped. The fresh session has no prior thinking
-      // blocks, so it cannot hit the same signature error.
-      const pendingTurn = session.busy
-        ? [...session.transcript].reverse().find((t) => t.role === "user")?.text
-        : undefined;
-      retrying = true;
-      void runLoop(session, input, options);
-      if (pendingTurn) {
-        input.push({ type: "user", message: { role: "user", content: pendingTurn }, parent_tool_use_id: null });
-      }
-    } else {
-      console.error(`[butler-sdk] session error: project=${session.projectId} ${message}`);
-      broadcast(session, { type: "error", message });
+    const outcome = classifyButlerLoopError({
+      aborted: session.abort.signal.aborted,
+      transient: isTransientNetworkError(err),
+      hasResume: Boolean((options as Record<string, unknown>).resume),
+      staleResume: isStaleResumeError(message),
+      invalidThinkingSignature: isInvalidThinkingSignatureError(message),
+    });
+    switch (outcome) {
+      case "aborted":
+        // Deliberate teardown (clear-context, profile switch, server stop) aborts the
+        // SDK query, surfacing as an "operation aborted" throw. Expected — do NOT
+        // broadcast it as an error, or a stream reconnecting right after the stop (the
+        // clear-context flow reopens immediately) would render a spurious error.
+        console.log(`[butler-sdk] session aborted (intentional): project=${session.projectId}`);
+        break;
+      case "transient":
+        // Anthropic HTTPS socket got killed (tsx hot-reload, network blip, manual stop).
+        // Don't propagate — the dev loop keeps running and the next ensureButlerSession()
+        // reopens a warm connection.
+        console.warn(`[butler-sdk] transient network error (ignored): project=${session.projectId} ${message}`);
+        break;
+      case "resume-reset":
+        // The persisted session can't be resumed (gone, or unverifiable thinking-block
+        // signature). Drop the resume id and start fresh — no user-facing error.
+        retrying = recoverButlerResume(session, input, options, message);
+        break;
+      case "fatal":
+        console.error(`[butler-sdk] session error: project=${session.projectId} ${message}`);
+        broadcast(session, { type: "error", message });
+        break;
     }
   } finally {
     if (!retrying) {
