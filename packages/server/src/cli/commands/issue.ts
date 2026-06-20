@@ -9,6 +9,8 @@ import { runMigrations, getActiveProjectId } from "../shared.js";
 import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { isAnalyticsNoise } from "../../services/session-filter.js";
 import { getWorkspaceDiffStats, type WorkspaceDiffStats } from "../../services/workspace-diff-stats.js";
+import { hasPath } from "../../lib/dependency-graph.js";
+import { getIssueIdsAndProjectsForBatch, getDependencyRowsForProjects } from "../../repositories/issue-service.repository.js";
 
 export function registerIssueCommand(program: Command) {
   const issueCmd = program.command("issue").description("Manage issues on the board.\n\nSubcommands: list, create, update, move, summary, dependency");
@@ -1026,24 +1028,11 @@ Valid actions: add, remove
         }
 
         const issueIds = [...new Set(edges.flatMap((e) => [e.issueId, e.dependsOnId]))];
-        const issueRows = issueIds.length === 0 ? [] : await db
-          .select({ id: issues.id, projectId: issues.projectId })
-          .from(issues)
-          .where(inArray(issues.id, issueIds));
+        const issueRows = issueIds.length === 0 ? [] : await getIssueIdsAndProjectsForBatch(issueIds);
         const projectByIssue = new Map(issueRows.map((r) => [r.id, r.projectId]));
 
         const projectIds = [...new Set(issueRows.map((r) => r.projectId))];
-        const allDepRows = projectIds.length === 0 ? [] : await db
-          .select({
-            id: issueDependencies.id,
-            issueId: issueDependencies.issueId,
-            dependsOnId: issueDependencies.dependsOnId,
-            type: issueDependencies.type,
-            projectId: issues.projectId,
-          })
-          .from(issueDependencies)
-          .innerJoin(issues, eq(issueDependencies.issueId, issues.id))
-          .where(inArray(issues.projectId, projectIds));
+        const allDepRows = projectIds.length === 0 ? [] : await getDependencyRowsForProjects(projectIds);
 
         const adjByProject = new Map<string, Map<string, Set<string>>>();
         const edgeKeyToRow = new Map<string, { id: string; projectId: string }>();
@@ -1057,20 +1046,6 @@ Valid actions: add, remove
           }
           edgeKeyToRow.set(`${dep.issueId}|${dep.dependsOnId}|${dep.type}`, { id: dep.id, projectId: dep.projectId });
         }
-
-        const hasPath = (adj: Map<string, Set<string>>, from: string, to: string): boolean => {
-          const visited = new Set<string>();
-          const stack = [from];
-          while (stack.length) {
-            const cur = stack.pop()!;
-            if (cur === to) return true;
-            if (visited.has(cur)) continue;
-            visited.add(cur);
-            const ns = adj.get(cur);
-            if (ns) for (const n of ns) stack.push(n);
-          }
-          return false;
-        };
 
         const skipped: { edge: typeof edges[number]; reason: string }[] = [];
         let added = 0;
