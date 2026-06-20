@@ -1,4 +1,5 @@
 import type { Database } from "../db/index.js";
+import { db } from "../db/index.js";
 import {
   createWorkflowTemplate,
   proposeTransition,
@@ -643,4 +644,24 @@ export function createWorkflowService(deps: WorkflowServiceDeps) {
     getWorkspaceProgress,
     executeTransition,
   };
+}
+
+/**
+ * CLI-facing wrapper: propose a workspace transition (the `workspace clarify
+ * --action propose` path). Supplies the default db so the CLI never imports
+ * db/index or the workflow-engine directly.
+ */
+export async function cliProposeTransition(
+  workspaceId: string,
+  opts: { to?: string; summary?: string; testsPassed?: boolean },
+  database: Database = db,
+) {
+  const signals = await computeWorkspaceSignals(database, workspaceId, { testsPassed: opts.testsPassed });
+  return proposeTransition(database, {
+    workspaceId,
+    toNodeName: opts.to,
+    summary: opts.summary,
+    triggeredBy: "agent",
+    signals,
+  });
 }

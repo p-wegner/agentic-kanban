@@ -1,8 +1,14 @@
 import type { Command } from "commander";
-import { db } from "../../db/index.js";
-import { issues, projects, workspaces, issueComments } from "@agentic-kanban/shared/schema";
-import { eq, and, desc, inArray } from "drizzle-orm";
-import { proposeTransition, computeWorkspaceSignals } from "@agentic-kanban/shared/lib/workflow-engine";
+import { getIssueIdByNumberInProject } from "../../repositories/issue.repository.js";
+import { getIssueById } from "../../repositories/followup-workspace.repository.js";
+import { getProjectById } from "../../repositories/project.repository.js";
+import { getWorkspaceById, getLatestWorkspaceForIssue, getWorkspaceIssueContext } from "../../repositories/workspace.repository.js";
+import { getWorkspacesForIssues } from "../../repositories/board-status.repository.js";
+import { insertWorkspaceRecordRow } from "../../repositories/workspace-crud.repository.js";
+import { getIssueTitleAndDescription } from "../../repositories/workspace-session.repository.js";
+import { insertIssueComment } from "../../repositories/issue-comments.repository.js";
+import { getProjectIssueIds } from "../../repositories/review-effectiveness.repository.js";
+import { cliProposeTransition } from "../../services/workflow.service.js";
 import { randomUUID } from "node:crypto";
 import { runMigrations, getActiveProjectId } from "../shared.js";
 import { buildWorkspaceApiUrl, buildApiUrl } from "./workspace-api-url.js";
@@ -25,10 +31,7 @@ Examples:
         await runMigrations();
         const projectId = await getActiveProjectId();
 
-        const projectIssues = await db
-          .select({ id: issues.id })
-          .from(issues)
-          .where(eq(issues.projectId, projectId));
+        const projectIssues = await getProjectIssueIds(projectId);
 
         if (projectIssues.length === 0) {
           console.log("No workspaces found (no issues in active project).");
@@ -36,7 +39,7 @@ Examples:
         }
 
         const issueIds = projectIssues.map((i) => i.id);
-        let rows = await db.select().from(workspaces).where(inArray(workspaces.issueId, issueIds));
+        let rows = await getWorkspacesForIssues(issueIds);
 
         if (options.status) rows = rows.filter((r) => r.status === options.status);
 
@@ -74,23 +77,17 @@ Tip: Use 'issue list' to find the issue ID.
       try {
         await runMigrations();
 
-        const issueRows = await db.select().from(issues).where(eq(issues.id, issueId)).limit(1);
+        const issueRows = await getIssueById(issueId);
         if (issueRows.length === 0) {
           console.error(`Issue '${issueId}' not found.`);
           process.exit(1);
         }
 
-        const projectRows = await db
-          .select()
-          .from(projects)
-          .where(eq(projects.id, issueRows[0].projectId))
-          .limit(1);
-        if (projectRows.length === 0 || !projectRows[0].repoPath) {
+        const project = await getProjectById(issueRows[0].projectId);
+        if (!project || !project.repoPath) {
           console.error("Project has no repo path configured.");
           process.exit(1);
         }
-
-        const project = projectRows[0];
         const { createWorktree } = await import("../../services/git.service.js");
 
         const branchName = options.branch ?? `workspace/${issueId.slice(0, 8)}`;
@@ -104,7 +101,7 @@ Tip: Use 'issue list' to find the issue ID.
         const id = randomUUID();
         const now = new Date().toISOString();
 
-        await db.insert(workspaces).values({
+        await insertWorkspaceRecordRow({
           id,
           issueId,
           branch: branchName,
@@ -141,20 +138,18 @@ Examples:
       try {
         await runMigrations();
 
-        const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
-        if (wsRows.length === 0) {
+        const ws = await getWorkspaceById(workspaceId);
+        if (!ws) {
           console.error(`Workspace '${workspaceId}' not found.`);
           process.exit(1);
         }
-
-        const ws = wsRows[0];
         let prompt = options.prompt;
         if (!prompt) {
-          const issueRows = await db.select({ title: issues.title, description: issues.description }).from(issues).where(eq(issues.id, ws.issueId)).limit(1);
-          if (issueRows.length > 0) {
-            prompt = issueRows[0].description
-              ? `${issueRows[0].title}\n\n${issueRows[0].description}`
-              : issueRows[0].title;
+          const detail = await getIssueTitleAndDescription(ws.issueId);
+          if (detail) {
+            prompt = detail.description
+              ? `${detail.title}\n\n${detail.description}`
+              : detail.title;
           } else {
             prompt = "Continue working on this issue.";
           }
@@ -203,36 +198,24 @@ Examples:
           process.exit(1);
         }
 
-        const issueRows = await db
-          .select({ id: issues.id })
-          .from(issues)
-          .where(and(eq(issues.issueNumber, num), eq(issues.projectId, projectId)))
-          .limit(1);
-
-        if (issueRows.length === 0) {
+        const issueId = await getIssueIdByNumberInProject(num, projectId);
+        if (issueId === null) {
           console.error(`Issue #${num} not found.`);
           process.exit(1);
         }
 
-        const wsRows = await db
-          .select()
-          .from(workspaces)
-          .where(eq(workspaces.issueId, issueRows[0].id))
-          .orderBy(desc(workspaces.updatedAt));
-
-        if (wsRows.length === 0) {
+        const ws = await getLatestWorkspaceForIssue(issueId);
+        if (!ws) {
           console.error(`No workspace found for issue #${num}. Create one first.`);
           process.exit(1);
         }
-
-        const ws = wsRows[0];
         let prompt = options.prompt;
         if (!prompt) {
-          const issueDetail = await db.select({ title: issues.title, description: issues.description }).from(issues).where(eq(issues.id, ws.issueId)).limit(1);
-          if (issueDetail.length > 0) {
-            prompt = issueDetail[0].description
-              ? `${issueDetail[0].title}\n\n${issueDetail[0].description}`
-              : issueDetail[0].title;
+          const detail = await getIssueTitleAndDescription(ws.issueId);
+          if (detail) {
+            prompt = detail.description
+              ? `${detail.title}\n\n${detail.description}`
+              : detail.title;
           } else {
             prompt = "Continue working on this issue.";
           }
@@ -294,8 +277,7 @@ Example:
       try {
         await runMigrations();
 
-        const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
-        if (wsRows.length === 0) {
+        if (!(await getWorkspaceById(workspaceId))) {
           console.error(`Workspace '${workspaceId}' not found.`);
           process.exit(1);
         }
@@ -591,20 +573,18 @@ Examples:
       try {
         await runMigrations();
 
-        const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
-        if (wsRows.length === 0) {
+        const ws = await getWorkspaceById(workspaceId);
+        if (!ws) {
           console.error(`Workspace '${workspaceId}' not found.`);
           process.exit(1);
         }
-
-        const ws = wsRows[0];
         let prompt = options.prompt;
         if (!prompt) {
-          const issueRows = await db.select({ title: issues.title, description: issues.description }).from(issues).where(eq(issues.id, ws.issueId)).limit(1);
-          if (issueRows.length > 0) {
-            prompt = issueRows[0].description
-              ? `${issueRows[0].title}\n\n${issueRows[0].description}`
-              : issueRows[0].title;
+          const detail = await getIssueTitleAndDescription(ws.issueId);
+          if (detail) {
+            prompt = detail.description
+              ? `${detail.title}\n\n${detail.description}`
+              : detail.title;
           } else {
             prompt = "Continue working on this issue.";
           }
@@ -729,17 +709,11 @@ Examples:
           process.exit(1);
         }
 
-        const wsRows = await db
-          .select({ issueId: workspaces.issueId, projectId: issues.projectId, issueNumber: issues.issueNumber })
-          .from(workspaces)
-          .innerJoin(issues, eq(workspaces.issueId, issues.id))
-          .where(eq(workspaces.id, workspaceId))
-          .limit(1);
-        if (wsRows.length === 0) {
+        const ws = await getWorkspaceIssueContext(workspaceId);
+        if (!ws) {
           console.error(`Workspace '${workspaceId}' not found.`);
           process.exit(1);
         }
-        const ws = wsRows[0];
 
         if (action === "clarify") {
           if (!options.question || !options.question.trim()) {
@@ -753,15 +727,13 @@ Examples:
             "",
             `1. ${question.header ? `${question.header}: ` : ""}${question.question}`,
           ].join("\n");
-          await db.insert(issueComments).values({
-            id: randomUUID(),
+          await insertIssueComment({
             issueId: ws.issueId,
             workspaceId,
             kind: "agent-question",
             author: "agent",
             body,
-            payload: JSON.stringify({ toolUseId, questions: [question], source: "cli_clarify_or_propose" }),
-            createdAt: new Date().toISOString(),
+            payload: { toolUseId, questions: [question], source: "cli_clarify_or_propose" },
           });
           const result = { ok: true, action: "clarify", toolUseId, workspaceId, issueId: ws.issueId, issueNumber: ws.issueNumber, question };
           if (options.json) { console.log(JSON.stringify(result, null, 2)); process.exit(0); }
@@ -771,14 +743,7 @@ Examples:
           process.exit(0);
         }
 
-        const signals = await computeWorkspaceSignals(db, workspaceId, { testsPassed: options.testsPassed });
-        const result = await proposeTransition(db, {
-          workspaceId,
-          toNodeName: options.to,
-          summary: options.summary,
-          triggeredBy: "agent",
-          signals,
-        });
+        const result = await cliProposeTransition(workspaceId, { to: options.to, summary: options.summary, testsPassed: options.testsPassed });
         if (!result.ok) {
           console.error(`Transition failed: ${result.error ?? "unknown error"}`);
           process.exit(1);

@@ -440,3 +440,14 @@ export async function getActiveWorkspaceCount(database: Database = db): Promise<
 export async function getClosedWorkspaces(database: Database = db) {
   return database.select().from(workspaces).where(eq(workspaces.status, "closed"));
 }
+
+/** {issueId, projectId, issueNumber} for a workspace (joined to its issue), or null. */
+export async function getWorkspaceIssueContext(workspaceId: string, database: Database = db) {
+  const rows = await database
+    .select({ issueId: workspaces.issueId, projectId: issues.projectId, issueNumber: issues.issueNumber })
+    .from(workspaces)
+    .innerJoin(issues, eq(workspaces.issueId, issues.id))
+    .where(eq(workspaces.id, workspaceId))
+    .limit(1);
+  return rows[0] ?? null;
+}
