@@ -135,4 +135,34 @@ describe("accumulateInsightsRow", () => {
     expect(acc.successCount).toBe(0);
     expect(acc.totalCostUsd).toBe(0);
   });
+
+  it("buckets the time series by UTC date and rolls up cost per day", () => {
+    const acc = fold([
+      row({ startedAt: "2026-06-20T01:00:00.000Z", cost: 1, success: true }),
+      row({ startedAt: "2026-06-20T23:30:00.000Z", cost: 2, success: false }),
+      row({ startedAt: "2026-06-19T12:00:00.000Z", cost: 4, success: true }),
+    ]);
+    expect(acc.timeSeries.get("2026-06-20")).toMatchObject({ sessionCount: 2, successCount: 1, totalCostUsd: 3 });
+    expect(acc.timeSeries.get("2026-06-19")).toMatchObject({ sessionCount: 1, successCount: 1, totalCostUsd: 4 });
+  });
+
+  it("captures only stat-bearing sessions in the top-expensive list", () => {
+    const acc = fold([
+      row({ sessionId: "a", cost: 5, inputTokens: 10, outputTokens: 5, model: "opus" }),
+      row({ sessionId: "b", stats: null }), // no stats -> not captured
+    ]);
+    expect(acc.topExpensive).toHaveLength(1);
+    expect(acc.topExpensive[0]).toMatchObject({ sessionId: "a", totalCostUsd: 5, totalTokens: 15, model: "opus" });
+  });
+
+  it("groups provider/profile pairs into one bucket", () => {
+    const acc = fold([
+      row({ provider: "claude", profile: "anth", cost: 1 }),
+      row({ provider: "claude", profile: "anth", cost: 2 }),
+      row({ provider: "codex", profile: "default", cost: 4 }),
+    ]);
+    expect(acc.byProviderProfile.get("claude::anth")?.sessionCount).toBe(2);
+    expect(acc.byProviderProfile.get("claude::anth")?.totalCostUsd).toBe(3);
+    expect(acc.byProviderProfile.get("codex::default")?.sessionCount).toBe(1);
+  });
 });

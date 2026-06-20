@@ -417,160 +417,262 @@ export interface AccumulateContext {
   contextWindowFromIso: string;
 }
 
-/** Fold one session row into the accumulator. Pure (mutates only `acc`). */
-export function accumulateInsightsRow(acc: InsightsAccumulator, row: InsightsSessionRow, ctx: AccumulateContext): void {
-  const { bySkill, byModel, byIssueType, byPriority, byProviderProfile, timeSeries, topExpensive, contextByIssue, frictionByTool, repeatedCommandAgg } = acc;
-  const stats = parseStats(row.stats);
-  const success = isSuccessful(stats, row.exitCode);
-  const resolvedModel = stats?.model || row.wsModel || "Unknown";
-  // Prefer the skill captured on the session at launch; fall back to the
-  // workspace's current skill for historical sessions that predate per-session
-  // attribution (graceful degradation).
-  const resolvedSkillId = row.sessionSkillId ?? row.wsSkillId;
-  const resolvedSkillName = row.sessionSkillName ?? row.skillName;
-  const skillMapKey = resolvedSkillId ?? "__no_skill__";
-  const skillName = resolvedSkillName ?? "No Skill";
-  const startedAtIso = toIsoStringOrNull(row.startedAt) ?? ctx.fallbackStartedAtIso;
-  const dateKey = toDateKey(startedAtIso);
-  const tokens = stats ? stats.inputTokens + stats.outputTokens : 0;
+// ── Per-dimension folds ──────────────────────────────────────────────────────
+// Each helper folds one session into a single accumulator dimension. They are
+// pure (mutate only the passed-in map/accumulator) and individually trivial, so
+// the row-level accumulateInsightsRow below reads as a flat list of dimensions
+// instead of one 150-line branch-dense function.
 
-  acc.sessionCount += 1;
-  if (success) acc.successCount += 1;
-  if (!acc.earliestStartedAt || startedAtIso < acc.earliestStartedAt) {
-    acc.earliestStartedAt = startedAtIso;
+function accumulateFriction(acc: InsightsAccumulator, stats: ParsedSessionStats | null): void {
+  if (!stats?.friction) return;
+  acc.sessionsWithFriction += 1;
+  acc.frictionTotalToolCalls += stats.friction.totalToolCalls;
+  acc.frictionFailedToolCalls += stats.friction.failedToolCalls;
+  acc.frictionErrorTotal += stats.friction.errorCount;
+  for (const t of stats.friction.tools ?? []) {
+    const e = acc.frictionByTool.get(t.tool) ?? { calls: 0, failed: 0 };
+    e.calls += t.count;
+    e.failed += t.failedCount;
+    acc.frictionByTool.set(t.tool, e);
   }
-
-  if (stats?.friction) {
-    acc.sessionsWithFriction += 1;
-    acc.frictionTotalToolCalls += stats.friction.totalToolCalls;
-    acc.frictionFailedToolCalls += stats.friction.failedToolCalls;
-    acc.frictionErrorTotal += stats.friction.errorCount;
-    for (const t of stats.friction.tools ?? []) {
-      const e = frictionByTool.get(t.tool) ?? { calls: 0, failed: 0 };
-      e.calls += t.count;
-      e.failed += t.failedCount;
-      frictionByTool.set(t.tool, e);
-    }
-    for (const rc of stats.friction.repeatedCommands ?? []) {
-      const e = repeatedCommandAgg.get(rc.command) ?? { count: 0, sessions: 0 };
-      e.count += rc.count;
-      e.sessions += 1;
-      repeatedCommandAgg.set(rc.command, e);
-    }
+  for (const rc of stats.friction.repeatedCommands ?? []) {
+    const e = acc.repeatedCommandAgg.get(rc.command) ?? { count: 0, sessions: 0 };
+    e.count += rc.count;
+    e.sessions += 1;
+    acc.repeatedCommandAgg.set(rc.command, e);
   }
+}
 
-  const skillBucket = bySkill.get(skillMapKey) ?? {
-    skillId: resolvedSkillId,
-    skillName,
-    ...createAggregateBucket(),
-  };
-  applyAggregate(skillBucket, stats, success);
-  bySkill.set(skillMapKey, skillBucket);
+function accumulateSkillBucket(
+  bySkill: Map<string, SkillBucket>,
+  key: string,
+  skillId: string | null,
+  skillName: string,
+  stats: ParsedSessionStats | null,
+  success: boolean,
+): void {
+  const bucket = bySkill.get(key) ?? { skillId, skillName, ...createAggregateBucket() };
+  applyAggregate(bucket, stats, success);
+  bySkill.set(key, bucket);
+}
 
-  const modelBucket = byModel.get(resolvedModel) ?? {
-    model: resolvedModel,
-    ...createAggregateBucket(),
-  };
-  applyAggregate(modelBucket, stats, success);
-  byModel.set(resolvedModel, modelBucket);
+function accumulateModelBucket(
+  byModel: Map<string, ModelBucket>,
+  model: string,
+  stats: ParsedSessionStats | null,
+  success: boolean,
+): void {
+  const bucket = byModel.get(model) ?? { model, ...createAggregateBucket() };
+  applyAggregate(bucket, stats, success);
+  byModel.set(model, bucket);
+}
 
-  const issueTypeBucket = byIssueType.get(row.issueType) ?? {
-    issueType: row.issueType,
-    sessionCount: 0,
-    successCount: 0,
-    totalCostUsd: 0,
-    totalInputTokens: 0,
-    totalOutputTokens: 0,
-  };
-  issueTypeBucket.sessionCount += 1;
-  if (success) issueTypeBucket.successCount += 1;
+// IssueTypeBucket and PriorityBucket are structurally identical (one discriminator
+// field plus the same five session/cost/token counters), so both fold through one
+// generic helper instead of two byte-identical 15-line blocks.
+function accumulateCategoryBucket<
+  T extends {
+    sessionCount: number;
+    successCount: number;
+    totalCostUsd: number;
+    totalInputTokens: number;
+    totalOutputTokens: number;
+  },
+>(
+  map: Map<string, T>,
+  key: string,
+  create: () => T,
+  stats: ParsedSessionStats | null,
+  success: boolean,
+): void {
+  const bucket = map.get(key) ?? create();
+  bucket.sessionCount += 1;
+  if (success) bucket.successCount += 1;
   if (stats) {
-    issueTypeBucket.totalCostUsd += stats.totalCostUsd;
-    issueTypeBucket.totalInputTokens += stats.inputTokens;
-    issueTypeBucket.totalOutputTokens += stats.outputTokens;
+    bucket.totalCostUsd += stats.totalCostUsd;
+    bucket.totalInputTokens += stats.inputTokens;
+    bucket.totalOutputTokens += stats.outputTokens;
   }
-  byIssueType.set(row.issueType, issueTypeBucket);
+  map.set(key, bucket);
+}
 
-  const priorityBucket = byPriority.get(row.issuePriority) ?? {
-    priority: row.issuePriority,
-    sessionCount: 0,
-    successCount: 0,
-    totalCostUsd: 0,
-    totalInputTokens: 0,
-    totalOutputTokens: 0,
-  };
-  priorityBucket.sessionCount += 1;
-  if (success) priorityBucket.successCount += 1;
-  if (stats) {
-    priorityBucket.totalCostUsd += stats.totalCostUsd;
-    priorityBucket.totalInputTokens += stats.inputTokens;
-    priorityBucket.totalOutputTokens += stats.outputTokens;
-  }
-  byPriority.set(row.issuePriority, priorityBucket);
-
-  const provider = row.wsProvider ?? "unknown";
-  const profile = row.wsClaudeProfile ?? "";
-  const ppKey = `${provider}::${profile}`;
-  const ppBucket = byProviderProfile.get(ppKey) ?? {
+function accumulateProviderProfileBucket(
+  byProviderProfile: Map<string, ProviderProfileBucket>,
+  provider: string,
+  profile: string,
+  stats: ParsedSessionStats | null,
+  success: boolean,
+): void {
+  const key = `${provider}::${profile}`;
+  const bucket = byProviderProfile.get(key) ?? {
     provider,
     profile,
     activeWorkspaceIds: new Set<string>(),
     ...createAggregateBucket(),
   };
-  applyAggregate(ppBucket, stats, success);
-  byProviderProfile.set(ppKey, ppBucket);
+  applyAggregate(bucket, stats, success);
+  byProviderProfile.set(key, bucket);
+}
 
-  const timeSeriesBucket = timeSeries.get(dateKey) ?? {
+function accumulateTimeSeriesBucket(
+  timeSeries: Map<string, TimeSeriesBucket>,
+  dateKey: string,
+  stats: ParsedSessionStats | null,
+  success: boolean,
+): void {
+  const bucket = timeSeries.get(dateKey) ?? {
     date: dateKey,
     sessionCount: 0,
     successCount: 0,
     totalCostUsd: 0,
   };
-  timeSeriesBucket.sessionCount += 1;
-  if (success) timeSeriesBucket.successCount += 1;
-  if (stats) timeSeriesBucket.totalCostUsd += stats.totalCostUsd;
-  timeSeries.set(dateKey, timeSeriesBucket);
+  bucket.sessionCount += 1;
+  if (success) bucket.successCount += 1;
+  if (stats) bucket.totalCostUsd += stats.totalCostUsd;
+  timeSeries.set(dateKey, bucket);
+}
 
-  if (stats) {
-    acc.totalCostUsd += stats.totalCostUsd;
-    acc.totalTokens += tokens;
-    topExpensive.push({
-      sessionId: row.sessionId,
-      workspaceId: row.workspaceId,
+function accumulateExpensive(
+  acc: InsightsAccumulator,
+  row: InsightsSessionRow,
+  stats: ParsedSessionStats,
+  resolvedModel: string,
+  tokens: number,
+  success: boolean,
+  startedAtIso: string,
+): void {
+  acc.totalCostUsd += stats.totalCostUsd;
+  acc.totalTokens += tokens;
+  acc.topExpensive.push({
+    sessionId: row.sessionId,
+    workspaceId: row.workspaceId,
+    issueId: row.issueId,
+    issueNumber: row.issueNumber,
+    issueTitle: row.issueTitle,
+    skillName: row.skillName,
+    model: resolvedModel || null,
+    totalCostUsd: stats.totalCostUsd,
+    totalTokens: tokens,
+    numTurns: stats.numTurns,
+    durationMs: stats.durationMs,
+    success,
+    startedAt: startedAtIso,
+  });
+}
+
+function accumulateContextLeaderboard(
+  acc: InsightsAccumulator,
+  row: InsightsSessionRow,
+  stats: ParsedSessionStats | null,
+  startedAtIso: string,
+  contextWindowFromIso: string,
+): void {
+  // Context-consumer leaderboard: only sessions within the fixed 7-day window.
+  if (startedAtIso < contextWindowFromIso) return;
+  const sessionContextTokens = contextTokensFor(stats);
+  acc.contextWindowTotalTokens += sessionContextTokens;
+  const existing = acc.contextByIssue.get(row.issueId);
+  if (existing) {
+    existing.sessionCount += 1;
+    existing.contextTokens += sessionContextTokens;
+    existing.totalCostUsd += stats?.totalCostUsd ?? 0;
+  } else {
+    acc.contextByIssue.set(row.issueId, {
       issueId: row.issueId,
       issueNumber: row.issueNumber,
       issueTitle: row.issueTitle,
-      skillName: row.skillName,
-      model: resolvedModel || null,
-      totalCostUsd: stats.totalCostUsd,
-      totalTokens: tokens,
-      numTurns: stats.numTurns,
-      durationMs: stats.durationMs,
-      success,
-      startedAt: startedAtIso,
+      sessionCount: 1,
+      contextTokens: sessionContextTokens,
+      totalCostUsd: stats?.totalCostUsd ?? 0,
     });
   }
+}
 
-  // Context-consumer leaderboard: only sessions within the fixed 7-day window.
-  if (startedAtIso >= ctx.contextWindowFromIso) {
-    const sessionContextTokens = contextTokensFor(stats);
-    acc.contextWindowTotalTokens += sessionContextTokens;
-    const existing = contextByIssue.get(row.issueId);
-    if (existing) {
-      existing.sessionCount += 1;
-      existing.contextTokens += sessionContextTokens;
-      existing.totalCostUsd += stats?.totalCostUsd ?? 0;
-    } else {
-      contextByIssue.set(row.issueId, {
-        issueId: row.issueId,
-        issueNumber: row.issueNumber,
-        issueTitle: row.issueTitle,
-        sessionCount: 1,
-        contextTokens: sessionContextTokens,
-        totalCostUsd: stats?.totalCostUsd ?? 0,
-      });
-    }
+/** Per-row facts derived from a session row, independent of the accumulator. */
+interface SessionRowFacts {
+  stats: ParsedSessionStats | null;
+  success: boolean;
+  resolvedModel: string;
+  resolvedSkillId: string | null;
+  skillMapKey: string;
+  skillName: string;
+  startedAtIso: string;
+  dateKey: string;
+  tokens: number;
+}
+
+/** Resolve the model/skill/timing fields a row contributes (graceful fallbacks). */
+function deriveSessionRowFacts(row: InsightsSessionRow, ctx: AccumulateContext): SessionRowFacts {
+  const stats = parseStats(row.stats);
+  // Prefer the skill captured on the session at launch; fall back to the
+  // workspace's current skill for historical sessions that predate per-session
+  // attribution (graceful degradation).
+  const resolvedSkillId = row.sessionSkillId ?? row.wsSkillId;
+  const startedAtIso = toIsoStringOrNull(row.startedAt) ?? ctx.fallbackStartedAtIso;
+  return {
+    stats,
+    success: isSuccessful(stats, row.exitCode),
+    resolvedModel: stats?.model || row.wsModel || "Unknown",
+    resolvedSkillId,
+    skillMapKey: resolvedSkillId ?? "__no_skill__",
+    skillName: row.sessionSkillName ?? row.skillName ?? "No Skill",
+    startedAtIso,
+    dateKey: toDateKey(startedAtIso),
+    tokens: stats ? stats.inputTokens + stats.outputTokens : 0,
+  };
+}
+
+/** Fold one session row into the accumulator. Pure (mutates only `acc`). */
+export function accumulateInsightsRow(acc: InsightsAccumulator, row: InsightsSessionRow, ctx: AccumulateContext): void {
+  const f = deriveSessionRowFacts(row, ctx);
+
+  acc.sessionCount += 1;
+  if (f.success) acc.successCount += 1;
+  if (!acc.earliestStartedAt || f.startedAtIso < acc.earliestStartedAt) {
+    acc.earliestStartedAt = f.startedAtIso;
   }
+
+  accumulateFriction(acc, f.stats);
+  accumulateSkillBucket(acc.bySkill, f.skillMapKey, f.resolvedSkillId, f.skillName, f.stats, f.success);
+  accumulateModelBucket(acc.byModel, f.resolvedModel, f.stats, f.success);
+  accumulateCategoryBucket(
+    acc.byIssueType,
+    row.issueType,
+    () => ({
+      issueType: row.issueType,
+      sessionCount: 0,
+      successCount: 0,
+      totalCostUsd: 0,
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+    }),
+    f.stats,
+    f.success,
+  );
+  accumulateCategoryBucket(
+    acc.byPriority,
+    row.issuePriority,
+    () => ({
+      priority: row.issuePriority,
+      sessionCount: 0,
+      successCount: 0,
+      totalCostUsd: 0,
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+    }),
+    f.stats,
+    f.success,
+  );
+  accumulateProviderProfileBucket(
+    acc.byProviderProfile,
+    row.wsProvider ?? "unknown",
+    row.wsClaudeProfile ?? "",
+    f.stats,
+    f.success,
+  );
+  accumulateTimeSeriesBucket(acc.timeSeries, f.dateKey, f.stats, f.success);
+  if (f.stats) accumulateExpensive(acc, row, f.stats, f.resolvedModel, f.tokens, f.success, f.startedAtIso);
+  accumulateContextLeaderboard(acc, row, f.stats, f.startedAtIso, ctx.contextWindowFromIso);
 }
 
 export async function computeInsights(database: Database, params: ComputeInsightsParams): Promise<InsightsData> {
