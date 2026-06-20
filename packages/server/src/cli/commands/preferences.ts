@@ -1,7 +1,5 @@
 import type { Command } from "commander";
-import { db } from "../../db/index.js";
-import { preferences } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
+import { getPreference, setPreference } from "../../repositories/preferences.repository.js";
 import { runMigrations } from "../shared.js";
 
 export function registerPreferencesCommand(program: Command) {
@@ -20,11 +18,7 @@ Examples:
     .action(async (key: string, value: string) => {
       try {
         await runMigrations();
-        const now = new Date().toISOString();
-        await db
-          .insert(preferences)
-          .values({ key, value, updatedAt: now })
-          .onConflictDoUpdate({ target: preferences.key, set: { value, updatedAt: now } });
+        await setPreference(key, value);
         console.log(`Set ${key} = ${value}`);
         process.exit(0);
       } catch (err) {
@@ -39,12 +33,8 @@ Examples:
     .action(async (key: string) => {
       try {
         await runMigrations();
-        const rows = await db.select().from(preferences).where(eq(preferences.key, key)).limit(1);
-        if (rows.length === 0) {
-          console.log(`(not set)`);
-        } else {
-          console.log(rows[0].value);
-        }
+        const value = await getPreference(key);
+        console.log(value === null ? `(not set)` : value);
         process.exit(0);
       } catch (err) {
         console.error("Error:", err instanceof Error ? err.message : String(err));
