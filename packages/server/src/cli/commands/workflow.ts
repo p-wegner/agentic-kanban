@@ -1,12 +1,11 @@
 import type { Command } from "commander";
 import { readFileSync } from "node:fs";
-import { db } from "../../db/index.js";
 import {
-  listWorkflowTemplates,
-  getTemplateGraph,
-  createWorkflowTemplate,
-  deleteWorkflowTemplate,
-} from "@agentic-kanban/shared/lib/workflow-engine";
+  cliListWorkflowTemplates,
+  cliGetWorkflowTemplateGraph,
+  cliCreateWorkflowTemplate,
+  cliDeleteWorkflowTemplate,
+} from "../../services/workflow.service.js";
 import { runMigrations, getActiveProjectId } from "../shared.js";
 import { normalizeImportedTemplate, validateImportedTemplate } from "../../lib/workflow-template-import.js";
 
@@ -47,13 +46,13 @@ export function registerWorkflowCommand(program: Command) {
       try {
         await runMigrations();
         const projectId = await getActiveProjectId();
-        const tpls = await listWorkflowTemplates(db, projectId);
+        const tpls = await cliListWorkflowTemplates(projectId);
         if (tpls.length === 0) {
           console.log("No workflow templates.");
           process.exit(0);
         }
         for (const t of tpls) {
-          const g = await getTemplateGraph(db, t.id);
+          const g = await cliGetWorkflowTemplateGraph(t.id);
           const tags = [t.isBuiltin ? "builtin" : "custom", t.ticketType ? `type:${t.ticketType}${t.isDefault ? "/default" : ""}` : null].filter(Boolean).join(", ");
           console.log(`  ${t.name}  [${tags}]  ${g?.nodes.length ?? 0} stages, ${g?.edges.length ?? 0} transitions`);
           console.log(`    id: ${t.id}`);
@@ -71,7 +70,7 @@ export function registerWorkflowCommand(program: Command) {
     .action(async (templateId: string) => {
       try {
         await runMigrations();
-        const g = await getTemplateGraph(db, templateId);
+        const g = await cliGetWorkflowTemplateGraph(templateId);
         if (!g) {
           console.error(`Template ${templateId} not found`);
           process.exit(1);
@@ -90,7 +89,7 @@ export function registerWorkflowCommand(program: Command) {
     .action(async (templateId: string) => {
       try {
         await runMigrations();
-        const g = await getTemplateGraph(db, templateId);
+        const g = await cliGetWorkflowTemplateGraph(templateId);
         if (!g) {
           console.error(`Template ${templateId} not found`);
           process.exit(1);
@@ -111,7 +110,7 @@ export function registerWorkflowCommand(program: Command) {
         await runMigrations();
         const projectId = await getActiveProjectId();
         const spec = readJsonFile(jsonFile) as any;
-        const res = await createWorkflowTemplate(db, {
+        const res = await cliCreateWorkflowTemplate({
           projectId,
           name: spec.name,
           description: spec.description,
@@ -148,7 +147,7 @@ export function registerWorkflowCommand(program: Command) {
           for (const e of importErrors) console.error("  - " + e);
           process.exit(1);
         }
-        const res = await createWorkflowTemplate(db, {
+        const res = await cliCreateWorkflowTemplate({
           projectId,
           name: spec.name.trim(),
           description: spec.description,
@@ -177,7 +176,7 @@ export function registerWorkflowCommand(program: Command) {
     .action(async (templateId: string) => {
       try {
         await runMigrations();
-        const res = await deleteWorkflowTemplate(db, templateId);
+        const res = await cliDeleteWorkflowTemplate(templateId);
         if (!res.ok) {
           console.error(res.error);
           process.exit(1);
