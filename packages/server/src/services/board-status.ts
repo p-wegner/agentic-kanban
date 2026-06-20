@@ -4,6 +4,7 @@ import { isTerminalStatusIdView, ACTIVE_WORKSPACE_STATUSES, workspaceStatusPrior
 import type { BoardStatusResponse, BoardStatusIssue } from "@agentic-kanban/shared";
 import { isAnalyticsNoise } from "./session-filter.js";
 import { NotFoundError } from "../errors/index.js";
+import { buildBoardStatusEntry, selectLatestRelevantSession } from "../lib/board-status-entry.js";
 import {
   classifyBoardStatusIssueAttention,
   classifyBoardStatusIssueMergeState,
@@ -33,24 +34,6 @@ export interface BoardStatusOptions {
   projectId?: string;
   includeClosed?: boolean;
   tailLines?: number;
-}
-
-function parseSessionStats(stats: string): BoardStatusIssue["sessionStats"] {
-  try {
-    const p = JSON.parse(stats);
-    return {
-      durationMs: p.durationMs ?? 0,
-      totalCostUsd: p.totalCostUsd ?? 0,
-      inputTokens: p.inputTokens ?? 0,
-      outputTokens: p.outputTokens ?? 0,
-      numTurns: p.numTurns ?? 1,
-      model: p.model ?? "",
-      success: p.success ?? false,
-      agentSummary: p.agentSummary,
-    };
-  } catch {
-    return null; // ignore bad stats JSON
-  }
 }
 
 /**
@@ -175,34 +158,9 @@ export async function getBoardStatus(
     );
 
     const mainSessions = mainWs ? (sessionsByWs.get(mainWs.id) ?? []) : [];
-    // Prefer the latest non-noise session for analytics; fall back to latest overall
-    const latestSession = mainSessions.find(s => !isAnalyticsNoise(s)) ?? mainSessions[0] ?? null;
+    const latestSession = selectLatestRelevantSession(mainSessions, isAnalyticsNoise);
 
-    const entry: BoardStatusIssue = {
-      issueNumber: issue.issueNumber,
-      issueId: issue.id,
-      title: issue.title,
-      priority: issue.priority,
-      issueType: issue.issueType,
-      statusName: effectiveStatusName,
-      workspace: mainWs ? {
-        id: mainWs.id, branch: mainWs.branch, status: mainWs.status,
-        workingDir: mainWs.workingDir, baseBranch: mainWs.baseBranch, isDirect: mainWs.isDirect,
-        readyForMerge: mainWs.readyForMerge,
-      } : null,
-      session: latestSession ? {
-        id: latestSession.id, status: latestSession.status,
-        startedAt: latestSession.startedAt, endedAt: latestSession.endedAt,
-      } : null,
-      sessionStats: latestSession?.stats ? parseSessionStats(latestSession.stats) : null,
-      diffStats: null,
-      conflicts: null,
-      lastActivity: null,
-      lastOutput: [],
-      lastAgentMessage: null,
-      attention: null,
-      mergeState: null,
-    };
+    const entry = buildBoardStatusEntry(issue, effectiveStatusName, mainWs, latestSession);
 
     // For non-closed workspaces with a workingDir: compute diff stats + last output
     if (mainWs) {
