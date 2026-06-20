@@ -1,12 +1,25 @@
 import type { Command } from "commander";
-import { db } from "../../db/index.js";
-import { issues, projectStatuses, workspaces, sessions, projects, sessionMessages, agentSkills, failurePatterns, preferences } from "@agentic-kanban/shared/schema";
-import { eq, desc, gte, isNotNull, and, sql } from "drizzle-orm";
 import { parseSessionSummary, computeFrictionStats, extractKeywords } from "@agentic-kanban/shared";
 import type { SessionFrictionStats } from "@agentic-kanban/shared";
 import { getCommitsForBranch } from "@agentic-kanban/shared/lib/git-service";
 import { runMigrations, getActiveProjectId } from "../shared.js";
-import { getSessionMessageRows } from "../../repositories/session.repository.js";
+import {
+  getSessionMessageRows,
+  getSessionById,
+  getRecentSessionsWithContext,
+  getSessionsForFrictionBackfill,
+  updateSessionStats,
+  getReviewerFixSessionRows,
+  getSessionTranscriptContext,
+  getNewestSessionMessages,
+  searchTranscriptMessages,
+  getLatestSessionIdForWorkspace,
+  getInsightsSessionRows,
+} from "../../repositories/session.repository.js";
+import { getWorkspaceById } from "../../repositories/workspace.repository.js";
+import { getProjectById } from "../../repositories/project.repository.js";
+import { getIssueWithStatusById, getIssueTitleDescriptionByNumber } from "../../repositories/issue.repository.js";
+import { getAllFailurePatterns } from "../../repositories/failure-pattern.repository.js";
 import { computeReviewEffectiveness, renderReviewEffectivenessReport } from "../../services/review-effectiveness.service.js";
 import { buildReviewWorkspaces, buildReviewResult, summarizeReviewEffectiveness, reviewPct, computeDeepReviewSignals, type ReviewResult, type ReviewTranscriptSummary } from "../../lib/review-effectiveness-report.js";
 
@@ -23,26 +36,17 @@ export function registerSessionCommand(program: Command) {
       try {
         await runMigrations();
 
-        const sessionRows = await db.select().from(sessions).where(eq(sessions.id, sessionId)).limit(1);
-        if (sessionRows.length === 0) {
+        const session = await getSessionById(sessionId);
+        if (!session) {
           console.error(`Session '${sessionId}' not found.`);
           process.exit(1);
         }
 
-        const session = sessionRows[0];
-
-        const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, session.workspaceId)).limit(1);
-        const ws = wsRows[0] ?? null;
+        const ws = await getWorkspaceById(session.workspaceId);
 
         let issue: Record<string, unknown> | null = null;
         if (ws) {
-          const issueRows = await db
-            .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, statusName: projectStatuses.name, priority: issues.priority, issueType: issues.issueType })
-            .from(issues)
-            .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-            .where(eq(issues.id, ws.issueId))
-            .limit(1);
-          issue = issueRows[0] ?? null;
+          issue = await getIssueWithStatusById(ws.issueId);
         }
 
         const msgRows = await getSessionMessageRows(sessionId);
@@ -100,25 +104,7 @@ export function registerSessionCommand(program: Command) {
 
         const limit = Math.min(parseInt(options.limit ?? "5", 10), 20);
 
-        const rows = await db
-          .select({
-            sessionId: sessions.id,
-            sessionStatus: sessions.status,
-            startedAt: sessions.startedAt,
-            endedAt: sessions.endedAt,
-            executor: sessions.executor,
-            triggerType: sessions.triggerType,
-            workspaceId: workspaces.id,
-            branch: workspaces.branch,
-            wsStatus: workspaces.status,
-            issueNumber: issues.issueNumber,
-            issueTitle: issues.title,
-          })
-          .from(sessions)
-          .innerJoin(workspaces, eq(sessions.workspaceId, workspaces.id))
-          .innerJoin(issues, eq(workspaces.issueId, issues.id))
-          .orderBy(desc(sessions.startedAt))
-          .limit(limit);
+        const rows = await getRecentSessionsWithContext(limit);
 
         console.log(JSON.stringify(rows.map(r => ({
           sessionId: r.sessionId,
@@ -147,20 +133,14 @@ export function registerSessionCommand(program: Command) {
       try {
         await runMigrations();
 
-        const whereClause = options.all
-          ? isNotNull(sessions.endedAt)
-          : and(
-              isNotNull(sessions.endedAt),
-              gte(
-                sessions.startedAt,
-                new Date(Date.now() - Math.max(1, parseInt(options.hours ?? "48", 10) || 48) * 60 * 60 * 1000).toISOString(),
-              ),
-            );
+        const sinceIso = new Date(
+          Date.now() - Math.max(1, parseInt(options.hours ?? "48", 10) || 48) * 60 * 60 * 1000,
+        ).toISOString();
 
-        const candidates = await db
-          .select({ id: sessions.id, stats: sessions.stats })
-          .from(sessions)
-          .where(whereClause);
+        const candidates = await getSessionsForFrictionBackfill({
+          includeAll: !!options.all,
+          sinceIso,
+        });
 
         let scanned = 0, updated = 0, skipped = 0, empty = 0;
         for (const s of candidates) {
@@ -180,7 +160,7 @@ export function registerSessionCommand(program: Command) {
             continue;
           }
           stats.friction = friction;
-          await db.update(sessions).set({ stats: JSON.stringify(stats) }).where(eq(sessions.id, s.id));
+          await updateSessionStats(s.id, JSON.stringify(stats));
           updated++;
         }
 
@@ -214,7 +194,7 @@ export function registerSessionCommand(program: Command) {
         const sinceIso = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
         const projectId = options.project ?? (await getActiveProjectId());
 
-        const report = await computeReviewEffectiveness({ projectId, sinceIso, deep: options.deep }, db);
+        const report = await computeReviewEffectiveness({ projectId, sinceIso, deep: options.deep });
 
         if (options.json) {
           console.log(JSON.stringify({ ...report, window: { days, since: sinceIso, projectId } }, null, 2));
@@ -258,35 +238,14 @@ export function registerSessionCommand(program: Command) {
         const sinceIso = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
         const projectId = options.project ?? (await getActiveProjectId());
 
-        const projRows = await db.select({ repoPath: projects.repoPath }).from(projects).where(eq(projects.id, projectId)).limit(1);
-        const repoPath = projRows[0]?.repoPath;
+        const project = await getProjectById(projectId);
+        const repoPath = project?.repoPath;
         if (!repoPath) {
           console.error(`Project '${projectId}' has no repoPath.`);
           process.exit(1);
         }
 
-        const rows = await db
-          .select({
-            sessionId: sessions.id,
-            triggerType: sessions.triggerType,
-            executor: sessions.executor,
-            startedAt: sessions.startedAt,
-            endedAt: sessions.endedAt,
-            workspaceId: workspaces.id,
-            branch: workspaces.branch,
-            wsStatus: workspaces.status,
-            provider: workspaces.provider,
-            baseCommitSha: workspaces.baseCommitSha,
-            mergedHeadSha: workspaces.mergedHeadSha,
-            mergedAt: workspaces.mergedAt,
-            issueNumber: issues.issueNumber,
-            issueTitle: issues.title,
-          })
-          .from(sessions)
-          .innerJoin(workspaces, eq(sessions.workspaceId, workspaces.id))
-          .innerJoin(issues, eq(workspaces.issueId, issues.id))
-          .where(and(eq(issues.projectId, projectId), gte(sessions.startedAt, sinceIso)))
-          .orderBy(sessions.startedAt);
+        const rows = await getReviewerFixSessionRows({ projectId, sinceIso });
 
         const GRACE_MS = 2 * 60 * 1000; // a commit can land just after the session's recorded endedAt
         // Classification, epoch-ms session windows (closed so they don't overlap), and
@@ -401,54 +360,15 @@ Examples:
 
         // Fetch session metadata from DB for project/issue/workspace context
         await runMigrations();
-        const sessionRows = await db
-          .select({
-            sessionId: sessions.id,
-            providerSessionId: sessions.providerSessionId,
-            executor: sessions.executor,
-            sessionStatus: sessions.status,
-            startedAt: sessions.startedAt,
-            endedAt: sessions.endedAt,
-            exitCode: sessions.exitCode,
-            triggerType: sessions.triggerType,
-            skillId: sessions.skillId,
-            skillName: sessions.skillName,
-            workspaceId: workspaces.id,
-            branch: workspaces.branch,
-            workspaceStatus: workspaces.status,
-            issueId: issues.id,
-            issueNumber: issues.issueNumber,
-            issueTitle: issues.title,
-            projectId: projects.id,
-            projectName: projects.name,
-          })
-          .from(sessions)
-          .innerJoin(workspaces, eq(sessions.workspaceId, workspaces.id))
-          .innerJoin(issues, eq(workspaces.issueId, issues.id))
-          .innerJoin(projects, eq(issues.projectId, projects.id))
-          .where(eq(sessions.id, sessionId))
-          .limit(1);
+        const meta = await getSessionTranscriptContext(sessionId);
 
-        if (sessionRows.length === 0) {
+        if (!meta) {
           console.error(`Session '${sessionId}' not found.`);
           process.exit(1);
         }
 
-        const meta = sessionRows[0];
-
-        // Fetch messages from DB (capped to limit)
-        const newestMessages = await db
-          .select({
-            id: sessionMessages.id,
-            type: sessionMessages.type,
-            data: sessionMessages.data,
-            exitCode: sessionMessages.exitCode,
-            createdAt: sessionMessages.createdAt,
-          })
-          .from(sessionMessages)
-          .where(eq(sessionMessages.sessionId, sessionId))
-          .orderBy(desc(sessionMessages.id))
-          .limit(limit);
+        // Fetch messages from DB (capped to limit), oldest-first for display.
+        const newestMessages = await getNewestSessionMessages(sessionId, limit);
         const msgs = newestMessages.reverse();
 
         console.log(JSON.stringify({ ...meta, messages: msgs, _serverOutput: outputData }, null, 2));
@@ -487,16 +407,6 @@ Examples:
         const limit = Math.min(Math.max(1, parseInt(options.limit ?? "25", 10) || 25), 100);
         const issueNumber = options.issue ? parseInt(options.issue, 10) : undefined;
 
-        const conditions = [
-          sql`${sessionMessages.data} IS NOT NULL`,
-          sql`${sessionMessages.data} LIKE ${"%" + q + "%"}`,
-          sql`${sessionMessages.type} != 'exit'`,
-        ];
-        if (options.project) conditions.push(eq(issues.projectId, options.project));
-        if (issueNumber && !isNaN(issueNumber)) conditions.push(eq(issues.issueNumber, issueNumber));
-        if (options.provider) conditions.push(eq(sessions.executor, options.provider));
-        if (options.status) conditions.push(eq(projectStatuses.name, options.status));
-
         const SNIPPET_RADIUS = 80;
         const makeSnippet = (text: string, matchIdx: number): string => {
           const start = Math.max(0, matchIdx - SNIPPET_RADIUS);
@@ -507,34 +417,14 @@ Examples:
           return snippet;
         };
 
-        const rows = await db
-          .select({
-            messageId: sessionMessages.id,
-            messageData: sessionMessages.data,
-            messageCreatedAt: sessionMessages.createdAt,
-            sessionId: sessions.id,
-            providerSessionId: sessions.providerSessionId,
-            sessionStartedAt: sessions.startedAt,
-            sessionStatus: sessions.status,
-            executor: sessions.executor,
-            workspaceId: workspaces.id,
-            branch: workspaces.branch,
-            issueId: issues.id,
-            issueNumber: issues.issueNumber,
-            issueTitle: issues.title,
-            issueStatusName: projectStatuses.name,
-            projectId: projects.id,
-            projectName: projects.name,
-          })
-          .from(sessionMessages)
-          .innerJoin(sessions, eq(sessionMessages.sessionId, sessions.id))
-          .innerJoin(workspaces, eq(sessions.workspaceId, workspaces.id))
-          .innerJoin(issues, eq(workspaces.issueId, issues.id))
-          .innerJoin(projects, eq(issues.projectId, projects.id))
-          .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-          .where(and(...conditions))
-          .orderBy(desc(sessionMessages.id))
-          .limit(limit);
+        const rows = await searchTranscriptMessages({
+          q,
+          projectId: options.project,
+          issueNumber,
+          statusFilter: options.status,
+          providerFilter: options.provider,
+          limit,
+        });
 
         const results = rows.map((row) => {
           const data = row.messageData ?? "";
@@ -585,17 +475,12 @@ Examples:
         let targetSessionId = sessionId;
 
         if (!targetSessionId && options.workspace) {
-          const wsSessions = await db
-            .select({ id: sessions.id })
-            .from(sessions)
-            .where(eq(sessions.workspaceId, options.workspace))
-            .orderBy(desc(sessions.startedAt))
-            .limit(1);
-          if (wsSessions.length === 0) {
+          const latestId = await getLatestSessionIdForWorkspace(options.workspace);
+          if (!latestId) {
             console.error("No sessions found for this workspace.");
             process.exit(1);
           }
-          targetSessionId = wsSessions[0].id;
+          targetSessionId = latestId;
         }
 
         if (!targetSessionId) {
@@ -603,24 +488,13 @@ Examples:
           process.exit(1);
         }
 
-        const rows = await db
-          .select({
-            id: sessions.id,
-            status: sessions.status,
-            stats: sessions.stats,
-            startedAt: sessions.startedAt,
-            endedAt: sessions.endedAt,
-          })
-          .from(sessions)
-          .where(eq(sessions.id, targetSessionId))
-          .limit(1);
+        const session = await getSessionById(targetSessionId);
 
-        if (rows.length === 0) {
+        if (!session) {
           console.error(`Session '${targetSessionId}' not found.`);
           process.exit(1);
         }
 
-        const session = rows[0];
         if (!session.stats) {
           console.error(`No stats available for session ${targetSessionId} (session may still be running or stats were not captured).`);
           process.exit(1);
@@ -672,18 +546,9 @@ Examples:
 
         const sinceIso = new Date(Date.now() - windowHours * 60 * 60 * 1000).toISOString();
 
-        const rows = await db
-          .select({
-            stats: sessions.stats,
-            exitCode: sessions.exitCode,
-            skillName: sessions.skillName,
-            wsSkillName: agentSkills.name,
-          })
-          .from(sessions)
-          .innerJoin(workspaces, eq(sessions.workspaceId, workspaces.id))
-          .innerJoin(issues, eq(workspaces.issueId, issues.id))
-          .leftJoin(agentSkills, eq(workspaces.skillId, agentSkills.id))
-          .where(and(eq(issues.projectId, projectId), gte(sessions.startedAt, sinceIso)));
+        // Reuses the insights session projection (same sessions+workspace+issue
+        // join, window-scoped); this command only consumes each row's `.stats`.
+        const rows = await getInsightsSessionRows(projectId, sinceIso);
 
         const byTool = new Map<string, { calls: number; failed: number }>();
         const repeated = new Map<string, { count: number; sessions: number }>();
@@ -802,16 +667,12 @@ Examples:
             console.error("Invalid issue number.");
             process.exit(1);
           }
-          const issueRows = await db
-            .select({ title: issues.title, description: issues.description })
-            .from(issues)
-            .where(eq(issues.issueNumber, issueNum))
-            .limit(1);
-          if (issueRows.length === 0) {
+          const issueRow = await getIssueTitleDescriptionByNumber(issueNum);
+          if (!issueRow) {
             console.error(`Issue #${issueNum} not found.`);
             process.exit(1);
           }
-          errorText = [issueRows[0].title, issueRows[0].description ?? ""].join(" ");
+          errorText = [issueRow.title, issueRow.description ?? ""].join(" ");
         }
 
         const queryKw = extractKeywords(errorText);
@@ -820,7 +681,7 @@ Examples:
           process.exit(1);
         }
 
-        const all = await db.select().from(failurePatterns);
+        const all = await getAllFailurePatterns();
         if (all.length === 0) {
           console.log("No failure patterns stored yet. Patterns are ingested from docs/learnings/ on startup.");
           process.exit(0);
