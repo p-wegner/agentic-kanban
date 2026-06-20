@@ -1,6 +1,8 @@
-// Pure presentation helpers for the `issue` CLI commands. Each returns the lines
-// to print (the caller does the console.log) so the formatting is unit-testable
-// with exact-string assertions and kept out of the giant command handlers.
+// Pure presentation + input-validation helpers for the `issue` CLI commands.
+// Renderers return the lines to print (the caller does the console.log) and
+// validators return the first error message (the caller does console.error +
+// process.exit), so the formatting/validation is unit-testable with exact-string
+// assertions and kept out of the giant command handlers.
 
 import { formatDurationStr, type SessionSummary } from "@agentic-kanban/shared";
 
@@ -149,5 +151,48 @@ export function buildIssueStatusLines(input: IssueStatusRenderInput): string[] {
   }
   lines.push("");
 
+  return lines;
+}
+
+export type ArtifactType = "text" | "link" | "image";
+
+/** Artifact types the CLI accepts. Intentionally NO "video" (the MCP tool allows it; the CLI does not). */
+export const ARTIFACT_TYPES: readonly ArtifactType[] = ["text", "link", "image"];
+
+/** Validate `issue attach-artifact` inputs; returns the first error message, else the parsed values. */
+export function validateAttachArtifactOptions(
+  issueNumberArg: string,
+  options: { type?: string; content?: string },
+): { ok: true; num: number; type: ArtifactType; content: string } | { ok: false; error: string } {
+  const num = Number(issueNumberArg);
+  if (!Number.isInteger(num) || num <= 0) {
+    return { ok: false, error: `Invalid issue number: ${issueNumberArg}` };
+  }
+  if (!options.type) {
+    return { ok: false, error: "--type is required. Valid: text, link, image" };
+  }
+  if (!(ARTIFACT_TYPES as readonly string[]).includes(options.type)) {
+    return { ok: false, error: `Invalid type '${options.type}'. Valid: ${ARTIFACT_TYPES.join(", ")}` };
+  }
+  if (!options.content || !options.content.trim()) {
+    return { ok: false, error: "--content is required and cannot be empty." };
+  }
+  return { ok: true, num, type: options.type as ArtifactType, content: options.content };
+}
+
+export interface AttachArtifactResult {
+  id: string;
+  issueId: string;
+  workspaceId: string | null;
+  type: string;
+  mimeType: string | null;
+  caption: string | null;
+}
+
+/** Build `issue attach-artifact` output lines (JSON blob, or the human confirmation). */
+export function formatAttachArtifactOutput(result: AttachArtifactResult, num: number, json: boolean): string[] {
+  if (json) return [JSON.stringify(result, null, 2)];
+  const lines = [`Attached ${result.type} artifact to issue #${num}.`, `  id: ${result.id}`];
+  if (result.caption) lines.push(`  caption: ${result.caption}`);
   return lines;
 }

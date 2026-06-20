@@ -11,7 +11,7 @@ import { isAnalyticsNoise } from "../../services/session-filter.js";
 import { getWorkspaceDiffStats, type WorkspaceDiffStats } from "../../services/workspace-diff-stats.js";
 import { hasPath } from "../../lib/dependency-graph.js";
 import { getIssueIdsAndProjectsForBatch, getDependencyRowsForProjects } from "../../repositories/issue-service.repository.js";
-import { buildIssueSummaryLines, buildIssueStatusLines } from "../../lib/issue-cli-format.js";
+import { buildIssueSummaryLines, buildIssueStatusLines, validateAttachArtifactOptions, formatAttachArtifactOutput } from "../../lib/issue-cli-format.js";
 import { extractLastAgentMessageFromRows } from "../../lib/session-message-extraction.js";
 
 export function registerIssueCommand(program: Command) {
@@ -1243,25 +1243,12 @@ Valid types: text, link, image
         await runMigrations();
         const projectId = await getActiveProjectId();
 
-        const num = Number(issueNumberArg);
-        if (!Number.isInteger(num) || num <= 0) {
-          console.error(`Invalid issue number: ${issueNumberArg}`);
+        const validated = validateAttachArtifactOptions(issueNumberArg, options);
+        if (!validated.ok) {
+          console.error(validated.error);
           process.exit(1);
         }
-
-        if (!options.type) {
-          console.error("--type is required. Valid: text, link, image");
-          process.exit(1);
-        }
-        const ARTIFACT_TYPES = ["text", "link", "image"] as const;
-        if (!(ARTIFACT_TYPES as readonly string[]).includes(options.type)) {
-          console.error(`Invalid type '${options.type}'. Valid: ${ARTIFACT_TYPES.join(", ")}`);
-          process.exit(1);
-        }
-        if (!options.content || !options.content.trim()) {
-          console.error("--content is required and cannot be empty.");
-          process.exit(1);
-        }
+        const { num, type, content } = validated;
 
         const issueRows = await db
           .select({ id: issues.id, projectId: issues.projectId })
@@ -1293,9 +1280,9 @@ Valid types: text, link, image
           id,
           issueId: issue.id,
           workspaceId: options.workspace ?? null,
-          type: options.type as typeof ARTIFACT_TYPES[number],
+          type,
           mimeType: options.mimeType ?? null,
-          content: options.content,
+          content,
           caption: options.caption ?? null,
         });
 
@@ -1303,17 +1290,13 @@ Valid types: text, link, image
           id,
           issueId: issue.id,
           workspaceId: options.workspace ?? null,
-          type: options.type,
+          type,
           mimeType: options.mimeType ?? null,
           caption: options.caption ?? null,
         };
 
-        if (options.json) {
-          console.log(JSON.stringify(result, null, 2));
-        } else {
-          console.log(`Attached ${options.type} artifact to issue #${num}.`);
-          console.log(`  id: ${id}`);
-          if (options.caption) console.log(`  caption: ${options.caption}`);
+        for (const line of formatAttachArtifactOutput(result, num, options.json ?? false)) {
+          console.log(line);
         }
         process.exit(0);
       } catch (err) {
