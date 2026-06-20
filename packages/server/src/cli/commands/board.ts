@@ -1,7 +1,7 @@
 import type { Command } from "commander";
-import { eq } from "drizzle-orm";
-import { db } from "../../db/index.js";
-import { projects, projectStatuses, issues, workspaces } from "@agentic-kanban/shared/schema";
+import { getProjectById, getProjectStatuses } from "../../repositories/project.repository.js";
+import { getIssueStatusNameRowsForProject } from "../../repositories/issue.repository.js";
+import { getActiveWorkspaceCount } from "../../repositories/workspace.repository.js";
 import { runMigrations, getActiveProjectId } from "../shared.js";
 
 const port = () => process.env.KANBAN_SERVER_PORT ?? "3001";
@@ -90,32 +90,17 @@ Examples:
         await runMigrations();
         const projectId = options.project ?? (await getActiveProjectId());
 
-        const projectRows = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
-        if (projectRows.length === 0) {
+        const project = await getProjectById(projectId);
+        if (!project) {
           console.error(`Project '${projectId}' not found.`);
           process.exit(1);
         }
-        const project = projectRows[0];
 
-        const statuses = await db
-          .select()
-          .from(projectStatuses)
-          .where(eq(projectStatuses.projectId, projectId))
-          .orderBy(projectStatuses.sortOrder);
+        const statuses = await getProjectStatuses(projectId);
 
-        const issueRows = await db
-          .select({
-            statusId: issues.statusId,
-            statusName: projectStatuses.name,
-          })
-          .from(issues)
-          .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-          .where(eq(issues.projectId, projectId));
+        const issueRows = await getIssueStatusNameRowsForProject(projectId);
 
-        const activeWorkspaceRows = await db
-          .select()
-          .from(workspaces)
-          .where(eq(workspaces.status, "active"));
+        const activeWorkspaceCount = await getActiveWorkspaceCount();
 
         const issueCounts: Record<string, number> = {};
         for (const issue of issueRows) {
@@ -127,7 +112,7 @@ Examples:
           statuses: statuses.map((s) => s.name),
           issueCounts,
           totalIssues: issueRows.length,
-          activeWorkspaces: activeWorkspaceRows.length,
+          activeWorkspaces: activeWorkspaceCount,
         };
 
         if (options.json) {
