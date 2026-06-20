@@ -1,6 +1,24 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
-import { TYPE_COLORS as TYPE_DOT } from "../lib/chartColors";
+import {
+  TYPE_COLORS,
+  PRIORITY_COLORS,
+  STATUS_BG,
+  STATUS_BADGE,
+  ALL_TYPES,
+  WEEK_MS,
+  MONTH_MS,
+  fmtAxisDate,
+  fmtTooltipDate,
+  computeLanes,
+  computeBaseRange,
+  computeTicks,
+  pctOf,
+  toggleTypeSet,
+  computeIssueBar,
+  type DateRange,
+  type Lane,
+} from "../lib/timelineView.js";
 
 interface TimelineViewProps {
   columns: StatusWithIssues[];
@@ -8,53 +26,10 @@ interface TimelineViewProps {
   searchQuery?: string;
 }
 
-const TYPE_COLORS: Record<string, { bg: string; border: string; text: string; dot: string }> = {
-  task:    { bg: "bg-slate-100 dark:bg-slate-800/50",  border: "border-slate-300 dark:border-slate-600",  text: "text-slate-700 dark:text-slate-200",  dot: TYPE_DOT.task },
-  bug:     { bg: "bg-red-100 dark:bg-red-900/50",      border: "border-red-300 dark:border-red-700",      text: "text-red-800 dark:text-red-200",      dot: TYPE_DOT.bug },
-  feature: { bg: "bg-brand-100 dark:bg-brand-900/50", border: "border-brand-300 dark:border-brand-700", text: "text-brand-800 dark:text-brand-200", dot: TYPE_DOT.feature },
-  chore:   { bg: "bg-amber-100 dark:bg-amber-900/50",  border: "border-amber-300 dark:border-amber-700",  text: "text-amber-800 dark:text-amber-200",  dot: TYPE_DOT.chore },
-};
-
-const PRIORITY_COLORS: Record<string, string> = {
-  critical: "#ef4444",
-  high:     "#f97316",
-  medium:   "#eab308",
-  low:      "#6b7280",
-};
-
-const STATUS_BG: Record<string, string> = {
-  "Todo":        "bg-gray-50 dark:bg-gray-900",
-  "In Progress": "bg-blue-50/50 dark:bg-blue-950/20",
-  "In Review":   "bg-accent-50/50 dark:bg-accent-950/20",
-  "AI Reviewed": "bg-accent-50/50 dark:bg-accent-950/20",
-  "Done":        "bg-green-50/50 dark:bg-green-950/20",
-  "Cancelled":   "bg-gray-100/50 dark:bg-gray-800/30",
-};
-
-const STATUS_BADGE: Record<string, string> = {
-  "Todo":        "text-gray-600 dark:text-gray-400",
-  "In Progress": "text-blue-700 dark:text-blue-300",
-  "In Review":   "text-accent-700 dark:text-accent-300",
-  "AI Reviewed": "text-accent-700 dark:text-accent-300",
-  "Done":        "text-green-700 dark:text-green-300",
-  "Cancelled":   "text-gray-500 dark:text-gray-500",
-};
-
 const LABEL_W = 220;
 const BAR_H = 30;
 const ROW_H = 46;
 const AXIS_H = 28;
-
-function fmtAxisDate(d: Date, spanMs: number): string {
-  if (spanMs < 2 * 86_400_000) {
-    // Sub-2-day span: show time so adjacent ticks are distinguishable
-    return d.toLocaleTimeString('en-US', { hour: "2-digit", minute: "2-digit" });
-  }
-  return d.toLocaleDateString('en-US', { month: "short", day: "numeric" });
-}
-function fmtTooltipDate(d: Date): string {
-  return d.toLocaleDateString('en-US', { month: "short", day: "numeric", year: "numeric" });
-}
 
 interface TooltipState {
   issue: IssueWithStatus;
@@ -62,13 +37,214 @@ interface TooltipState {
   y: number;
 }
 
-const COMPLETED_STATUSES = new Set(["Done", "Cancelled"]);
+/** Vertical tick gridlines + the "today" marker, shared by the lane header and issue rows. */
+function GridLines({ ticks, range, nowPct, strong }: { ticks: Date[]; range: DateRange; nowPct: number; strong?: boolean }) {
+  return (
+    <>
+      {ticks.map((tick, i) => (
+        <div key={i} className="absolute top-0 h-full border-l border-gray-100 dark:border-gray-800" style={{ left: `${pctOf(tick.getTime(), range)}%` }} />
+      ))}
+      {nowPct >= 0 && nowPct <= 100 && (
+        <div
+          className={`absolute top-0 h-full ${strong ? "border-l-2 border-red-400/30" : "border-l border-red-300/30 dark:border-red-500/20"}`}
+          style={{ left: `${nowPct}%` }}
+        />
+      )}
+    </>
+  );
+}
 
-const ALL_TYPES = Object.keys(TYPE_COLORS);
+function TimelineToolbar({
+  issueCount, laneCount, showCompleted, setShowCompleted, panOffsetMs, setPanOffsetMs, zoom, setZoom, activeTypes, onToggleType,
+}: {
+  issueCount: number;
+  laneCount: number;
+  showCompleted: boolean;
+  setShowCompleted: Dispatch<SetStateAction<boolean>>;
+  panOffsetMs: number;
+  setPanOffsetMs: Dispatch<SetStateAction<number>>;
+  zoom: number;
+  setZoom: Dispatch<SetStateAction<number>>;
+  activeTypes: Set<string>;
+  onToggleType: (type: string) => void;
+}) {
+  const navBtn = "w-6 h-6 text-xs flex items-center justify-center rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300";
+  return (
+    <div className="flex items-center gap-3 py-2 mb-1 flex-wrap">
+      <span className="text-xs text-gray-500 dark:text-gray-400">
+        {issueCount} issue{issueCount !== 1 ? "s" : ""} across {laneCount} status{laneCount !== 1 ? "es" : ""}
+      </span>
+      <button
+        onClick={() => setShowCompleted((v) => !v)}
+        className={`flex items-center gap-1.5 px-2 h-6 text-xs rounded border transition-colors ${
+          showCompleted
+            ? "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+            : "bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-400"
+        }`}
+        title={showCompleted ? "Hide completed issues" : "Show completed issues"}
+      >
+        <span className={`w-1.5 h-1.5 rounded-full ${showCompleted ? "bg-green-500" : "bg-gray-400"}`} />
+        Show completed
+      </button>
+      <div className="ml-auto flex items-center gap-1">
+        <span className="text-xs text-gray-400 dark:text-gray-500 mr-1">Navigate</span>
+        <button onClick={() => setPanOffsetMs((o) => o - MONTH_MS)} className={navBtn} title="Back 1 month">«</button>
+        <button onClick={() => setPanOffsetMs((o) => o - WEEK_MS)} className={navBtn} title="Back 1 week">‹</button>
+        <button
+          onClick={() => setPanOffsetMs(0)}
+          className={`px-1.5 h-6 text-xs flex items-center justify-center rounded border bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 min-w-[40px] ${panOffsetMs !== 0 ? "border-brand-400 dark:border-brand-600" : "border-gray-200 dark:border-gray-700"}`}
+          title="Reset to today"
+        >Today</button>
+        <button onClick={() => setPanOffsetMs((o) => o + WEEK_MS)} className={navBtn} title="Forward 1 week">›</button>
+        <button onClick={() => setPanOffsetMs((o) => o + MONTH_MS)} className={navBtn} title="Forward 1 month">»</button>
+        <span className="text-xs text-gray-400 dark:text-gray-500 mx-2">|</span>
+        <span className="text-xs text-gray-400 dark:text-gray-500 mr-1">Zoom</span>
+        <button onClick={() => setZoom((z) => Math.max(0.5, +(z - 0.25).toFixed(2)))} className={navBtn}>−</button>
+        <button onClick={() => setZoom(1)} className="px-1.5 h-6 text-xs flex items-center justify-center rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 min-w-[40px]">{Math.round(zoom * 100)}%</button>
+        <button onClick={() => setZoom((z) => Math.min(5, +(z + 0.25).toFixed(2)))} className={navBtn}>+</button>
+      </div>
+      <div className="flex items-center gap-1">
+        {Object.entries(TYPE_COLORS).map(([type, cls]) => {
+          const isActive = activeTypes.has(type);
+          return (
+            <button
+              key={type}
+              onClick={() => onToggleType(type)}
+              title={isActive ? `Hide ${type}s` : `Show ${type}s`}
+              className={`flex items-center gap-1.5 px-2 h-6 text-xs rounded border transition-all select-none ${
+                isActive
+                  ? `${cls.bg} ${cls.border} ${cls.text} hover:brightness-95 dark:hover:brightness-110`
+                  : "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-600 opacity-50 hover:opacity-75"
+              }`}
+            >
+              <span
+                className="w-2.5 h-2.5 rounded border shrink-0"
+                style={isActive ? { background: cls.dot + "33", borderColor: cls.dot + "99" } : { background: "transparent", borderColor: "currentColor" }}
+              />
+              {type.charAt(0).toUpperCase() + type.slice(1)}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
-const DAY_MS = 86_400_000;
-const WEEK_MS = 7 * DAY_MS;
-const MONTH_MS = 30 * DAY_MS;
+function TimelineLane({
+  lane, laneIdx, ticks, range, nowPct, onIssueClick, setTooltip,
+}: {
+  lane: Lane;
+  laneIdx: number;
+  ticks: Date[];
+  range: DateRange;
+  nowPct: number;
+  onIssueClick: (issue: IssueWithStatus) => void;
+  setTooltip: (t: TooltipState | null) => void;
+}) {
+  return (
+    <div className={`${STATUS_BG[lane.name] ?? "bg-surface-raised dark:bg-surface-raised-dark"} ${laneIdx > 0 ? "border-t border-gray-200 dark:border-gray-700" : ""}`}>
+      {/* Lane header */}
+      <div className="flex items-center sticky top-[28px] z-[5]" style={{ height: 28 }}>
+        <div
+          className={`flex items-center gap-2 px-3 border-r border-gray-200 dark:border-gray-700 h-full ${STATUS_BG[lane.name] ?? ""} border-b border-gray-100 dark:border-gray-800`}
+          style={{ width: LABEL_W, minWidth: LABEL_W }}
+        >
+          <span className={`text-xs font-semibold truncate ${STATUS_BADGE[lane.name] ?? "text-gray-600 dark:text-gray-400"}`}>{lane.name}</span>
+          <span className="text-xs text-gray-400 dark:text-gray-500 ml-auto shrink-0">{lane.issues.length}</span>
+        </div>
+        <div className={`flex-1 h-full border-b border-gray-100 dark:border-gray-800 relative ${STATUS_BG[lane.name] ?? ""}`}>
+          <GridLines ticks={ticks} range={range} nowPct={nowPct} strong />
+        </div>
+      </div>
+
+      {/* Issue rows */}
+      {lane.issues.map((issue) => {
+        const { startPct: startP, spanPct: spanP, colors: cls, priorityColor: priColor } = computeIssueBar(issue, range);
+        return (
+          <div key={issue.id} className="flex items-center border-b border-gray-50 dark:border-gray-800" style={{ height: ROW_H }}>
+            <div
+              className="flex items-center gap-1.5 px-2 border-r border-gray-100 dark:border-gray-800 h-full shrink-0 overflow-hidden"
+              style={{ width: LABEL_W, minWidth: LABEL_W }}
+            >
+              <span className="text-[11px] text-gray-400 dark:text-gray-500 shrink-0">#{issue.issueNumber}</span>
+              <span className="text-[11px] text-gray-600 dark:text-gray-400 truncate" title={issue.title}>{issue.title}</span>
+            </div>
+            <div className="flex-1 relative h-full">
+              <GridLines ticks={ticks} range={range} nowPct={nowPct} />
+              <div
+                className={`absolute top-1/2 -translate-y-1/2 rounded-md border cursor-pointer
+                  transition-all hover:shadow-md hover:brightness-95 dark:hover:brightness-110
+                  flex items-center gap-1.5 px-2 overflow-hidden select-none
+                  ${cls.bg} ${cls.border}`}
+                style={{ left: `${startP}%`, width: `max(90px, ${spanP}%)`, height: BAR_H }}
+                onClick={() => onIssueClick(issue)}
+                onMouseEnter={(e) => {
+                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  setTooltip({ issue, x: rect.left + rect.width / 2, y: rect.top });
+                }}
+                onMouseLeave={() => setTooltip(null)}
+              >
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: priColor }} title={`Priority: ${issue.priority ?? "medium"}`} />
+                <span className={`text-xs font-medium truncate ${cls.text}`}>{issue.title}</span>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function TimelineTooltip({ tooltip }: { tooltip: TooltipState }) {
+  return (
+    <div
+      className="fixed z-50 pointer-events-none bg-surface-raised dark:bg-surface-raised-dark border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl p-3 text-xs max-w-xs"
+      style={{ left: tooltip.x, top: tooltip.y - 12, transform: "translate(-50%, -100%)" }}
+    >
+      <div className="font-semibold text-gray-900 dark:text-gray-100 mb-1.5 flex items-center gap-1.5">
+        <span className="text-gray-400 dark:text-gray-500">#{tooltip.issue.issueNumber}</span>
+        <span className="truncate">{tooltip.issue.title}</span>
+      </div>
+      <div className="space-y-0.5 text-gray-500 dark:text-gray-400">
+        <div className="flex gap-2">
+          <span className="w-14 shrink-0 text-gray-400">Created</span>
+          {fmtTooltipDate(new Date(tooltip.issue.createdAt))}
+        </div>
+        <div className="flex gap-2">
+          <span className="w-14 shrink-0 text-gray-400">Updated</span>
+          {fmtTooltipDate(new Date(tooltip.issue.updatedAt))}
+        </div>
+        {tooltip.issue.dueDate && (
+          <div className="flex gap-2">
+            <span className="w-14 shrink-0 text-gray-400">Due</span>
+            <span className={new Date(tooltip.issue.dueDate) < new Date(new Date().toDateString()) ? "text-red-500 font-medium" : ""}>
+              {fmtTooltipDate(new Date(tooltip.issue.dueDate))}
+            </span>
+          </div>
+        )}
+        <div className="flex gap-2">
+          <span className="w-14 shrink-0 text-gray-400">Type</span>
+          <span className="capitalize">{tooltip.issue.issueType ?? "task"}</span>
+        </div>
+        <div className="flex gap-2">
+          <span className="w-14 shrink-0 text-gray-400">Priority</span>
+          <span className="capitalize" style={{ color: PRIORITY_COLORS[tooltip.issue.priority ?? "medium"] }}>
+            {tooltip.issue.priority ?? "medium"}
+          </span>
+        </div>
+        {(tooltip.issue.tags ?? []).length > 0 && (
+          <div className="flex gap-2 flex-wrap pt-0.5">
+            {(tooltip.issue.tags ?? []).map((tag) => (
+              <span key={tag.id} className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
+                {tag.name}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineViewProps) {
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
@@ -80,84 +256,28 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
 
   const q = searchQuery?.toLowerCase() ?? "";
 
-  function toggleType(type: string) {
-    setActiveTypes((prev) => {
-      const next = new Set(prev);
-      if (next.has(type)) {
-        // Prevent deactivating the last active type — reset to all instead
-        if (next.size === 1) return new Set(ALL_TYPES);
-        next.delete(type);
-      } else {
-        next.add(type);
-      }
-      return next;
-    });
-  }
+  const toggleType = (type: string) => setActiveTypes((prev) => toggleTypeSet(prev, type));
 
-  const lanes = useMemo(() =>
-    columns
-      .filter((col) => showCompleted || !COMPLETED_STATUSES.has(col.name))
-      .map((col) => ({
-        name: col.name,
-        issues: col.issues.filter((i) => {
-          const type = i.issueType ?? "task";
-          if (!activeTypes.has(type)) return false;
-          return !q || i.title.toLowerCase().includes(q) || (i.description ?? "").toLowerCase().includes(q);
-        }),
-      }))
-      .filter((lane) => lane.issues.length > 0),
-    [columns, q, showCompleted, activeTypes]
+  const lanes = useMemo(
+    () => computeLanes(columns, { showCompleted, activeTypes, query: q }),
+    [columns, q, showCompleted, activeTypes],
   );
 
   const allIssues = useMemo(() => lanes.flatMap((l) => l.issues), [lanes]);
 
-  const baseRange = useMemo(() => {
-    if (allIssues.length === 0) {
-      const now = Date.now();
-      return { min: now - 7 * DAY_MS, max: now };
-    }
-    const dates = allIssues.flatMap((i) => [
-      new Date(i.createdAt).getTime(),
-      i.dueDate ? new Date(i.dueDate).getTime() : new Date(i.updatedAt).getTime(),
-    ]);
-    const rawMin = Math.min(...dates);
-    const rawMax = Math.max(...dates, Date.now());
-    const span = Math.max(rawMax - rawMin, DAY_MS); // at least 1 day
-    const pad = span * 0.04;
-    return { min: rawMin - pad, max: rawMax + pad };
-  }, [allIssues]);
+  const baseRange = useMemo(() => computeBaseRange(allIssues), [allIssues]);
 
   const range = useMemo(() => ({
     min: baseRange.min + panOffsetMs,
     max: baseRange.max + panOffsetMs,
   }), [baseRange, panOffsetMs]);
 
-  const ticks = useMemo(() => {
-    const span = range.max - range.min;
-    const days = span / 86_400_000;
-    const count = Math.min(10, Math.max(4, Math.floor(days / 3)));
-    const raw = Array.from({ length: count + 1 }, (_, i) =>
-      new Date(range.min + (i / count) * span)
-    );
-    // Remove adjacent ticks that would render identical labels
-    const deduped: Date[] = [];
-    let lastLabel = "";
-    for (const tick of raw) {
-      const label = fmtAxisDate(tick, span);
-      if (label !== lastLabel) {
-        deduped.push(tick);
-        lastLabel = label;
-      }
-    }
-    return deduped;
-  }, [range]);
+  const ticks = useMemo(() => computeTicks(range), [range]);
 
   const span = range.max - range.min;
   const now = Date.now();
 
-  function pct(ts: number): number {
-    return ((ts - range.min) / (range.max - range.min)) * 100;
-  }
+  const pct = (ts: number): number => pctOf(ts, range);
 
   if (allIssues.length === 0) {
     return (
@@ -175,95 +295,18 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
 
   return (
     <div className="flex flex-col flex-1 min-h-0 px-4 pb-4">
-      {/* Toolbar */}
-      <div className="flex items-center gap-3 py-2 mb-1 flex-wrap">
-        <span className="text-xs text-gray-500 dark:text-gray-400">
-          {allIssues.length} issue{allIssues.length !== 1 ? "s" : ""} across {lanes.length} status{lanes.length !== 1 ? "es" : ""}
-        </span>
-        <button
-          onClick={() => setShowCompleted((v) => !v)}
-          className={`flex items-center gap-1.5 px-2 h-6 text-xs rounded border transition-colors ${
-            showCompleted
-              ? "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-              : "bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-400"
-          }`}
-          title={showCompleted ? "Hide completed issues" : "Show completed issues"}
-        >
-          <span className={`w-1.5 h-1.5 rounded-full ${showCompleted ? "bg-green-500" : "bg-gray-400"}`} />
-          Show completed
-        </button>
-        <div className="ml-auto flex items-center gap-1">
-          {/* Pan navigation */}
-          <span className="text-xs text-gray-400 dark:text-gray-500 mr-1">Navigate</span>
-          <button
-            onClick={() => setPanOffsetMs((o) => o - MONTH_MS)}
-            className="w-6 h-6 text-xs flex items-center justify-center rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300"
-            title="Back 1 month"
-          >«</button>
-          <button
-            onClick={() => setPanOffsetMs((o) => o - WEEK_MS)}
-            className="w-6 h-6 text-xs flex items-center justify-center rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300"
-            title="Back 1 week"
-          >‹</button>
-          <button
-            onClick={() => setPanOffsetMs(0)}
-            className={`px-1.5 h-6 text-xs flex items-center justify-center rounded border bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 min-w-[40px] ${panOffsetMs !== 0 ? "border-brand-400 dark:border-brand-600" : "border-gray-200 dark:border-gray-700"}`}
-            title="Reset to today"
-          >Today</button>
-          <button
-            onClick={() => setPanOffsetMs((o) => o + WEEK_MS)}
-            className="w-6 h-6 text-xs flex items-center justify-center rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300"
-            title="Forward 1 week"
-          >›</button>
-          <button
-            onClick={() => setPanOffsetMs((o) => o + MONTH_MS)}
-            className="w-6 h-6 text-xs flex items-center justify-center rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300"
-            title="Forward 1 month"
-          >»</button>
-          <span className="text-xs text-gray-400 dark:text-gray-500 mx-2">|</span>
-          <span className="text-xs text-gray-400 dark:text-gray-500 mr-1">Zoom</span>
-          <button
-            onClick={() => setZoom((z) => Math.max(0.5, +(z - 0.25).toFixed(2)))}
-            className="w-6 h-6 text-xs flex items-center justify-center rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300"
-          >−</button>
-          <button
-            onClick={() => setZoom(1)}
-            className="px-1.5 h-6 text-xs flex items-center justify-center rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 min-w-[40px]"
-          >{Math.round(zoom * 100)}%</button>
-          <button
-            onClick={() => setZoom((z) => Math.min(5, +(z + 0.25).toFixed(2)))}
-            className="w-6 h-6 text-xs flex items-center justify-center rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300"
-          >+</button>
-        </div>
-        {/* Legend (interactive filter) */}
-        <div className="flex items-center gap-1">
-          {Object.entries(TYPE_COLORS).map(([type, cls]) => {
-            const isActive = activeTypes.has(type);
-            return (
-              <button
-                key={type}
-                onClick={() => toggleType(type)}
-                title={isActive ? `Hide ${type}s` : `Show ${type}s`}
-                className={`flex items-center gap-1.5 px-2 h-6 text-xs rounded border transition-all select-none ${
-                  isActive
-                    ? `${cls.bg} ${cls.border} ${cls.text} hover:brightness-95 dark:hover:brightness-110`
-                    : "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-600 opacity-50 hover:opacity-75"
-                }`}
-              >
-                <span
-                  className="w-2.5 h-2.5 rounded border shrink-0"
-                  style={
-                    isActive
-                      ? { background: cls.dot + "33", borderColor: cls.dot + "99" }
-                      : { background: "transparent", borderColor: "currentColor" }
-                  }
-                />
-                {type.charAt(0).toUpperCase() + type.slice(1)}
-              </button>
-            );
-          })}
-        </div>
-      </div>
+      <TimelineToolbar
+        issueCount={allIssues.length}
+        laneCount={lanes.length}
+        showCompleted={showCompleted}
+        setShowCompleted={setShowCompleted}
+        panOffsetMs={panOffsetMs}
+        setPanOffsetMs={setPanOffsetMs}
+        zoom={zoom}
+        setZoom={setZoom}
+        activeTypes={activeTypes}
+        onToggleType={toggleType}
+      />
 
       {/* Timeline scroll area */}
       <div
@@ -302,158 +345,21 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
 
           {/* Status lanes */}
           {lanes.map((lane, laneIdx) => (
-            <div key={lane.name} className={`${STATUS_BG[lane.name] ?? "bg-surface-raised dark:bg-surface-raised-dark"} ${laneIdx > 0 ? "border-t border-gray-200 dark:border-gray-700" : ""}`}>
-              {/* Lane header */}
-              <div className="flex items-center sticky top-[28px] z-[5]" style={{ height: 28 }}>
-                <div
-                  className={`flex items-center gap-2 px-3 border-r border-gray-200 dark:border-gray-700 h-full ${STATUS_BG[lane.name] ?? ""} border-b border-gray-100 dark:border-gray-800`}
-                  style={{ width: LABEL_W, minWidth: LABEL_W }}
-                >
-                  <span className={`text-xs font-semibold truncate ${STATUS_BADGE[lane.name] ?? "text-gray-600 dark:text-gray-400"}`}>
-                    {lane.name}
-                  </span>
-                  <span className="text-xs text-gray-400 dark:text-gray-500 ml-auto shrink-0">
-                    {lane.issues.length}
-                  </span>
-                </div>
-                {/* Grid line for lane header */}
-                <div className={`flex-1 h-full border-b border-gray-100 dark:border-gray-800 relative ${STATUS_BG[lane.name] ?? ""}`}>
-                  {ticks.map((tick, i) => (
-                    <div key={i} className="absolute top-0 h-full border-l border-gray-100 dark:border-gray-800" style={{ left: `${pct(tick.getTime())}%` }} />
-                  ))}
-                  {nowPct >= 0 && nowPct <= 100 && (
-                    <div className="absolute top-0 h-full border-l-2 border-red-400/30" style={{ left: `${nowPct}%` }} />
-                  )}
-                </div>
-              </div>
-
-              {/* Issue rows */}
-              {lane.issues.map((issue) => {
-                const start = new Date(issue.createdAt).getTime();
-                const end = issue.dueDate
-                  ? new Date(issue.dueDate).getTime()
-                  : new Date(issue.updatedAt).getTime();
-                const startP = pct(start);
-                const spanP = Math.max(0, pct(end) - startP);
-                const type = issue.issueType ?? "task";
-                const cls = TYPE_COLORS[type] ?? TYPE_COLORS.task;
-                const priColor = PRIORITY_COLORS[issue.priority ?? "medium"] ?? PRIORITY_COLORS.medium;
-
-                return (
-                  <div key={issue.id} className="flex items-center border-b border-gray-50 dark:border-gray-800" style={{ height: ROW_H }}>
-                    {/* Label column */}
-                    <div
-                      className="flex items-center gap-1.5 px-2 border-r border-gray-100 dark:border-gray-800 h-full shrink-0 overflow-hidden"
-                      style={{ width: LABEL_W, minWidth: LABEL_W }}
-                    >
-                      <span className="text-[11px] text-gray-400 dark:text-gray-500 shrink-0">
-                        #{issue.issueNumber}
-                      </span>
-                      <span className="text-[11px] text-gray-600 dark:text-gray-400 truncate" title={issue.title}>
-                        {issue.title}
-                      </span>
-                    </div>
-
-                    {/* Bar area */}
-                    <div className="flex-1 relative h-full">
-                      {/* Grid lines */}
-                      {ticks.map((tick, i) => (
-                        <div key={i} className="absolute top-0 h-full border-l border-gray-100 dark:border-gray-800" style={{ left: `${pct(tick.getTime())}%` }} />
-                      ))}
-                      {/* Today line */}
-                      {nowPct >= 0 && nowPct <= 100 && (
-                        <div className="absolute top-0 h-full border-l border-red-300/30 dark:border-red-500/20" style={{ left: `${nowPct}%` }} />
-                      )}
-
-                      {/* Issue bar */}
-                      <div
-                        className={`absolute top-1/2 -translate-y-1/2 rounded-md border cursor-pointer
-                          transition-all hover:shadow-md hover:brightness-95 dark:hover:brightness-110
-                          flex items-center gap-1.5 px-2 overflow-hidden select-none
-                          ${cls.bg} ${cls.border}`}
-                        style={{
-                          left: `${startP}%`,
-                          width: `max(90px, ${spanP}%)`,
-                          height: BAR_H,
-                        }}
-                        onClick={() => onIssueClick(issue)}
-                        onMouseEnter={(e) => {
-                          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                          setTooltip({ issue, x: rect.left + rect.width / 2, y: rect.top });
-                        }}
-                        onMouseLeave={() => setTooltip(null)}
-                      >
-                        <span
-                          className="w-2 h-2 rounded-full shrink-0"
-                          style={{ backgroundColor: priColor }}
-                          title={`Priority: ${issue.priority ?? "medium"}`}
-                        />
-                        <span className={`text-xs font-medium truncate ${cls.text}`}>
-                          {issue.title}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            <TimelineLane
+              key={lane.name}
+              lane={lane}
+              laneIdx={laneIdx}
+              ticks={ticks}
+              range={range}
+              nowPct={nowPct}
+              onIssueClick={onIssueClick}
+              setTooltip={setTooltip}
+            />
           ))}
         </div>
       </div>
 
-      {/* Floating tooltip */}
-      {tooltip && (
-        <div
-          className="fixed z-50 pointer-events-none bg-surface-raised dark:bg-surface-raised-dark border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl p-3 text-xs max-w-xs"
-          style={{
-            left: tooltip.x,
-            top: tooltip.y - 12,
-            transform: "translate(-50%, -100%)",
-          }}
-        >
-          <div className="font-semibold text-gray-900 dark:text-gray-100 mb-1.5 flex items-center gap-1.5">
-            <span className="text-gray-400 dark:text-gray-500">#{tooltip.issue.issueNumber}</span>
-            <span className="truncate">{tooltip.issue.title}</span>
-          </div>
-          <div className="space-y-0.5 text-gray-500 dark:text-gray-400">
-            <div className="flex gap-2">
-              <span className="w-14 shrink-0 text-gray-400">Created</span>
-              {fmtTooltipDate(new Date(tooltip.issue.createdAt))}
-            </div>
-            <div className="flex gap-2">
-              <span className="w-14 shrink-0 text-gray-400">Updated</span>
-              {fmtTooltipDate(new Date(tooltip.issue.updatedAt))}
-            </div>
-            {tooltip.issue.dueDate && (
-              <div className="flex gap-2">
-                <span className="w-14 shrink-0 text-gray-400">Due</span>
-                <span className={new Date(tooltip.issue.dueDate) < new Date(new Date().toDateString()) ? "text-red-500 font-medium" : ""}>
-                  {fmtTooltipDate(new Date(tooltip.issue.dueDate))}
-                </span>
-              </div>
-            )}
-            <div className="flex gap-2">
-              <span className="w-14 shrink-0 text-gray-400">Type</span>
-              <span className="capitalize">{tooltip.issue.issueType ?? "task"}</span>
-            </div>
-            <div className="flex gap-2">
-              <span className="w-14 shrink-0 text-gray-400">Priority</span>
-              <span className="capitalize" style={{ color: PRIORITY_COLORS[tooltip.issue.priority ?? "medium"] }}>
-                {tooltip.issue.priority ?? "medium"}
-              </span>
-            </div>
-            {(tooltip.issue.tags ?? []).length > 0 && (
-              <div className="flex gap-2 flex-wrap pt-0.5">
-                {(tooltip.issue.tags ?? []).map((tag) => (
-                  <span key={tag.id} className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
-                    {tag.name}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      {tooltip && <TimelineTooltip tooltip={tooltip} />}
     </div>
   );
 }
