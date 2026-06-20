@@ -3,11 +3,10 @@ import { parseSessionSummary } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
 import * as realGitService from "./git.service.js";
 import { WorkspaceError, type GitService } from "./workspace-internals.js";
-import { readSessionStdoutFile, getSessionMessageRows } from "../repositories/session.repository.js";
+import { getSessionMessageRows, loadSessionMessageRowsWithFileFallback } from "../repositories/session.repository.js";
 import {
   getHandoffWorkspaceContext,
   getHandoffSessionRows,
-  getHandoffSessionMessageRows,
   getHandoffDiffComments,
   insertHandoffArtifact,
   getHandoffWorkspaceIssueId,
@@ -143,22 +142,7 @@ export async function generateGithubHandoffDraft(args: {
 
   const sessionRows = await getHandoffSessionRows(workspaceId, database);
   const sessionIds = sessionRows.map((session) => session.id);
-  let messageRows: Array<{ type: string; data: string | null; sessionId: string }> = [];
-  if (sessionIds.length > 0) {
-    const needsDb: string[] = [];
-    for (const sid of sessionIds) {
-      const fileContent = readSessionStdoutFile(sid);
-      if (fileContent !== null) {
-        messageRows.push({ type: "stdout", data: fileContent, sessionId: sid });
-      } else {
-        needsDb.push(sid);
-      }
-    }
-    if (needsDb.length > 0) {
-      const dbRows = await getHandoffSessionMessageRows(needsDb, database);
-      messageRows = messageRows.concat(dbRows);
-    }
-  }
+  const messageRows = await loadSessionMessageRowsWithFileFallback(sessionIds, database);
   const summary = parseSessionSummary(messageRows);
   const statsSummary = sessionRows
     .map((session) => {

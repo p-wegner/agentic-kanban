@@ -1,5 +1,5 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
-import { diffComments, issues, projects, projectStatuses, sessionMessages, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { and, desc, eq } from "drizzle-orm";
+import { diffComments, issues, projects, projectStatuses, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
@@ -45,13 +45,6 @@ export async function getHandoffBundleSessions(workspaceId: string, database: Da
     .from(sessions)
     .where(eq(sessions.workspaceId, workspaceId))
     .orderBy(desc(sessions.startedAt));
-}
-
-export async function getHandoffBundleSessionMessages(sessionIds: string[], database: Database = db) {
-  return database
-    .select({ type: sessionMessages.type, data: sessionMessages.data, sessionId: sessionMessages.sessionId })
-    .from(sessionMessages)
-    .where(inArray(sessionMessages.sessionId, sessionIds));
 }
 
 export async function getHandoffBundleDiffComments(workspaceId: string, database: Database = db) {
