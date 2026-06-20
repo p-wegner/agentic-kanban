@@ -344,6 +344,235 @@ export interface ComputeInsightsParams {
  * Pure application logic (transport-free): the route adapter parses query params
  * and serializes the returned {@link InsightsData}.
  */
+type InsightsSessionRow = Awaited<ReturnType<typeof getInsightsSessionRows>>[number];
+
+interface ContextIssueAgg {
+  issueId: string;
+  issueNumber: number | null;
+  issueTitle: string;
+  sessionCount: number;
+  contextTokens: number;
+  totalCostUsd: number;
+}
+
+/**
+ * Mutable accumulator for the single-pass session aggregation. computeInsights
+ * seeds one, folds every row through {@link accumulateInsightsRow}, then reads the
+ * buckets/counters out for finalization. Split out so the (historically dense)
+ * aggregation is unit-testable without a database.
+ */
+export interface InsightsAccumulator {
+  bySkill: Map<string, SkillBucket>;
+  byModel: Map<string, ModelBucket>;
+  byIssueType: Map<string, IssueTypeBucket>;
+  byPriority: Map<string, PriorityBucket>;
+  byProviderProfile: Map<string, ProviderProfileBucket>;
+  timeSeries: Map<string, TimeSeriesBucket>;
+  topExpensive: InsightsData["topExpensive"];
+  contextByIssue: Map<string, ContextIssueAgg>;
+  frictionByTool: Map<string, { calls: number; failed: number }>;
+  repeatedCommandAgg: Map<string, { count: number; sessions: number }>;
+  totalCostUsd: number;
+  totalTokens: number;
+  sessionCount: number;
+  successCount: number;
+  earliestStartedAt: string | null;
+  contextWindowTotalTokens: number;
+  frictionTotalToolCalls: number;
+  frictionFailedToolCalls: number;
+  frictionErrorTotal: number;
+  sessionsWithFriction: number;
+}
+
+export function createInsightsAccumulator(): InsightsAccumulator {
+  return {
+    bySkill: new Map(),
+    byModel: new Map(),
+    byIssueType: new Map(),
+    byPriority: new Map(),
+    byProviderProfile: new Map(),
+    timeSeries: new Map(),
+    topExpensive: [],
+    contextByIssue: new Map(),
+    frictionByTool: new Map(),
+    repeatedCommandAgg: new Map(),
+    totalCostUsd: 0,
+    totalTokens: 0,
+    sessionCount: 0,
+    successCount: 0,
+    earliestStartedAt: null,
+    contextWindowTotalTokens: 0,
+    frictionTotalToolCalls: 0,
+    frictionFailedToolCalls: 0,
+    frictionErrorTotal: 0,
+    sessionsWithFriction: 0,
+  };
+}
+
+/** Window-dependent inputs the per-row aggregation needs from computeInsights. */
+export interface AccumulateContext {
+  /** ISO fallback for a session with no startedAt (the panel window's end). */
+  fallbackStartedAtIso: string;
+  /** Start of the fixed 7-day context-consumer leaderboard window, ISO. */
+  contextWindowFromIso: string;
+}
+
+/** Fold one session row into the accumulator. Pure (mutates only `acc`). */
+export function accumulateInsightsRow(acc: InsightsAccumulator, row: InsightsSessionRow, ctx: AccumulateContext): void {
+  const { bySkill, byModel, byIssueType, byPriority, byProviderProfile, timeSeries, topExpensive, contextByIssue, frictionByTool, repeatedCommandAgg } = acc;
+  const stats = parseStats(row.stats);
+  const success = isSuccessful(stats, row.exitCode);
+  const resolvedModel = stats?.model || row.wsModel || "Unknown";
+  // Prefer the skill captured on the session at launch; fall back to the
+  // workspace's current skill for historical sessions that predate per-session
+  // attribution (graceful degradation).
+  const resolvedSkillId = row.sessionSkillId ?? row.wsSkillId;
+  const resolvedSkillName = row.sessionSkillName ?? row.skillName;
+  const skillMapKey = resolvedSkillId ?? "__no_skill__";
+  const skillName = resolvedSkillName ?? "No Skill";
+  const startedAtIso = toIsoStringOrNull(row.startedAt) ?? ctx.fallbackStartedAtIso;
+  const dateKey = toDateKey(startedAtIso);
+  const tokens = stats ? stats.inputTokens + stats.outputTokens : 0;
+
+  acc.sessionCount += 1;
+  if (success) acc.successCount += 1;
+  if (!acc.earliestStartedAt || startedAtIso < acc.earliestStartedAt) {
+    acc.earliestStartedAt = startedAtIso;
+  }
+
+  if (stats?.friction) {
+    acc.sessionsWithFriction += 1;
+    acc.frictionTotalToolCalls += stats.friction.totalToolCalls;
+    acc.frictionFailedToolCalls += stats.friction.failedToolCalls;
+    acc.frictionErrorTotal += stats.friction.errorCount;
+    for (const t of stats.friction.tools ?? []) {
+      const e = frictionByTool.get(t.tool) ?? { calls: 0, failed: 0 };
+      e.calls += t.count;
+      e.failed += t.failedCount;
+      frictionByTool.set(t.tool, e);
+    }
+    for (const rc of stats.friction.repeatedCommands ?? []) {
+      const e = repeatedCommandAgg.get(rc.command) ?? { count: 0, sessions: 0 };
+      e.count += rc.count;
+      e.sessions += 1;
+      repeatedCommandAgg.set(rc.command, e);
+    }
+  }
+
+  const skillBucket = bySkill.get(skillMapKey) ?? {
+    skillId: resolvedSkillId,
+    skillName,
+    ...createAggregateBucket(),
+  };
+  applyAggregate(skillBucket, stats, success);
+  bySkill.set(skillMapKey, skillBucket);
+
+  const modelBucket = byModel.get(resolvedModel) ?? {
+    model: resolvedModel,
+    ...createAggregateBucket(),
+  };
+  applyAggregate(modelBucket, stats, success);
+  byModel.set(resolvedModel, modelBucket);
+
+  const issueTypeBucket = byIssueType.get(row.issueType) ?? {
+    issueType: row.issueType,
+    sessionCount: 0,
+    successCount: 0,
+    totalCostUsd: 0,
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+  };
+  issueTypeBucket.sessionCount += 1;
+  if (success) issueTypeBucket.successCount += 1;
+  if (stats) {
+    issueTypeBucket.totalCostUsd += stats.totalCostUsd;
+    issueTypeBucket.totalInputTokens += stats.inputTokens;
+    issueTypeBucket.totalOutputTokens += stats.outputTokens;
+  }
+  byIssueType.set(row.issueType, issueTypeBucket);
+
+  const priorityBucket = byPriority.get(row.issuePriority) ?? {
+    priority: row.issuePriority,
+    sessionCount: 0,
+    successCount: 0,
+    totalCostUsd: 0,
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+  };
+  priorityBucket.sessionCount += 1;
+  if (success) priorityBucket.successCount += 1;
+  if (stats) {
+    priorityBucket.totalCostUsd += stats.totalCostUsd;
+    priorityBucket.totalInputTokens += stats.inputTokens;
+    priorityBucket.totalOutputTokens += stats.outputTokens;
+  }
+  byPriority.set(row.issuePriority, priorityBucket);
+
+  const provider = row.wsProvider ?? "unknown";
+  const profile = row.wsClaudeProfile ?? "";
+  const ppKey = `${provider}::${profile}`;
+  const ppBucket = byProviderProfile.get(ppKey) ?? {
+    provider,
+    profile,
+    activeWorkspaceIds: new Set<string>(),
+    ...createAggregateBucket(),
+  };
+  applyAggregate(ppBucket, stats, success);
+  byProviderProfile.set(ppKey, ppBucket);
+
+  const timeSeriesBucket = timeSeries.get(dateKey) ?? {
+    date: dateKey,
+    sessionCount: 0,
+    successCount: 0,
+    totalCostUsd: 0,
+  };
+  timeSeriesBucket.sessionCount += 1;
+  if (success) timeSeriesBucket.successCount += 1;
+  if (stats) timeSeriesBucket.totalCostUsd += stats.totalCostUsd;
+  timeSeries.set(dateKey, timeSeriesBucket);
+
+  if (stats) {
+    acc.totalCostUsd += stats.totalCostUsd;
+    acc.totalTokens += tokens;
+    topExpensive.push({
+      sessionId: row.sessionId,
+      workspaceId: row.workspaceId,
+      issueId: row.issueId,
+      issueNumber: row.issueNumber,
+      issueTitle: row.issueTitle,
+      skillName: row.skillName,
+      model: resolvedModel || null,
+      totalCostUsd: stats.totalCostUsd,
+      totalTokens: tokens,
+      numTurns: stats.numTurns,
+      durationMs: stats.durationMs,
+      success,
+      startedAt: startedAtIso,
+    });
+  }
+
+  // Context-consumer leaderboard: only sessions within the fixed 7-day window.
+  if (startedAtIso >= ctx.contextWindowFromIso) {
+    const sessionContextTokens = contextTokensFor(stats);
+    acc.contextWindowTotalTokens += sessionContextTokens;
+    const existing = contextByIssue.get(row.issueId);
+    if (existing) {
+      existing.sessionCount += 1;
+      existing.contextTokens += sessionContextTokens;
+      existing.totalCostUsd += stats?.totalCostUsd ?? 0;
+    } else {
+      contextByIssue.set(row.issueId, {
+        issueId: row.issueId,
+        issueNumber: row.issueNumber,
+        issueTitle: row.issueTitle,
+        sessionCount: 1,
+        contextTokens: sessionContextTokens,
+        totalCostUsd: stats?.totalCostUsd ?? 0,
+      });
+    }
+  }
+}
+
 export async function computeInsights(database: Database, params: ComputeInsightsParams): Promise<InsightsData> {
   const { projectId, range } = params;
 
@@ -366,36 +595,14 @@ export async function computeInsights(database: Database, params: ComputeInsight
   // Fetch active workspace IDs grouped by provider/profile for the ledger
   const activeWorkspaceRows = await getActiveWorkspacesForProject(projectId, database);
 
-  const bySkill = new Map<string, SkillBucket>();
-  const byModel = new Map<string, ModelBucket>();
-  const byIssueType = new Map<string, IssueTypeBucket>();
-  const byPriority = new Map<string, PriorityBucket>();
-  const byProviderProfile = new Map<string, ProviderProfileBucket>();
-  const timeSeries = new Map<string, TimeSeriesBucket>();
-  const topExpensive: InsightsData["topExpensive"] = [];
+  const acc = createInsightsAccumulator();
 
   // Per-issue context-token leaderboard over a FIXED last-7-days window,
   // independent of the panel's range selector (the #751 feature is explicitly
   // "Top context consumers in the last 7 days"). When the selected range is
   // wider (30d/90d/all) we still only count sessions inside this window.
   const contextWindowFrom = startOfUtcDay(addUtcDays(now, -(RANGE_DAYS["7d"] - 1)));
-  const contextByIssue = new Map<string, {
-    issueId: string;
-    issueNumber: number | null;
-    issueTitle: string;
-    sessionCount: number;
-    contextTokens: number;
-    totalCostUsd: number;
-  }>();
-  let contextWindowTotalTokens = 0;
 
-  // Friction roll-up across the window (only from sessions with persisted friction).
-  const frictionByTool = new Map<string, { calls: number; failed: number }>();
-  const repeatedCommandAgg = new Map<string, { count: number; sessions: number }>();
-  let frictionTotalToolCalls = 0;
-  let frictionFailedToolCalls = 0;
-  let frictionErrorTotal = 0;
-  let sessionsWithFriction = 0;
 
   // Pre-build a map from provider/profile key to active workspace IDs so the
   // ledger shows currently-running workspace counts separately from session history.
@@ -412,165 +619,17 @@ export async function computeInsights(database: Database, params: ComputeInsight
     }
   }
 
-  let totalCostUsd = 0;
-  let totalTokens = 0;
-  let sessionCount = 0;
-  let successCount = 0;
-  let earliestStartedAt: string | null = null;
 
-  for (const row of rows) {
-    const stats = parseStats(row.stats);
-    const success = isSuccessful(stats, row.exitCode);
-    const resolvedModel = stats?.model || row.wsModel || "Unknown";
-    // Prefer the skill captured on the session at launch; fall back to the
-    // workspace's current skill for historical sessions that predate per-session
-    // attribution (graceful degradation).
-    const resolvedSkillId = row.sessionSkillId ?? row.wsSkillId;
-    const resolvedSkillName = row.sessionSkillName ?? row.skillName;
-    const skillMapKey = resolvedSkillId ?? "__no_skill__";
-    const skillName = resolvedSkillName ?? "No Skill";
-    const startedAtIso = toIsoStringOrNull(row.startedAt) ?? dateTo;
-    const dateKey = toDateKey(startedAtIso);
-    const tokens = stats ? stats.inputTokens + stats.outputTokens : 0;
+  const accCtx: AccumulateContext = { fallbackStartedAtIso: dateTo, contextWindowFromIso: contextWindowFrom.toISOString() };
+  for (const row of rows) accumulateInsightsRow(acc, row, accCtx);
 
-    sessionCount += 1;
-    if (success) successCount += 1;
-    if (!earliestStartedAt || startedAtIso < earliestStartedAt) {
-      earliestStartedAt = startedAtIso;
-    }
-
-    if (stats?.friction) {
-      sessionsWithFriction += 1;
-      frictionTotalToolCalls += stats.friction.totalToolCalls;
-      frictionFailedToolCalls += stats.friction.failedToolCalls;
-      frictionErrorTotal += stats.friction.errorCount;
-      for (const t of stats.friction.tools ?? []) {
-        const e = frictionByTool.get(t.tool) ?? { calls: 0, failed: 0 };
-        e.calls += t.count;
-        e.failed += t.failedCount;
-        frictionByTool.set(t.tool, e);
-      }
-      for (const rc of stats.friction.repeatedCommands ?? []) {
-        const e = repeatedCommandAgg.get(rc.command) ?? { count: 0, sessions: 0 };
-        e.count += rc.count;
-        e.sessions += 1;
-        repeatedCommandAgg.set(rc.command, e);
-      }
-    }
-
-    const skillBucket = bySkill.get(skillMapKey) ?? {
-      skillId: resolvedSkillId,
-      skillName,
-      ...createAggregateBucket(),
-    };
-    applyAggregate(skillBucket, stats, success);
-    bySkill.set(skillMapKey, skillBucket);
-
-    const modelBucket = byModel.get(resolvedModel) ?? {
-      model: resolvedModel,
-      ...createAggregateBucket(),
-    };
-    applyAggregate(modelBucket, stats, success);
-    byModel.set(resolvedModel, modelBucket);
-
-    const issueTypeBucket = byIssueType.get(row.issueType) ?? {
-      issueType: row.issueType,
-      sessionCount: 0,
-      successCount: 0,
-      totalCostUsd: 0,
-      totalInputTokens: 0,
-      totalOutputTokens: 0,
-    };
-    issueTypeBucket.sessionCount += 1;
-    if (success) issueTypeBucket.successCount += 1;
-    if (stats) {
-      issueTypeBucket.totalCostUsd += stats.totalCostUsd;
-      issueTypeBucket.totalInputTokens += stats.inputTokens;
-      issueTypeBucket.totalOutputTokens += stats.outputTokens;
-    }
-    byIssueType.set(row.issueType, issueTypeBucket);
-
-    const priorityBucket = byPriority.get(row.issuePriority) ?? {
-      priority: row.issuePriority,
-      sessionCount: 0,
-      successCount: 0,
-      totalCostUsd: 0,
-      totalInputTokens: 0,
-      totalOutputTokens: 0,
-    };
-    priorityBucket.sessionCount += 1;
-    if (success) priorityBucket.successCount += 1;
-    if (stats) {
-      priorityBucket.totalCostUsd += stats.totalCostUsd;
-      priorityBucket.totalInputTokens += stats.inputTokens;
-      priorityBucket.totalOutputTokens += stats.outputTokens;
-    }
-    byPriority.set(row.issuePriority, priorityBucket);
-
-    const provider = row.wsProvider ?? "unknown";
-    const profile = row.wsClaudeProfile ?? "";
-    const ppKey = `${provider}::${profile}`;
-    const ppBucket = byProviderProfile.get(ppKey) ?? {
-      provider,
-      profile,
-      activeWorkspaceIds: new Set<string>(),
-      ...createAggregateBucket(),
-    };
-    applyAggregate(ppBucket, stats, success);
-    byProviderProfile.set(ppKey, ppBucket);
-
-    const timeSeriesBucket = timeSeries.get(dateKey) ?? {
-      date: dateKey,
-      sessionCount: 0,
-      successCount: 0,
-      totalCostUsd: 0,
-    };
-    timeSeriesBucket.sessionCount += 1;
-    if (success) timeSeriesBucket.successCount += 1;
-    if (stats) timeSeriesBucket.totalCostUsd += stats.totalCostUsd;
-    timeSeries.set(dateKey, timeSeriesBucket);
-
-    if (stats) {
-      totalCostUsd += stats.totalCostUsd;
-      totalTokens += tokens;
-      topExpensive.push({
-        sessionId: row.sessionId,
-        workspaceId: row.workspaceId,
-        issueId: row.issueId,
-        issueNumber: row.issueNumber,
-        issueTitle: row.issueTitle,
-        skillName: row.skillName,
-        model: resolvedModel || null,
-        totalCostUsd: stats.totalCostUsd,
-        totalTokens: tokens,
-        numTurns: stats.numTurns,
-        durationMs: stats.durationMs,
-        success,
-        startedAt: startedAtIso,
-      });
-    }
-
-    // Context-consumer leaderboard: only sessions within the fixed 7-day window.
-    if (startedAtIso >= contextWindowFrom.toISOString()) {
-      const sessionContextTokens = contextTokensFor(stats);
-      contextWindowTotalTokens += sessionContextTokens;
-      const existing = contextByIssue.get(row.issueId);
-      if (existing) {
-        existing.sessionCount += 1;
-        existing.contextTokens += sessionContextTokens;
-        existing.totalCostUsd += stats?.totalCostUsd ?? 0;
-      } else {
-        contextByIssue.set(row.issueId, {
-          issueId: row.issueId,
-          issueNumber: row.issueNumber,
-          issueTitle: row.issueTitle,
-          sessionCount: 1,
-          contextTokens: sessionContextTokens,
-          totalCostUsd: stats?.totalCostUsd ?? 0,
-        });
-      }
-    }
-  }
+  const {
+    bySkill, byModel, byIssueType, byPriority, byProviderProfile, timeSeries,
+    topExpensive, contextByIssue, frictionByTool, repeatedCommandAgg,
+    sessionCount, successCount, earliestStartedAt, totalCostUsd, totalTokens,
+    contextWindowTotalTokens, sessionsWithFriction, frictionTotalToolCalls,
+    frictionFailedToolCalls, frictionErrorTotal,
+  } = acc;
 
   const effectiveDateFrom = range === "all"
     ? (earliestStartedAt ?? dateTo)
