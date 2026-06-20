@@ -2,7 +2,7 @@
 // to print (the caller does the console.log) so the formatting is unit-testable
 // with exact-string assertions and kept out of the giant command handlers.
 
-import type { SessionSummary } from "@agentic-kanban/shared";
+import { formatDurationStr, type SessionSummary } from "@agentic-kanban/shared";
 
 export interface IssueSummaryRenderInput {
   num: number;
@@ -81,6 +81,72 @@ export function buildIssueSummaryLines(input: IssueSummaryRenderInput): string[]
     }
   }
 
+  lines.push("");
+
+  return lines;
+}
+
+export interface IssueStatusRenderInput {
+  num: number;
+  title: string;
+  statusName: string;
+  issueType: string | null;
+  workspace: { id: string; branch: string | null; status: string; isDirect: boolean; provider: string | null } | null;
+  session: { id: string; status: string; startedAt: string; endedAt: string | null } | null;
+  diffStats: { filesChanged: number; insertions: number; deletions: number } | null;
+  fileChanges: { read: number; edited: number; written: number } | null;
+  lastAgentMessage: string | null;
+  /** Injected clock (caller passes Date.now()) so the "N ago" line is testable. */
+  nowMs: number;
+}
+
+/**
+ * Build the human-readable `issue status` output as an array of lines. Printing
+ * each line with console.log reproduces the original handler output byte-for-byte.
+ */
+export function buildIssueStatusLines(input: IssueStatusRenderInput): string[] {
+  const { num, title, statusName, issueType, workspace, session, diffStats, fileChanges, lastAgentMessage, nowMs } = input;
+  const lines: string[] = [];
+
+  lines.push(`\n  #${num} ${title}`);
+  lines.push(`  Status: ${statusName} · Type: ${issueType ?? "task"}`);
+
+  if (workspace) {
+    const wsType = workspace.isDirect ? "direct" : "worktree";
+    const parts = [workspace.branch, wsType, workspace.status];
+    if (workspace.provider) parts.push(workspace.provider);
+    lines.push(`  Workspace: ${workspace.id.slice(0, 8)} (${parts.join(", ")})`);
+  }
+
+  if (session) {
+    const agoMs = nowMs - new Date(session.startedAt).getTime();
+    const ago = formatDurationStr(agoMs);
+    let duration = "?";
+    if (session.endedAt && session.startedAt) {
+      duration = formatDurationStr(new Date(session.endedAt).getTime() - new Date(session.startedAt).getTime());
+    }
+    lines.push(`  Session:  ${session.id.slice(0, 8)} (${session.status}, ${ago} ago, lasted ${duration})`);
+  }
+
+  if (diffStats && (diffStats.filesChanged > 0 || diffStats.insertions > 0 || diffStats.deletions > 0)) {
+    lines.push(`  Diff: ${diffStats.filesChanged} file${diffStats.filesChanged === 1 ? "" : "s"}, +${diffStats.insertions}/-${diffStats.deletions}`);
+  } else if (fileChanges && (fileChanges.read || fileChanges.edited || fileChanges.written)) {
+    const parts: string[] = [];
+    if (fileChanges.read) parts.push(`${fileChanges.read} read`);
+    if (fileChanges.edited) parts.push(`${fileChanges.edited} edited`);
+    if (fileChanges.written) parts.push(`${fileChanges.written} written`);
+    lines.push(`  Files: ${parts.join(", ")}`);
+  } else {
+    lines.push("  No file changes.");
+  }
+
+  if (lastAgentMessage) {
+    lines.push(`\n  Last agent message:`);
+    const wrapped = lastAgentMessage.length > 200 ? lastAgentMessage.slice(0, 197) + "..." : lastAgentMessage;
+    for (const line of wrapped.split("\n")) {
+      lines.push(`    ${line}`);
+    }
+  }
   lines.push("");
 
   return lines;

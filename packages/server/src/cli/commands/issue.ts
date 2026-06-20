@@ -11,7 +11,8 @@ import { isAnalyticsNoise } from "../../services/session-filter.js";
 import { getWorkspaceDiffStats, type WorkspaceDiffStats } from "../../services/workspace-diff-stats.js";
 import { hasPath } from "../../lib/dependency-graph.js";
 import { getIssueIdsAndProjectsForBatch, getDependencyRowsForProjects } from "../../repositories/issue-service.repository.js";
-import { buildIssueSummaryLines } from "../../lib/issue-cli-format.js";
+import { buildIssueSummaryLines, buildIssueStatusLines } from "../../lib/issue-cli-format.js";
+import { extractLastAgentMessageFromRows } from "../../lib/session-message-extraction.js";
 
 export function registerIssueCommand(program: Command) {
   const issueCmd = program.command("issue").description("Manage issues on the board.\n\nSubcommands: list, create, update, move, summary, dependency");
@@ -435,45 +436,7 @@ Examples:
             .where(eq(sessionMessages.sessionId, latestSession.id))
             .orderBy(desc(sessionMessages.id));
 
-          for (const row of msgRows) {
-            if (row.type !== "stdout" || !row.data) continue;
-            const lines = row.data.split("\n");
-            for (const line of lines) {
-              const trimmed = line.trim();
-              if (!trimmed) continue;
-              try {
-                const obj = JSON.parse(trimmed);
-                if (obj.type === "assistant") {
-                  const content = obj.message?.content as Array<Record<string, unknown>> | undefined;
-                  if (content) {
-                    for (const block of [...content].reverse()) {
-                      if (block.type === "text" && typeof block.text === "string" && block.text.trim()) {
-                        lastAgentMsg = block.text;
-                      }
-                    }
-                  }
-                }
-                if (obj.type === "assistant.message") {
-                  const data = obj.data as Record<string, unknown> | undefined;
-                  if (data) {
-                    const raw = data.content;
-                    const contentStr = typeof raw === "string" ? raw
-                      : Array.isArray(raw)
-                        ? (raw as { type?: string; text?: string }[])
-                            .filter(b => b.type === "text" && typeof b.text === "string")
-                            .map(b => b.text as string)
-                            .join("\n")
-                        : "";
-                    if (contentStr.trim()) lastAgentMsg = contentStr;
-                  }
-                }
-                if (obj.type === "item.completed" && obj.item?.type === "agent_message" && typeof obj.item.text === "string") {
-                  lastAgentMsg = obj.item.text;
-                }
-              } catch { /* not JSON */ }
-            }
-            if (lastAgentMsg) break;
-          }
+          lastAgentMsg = extractLastAgentMessageFromRows(msgRows);
 
           const summary = parseSessionSummary(msgRows);
           fileChanges = { read: summary.filesRead.length, edited: summary.filesEdited.length, written: summary.filesWritten.length };
@@ -505,46 +468,20 @@ Examples:
           process.exit(0);
         }
 
-        console.log(`\n  #${num} ${issue.title}`);
-        console.log(`  Status: ${issue.statusName} · Type: ${issue.issueType ?? "task"}`);
-
-        if (matchingWs) {
-          const wsType = matchingWs.isDirect ? "direct" : "worktree";
-          const parts = [matchingWs.branch, wsType, matchingWs.status];
-          if (matchingWs.provider) parts.push(matchingWs.provider);
-          console.log(`  Workspace: ${matchingWs.id.slice(0, 8)} (${parts.join(", ")})`);
+        for (const line of buildIssueStatusLines({
+          num,
+          title: issue.title,
+          statusName: issue.statusName,
+          issueType: issue.issueType,
+          workspace: matchingWs ?? null,
+          session: latestSession,
+          diffStats,
+          fileChanges,
+          lastAgentMessage: lastAgentMsg,
+          nowMs: Date.now(),
+        })) {
+          console.log(line);
         }
-
-        if (latestSession) {
-          const agoMs = Date.now() - new Date(latestSession.startedAt).getTime();
-          const ago = formatDurationStr(agoMs);
-          let duration = "?";
-          if (latestSession.endedAt && latestSession.startedAt) {
-            duration = formatDurationStr(new Date(latestSession.endedAt).getTime() - new Date(latestSession.startedAt).getTime());
-          }
-          console.log(`  Session:  ${latestSession.id.slice(0, 8)} (${latestSession.status}, ${ago} ago, lasted ${duration})`);
-        }
-
-        if (diffStats && (diffStats.filesChanged > 0 || diffStats.insertions > 0 || diffStats.deletions > 0)) {
-          console.log(`  Diff: ${diffStats.filesChanged} file${diffStats.filesChanged === 1 ? "" : "s"}, +${diffStats.insertions}/-${diffStats.deletions}`);
-        } else if (fileChanges && (fileChanges.read || fileChanges.edited || fileChanges.written)) {
-          const parts: string[] = [];
-          if (fileChanges.read) parts.push(`${fileChanges.read} read`);
-          if (fileChanges.edited) parts.push(`${fileChanges.edited} edited`);
-          if (fileChanges.written) parts.push(`${fileChanges.written} written`);
-          console.log(`  Files: ${parts.join(", ")}`);
-        } else {
-          console.log("  No file changes.");
-        }
-
-        if (lastAgentMsg) {
-          console.log(`\n  Last agent message:`);
-          const wrapped = lastAgentMsg.length > 200 ? lastAgentMsg.slice(0, 197) + "..." : lastAgentMsg;
-          for (const line of wrapped.split("\n")) {
-            console.log(`    ${line}`);
-          }
-        }
-        console.log("");
         process.exit(0);
       } catch (err) {
         console.error("Error:", err instanceof Error ? err.message : String(err));

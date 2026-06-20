@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { SessionSummary } from "@agentic-kanban/shared";
-import { buildIssueSummaryLines } from "./issue-cli-format.js";
+import { buildIssueSummaryLines, buildIssueStatusLines } from "./issue-cli-format.js";
 
 function summary(over: Partial<SessionSummary> = {}): SessionSummary {
   return {
@@ -129,5 +129,80 @@ describe("buildIssueSummaryLines", () => {
       summary: summary(),
     });
     expect(lines[lines.length - 1]).toBe("");
+  });
+});
+
+describe("buildIssueStatusLines", () => {
+  const base = {
+    num: 5,
+    title: "Do the thing",
+    statusName: "In Progress",
+    issueType: "feature" as string | null,
+    workspace: null,
+    session: null,
+    diffStats: null,
+    fileChanges: null,
+    lastAgentMessage: null,
+    nowMs: Date.parse("2026-06-20T12:00:00.000Z"),
+  };
+
+  it("renders header + status, defaults type to 'task' when null", () => {
+    expect(buildIssueStatusLines({ ...base, issueType: null })).toEqual([
+      "\n  #5 Do the thing",
+      "  Status: In Progress · Type: task",
+      "  No file changes.",
+      "",
+    ]);
+  });
+
+  it("renders a worktree workspace with provider", () => {
+    const lines = buildIssueStatusLines({
+      ...base,
+      workspace: { id: "abcdef1234", branch: "feature/x", status: "active", isDirect: false, provider: "claude" },
+    });
+    expect(lines).toContain("  Workspace: abcdef12 (feature/x, worktree, active, claude)");
+  });
+
+  it("labels a direct workspace and omits provider when absent", () => {
+    const lines = buildIssueStatusLines({
+      ...base,
+      workspace: { id: "abcdef1234", branch: "main", status: "idle", isDirect: true, provider: null },
+    });
+    expect(lines).toContain("  Workspace: abcdef12 (main, direct, idle)");
+  });
+
+  it("renders the session line with ago + lasted duration", () => {
+    const lines = buildIssueStatusLines({
+      ...base,
+      session: { id: "sess1234ab", status: "completed", startedAt: "2026-06-20T11:58:00.000Z", endedAt: "2026-06-20T11:59:00.000Z" },
+    });
+    expect(lines).toContain("  Session:  sess1234 (completed, 2m 0s ago, lasted 1m 0s)");
+  });
+
+  it("prefers diff stats over file-change counts", () => {
+    const lines = buildIssueStatusLines({
+      ...base,
+      diffStats: { filesChanged: 1, insertions: 10, deletions: 2 },
+      fileChanges: { read: 9, edited: 9, written: 9 },
+    });
+    expect(lines).toContain("  Diff: 1 file, +10/-2");
+    expect(lines.some((l) => l.startsWith("  Files:"))).toBe(false);
+  });
+
+  it("falls back to file-change counts when no diff stats", () => {
+    const lines = buildIssueStatusLines({
+      ...base,
+      diffStats: { filesChanged: 0, insertions: 0, deletions: 0 },
+      fileChanges: { read: 3, edited: 1, written: 0 },
+    });
+    expect(lines).toContain("  Files: 3 read, 1 edited");
+  });
+
+  it("truncates a long last agent message to 197 chars + ellipsis", () => {
+    const long = "x".repeat(250);
+    const lines = buildIssueStatusLines({ ...base, lastAgentMessage: long });
+    expect(lines).toContain("\n  Last agent message:");
+    const msgLine = lines.find((l) => l.startsWith("    x"))!;
+    expect(msgLine).toBe("    " + "x".repeat(197) + "...");
   });
 });

@@ -63,3 +63,58 @@ export function extractToolName(data: string): string | null {
   }
   return null;
 }
+
+/**
+ * Scan ordered session message rows (newest-first as the CLI passes them) and
+ * return the last agent text it can find, stopping at the first row that yields
+ * one. Handles the three provider stream shapes (assistant / assistant.message /
+ * item.completed). NOTE: this intentionally differs from extractAssistantMessage
+ * (which takes one string and returns on the first matching line) — it scans
+ * multiple rows and, per assistant block, keeps the first original-order text
+ * block; preserved verbatim from the `issue status` handler it was lifted from.
+ */
+export function extractLastAgentMessageFromRows(
+  rows: Array<{ type: string | null; data: string | null }>,
+): string | null {
+  let lastAgentMsg: string | null = null;
+  for (const row of rows) {
+    if (row.type !== "stdout" || !row.data) continue;
+    const lines = row.data.split("\n");
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const obj = JSON.parse(trimmed);
+        if (obj.type === "assistant") {
+          const content = obj.message?.content as Array<Record<string, unknown>> | undefined;
+          if (content) {
+            for (const block of [...content].reverse()) {
+              if (block.type === "text" && typeof block.text === "string" && block.text.trim()) {
+                lastAgentMsg = block.text;
+              }
+            }
+          }
+        }
+        if (obj.type === "assistant.message") {
+          const data = obj.data as Record<string, unknown> | undefined;
+          if (data) {
+            const raw = data.content;
+            const contentStr = typeof raw === "string" ? raw
+              : Array.isArray(raw)
+                ? (raw as { type?: string; text?: string }[])
+                    .filter(b => b.type === "text" && typeof b.text === "string")
+                    .map(b => b.text as string)
+                    .join("\n")
+                : "";
+            if (contentStr.trim()) lastAgentMsg = contentStr;
+          }
+        }
+        if (obj.type === "item.completed" && obj.item?.type === "agent_message" && typeof obj.item.text === "string") {
+          lastAgentMsg = obj.item.text;
+        }
+      } catch { /* not JSON */ }
+    }
+    if (lastAgentMsg) break;
+  }
+  return lastAgentMsg;
+}
