@@ -1,5 +1,6 @@
 import { getProjectById } from "../repositories/project.repository.js";
 import type { Database } from "../db/index.js";
+import { NotFoundError } from "../errors/index.js";
 import { isAnalyticsNoise } from "./session-filter.js";
 import { getChangedFileNames } from "./git.service.js";
 import { readSessionStdoutFile } from "../repositories/session.repository.js";
@@ -208,7 +209,7 @@ export async function getWorkspaceRisk(
   database: Database,
 ): Promise<WorkspaceRiskResponse> {
   const project = await getProjectById(projectId, database);
-  if (!project) throw new Error(`Project ${projectId} not found`);
+  if (!project) throw new NotFoundError(`Project ${projectId} not found`);
   const defaultBranch = project.defaultBranch;
 
   const statusRows = await getProjectStatusRows(projectId, database);

@@ -1,4 +1,5 @@
 import type { Database } from "../db/index.js";
+import { NotFoundError } from "../errors/index.js";
 import { getChangedFileNames } from "./git.service.js";
 import { getProjectDefaultBranch, getActiveContentionWorkspaces } from "../repositories/file-contention.repository.js";
 
@@ -33,7 +34,7 @@ export async function getFileContention(
   const project = await getProjectDefaultBranch(projectId, database);
 
   if (!project) {
-    throw new Error(`Project not found: ${projectId}`);
+    throw new NotFoundError(`Project not found: ${projectId}`);
   }
   const defaultBranch = project.defaultBranch;
 

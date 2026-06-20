@@ -1,4 +1,5 @@
 import type { Database } from "../db/index.js";
+import { NotFoundError } from "../errors/index.js";
 import type { WorkspaceTimelineEvent, WorkspaceTimelineResponse, WorkspaceTimelineEventType } from "@agentic-kanban/shared";
 import { readSessionStdoutFile } from "../repositories/session.repository.js";
 import {
@@ -99,7 +100,7 @@ export async function getWorkspaceTimeline(
 ): Promise<WorkspaceTimelineResponse> {
   const ws = await getWorkspaceById(workspaceId, database);
 
-  if (!ws) throw new Error(`Workspace ${workspaceId} not found`);
+  if (!ws) throw new NotFoundError(`Workspace ${workspaceId} not found`);
 
   const sessionRows = await getWorkspaceSessions(workspaceId, database);
 

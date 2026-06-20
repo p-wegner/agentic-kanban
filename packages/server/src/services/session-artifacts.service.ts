@@ -3,6 +3,7 @@ import { join, resolve, extname, relative, isAbsolute } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Database } from "../db/index.js";
+import { NotFoundError, ValidationError } from "../errors/index.js";
 import { issueArtifacts } from "@agentic-kanban/shared/schema";
 import {
   getWorkspaceWorkingDirAndBase,
@@ -45,7 +46,7 @@ export function resolveSafePath(workingDir: string, requestedPath: string): stri
 
   // Must be inside workingDir (prevent traversal with .. or absolute paths)
   if (!isPathInside(base, target)) {
-    throw new Error("Path is outside the workspace directory");
+    throw new ValidationError("Path is outside the workspace directory");
   }
   return target;
 }
@@ -57,12 +58,23 @@ function isPathInside(baseDir: string, targetPath: string): boolean {
 
 async function resolveSafeExistingPath(workingDir: string, requestedPath: string): Promise<string> {
   const lexicalTarget = resolveSafePath(workingDir, requestedPath);
-  const [realBase, realTarget] = await Promise.all([
-    realpath(workingDir),
-    realpath(lexicalTarget),
-  ]);
+  let realBase: string;
+  let realTarget: string;
+  try {
+    [realBase, realTarget] = await Promise.all([
+      realpath(workingDir),
+      realpath(lexicalTarget),
+    ]);
+  } catch (err) {
+    // A missing file/dir (ENOENT) means the requested artifact does not exist —
+    // a 404, not a generic 500. Other fs errors propagate to the generic handler.
+    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
+      throw new NotFoundError("Artifact file not found");
+    }
+    throw err;
+  }
   if (!isPathInside(realBase, realTarget)) {
-    throw new Error("Path is outside the workspace directory");
+    throw new ValidationError("Path is outside the workspace directory");
   }
   return realTarget;
 }
@@ -142,11 +154,11 @@ export function createSessionArtifactsService(deps: { database: Database }) {
     const row = await getWorkspaceWorkingDirAndBase(workspaceId, database);
 
     if (!row) {
-      throw new Error("Workspace not found");
+      throw new NotFoundError("Workspace not found");
     }
     const { workingDir, baseBranch } = row;
     if (!workingDir) {
-      throw new Error("Workspace has no working directory");
+      throw new NotFoundError("Workspace has no working directory");
     }
     return { workingDir, baseBranch };
   }
@@ -224,7 +236,7 @@ export function createSessionArtifactsService(deps: { database: Database }) {
 
     const ext = extname(fullPath).toLowerCase();
     if (!TEXT_EXTENSIONS.has(ext)) {
-      throw new Error(`Cannot read ${ext || "extensionless"} file as text`);
+      throw new ValidationError(`Cannot read ${ext || "extensionless"} file as text`);
     }
 
     const content = await readFile(fullPath, "utf-8");
@@ -244,7 +256,7 @@ export function createSessionArtifactsService(deps: { database: Database }) {
 
     const ext = extname(fullPath).toLowerCase();
     if (!IMAGE_EXTENSIONS.has(ext)) {
-      throw new Error(`Cannot read ${ext || "extensionless"} file as image`);
+      throw new ValidationError(`Cannot read ${ext || "extensionless"} file as image`);
     }
 
     const MIME_MAP: Record<string, string> = {
