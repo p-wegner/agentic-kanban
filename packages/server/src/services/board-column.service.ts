@@ -1,5 +1,6 @@
 import { isResolvedDependencyStatusView } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
+import { buildAdjacency, wouldCreateCycle as graphWouldCreateCycle } from "../lib/dependency-graph.js";
 import {
   getDependencyRowsForIssues,
   getDependencyStatusViews,
@@ -75,25 +76,6 @@ export async function buildGraphEdges(issueIds: string[], database: Database): P
  */
 export async function wouldCreateCycle(database: Database, issueId: string, dependsOnId: string, projectId: string): Promise<boolean> {
   const allDeps = await getProjectDependencyEdges(projectId, database);
-
-  const adj = new Map<string, Set<string>>();
-  for (const dep of allDeps) {
-    let set = adj.get(dep.depIssueId);
-    if (!set) { set = new Set(); adj.set(dep.depIssueId, set); }
-    set.add(dep.depDependsOnId);
-  }
-
-  const visited = new Set<string>();
-  const stack = [dependsOnId];
-  while (stack.length > 0) {
-    const current = stack.pop()!;
-    if (current === issueId) return true;
-    if (visited.has(current)) continue;
-    visited.add(current);
-    const neighbors = adj.get(current);
-    if (neighbors) {
-      for (const n of neighbors) stack.push(n);
-    }
-  }
-  return false;
+  const adj = buildAdjacency(allDeps.map(dep => ({ from: dep.depIssueId, to: dep.depDependsOnId })));
+  return graphWouldCreateCycle(adj, issueId, dependsOnId);
 }
