@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ProviderPolicyProfileField } from "./StrategyTargetsView.js";
+import { ProviderPolicyProfileField } from "./ProviderPolicyProfileField.js";
 
 describe("ProviderPolicyProfileField (AK-836)", () => {
   it("renders a dropdown of the available profiles for the provider", () => {
