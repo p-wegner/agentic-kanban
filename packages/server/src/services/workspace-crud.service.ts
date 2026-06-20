@@ -5,7 +5,7 @@ import { existsSync } from "node:fs";
 import { resolve as pathResolve, dirname, parse as pathParse, relative, sep } from "node:path";
 import { isResolvedDependencyStatusView } from "@agentic-kanban/shared/lib/status-view";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
-import { branchHash, BASE_SERVER_PORT, BASE_CLIENT_PORT } from "./worktree-ports.js";
+import { derivePortsFromBranch } from "./worktree-ports.js";
 import { buildAgentPrompt } from "./workspace-create/policy.js";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
@@ -1323,9 +1323,7 @@ exit 1
     // 12. Derive expected worktree ports from the branch name (null for direct workspaces)
     let ports: { serverPort: number; clientPort: number } | null = null;
     if (!isDirect && branch) {
-      const issueMatch = branch.match(/(?:^|[_/-])ak-(\d+)-/i) ?? branch.match(/^feature[_/-](\d+)-/i);
-      const offset = issueMatch ? Number(issueMatch[1]) : branchHash(branch);
-      ports = { serverPort: BASE_SERVER_PORT + offset, clientPort: BASE_CLIENT_PORT + offset };
+      ports = derivePortsFromBranch(branch);
     }
 
     // 13. Budget estimation (non-blocking — never throws)
