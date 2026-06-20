@@ -7,6 +7,7 @@ import type { WorkspaceCodeMetrics, WorkspaceSummary } from "@agentic-kanban/sha
 import { ACTIVE_WORKSPACE_STATUSES, workspaceStatusPriority } from "@agentic-kanban/shared";
 import { readSessionStdoutFile } from "../repositories/session.repository.js";
 import { extractAssistantMessage, extractToolName, safeParseStringArray } from "../lib/session-message-extraction.js";
+import { selectLatestSessionsByWorkspace, parseContextTokensFromStats } from "../lib/workspace-summary-session.js";
 import {
   aggregateWorkspaceCountRows,
   fetchWorkspaceDetailRows,
@@ -444,21 +445,7 @@ async function attachSessionData(
   if (mainWsIds.length === 0) return;
 
   const sessionRows = await getSessionsForWorkspaces(mainWsIds, database);
-
-  const latestByWs = new Map<string, { id: string; status: string; startedAt: string; endedAt: string | null; stats: string | null; triggerType: string | null }>();
-  const latestNoiseByWs = new Map<string, { id: string; status: string; startedAt: string; endedAt: string | null; stats: string | null; triggerType: string | null }>();
-  for (const s of sessionRows) {
-    const entry = { id: s.id, status: s.status, startedAt: s.startedAt, endedAt: s.endedAt, stats: s.stats, triggerType: s.triggerType ?? null };
-    if (isAnalyticsNoise(s)) {
-      latestNoiseByWs.set(s.workspaceId, entry);
-    } else {
-      latestByWs.set(s.workspaceId, entry);
-    }
-  }
-  // Fall back to noise sessions only for workspaces with no real sessions
-  for (const [wsId, noiseSession] of latestNoiseByWs) {
-    if (!latestByWs.has(wsId)) latestByWs.set(wsId, noiseSession);
-  }
+  const latestByWs = selectLatestSessionsByWorkspace(sessionRows, isAnalyticsNoise);
 
   // lastTool / lastAssistantMessage are only consumed for non-closed, non-archived
   // workspaces (AgentGrid hides closed; MonitorPopover only shows active/reviewing/
@@ -476,43 +463,9 @@ async function attachSessionData(
   const latestSessionIds = [...latestByWs.entries()]
     .filter(([wsId]) => !skipMessageScanWsIds.has(wsId))
     .map(([, s]) => s.id);
-  const lastToolBySession = new Map<string, string>();
-  const lastAssistantMsgBySession = new Map<string, string>();
 
-  if (latestSessionIds.length > 0) {
-    // Prefer .out file for stdout; fall back to DB for historical sessions
-    const needsDb: string[] = [];
-    for (const sid of latestSessionIds) {
-      const fileContent = readSessionStdoutFile(sid);
-      if (fileContent !== null) {
-        const toolName = extractToolName(fileContent);
-        if (toolName) lastToolBySession.set(sid, toolName);
-        const assistantMessage = extractAssistantMessage(fileContent);
-        if (assistantMessage) lastAssistantMsgBySession.set(sid, assistantMessage);
-      } else {
-        needsDb.push(sid);
-      }
-    }
-
-    if (needsDb.length > 0) {
-      const msgRows = await getSessionMessagesForSessions(needsDb, database);
-
-      for (const msg of msgRows) {
-        const hasTool = lastToolBySession.has(msg.sessionId);
-        const hasMsg = lastAssistantMsgBySession.has(msg.sessionId);
-        if (hasTool && hasMsg) continue;
-        if (!msg.data) continue;
-        if (!hasTool) {
-          const toolName = extractToolName(msg.data);
-          if (toolName) lastToolBySession.set(msg.sessionId, toolName);
-        }
-        if (!hasMsg) {
-          const assistantMessage = extractAssistantMessage(msg.data);
-          if (assistantMessage) lastAssistantMsgBySession.set(msg.sessionId, assistantMessage);
-        }
-      }
-    }
-  }
+  const { lastToolBySession, lastAssistantMsgBySession } =
+    await collectLastToolAndMessages(latestSessionIds, database);
 
   for (const [, summary] of workspaceSummaryMap) {
     if (!summary.main) continue;
@@ -521,19 +474,53 @@ async function attachSessionData(
     summary.main.lastSessionAt = sess.status === "running" ? sess.startedAt : sess.endedAt;
     summary.main.sessionStatus = sess.status;
     summary.main.lastSessionTriggerType = sess.triggerType;
-    if (sess.stats) {
-      try {
-        const p = JSON.parse(sess.stats);
-        if (p !== null && typeof p === "object") {
-          const typed = p as Record<string, unknown>;
-          const explicitContextTokens = (typed.contextTokens as number) ?? 0;
-          const inputTokens = (typed.inputTokens as number) ?? 0;
-          const cachedTokens = (typed.cacheReadTokens as number) ?? 0;
-          summary.main.contextTokens = explicitContextTokens || inputTokens + cachedTokens || null;
-        }
-      } catch { /* ignore */ }
-    }
+    if (sess.stats) summary.main.contextTokens = parseContextTokensFromStats(sess.stats);
     summary.main.lastTool = lastToolBySession.get(sess.id) ?? null;
     summary.main.lastAssistantMessage = lastAssistantMsgBySession.get(sess.id) ?? null;
   }
+}
+
+// Phase 8 I/O: for each candidate session, derive its last tool name and last
+// assistant message — preferring the live .out stdout file and falling back to the
+// persisted session_messages rows for historical sessions with no file.
+async function collectLastToolAndMessages(
+  latestSessionIds: string[],
+  database: Database,
+): Promise<{ lastToolBySession: Map<string, string>; lastAssistantMsgBySession: Map<string, string> }> {
+  const lastToolBySession = new Map<string, string>();
+  const lastAssistantMsgBySession = new Map<string, string>();
+  if (latestSessionIds.length === 0) return { lastToolBySession, lastAssistantMsgBySession };
+
+  // Prefer .out file for stdout; fall back to DB for historical sessions
+  const needsDb: string[] = [];
+  for (const sid of latestSessionIds) {
+    const fileContent = readSessionStdoutFile(sid);
+    if (fileContent === null) {
+      needsDb.push(sid);
+      continue;
+    }
+    const toolName = extractToolName(fileContent);
+    if (toolName) lastToolBySession.set(sid, toolName);
+    const assistantMessage = extractAssistantMessage(fileContent);
+    if (assistantMessage) lastAssistantMsgBySession.set(sid, assistantMessage);
+  }
+
+  if (needsDb.length > 0) {
+    const msgRows = await getSessionMessagesForSessions(needsDb, database);
+    for (const msg of msgRows) {
+      const hasTool = lastToolBySession.has(msg.sessionId);
+      const hasMsg = lastAssistantMsgBySession.has(msg.sessionId);
+      if ((hasTool && hasMsg) || !msg.data) continue;
+      if (!hasTool) {
+        const toolName = extractToolName(msg.data);
+        if (toolName) lastToolBySession.set(msg.sessionId, toolName);
+      }
+      if (!hasMsg) {
+        const assistantMessage = extractAssistantMessage(msg.data);
+        if (assistantMessage) lastAssistantMsgBySession.set(msg.sessionId, assistantMessage);
+      }
+    }
+  }
+
+  return { lastToolBySession, lastAssistantMsgBySession };
 }
