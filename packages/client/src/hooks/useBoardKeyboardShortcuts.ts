@@ -4,6 +4,7 @@ import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { registerAction } from "../lib/actions.js";
 import { SHORTCUT_TO_VIEW, VIEW_REGISTRY, type ViewMode } from "../lib/viewRegistry.js";
+import { computeNavTarget, type NavKey } from "../lib/boardKeyboardNav.js";
 import { showToast } from "../lib/toast.js";
 import type { BoardPanelState } from "./useBoardPanels.js";
 
@@ -58,6 +59,35 @@ export function useBoardKeyboardShortcuts(
     let pendingGRef = false;
     let pendingGTimerRef: ReturnType<typeof setTimeout> | null = null;
 
+    // Declarative keymap for the uniform single-key shortcuts: each entry matches a
+    // key (+ modifier predicate) and runs an action. The shared guard/preventDefault
+    // wrapper lives in the dispatch loop in handleKeyDown, so adding a shortcut is a
+    // one-line entry here instead of another bespoke if-block. The stateful chord
+    // (g, g-then-s), cursor navigation, Escape, Enter, command palette, and the
+    // dual-key c/w create binding stay as explicit handlers — they don't fit the
+    // "match key → run, suppress in text fields" shape.
+    const noMods = (e: KeyboardEvent) => !e.ctrlKey && !e.metaKey && !e.altKey;
+    const simpleBindings: { match: (e: KeyboardEvent) => boolean; run: (e: KeyboardEvent) => void }[] = [
+      { match: (e) => e.key === "?" && !e.ctrlKey && !e.metaKey, run: () => actions.panels.setShowShortcutHelp((prev) => !prev) },
+      { match: (e) => !!SHORTCUT_TO_VIEW[e.key] && noMods(e), run: (e) => actions.handleViewModeChange(SHORTCUT_TO_VIEW[e.key]) },
+      { match: (e) => e.key === "a" && noMods(e), run: () => actions.panels.setShowAllWorkspaces((prev) => !prev) },
+      { match: (e) => e.key === "h" && noMods(e), run: () => actions.panels.setShowFileContention((prev) => !prev) },
+      { match: (e) => e.key === "t" && noMods(e), run: () => actions.panels.setShowTranscriptSearch(true) },
+      { match: (e) => e.key === "q" && noMods(e), run: () => actions.panels.setShowQuickTasks(true) },
+      { match: (e) => e.key === "l" && noMods(e) && state.keyboardCursorIssueIdRef.current === null, run: () => actions.panels.setShowLiveActivityTicker((prev) => !prev) },
+      { match: (e) => e.key === "x" && noMods(e), run: () => actions.panels.setShowCodemod((prev) => !prev) },
+      { match: (e) => e.key === "p" && noMods(e), run: () => actions.panels.setShowProjectHealth((prev) => !prev) },
+      { match: (e) => e.key === "V" && e.shiftKey && noMods(e), run: () => window.dispatchEvent(new CustomEvent("voice-inbox-trigger")) },
+      {
+        match: (e) => e.key === "f" && noMods(e),
+        run: () => actions.setFocusMode((v) => {
+          const next = !v;
+          try { sessionStorage.setItem("board-focus-mode", next ? "1" : "0"); } catch { /* ignore */ }
+          return next;
+        }),
+      },
+    ];
+
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "k" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
@@ -97,51 +127,8 @@ export function useBoardKeyboardShortcuts(
         const navColumns = state.viewMode === "kanban" ? [...state.activeColumns, ...(state.archiveExpanded ? state.archiveColumns : [])] : [];
         if (navColumns.length === 0) return;
         e.preventDefault();
-        const cursorId = state.keyboardCursorIssueIdRef.current;
-        let colIdx = -1;
-        let issueIdx = -1;
-        if (cursorId) {
-          for (let c = 0; c < navColumns.length; c++) {
-            const i = navColumns[c].issues.findIndex((issue) => issue.id === cursorId);
-            if (i !== -1) { colIdx = c; issueIdx = i; break; }
-          }
-        }
-        if (colIdx === -1) {
-          const firstCol = navColumns.find((c) => c.issues.length > 0);
-          if (!firstCol) return;
-          actions.setKeyboardCursorIssueId(firstCol.issues[0].id);
-          return;
-        }
-
-        let newColIdx = colIdx;
-        let newIssueIdx = issueIdx;
-        if (e.key === "ArrowDown" || e.key === "j") {
-          if (issueIdx < navColumns[colIdx].issues.length - 1) {
-            newIssueIdx = issueIdx + 1;
-          }
-        } else if (e.key === "ArrowUp" || e.key === "k") {
-          if (issueIdx > 0) {
-            newIssueIdx = issueIdx - 1;
-          }
-        } else if (e.key === "ArrowRight" || e.key === "l") {
-          for (let c = colIdx + 1; c < navColumns.length; c++) {
-            if (navColumns[c].issues.length > 0) {
-              newColIdx = c;
-              newIssueIdx = Math.min(issueIdx, navColumns[c].issues.length - 1);
-              break;
-            }
-          }
-        } else if (e.key === "ArrowLeft" || e.key === "h") {
-          for (let c = colIdx - 1; c >= 0; c--) {
-            if (navColumns[c].issues.length > 0) {
-              newColIdx = c;
-              newIssueIdx = Math.min(issueIdx, navColumns[c].issues.length - 1);
-              break;
-            }
-          }
-        }
-        const target = navColumns[newColIdx]?.issues[newIssueIdx];
-        if (target) actions.setKeyboardCursorIssueId(target.id);
+        const targetId = computeNavTarget(navColumns, state.keyboardCursorIssueIdRef.current, e.key as NavKey);
+        if (targetId) actions.setKeyboardCursorIssueId(targetId);
         return;
       }
 
@@ -155,12 +142,6 @@ export function useBoardKeyboardShortcuts(
           actions.handleIssueClick(issue);
         }
         return;
-      }
-
-      if (e.key === "?" && !e.ctrlKey && !e.metaKey) {
-        if (isTextEntryTarget(e.target)) return;
-        e.preventDefault();
-        actions.panels.setShowShortcutHelp((prev) => !prev);
       }
 
       if (e.key === "g" && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -188,78 +169,13 @@ export function useBoardKeyboardShortcuts(
         return;
       }
 
-      if (SHORTCUT_TO_VIEW[e.key] && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (isTextEntryTarget(e.target)) return;
-        e.preventDefault();
-        actions.handleViewModeChange(SHORTCUT_TO_VIEW[e.key]);
-        return;
-      }
-
-      if (e.key === "a" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (isTextEntryTarget(e.target)) return;
-        e.preventDefault();
-        actions.panels.setShowAllWorkspaces((prev) => !prev);
-        return;
-      }
-
-      if (e.key === "h" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (isTextEntryTarget(e.target)) return;
-        e.preventDefault();
-        actions.panels.setShowFileContention((prev) => !prev);
-        return;
-      }
-
-      if (e.key === "t" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (isTextEntryTarget(e.target)) return;
-        e.preventDefault();
-        actions.panels.setShowTranscriptSearch(true);
-        return;
-      }
-
-      if (e.key === "q" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (isTextEntryTarget(e.target)) return;
-        e.preventDefault();
-        actions.panels.setShowQuickTasks(true);
-        return;
-      }
-
-      if (e.key === "l" && !e.ctrlKey && !e.metaKey && !e.altKey && state.keyboardCursorIssueIdRef.current === null) {
-        if (isTextEntryTarget(e.target)) return;
-        e.preventDefault();
-        actions.panels.setShowLiveActivityTicker((prev) => !prev);
-        return;
-      }
-
-      if (e.key === "x" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (isTextEntryTarget(e.target)) return;
-        e.preventDefault();
-        actions.panels.setShowCodemod((prev) => !prev);
-        return;
-      }
-
-      if (e.key === "p" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (isTextEntryTarget(e.target)) return;
-        e.preventDefault();
-        actions.panels.setShowProjectHealth((prev) => !prev);
-        return;
-      }
-
-      if (e.key === "V" && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (isTextEntryTarget(e.target)) return;
-        e.preventDefault();
-        window.dispatchEvent(new CustomEvent("voice-inbox-trigger"));
-        return;
-      }
-
-      if (e.key === "f" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (isTextEntryTarget(e.target)) return;
-        e.preventDefault();
-        actions.setFocusMode((v) => {
-          const next = !v;
-          try { sessionStorage.setItem("board-focus-mode", next ? "1" : "0"); } catch { /* ignore */ }
-          return next;
-        });
-        return;
+      for (const binding of simpleBindings) {
+        if (binding.match(e)) {
+          if (isTextEntryTarget(e.target)) return;
+          e.preventDefault();
+          binding.run(e);
+          return;
+        }
       }
 
       if ((e.key === "c" || e.key === "w") && !e.ctrlKey && !e.metaKey && !e.altKey) {
