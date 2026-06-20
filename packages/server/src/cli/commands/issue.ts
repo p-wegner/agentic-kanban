@@ -11,6 +11,7 @@ import { isAnalyticsNoise } from "../../services/session-filter.js";
 import { getWorkspaceDiffStats, type WorkspaceDiffStats } from "../../services/workspace-diff-stats.js";
 import { hasPath } from "../../lib/dependency-graph.js";
 import { getIssueIdsAndProjectsForBatch, getDependencyRowsForProjects } from "../../repositories/issue-service.repository.js";
+import { buildIssueSummaryLines } from "../../lib/issue-cli-format.js";
 
 export function registerIssueCommand(program: Command) {
   const issueCmd = program.command("issue").description("Manage issues on the board.\n\nSubcommands: list, create, update, move, summary, dependency");
@@ -669,65 +670,17 @@ Examples:
           process.exit(0);
         }
 
-        console.log(`\n  #${num} ${issue.title}`);
-
-        if (matchingWorkspace) {
-          console.log(`  workspace: ${matchingWorkspace.branch} (${matchingWorkspace.status})`);
+        for (const line of buildIssueSummaryLines({
+          num,
+          title: issue.title,
+          workspace: matchingWorkspace ?? null,
+          sessionStatus: completedSession.status,
+          duration,
+          stats,
+          summary,
+        })) {
+          console.log(line);
         }
-
-        console.log(`  session: ${completedSession.status}  duration: ${duration ?? "?"}`);
-
-        if (stats) {
-          const s = stats as any;
-          const parts: string[] = [];
-          if (s.model ?? summary.model) parts.push(`model: ${s.model ?? summary.model}`);
-          if (s.numTurns > 0) parts.push(`turns: ${s.numTurns}`);
-          if (s.totalCostUsd > 0) parts.push(`cost: $${s.totalCostUsd.toFixed(2)}`);
-          if (s.inputTokens > 0 || s.outputTokens > 0) parts.push(`tokens: ${s.inputTokens ?? 0} in / ${s.outputTokens ?? 0} out`);
-          if (parts.length > 0) console.log(`  ${parts.join("  ")}`);
-        }
-
-        if (summary.overview) {
-          console.log(`  ${summary.overview}`);
-        }
-
-        if (summary.agentSummary) {
-          console.log(`\n  Agent summary:`);
-          for (const line of summary.agentSummary.split("\n")) {
-            console.log(`    ${line}`);
-          }
-        }
-
-        const allFiles = [...new Set([...summary.filesRead, ...summary.filesEdited, ...summary.filesWritten])];
-        if (allFiles.length > 0) {
-          console.log(`\n  Files (${allFiles.length}):`);
-          for (const f of allFiles) {
-            const tags: string[] = [];
-            if (summary.filesEdited.includes(f)) tags.push("edited");
-            if (summary.filesWritten.includes(f)) tags.push("written");
-            if (summary.filesRead.includes(f) && tags.length === 0) tags.push("read");
-            console.log(`    ${f} (${tags.join(", ")})`);
-          }
-        }
-
-        if (summary.commandsRun.length > 0) {
-          console.log(`\n  Commands (${summary.commandsRun.length}):`);
-          for (const cmd of summary.commandsRun.slice(0, 10)) {
-            console.log(`    ${cmd}`);
-          }
-          if (summary.commandsRun.length > 10) {
-            console.log(`    ... and ${summary.commandsRun.length - 10} more`);
-          }
-        }
-
-        if (summary.errors.length > 0) {
-          console.log(`\n  Errors (${summary.errors.length}):`);
-          for (const err of summary.errors.slice(0, 5)) {
-            console.log(`    ${err}`);
-          }
-        }
-
-        console.log("");
         process.exit(0);
       } catch (err) {
         console.error("Error:", err instanceof Error ? err.message : String(err));
