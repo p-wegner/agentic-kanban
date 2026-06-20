@@ -1,16 +1,41 @@
 import type { Command } from "commander";
-import { db } from "../../db/index.js";
-import { issues, projectStatuses, workspaces, sessions, sessionMessages, issueDependencies, DEPENDENCY_TYPES, projects, diffComments, issueArtifacts, issueTags, tags } from "@agentic-kanban/shared/schema";
-import { eq, inArray, sql, and, desc } from "drizzle-orm";
+import type { DependencyType } from "@agentic-kanban/shared/schema";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { parseSessionSummary, formatDurationStr } from "@agentic-kanban/shared";
+import { parseSessionSummary } from "@agentic-kanban/shared";
 import { runMigrations, getActiveProjectId } from "../shared.js";
-import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { isAnalyticsNoise } from "../../services/session-filter.js";
 import { getWorkspaceDiffStats, type WorkspaceDiffStats } from "../../services/workspace-diff-stats.js";
-import { hasPath } from "../../lib/dependency-graph.js";
-import { getIssueIdsAndProjectsForBatch, getDependencyRowsForProjects } from "../../repositories/issue-service.repository.js";
+import {
+  getIssueListForProject,
+  getIssueHeaderByNumber,
+  getIssueByNumberOrId,
+  getIssueIdByNumberInProject,
+  createIssueWithNextNumber,
+  moveIssueToStatus,
+  createSubIssueWithParentLink,
+  getIssuesTouchedFilesByNumbers,
+  getOutgoingDependencies,
+  getIncomingDependencies,
+} from "../../repositories/issue.repository.js";
+import {
+  getIssueIdsAndProjectsForBatch,
+  getDependencyRowsForProjects,
+  updateIssueById,
+  getIssueProjectIdsPair,
+  insertDependency,
+  deleteDependencyByIdReturning,
+  insertIssueArtifact,
+  applyDependencyEdgeBatch,
+  deleteIssueCascade,
+  createIssuesBatchWithDepsAndTags,
+} from "../../repositories/issue-service.repository.js";
+import { getMaxIssueNumber } from "../../repositories/issue-ai.repository.js";
+import { getProjectStatuses, getProjectById } from "../../repositories/project.repository.js";
+import { getWorkspacesByIssueId } from "../../repositories/workspace.repository.js";
+import { getSessionsForWorkspacesDesc } from "../../repositories/workspace-launch-failures.repository.js";
+import { getSessionMessagesByIdDesc, getSessionMessagesByIdAsc } from "../../repositories/session.repository.js";
+import { getWorkspaceArtifactTarget } from "../../repositories/phase-artifacts.repository.js";
 import { buildIssueSummaryLines, buildIssueStatusLines, validateAttachArtifactOptions, formatAttachArtifactOutput, selectSummarySession, buildIssueSummaryJson, buildIssueStatusJson } from "../../lib/issue-cli-format.js";
 import { computeSessionDuration } from "../../lib/issue-summary-projection.js";
 import { extractLastAgentMessageFromRows } from "../../lib/session-message-extraction.js";
@@ -39,19 +64,7 @@ Examples:
         await runMigrations();
         const projectId = await getActiveProjectId();
 
-        let rows = await db
-          .select({
-            issueNumber: issues.issueNumber,
-            id: issues.id,
-            title: issues.title,
-            priority: issues.priority,
-            issueType: issues.issueType,
-            statusName: projectStatuses.name,
-            createdAt: issues.createdAt,
-          })
-          .from(issues)
-          .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-          .where(eq(issues.projectId, projectId));
+        let rows = await getIssueListForProject(projectId);
 
         if (options.status) rows = rows.filter((r) => r.statusName === options.status);
         if (options.priority) rows = rows.filter((r) => r.priority === options.priority);
@@ -98,29 +111,12 @@ Examples:
           process.exit(1);
         }
 
-        const issueRows = await db
-          .select({
-            id: issues.id,
-            issueNumber: issues.issueNumber,
-            title: issues.title,
-            description: issues.description,
-            priority: issues.priority,
-            issueType: issues.issueType,
-            statusName: projectStatuses.name,
-            createdAt: issues.createdAt,
-            updatedAt: issues.updatedAt,
-          })
-          .from(issues)
-          .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-          .where(and(eq(issues.issueNumber, num), eq(issues.projectId, projectId)))
-          .limit(1);
+        const issue = await getIssueHeaderByNumber(projectId, num);
 
-        if (issueRows.length === 0) {
+        if (!issue) {
           console.error(`Issue #${num} not found in active project.`);
           process.exit(1);
         }
-
-        const issue = issueRows[0];
 
         if (options.json) {
           console.log(JSON.stringify(issue, null, 2));
@@ -166,11 +162,7 @@ Examples:
         await runMigrations();
         const projectId = await getActiveProjectId();
 
-        const statuses = await db
-          .select()
-          .from(projectStatuses)
-          .where(eq(projectStatuses.projectId, projectId))
-          .orderBy(projectStatuses.sortOrder);
+        const statuses = await getProjectStatuses(projectId);
 
         if (statuses.length === 0) throw new Error("No statuses found for project.");
 
@@ -184,27 +176,13 @@ Examples:
           statusId = found.id;
         }
 
-        const maxResult = await db
-          .select({ maxNum: sql<number | null>`max(${issues.issueNumber})` })
-          .from(issues)
-          .where(eq(issues.projectId, projectId));
-        const issueNumber = (maxResult[0]?.maxNum ?? 0) + 1;
-
-        const id = randomUUID();
-        const now = new Date().toISOString();
-
-        await db.insert(issues).values({
-          id,
-          issueNumber,
-          title,
-          description: options.description ?? null,
-          priority: (options.priority as "low" | "medium" | "high" | "critical") ?? "medium",
-          issueType: (options.type as "task" | "bug" | "feature" | "chore") ?? "task",
-          sortOrder: 0,
-          statusId,
+        const { id, issueNumber } = await createIssueWithNextNumber({
           projectId,
-          createdAt: now,
-          updatedAt: now,
+          statusId,
+          title,
+          description: options.description,
+          priority: options.priority,
+          issueType: options.type,
         });
 
         console.log(`Created issue #${issueNumber}: ${title}`);
@@ -240,16 +218,12 @@ Tip: to change an issue's STATUS, use 'issue move' instead.
         // Resolve by issue number (active project) or by full ID, like 'issue move'.
         const isNumeric = /^\d+$/.test(issueArg);
         const projectId = isNumeric ? await getActiveProjectId() : undefined;
-        const whereClause = isNumeric
-          ? and(eq(issues.issueNumber, Number(issueArg)), eq(issues.projectId, projectId!))
-          : eq(issues.id, issueArg);
 
-        const issueRows = await db.select().from(issues).where(whereClause).limit(1);
-        if (issueRows.length === 0) {
+        const issue = await getIssueByNumberOrId(issueArg, projectId);
+        if (!issue) {
           console.error(`Issue '${issueArg}' not found.`);
           process.exit(1);
         }
-        const issue = issueRows[0];
 
         // Build the update set from provided flags only — untouched flags stay as-is.
         const updates: Record<string, unknown> = {};
@@ -298,7 +272,7 @@ Tip: to change an issue's STATUS, use 'issue move' instead.
         }
 
         updates.updatedAt = new Date().toISOString();
-        await db.update(issues).set(updates).where(eq(issues.id, issue.id));
+        await updateIssueById(issue.id, updates);
 
         const changed = Object.keys(updates).filter((k) => k !== "updatedAt");
         const num = issue.issueNumber != null ? `#${issue.issueNumber}` : issue.id;
@@ -326,33 +300,21 @@ Tip: Use 'issue list' to find the issue ID and see available status names.
 
         const isNumeric = /^\d+$/.test(issueId);
         const projectId = isNumeric ? await getActiveProjectId() : undefined;
-        const whereClause = isNumeric
-          ? and(eq(issues.issueNumber, Number(issueId)), eq(issues.projectId, projectId!))
-          : eq(issues.id, issueId);
 
-        const issueRows = await db.select().from(issues).where(whereClause).limit(1);
-        if (issueRows.length === 0) {
+        const issue = await getIssueByNumberOrId(issueId, projectId);
+        if (!issue) {
           console.error(`Issue '${issueId}' not found.`);
           process.exit(1);
         }
 
-        const statuses = await db
-          .select()
-          .from(projectStatuses)
-          .where(eq(projectStatuses.projectId, issueRows[0].projectId));
+        const statuses = await getProjectStatuses(issue.projectId);
         const target = statuses.find((s) => s.name === statusName);
         if (!target) {
           console.error(`Status '${statusName}' not found. Available: ${statuses.map((s) => s.name).join(", ")}`);
           process.exit(1);
         }
 
-        const now = new Date().toISOString();
-        await db
-          .update(issues)
-          .set({ statusId: target.id, statusChangedAt: now, updatedAt: now })
-          .where(eq(issues.id, issueRows[0].id));
-
-        await syncCurrentNodeToStatus(db, issueRows[0].id).catch(() => {});
+        await moveIssueToStatus(issue.id, target.id);
 
         console.log(`Moved issue to '${statusName}'`);
         process.exit(0);
@@ -382,30 +344,17 @@ Examples:
           process.exit(1);
         }
 
-        const issueRows = await db
-          .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, priority: issues.priority, issueType: issues.issueType, statusName: projectStatuses.name })
-          .from(issues)
-          .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-          .where(and(eq(issues.issueNumber, num), eq(issues.projectId, projectId)))
-          .limit(1);
+        const issue = await getIssueHeaderByNumber(projectId, num);
 
-        if (issueRows.length === 0) {
+        if (!issue) {
           console.error(`Issue #${num} not found.`);
           process.exit(1);
         }
 
-        const issue = issueRows[0];
-        const projectRows = await db
-          .select({ defaultBranch: projects.defaultBranch })
-          .from(projects)
-          .where(eq(projects.id, projectId))
-          .limit(1);
-        const projectDefaultBranch = projectRows[0]?.defaultBranch ?? null;
+        const project = await getProjectById(projectId);
+        const projectDefaultBranch = project?.defaultBranch ?? null;
 
-        const wsRows = await db
-          .select()
-          .from(workspaces)
-          .where(eq(workspaces.issueId, issue.id));
+        const wsRows = await getWorkspacesByIssueId(issue.id);
 
         if (wsRows.length === 0) {
           console.log(`#${num} ${issue.title}`);
@@ -415,11 +364,7 @@ Examples:
         }
 
         const wsIds = wsRows.map(w => w.id);
-        const sessionRows = await db
-          .select()
-          .from(sessions)
-          .where(inArray(sessions.workspaceId, wsIds))
-          .orderBy(desc(sessions.startedAt));
+        const sessionRows = await getSessionsForWorkspacesDesc(wsIds);
 
         const latestSession = sessionRows.find(s => !isAnalyticsNoise(s)) ?? sessionRows[0] ?? null;
         const matchingWs = latestSession ? wsRows.find(w => w.id === latestSession.workspaceId) : wsRows[0];
@@ -433,11 +378,7 @@ Examples:
         }
 
         if (latestSession) {
-          const msgRows = await db
-            .select()
-            .from(sessionMessages)
-            .where(eq(sessionMessages.sessionId, latestSession.id))
-            .orderBy(desc(sessionMessages.id));
+          const msgRows = await getSessionMessagesByIdDesc(latestSession.id);
 
           lastAgentMsg = extractLastAgentMessageFromRows(msgRows);
 
@@ -501,23 +442,14 @@ Examples:
           process.exit(1);
         }
 
-        const issueRows = await db
-          .select()
-          .from(issues)
-          .where(and(eq(issues.issueNumber, num), eq(issues.projectId, projectId)))
-          .limit(1);
+        const issue = await getIssueByNumberOrId(String(num), projectId);
 
-        if (issueRows.length === 0) {
+        if (!issue) {
           console.error(`Issue #${num} not found.`);
           process.exit(1);
         }
 
-        const issue = issueRows[0];
-
-        const wsRows = await db
-          .select()
-          .from(workspaces)
-          .where(eq(workspaces.issueId, issue.id));
+        const wsRows = await getWorkspacesByIssueId(issue.id);
 
         if (wsRows.length === 0) {
           console.log(`#${num} ${issue.title}`);
@@ -526,11 +458,7 @@ Examples:
         }
 
         const wsIds = wsRows.map(w => w.id);
-        const sessionRows = await db
-          .select()
-          .from(sessions)
-          .where(inArray(sessions.workspaceId, wsIds))
-          .orderBy(desc(sessions.startedAt));
+        const sessionRows = await getSessionsForWorkspacesDesc(wsIds);
 
         const completedSession = selectSummarySession(sessionRows, isAnalyticsNoise);
 
@@ -540,11 +468,7 @@ Examples:
           process.exit(0);
         }
 
-        const msgRows = await db
-          .select()
-          .from(sessionMessages)
-          .where(eq(sessionMessages.sessionId, completedSession.id))
-          .orderBy(sessionMessages.id);
+        const msgRows = await getSessionMessagesByIdAsc(completedSession.id);
 
         let stats: Record<string, unknown> | null = null;
         if (completedSession.stats) {
@@ -606,31 +530,8 @@ Example:
       try {
         await runMigrations();
 
-        const outgoing = await db
-          .select({
-            id: issueDependencies.id,
-            type: issueDependencies.type,
-            targetTitle: issues.title,
-            targetNumber: issues.issueNumber,
-            targetStatusName: projectStatuses.name,
-          })
-          .from(issueDependencies)
-          .innerJoin(issues, eq(issueDependencies.dependsOnId, issues.id))
-          .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-          .where(eq(issueDependencies.issueId, issueId));
-
-        const incoming = await db
-          .select({
-            id: issueDependencies.id,
-            type: issueDependencies.type,
-            sourceTitle: issues.title,
-            sourceNumber: issues.issueNumber,
-            sourceStatusName: projectStatuses.name,
-          })
-          .from(issueDependencies)
-          .innerJoin(issues, eq(issueDependencies.issueId, issues.id))
-          .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-          .where(eq(issueDependencies.dependsOnId, issueId));
+        const outgoing = await getOutgoingDependencies(issueId);
+        const incoming = await getIncomingDependencies(issueId);
 
         if (outgoing.length === 0 && incoming.length === 0) {
           console.log("No dependencies found.");
@@ -640,8 +541,8 @@ Example:
         if (outgoing.length > 0) {
           console.log("Outgoing:");
           for (const dep of outgoing) {
-            const num = dep.targetNumber != null ? `#${dep.targetNumber}` : "(no number)";
-            console.log(`  [${dep.type}] ${num} ${dep.targetTitle} (${dep.targetStatusName})`);
+            const num = dep.issueNumber != null ? `#${dep.issueNumber}` : "(no number)";
+            console.log(`  [${dep.type}] ${num} ${dep.issueTitle} (${dep.issueStatusName})`);
             console.log(`    id: ${dep.id}`);
           }
         }
@@ -649,8 +550,8 @@ Example:
         if (incoming.length > 0) {
           console.log("Incoming:");
           for (const dep of incoming) {
-            const num = dep.sourceNumber != null ? `#${dep.sourceNumber}` : "(no number)";
-            console.log(`  [${dep.type}] ${num} ${dep.sourceTitle} (${dep.sourceStatusName})`);
+            const num = dep.issueNumber != null ? `#${dep.issueNumber}` : "(no number)";
+            console.log(`  [${dep.type}] ${num} ${dep.issueTitle} (${dep.issueStatusName})`);
             console.log(`    id: ${dep.id}`);
           }
         }
@@ -687,10 +588,7 @@ Examples:
           process.exit(1);
         }
 
-        const [sourceIssue, targetIssue] = await Promise.all([
-          db.select({ projectId: issues.projectId }).from(issues).where(eq(issues.id, issueId)).limit(1),
-          db.select({ projectId: issues.projectId }).from(issues).where(eq(issues.id, targetId)).limit(1),
-        ]);
+        const [sourceIssue, targetIssue] = await getIssueProjectIdsPair(issueId, targetId);
 
         if (sourceIssue.length === 0) {
           console.error(`Issue '${issueId}' not found.`);
@@ -707,11 +605,11 @@ Examples:
 
         const id = randomUUID();
         try {
-          await db.insert(issueDependencies).values({
+          await insertDependency({
             id,
             issueId,
             dependsOnId: targetId,
-            type: depType as typeof DEPENDENCY_TYPES[number],
+            type: depType as DependencyType,
             createdAt: new Date().toISOString(),
           });
         } catch (err: any) {
@@ -743,8 +641,8 @@ Example:
       try {
         await runMigrations();
 
-        const rows = await db.delete(issueDependencies).where(eq(issueDependencies.id, dependencyId)).returning();
-        if (rows.length === 0) {
+        const removedCount = await deleteDependencyByIdReturning(dependencyId);
+        if (removedCount === 0) {
           console.error(`Dependency '${dependencyId}' not found.`);
           process.exit(1);
         }
@@ -777,18 +675,13 @@ Examples:
           process.exit(1);
         }
 
-        const issueRows = await db
-          .select({ id: issues.id })
-          .from(issues)
-          .where(and(eq(issues.issueNumber, num), eq(issues.projectId, projectId)))
-          .limit(1);
+        const issueId = await getIssueIdByNumberInProject(num, projectId);
 
-        if (issueRows.length === 0) {
+        if (!issueId) {
           console.error(`Issue #${num} not found in active project.`);
           process.exit(1);
         }
 
-        const issueId = issueRows[0].id;
         const port = process.env.KANBAN_SERVER_PORT ?? "3001";
         const res = await fetch(`http://127.0.0.1:${port}/api/issues/analyze-dependencies`, {
           method: "POST",
@@ -890,64 +783,12 @@ Valid actions: add, remove
           edgeKeyToRow.set(`${dep.issueId}|${dep.dependsOnId}|${dep.type}`, { id: dep.id, projectId: dep.projectId });
         }
 
-        const skipped: { edge: typeof edges[number]; reason: string }[] = [];
-        let added = 0;
-        let removed = 0;
-        let cycleError: string | null = null;
-
-        await db.transaction(async (tx) => {
-          for (let i = 0; i < edges.length; i++) {
-            const e = edges[i];
-            const type = (e.type ?? "depends_on") as typeof VALID_TYPES[number];
-            const srcProj = projectByIssue.get(e.issueId);
-            const tgtProj = projectByIssue.get(e.dependsOnId);
-
-            if (e.action === "add") {
-              if (!srcProj) { skipped.push({ edge: e, reason: "source issue not found" }); continue; }
-              if (!tgtProj) { skipped.push({ edge: e, reason: "target issue not found" }); continue; }
-              if (srcProj !== tgtProj) { skipped.push({ edge: e, reason: "cross-project dependency" }); continue; }
-
-              const key = `${e.issueId}|${e.dependsOnId}|${type}`;
-              if (edgeKeyToRow.has(key)) { skipped.push({ edge: e, reason: "already exists" }); continue; }
-
-              if (DIRECTIONAL.has(type)) {
-                let adj = adjByProject.get(srcProj);
-                if (!adj) { adj = new Map(); adjByProject.set(srcProj, adj); }
-                if (hasPath(adj, e.dependsOnId, e.issueId)) {
-                  cycleError = `edges[${i}]: would create a cycle (${e.issueId} -> ${e.dependsOnId})`;
-                  throw new Error(cycleError);
-                }
-                let set = adj.get(e.issueId);
-                if (!set) { set = new Set(); adj.set(e.issueId, set); }
-                set.add(e.dependsOnId);
-              }
-
-              const id = randomUUID();
-              await tx.insert(issueDependencies).values({
-                id,
-                issueId: e.issueId,
-                dependsOnId: e.dependsOnId,
-                type,
-                createdAt: new Date().toISOString(),
-              });
-              edgeKeyToRow.set(`${e.issueId}|${e.dependsOnId}|${type}`, { id, projectId: srcProj });
-              added++;
-            } else {
-              const key = `${e.issueId}|${e.dependsOnId}|${type}`;
-              const row = edgeKeyToRow.get(key);
-              if (!row) { skipped.push({ edge: e, reason: "dependency does not exist" }); continue; }
-              await tx.delete(issueDependencies).where(eq(issueDependencies.id, row.id));
-              edgeKeyToRow.delete(key);
-              if (DIRECTIONAL.has(type)) {
-                const adj = adjByProject.get(row.projectId);
-                adj?.get(e.issueId)?.delete(e.dependsOnId);
-              }
-              removed++;
-            }
-          }
-        }).catch((err) => {
-          if (cycleError) return;
-          throw err;
+        const { added, removed, skipped, cycleError } = await applyDependencyEdgeBatch({
+          edges,
+          projectByIssue,
+          adjByProject,
+          edgeKeyToRow,
+          directional: DIRECTIONAL,
         });
 
         if (cycleError) {
@@ -996,24 +837,14 @@ Examples:
           process.exit(1);
         }
 
-        const parentRows = await db
-          .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, projectId: issues.projectId })
-          .from(issues)
-          .where(and(eq(issues.issueNumber, parentNum), eq(issues.projectId, projectId)))
-          .limit(1);
+        const parent = await getIssueByNumberOrId(String(parentNum), projectId);
 
-        if (parentRows.length === 0) {
+        if (!parent) {
           console.error(`Parent issue #${parentNum} not found in active project.`);
           process.exit(1);
         }
 
-        const parent = parentRows[0];
-
-        const statuses = await db
-          .select()
-          .from(projectStatuses)
-          .where(eq(projectStatuses.projectId, parent.projectId))
-          .orderBy(projectStatuses.sortOrder);
+        const statuses = await getProjectStatuses(parent.projectId);
 
         if (statuses.length === 0) {
           console.error("No statuses configured for project.");
@@ -1030,37 +861,14 @@ Examples:
           statusId = found.id;
         }
 
-        const maxResult = await db
-          .select({ maxNum: sql<number | null>`max(${issues.issueNumber})` })
-          .from(issues)
-          .where(eq(issues.projectId, parent.projectId));
-        const issueNumber = (maxResult[0]?.maxNum ?? 0) + 1;
-
-        const id = randomUUID();
-        const dependencyId = randomUUID();
-        const now = new Date().toISOString();
-
-        await db.transaction(async (tx) => {
-          await tx.insert(issues).values({
-            id,
-            issueNumber,
-            title,
-            description: options.description ?? null,
-            priority: (options.priority as "low" | "medium" | "high" | "critical") ?? "medium",
-            issueType: (options.type as "task" | "bug" | "feature" | "chore") ?? "task",
-            sortOrder: 0,
-            statusId,
-            projectId: parent.projectId,
-            createdAt: now,
-            updatedAt: now,
-          });
-          await tx.insert(issueDependencies).values({
-            id: dependencyId,
-            issueId: id,
-            dependsOnId: parent.id,
-            type: "child_of",
-            createdAt: now,
-          });
+        const { id, issueNumber, dependencyId } = await createSubIssueWithParentLink({
+          projectId: parent.projectId,
+          parentId: parent.id,
+          title,
+          description: options.description,
+          priority: options.priority,
+          issueType: options.type,
+          statusId,
         });
 
         const result = {
@@ -1114,45 +922,19 @@ Note: deletion is permanent. There is no undo. The issue number will not be reus
           process.exit(1);
         }
 
-        const issueRows = await db
-          .select({ id: issues.id, title: issues.title, projectId: issues.projectId })
-          .from(issues)
-          .where(and(eq(issues.issueNumber, num), eq(issues.projectId, projectId)))
-          .limit(1);
+        const issue = await getIssueByNumberOrId(String(num), projectId);
 
-        if (issueRows.length === 0) {
+        if (!issue) {
           console.error(`Issue #${num} not found in active project.`);
           process.exit(1);
         }
-
-        const issue = issueRows[0];
 
         if (!options.force) {
           console.log(`Warning: This will permanently delete issue #${num} "${issue.title}" and ALL associated workspaces, sessions, and messages. Use --force to suppress this message.`);
         }
 
-        // Cascade: workspaces → sessions → messages → diff_comments
-        const wsRows = await db
-          .select({ id: workspaces.id })
-          .from(workspaces)
-          .where(eq(workspaces.issueId, issue.id));
-
-        for (const ws of wsRows) {
-          const wsSessions = await db
-            .select({ id: sessions.id })
-            .from(sessions)
-            .where(eq(sessions.workspaceId, ws.id));
-
-          await db.delete(diffComments).where(eq(diffComments.workspaceId, ws.id));
-          if (wsSessions.length > 0) {
-            await db.delete(sessionMessages).where(inArray(sessionMessages.sessionId, wsSessions.map((s) => s.id)));
-          }
-          await db.delete(sessions).where(eq(sessions.workspaceId, ws.id));
-          await db.delete(workspaces).where(eq(workspaces.id, ws.id));
-        }
-
-        await db.delete(issueTags).where(eq(issueTags.issueId, issue.id));
-        await db.delete(issues).where(eq(issues.id, issue.id));
+        // Cascade workspaces (+ their sessions/messages/comments/artifacts) → tags → issue.
+        await deleteIssueCascade(issue.id);
 
         const result = { id: issue.id, issueNumber: num, title: issue.title, deleted: true };
         if (options.json) {
@@ -1196,35 +978,25 @@ Valid types: text, link, image
         }
         const { num, type, content } = validated;
 
-        const issueRows = await db
-          .select({ id: issues.id, projectId: issues.projectId })
-          .from(issues)
-          .where(and(eq(issues.issueNumber, num), eq(issues.projectId, projectId)))
-          .limit(1);
+        const issueId = await getIssueIdByNumberInProject(num, projectId);
 
-        if (issueRows.length === 0) {
+        if (!issueId) {
           console.error(`Issue #${num} not found in active project.`);
           process.exit(1);
         }
 
-        const issue = issueRows[0];
-
         if (options.workspace) {
-          const wsRows = await db
-            .select({ id: workspaces.id })
-            .from(workspaces)
-            .where(and(eq(workspaces.id, options.workspace), eq(workspaces.issueId, issue.id)))
-            .limit(1);
-          if (wsRows.length === 0) {
+          const target = await getWorkspaceArtifactTarget(options.workspace, issueId);
+          if (!target) {
             console.error(`Workspace '${options.workspace}' not found or does not belong to issue #${num}.`);
             process.exit(1);
           }
         }
 
         const id = randomUUID();
-        await db.insert(issueArtifacts).values({
+        await insertIssueArtifact({
           id,
-          issueId: issue.id,
+          issueId,
           workspaceId: options.workspace ?? null,
           type,
           mimeType: options.mimeType ?? null,
@@ -1234,7 +1006,7 @@ Valid types: text, link, image
 
         const result = {
           id,
-          issueId: issue.id,
+          issueId,
           workspaceId: options.workspace ?? null,
           type,
           mimeType: options.mimeType ?? null,
@@ -1304,11 +1076,7 @@ Each dependency: issueIndex, dependsOnIndex (0-based indices), type (optional, d
         }
         const { issueInputs, dependencyInputs } = normalized;
 
-        const statuses = await db
-          .select()
-          .from(projectStatuses)
-          .where(eq(projectStatuses.projectId, projectId))
-          .orderBy(projectStatuses.sortOrder);
+        const statuses = await getProjectStatuses(projectId);
 
         if (statuses.length === 0) {
           console.error("No statuses configured for project.");
@@ -1328,107 +1096,25 @@ Each dependency: issueIndex, dependsOnIndex (0-based indices), type (optional, d
             console.error(`Invalid parent issue number: ${options.parent}`);
             process.exit(1);
           }
-          const parentRows = await db
-            .select({ id: issues.id, projectId: issues.projectId })
-            .from(issues)
-            .where(and(eq(issues.issueNumber, parentNum), eq(issues.projectId, projectId)))
-            .limit(1);
-          if (parentRows.length === 0) {
+          const resolvedParentId = await getIssueIdByNumberInProject(parentNum, projectId);
+          if (!resolvedParentId) {
             console.error(`Parent issue #${parentNum} not found in active project.`);
             process.exit(1);
           }
-          parentIssueId = parentRows[0].id;
+          parentIssueId = resolvedParentId;
         }
 
-        const maxResult = await db
-          .select({ maxNum: sql<number | null>`max(${issues.issueNumber})` })
-          .from(issues)
-          .where(eq(issues.projectId, projectId));
-        let nextNumber = (maxResult[0]?.maxNum ?? 0) + 1;
-
+        const nextNumber = ((await getMaxIssueNumber(projectId)) ?? 0) + 1;
         const now = new Date().toISOString();
-        const created: { id: string; issueNumber: number; title: string }[] = [];
 
-        await db.transaction(async (tx) => {
-          const tagIdByName = new Map<string, string>();
-          const resolveTagId = async (name: string): Promise<string> => {
-            const key = name.toLowerCase();
-            const cached = tagIdByName.get(key);
-            if (cached) return cached;
-            const existing = await tx.select({ id: tags.id }).from(tags)
-              .where(sql`lower(${tags.name}) = lower(${name})`)
-              .limit(1);
-            let tagId: string;
-            if (existing.length > 0) {
-              tagId = existing[0].id;
-            } else {
-              tagId = randomUUID();
-              await tx.insert(tags).values({ id: tagId, name, color: null, createdAt: now });
-            }
-            tagIdByName.set(key, tagId);
-            return tagId;
-          };
-
-          const idByIndex: string[] = [];
-          for (const input of issueInputs) {
-            const id = randomUUID();
-            const statusId = input.statusName
-              ? statuses.find((s) => s.name === input.statusName)!.id
-              : statuses[0].id;
-            const issueNumber = nextNumber++;
-            await tx.insert(issues).values({
-              id,
-              issueNumber,
-              title: input.title,
-              description: input.description ?? null,
-              priority: input.priority ?? "medium",
-              issueType: input.issueType ?? "task",
-              sortOrder: input.sortOrder ?? 0,
-              estimate: input.estimate ?? null,
-              statusId,
-              projectId,
-              createdAt: now,
-              updatedAt: now,
-            });
-            if (parentIssueId) {
-              await tx.insert(issueDependencies).values({
-                id: randomUUID(),
-                issueId: id,
-                dependsOnId: parentIssueId,
-                type: "child_of",
-                createdAt: now,
-              });
-            }
-            if (input.tags && input.tags.length > 0) {
-              const seenTagIds = new Set<string>();
-              for (const tagName of input.tags) {
-                const trimmed = tagName.trim();
-                if (!trimmed) continue;
-                const tagId = await resolveTagId(trimmed);
-                if (seenTagIds.has(tagId)) continue;
-                seenTagIds.add(tagId);
-                await tx.insert(issueTags).values({ id: randomUUID(), issueId: id, tagId });
-              }
-            }
-            idByIndex.push(id);
-            created.push({ id, issueNumber, title: input.title });
-          }
-
-          for (const e of dependencyInputs) {
-            if (e.issueIndex < 0 || e.issueIndex >= issueInputs.length) {
-              throw new Error(`dependencies: issueIndex ${e.issueIndex} out of range (0..${issueInputs.length - 1})`);
-            }
-            if (e.dependsOnIndex < 0 || e.dependsOnIndex >= issueInputs.length) {
-              throw new Error(`dependencies: dependsOnIndex ${e.dependsOnIndex} out of range (0..${issueInputs.length - 1})`);
-            }
-            await tx.insert(issueDependencies).values({
-              id: randomUUID(),
-              issueId: idByIndex[e.issueIndex],
-              dependsOnId: idByIndex[e.dependsOnIndex],
-              type: (e.type ?? "depends_on") as typeof DEPENDENCY_TYPES[number],
-              createdAt: now,
-            });
-          }
+        const { created } = await createIssuesBatchWithDepsAndTags({
+          projectId,
+          startNumber: nextNumber,
+          now,
+          issueInputs,
+          dependencyInputs,
+          statuses,
+          parentIssueId,
         });
 
         for (const line of formatBatchCreateResult(created, dependencyInputs.length, options.json ?? false)) {
@@ -1471,10 +1157,7 @@ At least 2 issue numbers are required.
           }
         }
 
-        const issueRows = await db
-          .select({ id: issues.id, issueNumber: issues.issueNumber, touchedFilesJson: issues.touchedFilesJson })
-          .from(issues)
-          .where(and(inArray(issues.issueNumber, nums), eq(issues.projectId, projectId)));
+        const issueRows = await getIssuesTouchedFilesByNumbers(projectId, nums);
 
         const foundNums = new Set(issueRows.map((r) => r.issueNumber));
         for (const n of nums) {
