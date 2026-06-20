@@ -1,7 +1,6 @@
 import type { Command } from "commander";
-import { db } from "../../db/index.js";
-import { projects, issues, projectStatuses } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
+import { getProjectStatusById, deleteProjectStatusById } from "../../repositories/project.repository.js";
+import { getFirstIssueIdWithStatus } from "../../repositories/issue.repository.js";
 import { BUILTIN_SKILLS } from "../../builtin-skills.js";
 import { runMigrations, logDefaultBranch, timeSince } from "../shared.js";
 
@@ -12,18 +11,18 @@ export function registerSystemCommands(program: Command) {
     .action(async (statusId: string) => {
       try {
         await runMigrations();
-        const rows = await db.select().from(projectStatuses).where(eq(projectStatuses.id, statusId)).limit(1);
-        if (rows.length === 0) {
+        const status = await getProjectStatusById(statusId);
+        if (!status) {
           console.error(`Status "${statusId}" not found.`);
           process.exit(1);
         }
-        const linked = await db.select({ id: issues.id }).from(issues).where(eq(issues.statusId, statusId)).limit(1);
-        if (linked.length > 0) {
-          console.error(`Cannot delete status "${rows[0].name}" -- it has linked issues. Move or delete those issues first.`);
+        const linkedId = await getFirstIssueIdWithStatus(statusId);
+        if (linkedId) {
+          console.error(`Cannot delete status "${status.name}" -- it has linked issues. Move or delete those issues first.`);
           process.exit(1);
         }
-        await db.delete(projectStatuses).where(eq(projectStatuses.id, statusId));
-        console.log(`Deleted status "${rows[0].name}" (${statusId})`);
+        await deleteProjectStatusById(statusId);
+        console.log(`Deleted status "${status.name}" (${statusId})`);
         process.exit(0);
       } catch (err) {
         console.error("Error:", err instanceof Error ? err.message : String(err));

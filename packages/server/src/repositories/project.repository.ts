@@ -228,3 +228,14 @@ export async function deleteProjectStatus(
   await database.delete(projectStatuses).where(eq(projectStatuses.id, statusId));
   return { success: true };
 }
+
+/** A single project status by its id (no project scoping), or null. */
+export async function getProjectStatusById(statusId: string, database: Database = db) {
+  const rows = await database.select().from(projectStatuses).where(eq(projectStatuses.id, statusId)).limit(1);
+  return rows[0] ?? null;
+}
+
+/** Delete a project status by id alone (caller has already validated). */
+export async function deleteProjectStatusById(statusId: string, database: Database = db): Promise<void> {
+  await database.delete(projectStatuses).where(eq(projectStatuses.id, statusId));
+}
