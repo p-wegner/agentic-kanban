@@ -2,11 +2,9 @@ import React from "react";
 import ReactMarkdown from "react-markdown";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { getWorkspacePreviewUrl } from "../lib/workspace-preview.js";
-import { getOutputFormatForAgent, getOutputFormatForProvider, type AgentOutputFormat } from "../lib/agent-output-parser.js";
+import { getOutputFormatForAgent, getOutputFormatForProvider } from "../lib/agent-output-parser.js";
 import { TerminalView } from "./TerminalView.js";
 import { WorkspacePreviewPanel } from "./WorkspacePreviewPanel.js";
-import { WorkspaceActionButton } from "./WorkspaceActionButton.js";
-import { WorkspaceArtifactsBrowser } from "./WorkspaceArtifactsBrowser.js";
 import { WorkspaceDiagnosticsPanel } from "./WorkspaceDiagnosticsPanel.js";
 import { WorkspaceTimelinePanel } from "./WorkspaceTimelinePanel.js";
 import { FailurePatternHint } from "./FailurePatternHint.js";
@@ -24,18 +22,14 @@ import { WorkspaceSummaryView } from "./WorkspaceSummaryView.js";
 import {
   CODEX_DEFAULT_PROFILE,
   COPILOT_DEFAULT_PROFILE,
-  SESSION_STATUS_COLORS,
   STATUS_COLORS,
-  formatDuration,
-  formatTokenCount,
   getTriggerTypeLabel,
   humanizeSkillName,
-  parseStats,
   profileOptionValue,
   providerLabel,
   type ProfileOption,
 } from "../lib/workspace-helpers.js";
-import { SessionStatsBadge, SessionStatsSummary } from "../lib/session-stats.js";
+import { SessionStatsSummary } from "../lib/session-stats.js";
 import { ContextWindowView } from "./ContextWindowView.js";
 import type { WorkspaceViewMode } from "../hooks/useWorkspaceSession.js";
 import type { LiveSessionStats } from "../lib/useBoardEvents.js";
