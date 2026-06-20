@@ -6,9 +6,10 @@ import {
 } from "../../repositories/broadcast.repository.js";
 import * as agentService from "../agent.service.js";
 import { getProvider } from "../agent-provider.js";
+import type { ParsedStreamEvent } from "../agent-provider.js";
 import { parseSessionSummary, computeFrictionStats } from "@agentic-kanban/shared";
 import type { AgentOutputMessage, SessionFrictionStats } from "@agentic-kanban/shared";
-import type { SessionManagerOptions, SessionState } from "./types.js";
+import type { SessionContext, SessionManagerOptions, SessionState } from "./types.js";
 import { formatToolActivity, tasksToTodoItems } from "./utils.js";
 import type { TodoItem } from "../board-events.js";
 import { detectCodexUsageLimitMessages } from "../codex-rate-limit.js";
@@ -96,6 +97,207 @@ function flushDbBuffer(state: SessionState, sessionId: string) {
   });
 }
 
+/**
+ * Apply a single parsed stream event to the session's in-memory state, firing
+ * the live-stats / activity / todos callbacks. Pure with respect to its inputs
+ * (mutates only `state` and calls `options` hooks), so the whole event cascade
+ * is unit-testable with synthetic events — no provider parsing required.
+ */
+/** True when the event carries real agent content (vs. transport/keepalive noise). */
+function isSubstantiveEvent(evt: ParsedStreamEvent): boolean {
+  return Boolean(
+    evt.assistantText ||
+    evt.stats ||
+    evt.liveStats ||
+    evt.toolActivity ||
+    evt.toolResult ||
+    evt.turnComplete ||
+    evt.exitPlanModeDenied ||
+    evt.rateLimitInfo,
+  );
+}
+
+export function applyStreamEvent(
+  state: SessionState,
+  options: SessionManagerOptions | undefined,
+  sessionId: string,
+  evt: ParsedStreamEvent,
+): void {
+
+  if (isSubstantiveEvent(evt)) {
+    state.sessionSubstantiveOutput.add(sessionId);
+  }
+
+  const ctx = state.sessionContexts.get(sessionId);
+
+  // Provider session ID (e.g. Claude's system/init session_id)
+  if (evt.providerSessionId) {
+    updateProviderSessionId(sessionId, evt.providerSessionId)
+      .catch((err) => console.error("Failed to update providerSessionId:", err));
+  }
+
+  // Track ExitPlanMode denial for auto-resume
+  if (evt.exitPlanModeDenied) {
+    state.sessionExitPlanModeDenied.add(sessionId);
+    console.log(`[session] ExitPlanMode denied: sessionId=${sessionId} — will auto-resume if planMode=false`);
+  }
+
+  // Turn completion in multi-turn mode
+  if (evt.turnComplete && agentService.isStdinOpen(sessionId)) {
+    state.turnStates.set(sessionId, "waiting");
+  }
+
+  // Accumulate assistant text for agentSummary
+  if (evt.assistantText) {
+    if (!state.sessionTextParts.has(sessionId)) state.sessionTextParts.set(sessionId, []);
+    state.sessionTextParts.get(sessionId)!.push(evt.assistantText);
+  }
+
+  // Persist session stats from result events
+  if (evt.stats) applyStatsEvent(state, sessionId, evt.stats);
+
+  // Live stats updates (model, context tokens, tool uses, subagents)
+  if (evt.liveStats) applyLiveStats(state, options, sessionId, evt.liveStats, ctx);
+
+  // Tool activity broadcasting (tool_use, TodoWrite/Task tracking)
+  if (evt.toolActivity && ctx) applyToolActivity(state, options, sessionId, evt.toolActivity, evt.todos, ctx);
+
+  // Rate limit event: log for observability
+  if (evt.rateLimitInfo) {
+    const retryAfter = evt.rateLimitInfo.retryAfter ? ` retryAfter=${evt.rateLimitInfo.retryAfter}` : "";
+    console.warn(`[agent] rate_limit_event: sessionId=${sessionId} status=${evt.rateLimitInfo.status} type=${evt.rateLimitInfo.rateLimitType}${retryAfter}`);
+  }
+
+  // Tool result: decrement subagent count for tracked Agent tool_use IDs
+  if (evt.toolResult) applyToolResult(state, options, sessionId, evt.toolResult, ctx);
+}
+
+/** Persist aggregate stats from a result event, folding in friction + agent summary. */
+function applyStatsEvent(state: SessionState, sessionId: string, stats: NonNullable<ParsedStreamEvent["stats"]>): void {
+  const lastTool = state.sessionLastTool.get(sessionId);
+  const textParts = state.sessionTextParts.get(sessionId) ?? [];
+  const fullAgentSummary = textParts.length > 0 ? textParts.join("\n\n---\n\n") : stats.agentSummary;
+  // Fold in deterministic friction metrics so the insights endpoint can
+  // aggregate failures/repeated-commands without re-parsing transcripts.
+  const friction = frictionFromBuffer(state.messageBuffer.get(sessionId) ?? []);
+  const statsToSave = {
+    ...stats,
+    agentSummary: fullAgentSummary,
+    ...(lastTool ? { lastTool } : {}),
+    ...(friction ? { friction } : {}),
+  };
+  mergeExistingStats(sessionId, statsToSave)
+    .then((mergedStats) => updateSessionStats(sessionId, JSON.stringify(mergedStats)))
+    .catch((err) => console.error("Failed to update session stats:", err));
+}
+
+/** Update per-session live stats (model/tokens/tool-uses/subagents) and re-broadcast. */
+function applyLiveStats(
+  state: SessionState,
+  options: SessionManagerOptions | undefined,
+  sessionId: string,
+  ls: NonNullable<ParsedStreamEvent["liveStats"]>,
+  ctx: SessionContext | undefined,
+): void {
+  if (ls.model) state.sessionModels.set(sessionId, ls.model);
+  if (ls.contextTokens > 0) state.sessionContextTokens.set(sessionId, ls.contextTokens);
+  if (ls.toolUses !== undefined) state.sessionToolUses.set(sessionId, ls.toolUses);
+
+  if (ls.subagentDelta === 1) {
+    const count = (state.sessionSubagents.get(sessionId) ?? 0) + 1;
+    state.sessionSubagents.set(sessionId, count);
+  }
+
+  const model = state.sessionModels.get(sessionId) ?? "";
+  const contextTokens = state.sessionContextTokens.get(sessionId) ?? 0;
+  const toolUses = state.sessionToolUses.get(sessionId) ?? 0;
+  const subagentCount = state.sessionSubagents.get(sessionId) ?? 0;
+  if (ctx && (model || contextTokens || toolUses || subagentCount)) {
+    options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, contextTokens, toolUses, subagentCount);
+  }
+}
+
+/** Handle a tool_use event: activity broadcast, Agent-id tracking, TodoWrite/Task tracking. */
+function applyToolActivity(
+  state: SessionState,
+  options: SessionManagerOptions | undefined,
+  sessionId: string,
+  toolActivity: NonNullable<ParsedStreamEvent["toolActivity"]>,
+  todos: ParsedStreamEvent["todos"],
+  ctx: SessionContext,
+): void {
+  state.sessionLastTool.set(sessionId, toolActivity.name);
+  const activity = formatToolActivity(toolActivity.name, toolActivity.input);
+  if (activity) {
+    options?.onActivity?.(ctx.projectId, ctx.issueId, sessionId, activity);
+  }
+
+  // Track Agent tool_use IDs for subagent count decrement
+  if (toolActivity.name === "Agent" && toolActivity.toolUseId) {
+    if (!state.sessionAgentToolUseIds.has(sessionId)) state.sessionAgentToolUseIds.set(sessionId, new Set());
+    state.sessionAgentToolUseIds.get(sessionId)!.add(toolActivity.toolUseId);
+  }
+
+  // TodoWrite: set hasTodoWrite flag and broadcast todos
+  if (toolActivity.name === "TodoWrite" && todos) {
+    state.sessionHasTodoWrite.add(sessionId);
+    options?.onTodos?.(ctx.projectId, ctx.issueId, todos as unknown as TodoItem[]);
+  }
+
+  // TaskCreate (only when no TodoWrite has taken precedence)
+  if (!state.sessionHasTodoWrite.has(sessionId) && toolActivity.name === "TaskCreate") {
+    const subject = toolActivity.input.subject as string | undefined;
+    if (subject) {
+      if (!state.sessionTasks.has(sessionId)) state.sessionTasks.set(sessionId, new Map());
+      const tasks = state.sessionTasks.get(sessionId)!;
+      const taskIdx = String(tasks.size + 1);
+      tasks.set(taskIdx, { subject, status: "pending" });
+      options?.onTodos?.(ctx.projectId, ctx.issueId, tasksToTodoItems(tasks));
+    }
+  }
+
+  // TaskUpdate — update task status by taskId
+  if (toolActivity.name === "TaskUpdate" && !state.sessionHasTodoWrite.has(sessionId)) {
+    const taskId = toolActivity.input.taskId as string | undefined;
+    const taskStatus = toolActivity.input.status as string | undefined;
+    if (taskId && taskStatus) {
+      const tasks = state.sessionTasks.get(sessionId);
+      const task = tasks?.get(taskId);
+      if (task) {
+        task.status = taskStatus;
+        options?.onTodos?.(ctx.projectId, ctx.issueId, tasksToTodoItems(tasks!));
+      }
+    }
+  }
+}
+
+/** Handle a tool_result for a tracked Agent tool_use: accumulate text, decrement subagents. */
+function applyToolResult(
+  state: SessionState,
+  options: SessionManagerOptions | undefined,
+  sessionId: string,
+  toolResult: NonNullable<ParsedStreamEvent["toolResult"]>,
+  ctx: SessionContext | undefined,
+): void {
+  const agentIds = state.sessionAgentToolUseIds.get(sessionId);
+  if (!agentIds || !agentIds.has(toolResult.toolUseId)) return;
+
+  // Accumulate subagent response text
+  if (toolResult.agentResultText) {
+    if (!state.sessionTextParts.has(sessionId)) state.sessionTextParts.set(sessionId, []);
+    state.sessionTextParts.get(sessionId)!.push(toolResult.agentResultText);
+  }
+  agentIds.delete(toolResult.toolUseId);
+  const newCount = Math.max(0, (state.sessionSubagents.get(sessionId) ?? 1) - 1);
+  state.sessionSubagents.set(sessionId, newCount);
+  if (ctx) {
+    const model = state.sessionModels.get(sessionId) ?? "";
+    const toolUses = state.sessionToolUses.get(sessionId) ?? 0;
+    const lastContextTokens = state.sessionContextTokens.get(sessionId) ?? 0;
+    options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, lastContextTokens, toolUses, newCount);
+  }
+}
+
 export function createBroadcaster(
   state: SessionState,
   options: SessionManagerOptions | undefined,
@@ -139,158 +341,7 @@ export function createBroadcaster(
         if (!line.trim()) continue;
         const evt = provider.parseStreamEvent(line);
         if (!evt) continue;
-
-        if (
-          evt.assistantText ||
-          evt.stats ||
-          evt.liveStats ||
-          evt.toolActivity ||
-          evt.toolResult ||
-          evt.turnComplete ||
-          evt.exitPlanModeDenied ||
-          evt.rateLimitInfo
-        ) {
-          state.sessionSubstantiveOutput.add(sessionId);
-        }
-
-        const ctx = state.sessionContexts.get(sessionId);
-
-        // Provider session ID (e.g. Claude's system/init session_id)
-        if (evt.providerSessionId) {
-          updateProviderSessionId(sessionId, evt.providerSessionId)
-            .catch((err) => console.error("Failed to update providerSessionId:", err));
-        }
-
-        // Track ExitPlanMode denial for auto-resume
-        if (evt.exitPlanModeDenied) {
-          state.sessionExitPlanModeDenied.add(sessionId);
-          console.log(`[session] ExitPlanMode denied: sessionId=${sessionId} — will auto-resume if planMode=false`);
-        }
-
-        // Turn completion in multi-turn mode
-        if (evt.turnComplete && agentService.isStdinOpen(sessionId)) {
-          state.turnStates.set(sessionId, "waiting");
-        }
-
-        // Accumulate assistant text for agentSummary
-        if (evt.assistantText) {
-          if (!state.sessionTextParts.has(sessionId)) state.sessionTextParts.set(sessionId, []);
-          state.sessionTextParts.get(sessionId)!.push(evt.assistantText);
-        }
-
-        // Persist session stats from result events
-        if (evt.stats) {
-          const lastTool = state.sessionLastTool.get(sessionId);
-          const textParts = state.sessionTextParts.get(sessionId) ?? [];
-          const fullAgentSummary = textParts.length > 0 ? textParts.join("\n\n---\n\n") : evt.stats.agentSummary;
-          // Fold in deterministic friction metrics so the insights endpoint can
-          // aggregate failures/repeated-commands without re-parsing transcripts.
-          const friction = frictionFromBuffer(state.messageBuffer.get(sessionId) ?? []);
-          const statsToSave = {
-            ...evt.stats,
-            agentSummary: fullAgentSummary,
-            ...(lastTool ? { lastTool } : {}),
-            ...(friction ? { friction } : {}),
-          };
-          mergeExistingStats(sessionId, statsToSave)
-            .then((mergedStats) => updateSessionStats(sessionId, JSON.stringify(mergedStats)))
-            .catch((err) => console.error("Failed to update session stats:", err));
-        }
-
-        // Live stats updates (model, context tokens, tool uses, subagents)
-        if (evt.liveStats) {
-          const ls = evt.liveStats;
-          if (ls.model) state.sessionModels.set(sessionId, ls.model);
-          if (ls.contextTokens > 0) state.sessionContextTokens.set(sessionId, ls.contextTokens);
-          if (ls.toolUses !== undefined) state.sessionToolUses.set(sessionId, ls.toolUses);
-
-          if (ls.subagentDelta === 1) {
-            const count = (state.sessionSubagents.get(sessionId) ?? 0) + 1;
-            state.sessionSubagents.set(sessionId, count);
-          }
-
-          const model = state.sessionModels.get(sessionId) ?? "";
-          const contextTokens = state.sessionContextTokens.get(sessionId) ?? 0;
-          const toolUses = state.sessionToolUses.get(sessionId) ?? 0;
-          const subagentCount = state.sessionSubagents.get(sessionId) ?? 0;
-          if (ctx && (model || contextTokens || toolUses || subagentCount)) {
-            options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, contextTokens, toolUses, subagentCount);
-          }
-        }
-
-        // Tool activity broadcasting
-        if (evt.toolActivity && ctx) {
-          state.sessionLastTool.set(sessionId, evt.toolActivity.name);
-          const activity = formatToolActivity(evt.toolActivity.name, evt.toolActivity.input);
-          if (activity) {
-            options?.onActivity?.(ctx.projectId, ctx.issueId, sessionId, activity);
-          }
-
-          // Track Agent tool_use IDs for subagent count decrement
-          if (evt.toolActivity.name === "Agent" && evt.toolActivity.toolUseId) {
-            if (!state.sessionAgentToolUseIds.has(sessionId)) state.sessionAgentToolUseIds.set(sessionId, new Set());
-            state.sessionAgentToolUseIds.get(sessionId)!.add(evt.toolActivity.toolUseId);
-          }
-
-          // TodoWrite: set hasTodoWrite flag and broadcast todos
-          if (evt.toolActivity.name === "TodoWrite" && evt.todos) {
-            state.sessionHasTodoWrite.add(sessionId);
-            options?.onTodos?.(ctx.projectId, ctx.issueId, evt.todos as unknown as TodoItem[]);
-          }
-
-          // TaskCreate (only when no TodoWrite has taken precedence)
-          if (!state.sessionHasTodoWrite.has(sessionId) && evt.toolActivity.name === "TaskCreate") {
-            const subject = evt.toolActivity.input.subject as string | undefined;
-            if (subject) {
-              if (!state.sessionTasks.has(sessionId)) state.sessionTasks.set(sessionId, new Map());
-              const tasks = state.sessionTasks.get(sessionId)!;
-              const taskIdx = String(tasks.size + 1);
-              tasks.set(taskIdx, { subject, status: "pending" });
-              options?.onTodos?.(ctx.projectId, ctx.issueId, tasksToTodoItems(tasks));
-            }
-          }
-
-          // TaskUpdate — update task status by taskId
-          if (evt.toolActivity.name === "TaskUpdate" && !state.sessionHasTodoWrite.has(sessionId)) {
-            const taskId = evt.toolActivity.input.taskId as string | undefined;
-            const taskStatus = evt.toolActivity.input.status as string | undefined;
-            if (taskId && taskStatus) {
-              const tasks = state.sessionTasks.get(sessionId);
-              const task = tasks?.get(taskId);
-              if (task) {
-                task.status = taskStatus;
-                options?.onTodos?.(ctx.projectId, ctx.issueId, tasksToTodoItems(tasks!));
-              }
-            }
-          }
-        }
-
-        // Rate limit event: log for observability
-        if (evt.rateLimitInfo) {
-          const retryAfter = evt.rateLimitInfo.retryAfter ? ` retryAfter=${evt.rateLimitInfo.retryAfter}` : "";
-          console.warn(`[agent] rate_limit_event: sessionId=${sessionId} status=${evt.rateLimitInfo.status} type=${evt.rateLimitInfo.rateLimitType}${retryAfter}`);
-        }
-
-        // Tool result: decrement subagent count for tracked Agent tool_use IDs
-        if (evt.toolResult) {
-          const agentIds = state.sessionAgentToolUseIds.get(sessionId);
-          if (agentIds && agentIds.has(evt.toolResult.toolUseId)) {
-            // Accumulate subagent response text
-            if (evt.toolResult.agentResultText) {
-              if (!state.sessionTextParts.has(sessionId)) state.sessionTextParts.set(sessionId, []);
-              state.sessionTextParts.get(sessionId)!.push(evt.toolResult.agentResultText);
-            }
-            agentIds.delete(evt.toolResult.toolUseId);
-            const newCount = Math.max(0, (state.sessionSubagents.get(sessionId) ?? 1) - 1);
-            state.sessionSubagents.set(sessionId, newCount);
-            if (ctx) {
-              const model = state.sessionModels.get(sessionId) ?? "";
-              const toolUses = state.sessionToolUses.get(sessionId) ?? 0;
-              const lastContextTokens = state.sessionContextTokens.get(sessionId) ?? 0;
-              options?.onLiveStats?.(ctx.projectId, ctx.issueId, model, lastContextTokens, toolUses, newCount);
-            }
-          }
-        }
+        applyStreamEvent(state, options, sessionId, evt);
       }
     }
 
