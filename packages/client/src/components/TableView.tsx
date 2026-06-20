@@ -11,6 +11,7 @@ import { bulkAddTag, bulkDeleteIssues, bulkMoveStatus, bulkRemoveTag, bulkUpdate
 import type { BulkOpDeps } from "../lib/tableView-bulk-ops.js";
 import { useBulkOperations } from "../hooks/useBulkOperations.js";
 import type { Tag } from "../hooks/useBulkOperations.js";
+import { resolveRowCells, PRIORITY_LABEL, tagClass } from "../lib/tableView-cells.js";
 
 interface TableViewProps {
   columns: StatusWithIssues[];
@@ -21,59 +22,8 @@ interface TableViewProps {
   onClearCreatedDateFilter?: () => void;
 }
 
-const ISSUE_TYPE_LABEL: Record<string, string> = {
-  task: "Task",
-  bug: "Bug",
-  feature: "Feature",
-  chore: "Chore",
-};
-
-const ISSUE_TYPE_CLASS: Record<string, string> = {
-  task: "text-gray-600 bg-gray-100",
-  bug: "text-red-700 bg-red-50",
-  feature: "text-brand-700 bg-brand-50 dark:text-brand-300 dark:bg-brand-900/40",
-  chore: "text-amber-700 bg-amber-50",
-};
-
-const STATUS_CLASS: Record<string, string> = {
-  "Todo": "text-gray-600 bg-gray-100",
-  "In Progress": "text-blue-700 bg-blue-50",
-  "In Review": "text-accent-700 bg-accent-50 dark:text-accent-300 dark:bg-accent-900/40",
-  "AI Reviewed": "text-accent-700 bg-accent-50 dark:text-accent-300 dark:bg-accent-900/40",
-  "Done": "text-green-700 bg-green-50",
-  "Cancelled": "text-gray-500 bg-gray-100",
-};
-
 const ESTIMATE_OPTIONS = ["XS", "S", "M", "L", "XL"] as const;
 const PRIORITY_OPTIONS = ["critical", "high", "medium", "low"] as const;
-const PRIORITY_LABEL: Record<string, string> = { critical: "Critical", urgent: "Urgent", high: "High", medium: "Medium", low: "Low" };
-const PRIORITY_CLASS: Record<string, string> = {
-  critical: "text-red-700 bg-red-50",
-  urgent: "text-red-700 bg-red-50",
-  high: "text-orange-700 bg-orange-50",
-  medium: "text-yellow-700 bg-yellow-50",
-  low: "text-gray-500 bg-gray-100",
-};
-
-const TAG_COLORS: Record<string, string> = {
-  blue: "bg-blue-100 text-blue-700",
-  green: "bg-green-100 text-green-700",
-  red: "bg-red-100 text-red-700",
-  yellow: "bg-yellow-100 text-yellow-700",
-  purple: "bg-brand-100 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300",
-  pink: "bg-pink-100 text-pink-700",
-  orange: "bg-orange-100 text-orange-700",
-  indigo: "bg-indigo-100 text-indigo-700",
-  gray: "bg-gray-100 text-gray-600",
-};
-
-function tagClass(color: string | null | undefined) {
-  return TAG_COLORS[color ?? ""] ?? "bg-gray-100 text-gray-600";
-}
-
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString('en-US', { month: "short", day: "numeric", year: "numeric" });
-}
 
 type TableSort = { key: SortKey; dir: SortDir };
 
@@ -140,6 +90,7 @@ interface TableRowProps {
 }
 
 function TableRow({ issue, selected, onSelect, onClick }: TableRowProps) {
+  const cells = resolveRowCells(issue);
   return (
     <tr
       onClick={onClick}
@@ -161,41 +112,37 @@ function TableRow({ issue, selected, onSelect, onClick }: TableRowProps) {
         <span className="font-medium text-gray-900 dark:text-gray-100 truncate block">{issue.title}</span>
       </td>
       <td className="px-3 py-1.5 whitespace-nowrap">
-        <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_CLASS[issue.statusName] ?? "text-gray-600 bg-gray-100"}`}>
+        <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${cells.statusClass}`}>
           {issue.statusName}
         </span>
       </td>
       <td className="px-3 py-1.5 whitespace-nowrap">
-        <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${PRIORITY_CLASS[issue.priority ?? "medium"] ?? PRIORITY_CLASS.medium}`}>
-          {PRIORITY_LABEL[issue.priority ?? "medium"] ?? issue.priority ?? "medium"}
+        <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${cells.priorityClass}`}>
+          {cells.priorityLabel}
         </span>
       </td>
       <td className="px-3 py-1.5 whitespace-nowrap">
-        <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${ISSUE_TYPE_CLASS[issue.issueType ?? "task"] ?? ""}`}>
-          {ISSUE_TYPE_LABEL[issue.issueType ?? "task"] ?? issue.issueType ?? "task"}
+        <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${cells.typeClass}`}>
+          {cells.typeLabel}
         </span>
       </td>
       <td className="px-3 py-1.5 whitespace-nowrap text-xs text-gray-600 dark:text-gray-400">
         {issue.estimate ?? <span className="text-gray-300 dark:text-gray-600">—</span>}
       </td>
       <td className="px-3 py-1.5 whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">
-        {formatDate(issue.updatedAt)}
+        {cells.updatedText}
       </td>
       <td className="px-3 py-1.5 whitespace-nowrap text-xs">
-        {issue.dueDate ? (() => {
-          const overdue = new Date(issue.dueDate) < new Date(new Date().toDateString()) &&
-            issue.statusName !== "Done" && issue.statusName !== "Cancelled";
-          return (
-            <span className={overdue ? "text-red-600 font-medium" : "text-gray-500 dark:text-gray-400"}>
-              {formatDate(issue.dueDate)}
-            </span>
-          );
-        })() : <span className="text-gray-300 dark:text-gray-600">—</span>}
+        {cells.due ? (
+          <span className={cells.due.overdue ? "text-red-600 font-medium" : "text-gray-500 dark:text-gray-400"}>
+            {cells.due.text}
+          </span>
+        ) : <span className="text-gray-300 dark:text-gray-600">—</span>}
       </td>
       <td className="px-3 py-1.5">
         <div className="flex flex-wrap gap-1">
-          {(issue.tags ?? []).map((tag) => (
-            <span key={tag.id} className={`inline-flex px-1.5 py-0.5 rounded text-xs font-medium ${tagClass(tag.color)}`}>
+          {cells.tags.map((tag) => (
+            <span key={tag.id} className={`inline-flex px-1.5 py-0.5 rounded text-xs font-medium ${tag.className}`}>
               {tag.name}
             </span>
           ))}
