@@ -5,6 +5,11 @@ import {
   type SessionExitAction,
 } from "../startup/session-exit-classification.js";
 
+// This file pins the PURE routing verdict only. The handler's dispatch of each verdict
+// (and the "builder" fall-through to handleBuilderSessionExit) is covered end-to-end by the
+// exit-workflow integration tests (zero-diff-inreview, stranded-fix-and-merge-resolver,
+// usage-limit-rotation, workspace-lifecycle-status-transitions, …).
+
 /** All-false / clean-exit baseline; override only the fields a case cares about. */
 function inputs(over: Partial<SessionExitInputs> = {}): SessionExitInputs {
   return {
@@ -96,6 +101,36 @@ describe("classifySessionExit", () => {
       ["every role flag + a non-zero exit", { isFixAndMerge: true, isLearning: true, isReview: true, exitCode: 1 }],
     ])("plan-mode beats %s", (_label, over) => {
       expect(classifySessionExit(inputs({ wasPlanMode: true, ...over })).action).toBe("plan-mode-skip");
+    });
+  });
+
+  // Totality guard for this outage-prone route: every input must map to exactly one of
+  // the six valid actions. Catches a future typo'd action string or a non-total path.
+  describe("totality", () => {
+    const VALID_ACTIONS: SessionExitAction[] = [
+      "plan-mode-skip",
+      "fix-and-merge",
+      "learning-cleanup",
+      "failed",
+      "review",
+      "builder",
+    ];
+    const bools = [false, true];
+    const exitCodes: Array<number | null> = [0, 1, null];
+
+    it("returns a valid SessionExitAction for all 48 flag × exit-code combinations", () => {
+      for (const wasPlanMode of bools) {
+        for (const isFixAndMerge of bools) {
+          for (const isLearning of bools) {
+            for (const isReview of bools) {
+              for (const exitCode of exitCodes) {
+                const { action } = classifySessionExit({ wasPlanMode, isFixAndMerge, isLearning, isReview, exitCode });
+                expect(VALID_ACTIONS).toContain(action);
+              }
+            }
+          }
+        }
+      }
     });
   });
 
