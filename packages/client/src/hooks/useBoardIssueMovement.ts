@@ -148,12 +148,14 @@ export function useBoardIssueMovement(params: UseBoardIssueMovementParams): Boar
       } else {
         await refetchBoard();
       }
-    } catch {
+    } catch (err) {
       if (optimistic) {
         setColumns(snapshotColumns);
         columnsRef.current = snapshotColumns;
       }
-      showToast("Failed to move issue", "error");
+      // Surface the server message (e.g. the AK-535 terminal-move guard) rather than
+      // a generic failure, so a blocked move explains why and how to proceed.
+      showToast(err instanceof Error ? err.message : "Failed to move issue", "error");
     }
   }
 
@@ -212,12 +214,14 @@ export function useBoardIssueMovement(params: UseBoardIssueMovementParams): Boar
       } else {
         await refetchBoard();
       }
-    } catch {
+    } catch (err) {
       if (optimistic) {
         setColumns(snapshotColumns);
         columnsRef.current = snapshotColumns;
       }
-      showToast("Failed to move issue", "error");
+      // Surface the server message (e.g. the AK-535 terminal-move guard) rather than
+      // a generic failure, so a blocked move explains why and how to proceed.
+      showToast(err instanceof Error ? err.message : "Failed to move issue", "error");
     }
   }
 

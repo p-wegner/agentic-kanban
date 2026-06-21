@@ -7,7 +7,7 @@ import type { WebhookIssueStatusPayload } from "@agentic-kanban/shared/lib";
 import { buildIssueStatusPayload } from "@agentic-kanban/shared/lib";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
 import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
-import { isTerminalStatusView } from "@agentic-kanban/shared";
+import { isTerminalStatusView, isTerminalStatusName } from "@agentic-kanban/shared";
 import {
   resolveNewIssueDefaults,
   getIssueProjectId,
@@ -57,9 +57,10 @@ import {
   getDoneCandidateIssues,
   archiveIssuesByIds,
 } from "../repositories/issue-service.repository.js";
-import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
+import { deleteWorkspaceCascade, findOpenUnmergedWorkspace } from "../repositories/workspace.repository.js";
 import { enrichWorkspacesWithSessionData, wouldCreateCycle } from "./board-aggregation.service.js";
 import { hasPath } from "../lib/dependency-graph.js";
+import { openWorkspaceBlockMessage } from "../lib/terminal-move-guard.js";
 import { materializePhaseArtifactToWorktree } from "./phase-artifacts.service.js";
 
 function parseJsonArray<T>(raw: string | null | undefined, fallback: T[]): T[] {
@@ -342,6 +343,7 @@ export function createIssueService(deps: {
     // terminal status (Done/Cancelled/Archived), not on every update of an
     // already-terminal issue.
     let wasTerminal = false;
+    let newStatusName: string | null = null;
     if (body.statusId !== undefined) {
       const before = await getIssueWebhookSnapshot(id, database);
       if (before) {
@@ -351,6 +353,20 @@ export function createIssueService(deps: {
           statusName: before.statusName,
           currentNodeId: before.currentNodeId,
         });
+      }
+      newStatusName = await getProjectStatusName(body.statusId as string, database);
+
+      // AK-535 guard: block a non-terminal -> terminal move (Done/Cancelled) while
+      // the issue still has an open, non-direct, unmerged workspace — that strands
+      // the branch (silent merge loss). Mirrors MCP move_issue / update_issue via
+      // the shared findOpenUnmergedWorkspace seam. Runs BEFORE the status write so a
+      // blocked move is a no-op (no DB change, no workspace auto-close).
+      if (!wasTerminal && isTerminalStatusName(newStatusName)) {
+        const openWs = await findOpenUnmergedWorkspace(id, database);
+        if (openWs) {
+          // newStatusName is non-null here: isTerminalStatusName returns false for null.
+          throw new IssueError(openWorkspaceBlockMessage(newStatusName!, openWs.branch), "CONFLICT");
+        }
       }
     }
 
@@ -362,12 +378,8 @@ export function createIssueService(deps: {
       await syncCurrentNodeToStatus(database, id).catch(() => {});
     }
 
-    // Resolve the new status name once; reused for the terminal-transition check
-    // below and the webhook payload.
-    let newStatusName: string | null = null;
-    if (body.statusId !== undefined) {
-      newStatusName = await getProjectStatusName(body.statusId as string, database);
-    }
+    // newStatusName was resolved above (before the AK-535 guard) and is reused for
+    // the terminal-transition close logic and the webhook payload.
 
     // When an issue transitions INTO a terminal status (Done/Cancelled/Archived),
     // close any still-open workspace for it. Otherwise the in-process monitor keeps
@@ -429,6 +441,29 @@ export function createIssueService(deps: {
     const updates = buildSharedIssueUpdate(body, now);
 
     const uniqueIds = [...new Set(ids)];
+
+    // AK-535 guard (bulk): if this batch moves issues INTO a terminal status, block
+    // the WHOLE batch when any issue still has an open, non-direct, unmerged
+    // workspace — atomic, so no branch is silently stranded. Same guard seam as the
+    // single-issue path (updateIssue), MCP and the CLI.
+    if (body.statusId !== undefined) {
+      const bulkStatusName = await getProjectStatusName(body.statusId as string, database);
+      if (isTerminalStatusName(bulkStatusName)) {
+        const blockedBranches: string[] = [];
+        for (const issueId of uniqueIds) {
+          const openWs = await findOpenUnmergedWorkspace(issueId, database);
+          if (openWs) blockedBranches.push(openWs.branch);
+        }
+        if (blockedBranches.length > 0) {
+          const one = blockedBranches.length === 1;
+          throw new IssueError(
+            `Cannot move ${blockedBranches.length} issue(s) to "${bulkStatusName}": ${one ? "it has" : "they have"} an open, unmerged workspace (branch: ${blockedBranches.join(", ")}). Merge or close ${one ? "it" : "them"} first.`,
+            "CONFLICT",
+          );
+        }
+      }
+    }
+
     await updateIssuesByIds(uniqueIds, updates, database);
 
     if (body.statusId !== undefined) {
