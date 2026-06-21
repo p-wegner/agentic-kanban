@@ -5,25 +5,26 @@ import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { WorkspaceRiskHeatmap } from "./WorkspaceRiskHeatmap.js";
 import { CollapsibleSection } from "./CollapsibleSection.js";
 import { useStaleWorkspaceManager } from "../hooks/useStaleWorkspaceManager.js";
+import {
+  type CrossProjectGroup,
+  type WsStatusFilter,
+  selectIssuesWithWorkspaces,
+  countActiveWorkspaces,
+  collectIdleWorkspaceIds,
+  matchesWorkspaceFilter,
+  matchesStaleFilter,
+} from "../lib/allWorkspacesFilter.js";
+import {
+  WS_STATUS_COLORS,
+  workspaceRowStatusBadgeClass,
+  workspaceRowStatusLabel,
+  formatContextTokens,
+  searchPlaceholder,
+} from "../lib/allWorkspacesStatus.js";
 
 interface Project {
   id: string;
   name: string;
-}
-
-interface CrossProjectIssue {
-  id: string;
-  issueNumber: number | null;
-  title: string;
-  statusName: string;
-  projectId: string;
-  workspaceSummary?: IssueWithStatus["workspaceSummary"];
-}
-
-interface CrossProjectGroup {
-  projectId: string;
-  projectName: string;
-  issues: CrossProjectIssue[];
 }
 
 interface AllWorkspacesPanelProps {
@@ -36,7 +37,6 @@ interface AllWorkspacesPanelProps {
 }
 
 type ViewMode = "workspaces" | "risk";
-type WsStatusFilter = "all" | "active" | "running" | "idle" | "reviewing" | "fixing" | "closed" | "stale";
 
 const FILTER_CHIPS: { label: string; value: WsStatusFilter }[] = [
   { label: "All", value: "all" },
@@ -48,14 +48,6 @@ const FILTER_CHIPS: { label: string; value: WsStatusFilter }[] = [
   { label: "Closed", value: "closed" },
   { label: "Stale", value: "stale" },
 ];
-
-const WS_STATUS_COLORS: Record<string, string> = {
-  active: "bg-green-100 text-green-700",
-  reviewing: "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300",
-  fixing: "bg-orange-100 text-orange-700",
-  idle: "bg-yellow-100 text-yellow-700",
-  closed: "bg-gray-100 text-gray-500 dark:bg-gray-400",
-};
 
 const ISSUE_STATUS_COLORS: Record<string, string> = {
   "Todo": "bg-gray-100 text-gray-600",
@@ -107,22 +99,11 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
   }, [projectFilter]);
 
   // Build the issues list depending on project filter
-  const issuesWithWorkspaces: (CrossProjectIssue & { projectName?: string })[] =
-    projectFilter === "all"
-      ? (crossProjectData ?? [] as CrossProjectGroup[]).flatMap((g: CrossProjectGroup) =>
-          g.issues.map((i: CrossProjectIssue) => ({ ...i, projectName: g.projectName }))
-        )
-      : columns
-          .flatMap((col) => col.issues)
-          .filter((issue) => issue.workspaceSummary && issue.workspaceSummary.total > 0);
+  const issuesWithWorkspaces = selectIssuesWithWorkspaces(projectFilter, crossProjectData, columns);
 
-  const activeCount = issuesWithWorkspaces.filter(
-    (i) => ["active", "reviewing", "fixing"].includes(i.workspaceSummary?.main?.status ?? "")
-  ).length;
+  const activeCount = countActiveWorkspaces(issuesWithWorkspaces);
 
-  const idleWorkspaceIds = issuesWithWorkspaces
-    .filter((i) => i.workspaceSummary?.main?.status === "idle")
-    .map((i) => i.workspaceSummary!.main!.id);
+  const idleWorkspaceIds = collectIdleWorkspaceIds(issuesWithWorkspaces);
 
   async function handleCloseIdle() {
     if (idleWorkspaceIds.length === 0) return;
@@ -142,37 +123,12 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
     setClosingIdle(false);
   }
 
-  const filtered = issuesWithWorkspaces.filter((issue) => {
-    const ws = issue.workspaceSummary!;
-    const mainStatus = ws.main?.status ?? "";
-
-    if (statusFilter !== "all" && statusFilter !== "stale") {
-      if (statusFilter === "active") {
-        if (!["active", "reviewing", "fixing"].includes(mainStatus)) return false;
-      } else if (mainStatus !== statusFilter) {
-        return false;
-      }
-    }
-
-    if (searchQuery.trim()) {
-      const q = searchQuery.trim().toLowerCase();
-      const matchesTitle = issue.title.toLowerCase().includes(q);
-      const matchesBranch = (ws.main?.branch ?? "").toLowerCase().includes(q);
-      const matchesProject = ("projectName" in issue ? (issue.projectName ?? "") : "").toLowerCase().includes(q);
-      if (!matchesTitle && !matchesBranch && !matchesProject) return false;
-    }
-
-    return true;
-  });
+  const filtered = issuesWithWorkspaces.filter((issue) =>
+    matchesWorkspaceFilter(issue, statusFilter, searchQuery),
+  );
 
   // Filter stale worktrees by search query
-  const filteredStale = staleWorktrees.filter((entry) => {
-    if (!searchQuery.trim()) return true;
-    const q = searchQuery.trim().toLowerCase();
-    return entry.branch.toLowerCase().includes(q)
-      || entry.issueTitle.toLowerCase().includes(q)
-      || String(entry.issueNumber).includes(q);
-  });
+  const filteredStale = staleWorktrees.filter((entry) => matchesStaleFilter(entry, searchQuery));
 
   const showingCrossProject = projectFilter === "all";
   const showingStale = statusFilter === "stale";
@@ -287,7 +243,7 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
               {/* Text search */}
               <input
                 type="text"
-                placeholder={showingStale ? "Search by title, branch, or issue #…" : showingCrossProject ? "Search by title, branch, or project…" : "Search by title or branch…"}
+                placeholder={searchPlaceholder(showingStale, showingCrossProject)}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full text-sm px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-400 dark:bg-gray-900 dark:text-gray-200"
@@ -464,9 +420,9 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
 
                           {/* Workspace status */}
                           <span
-                            className={`text-xs px-1.5 py-0.5 rounded ${main.conflicts?.hasConflicts && main.status !== "fixing" ? "bg-red-100 text-red-700" : main.status === "closed" && main.lastSessionTriggerType === "fix-conflicts" ? "bg-orange-100 text-orange-700" : main.status === "closed" && main.mergedAt ? "bg-emerald-100 text-emerald-700" : WS_STATUS_COLORS[main.status] ?? "bg-gray-100 text-gray-600"}`}
+                            className={`text-xs px-1.5 py-0.5 rounded ${workspaceRowStatusBadgeClass(main)}`}
                           >
-                            {main.status === "reviewing" ? "AI Reviewing" : main.status === "fixing" ? "AI Fixing Conflicts" : main.conflicts?.hasConflicts ? "Merge Conflicts" : main.status === "closed" && main.lastSessionTriggerType === "fix-conflicts" ? "merged conflicts" : main.status === "closed" && main.mergedAt ? "merged" : main.status}
+                            {workspaceRowStatusLabel(main)}
                           </span>
 
                           {/* Ready to merge */}
@@ -519,9 +475,7 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
                           {/* Context usage */}
                           {(main.status === "active" || main.status === "fixing") && main.contextTokens ? (
                             <span className="text-xs text-gray-400 dark:text-gray-500" title={`${main.contextTokens.toLocaleString('en-US')} context tokens`}>
-                              {main.contextTokens >= 1000
-                                ? `${Math.round(main.contextTokens / 1000)}k ctx`
-                                : `${main.contextTokens} ctx`}
+                              {formatContextTokens(main.contextTokens)}
                             </span>
                           ) : null}
 
