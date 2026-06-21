@@ -157,6 +157,9 @@ describe("board cache invalidation on PATCH issue statusId", () => {
     });
 
     // Idle workspace whose currentNodeId points to the "In Review" workflow node.
+    // isDirect so the move to Done is not blocked by the AK-535 terminal-move guard
+    // (#854) — direct workspaces commit to the default branch, no branch to strand —
+    // while still exercising the workspace currentNode sync this test covers.
     const workspaceId = randomUUID();
     await db.insert(schema.workspaces).values({
       id: workspaceId,
@@ -165,6 +168,7 @@ describe("board cache invalidation on PATCH issue statusId", () => {
       workingDir: "/tmp/cache-test/.worktrees/ci-fix",
       baseBranch: "main",
       status: "idle",
+      isDirect: true,
       currentNodeId: inReviewNodeId,
       createdAt: now,
       updatedAt: now,
