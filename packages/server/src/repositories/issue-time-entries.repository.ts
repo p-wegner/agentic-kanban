@@ -59,6 +59,14 @@ export async function deleteTimeEntry(
   await database.delete(issueTimeEntries).where(eq(issueTimeEntries.id, entryId));
 }
 
+/** Delete every time entry for an issue (used by the issue-delete cascade). */
+export async function deleteTimeEntriesForIssue(
+  issueId: string,
+  database: Database = db,
+): Promise<void> {
+  await database.delete(issueTimeEntries).where(eq(issueTimeEntries.issueId, issueId));
+}
+
 /** Shared filter for the project time report: project scope + an optional createdAt window. */
 function timeReportWhere(projectId: string, dateFrom: string | null, dateTo: string) {
   return dateFrom

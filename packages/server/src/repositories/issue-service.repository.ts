@@ -5,6 +5,7 @@ import { eq, and, or, sql, inArray, desc } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database, TransactionClient } from "../db/index.js";
 import { deleteWorkspaceCascade } from "./workspace.repository.js";
+import { deleteTimeEntriesForIssue } from "./issue-time-entries.repository.js";
 import { hasPath } from "../lib/dependency-graph.js";
 import type { BatchIssueInput, BatchDependencyInput } from "../lib/batch-create-issues.js";
 
@@ -97,6 +98,30 @@ export async function insertDependency(
   database: DbOrTx = db,
 ): Promise<void> {
   await database.insert(issueDependencies).values(values);
+}
+
+/**
+ * Return the existing dependency edge matching the unique key
+ * (issueId, dependsOnId, type), or null. Used by the CLI to detect duplicates
+ * BEFORE inserting — driver-independent, unlike matching the insert error string
+ * (libsql's message lacks "UNIQUE constraint"; #857).
+ */
+export async function getDependencyEdge(
+  issueId: string,
+  dependsOnId: string,
+  type: DependencyType,
+  database: DbOrTx = db,
+): Promise<{ id: string } | null> {
+  const rows = await database
+    .select({ id: issueDependencies.id })
+    .from(issueDependencies)
+    .where(and(
+      eq(issueDependencies.issueId, issueId),
+      eq(issueDependencies.dependsOnId, dependsOnId),
+      eq(issueDependencies.type, type),
+    ))
+    .limit(1);
+  return rows[0] ?? null;
 }
 
 export async function getIssueWebhookSnapshot(
@@ -483,17 +508,28 @@ export async function applyDependencyEdgeBatch(
  * Cascade-delete an issue and all its data (CLI `issue delete`): every workspace
  * via deleteWorkspaceCascade (which clears that workspace's transitions / retry
  * decisions / diff-comments / artifacts / comments / repos / session-messages /
- * sessions inside its own tx), then the issue's tags, then the issue row. Order
- * preserved (workspaces+children first). NOTE: deleteWorkspaceCascade clears a
- * SUPERSET of the old hand-rolled CLI loop — it additionally removes
- * workflowTransitions/testRetryDecisions/issueArtifacts/issueComments/repos that
- * the previous CLI cascade leaked, mirroring the deleteProjectCascade fix.
+ * sessions inside its own tx), then every row that FK-references the issue, then
+ * the issue row. Order preserved (workspaces+children first).
+ *
+ * deleteWorkspaceCascade only clears issueArtifacts/issueComments scoped to a
+ * WORKSPACE (by workspaceId). Rows attached directly to the issue (workspaceId
+ * NULL), plus issueTimeEntries, showdowns, and issueDependencies (in BOTH
+ * directions — issueId and dependsOnId), are NOT workspace-scoped, so they must
+ * be deleted here. These FKs are RESTRICT in the live DB (#858: the schema's
+ * onDelete:"cascade" clauses were never migrated into existing databases, and the
+ * action drifts between DBs), so omitting any of them makes the final issue-row
+ * delete FK-fail. Each delete is by issueId and idempotent.
  */
 export async function deleteIssueCascade(issueId: string, database: Database = db): Promise<void> {
   const wsRows = await database.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.issueId, issueId));
   for (const ws of wsRows) {
     await deleteWorkspaceCascade(ws.id, database);
   }
+  await deleteDependenciesTouchingIssue(issueId, database);
+  await deleteIssueArtifactsForIssue(issueId, database);
+  await deleteIssueCommentsForIssue(issueId, database);
+  await deleteTimeEntriesForIssue(issueId, database);
+  await deleteShowdownsForIssue(issueId, database);
   await deleteIssueTagsForIssue(issueId, database);
   await deleteIssueRow(issueId, database);
 }

@@ -24,6 +24,7 @@ import {
   updateIssueById,
   getIssueProjectIdsPair,
   insertDependency,
+  getDependencyEdge,
   deleteDependencyByIdReturning,
   insertIssueArtifact,
   applyDependencyEdgeBatch,
@@ -603,6 +604,14 @@ Examples:
           process.exit(1);
         }
 
+        // Detect duplicates BEFORE inserting. The unique key is
+        // (issueId, dependsOnId, type). Matching the insert error string is not
+        // portable — libsql's message lacks "UNIQUE constraint" (#857).
+        if (await getDependencyEdge(issueId, targetId, depType as DependencyType)) {
+          console.error("This dependency already exists.");
+          process.exit(1);
+        }
+
         const id = randomUUID();
         try {
           await insertDependency({
@@ -612,8 +621,10 @@ Examples:
             type: depType as DependencyType,
             createdAt: new Date().toISOString(),
           });
-        } catch (err: any) {
-          if (err.message?.includes("UNIQUE constraint")) {
+        } catch (err) {
+          // A concurrent insert could still race the pre-check. Re-query instead
+          // of string-matching the driver error to stay driver-independent.
+          if (await getDependencyEdge(issueId, targetId, depType as DependencyType)) {
             console.error("This dependency already exists.");
             process.exit(1);
           }
