@@ -5,13 +5,9 @@
 
 import type { DisplayEvent } from "../lib/agent-output-parser.js";
 import { summarizeToolCall, normalizedSearchQuery, eventSearchText, isSkillRead } from "../lib/terminal-transcript.js";
+import type { SubagentGroup } from "../lib/terminal-transcript.js";
 
-export interface SubagentGroup {
-  startIdx: number;
-  endIdx: number;
-  description: string;
-  subagentType: string;
-}
+export type { SubagentGroup };
 
 export interface RenderContext {
   multiTurn?: boolean;

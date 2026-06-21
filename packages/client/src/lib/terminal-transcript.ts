@@ -3,7 +3,10 @@
 // (repo convention) and don't bloat the rendering component. `highlightText`
 // stays in TerminalView since it returns JSX.
 
-import type { DisplayEvent } from "./agent-output-parser.js";
+import type { DisplayEvent, AgentOutputFormat } from "./agent-output-parser.js";
+import { createAgentOutputParser } from "./agent-output-parser.js";
+import type { AgentOutputMessage } from "@agentic-kanban/shared";
+import { extractMeaningfulOutput } from "@agentic-kanban/shared";
 
 const FILE_PATH_PATTERN = /(?:[A-Za-z]:[\\/]|\.{1,2}[\\/]|[\w.-]+[\\/])[\w .@()[\]{}+=,;!#$%&'-]+(?:[\\/][\w .@()[\]{}+=,;!#$%&'-]+)*|\b[\w.-]+\.(?:ts|tsx|js|jsx|json|md|css|scss|html|sql|py|rs|go|java|cs|yml|yaml|toml)\b/i;
 
@@ -102,6 +105,190 @@ export function buildTranscriptSearchEntries(
 
     return matchesQuery && matchesFilters ? [{ idx, event, text, filters: entryFilters }] : [];
   });
+}
+
+// ── Message → DisplayEvent conversion ──────────────────────────────────────
+// Pure core of TerminalView's re-parse effect: turn the raw AgentOutputMessage[]
+// into the DisplayEvent[] the transcript renders. The component keeps the
+// setDisplayEvents/setExpandedSections side effects; only the conversion lives here.
+
+/** parseOutput==="false": each message becomes a raw line; empties dropped. */
+export function buildRawDisplayEvents(messages: AgentOutputMessage[]): DisplayEvent[] {
+  return messages
+    .map((msg): DisplayEvent => {
+      if (msg.type === "exit") {
+        return { kind: "raw", text: `Process exited with code ${msg.exitCode ?? "unknown"}` };
+      }
+      return { kind: "raw", text: msg.data || "" };
+    })
+    .filter((e) => e.kind === "raw" && e.text.length > 0);
+}
+
+/**
+ * Convert agent output to display events. With parseOutput==="false" the output
+ * is shown verbatim (raw lines); otherwise it is run through the provider parser,
+ * with exit / auto-bisect / stderr messages handled specially before flush.
+ */
+export function buildDisplayEventsFromMessages(
+  messages: AgentOutputMessage[],
+  parseOutput: "minimal" | "false",
+  outputFormat: AgentOutputFormat,
+): DisplayEvent[] {
+  if (parseOutput === "false") return buildRawDisplayEvents(messages);
+
+  const parser = createAgentOutputParser(outputFormat);
+  const events: DisplayEvent[] = [];
+
+  for (const msg of messages) {
+    if (msg.type === "exit") {
+      events.push({ kind: "raw", text: `Process exited with code ${msg.exitCode ?? "unknown"}` });
+      continue;
+    }
+    if (msg.type === "bisect") {
+      try {
+        const parsed = JSON.parse(msg.data || "{}") as { breakingCommitSha?: string; message?: string; failingTestName?: string; status?: string };
+        events.push({
+          kind: "raw",
+          text: parsed.breakingCommitSha
+            ? `Auto-bisect result: ${parsed.breakingCommitSha} ${parsed.message ?? ""}${parsed.failingTestName ? `\nFailing test: ${parsed.failingTestName}` : ""}`
+            : `Auto-bisect result: ${parsed.status ?? "finished"}`,
+        });
+      } catch {
+        events.push({ kind: "raw", text: msg.data || "Auto-bisect result" });
+      }
+      continue;
+    }
+    if (msg.type === "stderr") {
+      events.push({ kind: "raw", text: msg.data || "" });
+      continue;
+    }
+    if (msg.data) {
+      events.push(...parser.feed(msg.data + "\n"));
+    }
+  }
+
+  events.push(...parser.flush());
+  return events;
+}
+
+// ── Subagent grouping ───────────────────────────────────────────────────────
+
+/** Start/end span of an Agent subagent section plus its description/type. */
+export interface SubagentGroup {
+  startIdx: number;
+  endIdx: number;
+  description: string;
+  subagentType: string;
+}
+
+export interface SubagentGrouping {
+  /** Agent tool_use_ids that started (task_started) but have no Agent tool_result yet. */
+  activeSubagentToolUseIds: Set<string>;
+  /** toolUseId → the span (startIdx..endIdx) of its subagent section; open agents run to the end. */
+  subagentGroups: Map<string, SubagentGroup>;
+  /** event index → toolUseId of the containing subagent group. */
+  eventToSubagent: Map<number, string>;
+}
+
+/**
+ * Derive subagent grouping from the visible event list via ID matching
+ * (task_started.toolUseId → Agent tool_use.id → Agent tool_result.toolUseId).
+ * Pure over `visibleEvents`; feeds the renderer's RenderContext.
+ */
+export function computeSubagentGrouping(visibleEvents: DisplayEvent[]): SubagentGrouping {
+  // (a) active set: started but not completed.
+  const startedIds = new Set<string>();
+  const completedIds = new Set<string>();
+  for (const ev of visibleEvents) {
+    if (ev.kind === "task_started" && ev.toolUseId) startedIds.add(ev.toolUseId);
+    if (ev.kind === "tool_result" && ev.toolName === "Agent" && ev.toolUseId) completedIds.add(ev.toolUseId);
+  }
+  const activeSubagentToolUseIds = new Set<string>();
+  for (const id of startedIds) {
+    if (!completedIds.has(id)) activeSubagentToolUseIds.add(id);
+  }
+
+  // (b) groups: span each Agent tool_use to its tool_result; still-open agents run to the end.
+  const subagentGroups = new Map<string, SubagentGroup>();
+  const openAgents = new Map<string, { idx: number; description: string; subagentType: string }>();
+  for (let i = 0; i < visibleEvents.length; i++) {
+    const ev = visibleEvents[i];
+    if (ev.kind === "tool_use" && ev.name === "Agent" && ev.id) {
+      openAgents.set(ev.id, {
+        idx: i,
+        description: (ev.inputParsed?.description as string) || (ev.inputParsed?.prompt as string) || "",
+        subagentType: (ev.inputParsed?.subagent_type as string) || "",
+      });
+    }
+    if (ev.kind === "tool_result" && ev.toolName === "Agent" && ev.toolUseId && openAgents.has(ev.toolUseId)) {
+      const opener = openAgents.get(ev.toolUseId)!;
+      subagentGroups.set(ev.toolUseId, {
+        startIdx: opener.idx,
+        endIdx: i,
+        description: opener.description,
+        subagentType: opener.subagentType,
+      });
+      openAgents.delete(ev.toolUseId);
+    }
+  }
+  for (const [id, opener] of openAgents) {
+    subagentGroups.set(id, {
+      startIdx: opener.idx,
+      endIdx: visibleEvents.length - 1,
+      description: opener.description,
+      subagentType: opener.subagentType,
+    });
+  }
+
+  // (c) index → containing group.
+  const eventToSubagent = new Map<number, string>();
+  for (const [toolUseId, group] of subagentGroups) {
+    for (let i = group.startIdx; i <= group.endIdx; i++) eventToSubagent.set(i, toolUseId);
+  }
+
+  return { activeSubagentToolUseIds, subagentGroups, eventToSubagent };
+}
+
+// ── Scrollbar markers + connection status + download ────────────────────────
+
+/** Tailwind background class for an event's scrollbar mini-map marker. */
+export function markerColorForEvent(event: DisplayEvent): string {
+  switch (event.kind) {
+    case "assistant": return "bg-green-500";
+    case "thinking": return "bg-gray-500";
+    case "tool_use": return event.name === "Agent" ? "bg-brand-500" : "bg-yellow-500";
+    case "tool_result": return event.isError ? "bg-red-500" : "bg-brand-500";
+    case "result": return event.success ? "bg-emerald-400" : "bg-red-400";
+    case "init": return "bg-cyan-400";
+    case "task_started": return "bg-blue-500";
+    case "notification": return event.key === "user" ? "bg-blue-500" : "bg-orange-500";
+    case "rate_limit": return "bg-yellow-500";
+    default: return "bg-gray-600";
+  }
+}
+
+export const CONNECTION_STATUS_COLORS: Record<string, string> = {
+  connecting: "bg-yellow-400",
+  open: "bg-green-400",
+  closed: "bg-gray-400",
+  error: "bg-red-400",
+};
+
+export const CONNECTION_STATUS_LABELS: Record<string, string> = {
+  connecting: "Connecting...",
+  open: "Connected",
+  closed: "Disconnected",
+  error: "Connection Error",
+};
+
+/** Non-DOM core of the transcript download: the file body text. */
+export function buildSessionDownloadText(messages: AgentOutputMessage[]): string {
+  return extractMeaningfulOutput(messages.map((m) => ({ ...m, data: m.data ?? null })), 10000).join("\n");
+}
+
+/** Download filename for a session transcript. */
+export function buildSessionDownloadFilename(sessionId?: string): string {
+  return sessionId ? `session-${sessionId}.txt` : "session-output.txt";
 }
 
 export function basename(path: string): string {
