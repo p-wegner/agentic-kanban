@@ -100,11 +100,16 @@ export interface ReviewWorkspaceStats {
 }
 
 /**
- * Fold session rows (in `startedAt` order) plus their diff comments into a
- * per-workspace lifecycle map, and tally the raw triggerType distribution. Noise
- * sessions (board-monitor/navigator skills) count toward the distribution but do
- * not create or mutate a workspace entry. A build/rework session that started
- * after the first review marks the attempt as `changeAfterReview` (a bounce-back).
+ * Fold session rows plus their diff comments into a per-workspace lifecycle map,
+ * and tally the raw triggerType distribution. Noise sessions (board-monitor/navigator
+ * skills) count toward the distribution but do not create or mutate a workspace entry.
+ * A build/rework session that started strictly after the first review marks the attempt
+ * as `changeAfterReview` (a bounce-back).
+ *
+ * PRECONDITION: `rows` must be in ascending `startedAt` order (the repository's
+ * `getReviewEffectivenessSessionRows` guarantees this via `.orderBy(sessions.startedAt)`).
+ * `firstReviewAt`/`lastReviewAt` and the `changeAfterReview` bounce-back detection depend
+ * on it — out-of-order rows would mis-detect bounce-backs. This function does not sort.
  */
 export function aggregateReviewWorkspaceStats(
   rows: ReviewEffSessionInput[],
