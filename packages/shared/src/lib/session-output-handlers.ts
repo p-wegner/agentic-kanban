@@ -44,7 +44,7 @@ export function handleAssistantMessage(obj: ParsedLine): string[] {
     if (text) return [text.slice(0, 200)];
   } else if (obj.data?.reasoningText?.trim()) {
     // Use first line of reasoning as fallback when there is no direct content
-    const text = (obj.data.reasoningText as string).trim().split("\n")[0] ?? "";
+    const text = (obj.data.reasoningText).trim().split("\n")[0] ?? "";
     if (text) return [text.slice(0, 200)];
   }
   return [];
@@ -105,7 +105,7 @@ export function handleRateLimit(obj: ParsedLine): string[] {
 
 /** Codex exec --json: item.completed / item.updated streaming events. */
 export function handleItemEvent(obj: ParsedLine): string[] {
-  const item = obj.item as Record<string, unknown> | undefined;
+  const item = obj.item;
   if (!item) return [];
   const itemType = item.type as string | undefined;
   if (itemType === "agent_message") {
@@ -134,7 +134,7 @@ export function handleItemEvent(obj: ParsedLine): string[] {
 
 /** Codex exec --json: item.started streaming events. */
 export function handleItemStarted(obj: ParsedLine): string[] {
-  const item = obj.item as Record<string, unknown> | undefined;
+  const item = obj.item;
   if (item && item.type === "command_execution") {
     const cmd = item.command as string | undefined;
     if (cmd) return [`[tool] shell(${cmd.slice(0, 160)})`];
@@ -143,7 +143,7 @@ export function handleItemStarted(obj: ParsedLine): string[] {
 }
 
 export function handleTurnFailed(obj: ParsedLine): string[] {
-  const error = obj.error as Record<string, unknown> | undefined;
+  const error = obj.error;
   const msg = error?.message as string | undefined;
   return [`[error] ${msg ?? "Turn failed"}`];
 }

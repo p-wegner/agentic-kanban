@@ -569,7 +569,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       boardWarmupTimers.delete(projectId);
       warmBoardCache(projectId).catch(() => {});
     }, BOARD_WARMUP_DEBOUNCE_MS);
-    (timer as NodeJS.Timeout).unref?.();
+    (timer).unref?.();
     boardWarmupTimers.set(projectId, timer);
   }
 
@@ -754,7 +754,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     const result = await updateProjectStatusSortOrder(projectId, statusId, sortOrder, database);
     if ("error" in result) {
       const code = result.status === 404 ? "NOT_FOUND" : "CONFLICT";
-      throw new ProjectError(result.error, code as "NOT_FOUND" | "CONFLICT");
+      throw new ProjectError(result.error, code);
     }
     return result;
   }
@@ -763,7 +763,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     const result = await deleteProjectStatus(projectId, statusId, database);
     if ("error" in result) {
       const code = result.status === 404 ? "NOT_FOUND" : "CONFLICT";
-      throw new ProjectError(result.error, code as "NOT_FOUND" | "CONFLICT");
+      throw new ProjectError(result.error, code);
     }
     return result;
   }

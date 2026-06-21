@@ -27,7 +27,7 @@ function execGit(args: string[], cwd: string): Promise<string> {
 function execGitCapture(args: string[], cwd: string, timeout: number, maxBuffer = 1024 * 1024): Promise<string> {
   return new Promise((resolvePromise, reject) => {
     execFile("git", args, { cwd, timeout, maxBuffer, windowsHide: true }, (err, stdout) => {
-      if (err) reject(err);
+      if (err) reject(err instanceof Error ? err : new Error(err.message));
       else resolvePromise(stdout.toString());
     });
   });

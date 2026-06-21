@@ -153,7 +153,7 @@ export function createConfigExportImportRoute(database: Database) {
       if (!file || typeof file === "string") {
         return c.json({ error: "multipart upload must include a 'file' field" }, 400);
       }
-      const text = await (file as File).text();
+      const text = await (file).text();
       try {
         rawBody = JSON.parse(text);
       } catch {

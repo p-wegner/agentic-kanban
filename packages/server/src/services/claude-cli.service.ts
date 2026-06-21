@@ -65,7 +65,7 @@ export async function invokeClaudePrompt(
       maxBuffer: 1024 * 1024,
       env: buildSpawnEnv(claudeProfile),
     }, (err, stdout) => {
-      if (err) reject(err);
+      if (err) reject(err instanceof Error ? err : new Error(err.message));
       else resolve(stdout ?? "");
     });
     child.stdin?.end(prompt);

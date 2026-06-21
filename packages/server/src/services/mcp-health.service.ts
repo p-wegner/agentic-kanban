@@ -110,7 +110,7 @@ export async function probeMcpHealth(
       env: { ...process.env, ...(config.env ?? {}) },
       stdio: "pipe",
       windowsHide: true,
-    }) as ChildProcessWithoutNullStreams;
+    });
 
     lastProbe = await runJsonRpcProbe(child, checkedAt, startedAt, timeoutMs);
   } catch (err) {

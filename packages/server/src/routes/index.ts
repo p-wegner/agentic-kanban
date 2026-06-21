@@ -57,7 +57,9 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
     getSessionManager,
     boardEvents: options?.boardEvents,
   });
-  const onWorkflowAdvanced = (workspaceId: string) => forkService.onWorkspaceEnteredNode(workspaceId);
+  const onWorkflowAdvanced = (workspaceId: string) => {
+    void forkService.onWorkspaceEnteredNode(workspaceId);
+  };
 
   routes.route("/projects", createProjectsRoute(database, { ...options, getSessionManager }));
   routes.route("/projects", createProjectScriptsRoute(database));

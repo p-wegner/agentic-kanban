@@ -109,7 +109,7 @@ describe("dev launcher exit classification", () => {
 
 describe("server dev proxy", () => {
   it("keeps the public API port reachable while the watched backend restarts", async () => {
-    let backend = createBackend("before-restart");
+    const backend = createBackend("before-restart");
     let restartedBackend = null;
     let proxy = null;
 

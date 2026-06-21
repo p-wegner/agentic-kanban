@@ -278,7 +278,7 @@ export async function getStartNode(
     .where(eq(schema.workflowNodes.templateId, templateId))
     .orderBy(asc(schema.workflowNodes.sortOrder));
   if (nodes.length === 0) return null;
-  return (nodes.find((n) => n.nodeType === "start") ?? nodes[0]) as WorkflowNodeRow;
+  return (nodes.find((n) => n.nodeType === "start") ?? nodes[0]);
 }
 
 export async function getNode(db: WorkflowDb, nodeId: string): Promise<WorkflowNodeRow | null> {
@@ -287,7 +287,7 @@ export async function getNode(db: WorkflowDb, nodeId: string): Promise<WorkflowN
     .from(schema.workflowNodes)
     .where(eq(schema.workflowNodes.id, nodeId))
     .limit(1);
-  return (rows[0] as WorkflowNodeRow) ?? null;
+  return (rows[0]) ?? null;
 }
 
 /** Valid outgoing transitions from a node (with target node + status info). */

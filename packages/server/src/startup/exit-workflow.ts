@@ -125,12 +125,14 @@ export interface WorkflowDeps {
 async function waitForLearningSession(database: Database, learnSessId: string, label: string, timeoutMessage: string) {
   return new Promise<void>((resolve) => {
     const timeout = setTimeout(() => { console.log(timeoutMessage); resolve(); }, 3 * 60 * 1000);
-    const poll = setInterval(async () => {
-      const sessRows = await database.select({ status: sessions.status }).from(sessions).where(eq(sessions.id, learnSessId)).limit(1);
-      if (sessRows.length > 0 && sessRows[0].status !== "running") {
-        clearInterval(poll); clearTimeout(timeout);
-        console.log(`[workflow] learning step (${label}) finished`); resolve();
-      }
+    const poll = setInterval(() => {
+      void (async () => {
+        const sessRows = await database.select({ status: sessions.status }).from(sessions).where(eq(sessions.id, learnSessId)).limit(1);
+        if (sessRows.length > 0 && sessRows[0].status !== "running") {
+          clearInterval(poll); clearTimeout(timeout);
+          console.log(`[workflow] learning step (${label}) finished`); resolve();
+        }
+      })();
     }, 5000);
   });
 }

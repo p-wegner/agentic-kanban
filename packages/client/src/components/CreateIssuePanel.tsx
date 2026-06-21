@@ -109,7 +109,7 @@ export function CreateIssuePanel({
 
   useEffect(() => {
     if (!startWorkspace || !projectId) return;
-    Promise.all([
+    void Promise.all([
       apiFetch<Skill[]>(`/api/agent-skills?projectId=${projectId}`).catch(() => [] as Skill[]),
       getSettings().catch(() => ({} as Record<string, string>)),
       apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles").catch(() => ({ profiles: [] as string[] })),

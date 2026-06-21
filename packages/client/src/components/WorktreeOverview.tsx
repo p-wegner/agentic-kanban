@@ -63,7 +63,7 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
       await loadWorktrees();
       setLoading(false);
     }
-    load();
+    void load();
   }, [loadWorktrees]);
 
   async function handleOpenFolder(wt: WorktreeInfo) {

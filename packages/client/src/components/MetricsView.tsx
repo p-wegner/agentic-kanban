@@ -278,7 +278,7 @@ function ActivityHeatmap({
     startDate.setDate(startDate.getDate() - startDate.getDay());
 
     const weeksArr: Array<Array<{ date: Date; count: number; key: string }>> = [];
-    let current = new Date(startDate);
+    const current = new Date(startDate);
     let max = 0;
 
     for (let w = 0; w < HEATMAP_WEEKS; w++) {

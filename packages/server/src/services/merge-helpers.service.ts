@@ -63,7 +63,7 @@ export async function getConflictingFiles(workingDir: string): Promise<string[]>
   try {
     const output = await new Promise<string>((res, rej) => {
       execFile("git", ["diff", "--name-only", "--diff-filter=U"], { cwd: workingDir }, (err, stdout) => {
-        if (err) rej(err); else res(stdout.toString());
+        if (err) rej(err instanceof Error ? err : new Error(err.message)); else res(stdout.toString());
       });
     });
     return output.trim().split("\n").filter(Boolean);
@@ -135,14 +135,16 @@ export async function runLearningStep(
         console.log("[merge-helpers] learning step timed out after 3m, proceeding with merge");
         resolve();
       }, 3 * 60 * 1000);
-      const poll = setInterval(async () => {
-        const status = await getSessionStatus(learningSessId, database);
-        if (status !== null && status !== "running") {
-          clearInterval(poll);
-          clearTimeout(timeout);
-          console.log(`[merge-helpers] learning step finished: status=${status}`);
-          resolve();
-        }
+      const poll = setInterval(() => {
+        void (async () => {
+          const status = await getSessionStatus(learningSessId, database);
+          if (status !== null && status !== "running") {
+            clearInterval(poll);
+            clearTimeout(timeout);
+            console.log(`[merge-helpers] learning step finished: status=${status}`);
+            resolve();
+          }
+        })();
       }, 5000);
     });
   } catch (err) {

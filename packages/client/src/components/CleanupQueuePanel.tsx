@@ -44,7 +44,7 @@ export function CleanupQueuePanel({ projectId, onClose }: CleanupQueuePanelProps
   }, [projectId]);
 
   useEffect(() => {
-    fetchWarnings();
+    void fetchWarnings();
   }, [fetchWarnings]);
 
   async function handleRetry(id: string) {

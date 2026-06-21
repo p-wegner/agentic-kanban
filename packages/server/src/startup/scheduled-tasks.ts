@@ -73,7 +73,7 @@ export function setupScheduledTasks(serverPort: number): ScheduledTaskTimers {
           const rows = await db.select({ id: projects.id, repoPath: projects.repoPath }).from(projects);
           return rows
             .filter((r) => !!r.repoPath)
-            .map((r) => ({ projectId: r.id, repoPath: r.repoPath as string }));
+            .map((r) => ({ projectId: r.id, repoPath: r.repoPath }));
         },
         getSchedulePref: (projectId) => getPreference(conductorCronPrefKey(projectId), db),
         setSchedulePref: (projectId, value) => setPreference(conductorCronPrefKey(projectId), value, db),

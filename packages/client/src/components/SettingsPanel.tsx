@@ -231,7 +231,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
                   setupBlocking: project.setupBlocking !== false,
                   setupEnabled: (project as any).setupEnabled !== false,
                   teardownScript: (project as any).teardownScript || "",
-                  verifyScript: (data as Record<string, string>)[`verify_script_${activeProjectId}`] || "",
+                  verifyScript: (data)[`verify_script_${activeProjectId}`] || "",
                   color: project.color || null,
                   symlinkEnabled: (project as any).symlinkEnabled === true,
                   symlinkDirs: (project as any).symlinkDirs || "",
@@ -274,14 +274,14 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
 
     // Run the deferred probes only after the critical bootstrap resolves, so the heavy
     // status requests don't compete for the connection pool during first paint.
-    loadCore().finally(() => { if (!cancelled) loadDeferred(); });
+    void loadCore().finally(() => { if (!cancelled) loadDeferred(); });
     return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
     if (tab === "workflow") {
-      fetchMonitorStatus();
-      if (activeProjectId) fetchMonitorTunables();
+      void fetchMonitorStatus();
+      if (activeProjectId) void fetchMonitorTunables();
     }
   }, [tab]);
 

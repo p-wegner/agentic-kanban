@@ -225,7 +225,7 @@ export function startAncestorBranchReconciler(
   const interval = setInterval(tick, intervalMs);
   activeAncestorTimeout = timer;
   activeAncestorInterval = interval;
-  (timer as NodeJS.Timeout).unref?.();
-  (interval as NodeJS.Timeout).unref?.();
+  (timer).unref?.();
+  (interval).unref?.();
   return { timer, interval };
 }

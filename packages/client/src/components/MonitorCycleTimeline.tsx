@@ -131,12 +131,12 @@ export function MonitorCycleTimeline({ projectId, onSelectIssue, onSwitchToEvent
   }, [projectId]);
 
   useEffect(() => {
-    fetchCycles();
+    void fetchCycles();
   }, [fetchCycles]);
 
   useEffect(() => {
     if (tab === "orchestrator") {
-      fetchOrchestrator();
+      void fetchOrchestrator();
     }
   }, [tab, fetchOrchestrator]);
 

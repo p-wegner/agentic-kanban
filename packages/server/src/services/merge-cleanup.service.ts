@@ -168,7 +168,7 @@ export async function finalizeMergeCleanup(
 
   const broadcasted = Boolean(input.boardEvents && projectId && (workspaceUpdated || issueTransitioned || sessionsStopped));
   if (broadcasted) {
-    input.boardEvents?.broadcast(projectId!, "workspace_merged");
+    input.boardEvents?.broadcast(projectId, "workspace_merged");
   }
 
   return {

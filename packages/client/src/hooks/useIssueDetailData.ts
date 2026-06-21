@@ -132,7 +132,7 @@ export function useIssueDetailData(issue: IssueWithStatus, onIssueUpdate: (issue
       // Touched-files, related-issues, and merged-commits are owned by their own
       // self-fetching section components — they no longer ride along here.
     }
-    loadData();
+    void loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [issue.id]);
 

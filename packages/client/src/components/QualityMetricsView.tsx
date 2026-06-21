@@ -119,7 +119,7 @@ export function QualityMetricsView({ projectId }: QualityMetricsViewProps) {
   }, [projectId]);
 
   useEffect(() => {
-    fetchMetrics();
+    void fetchMetrics();
   }, [fetchMetrics]);
 
   const launchCollector = useCallback(async () => {

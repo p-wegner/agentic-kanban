@@ -169,7 +169,7 @@ export async function updateWorkspaceStatus(
   const now = new Date().toISOString();
   await database
     .update(workspaces)
-    .set({ status, updatedAt: now, ...extra } as Partial<Workspace>)
+    .set({ status, updatedAt: now, ...extra })
     .where(eq(workspaces.id, workspaceId));
 }
 

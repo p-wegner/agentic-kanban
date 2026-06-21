@@ -1349,7 +1349,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
       createdAt: now, updatedAt: now,
     });
 
-    let callIdx = 0;
+    const callIdx = 0;
     const checkAncestor: CheckAncestor = vi.fn(async (_repo, branch) => {
       if (branch === "feature/branch-deleted-throw") throw new Error("branch not found");
       if (branch === "feature/branch-deleted-no-sha") return { isAncestor: false as const, branchSha: "", baseSha: "sha-master" };

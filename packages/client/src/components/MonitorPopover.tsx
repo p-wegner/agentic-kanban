@@ -111,7 +111,7 @@ export function MonitorPopover({
   }, []);
 
   useEffect(() => {
-    loadHealthEvents();
+    void loadHealthEvents();
   }, [projectId]);
 
   useEffect(() => {

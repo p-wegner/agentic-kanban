@@ -235,7 +235,7 @@ export class ClaudeOutputParser {
           const source = block.source as Record<string, unknown> | undefined;
           if (source?.type === "base64" && typeof source.data === "string") {
             const mediaType = (source.media_type as string) || "image/png";
-            events.push({ kind: "image", mediaType, data: source.data as string });
+            events.push({ kind: "image", mediaType, data: source.data });
           }
         } else if (blockType === "tool_use") {
           const toolUseId = (block.id as string) || "";
@@ -280,7 +280,7 @@ export class ClaudeOutputParser {
               .map((b) => {
                 const src = b.source as Record<string, unknown> | undefined;
                 return src?.type === "base64" && typeof src.data === "string"
-                  ? { mediaType: (src.media_type as string) || "image/png", data: src.data as string }
+                  ? { mediaType: (src.media_type as string) || "image/png", data: src.data }
                   : null;
               })
               .filter((x): x is { mediaType: string; data: string } => x !== null);

@@ -191,7 +191,7 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
               <div className="flex items-center gap-1.5 px-4 py-1 mt-0.5">
                 <span className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
                   {group.category !== "recent" && (
-                    <span className="mr-1">{CATEGORY_ICONS[group.category as ActionCategory]}</span>
+                    <span className="mr-1">{CATEGORY_ICONS[group.category]}</span>
                   )}
                   {group.label}
                 </span>

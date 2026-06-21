@@ -155,7 +155,7 @@ export async function getWorkspaceTimeline(
   for (const session of sessionRows) {
     const stats = parseStats(session.stats);
     const tokenCounts = (stats?.inputTokens != null || stats?.outputTokens != null)
-      ? { inputTokens: (stats?.inputTokens ?? 0) as number, outputTokens: (stats?.outputTokens ?? 0) as number }
+      ? { inputTokens: (stats?.inputTokens ?? 0), outputTokens: (stats?.outputTokens ?? 0) }
       : null;
 
     // Session launched

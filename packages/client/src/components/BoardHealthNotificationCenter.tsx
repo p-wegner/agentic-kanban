@@ -89,7 +89,7 @@ export function BoardHealthNotificationCenter({ projectId, onOpenIssue }: BoardH
   }, [projectId, categoryFilter, limit]);
 
   useEffect(() => {
-    fetchEvents();
+    void fetchEvents();
   }, [fetchEvents]);
 
   if (!projectId) {

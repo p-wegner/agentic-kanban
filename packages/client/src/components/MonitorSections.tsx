@@ -49,7 +49,7 @@ export function ConductorCronSection({
     } catch { /* leave prior state */ }
   }
 
-  useEffect(() => { load(); }, [projectId]);
+  useEffect(() => { void load(); }, [projectId]);
 
   async function save(patch: { enabled?: boolean; cron?: string; agent?: "claude" | "codex" }) {
     setSaving(true);
@@ -90,13 +90,13 @@ export function ConductorCronSection({
           placeholder="*/30 * * * *"
           spellCheck={false}
           onChange={(e) => setCronInput(e.target.value)}
-          onBlur={() => { if (!cronShapeInvalid && cronInput.trim() !== (schedule?.cron ?? "")) save({ cron: cronInput.trim() }); }}
+          onBlur={() => { if (!cronShapeInvalid && cronInput.trim() !== (schedule?.cron ?? "")) void save({ cron: cronInput.trim() }); }}
           className={`flex-1 min-w-0 font-mono text-[11px] border rounded-md px-2 py-1 focus:outline-none focus:ring-1 bg-white dark:bg-gray-900 ${cronShapeInvalid ? "border-red-300 dark:border-red-700 focus:ring-red-400" : "border-gray-200 dark:border-gray-700 focus:ring-emerald-400"}`}
         />
         <select
           value={agent}
           disabled={saving}
-          onChange={(e) => { const a = e.target.value as "claude" | "codex"; setAgent(a); save({ agent: a }); }}
+          onChange={(e) => { const a = e.target.value as "claude" | "codex"; setAgent(a); void save({ agent: a }); }}
           className="text-[11px] border border-gray-200 dark:border-gray-700 rounded-md px-1 py-1 bg-white dark:bg-gray-900"
         >
           <option value="claude">claude</option>

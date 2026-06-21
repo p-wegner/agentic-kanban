@@ -581,7 +581,7 @@ export function BoardPageView({
           setWorkspaceIssue(issue);
           setWorkspaceInitial({ workspaceId, sessionId: "" });
           setWorkspaceOpenCreate(false);
-          refetchBoard();
+          void refetchBoard();
         }}
         activeProjectId={activeProjectId}
         columns={columns}

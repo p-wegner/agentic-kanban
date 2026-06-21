@@ -14,7 +14,7 @@ export function registerCleanupProject(server: McpServer, deps: ToolDeps = prodD
     async ({ projectId }) => {
       try {
         // Query closed workspaces that still have a workingDir set
-        let query = db
+        const query = db
           .select({
             id: schema.workspaces.id,
             branch: schema.workspaces.branch,

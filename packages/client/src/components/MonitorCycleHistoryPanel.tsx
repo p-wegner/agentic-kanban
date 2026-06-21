@@ -85,7 +85,7 @@ export function MonitorCycleHistoryPanel({ projectId }: MonitorCycleHistoryPanel
   }, [projectId, typeFilter, limit]);
 
   useEffect(() => {
-    fetchEvents();
+    void fetchEvents();
   }, [fetchEvents]);
 
   const handleSort = (key: SortKey) => {

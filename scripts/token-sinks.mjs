@@ -214,7 +214,7 @@ const jsonOut = args.includes("--json");
 
 const cutoffMs = Date.now() - days * 24 * 60 * 60 * 1000;
 
-let sessions = [];
+const sessions = [];
 if (provider === "all" || provider === "claude") sessions.push(...collectClaude(cutoffMs));
 if (provider === "all" || provider === "codex") sessions.push(...collectCodex(cutoffMs));
 
@@ -248,7 +248,7 @@ for (const s of sessions) {
   if (g.provider !== s.provider) g.provider = "mixed";
 };
 
-let rows = [...groups.values()].map((g) => ({ ...g, rawTokens: rawTotal(g.tokens) }));
+const rows = [...groups.values()].map((g) => ({ ...g, rawTokens: rawTotal(g.tokens) }));
 const sortKey = sort === "tokens" ? (r) => r.rawTokens : sort === "output" ? (r) => r.tokens.output : (r) => r.cost;
 rows.sort((a, b) => sortKey(b) - sortKey(a));
 

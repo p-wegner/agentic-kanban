@@ -106,7 +106,7 @@ export function StartWorkspacePicker({ issues, onClose, onStarted }: StartWorksp
     if (e.key === "Enter") {
       e.preventDefault();
       const issue = filtered[selectedIndex];
-      if (issue) startWorkspace(issue);
+      if (issue) void startWorkspace(issue);
       return;
     }
   }

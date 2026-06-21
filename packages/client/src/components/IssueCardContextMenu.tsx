@@ -156,7 +156,7 @@ export function IssueCardContextMenu({
         <button
           type="button"
           role="menuitem"
-          onClick={() => runContextAction(() => quickUpdate.onTogglePinned!(issue.id, !issue.pinned))}
+          onClick={() => runContextAction(() => { void quickUpdate.onTogglePinned!(issue.id, !issue.pinned); })}
           className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
         >
           <svg className="h-3.5 w-3.5 shrink-0 text-amber-400" fill={issue.pinned ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -183,7 +183,7 @@ export function IssueCardContextMenu({
         <button
           type="button"
           role="menuitem"
-          onClick={() => runContextAction(() => onOpenDiff!(issue, ws!.main!.id!))}
+          onClick={() => runContextAction(() => onOpenDiff!(issue, ws!.main!.id))}
           className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:text-gray-200 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
         >
           <svg className="h-3.5 w-3.5 shrink-0 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

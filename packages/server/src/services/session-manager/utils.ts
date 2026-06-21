@@ -38,7 +38,7 @@ export function tasksToTodoItems(tasks: Map<string, { subject: string; status: s
     id,
     content: task.subject,
     status: (task.status === "in_progress" || task.status === "completed" || task.status === "pending")
-      ? task.status as "pending" | "in_progress" | "completed"
+      ? task.status
       : "pending",
     priority: "medium" as const,
   }));

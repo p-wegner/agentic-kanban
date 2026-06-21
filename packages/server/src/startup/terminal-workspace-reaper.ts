@@ -235,7 +235,7 @@ export function startTerminalWorkspaceReaper(
   const interval = setInterval(tick, intervalMs);
   activeTerminalReaperTimeout = timer;
   activeTerminalReaperInterval = interval;
-  (timer as NodeJS.Timeout).unref?.();
-  (interval as NodeJS.Timeout).unref?.();
+  (timer).unref?.();
+  (interval).unref?.();
   return { timer, interval };
 }

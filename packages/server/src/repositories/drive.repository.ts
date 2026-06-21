@@ -39,7 +39,7 @@ export async function createDrive(
     metaIssueId: data.metaIssueId ?? null,
     target: data.target,
     completionContract: data.completionContract ?? null,
-    status: data.status ?? ("active" as DriveStatus),
+    status: data.status ?? ("active"),
     startedAt,
     finishedAt: null,
   };

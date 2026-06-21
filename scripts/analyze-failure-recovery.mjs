@@ -86,7 +86,7 @@ function collectClaude() {
           if (!matchRe.test(txt)) continue;
           const failedTool = toolById.get(b.tool_use_id) || {};
           // find next assistant turn
-          let next = { text: "", tool: "", cmd: "", input: null };
+          const next = { text: "", tool: "", cmd: "", input: null };
           for (let j = i + 1; j < entries.length; j++) {
             if (entries[j].type !== "assistant") continue;
             for (const nb of entries[j].message?.content || []) {

@@ -310,7 +310,7 @@ export function FireworksView({ columns, onIssueClick, searchQuery = "" }: Firew
         priority.key,
         issues.filter((issue) => (issue.priority ?? "low") === priority.key).length,
       ]),
-    ) as Record<string, number>;
+    );
   }, [filteredColumns]);
 
   return (

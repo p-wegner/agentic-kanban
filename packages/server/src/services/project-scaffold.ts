@@ -736,7 +736,7 @@ interface PmDetection {
 }
 
 function detectNodePmForApproval(repoPath: string, pkg: Record<string, unknown>): PmDetection {
-  const pm = typeof pkg.packageManager === "string" ? (pkg.packageManager as string) : "";
+  const pm = typeof pkg.packageManager === "string" ? (pkg.packageManager) : "";
   // An explicit packageManager pin is authoritative (it's already pinned, so pinnable is moot).
   if (pm.startsWith("pnpm@")) return { pm: "pnpm", pinnable: true };
   if (pm.startsWith("yarn@")) return { pm: "yarn", pinnable: true };

@@ -387,7 +387,7 @@ export function IssueDetailPanel({
                 value={inlineTitleValue}
                 onChange={(e) => setInlineTitleValue(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") { e.preventDefault(); handleInlineTitleSave(); }
+                  if (e.key === "Enter") { e.preventDefault(); void handleInlineTitleSave(); }
                   if (e.key === "Escape") { e.stopPropagation(); setInlineEditingTitle(false); setInlineTitleValue(issue.title); setInlineError(null); }
                 }}
                 onBlur={handleInlineTitleSave}

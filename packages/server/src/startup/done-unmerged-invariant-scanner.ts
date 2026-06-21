@@ -408,8 +408,8 @@ export function startDoneUnmergedScanner(
   });
   const timer = setTimeout(tick, 40_000);
   const interval = setInterval(tick, intervalMs);
-  (timer as NodeJS.Timeout).unref?.();
-  (interval as NodeJS.Timeout).unref?.();
+  (timer).unref?.();
+  (interval).unref?.();
   _activeTimer = timer;
   _activeInterval = interval;
   return { timer, interval };

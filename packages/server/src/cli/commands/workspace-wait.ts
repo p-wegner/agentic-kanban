@@ -177,7 +177,7 @@ export async function runWorkspaceWait(issueNumberArg: string, options: WaitOpti
         console.error(`Timed out after ${timeoutSec}s waiting for #${num} (last status: ${lastStatus}).`);
         finish(1);
       }, timeoutSec * 1000);
-      (timer as NodeJS.Timeout).unref?.();
+      (timer).unref?.();
     }
   });
 }

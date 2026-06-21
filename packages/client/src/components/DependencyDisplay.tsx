@@ -100,7 +100,7 @@ export function DependencyDisplay({
               const isOutgoing = dep.issueId === issue.id;
               if (isOutgoing) {
                 // Outgoing: use the type as-is (but depends_on stays depends_on, blocked_by stays blocked_by)
-                return dep.type as DisplayCategory;
+                return dep.type;
               }
               // Incoming: invert
               switch (dep.type) {
@@ -249,7 +249,7 @@ export function DependencyDisplay({
                 }}
                 onFocus={() => setDepDropdownOpen(true)}
                 onBlur={(e) => {
-                  if (!depComboRef.current?.contains(e.relatedTarget as Node)) {
+                  if (!depComboRef.current?.contains(e.relatedTarget)) {
                     setDepDropdownOpen(false);
                   }
                 }}
@@ -267,7 +267,7 @@ export function DependencyDisplay({
                   } else if (e.key === "Enter") {
                     e.preventDefault();
                     const item = filteredCandidates[depHighlightIdx];
-                    if (item) addDep(item.id);
+                    if (item) void addDep(item.id);
                   } else if (e.key === "Escape") {
                     setDepDropdownOpen(false);
                     setDepSearch("");
@@ -284,7 +284,7 @@ export function DependencyDisplay({
                         key={i.id}
                         tabIndex={-1}
                         className={`w-full text-left text-xs px-2 py-1 truncate ${idx === depHighlightIdx ? "bg-brand-100 text-brand-800 dark:bg-brand-900/40 dark:text-brand-300" : "hover:bg-gray-100 dark:hover:bg-gray-800"}`}
-                        onMouseDown={(e) => { e.preventDefault(); addDep(i.id); }}
+                        onMouseDown={(e) => { e.preventDefault(); void addDep(i.id); }}
                         onMouseEnter={() => setDepHighlightIdx(idx)}
                       >
                         {i.issueNumber != null ? <span className="font-mono text-gray-500 dark:text-gray-400">#{i.issueNumber} </span> : null}

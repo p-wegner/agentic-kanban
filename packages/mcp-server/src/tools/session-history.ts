@@ -147,7 +147,7 @@ export function registerSessionHistory(server: McpServer) {
             stopReason,
             sessionStarted,
             agentResponded,
-            sessionId: sessionId ? (sessionId as string).slice(0, 8) + "--" : null,
+            sessionId: sessionId ? (sessionId).slice(0, 8) + "--" : null,
           });
         }
       }

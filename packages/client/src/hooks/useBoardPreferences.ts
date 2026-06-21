@@ -101,7 +101,7 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
   }, [projectId]);
 
   useEffect(() => {
-    loadPreferences();
+    void loadPreferences();
   }, [loadPreferences]);
 
   // Monitor-status is global (not project-scoped), so it lives in its own

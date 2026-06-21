@@ -301,7 +301,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps) {
 
     const byWorkspace = new Map<string, typeof rows>();
     for (const r of rows) {
-      if (!byWorkspace.has(r.workspaceId)) byWorkspace.set(r.workspaceId, [] as any);
+      if (!byWorkspace.has(r.workspaceId)) byWorkspace.set(r.workspaceId, []);
       byWorkspace.get(r.workspaceId)!.push(r);
     }
 
@@ -445,7 +445,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps) {
 
     const byWorkspace = new Map<string, typeof rows>();
     for (const r of rows) {
-      if (!byWorkspace.has(r.workspaceId)) byWorkspace.set(r.workspaceId, [] as any);
+      if (!byWorkspace.has(r.workspaceId)) byWorkspace.set(r.workspaceId, []);
       byWorkspace.get(r.workspaceId)!.push(r);
     }
 

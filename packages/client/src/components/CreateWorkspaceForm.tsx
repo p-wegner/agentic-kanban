@@ -121,7 +121,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
         .then((data) => setBranches(data))
         .catch(() => setBranches(null));
     }
-    Promise.all([
+    void Promise.all([
       apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles").catch(() => ({ profiles: [] as string[] })),
       apiFetch<{ profiles: string[] }>("/api/preferences/codex-profiles").catch(() => ({ profiles: [CODEX_DEFAULT_PROFILE] as string[] })),
       apiFetch<{ profiles: string[] }>("/api/preferences/copilot-profiles").catch(() => ({ profiles: [COPILOT_DEFAULT_PROFILE] })),
