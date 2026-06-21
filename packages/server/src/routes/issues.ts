@@ -10,7 +10,7 @@ import {
   getIssueTouchedFilesWithProject,
   getProjectIssuesTouchedFiles,
 } from "../repositories/issue.repository.js";
-import { clampDays } from "../lib/issue-analytics.js";
+import { clampDays } from "../lib/analytics-window.js";
 import {
   getBurndownChart,
   getCfdChart,

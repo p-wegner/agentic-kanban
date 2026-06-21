@@ -16,6 +16,7 @@ import {
   aggregateCostOverTime,
   bucketScorecardScores,
 } from "../lib/workspace-stats.js";
+import { clampDays, cutoffDayFor, subDays, buildDateAxis } from "../lib/analytics-window.js";
 
 export function createWorkspacesRoute(
   database: Database,
@@ -35,22 +36,11 @@ export function createWorkspacesRoute(
   router.get("/provider-mix", async (c) => {
     const projectId = c.req.query("projectId");
     if (!projectId) return c.json({ error: "projectId required" }, 400);
-    const daysRaw = parseInt(c.req.query("days") ?? "14", 10);
-    const days = Math.min(Math.max(Number.isNaN(daysRaw) ? 14 : daysRaw, 1), 365);
+    const days = clampDays(c.req.query("days"), 14);
+    const now = new Date();
 
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - days + 1);
-    const cutoffDay = cutoffDate.toISOString().slice(0, 10);
-
-    const rows = await getProviderMixRows(projectId, cutoffDay, database);
-
-    // Build date axis
-    const today = new Date();
-    const dates: string[] = [];
-    for (let d = new Date(cutoffDate); d <= today; d.setDate(d.getDate() + 1)) {
-      dates.push(d.toISOString().slice(0, 10));
-    }
-
+    const rows = await getProviderMixRows(projectId, cutoffDayFor(now, days), database);
+    const dates = buildDateAxis(subDays(now, days - 1), now);
     return c.json(aggregateProviderMix(rows, dates));
   });
 
@@ -61,10 +51,11 @@ export function createWorkspacesRoute(
   router.get("/cost-over-time", async (c) => {
     const projectId = c.req.query("projectId");
     if (!projectId) return c.json({ error: "projectId required" }, 400);
-    const daysRaw = parseInt(c.req.query("days") ?? "30", 10);
-    const days = Math.min(Math.max(Number.isNaN(daysRaw) ? 30 : daysRaw, 1), 365);
+    const days = clampDays(c.req.query("days"), 30);
 
     // Start-of-UTC-day cutoff so the day buckets (ISO date keys) line up with the filter.
+    // (Deliberately UTC-anchored, unlike the local-day analytics-window helpers used
+    // elsewhere — cost buckets key on UTC ISO days, so the cutoff must match.)
     const cutoffDate = new Date();
     cutoffDate.setUTCDate(cutoffDate.getUTCDate() - days + 1);
     cutoffDate.setUTCHours(0, 0, 0, 0);
@@ -87,14 +78,9 @@ export function createWorkspacesRoute(
   router.get("/scorecard-distribution", async (c) => {
     const projectId = c.req.query("projectId");
     if (!projectId) return c.json({ error: "projectId required" }, 400);
-    const daysRaw = parseInt(c.req.query("days") ?? "90", 10);
-    const days = Math.min(Math.max(Number.isNaN(daysRaw) ? 90 : daysRaw, 1), 365);
+    const days = clampDays(c.req.query("days"), 90);
 
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - days + 1);
-    const cutoffDay = cutoffDate.toISOString().slice(0, 10);
-
-    const rows = await getScorecardScores(projectId, cutoffDay, database);
+    const rows = await getScorecardScores(projectId, cutoffDayFor(new Date(), days), database);
     return c.json(bucketScorecardScores(rows));
   });
 
