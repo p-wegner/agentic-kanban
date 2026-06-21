@@ -51,7 +51,7 @@ export function createWorkspaceActionsRoute(
   // POST /api/workspaces/:id/turn
   router.post("/:id/turn", async (c) => {
     const id = c.req.param("id");
-    const body = await parseJsonBody(c);
+    const body = await parseJsonBody<{ content?: string }>(c);
     if (!body.content) return c.json({ error: "content is required" }, 400);
     const result = await workspaceService.sendTurn(id, body.content);
     if (result.type === "sent") return c.json({ ok: true });
@@ -199,7 +199,7 @@ export function createWorkspaceActionsRoute(
   // POST /api/workspaces/:id/comments
   router.post("/:id/comments", async (c) => {
     const id = c.req.param("id");
-    const body = await parseJsonBody(c);
+    const body = await parseJsonBody<{ filePath: string; body: string; lineNumOld?: number | null; lineNumNew?: number | null; side?: string }>(c);
     if (!body.filePath || !body.body) return c.json({ error: "filePath and body are required" }, 400);
     return c.json(await workspaceService.createComment(id, body), 201);
   });
@@ -208,7 +208,7 @@ export function createWorkspaceActionsRoute(
   router.patch("/:id/comments/:commentId", async (c) => {
     const id = c.req.param("id");
     const commentId = c.req.param("commentId");
-    const body = await parseJsonBody(c);
+    const body = await parseJsonBody<{ body?: string }>(c);
     if (!body.body) return c.json({ error: "body is required" }, 400);
     return c.json(await workspaceService.updateComment(id, commentId, body.body));
   });

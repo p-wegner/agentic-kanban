@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
 import { getE2EProjectId } from "../helpers/e2e-project.js";
 
@@ -75,8 +75,7 @@ test.describe("@system: Diff Viewer UI", () => {
   // Helper: open the WorkspacePanel for a given issue title and expand the
   // first workspace card. Returns when the "View Diff" button is visible.
   async function openWorkspacePanel(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    page: any,
+    page: Page,
     issueTitle: string,
     branchName: string,
   ) {
