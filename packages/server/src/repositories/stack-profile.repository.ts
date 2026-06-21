@@ -2,17 +2,14 @@ import { projects } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { getProjectById } from "./project.repository.js";
 
 /** Read a project's configured setup script, or null if the project/column is unset. */
 export async function getProjectSetupScript(
   projectId: string,
   database: Database = db,
 ): Promise<string | null> {
-  const [project] = await database
-    .select({ setupScript: projects.setupScript })
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .limit(1);
+  const project = await getProjectById(projectId, database);
   return project?.setupScript ?? null;
 }
 
