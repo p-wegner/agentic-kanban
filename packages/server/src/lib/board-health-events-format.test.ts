@@ -4,7 +4,23 @@ import {
   parseBoardHealthEventTypes,
   parseBoardHealthCategories,
   compactBoardHealthEventDetails,
+  boardHealthEventLevel,
+  parseBoardHealthEventDetails,
+  toBoardHealthEventSummary,
+  toBoardHealthEventDetail,
+  type BoardHealthEventRecord,
 } from "./board-health-events-format.js";
+
+const ROW: BoardHealthEventRecord = {
+  id: "e1",
+  cycleId: "c1",
+  createdAt: "2026-06-21T10:00:00.000Z",
+  eventType: "action",
+  category: "merge",
+  issueNumber: 42,
+  summary: "merged #42",
+  details: JSON.stringify({ a: 1, b: "x" }),
+};
 
 describe("parseBoardHealthEventsLimit", () => {
   it("defaults to 20 for missing/invalid input", () => {
@@ -67,5 +83,66 @@ describe("compactBoardHealthEventDetails", () => {
   it("falls back to a 160-char slice of non-JSON input", () => {
     const raw = "x".repeat(200);
     expect(compactBoardHealthEventDetails(raw)).toBe("x".repeat(160));
+  });
+});
+
+describe("boardHealthEventLevel", () => {
+  it("maps error -> error and everything else -> info", () => {
+    expect(boardHealthEventLevel("error")).toBe("error");
+    expect(boardHealthEventLevel("action")).toBe("info");
+    expect(boardHealthEventLevel("cycle_start")).toBe("info");
+  });
+});
+
+describe("parseBoardHealthEventDetails", () => {
+  it("returns null for absent details", () => {
+    expect(parseBoardHealthEventDetails(null)).toBeNull();
+    expect(parseBoardHealthEventDetails("")).toBeNull();
+  });
+  it("returns the parsed JSON value when valid", () => {
+    expect(parseBoardHealthEventDetails('{"a":1}')).toEqual({ a: 1 });
+    expect(parseBoardHealthEventDetails("[1,2]")).toEqual([1, 2]);
+  });
+  it("falls back to the raw string on invalid JSON", () => {
+    expect(parseBoardHealthEventDetails("not json")).toBe("not json");
+  });
+});
+
+describe("toBoardHealthEventSummary", () => {
+  it("projects the list DTO with a compacted details line, no cycleId", () => {
+    expect(toBoardHealthEventSummary(ROW)).toEqual({
+      id: "e1",
+      timestamp: "2026-06-21T10:00:00.000Z",
+      level: "info",
+      type: "action",
+      category: "merge",
+      issueNumber: 42,
+      summary: "merged #42",
+      details: "a: 1, b: x",
+    });
+  });
+  it("normalizes missing category/issueNumber to null", () => {
+    const dto = toBoardHealthEventSummary({ ...ROW, category: null, issueNumber: null, details: null });
+    expect(dto).toMatchObject({ category: null, issueNumber: null, details: null });
+  });
+});
+
+describe("toBoardHealthEventDetail", () => {
+  it("projects the full DTO with parsed details + cycleId", () => {
+    expect(toBoardHealthEventDetail(ROW)).toEqual({
+      id: "e1",
+      cycleId: "c1",
+      timestamp: "2026-06-21T10:00:00.000Z",
+      level: "info",
+      type: "action",
+      category: "merge",
+      issueNumber: 42,
+      summary: "merged #42",
+      details: { a: 1, b: "x" },
+    });
+  });
+  it("derives the error level and tolerates an absent cycleId", () => {
+    const dto = toBoardHealthEventDetail({ ...ROW, cycleId: undefined, eventType: "error" });
+    expect(dto).toMatchObject({ cycleId: null, level: "error" });
   });
 });

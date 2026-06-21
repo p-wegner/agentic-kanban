@@ -14,7 +14,8 @@ import {
   parseBoardHealthEventsLimit,
   parseBoardHealthEventTypes,
   parseBoardHealthCategories,
-  compactBoardHealthEventDetails,
+  toBoardHealthEventSummary,
+  toBoardHealthEventDetail,
 } from "../lib/board-health-events-format.js";
 import { listMonitorCycles } from "../services/monitor-cycle-health.service.js";
 import { buildDependencyWavePlan, startNextDependencyWave } from "../services/dependency-wave.service.js";
@@ -202,16 +203,7 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
     const eventTypes = parseBoardHealthEventTypes(c.req.query("eventType"));
     const categories = parseBoardHealthCategories(c.req.query("category"));
     const events = await listBoardHealthEvents({ projectId, eventTypes, categories, limit }, database);
-    return c.json(events.map((event) => ({
-      id: event.id,
-      timestamp: event.createdAt,
-      level: event.eventType === "error" ? "error" : "info",
-      type: event.eventType,
-      category: event.category ?? null,
-      issueNumber: event.issueNumber ?? null,
-      summary: event.summary,
-      details: compactBoardHealthEventDetails(event.details),
-    })));
+    return c.json(events.map(toBoardHealthEventSummary));
   });
 
   // GET /api/projects/:id/monitor-cycles — aggregated cycle summaries
@@ -230,21 +222,7 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
     const eventId = c.req.param("eventId");
     const event = await getBoardHealthEvent(eventId, database);
     if (!event || event.projectId !== projectId) return c.json({ error: "not found" }, 404);
-    let parsedDetails: unknown = null;
-    if (event.details) {
-      try { parsedDetails = JSON.parse(event.details); } catch { parsedDetails = event.details; }
-    }
-    return c.json({
-      id: event.id,
-      cycleId: event.cycleId,
-      timestamp: event.createdAt,
-      level: event.eventType === "error" ? "error" : "info",
-      type: event.eventType,
-      category: event.category ?? null,
-      issueNumber: event.issueNumber ?? null,
-      summary: event.summary,
-      details: parsedDetails,
-    });
+    return c.json(toBoardHealthEventDetail(event));
   });
 
   // GET /api/projects/:id/worktrees
