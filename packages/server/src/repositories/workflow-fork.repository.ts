@@ -11,6 +11,7 @@ import {
 } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { getProjectById } from "./project.repository.js";
 
 export async function selectAllPreferences(database: Database = db) {
   return database.select().from(preferences);
@@ -168,7 +169,8 @@ export async function selectForkIssueWithTemplate(issueId: string, database: Dat
 }
 
 export async function selectProjectIdAndRepoPath(projectId: string, database: Database = db) {
-  return database.select({ id: projects.id, repoPath: projects.repoPath }).from(projects).where(eq(projects.id, projectId)).limit(1);
+  const project = await getProjectById(projectId, database);
+  return project ? [{ id: project.id, repoPath: project.repoPath }] : [];
 }
 
 export async function selectExistingForkChildren(

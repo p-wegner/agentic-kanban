@@ -1,18 +1,15 @@
-import { projects, projectStatuses, issues, workspaces, sessions } from "@agentic-kanban/shared/schema";
+import { projectStatuses, issues, workspaces, sessions } from "@agentic-kanban/shared/schema";
 import { eq, inArray, desc, and, ne } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { getProjectById } from "./project.repository.js";
 
 export async function getProjectIdOrNull(
   projectId: string,
   database: Database = db,
 ): Promise<string | null> {
-  const rows = await database
-    .select({ id: projects.id })
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .limit(1);
-  return rows[0]?.id ?? null;
+  const project = await getProjectById(projectId, database);
+  return project?.id ?? null;
 }
 
 export async function getProjectStatusRows(
