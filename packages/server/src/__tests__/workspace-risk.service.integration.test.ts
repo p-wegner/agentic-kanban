@@ -455,6 +455,48 @@ describe("getWorkspaceRisk (orchestration)", () => {
     expect(res.entries[0].signals.find((s) => s.key === "overlap")).toBeUndefined();
   });
 
+  it("diffs a non-direct workspace against its base branch, falling back to the default branch", async () => {
+    const { projectId, statuses } = await seedProject(db, { defaultBranch: "develop" });
+    const issueA = await seedIssue(db, projectId, statuses.inProgress);
+    await seedWorkspace(db, issueA, { status: "active", workingDir: "/tmp/wsBase", baseBranch: "release/1" });
+    const issueB = await seedIssue(db, projectId, statuses.inProgress);
+    await seedWorkspace(db, issueB, { status: "active", workingDir: "/tmp/wsDefault", baseBranch: null });
+
+    await getWorkspaceRisk(projectId, db);
+
+    const refByDir = new Map(mockGetChangedFileNames.mock.calls.map((c) => [c[0], c[1]]));
+    expect(refByDir.get("/tmp/wsBase")).toBe("release/1");
+    expect(refByDir.get("/tmp/wsDefault")).toBe("develop"); // null baseBranch -> project default branch
+  });
+
+  it("diffs a direct workspace against HEAD", async () => {
+    const { projectId, statuses } = await seedProject(db);
+    const issue = await seedIssue(db, projectId, statuses.inProgress);
+    await seedWorkspace(db, issue, { status: "active", workingDir: "/tmp/wsDirect", isDirect: true });
+
+    await getWorkspaceRisk(projectId, db);
+
+    const call = mockGetChangedFileNames.mock.calls.find((c) => c[0] === "/tmp/wsDirect");
+    expect(call?.[1]).toBe("HEAD");
+  });
+
+  it("falls back to an empty changed-file list from the diff-stat cache when git yields nothing", async () => {
+    const { projectId, statuses, now } = await seedProject(db);
+    const issue = await seedIssue(db, projectId, statuses.inProgress);
+    await seedWorkspace(db, issue, {
+      status: "active",
+      workingDir: "/tmp/wsCache",
+      diffStatCacheCheckedAt: now,
+      diffStatCacheFilesChanged: 6,
+    });
+    mockGetChangedFileNames.mockRejectedValue(new Error("git down"));
+
+    const res = await getWorkspaceRisk(projectId, db);
+    expect(res.entries[0].changedFiles).toEqual([]);
+    // the cached diff-stat still drives the uncommitted signal even without filenames
+    expect(res.entries[0].signals.find((s) => s.key === "uncommitted")?.value).toBe(6);
+  });
+
   it("uses startedAt for a running session's staleness and endedAt for a stopped one", async () => {
     const { projectId, statuses } = await seedProject(db);
     // running session started 5h ago -> stale (uses startedAt)
