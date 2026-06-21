@@ -1,7 +1,8 @@
-import { workspaces, issues, projects, projectStatuses, issueDependencies, workflowNodes } from "@agentic-kanban/shared/schema";
+import { workspaces, issues, projectStatuses, issueDependencies, workflowNodes } from "@agentic-kanban/shared/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { getProjectById } from "./project.repository.js";
 
 export async function getDependentsOf(
   mergedIssueId: string,
@@ -27,7 +28,8 @@ export async function getProjectForFollowup(
   projectId: string,
   database: Database = db,
 ) {
-  return database.select().from(projects).where(eq(projects.id, projectId)).limit(1);
+  const project = await getProjectById(projectId, database);
+  return project ? [project] : [];
 }
 
 export async function getBlockingDepsForIssue(

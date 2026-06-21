@@ -1,7 +1,8 @@
-import { agentSkills, issues, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
+import { agentSkills, issues, projectStatuses, workspaces } from "@agentic-kanban/shared/schema";
 import { eq, max } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { getProjectById } from "./project.repository.js";
 
 export async function getScheduledRunSystemIssueSummary(
   systemIssueId: string,
@@ -40,7 +41,8 @@ export async function getScheduledRunProjectId(
   projectId: string,
   database: Database = db,
 ) {
-  return database.select({ id: projects.id }).from(projects).where(eq(projects.id, projectId)).limit(1);
+  const project = await getProjectById(projectId, database);
+  return project ? [{ id: project.id }] : [];
 }
 
 export async function getScheduledRunIssueId(
