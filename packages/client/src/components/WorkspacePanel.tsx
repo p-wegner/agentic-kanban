@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { type AgentOutputFormat } from "../lib/agent-output-parser.js";
 import { detectQuickLaunchProvider, canResumeWorkspace, canRestartWorkspace, type RelaunchContext } from "../lib/workspaceLaunchState.js";
+import { buildDefaultLaunchPrompt } from "../lib/workspace-launch.js";
 import { useWebSocket } from "../lib/useWebSocket.js";
 import { CreateWorkspaceForm } from "./CreateWorkspaceForm.js";
 import { WorkspaceDiffPanel } from "./WorkspaceDiffPanel.js";
@@ -122,7 +123,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
   } = useProfileSelection(issue.id);
   const [availableSkills, setAvailableSkills] = useState<AvailableSkill[]>([]);
   const [lastPrompt, setLastPrompt] = useState<string>(
-    initialSessionId ? `${issue.title}${issue.description ? `\n\n${issue.description}` : ""}` : ""
+    initialSessionId ? buildDefaultLaunchPrompt(issue) : ""
   );
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const suggestion = suggestBranchName(issue);
@@ -440,7 +441,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                 if (result.sessionId) {
                   setSelectedWorkspace(result.id);
                   setActiveSession(result.sessionId);
-                  setLastPrompt(`${issue.title}${issue.description ? `\n\n${issue.description}` : ""}`);
+                  setLastPrompt(buildDefaultLaunchPrompt(issue));
                 }
                 fetchWorkspaces();
                 onWorkspaceChange?.();
