@@ -57,6 +57,14 @@ const PI_API_KEY_ENV_KEYS = [
   "OPENROUTER_API_KEY",
 ];
 
+/** Display labels for the "using default <X> command from PATH" preflight warning. */
+const DEFAULT_COMMAND_LABELS: Record<ProviderName, string> = {
+  claude: "Claude",
+  codex: "Codex",
+  copilot: "Copilot",
+  pi: "Pi",
+};
+
 function profileKey(provider: ProviderName, profileName?: string | null): string {
   const name = profileName?.trim() || DEFAULT_PROFILE;
   return `${provider}:${name}`;
@@ -183,46 +191,54 @@ export function preflightAgentProfile(
   const effectivePrefs = applyProfileSelection(prefMap, provider, profileName);
   const settings = resolveAgentSettings(effectivePrefs);
 
-  // Codex OAuth license (a CODEX_HOME directory, not a config toml): validate the
-  // login by checking for auth.json, and skip the config-file existence check.
-  const codexHome = provider === "codex"
-    ? resolveCodexHomeForProfile(profileName, parseCodexLicenseRing(prefMap.get("codex_license_ring")))
-    : undefined;
-  // Claude OAuth subscription (a CLAUDE_CONFIG_DIR directory, not a settings_<name>.json):
-  // validate the login by checking for .credentials.json, and skip the settings-file check.
-  const claudeConfigDir = provider === "claude"
-    ? resolveClaudeConfigDirForProfile(profileName, parseClaudeSubscriptionRing(prefMap.get("claude_subscription_ring")))
-    : undefined;
-  if (codexHome) {
-    if (!codexHomeHasAuth(codexHome)) {
-      errors.push(`Codex license '${profileName}' not logged in: no auth.json in ${codexHome} (run: $env:CODEX_HOME='${codexHome}'; codex login)`);
+  // Validate the profile's auth/config: an OAuth license/subscription directory
+  // (checked for auth.json/.credentials.json) or a profile config file's existence.
+  function validateAuthOrConfig() {
+    // Codex OAuth license (a CODEX_HOME directory, not a config toml): validate the
+    // login by checking for auth.json, and skip the config-file existence check.
+    const codexHome = provider === "codex"
+      ? resolveCodexHomeForProfile(profileName, parseCodexLicenseRing(prefMap.get("codex_license_ring")))
+      : undefined;
+    // Claude OAuth subscription (a CLAUDE_CONFIG_DIR directory, not a settings_<name>.json):
+    // validate the login by checking for .credentials.json, and skip the settings-file check.
+    const claudeConfigDir = provider === "claude"
+      ? resolveClaudeConfigDirForProfile(profileName, parseClaudeSubscriptionRing(prefMap.get("claude_subscription_ring")))
+      : undefined;
+    if (codexHome) {
+      if (!codexHomeHasAuth(codexHome)) {
+        errors.push(`Codex license '${profileName}' not logged in: no auth.json in ${codexHome} (run: $env:CODEX_HOME='${codexHome}'; codex login)`);
+      }
+    } else if (claudeConfigDir) {
+      if (!claudeConfigDirHasAuth(claudeConfigDir)) {
+        errors.push(`Claude subscription '${profileName}' not logged in: no .credentials.json in ${claudeConfigDir} (run: $env:CLAUDE_CONFIG_DIR='${claudeConfigDir}'; claude /login)`);
+      }
+    } else {
+      const configPath = profileConfigPath(provider, profileName);
+      if (configPath && !existsSync(configPath)) {
+        errors.push(`Profile config not found: ${configPath}`);
+      }
     }
-  } else if (claudeConfigDir) {
-    if (!claudeConfigDirHasAuth(claudeConfigDir)) {
-      errors.push(`Claude subscription '${profileName}' not logged in: no .credentials.json in ${claudeConfigDir} (run: $env:CLAUDE_CONFIG_DIR='${claudeConfigDir}'; claude /login)`);
-    }
-  } else {
-    const configPath = profileConfigPath(provider, profileName);
-    if (configPath && !existsSync(configPath)) {
-      errors.push(`Profile config not found: ${configPath}`);
-    }
   }
-  if (!settings.agentCommand && provider === "claude") {
-    warnings.push("Using default Claude command from PATH.");
-  }
-  if (!settings.agentCommand && provider === "codex") {
-    warnings.push("Using default Codex command from PATH.");
-  }
-  if (!settings.agentCommand && provider === "copilot") {
-    warnings.push("Using default Copilot command from PATH.");
-  }
-  if (!settings.agentCommand && provider === "pi") {
-    warnings.push("Using default Pi command from PATH.");
+  validateAuthOrConfig();
+
+  if (!settings.agentCommand) {
+    warnings.push(`Using default ${DEFAULT_COMMAND_LABELS[provider]} command from PATH.`);
   }
 
   let flags: string[] = [];
   let command = sanitizeCommand(settings.agentCommand) || provider;
-  if (provider === "pi") {
+  // Pi auth: needs a provider API key OR an existing PI_CODING_AGENT_DIR.
+  function validatePiAuth(codingAgentDir: string | undefined) {
+    if (!hasPiApiKey() && !codingAgentDir) {
+      errors.push(`Pi auth is not configured: set one of ${PI_API_KEY_ENV_KEYS.join(", ")} or select a Pi profile with an existing PI_CODING_AGENT_DIR.`);
+    } else if (!hasPiApiKey() && codingAgentDir && existsSync(codingAgentDir)) {
+      warnings.push("No Pi provider API key is set in the server environment; assuming auth is configured in PI_CODING_AGENT_DIR.");
+    }
+  }
+  // Pi profiles need extra validation: the Pi binary on PATH, an existing
+  // PI_CODING_AGENT_DIR for non-default profiles, and some form of auth.
+  function validatePiProfile() {
+    if (provider !== "pi") return;
     const launchCommand = settings.agentCommand || "pi";
     const resolvedCommand = !settings.agentCommand ? resolvePiExecutable(launchCommand) : undefined;
     command = sanitizeCommand(resolvedCommand || launchCommand) || "pi";
@@ -245,12 +261,10 @@ export function preflightAgentProfile(
       }
     }
 
-    if (!hasPiApiKey() && !codingAgentDir) {
-      errors.push(`Pi auth is not configured: set one of ${PI_API_KEY_ENV_KEYS.join(", ")} or select a Pi profile with an existing PI_CODING_AGENT_DIR.`);
-    } else if (!hasPiApiKey() && codingAgentDir && existsSync(codingAgentDir)) {
-      warnings.push("No Pi provider API key is set in the server environment; assuming auth is configured in PI_CODING_AGENT_DIR.");
-    }
+    validatePiAuth(codingAgentDir);
   }
+  validatePiProfile();
+
   try {
     const launchConfig = buildAgentLaunchConfig({
       agentCommand: settings.agentCommand,
