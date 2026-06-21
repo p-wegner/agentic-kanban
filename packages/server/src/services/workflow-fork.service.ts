@@ -54,6 +54,11 @@ import {
 } from "@agentic-kanban/shared/lib/workflow-engine";
 import { writeAgentSkillFile, readLocalSkillPrompt, copySkillToWorktree } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
+import {
+  buildForkArtifactsDoc,
+  buildJoinConsolidateLine,
+  type ForkMergeResult,
+} from "../lib/fork-artifacts.js";
 
 /** Default concurrency + timeout caps for parallel fork children (#82). */
 const MAX_CONCURRENT_PER_WORKSPACE = 2;
@@ -475,24 +480,121 @@ export function createWorkflowForkService(deps: {
     await consolidate(parentId);
   }
 
-  /** Write the fork artifacts file and advance the parent into the join node. */
-  async function consolidate(parentWorkspaceId: string): Promise<void> {
+  /**
+   * Merge every joined child branch back into the parent branch (the "merge" join
+   * strategy). Closes over gitService; pure-data result the artifacts doc + join prompt
+   * render from. A child that is not joined / has no branch is recorded as skipped; a
+   * merge that conflicts is auto-aborted by mergeBranch and recorded as a conflict so its
+   * work stays on its own branch for the join agent to integrate manually.
+   */
+  async function mergeJoinedChildBranches(
+    parentWorkingDir: string,
+    parentBranch: string,
+    children: Array<{ branch: string; workingDir: string | null; forkStatus: string | null }>,
+    joinNodeName: string,
+  ): Promise<ForkMergeResult[]> {
+    const mergeResults: ForkMergeResult[] = [];
+    // Make sure the parent worktree is on its branch (captures any commits made
+    // in detached HEAD) before merging into it.
+    await gitService.ensureOnBranch(parentWorkingDir, parentBranch).catch(() => {});
+    for (const c of children) {
+      if (c.forkStatus !== "joined" || !c.branch) {
+        mergeResults.push({ branch: c.branch, status: "skipped", detail: c.forkStatus ?? "unknown" });
+        continue;
+      }
+      try {
+        // Ensure the child branch ref reflects the agent's commits, then merge.
+        // syncWorkingTree: true updates the parent worktree's working tree so the
+        // join agent sees the merged state when it runs.
+        if (c.workingDir) await gitService.syncBranchToHead(c.workingDir, c.branch).catch(() => {});
+        await gitService.mergeBranch(parentWorkingDir, c.branch, parentBranch, { syncWorkingTree: true });
+        mergeResults.push({ branch: c.branch, status: "merged" });
+      } catch (err) {
+        // mergeBranch auto-aborts on conflict; the child's work stays on its
+        // own branch for the join agent to integrate manually using the diff.
+        mergeResults.push({ branch: c.branch, status: "conflict", detail: err instanceof Error ? err.message.slice(0, 200) : String(err) });
+      }
+    }
+    const summary = mergeResults.map((r) => `${r.branch}=${r.status}`).join(", ");
+    console.log(`[fork] join "${joinNodeName}" auto-merge: ${summary}`);
+    return mergeResults;
+  }
+
+  /**
+   * Launch the parent agent at the join node to consolidate the fork. A no-op when no
+   * session manager is wired (tests). Closes over getSessionManager / database /
+   * resolveAgentConfig / injectNodeSkill.
+   */
+  async function launchJoinAgent(p: {
+    joinNode: WorkflowNodeRow;
+    parent: { id: string; workingDir: string | null };
+    project: { repoPath: string };
+    issue: { issueNumber: number | null; title: string };
+    sharedWorktree: boolean;
+    joinStrategy: string;
+    unmergedCount: number;
+    artifactsPath: string | null;
+    artifacts: string;
+  }): Promise<void> {
+    if (!getSessionManager) return;
+    const { joinNode, parent, project, issue, sharedWorktree, joinStrategy, unmergedCount, artifactsPath, artifacts } = p;
+      const joinTransitions = await getOutgoingTransitions(database, joinNode.id);
+      const consolidateLine = buildJoinConsolidateLine(sharedWorktree, joinStrategy, unmergedCount);
+      const prompt =
+        `All parallel branches for issue #${issue.issueNumber ?? "?"} — "${issue.title}" have completed.\n` +
+        (artifactsPath ? `Read \`WORKFLOW_FORK_ARTIFACTS.md\` in this worktree for each branch's diff and summary.\n` : `${artifacts}\n`) +
+        `${consolidateLine}\n\n` +
+        buildTransitionBlock(joinNode, joinTransitions, parent.id);
+      const cfg = await resolveAgentConfig();
+      const skillName = await injectNodeSkill(joinNode, parent.workingDir ?? project.repoPath, project.repoPath);
+      await getSessionManager()
+        .startSession({
+          workspaceId: parent.id,
+          prompt,
+          agentCommand: cfg.agentCommand,
+          agentArgs: cfg.agentArgs,
+          claudeProfile: cfg.claudeProfile,
+          permissionPromptTool: cfg.permissionPromptTool,
+          provider: toExecutorProvider(cfg.provider),
+          triggerType: skillName ? `join:${skillName}` : "fork-join",
+          profile: cfg.profile,
+          model: cfg.model,
+        })
+        .catch((err) => console.error(`[fork] join session launch failed:`, err instanceof Error ? err.message : String(err)));
+  }
+
+  /**
+   * Load + validate the inputs consolidate needs: the parent workspace, its issue
+   * (with a workflow template), the project, and the template's join node. Returns
+   * null — so the caller bails — when any is missing OR the parent is already on the
+   * join node (idempotency: only consolidate once).
+   */
+  async function loadConsolidateContext(parentWorkspaceId: string) {
     const parentRows = await selectConsolidateParent(parentWorkspaceId, database);
-    if (parentRows.length === 0) return;
+    if (parentRows.length === 0) return null;
     const parent = parentRows[0];
 
     const issueRows = await selectConsolidateIssue(parent.issueId, database);
-    if (issueRows.length === 0 || !issueRows[0].workflowTemplateId) return;
+    if (issueRows.length === 0 || !issueRows[0].workflowTemplateId) return null;
     const issue = issueRows[0];
     const projRows = await selectProjectIdAndRepoPath(issue.projectId, database);
-    if (projRows.length === 0) return;
+    if (projRows.length === 0) return null;
     const project = projRows[0];
 
     const joinNode = await findJoinNode(database, issue.workflowTemplateId!);
-    if (!joinNode) return;
+    if (!joinNode) return null;
 
     // Idempotency: only consolidate once (parent not already on/past the join).
-    if (parent.currentNodeId === joinNode.id) return;
+    if (parent.currentNodeId === joinNode.id) return null;
+
+    return { parent, issue, project, joinNode };
+  }
+
+  /** Write the fork artifacts file and advance the parent into the join node. */
+  async function consolidate(parentWorkspaceId: string): Promise<void> {
+    const ctx = await loadConsolidateContext(parentWorkspaceId);
+    if (!ctx) return;
+    const { parent, issue, project, joinNode } = ctx;
 
     const children = await selectForkChildrenForConsolidate(parent.id, database);
 
@@ -514,54 +616,22 @@ export function createWorkflowForkService(deps: {
     // doc) lands on one branch without the join agent doing it by hand. (Skipped in
     // shared mode — the children already committed onto this branch.)
     const joinStrategy = getJoinStrategy(joinNode.config);
-    const mergeResults: { branch: string; status: "merged" | "conflict" | "skipped"; detail?: string }[] = [];
-    if (!sharedWorktree && joinStrategy === "merge" && parent.workingDir) {
-      // Make sure the parent worktree is on its branch (captures any commits made
-      // in detached HEAD) before merging into it.
-      await gitService.ensureOnBranch(parent.workingDir, parent.branch).catch(() => {});
-      for (const c of children) {
-        if (c.forkStatus !== "joined" || !c.branch) {
-          mergeResults.push({ branch: c.branch, status: "skipped", detail: c.forkStatus ?? "unknown" });
-          continue;
-        }
-        try {
-          // Ensure the child branch ref reflects the agent's commits, then merge.
-          // syncWorkingTree: true updates the parent worktree's working tree so the
-          // join agent sees the merged state when it runs.
-          if (c.workingDir) await gitService.syncBranchToHead(c.workingDir, c.branch).catch(() => {});
-          await gitService.mergeBranch(parent.workingDir, c.branch, parent.branch, { syncWorkingTree: true });
-          mergeResults.push({ branch: c.branch, status: "merged" });
-        } catch (err) {
-          // mergeBranch auto-aborts on conflict; the child's work stays on its
-          // own branch for the join agent to integrate manually using the diff.
-          mergeResults.push({ branch: c.branch, status: "conflict", detail: err instanceof Error ? err.message.slice(0, 200) : String(err) });
-        }
-      }
-      console.log(`[fork] join "${joinNode.name}" auto-merge: ${mergeResults.map((r) => `${r.branch}=${r.status}`).join(", ")}`);
-    }
+    const mergeResults: ForkMergeResult[] =
+      !sharedWorktree && joinStrategy === "merge" && parent.workingDir
+        ? await mergeJoinedChildBranches(parent.workingDir, parent.branch, children, joinNode.name)
+        : [];
 
     const unmerged = mergeResults.filter((r) => r.status === "conflict");
-    const mergeSummary = joinStrategy === "merge"
-      ? `## Auto-merge results\n\n` +
-        mergeResults.map((r) => `- \`${r.branch}\`: **${r.status}**${r.detail ? ` — ${r.detail}` : ""}`).join("\n") +
-        `\n\n` +
-        (unmerged.length === 0
-          ? `All branches were merged into this branch automatically. Review the combined result for coherence; the per-branch diffs below are for reference.\n\n`
-          : `${unmerged.length} branch(es) did NOT merge cleanly (the conflicting merge was auto-aborted; that work remains only on its own branch). Integrate them manually using the diffs below.\n\n`)
-      : "";
-
-    const headerJob = sharedWorktree
-      ? `${children.length} fork stage(s) ran sequentially on this shared branch; all their work is already committed here. Your job at this **${joinNode.name}** stage: verify the combined result is coherent, then advance the workflow.`
-      : joinStrategy === "merge"
-      ? `${children.length} parallel branch(es) completed and were auto-merged into this branch. Your job at this **${joinNode.name}** stage: verify the combined result is coherent, integrate any branches that failed to merge (listed above), then advance the workflow.`
-      : `${children.length} parallel branch(es) completed. Your job at this **${joinNode.name}** stage: review each branch's diff below, consolidate them into a single coherent result on this (parent) branch, resolve any overlaps, and then advance the workflow.`;
-
-    const artifacts =
-      `# Parallel fork artifacts\n\n` +
-      `Issue #${issue.issueNumber ?? "?"} — "${issue.title}"\n\n` +
-      `${headerJob}\n\n` +
-      mergeSummary +
-      sections.join("\n\n---\n\n");
+    const artifacts = buildForkArtifactsDoc({
+      issueNumber: issue.issueNumber,
+      issueTitle: issue.title,
+      joinNodeName: joinNode.name,
+      childrenCount: children.length,
+      joinStrategy,
+      sharedWorktree,
+      mergeResults,
+      sections,
+    });
 
     let artifactsPath: string | null = null;
     if (parent.workingDir) {
@@ -600,36 +670,10 @@ export function createWorkflowForkService(deps: {
 
     boardEvents?.broadcast(issue.projectId, "workflow_join");
 
-    // Launch the parent agent at the join node to consolidate.
-    if (getSessionManager) {
-      const joinTransitions = await getOutgoingTransitions(database, joinNode.id);
-      const consolidateLine = sharedWorktree
-        ? `The fork stages ran sequentially on this branch, so all their work is already committed here. Verify the combined result is coherent, then advance the workflow.`
-        : joinStrategy === "merge"
-        ? `The parallel branches have already been auto-merged into this branch. Verify the combined result is coherent${unmerged.length ? `, integrate the ${unmerged.length} branch(es) that failed to merge (see the artifacts)` : ""}, then advance the workflow.`
-        : `Consolidate the branches into a single coherent result on this branch, then advance the workflow.`;
-      const prompt =
-        `All parallel branches for issue #${issue.issueNumber ?? "?"} — "${issue.title}" have completed.\n` +
-        (artifactsPath ? `Read \`WORKFLOW_FORK_ARTIFACTS.md\` in this worktree for each branch's diff and summary.\n` : `${artifacts}\n`) +
-        `${consolidateLine}\n\n` +
-        buildTransitionBlock(joinNode, joinTransitions, parent.id);
-      const cfg = await resolveAgentConfig();
-      const skillName = await injectNodeSkill(joinNode, parent.workingDir ?? project.repoPath, project.repoPath);
-      await getSessionManager()
-        .startSession({
-          workspaceId: parent.id,
-          prompt,
-          agentCommand: cfg.agentCommand,
-          agentArgs: cfg.agentArgs,
-          claudeProfile: cfg.claudeProfile,
-          permissionPromptTool: cfg.permissionPromptTool,
-          provider: toExecutorProvider(cfg.provider),
-          triggerType: skillName ? `join:${skillName}` : "fork-join",
-          profile: cfg.profile,
-          model: cfg.model,
-        })
-        .catch((err) => console.error(`[fork] join session launch failed:`, err instanceof Error ? err.message : String(err)));
-    }
+    await launchJoinAgent({
+      joinNode, parent, project, issue, sharedWorktree, joinStrategy,
+      unmergedCount: unmerged.length, artifactsPath, artifacts,
+    });
     console.log(`[fork] consolidated ${children.length} children into parent=${parent.id} at join "${joinNode.name}".`);
   }
 
