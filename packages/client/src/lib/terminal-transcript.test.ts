@@ -177,14 +177,20 @@ describe("computeSubagentGrouping", () => {
 });
 
 describe("markerColorForEvent", () => {
-  it("maps each event kind to its marker color", () => {
+  it("maps every event kind/flag to its marker color", () => {
     expect(markerColorForEvent(asst("x"))).toBe("bg-green-500");
+    expect(markerColorForEvent({ kind: "thinking", text: "x" } as DisplayEvent)).toBe("bg-gray-500");
     expect(markerColorForEvent(toolUse("Bash"))).toBe("bg-yellow-500");
     expect(markerColorForEvent(agentUse("a"))).toBe("bg-brand-500");
     expect(markerColorForEvent({ kind: "tool_result", toolName: "X", toolUseId: "1", output: "", isError: true } as DisplayEvent)).toBe("bg-red-500");
+    expect(markerColorForEvent({ kind: "tool_result", toolName: "X", toolUseId: "1", output: "", isError: false } as DisplayEvent)).toBe("bg-brand-500");
     expect(markerColorForEvent({ kind: "result", success: false } as DisplayEvent)).toBe("bg-red-400");
     expect(markerColorForEvent({ kind: "result", success: true } as DisplayEvent)).toBe("bg-emerald-400");
+    expect(markerColorForEvent({ kind: "init" } as DisplayEvent)).toBe("bg-cyan-400");
+    expect(markerColorForEvent({ kind: "task_started", toolUseId: "t" } as DisplayEvent)).toBe("bg-blue-500");
     expect(markerColorForEvent({ kind: "notification", key: "user" } as DisplayEvent)).toBe("bg-blue-500");
+    expect(markerColorForEvent({ kind: "notification", key: "agent" } as DisplayEvent)).toBe("bg-orange-500");
+    expect(markerColorForEvent({ kind: "rate_limit" } as DisplayEvent)).toBe("bg-yellow-500");
     expect(markerColorForEvent({ kind: "raw", text: "x" })).toBe("bg-gray-600");
   });
 });
