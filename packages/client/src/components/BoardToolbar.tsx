@@ -8,6 +8,13 @@ import { PRIMARY_VIEWS, SECONDARY_VIEWS, VIEW_REGISTRY, type ViewDescriptor } fr
 import type { StatusWithIssues } from "@agentic-kanban/shared";
 import type { CardDensity } from "../hooks/useBoardPreferences.js";
 import { PRIORITY_META } from "../lib/chartColors.js";
+import { computeVisibleTabCount, splitToolbarViews } from "../lib/toolbarTabOverflow.js";
+import { buildMonitorTitle, countActiveMonitors } from "../lib/monitorToolbarStatus.js";
+import { validateAgingThreshold } from "../lib/agingHeatmapThresholds.js";
+import { formatBoardActivitySummary } from "../lib/boardActivitySummary.js";
+
+// Re-exported for back-compat with the sibling BoardToolbar.test.ts import.
+export { formatBoardActivitySummary };
 
 // Re-exported from the canonical view registry (#116). Kept here for back-compat
 // with the many components that import `ViewMode` from BoardToolbar.
@@ -16,7 +23,6 @@ import type { ViewMode } from "../lib/viewRegistry.js";
 
 const ACTIVE_DEFAULT = "bg-brand-600 text-white hover:bg-brand-700";
 const INACTIVE = "text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-700";
-const BOARD_ACTIVITY_STATUS_ORDER = ["In Progress", "In Review", "AI Reviewed", "Todo"];
 
 interface AgingHeatmapLegendProps {
   warmDays: number;
@@ -32,21 +38,15 @@ function AgingHeatmapLegend({ warmDays, hotDays, onChange }: AgingHeatmapLegendP
   useEffect(() => { setHotInput(String(hotDays)); }, [hotDays]);
 
   function commitWarm(raw: string) {
-    const v = parseInt(raw, 10);
-    if (!isNaN(v) && v >= 1 && v < hotDays) {
-      onChange(v, hotDays);
-    } else {
-      setWarmInput(String(warmDays));
-    }
+    const { valid, value } = validateAgingThreshold(raw, { which: "warm", warmDays, hotDays });
+    if (valid) onChange(value, hotDays);
+    else setWarmInput(String(warmDays));
   }
 
   function commitHot(raw: string) {
-    const v = parseInt(raw, 10);
-    if (!isNaN(v) && v > warmDays) {
-      onChange(warmDays, v);
-    } else {
-      setHotInput(String(hotDays));
-    }
+    const { valid, value } = validateAgingThreshold(raw, { which: "hot", warmDays, hotDays });
+    if (valid) onChange(warmDays, value);
+    else setHotInput(String(hotDays));
   }
 
   return (
@@ -319,24 +319,7 @@ export function BoardToolbar({
       // Last measured child is the "More" trigger; the rest are primary tabs.
       const moreWidth = children[children.length - 1].offsetWidth;
       const tabWidths = children.slice(0, -1).map((el) => el.offsetWidth);
-      const GAP = 4; // gap-1
-      const OVERHEAD = 8; // border + p-0.5 + small safety margin
-
-      // Everything fits without a "More" button?
-      const totalAll = tabWidths.reduce((sum, w) => sum + w + GAP, 0);
-      if (totalAll + OVERHEAD <= avail) {
-        setVisibleViewCount(tabWidths.length);
-        return;
-      }
-      // Otherwise reserve room for "More" and greedily fit tabs.
-      let budget = avail - OVERHEAD - (moreWidth + GAP);
-      let count = 0;
-      for (const w of tabWidths) {
-        if (budget - (w + GAP) < 0) break;
-        budget -= w + GAP;
-        count++;
-      }
-      setVisibleViewCount(count);
+      setVisibleViewCount(computeVisibleTabCount({ availableWidth: avail, tabWidths, moreWidth }));
     }
 
     recompute();
@@ -345,10 +328,8 @@ export function BoardToolbar({
     return () => ro.disconnect();
   }, [butlerBadgeCount, boardActivitySummary]);
 
-  const visiblePrimaryViews = PRIMARY_VIEWS.slice(0, visibleViewCount);
-  const overflowPrimaryViews = PRIMARY_VIEWS.slice(visibleViewCount);
-  const moreViews = [...overflowPrimaryViews, ...SECONDARY_VIEWS];
-  const activeMoreView = moreViews.find((v) => v.id === viewMode);
+  const { visiblePrimaryViews, overflowPrimaryViews, moreViews, activeMoreView } =
+    splitToolbarViews(PRIMARY_VIEWS, SECONDARY_VIEWS, visibleViewCount, viewMode);
 
   function renderViewTab(view: ViewDescriptor, measuring = false) {
     const isActive = viewMode === view.id;
@@ -702,15 +683,6 @@ export function BoardToolbar({
   );
 }
 
-function buildMonitorTitle(autoMonitor: boolean, butlerEnabled: boolean, orchestratorAlive: boolean | undefined): string {
-  const active: string[] = [];
-  if (orchestratorAlive) active.push("Orchestrator loop");
-  if (butlerEnabled) active.push("Monitor Butler");
-  if (autoMonitor) active.push("Auto-monitor");
-  if (active.length === 0) return "Board monitor - click to configure";
-  return `Active: ${active.join(", ")} — click for details`;
-}
-
 function ActiveMonitorDots({
   autoMonitor,
   butlerEnabled,
@@ -731,7 +703,7 @@ function ActiveMonitorBadge({
   butlerEnabled,
   orchestratorAlive,
 }: { autoMonitor: boolean; butlerEnabled: boolean; orchestratorAlive: boolean | undefined }) {
-  const count = [orchestratorAlive, butlerEnabled, autoMonitor].filter(Boolean).length;
+  const count = countActiveMonitors(autoMonitor, butlerEnabled, orchestratorAlive);
   if (count <= 1) return null;
   return (
     <span className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-accent-500 text-white text-[10px] font-semibold leading-none">
@@ -740,17 +712,3 @@ function ActiveMonitorBadge({
   );
 }
 
-export function formatBoardActivitySummary(activeColumns: StatusWithIssues[]) {
-  const columnsByName = new Map(activeColumns.map((col) => [col.name, col]));
-  const orderedNames = [
-    ...BOARD_ACTIVITY_STATUS_ORDER,
-    ...activeColumns.map((col) => col.name).filter((name) => !BOARD_ACTIVITY_STATUS_ORDER.includes(name)),
-  ];
-
-  return orderedNames
-    .map((name) => columnsByName.get(name))
-    .filter((col): col is StatusWithIssues => col !== undefined)
-    .filter((col) => col.count > 0)
-    .map((col) => `${col.count} ${col.name}`)
-    .join(", ");
-}
