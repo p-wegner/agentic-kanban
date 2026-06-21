@@ -67,7 +67,7 @@ export function WorkspaceClosedActions({
                   </summary>
                   <div className="mt-1 bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded p-2 max-h-56 overflow-y-auto">
                     <div className="prose prose-xs max-w-none text-[11px] leading-relaxed text-gray-700 dark:text-gray-300">
-                      <ReactMarkdown>{githubDrafts[wsId]!}</ReactMarkdown>
+                      <ReactMarkdown>{githubDrafts[wsId]}</ReactMarkdown>
                     </div>
                   </div>
                 </details>

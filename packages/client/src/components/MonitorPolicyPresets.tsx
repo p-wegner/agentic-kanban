@@ -164,7 +164,7 @@ export function MonitorPolicyPresets({
             type="text"
             value={savingName}
             onChange={(e) => setSavingName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") saveCurrentAsPreset(); if (e.key === "Escape") setShowSaveForm(false); }}
+            onKeyDown={(e) => { if (e.key === "Enter") void saveCurrentAsPreset(); if (e.key === "Escape") setShowSaveForm(false); }}
             placeholder="Preset name..."
             className="min-w-0 flex-1 rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
             autoFocus

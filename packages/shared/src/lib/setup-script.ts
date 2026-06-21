@@ -14,7 +14,7 @@ export function runSetupScript(worktreePath: string, script: string): Promise<Se
 
     const proc = spawn(shell, shellArgs, {
       cwd: worktreePath,
-      env: { ...process.env } as Record<string, string>,
+      env: { ...process.env },
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
     });

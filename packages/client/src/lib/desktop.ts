@@ -40,6 +40,6 @@ export function isTauri(): boolean {
 }
 
 // Auto-initialize on import
-initNotifications();
+void initNotifications();
 
 export { initNotifications };

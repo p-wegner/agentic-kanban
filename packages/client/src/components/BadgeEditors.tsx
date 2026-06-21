@@ -25,7 +25,7 @@ export function PriorityDropdown({ priority, onChange }: { priority: string; onC
     if (p === current || saving) return;
     setSaving(true);
     try {
-      await onChange(p);
+      onChange(p);
     } finally {
       setSaving(false);
     }

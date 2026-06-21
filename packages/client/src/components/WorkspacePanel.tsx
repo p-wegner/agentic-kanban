@@ -216,7 +216,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
         });
       }
       setActiveSession(null);
-      fetchWorkspaces();
+      void fetchWorkspaces();
     }
 
     const exitMsg = messages.find(m => m.type === "exit");
@@ -268,7 +268,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
   }
 
   useEffect(() => {
-    fetchWorkspaces();
+    void fetchWorkspaces();
     const skillsUrl = project ? `/api/agent-skills?projectId=${project.id}` : "/api/agent-skills";
     apiFetch<{ id: string; name: string; description: string }[]>(skillsUrl)
       .then(setAvailableSkills)
@@ -443,7 +443,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                   setActiveSession(result.sessionId);
                   setLastPrompt(buildDefaultLaunchPrompt(issue));
                 }
-                fetchWorkspaces();
+                void fetchWorkspaces();
                 onWorkspaceChange?.();
               }}
               onCancel={() => setShowCreate(false)}

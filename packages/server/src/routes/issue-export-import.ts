@@ -451,8 +451,8 @@ export function createIssueExportImportRoute(
       const formData = await c.req.formData();
       const file = formData.get("file");
       if (file && typeof file !== "string") {
-        text = await (file as File).text();
-        hint = formatHintFromFilename((file as File).name);
+        text = await (file).text();
+        hint = formatHintFromFilename((file).name);
       } else {
         const t = formData.get("text");
         if (typeof t === "string") text = t;
@@ -461,9 +461,9 @@ export function createIssueExportImportRoute(
       }
     } else if (contentType.includes("application/json")) {
       const body = await c.req.json().catch(() => null);
-      if (body && typeof body === "object" && !Array.isArray(body) && typeof (body as any).text === "string") {
-        text = String((body as any).text);
-        hint = (body as any).format ? String((body as any).format) : "auto";
+      if (body && typeof body === "object" && !Array.isArray(body) && typeof (body).text === "string") {
+        text = String((body).text);
+        hint = (body).format ? String((body).format) : "auto";
       } else if (typeof body === "string") {
         text = body;
       } else if (Array.isArray(body)) {
@@ -501,16 +501,16 @@ export function createIssueExportImportRoute(
       if (!file || typeof file === "string") {
         return c.json({ error: "multipart upload must include a 'file' field" }, 400);
       }
-      text = await (file as File).text();
-      hint = formatHintFromFilename((file as File).name);
+      text = await (file).text();
+      hint = formatHintFromFilename((file).name);
     } else if (contentType.includes("application/json")) {
       const body = await c.req.json().catch(() => null);
       if (Array.isArray(body)) {
         text = JSON.stringify(body);
         hint = "json";
-      } else if (body && typeof body === "object" && typeof (body as any).text === "string") {
-        text = String((body as any).text);
-        hint = (body as any).format ? String((body as any).format) : "auto";
+      } else if (body && typeof body === "object" && typeof (body).text === "string") {
+        text = String((body).text);
+        hint = (body).format ? String((body).format) : "auto";
       } else {
         return c.json({ error: "JSON body must be an array of issues or a { text, format } object" }, 400);
       }

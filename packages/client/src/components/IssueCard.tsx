@@ -453,7 +453,7 @@ function IssueCardActions({
       )}
       {showDiff && (
         <button
-          onClick={(e) => { e.stopPropagation(); onOpenDiff!(issue, ws!.main!.id!); }}
+          onClick={(e) => { e.stopPropagation(); onOpenDiff!(issue, ws!.main!.id); }}
           className="flex items-center justify-center gap-1 text-xs text-brand-600 dark:text-brand-400 hover:text-white hover:bg-brand-600 border border-brand-200 dark:border-brand-800 hover:border-brand-600 rounded px-2 py-1 transition-colors"
           title="Open live diff for this workspace"
           aria-label="Open live diff"

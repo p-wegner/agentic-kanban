@@ -5,7 +5,7 @@ export function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation();
-    navigator.clipboard.writeText(text).then(() => {
+    void navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     });
@@ -41,7 +41,7 @@ export function CopyLinkButton({ issueNumber }: { issueNumber: number }) {
     e.stopPropagation();
     const url = new URL(window.location.href);
     url.search = `?issue=${issueNumber}`;
-    navigator.clipboard.writeText(url.toString()).then(() => {
+    void navigator.clipboard.writeText(url.toString()).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });

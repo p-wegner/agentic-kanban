@@ -96,7 +96,7 @@ export function registerStartWorkspace(server: McpServer) {
         // Read agent settings to store on workspace
         const prefRows = await db.select().from(schema.preferences);
         const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
-        const provider = (prefMap.get("provider") || "claude") as string;
+        const provider = (prefMap.get("provider") || "claude");
         const profileName = provider === "codex"
           ? (prefMap.get("codex_profile") || prefMap.get("claude_profile") || null)
           : (prefMap.get("claude_profile") || null);

@@ -109,7 +109,7 @@ export function TranscriptSearchPanel({ projectId, onClose, onNavigateToWorkspac
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter") {
       e.preventDefault();
-      doSearch();
+      void doSearch();
     }
     if (e.key === "Escape") {
       onClose();

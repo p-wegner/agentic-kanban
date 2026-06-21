@@ -326,7 +326,7 @@ export function BoardOverlayPanels({
             setSelectedIssue(issue);
             onCloseMergeQueue();
           }}
-          onMerged={() => { refetchBoard(); }}
+          onMerged={() => { void refetchBoard(); }}
         />
       )}
       {showRunQueueForecast && (

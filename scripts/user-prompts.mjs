@@ -102,7 +102,7 @@ const hhmm = (ts) => {
 // Returns { kind, text } with text normalized (slash-command/bash-input unwrapped),
 // or null to drop the entry entirely.
 function classify(raw) {
-  let text = (raw || "").trim();
+  const text = (raw || "").trim();
   if (!text) return null;
 
   // pure harness/echo noise — never a prompt
@@ -184,7 +184,7 @@ function codexPrompts(path) {
     if (obj.type !== "event_msg") continue;
     if (obj.payload?.type !== "user_message") continue;
     if (!inWindow(obj.timestamp)) continue;
-    let text = (obj.payload.message || "").trim();
+    const text = (obj.payload.message || "").trim();
     if (!text) continue;
     // skip injected system preambles, not human prompts
     if (/^<environment_context>/.test(text)) continue;
@@ -254,7 +254,7 @@ function collectCodex() {
 }
 
 // ── run ──────────────────────────────────────────────────────────────────────
-let sessions = [];
+const sessions = [];
 if (provider === "all" || provider === "claude") sessions.push(...collectClaude());
 if (provider === "all" || provider === "codex") sessions.push(...collectCodex());
 

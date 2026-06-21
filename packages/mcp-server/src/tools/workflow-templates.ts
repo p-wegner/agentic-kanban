@@ -92,7 +92,7 @@ export function registerCreateWorkflowTemplate(server: McpServer, deps: ToolDeps
       const pid = await resolveProjectId(deps, projectId);
       if (!pid) return text("No active project.");
       const res = await createWorkflowTemplate(deps.db, {
-        projectId: pid, name, description, ticketType: ticketType ?? null, isDefault, nodes: nodes as any, edges: edges as any,
+        projectId: pid, name, description, ticketType: ticketType ?? null, isDefault, nodes: nodes, edges: edges,
       });
       if (!res.ok) return json({ error: "Invalid workflow graph", errors: res.errors });
       deps.notifyBoard(pid, "mcp_create_workflow_template");
@@ -116,7 +116,7 @@ export function registerUpdateWorkflowTemplate(server: McpServer, deps: ToolDeps
     },
     async ({ templateId, name, description, ticketType, isDefault, nodes, edges }) => {
       const res = await updateWorkflowTemplate(deps.db, templateId, {
-        name, description, ticketType, isDefault, nodes: nodes as any, edges: edges as any,
+        name, description, ticketType, isDefault, nodes: nodes, edges: edges,
       });
       if (!res.ok) return json({ error: res.error, errors: (res as any).errors });
       const t = await getTemplateGraph(deps.db, templateId);

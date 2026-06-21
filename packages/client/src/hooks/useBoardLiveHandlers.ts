@@ -70,11 +70,11 @@ export function useBoardLiveHandlers(deps: UseBoardLiveHandlersDeps) {
     }
 
     if (reason === "session_completed") {
-      sendDesktopNotification("Agentic Kanban", "Agent session completed");
+      void sendDesktopNotification("Agentic Kanban", "Agent session completed");
     } else if (reason === "workspace_merged") {
-      sendDesktopNotification("Agentic Kanban", "Workspace merged successfully");
+      void sendDesktopNotification("Agentic Kanban", "Workspace merged successfully");
     } else if (reason === "project_completed") {
-      sendDesktopNotification("Agentic Kanban", "🎉 Project complete — the backlog is fully implemented");
+      void sendDesktopNotification("Agentic Kanban", "🎉 Project complete — the backlog is fully implemented");
     }
 
     // Activity notification bell — capture issue context from current board snapshot

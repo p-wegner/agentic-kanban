@@ -205,7 +205,7 @@ export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQu
   }
 
   function copyBrief() {
-    navigator.clipboard.writeText(agentBrief).then(() => {
+    void navigator.clipboard.writeText(agentBrief).then(() => {
       setCopied(true);
       showToast("Strategy brief copied", "success");
       setTimeout(() => setCopied(false), 1500);
@@ -277,9 +277,9 @@ export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQu
                     type="number"
                     min={min as number}
                     max={max as number}
-                    value={config[keyName as keyof Pick<StrategyConfig, "activeAgentsTarget" | "backlogFloor" | "maxNewStartsPerCycle">] as number}
+                    value={config[keyName as keyof Pick<StrategyConfig, "activeAgentsTarget" | "backlogFloor" | "maxNewStartsPerCycle">]}
                     onChange={(event) => {
-                      const value = clampPolicy(Number(event.target.value), DEFAULT_CONFIG[keyName as keyof Pick<StrategyConfig, "activeAgentsTarget" | "backlogFloor" | "maxNewStartsPerCycle">] as number, min as number, max as number);
+                      const value = clampPolicy(Number(event.target.value), DEFAULT_CONFIG[keyName as keyof Pick<StrategyConfig, "activeAgentsTarget" | "backlogFloor" | "maxNewStartsPerCycle">], min as number, max as number);
                       setConfigDirty((prev) => ({ ...prev, [keyName]: value }));
                     }}
                     className="w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"

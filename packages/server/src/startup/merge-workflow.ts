@@ -125,14 +125,16 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
           await new Promise<void>((resolve) => {
             let poll: NodeJS.Timeout;
             const timeout = setTimeout(() => { clearInterval(poll); console.log("[workflow] learning step timed out after 3m, proceeding with merge"); resolve(); }, 3 * 60 * 1000);
-            poll = setInterval(async () => {
-              const sessRows = await db.select({ status: sessions.status }).from(sessions).where(eq(sessions.id, learningSessId)).limit(1);
-              if (sessRows.length > 0 && sessRows[0].status !== "running") {
-                clearInterval(poll);
-                clearTimeout(timeout);
-                console.log(`[workflow] learning step finished: status=${sessRows[0].status}`);
-                resolve();
-              }
+            poll = setInterval(() => {
+              void (async () => {
+                const sessRows = await db.select({ status: sessions.status }).from(sessions).where(eq(sessions.id, learningSessId)).limit(1);
+                if (sessRows.length > 0 && sessRows[0].status !== "running") {
+                  clearInterval(poll);
+                  clearTimeout(timeout);
+                  console.log(`[workflow] learning step finished: status=${sessRows[0].status}`);
+                  resolve();
+                }
+              })();
             }, 5000);
           });
         } catch (err) {

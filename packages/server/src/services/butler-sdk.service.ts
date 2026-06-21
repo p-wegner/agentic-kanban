@@ -68,7 +68,7 @@ class Pushable<T> implements AsyncIterable<T> {
   end(): void {
     this.closed = true;
     if (this.waiting) {
-      this.waiting({ value: undefined as unknown as T, done: true });
+      this.waiting({ value: undefined, done: true });
       this.waiting = undefined;
     }
   }
@@ -370,7 +370,7 @@ export function ensureButlerSession(opts: {
     includePartialMessages: true,
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
-    env: env as Options["env"],
+    env: env,
     abortController: session.abort,
     systemPrompt: { type: "preset", preset: "claude_code", append: systemPromptAppend },
     mcpServers: getMcpServersConfig(),

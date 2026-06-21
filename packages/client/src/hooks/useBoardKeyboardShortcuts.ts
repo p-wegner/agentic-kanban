@@ -260,7 +260,7 @@ export function useBoardKeyboardShortcuts(
             showToast(`"${project.name}" is already active`, "success");
             return;
           }
-          actions.handleProjectChange(project.id);
+          void actions.handleProjectChange(project.id);
         },
       }));
     }
@@ -316,13 +316,15 @@ export function useBoardKeyboardShortcuts(
           description: "Trigger AI code review for this workspace",
           icon: "③",
           category: "issue",
-          handler: async () => {
-            try {
-              await apiPost(`/api/workspaces/${ws.id}/review`);
-              showToast("Review started", "success");
-            } catch {
-              showToast("Failed to start review", "error");
-            }
+          handler: () => {
+            void (async () => {
+              try {
+                await apiPost(`/api/workspaces/${ws.id}/review`);
+                showToast("Review started", "success");
+              } catch {
+                showToast("Failed to start review", "error");
+              }
+            })();
           },
         }));
       }
@@ -334,13 +336,15 @@ export function useBoardKeyboardShortcuts(
           description: "Merge this workspace branch into the base branch",
           icon: "⤵",
           category: "issue",
-          handler: async () => {
-            try {
-              await apiPost(`/api/workspaces/${ws.id}/merge`);
-              showToast("Merge started", "success");
-            } catch {
-              showToast("Failed to merge", "error");
-            }
+          handler: () => {
+            void (async () => {
+              try {
+                await apiPost(`/api/workspaces/${ws.id}/merge`);
+                showToast("Merge started", "success");
+              } catch {
+                showToast("Failed to merge", "error");
+              }
+            })();
           },
         }));
       }

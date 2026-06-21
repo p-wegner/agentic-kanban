@@ -454,7 +454,7 @@ export function ProjectSettings({ activeProjectId, settings, setSettings, projec
                                 type="url"
                                 placeholder="http://localhost:9000/webhook"
                                 value={settings[`outbound_webhook_url_${activeProjectId}` as keyof Settings] ?? ""}
-                                onChange={(e) => setSettings((s) => ({ ...s, [`outbound_webhook_url_${activeProjectId}`]: e.target.value } as Settings))}
+                                onChange={(e) => setSettings((s) => ({ ...s, [`outbound_webhook_url_${activeProjectId}`]: e.target.value }))}
                                 className="w-full px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500 font-mono"
                               />
                             </Field>

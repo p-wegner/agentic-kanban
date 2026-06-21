@@ -200,7 +200,7 @@ Examples:
           ? buildApiUrl(port, `/api/workspaces/${encodeURIComponent(workspaceId)}/comments?filePath=${encodeURIComponent(options.file)}`)
           : buildApiUrl(port, `/api/workspaces/${encodeURIComponent(workspaceId)}/comments`);
         const res = await fetch(url);
-        const data = await res.json() as unknown;
+        const data = await res.json();
 
         if (!res.ok) {
           console.error(`Comment list failed: ${(data as Record<string, unknown>).error ?? res.statusText}`);

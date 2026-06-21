@@ -47,7 +47,7 @@ export function StackProfileSettingsSection({ projectId }: StackProfileSettingsS
   }
 
   useEffect(() => {
-    load();
+    void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 

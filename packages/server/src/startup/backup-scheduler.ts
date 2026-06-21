@@ -39,7 +39,7 @@ export function startBackupScheduler(intervalMin = 30): NodeJS.Timeout | null {
     );
 
   // One shortly after boot.
-  activeBackupTimeout = setTimeout(run, 60_000);
+  activeBackupTimeout = setTimeout(() => void run(), 60_000);
   activeBackupTimeout.unref?.();
 
   if (intervalMin <= 0) {
@@ -47,7 +47,7 @@ export function startBackupScheduler(intervalMin = 30): NodeJS.Timeout | null {
     return null;
   }
   console.log(`[backup] periodic backups every ${intervalMin} min`);
-  const handle = setInterval(run, intervalMin * 60_000);
+  const handle = setInterval(() => void run(), intervalMin * 60_000);
   activeBackupInterval = handle;
   handle.unref();
   return handle;

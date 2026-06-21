@@ -140,7 +140,7 @@ export default function TicketMentionInput({
   return (
     <div ref={wrapperRef} className="relative">
       <textarea
-        ref={textareaRef as React.LegacyRef<HTMLTextAreaElement>}
+        ref={textareaRef}
         value={value}
         onChange={handleChange}
         onKeyDown={handleKeyDown}
@@ -154,7 +154,7 @@ export default function TicketMentionInput({
           // Close dropdown if focus leaves the wrapper
           if (
             !wrapperRef.current?.contains(
-              e.relatedTarget as Node,
+              e.relatedTarget,
             )
           ) {
             setMentionActive(false);

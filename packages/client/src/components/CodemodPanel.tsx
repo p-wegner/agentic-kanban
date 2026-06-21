@@ -221,7 +221,7 @@ export function CodemodPanel({ onClose, activeProjectId }: CodemodPanelProps) {
             <div className="bg-yellow-50 dark:bg-yellow-950 border border-yellow-300 dark:border-yellow-700 rounded-md p-3">
               <p className="text-sm text-yellow-800 dark:text-yellow-200 mb-2">{limitWarning}</p>
               <button
-                onClick={() => { setOverrideLimit(true); handlePreview({ override: true }); }}
+                onClick={() => { setOverrideLimit(true); void handlePreview({ override: true }); }}
                 className="text-xs px-3 py-1 bg-yellow-500 hover:bg-yellow-600 text-white rounded"
               >
                 Yes, I know — run codemod on all files
@@ -341,7 +341,7 @@ export function CodemodPanel({ onClose, activeProjectId }: CodemodPanelProps) {
                         onChange={(e) => setSaveName(e.target.value)}
                         placeholder="Codemod name"
                         className="text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 w-48"
-                        onKeyDown={(e) => { if (e.key === "Enter") handleSave(); if (e.key === "Escape") setShowSaveForm(false); }}
+                        onKeyDown={(e) => { if (e.key === "Enter") void handleSave(); if (e.key === "Escape") setShowSaveForm(false); }}
                       />
                       <button
                         onClick={handleSave}

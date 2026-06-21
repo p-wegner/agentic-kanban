@@ -531,7 +531,7 @@ function SwimlaneRenderer({
           return {
             key: group.key,
             label: style.label,
-            dot: style.dot as string | undefined,
+            dot: style.dot,
             dotColor: undefined as string | undefined,
             headerBg: style.headerBg,
             headerBorder: style.headerBorder,

@@ -158,7 +158,7 @@ export function useAgentLiveTicker(
   // Kick off a poll when live activity changes (board event arrived)
   useEffect(() => {
     if (!enabled) return;
-    refresh(columns, liveActivity);
+    void refresh(columns, liveActivity);
   }, [liveActivity, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Periodic poll so ticker stays fresh even without board events.

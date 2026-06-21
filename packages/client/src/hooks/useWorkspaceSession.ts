@@ -73,7 +73,7 @@ export function useWorkspaceSession({
 
     apiFetch<SessionInfo[]>(`/api/workspaces/${selectedWorkspace}/sessions`)
       .then((sessions) => {
-        setWorkspaceSessions((prev) => ({ ...prev, [selectedWorkspace!]: sessions }));
+        setWorkspaceSessions((prev) => ({ ...prev, [selectedWorkspace]: sessions }));
       })
       .catch(() => {});
   }, [selectedWorkspace]);
@@ -121,7 +121,7 @@ export function useWorkspaceSession({
       .filter(s => s.status !== "running")
       .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
 
-    (async () => {
+    void (async () => {
       for (const session of sortedCompleted) {
         try {
           const msgs = await apiFetch<AgentOutputMessage[]>(`/api/sessions/${session.id}/output`);

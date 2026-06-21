@@ -130,7 +130,9 @@ Status indicators:
             console.log(`\n  Refreshing every ${intervalSec}s. Press Ctrl+C to exit.`);
           };
           await renderAndClear();
-          setInterval(renderAndClear, intervalSec * 1000);
+          setInterval(() => {
+            void renderAndClear();
+          }, intervalSec * 1000);
         } else {
           await render();
           process.exit(0);

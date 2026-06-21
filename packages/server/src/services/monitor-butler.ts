@@ -219,7 +219,7 @@ async function runAgentTurn(opts: {
     cwd: opts.repoPath,
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
-    env: env as Options["env"],
+    env: env,
     abortController: abort,
     systemPrompt: { type: "preset", preset: "claude_code", append: buildMonitorSystemPrompt(opts.projectName, opts.repoPath) },
     mcpServers: getMcpServersConfig(),

@@ -759,7 +759,7 @@ export function BacklogView({
                               disabled={promotingIssueIds.has(issue.id)}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                promoteIssue(issue, status);
+                                void promoteIssue(issue, status);
                               }}
                               className="rounded border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-medium text-gray-500 hover:border-brand-200 hover:text-brand-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400 dark:hover:text-brand-300"
                             >

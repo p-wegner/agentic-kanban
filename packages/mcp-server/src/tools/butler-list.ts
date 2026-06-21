@@ -23,7 +23,7 @@ export function registerButlerList(server: McpServer) {
         const res = await fetch(`http://127.0.0.1:${getServerPort()}/api/projects/${projectId}/butlers`);
         const data = (await res.json()) as ButlerEntry[] | { error?: string };
         if (!res.ok) {
-          const err = Array.isArray(data) ? res.statusText : ((data as { error?: string }).error ?? res.statusText);
+          const err = Array.isArray(data) ? res.statusText : ((data).error ?? res.statusText);
           return { content: [{ type: "text" as const, text: `Butler list error: ${err}` }] };
         }
         return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };

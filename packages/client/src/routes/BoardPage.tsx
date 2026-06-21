@@ -226,7 +226,7 @@ export function BoardPage() {
   useEffect(() => {
     if (!creatingInColumnId && pendingBoardRefreshRef.current) {
       pendingBoardRefreshRef.current = false;
-      refetchBoard();
+      void refetchBoard();
     }
   }, [creatingInColumnId, refetchBoard]);
 
@@ -288,7 +288,7 @@ export function BoardPage() {
       }
       setLoading(false);
     }
-    load();
+    void load();
   }, [loadProjects]);
 
   useEffect(() => {

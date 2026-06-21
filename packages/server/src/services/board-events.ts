@@ -181,7 +181,7 @@ function createBoardEvents() {
   function startCleanup(intervalMs = 30_000) {
     if (cleanupTimer !== null) return;
     cleanupTimer = setInterval(cleanupStaleConnections, intervalMs);
-    (cleanupTimer as NodeJS.Timeout).unref?.();
+    (cleanupTimer).unref?.();
   }
 
   /** Stop the cleanup timer (e.g. for testing or graceful shutdown). */

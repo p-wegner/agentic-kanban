@@ -113,7 +113,7 @@ export function createDriveObstaclesRoute(
       projectId,
       driveId: body.driveId ?? null,
       kind: body.kind,
-      severity: body.severity as DriveObstacleSeverity | undefined,
+      severity: body.severity,
       issueNumber: body.issueNumber ?? null,
       summary: body.summary.trim(),
       details: body.details,

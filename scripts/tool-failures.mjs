@@ -188,7 +188,7 @@ const top = parseInt(flag("top", "25"), 10);
 const jsonOut = args.includes("--json");
 
 const cutoffMs = Date.now() - days * 24 * 60 * 60 * 1000;
-let sessions = [];
+const sessions = [];
 if (provider === "all" || provider === "claude") sessions.push(...collectClaude(cutoffMs));
 if (provider === "all" || provider === "codex") sessions.push(...collectCodex(cutoffMs));
 

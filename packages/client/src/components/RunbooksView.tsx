@@ -59,7 +59,7 @@ export function RunbooksView({ projectId }: RunbooksViewProps) {
     setSelectedEntry(null);
     setContent(null);
     setContentError(null);
-    fetchEntries();
+    void fetchEntries();
   }, [fetchEntries]);
 
   const handleSelect = useCallback(async (entry: RunbookEntry) => {

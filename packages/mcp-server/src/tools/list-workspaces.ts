@@ -12,7 +12,7 @@ export function registerListWorkspaces(server: McpServer) {
       status: z.string().optional().describe("Filter by status (active, idle, closed)"),
     },
     async ({ issueId, status }) => {
-      let query = db.select().from(schema.workspaces);
+      const query = db.select().from(schema.workspaces);
 
       // Apply filters
       const conditions = [];

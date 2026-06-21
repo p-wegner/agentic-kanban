@@ -325,7 +325,7 @@ describe("merge endpoint response before cleanup", () => {
     // it via a spy on the gitService (which proxies to the real implementation via overrides).
     // Instead, we track the call ordering by wrapping processKiller (always deferred) and
     // injecting a spy that also intercepts the sync via a mock that runs in cleanup.
-    let syncCalledAt: "before" | "after" | null = null;
+    const syncCalledAt: "before" | "after" | null = null;
     const processKiller = vi.fn(async () => {
       // processKiller runs in teardownMergedWorktree — AFTER applyDeferredWorkingTreeSync
       // In this test we track that mergeResolved was true by the time cleanup started

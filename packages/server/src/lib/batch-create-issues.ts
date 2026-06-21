@@ -32,7 +32,7 @@ export function normalizeBatchInput(
   if (Array.isArray(parsed)) {
     return { ok: true, issueInputs: parsed as BatchIssueInput[], dependencyInputs: [] };
   }
-  if (parsed && typeof parsed === "object" && "issues" in parsed && Array.isArray((parsed as { issues: unknown }).issues)) {
+  if (parsed && typeof parsed === "object" && "issues" in parsed && Array.isArray((parsed).issues)) {
     const p = parsed as { issues: BatchIssueInput[]; dependencies?: BatchDependencyInput[] };
     return { ok: true, issueInputs: p.issues, dependencyInputs: p.dependencies ?? [] };
   }

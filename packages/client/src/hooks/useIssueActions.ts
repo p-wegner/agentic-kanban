@@ -200,7 +200,7 @@ export function useIssueActions(deps: IssueActionsDeps) {
           throw new Error(`Built-in tag "${VISUAL_VERIFY_TAG}" not found`);
         }
         await apiPost(`/api/issues/${issue.id}/tags`, { tagId: tag.id });
-        setIssueTags((prev) => [...prev, tag!]);
+        setIssueTags((prev) => [...prev, tag]);
         showToast("Marked for visual verification", "success");
       }
     } catch {

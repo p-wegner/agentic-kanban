@@ -18,7 +18,7 @@ export function registerListIssues(server: McpServer, deps: ToolDeps = prodDeps)
       issueNumber: z.number().optional().describe("Filter by issue number (e.g., 42)"),
     },
     async ({ projectId, status, priority, tag, blocked, issueNumber }) => {
-      let query = db.select({
+      const query = db.select({
         id: schema.issues.id,
         issueNumber: schema.issues.issueNumber,
         title: schema.issues.title,

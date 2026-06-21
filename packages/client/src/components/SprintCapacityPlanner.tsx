@@ -96,7 +96,7 @@ export function SprintCapacityPlanner({ projectId }: SprintCapacityPlannerProps)
       }
     }
 
-    load();
+    void load();
     return () => { cancelled = true; };
   }, [projectId]);
 

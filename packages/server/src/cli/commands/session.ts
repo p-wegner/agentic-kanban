@@ -356,7 +356,7 @@ Examples:
           process.exit(1);
         }
         // /output returns the session messages; also fetch summary for metadata
-        const outputData = await res.json() as unknown;
+        const outputData = await res.json();
 
         // Fetch session metadata from DB for project/issue/workspace context
         await runMigrations();
@@ -542,7 +542,7 @@ Examples:
         await runMigrations();
 
         const windowHours = Math.max(1, parseInt(options.hours ?? "48", 10) || 48);
-        let projectId = options.project ?? (await getActiveProjectId());
+        const projectId = options.project ?? (await getActiveProjectId());
 
         const sinceIso = new Date(Date.now() - windowHours * 60 * 60 * 1000).toISOString();
 

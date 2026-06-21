@@ -9,7 +9,7 @@ import { HTTPException } from "hono/http-exception";
  */
 export async function parseJsonBody<T = Record<string, unknown>>(c: Context): Promise<T> {
   try {
-    return (await c.req.json()) as T;
+    return (await c.req.json());
   } catch {
     throw new HTTPException(400, { message: "invalid JSON body" });
   }
@@ -21,7 +21,7 @@ export async function parseJsonBody<T = Record<string, unknown>>(c: Context): Pr
  */
 export async function parseOptionalJsonBody<T = Record<string, unknown>>(c: Context): Promise<Partial<T>> {
   try {
-    return (await c.req.json()) as T;
+    return (await c.req.json());
   } catch {
     return {};
   }

@@ -77,7 +77,7 @@ if (process.argv[2] === "--") {
 const hasArgs = process.argv.length > 2;
 
 if (!hasArgs) {
-  (async () => {
+  void (async () => {
     try {
       const { dbExists, ensureDataDir } = await import("../db/data-dir.js");
       const { execFile } = await import("node:child_process");

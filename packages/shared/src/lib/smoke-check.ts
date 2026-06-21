@@ -158,7 +158,7 @@ async function runSmokeCheckInner(
 
   const proc = spawn(shell, shellArgs, {
     cwd: worktreePath,
-    env: { ...process.env } as Record<string, string>,
+    env: { ...process.env },
     windowsHide: true,
     // POSIX: own process group so we can kill the whole tree via the negative pid.
     detached: !isWindows,

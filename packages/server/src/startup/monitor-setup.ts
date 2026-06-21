@@ -122,7 +122,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       if (stopped) return;
       runMonitorCycle().catch(() => {});
     }, EVENT_TRIGGER_DEBOUNCE_MS);
-    (triggerTimer as NodeJS.Timeout).unref?.();
+    (triggerTimer).unref?.();
   }
   async function refreshMonitorWarnings(prefMap?: Map<string, string>) {
     const prefs = prefMap ?? new Map((await db.select().from(preferences)).map((r) => [r.key, r.value]));
@@ -255,7 +255,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
         // runMonitorCycle directly (not via the timer), so without this the old periodic
         // timer would leak and accumulate, firing redundant cycles.
         if (monitorState.timer) clearTimeout(monitorState.timer);
-        monitorState.timer = setTimeout(runMonitorCycle, intervalMin * 60 * 1000);
+        monitorState.timer = setTimeout(() => void runMonitorCycle(), intervalMin * 60 * 1000);
       } else {
         monitorState.nextRunAt = null;
       }
@@ -323,7 +323,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
   const invalidationListener = () => triggerMonitorSoon();
   boardEvents.addInvalidationListener(invalidationListener);
 
-  const syncMonitorInterval = setInterval(syncMonitorState, 30_000);
+  const syncMonitorInterval = setInterval(() => void syncMonitorState(), 30_000);
   syncMonitorInterval.unref?.();
   syncMonitorState().catch(() => {});
   const resourceSweepInterval = setInterval(() => void runStandaloneResourceSweep(), 5 * 60_000);

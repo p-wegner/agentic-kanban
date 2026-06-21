@@ -300,7 +300,7 @@ export function createSessionLifecycle(
     // Capture the skill the workspace launched under so Insights "By Skill" can
     // attribute this session even if the workspace's skill changes later. The name
     // is snapshotted because the agent_skills row may be renamed or deleted.
-    let sessionSkillId: string | null = workspace.skillId ?? null;
+    const sessionSkillId: string | null = workspace.skillId ?? null;
     let sessionSkillName: string | null = null;
     if (sessionSkillId) {
       sessionSkillName = await lifecycleRepo.getAgentSkillName(sessionSkillId, db);
@@ -520,7 +520,7 @@ export function createSessionLifecycle(
             const stats = isZeroOutput
               ? buildZeroOutputLaunchFailureStats(executor, durationMs, exitCode, capturedStderr)
               : buildModelErrorLaunchFailureStats(executor, durationMs, exitCode, errorText);
-            const effectiveExitCode = isNonZeroExit ? exitCode! : 1;
+            const effectiveExitCode = isNonZeroExit ? exitCode : 1;
             void (async () => {
               await recordAgentProfileLaunchFailure(db, {
                 provider: lifecycleProviderName(provider, profile),
@@ -571,7 +571,7 @@ export function createSessionLifecycle(
             }
           })()
             .catch((err) => console.error("Failed to finalize session:", err));
-          sessionFinalized.finally(() => {
+          void sessionFinalized.finally(() => {
             // Always fire the workflow callback even if finalization failed.
             options?.onSessionExit?.(workspaceId, sessionId, exitCode, planMode);
             computeScorecard(workspaceId, db).catch(() => {});
@@ -607,7 +607,7 @@ export function createSessionLifecycle(
           // All-provider plan mode: a read-only plan run just finished. Persist the plan to PLAN.md,
           // leave plan mode, then either auto-continue or park awaiting human approval.
           if (planMode && exitCode === 0 && workspace.workingDir && planText) {
-            sessionFinalized.then(async () => {
+            void sessionFinalized.then(async () => {
               try {
                 const plan = extractPlan(planText);
                 if (!plan) {

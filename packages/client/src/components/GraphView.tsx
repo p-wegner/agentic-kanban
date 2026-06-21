@@ -157,7 +157,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery, focus
         setLoading(false);
       }
     }
-    load();
+    void load();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, columns]);
 
@@ -542,7 +542,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery, focus
               <span className="w-2.5 h-2.5 rounded-full inline-block shrink-0" style={{ background: CHAIN_EDGE_COLOR }} />
               Blocking edge
             </div>
-            {criticalPathResult!.rootBlockers.length === 0 && (
+            {criticalPathResult.rootBlockers.length === 0 && (
               <div className="text-gray-400 italic mt-1">No blocking chains found</div>
             )}
           </>
@@ -560,8 +560,8 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery, focus
       </div>
 
       {/* Best unblock callout (critical-path mode only) */}
-      {isCriticalPathMode && criticalPathResult!.bestUnblock && (() => {
-        const best = criticalPathResult!.bestUnblock;
+      {isCriticalPathMode && criticalPathResult.bestUnblock && (() => {
+        const best = criticalPathResult.bestUnblock;
         const bestIssue = nodeMap.get(best.id)?.issue;
         return (
           <div

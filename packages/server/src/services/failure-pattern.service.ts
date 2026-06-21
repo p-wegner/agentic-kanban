@@ -164,7 +164,7 @@ export async function createPattern(
   const keywords = extractKeywords([data.title, data.description ?? "", data.rootCause ?? "", data.fix ?? ""].join(" ")).join(" ");
   const row = { id, keywords, createdAt: now, updatedAt: now, ...data };
   await insertFailurePattern(row, db);
-  return row as FailurePattern;
+  return row;
 }
 
 /**
@@ -187,7 +187,7 @@ export async function findSimilarFailures(
   const scored: PatternMatch[] = all.map(p => {
     const patternKw = p.keywords ? p.keywords.split(" ").filter(Boolean) : [];
     const { score, matched } = overlapScore(patternKw, querySet);
-    return { pattern: p as FailurePattern, score, matchedKeywords: matched };
+    return { pattern: p, score, matchedKeywords: matched };
   });
 
   return scored
@@ -211,7 +211,7 @@ export async function extractSessionStderr(sessionId: string, maxLines = 50, db:
 
 /** List all stored failure patterns (for API/MCP). */
 export async function listPatterns(db: Database = realDb): Promise<FailurePattern[]> {
-  return getAllFailurePatterns(db) as Promise<FailurePattern[]>;
+  return getAllFailurePatterns(db);
 }
 
 /** Delete a pattern by ID. */

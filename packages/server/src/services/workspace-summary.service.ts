@@ -29,7 +29,7 @@ const BG_GIT_CONCURRENCY = 5;
 function runBgGit(fn: () => Promise<void>): void {
   if (_bgGitRunning >= BG_GIT_CONCURRENCY) return;
   _bgGitRunning++;
-  fn().finally(() => { _bgGitRunning--; });
+  void fn().finally(() => { _bgGitRunning--; });
 }
 
 const CONFLICT_CACHE_TTL_MS = 5 * 60 * 1000;

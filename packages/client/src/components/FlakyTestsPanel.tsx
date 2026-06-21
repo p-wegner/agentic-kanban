@@ -52,7 +52,7 @@ export function FlakyTestsPanel({ projectId }: FlakyTestsPanelProps) {
   }, [windowDays]);
 
   useEffect(() => {
-    fetchTests();
+    void fetchTests();
   }, [fetchTests]);
 
   const handleSort = (key: SortKey) => {
@@ -75,8 +75,8 @@ export function FlakyTestsPanel({ projectId }: FlakyTestsPanelProps) {
     if (showPinnedOnly) list = list.filter(t => t.isPinned);
     return [...list].sort((a, b) => {
       const mult = sortDir === "asc" ? 1 : -1;
-      const av = a[sortKey] as number | string;
-      const bv = b[sortKey] as number | string;
+      const av = a[sortKey];
+      const bv = b[sortKey];
       if (typeof av === "number" && typeof bv === "number") return mult * (av - bv);
       return mult * String(av).localeCompare(String(bv));
     });

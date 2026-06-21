@@ -46,7 +46,7 @@ function ActivityFeed({ feedRef, lines, dot }: { feedRef: React.RefObject<HTMLDi
     <div
       ref={feedRef}
       className="px-3 py-2 flex-1 overflow-y-auto min-h-[5rem] max-h-32 bg-gray-50 dark:bg-gray-950/50 font-mono"
-      style={{ scrollbarWidth: "thin" } as React.CSSProperties}
+      style={{ scrollbarWidth: "thin" }}
     >
       {lines.length > 0 ? (
         <div className="flex flex-col gap-0.5">

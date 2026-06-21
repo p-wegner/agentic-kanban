@@ -92,7 +92,7 @@ export function sanitize(raw: unknown): TrailState {
   const candidate = raw as Partial<TrailState>;
   if (!Array.isArray(candidate.entries)) return EMPTY_TRAIL;
   const entries = candidate.entries
-    .filter((e): e is TrailEntry => !!e && typeof (e as TrailEntry).id === "string")
+    .filter((e): e is TrailEntry => !!e && typeof (e).id === "string")
     .slice(0, MAX_TRAIL_ENTRIES);
   const cursor =
     typeof candidate.cursor === "number" && candidate.cursor >= 0 && candidate.cursor < entries.length

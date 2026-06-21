@@ -37,7 +37,7 @@ export function ProjectScriptsSettingsSection({ projectId }: ProjectScriptsSetti
 
   useEffect(() => {
     setDraft(EMPTY_DRAFT);
-    loadScripts();
+    void loadScripts();
   }, [projectId]);
 
   async function saveDraft() {

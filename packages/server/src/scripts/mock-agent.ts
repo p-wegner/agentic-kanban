@@ -370,7 +370,7 @@ function readStdin(idleMs = 800): Promise<string> {
     const done = () => { if (timer) clearTimeout(timer); resolve(buf); };
     const bump = () => { if (timer) clearTimeout(timer); timer = setTimeout(done, idleMs); };
     process.stdin.setEncoding("utf-8");
-    process.stdin.on("data", (chunk) => { buf += chunk; bump(); });
+    process.stdin.on("data", (chunk: string | Buffer) => { buf += String(chunk); bump(); });
     process.stdin.on("end", done);
     process.stdin.on("error", done);
     bump();
@@ -559,7 +559,7 @@ async function main() {
       break;
     case "standard":
     default:
-      await runStandard(sessionId, delayMs, resumeId as string | undefined);
+      await runStandard(sessionId, delayMs, resumeId);
       break;
   }
 

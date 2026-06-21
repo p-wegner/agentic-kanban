@@ -28,7 +28,7 @@ export function SlowRequestsPanel() {
   }
 
   useEffect(() => {
-    load();
+    void load();
   }, []);
 
   return (
