@@ -615,6 +615,18 @@ describe("CLI issue dependency", () => {
     expect(result.stdout).toContain(issueBId);
   });
 
+  it("rejects a duplicate dependency with a friendly message, not a raw driver error (#857)", { timeout: 30_000 }, () => {
+    const first = runCli(["issue", "dependency", "add", issueAId, issueBId], ctx.dbPath);
+    expect(first.status).toBe(0);
+
+    const dup = runCli(["issue", "dependency", "add", issueAId, issueBId], ctx.dbPath);
+    expect(dup.status).toBe(1);
+    expect(dup.stderr).toContain("This dependency already exists.");
+    // Regression: libsql's error message lacks "UNIQUE constraint", so the old
+    // string-match leaked the raw "Failed query: ..." instead of this message.
+    expect(dup.stderr).not.toContain("Failed query");
+  });
+
   it("adds dependency with custom type", () => {
     const result = runCli(["issue", "dependency", "add", issueAId, issueBId, "--type", "related_to"], ctx.dbPath);
     expect(result.status).toBe(0);
@@ -649,6 +661,48 @@ describe("CLI issue dependency", () => {
     const result = runCli(["issue", "dependency", "remove", depId], ctx.dbPath);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Removed dependency");
+  });
+});
+
+describe("CLI issue delete (#858 — FK-safe cascade)", () => {
+  let ctx: ReturnType<typeof createTestDb>;
+  let projectId: string;
+
+  beforeEach(async () => {
+    ctx = createTestDb();
+    const project = await seedProject(ctx.dbPath);
+    projectId = project.id;
+  });
+  afterEach(() => { ctx.cleanup(); });
+
+  it("deletes an issue with a direct artifact, issue-level comment, time entry, showdown and an incoming dependency", { timeout: 30_000 }, async () => {
+    const issue = await seedIssue(ctx.dbPath, projectId, { title: "Has children" });
+    const other = await seedIssue(ctx.dbPath, projectId, { title: "Other" });
+
+    const client = createClient({ url: `file:${ctx.dbPath}` });
+    const database = drizzle(client, { schema });
+    const now = new Date().toISOString();
+    // All attached directly to the issue (no workspace) — the rows the old cascade leaked.
+    await database.insert(schema.issueArtifacts).values({ id: randomUUID(), issueId: issue.id, workspaceId: null, type: "text", content: "x", createdAt: now });
+    await database.insert(schema.issueComments).values({ id: randomUUID(), issueId: issue.id, workspaceId: null, kind: "note", author: "user", body: "x", createdAt: now });
+    await database.insert(schema.issueTimeEntries).values({ id: randomUUID(), issueId: issue.id, minutes: 10, note: null, createdAt: now });
+    await database.insert(schema.showdowns).values({ id: randomUUID(), issueId: issue.id, status: "active", createdAt: now, updatedAt: now });
+    // Incoming edge: another issue depends on the one being deleted (dependsOnId target).
+    await database.insert(schema.issueDependencies).values({ id: randomUUID(), issueId: other.id, dependsOnId: issue.id, type: "blocked_by", createdAt: now });
+    client.close();
+
+    const result = runCli(["issue", "delete", String(issue.issueNumber), "--force"], ctx.dbPath);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(`Deleted issue #${issue.issueNumber}`);
+    // Regression: the old cascade FK-failed with a raw "Failed query: delete from issues ...".
+    expect(result.stderr).not.toContain("Failed query");
+
+    const verifyClient = createClient({ url: `file:${ctx.dbPath}` });
+    const verifyDb = drizzle(verifyClient, { schema });
+    expect(await verifyDb.select().from(schema.issues).where(eq(schema.issues.id, issue.id))).toHaveLength(0);
+    // The other issue (and only its now-dangling edge removed) survives.
+    expect(await verifyDb.select().from(schema.issues).where(eq(schema.issues.id, other.id))).toHaveLength(1);
+    verifyClient.close();
   });
 });
 
