@@ -24,6 +24,7 @@ import { rotateCodexLicense } from "../services/codex-license-ring.js";
 import { isClaudeUsageLimitStats } from "../services/claude-rate-limit.js";
 import { rotateClaudeSubscription } from "../services/claude-subscription-ring.js";
 import { isBuilderSession, decideRateLimitExit, formatRateLimitBlockedReason } from "./rate-limit-exit-decision.js";
+import { classifySessionExit } from "./session-exit-classification.js";
 import { buildLearningStepPrompt } from "../services/merge-helpers.service.js";
 import { isFoundationalBlocker } from "../services/foundational-merge.service.js";
 import { isColdCloneCheckEnabled, runColdCloneBuildCheckForProject } from "../services/cold-clone-build-check.service.js";
@@ -382,6 +383,17 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
         await handleUsageLimitExit(usageLimitCfg, workspaceId, sessionId, issueId, projectId, now, sessionRows[0]?.stats);
         return;
       }
+      // Route the (non-already-merged, non-usage-limited) exit to exactly one terminal
+      // handler. The pure `classifySessionExit` decision core (#855) computes the verdict
+      // so the priority between the cases is table-testable; every side effect below stays
+      // here, in the same order as the original control flow.
+      const classification = classifySessionExit({
+        wasPlanMode: wasPlanMode ?? false,
+        isFixAndMerge: fixAndMergeSessionIds.has(sessionId),
+        isLearning: learningSessionIds.has(sessionId),
+        isReview: reviewSessionIds.has(sessionId),
+        exitCode,
+      });
       await db.update(workspaces).set({ status: "idle", updatedAt: now }).where(eq(workspaces.id, workspaceId));
       boardEvents.broadcastActivity(projectId, { issueId, sessionId, activity: "" });
       boardEvents.broadcast(projectId, "session_completed");
@@ -389,7 +401,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       // A read-only plan run produces no new commits, but the branch may already differ from
       // its base  which would otherwise trip the "committed changes  In Review  auto-review"
       // path below. The planimplement continuation is handled in session.manager, so skip the workflow.
-      if (wasPlanMode) {
+      if (classification.action === "plan-mode-skip") {
         console.log(`[workflow] plan-mode session ${sessionId} completed  skipping review/merge workflow`);
         return;
       }
@@ -428,10 +440,10 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       );
 
       const ctx: ExitContext = { workspace, projectId, issueId, skipAutoReview, sessionId, exitCode, now, prefMap, statuses, findStatus, autoMergeEnabled, defaultBranch, autoMergeDisabledProjectIds };
-      if (fixAndMergeSessionIds.has(sessionId)) { await handleFixAndMergeExit(ctx); return; }
-      if (learningSessionIds.has(sessionId)) { learningSessionIds.delete(sessionId); console.log(`[workflow] learning step session ${sessionId} completed  no further workflow action`); return; }
-      if (exitCode !== 0) { await handleFailedSessionExit(ctx); return; }
-      if (reviewSessionIds.has(sessionId)) { await handleReviewSessionExit(ctx); return; }
+      if (classification.action === "fix-and-merge") { await handleFixAndMergeExit(ctx); return; }
+      if (classification.action === "learning-cleanup") { learningSessionIds.delete(sessionId); console.log(`[workflow] learning step session ${sessionId} completed  no further workflow action`); return; }
+      if (classification.action === "failed") { await handleFailedSessionExit(ctx); return; }
+      if (classification.action === "review") { await handleReviewSessionExit(ctx); return; }
       await handleBuilderSessionExit(ctx);
     } catch (err) {
       console.error("[workflow] onSessionExit error:", err);
