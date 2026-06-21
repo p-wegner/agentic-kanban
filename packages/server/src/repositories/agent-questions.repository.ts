@@ -1,7 +1,8 @@
-import { sessions, sessionMessages, workspaces, issues, projects, projectStatuses, issueComments, workflowNodes } from "@agentic-kanban/shared/schema";
+import { sessions, sessionMessages, workspaces, issues, projectStatuses, issueComments, workflowNodes } from "@agentic-kanban/shared/schema";
 import { eq, ne, and, desc } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { getProjectById } from "./project.repository.js";
 
 /** Resolve the issueId backing a workspace (for attaching an agent-question comment). */
 export async function getWorkspaceIssueId(
@@ -115,6 +116,5 @@ export async function getProjectRow(
   projectId: string,
   database: Database = db,
 ) {
-  const projRows = await database.select().from(projects).where(eq(projects.id, projectId)).limit(1);
-  return projRows[0] ?? null;
+  return getProjectById(projectId, database);
 }

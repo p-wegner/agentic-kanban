@@ -1,7 +1,8 @@
-import { projects, projectStatuses, issues, workspaces, sessions, preferences, workflowNodes } from "@agentic-kanban/shared/schema";
+import { projectStatuses, issues, workspaces, sessions, preferences, workflowNodes } from "@agentic-kanban/shared/schema";
 import { eq, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { getProjectById } from "./project.repository.js";
 
 /** Resolve the active project id from the `activeProjectId` preference. */
 export async function getActiveProjectIdPref(
@@ -20,12 +21,8 @@ export async function getBoardStatusProject(
   projectId: string,
   database: Database = db,
 ) {
-  const projectRows = await database
-    .select({ id: projects.id, name: projects.name, repoPath: projects.repoPath, defaultBranch: projects.defaultBranch })
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .limit(1);
-  return projectRows[0] ?? null;
+  const project = await getProjectById(projectId, database);
+  return project ? { id: project.id, name: project.name, repoPath: project.repoPath, defaultBranch: project.defaultBranch } : null;
 }
 
 /** Auto-merge preference key/value pairs relevant to board-status classification. */

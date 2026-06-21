@@ -1,28 +1,19 @@
-import { projects } from "@agentic-kanban/shared/schema";
-import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { getProjectById } from "./project.repository.js";
 
 export async function getProjectRepoInfo(
   projectId: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select({ repoPath: projects.repoPath, repoName: projects.repoName })
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .limit(1);
-  return rows[0] ?? null;
+  const project = await getProjectById(projectId, database);
+  return project ? { repoPath: project.repoPath, repoName: project.repoName } : null;
 }
 
 export async function getProjectRepoInfoWithSetupScript(
   projectId: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select({ repoPath: projects.repoPath, repoName: projects.repoName, setupScript: projects.setupScript })
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .limit(1);
-  return rows[0] ?? null;
+  const project = await getProjectById(projectId, database);
+  return project ? { repoPath: project.repoPath, repoName: project.repoName, setupScript: project.setupScript } : null;
 }

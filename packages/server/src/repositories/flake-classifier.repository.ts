@@ -1,7 +1,8 @@
 import { eq, desc, inArray } from "drizzle-orm";
-import { flakyTests, testRetryDecisions, projects, workspaces as workspacesTable, issues } from "@agentic-kanban/shared/schema";
+import { flakyTests, testRetryDecisions, workspaces as workspacesTable, issues } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { getProjectById } from "./project.repository.js";
 
 export async function listFlakyTestsByProject(
   projectId: string,
@@ -48,12 +49,8 @@ export async function getProjectRetrySettings(
   projectId: string,
   database: Database = db,
 ) {
-  const [project] = await database
-    .select({ autoRetryFlakes: projects.autoRetryFlakes, maxRetries: projects.maxRetries })
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .limit(1);
-  return project;
+  const project = await getProjectById(projectId, database);
+  return project ? { autoRetryFlakes: project.autoRetryFlakes, maxRetries: project.maxRetries } : undefined;
 }
 
 export async function listKnownFlakyByProject(

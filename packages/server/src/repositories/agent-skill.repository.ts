@@ -1,8 +1,9 @@
-import { agentSkills, preferences, projects } from "@agentic-kanban/shared/schema";
+import { agentSkills, preferences } from "@agentic-kanban/shared/schema";
 import { eq, and, isNull, sql, desc } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { getProjectById } from "./project.repository.js";
 
 export async function listAgentSkills(
   projectId: string | undefined,
@@ -92,16 +93,16 @@ export async function getActiveProjectRepoPath(
   const prefRows = await database.select().from(preferences).where(eq(preferences.key, "activeProjectId"));
   const activeProjectId = prefRows[0]?.value;
   if (!activeProjectId) return null;
-  const projectRows = await database.select({ repoPath: projects.repoPath }).from(projects).where(eq(projects.id, activeProjectId)).limit(1);
-  return projectRows[0]?.repoPath ?? null;
+  const project = await getProjectById(activeProjectId, database);
+  return project?.repoPath ?? null;
 }
 
 export async function getProjectRepoPath(
   projectId: string,
   database: Database = db,
 ): Promise<string | null> {
-  const rows = await database.select({ repoPath: projects.repoPath }).from(projects).where(eq(projects.id, projectId)).limit(1);
-  return rows[0]?.repoPath ?? null;
+  const project = await getProjectById(projectId, database);
+  return project?.repoPath ?? null;
 }
 
 // ───────────────────────── Butler system-prompt skill ─────────────────────────
