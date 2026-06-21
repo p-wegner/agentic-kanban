@@ -63,4 +63,19 @@ describe("agent profile health service", () => {
     expect(result.command).toMatch(/^pi(\.|$)/);
     expect(result.errors.some((error) => error.includes("Pi profile 'local' requires PI_CODING_AGENT_DIR"))).toBe(true);
   });
+
+  it.each([
+    ["claude", "Using default Claude command from PATH."],
+    ["codex", "Using default Codex command from PATH."],
+    ["copilot", "Using default Copilot command from PATH."],
+    ["pi", "Using default Pi command from PATH."],
+  ] as const)("warns about the default %s command when none is configured", (provider, message) => {
+    const result = preflightAgentProfile(new Map(), provider, "default");
+    expect(result.warnings).toContain(message);
+  });
+
+  it("reports a missing codex profile config file as an error", () => {
+    const result = preflightAgentProfile(new Map(), "codex", "nonexistent-xyz");
+    expect(result.errors.some((e) => e.includes("Profile config not found"))).toBe(true);
+  });
 });
