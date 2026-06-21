@@ -11,8 +11,25 @@ import {
   presetsKey,
   DEFAULT_CONFIG,
   BUILTIN_PRESETS,
+  buildMigrationConfig,
   type StrategySegment,
 } from "./strategy-targets.js";
+
+describe("buildMigrationConfig", () => {
+  it("uses the WIP limit as the active-agents target", () => {
+    expect(buildMigrationConfig("8")).toEqual({
+      version: 1,
+      activeAgentsTarget: 8,
+      backlogFloor: 3,
+      maxNewStartsPerCycle: 3,
+      segments: [],
+    });
+  });
+  it("falls back to 5 when the WIP limit is missing or non-numeric", () => {
+    expect(buildMigrationConfig(undefined).activeAgentsTarget).toBe(5);
+    expect(buildMigrationConfig("abc").activeAgentsTarget).toBe(5);
+  });
+});
 
 function mkIssue(partial: Record<string, unknown>) {
   // Only the fields issueSearchText reads matter.
