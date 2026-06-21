@@ -7,6 +7,10 @@ patterns = [
   # Git worktrees — 25 full package-tree copies under packages/.worktrees/
   # that otherwise dominate the "root" bucket and double-count every file.
   "**/.worktrees/**",
+  # Harness/workflow worktrees (full source-tree copies + node_modules) live under
+  # .claude/worktrees/ — exclude so they don't double-count files / skew hotspots.
+  ".claude/worktrees/**",
+  "**/.claude/worktrees/**",
   # Generated Drizzle SQL migrations (built-in only drops drizzle/meta).
   "**/drizzle/**",
   # Logs (incl. multi-MB dev.log at the repo root — *.log needed for root files).
