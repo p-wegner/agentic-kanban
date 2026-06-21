@@ -2,7 +2,6 @@ import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { ShowdownContestant } from "@agentic-kanban/shared";
-import { isTerminalStatusName } from "@agentic-kanban/shared";
 import { analyzeDependencies, enhanceIssue, aiEstimateIssue, decomposeEpic, confirmEpicDecomposition, analyzeTouchedFiles } from "../services/issue-ai.service.js";
 import { createIssueService } from "../services/issue.service.js";
 import {
@@ -10,9 +9,14 @@ import {
   getIssueTouchedFiles,
   getIssueTouchedFilesWithProject,
   getProjectIssuesTouchedFiles,
-  getIssueStatusTimelineRows,
-  getDoneIssuesSince,
 } from "../repositories/issue.repository.js";
+import { clampDays } from "../lib/issue-analytics.js";
+import {
+  getBurndownChart,
+  getCfdChart,
+  getThroughputChart,
+  getLeadTimeChart,
+} from "../services/issue-analytics.service.js";
 import { createIssueCommentsService } from "../services/issue-comments.service.js";
 import { createIssueTimeEntriesService } from "../services/issue-time-entries.service.js";
 import type { IssueCommentKind, IssueCommentAuthor } from "../repositories/issue-comments.repository.js";
@@ -380,59 +384,8 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   router.get("/burndown", async (c) => {
     const projectId = c.req.query("projectId");
     if (!projectId) return c.json({ error: "projectId required" }, 400);
-    const daysRaw = parseInt(c.req.query("days") ?? "30", 10);
-    const days = Math.min(Math.max(Number.isNaN(daysRaw) ? 30 : daysRaw, 1), 365);
-
-    // Snapshot "today" once so the date axis and cutoff stay consistent even if
-    // the DB query crosses midnight.
-    const today = new Date();
-    const cutoffDate = new Date(today);
-    cutoffDate.setDate(cutoffDate.getDate() - days + 1);
-
-    // A remaining-open count on day D depends on every issue ever created — an issue opened
-    // long before the window that is still open still counts as remaining — so fetch the lot.
-    const rows = await getIssueStatusTimelineRows(projectId, database);
-
-    // Per issue: the day it entered the board (createdAt) and the day it stopped being open
-    // (statusChangedAt when the current status is terminal; an issue created straight into a
-    // terminal status with no explicit move is treated as never-open).
-    const items = rows.map((r) => {
-      const createdDay = r.createdAt.slice(0, 10);
-      let closedDay: string | null = null;
-      if (isTerminalStatusName(r.statusName)) {
-        closedDay = r.statusChangedAt ? r.statusChangedAt.slice(0, 10) : createdDay;
-      }
-      return { createdDay, closedDay };
-    });
-
-    // Build the date axis (inclusive, trailing `days` days up to today).
-    const dates: string[] = [];
-    for (let d = new Date(cutoffDate); d <= today; d.setDate(d.getDate() + 1)) {
-      dates.push(d.toISOString().slice(0, 10));
-    }
-
-    // For each day count remaining-open issues (created by D, not closed by D) plus the
-    // opened/closed deltas. YYYY-MM-DD compares lexicographically == chronologically.
-    const buckets = dates.map((date) => {
-      let remaining = 0;
-      let opened = 0;
-      let closed = 0;
-      for (const it of items) {
-        if (it.createdDay <= date) {
-          if (it.closedDay === null || it.closedDay > date) remaining++;
-          if (it.createdDay === date) opened++;
-        }
-        if (it.closedDay === date) closed++;
-      }
-      return { date, remaining, opened, closed };
-    });
-
-    const startCount = buckets.length > 0 ? buckets[0].remaining : 0;
-    const endCount = buckets.length > 0 ? buckets[buckets.length - 1].remaining : 0;
-    const totalClosed = buckets.reduce((s, b) => s + b.closed, 0);
-    const totalOpened = buckets.reduce((s, b) => s + b.opened, 0);
-
-    return c.json({ buckets, startCount, endCount, totalClosed, totalOpened });
+    const days = clampDays(c.req.query("days"), 30);
+    return c.json(await getBurndownChart(projectId, days, database));
   });
 
   // GET /api/issues/cfd?projectId=&days= — cumulative flow diagram data.
@@ -442,55 +395,8 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   router.get("/cfd", async (c) => {
     const projectId = c.req.query("projectId");
     if (!projectId) return c.json({ error: "projectId required" }, 400);
-    const daysRaw = parseInt(c.req.query("days") ?? "30", 10);
-    const days = Math.min(Math.max(Number.isNaN(daysRaw) ? 30 : daysRaw, 1), 365);
-
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - days);
-
-    // Single query: all issues for the project with status metadata.
-    const rows = await getIssueStatusTimelineRows(projectId, database);
-
-    // Collect all statuses (sorted by board order).
-    const statusMeta = new Map<string, { sortOrder: number }>();
-    for (const r of rows) {
-      if (!statusMeta.has(r.statusName)) {
-        statusMeta.set(r.statusName, { sortOrder: r.statusSortOrder });
-      }
-    }
-    const statuses = [...statusMeta.entries()]
-      .sort((a, b) => a[1].sortOrder - b[1].sortOrder)
-      .map(([name]) => name);
-
-    // Build the date axis: one entry per day in [cutoffDate, today].
-    const today = new Date();
-    const dates: string[] = [];
-    for (let d = new Date(cutoffDate); d <= today; d.setDate(d.getDate() + 1)) {
-      dates.push(d.toISOString().slice(0, 10));
-    }
-
-    // For each day, count issues per status.
-    // An issue is counted in status X on day D if:
-    //   - its current status is X, AND
-    //   - it entered that status on or before D (statusChangedAt <= D, or
-    //     statusChangedAt is null and createdAt <= D).
-    const counts: { date: string; status: string; count: number }[] = [];
-    for (const date of dates) {
-      const byStatus = new Map<string, number>();
-      for (const s of statuses) byStatus.set(s, 0);
-      for (const r of rows) {
-        const enteredAt = r.statusChangedAt ?? r.createdAt;
-        const enteredDay = enteredAt.slice(0, 10);
-        if (enteredDay <= date) {
-          byStatus.set(r.statusName, (byStatus.get(r.statusName) ?? 0) + 1);
-        }
-      }
-      for (const [status, count] of byStatus) {
-        counts.push({ date, status, count });
-      }
-    }
-
-    return c.json({ statuses, counts });
+    const days = clampDays(c.req.query("days"), 30);
+    return c.json(await getCfdChart(projectId, days, database));
   });
 
   // GET /api/issues/throughput?projectId=&days= — daily throughput: count of issues moved to Done per calendar day.
@@ -499,35 +405,8 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   router.get("/throughput", async (c) => {
     const projectId = c.req.query("projectId");
     if (!projectId) return c.json({ error: "projectId required" }, 400);
-    const daysRaw = parseInt(c.req.query("days") ?? "14", 10);
-    const days = Math.min(Math.max(Number.isNaN(daysRaw) ? 14 : daysRaw, 1), 365);
-
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - days + 1);
-    const cutoffDay = cutoffDate.toISOString().slice(0, 10);
-
-    // Fetch only "Done" issues whose statusChangedAt falls within the window.
-    const rows = await getDoneIssuesSince(projectId, cutoffDay, database);
-
-    // Build the date axis: one entry per day in the trailing window.
-    const today = new Date();
-    const dates: string[] = [];
-    for (let d = new Date(cutoffDate); d <= today; d.setDate(d.getDate() + 1)) {
-      dates.push(d.toISOString().slice(0, 10));
-    }
-
-    // Count issues per day that moved into "Done" on that exact day.
-    const countByDate = new Map<string, number>(dates.map((d) => [d, 0]));
-    for (const r of rows) {
-      if (!r.statusChangedAt) continue;
-      const movedDay = r.statusChangedAt.slice(0, 10);
-      if (countByDate.has(movedDay)) {
-        countByDate.set(movedDay, (countByDate.get(movedDay) ?? 0) + 1);
-      }
-    }
-
-    const points = dates.map((date) => ({ date, count: countByDate.get(date) ?? 0 }));
-    return c.json({ points });
+    const days = clampDays(c.req.query("days"), 14);
+    return c.json(await getThroughputChart(projectId, days, database));
   });
 
   // GET /api/issues/lead-time?projectId=&days= — lead time trend: median + p90 per day for issues that reached Done.
@@ -536,51 +415,8 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   router.get("/lead-time", async (c) => {
     const projectId = c.req.query("projectId");
     if (!projectId) return c.json({ error: "projectId required" }, 400);
-    const daysRaw = parseInt(c.req.query("days") ?? "30", 10);
-    const days = Math.min(Math.max(Number.isNaN(daysRaw) ? 30 : daysRaw, 1), 365);
-
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - days + 1);
-    const cutoffDay = cutoffDate.toISOString().slice(0, 10);
-
-    const rows = await getDoneIssuesSince(projectId, cutoffDay, database);
-
-    // Build date axis.
-    const today = new Date();
-    const dates: string[] = [];
-    for (let d = new Date(cutoffDate); d <= today; d.setDate(d.getDate() + 1)) {
-      dates.push(d.toISOString().slice(0, 10));
-    }
-
-    // Group lead times (ms) per day.
-    const byDate = new Map<string, number[]>(dates.map((d) => [d, []]));
-    for (const r of rows) {
-      if (!r.statusChangedAt || !r.createdAt) continue;
-      const day = r.statusChangedAt.slice(0, 10);
-      if (!byDate.has(day)) continue;
-      const leadMs = new Date(r.statusChangedAt).getTime() - new Date(r.createdAt).getTime();
-      if (leadMs >= 0) byDate.get(day)!.push(leadMs);
-    }
-
-    function percentile(sorted: number[], p: number): number {
-      if (sorted.length === 0) return 0;
-      const idx = (p / 100) * (sorted.length - 1);
-      const lo = Math.floor(idx);
-      const hi = Math.ceil(idx);
-      return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
-    }
-
-    const buckets = dates.map((date) => {
-      const vals = [...(byDate.get(date) ?? [])].sort((a, b) => a - b);
-      return {
-        date,
-        count: vals.length,
-        medianMs: vals.length > 0 ? percentile(vals, 50) : null,
-        p90Ms: vals.length > 0 ? percentile(vals, 90) : null,
-      };
-    });
-
-    return c.json({ buckets });
+    const days = clampDays(c.req.query("days"), 30);
+    return c.json(await getLeadTimeChart(projectId, days, database));
   });
 
   router.get("/:id", async (c) => {
