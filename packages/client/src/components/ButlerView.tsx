@@ -12,6 +12,9 @@ import {
   type ButlerChatMessage as ChatMessage,
 } from "../lib/butler-event-reducer.js";
 import { formatWindow, formatRelativeTs, backendLabel, modelOptionsForBackend, modelLabel } from "../lib/butler-format.js";
+import { buildButlerUrl } from "../lib/butler-url.js";
+import { parseSlashCommand, filterCommands, applyCommandToInput, nextCycleIndex } from "../lib/butler-slash-commands.js";
+import { sanitizeSpeechText } from "../lib/butler-speech.js";
 import { ButlerManageModal, type ButlerDef } from "./ButlerManageModal.js";
 import { ChatBubble } from "./ButlerChatParts.js";
 import { ActivityStrip } from "./ButlerChrome.js";
@@ -189,9 +192,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   // ── Helpers ──
 
   function butlerUrl(butlerId: string, path: string): string {
-    const base = `/api/projects/${projectId}/butler${path}`;
-    if (!butlerId || butlerId === "default") return base;
-    return `${base}${path.includes("?") ? "&" : "?"}butler=${encodeURIComponent(butlerId)}`;
+    return buildButlerUrl(projectId, butlerId, path);
   }
 
   function getOrInitBuf(butlerId: string) {
@@ -575,7 +576,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     if (!tab || tab.sending || activeModelOptions.length === 0) return;
     const current = tab.selectedModel || tab.model || activeModelOptions[0]?.value;
     const currentIndex = activeModelOptions.findIndex((item) => item.value === current);
-    const next = activeModelOptions[(currentIndex + 1 + activeModelOptions.length) % activeModelOptions.length];
+    const next = activeModelOptions[nextCycleIndex(activeModelOptions.length, currentIndex)];
     if (next) {
       void handleModelChange(next.value);
       modelSelectRef.current?.focus();
@@ -613,16 +614,9 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     if (tab.sending || options.length === 0) return;
     if (options.length === 1) { profileSelectRef.current?.focus(); return; }
     const currentIndex = options.indexOf(tab.selectedProfile);
-    const next = options[(currentIndex + 1 + options.length) % options.length];
+    const next = options[nextCycleIndex(options.length, currentIndex)];
     void handleProfileChange(next);
   }
-
-  const sanitizeSpeechText = (value: string) => (
-    value
-      .replace(/[ --]/g, "")
-      .replace(/[​‌‍⁠᠎‎‏﻿]/g, "")
-      .trim()
-  );
 
   function setTabInput(butlerId: string, value: string) {
     inputValuesRef.current[butlerId] = value;
@@ -748,10 +742,10 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
 
   // ── Slash-command autocomplete ──
 
-  const slashMatch = tab ? /(?:^|\s)\/([\w:-]*)$/.exec(tab.input) : null;
-  const commandQuery = slashMatch?.[1] ?? "";
-  const filteredCommands = slashMatch && tab && tab.commands.length > 0
-    ? tab.commands.filter((cmd) => cmd.name.toLowerCase().includes(commandQuery.toLowerCase())).slice(0, 8)
+  const slashCommandQuery = tab ? parseSlashCommand(tab.input) : null;
+  const commandQuery = slashCommandQuery ?? "";
+  const filteredCommands = slashCommandQuery !== null && tab && tab.commands.length > 0
+    ? filterCommands(tab.commands, commandQuery)
     : [];
   const commandMenuOpen = filteredCommands.length > 0;
 
@@ -762,10 +756,8 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
 
   function applyCommand(name: string) {
     if (!tab) return;
-    const m = /(?:^|\s)\/([\w:-]*)$/.exec(tab.input);
-    if (!m) return;
-    const slashStart = m.index + m[0].length - (m[1].length + 1);
-    const next = `${tab.input.slice(0, slashStart)}/${name} `;
+    const next = applyCommandToInput(tab.input, name);
+    if (next === null) return;
     setTabInput(activeTabId, next);
     setCommandIndex(0);
     commandIndexRef.current = 0;
