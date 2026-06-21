@@ -751,6 +751,25 @@ describe("CodexProvider", () => {
       message: "You've hit your usage limit for GPT-5.3-Codex-Spark. Switch to another model now, or try again at Jun 6th, 2026 12:30 AM.",
     });
   });
+
+  it("extracts providerSessionId from thread.started", () => {
+    const evt = provider.parseStreamEvent(JSON.stringify({ type: "thread.started", thread_id: "thread-abc" }));
+    expect(evt?.providerSessionId).toBe("thread-abc");
+  });
+
+  it("extracts shell toolActivity from item.started command_execution", () => {
+    const evt = provider.parseStreamEvent(JSON.stringify({
+      type: "item.started",
+      item: { id: "cmd-1", type: "command_execution", command: "ls -la" },
+    }));
+    expect(evt?.toolActivity?.name).toBe("shell");
+    expect(evt?.toolActivity?.input).toEqual({ command: "ls -la" });
+    expect(evt?.toolActivity?.toolUseId).toBe("cmd-1");
+  });
+
+  it("returns undefined for an event that populates no fields", () => {
+    expect(provider.parseStreamEvent(JSON.stringify({ type: "thread.started" }))).toBeUndefined();
+  });
 });
 
 describe("CopilotProvider", () => {
