@@ -267,3 +267,20 @@ export function formatHealthTime(value: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString("en-US");
 }
+
+/**
+ * Apply a preflight result to the matching profile-health row. A row that already
+ * has a recorded latestFailure stays "error" even when the preflight itself passes
+ * (failure-wins); otherwise it takes the preflight's status.
+ */
+export function applyPreflightResult(
+  rows: AgentProfileHealth[],
+  profileId: string,
+  result: AgentProfileHealth["preflight"],
+): AgentProfileHealth[] {
+  return rows.map((row) =>
+    row.id === profileId
+      ? { ...row, preflight: result, status: row.latestFailure ? "error" : result.status, command: result.command }
+      : row,
+  );
+}

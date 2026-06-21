@@ -8,9 +8,38 @@ import {
   getProviderCapabilities,
   statusClasses,
   formatHealthTime,
+  applyPreflightResult,
   DEFAULT_SETTINGS,
   type Settings,
+  type AgentProfileHealth,
 } from "./settings-shared.js";
+
+describe("applyPreflightResult", () => {
+  const row = (over: Partial<AgentProfileHealth>): AgentProfileHealth => ({
+    id: "p1",
+    provider: "claude",
+    profileName: "anth",
+    command: "old-cmd",
+    selected: false,
+    status: "unknown",
+    preflight: { ok: false, status: "unknown", errors: [], warnings: [], command: "", provider: "claude", profileName: "anth", flags: [] },
+    latestFailure: null,
+    ...over,
+  } as AgentProfileHealth);
+  const result: AgentProfileHealth["preflight"] = { ok: true, status: "ok", errors: [], warnings: [], command: "new-cmd", provider: "claude", profileName: "anth", flags: [] };
+
+  it("updates only the matching row, taking the preflight status + command", () => {
+    const rows = [row({ id: "p1" }), row({ id: "p2" })];
+    const out = applyPreflightResult(rows, "p1", result);
+    expect(out[0]).toMatchObject({ status: "ok", command: "new-cmd", preflight: result });
+    expect(out[1]).toBe(rows[1]); // untouched
+  });
+
+  it("keeps a row with a recorded latestFailure at 'error' even when preflight passes", () => {
+    const rows = [row({ id: "p1", latestFailure: { at: "t", summary: "boom" } })];
+    expect(applyPreflightResult(rows, "p1", result)[0].status).toBe("error");
+  });
+});
 
 describe("uniqueProfiles", () => {
   it("dedupes, drops falsy, and prepends the fallback", () => {

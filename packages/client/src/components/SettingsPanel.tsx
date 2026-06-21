@@ -3,7 +3,9 @@ import { apiFetch, apiPost, apiPut, apiPatch } from "../lib/api.js";
 import { invalidateSettings, setSettings as savePreferences } from "../lib/settingsStore.js";
 import { showToast } from "./Toast.js";
 import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
-import { CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, DEFAULT_SETTINGS, PI_DEFAULT_PROFILE, TABS, uniqueProfiles, type AgentProfileHealth, type McpHealth, type MonitorTunables, type ProjectSettingsState, type ScheduledRun, type Settings, type SettingsPanelProps, type SkillSetting, type Tab, type TagSetting } from "./SettingsPanel.shared.js";
+import { applyPreflightResult, CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, DEFAULT_SETTINGS, PI_DEFAULT_PROFILE, TABS, uniqueProfiles, type AgentProfileHealth, type McpHealth, type MonitorTunables, type ProjectSettingsState, type ScheduledRun, type Settings, type SettingsPanelProps, type SkillSetting, type Tab, type TagSetting } from "./SettingsPanel.shared.js";
+import { buildMigrationConfig } from "../lib/strategy-targets.js";
+import { parseDisabledTools, withToolDisabled } from "../lib/mcp-tool-toggle.js";
 import type { MonitorAction } from "./MonitorPopover.js";
 import { AgentSettings } from "./settings/AgentSettings.js";
 import { WorkflowSettings } from "./settings/WorkflowSettings.js";
@@ -187,15 +189,12 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
     }
   }
 
-  const disabledTools = new Set((settings.disabled_mcp_tools || "").split(",").filter(Boolean));
+  const disabledTools = parseDisabledTools(settings.disabled_mcp_tools);
   function isToolDisabled(name: string) {
     return disabledTools.has(name);
   }
   function toggleTool(name: string, disabled: boolean) {
-    const next = new Set(disabledTools);
-    if (disabled) next.add(name);
-    else next.delete(name);
-    setSettings((s) => ({ ...s, disabled_mcp_tools: [...next].join(",") }));
+    setSettings((s) => ({ ...s, disabled_mcp_tools: withToolDisabled(disabledTools, name, disabled) }));
   }
 
   useEffect(() => {
@@ -333,15 +332,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
     if (!activeProjectId || migratingToStrategy) return;
     setMigratingToStrategy(true);
     try {
-      const wipLimit = parseInt(settings.nudge_wip_limit || "5", 10);
-      const activeAgentsTarget = Number.isFinite(wipLimit) ? wipLimit : 5;
-      const strategyConfig = {
-        version: 1,
-        activeAgentsTarget,
-        backlogFloor: 3,
-        maxNewStartsPerCycle: 3,
-        segments: [],
-      };
+      const strategyConfig = buildMigrationConfig(settings.nudge_wip_limit);
       await savePreferences({ [`board_strategy_${activeProjectId}`]: JSON.stringify(strategyConfig) });
       showToast("Migrated to Strategy Bullseye", "success");
       await fetchMonitorTunables();
@@ -369,9 +360,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
     setPreflightingProfileId(profile.id);
     try {
       const result = await apiPost<AgentProfileHealth["preflight"]>("/api/preferences/agent-profiles/preflight", { provider: profile.provider, profileName: profile.profileName });
-      setProfileHealth((rows) => rows.map((row) => row.id === profile.id
-        ? { ...row, preflight: result, status: row.latestFailure ? "error" : result.status, command: result.command }
-        : row));
+      setProfileHealth((rows) => applyPreflightResult(rows, profile.id, result));
       showToast(result.ok ? "Preflight passed" : "Preflight found issues", result.ok ? "success" : "error");
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Preflight failed", "error");

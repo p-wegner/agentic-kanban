@@ -212,3 +212,21 @@ export function presetMatchesConfig(preset: MonitorPolicyPreset, config: Strateg
     preset.refillFocus === deriveRefillFocus(config.segments)
   );
 }
+
+/**
+ * Derive the Strategy-Bullseye config persisted when migrating off the legacy
+ * nudge_wip_limit pref: the clamped WIP limit becomes activeAgentsTarget (NaN →
+ * 5). Intentionally minimal (no segments/providerPolicies) — matches the exact
+ * shape the SettingsPanel migration used to build inline.
+ */
+export function buildMigrationConfig(wipLimitStr: string | undefined): {
+  version: number;
+  activeAgentsTarget: number;
+  backlogFloor: number;
+  maxNewStartsPerCycle: number;
+  segments: StrategySegment[];
+} {
+  const wipLimit = parseInt(wipLimitStr || "5", 10);
+  const activeAgentsTarget = Number.isFinite(wipLimit) ? wipLimit : 5;
+  return { version: 1, activeAgentsTarget, backlogFloor: 3, maxNewStartsPerCycle: 3, segments: [] };
+}
