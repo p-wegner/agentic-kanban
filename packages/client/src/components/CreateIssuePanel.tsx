@@ -11,6 +11,15 @@ import TicketMentionRenderer from "./TicketMentionRenderer.js";
 import { MarkdownToolbar } from "./MarkdownToolbar.js";
 import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
 import { buildCreateIssuePayload } from "../lib/createIssuePayload.js";
+import {
+  COPILOT_DEFAULT_PROFILE,
+  CODEX_DEFAULT_PROFILE,
+  PI_DEFAULT_PROFILE,
+  uniqueProfiles,
+  defaultProfileLabel,
+  profileOptionLabel,
+  providerFromSelection,
+} from "../lib/profileOptionLabels.js";
 
 interface Skill {
   id: string;
@@ -34,32 +43,6 @@ interface CreateIssuePanelProps {
   canStartWorkspace?: boolean;
 }
 
-type AgentProvider = ProfileSelection["provider"];
-
-const COPILOT_DEFAULT_PROFILE = "default";
-const CODEX_DEFAULT_PROFILE = "default";
-const PI_DEFAULT_PROFILE = "default";
-
-function uniqueProfiles(profiles: string[], fallback?: string): string[] {
-  const all = fallback ? [fallback, ...profiles] : profiles;
-  return [...new Set(all.filter(Boolean))];
-}
-
-function defaultProfileLabel(settings: Record<string, string>): string {
-  if (settings.provider === "codex") return `codex:${settings.codex_profile || CODEX_DEFAULT_PROFILE}`;
-  if (settings.provider === "copilot") return `copilot:${settings.copilot_profile || COPILOT_DEFAULT_PROFILE}`;
-  if (settings.provider === "pi") return `pi:${settings.pi_profile || PI_DEFAULT_PROFILE}`;
-  return `claude:${settings.claude_profile || "none"}`;
-}
-
-function profileOptionLabel(provider: AgentProvider, name: string): string {
-  const isDefault = (provider === "copilot" && name === COPILOT_DEFAULT_PROFILE) ||
-    (provider === "codex" && name === CODEX_DEFAULT_PROFILE) ||
-    (provider === "pi" && name === PI_DEFAULT_PROFILE);
-  const displayName = isDefault ? "Default" : name;
-  const providerLabel = provider === "codex" ? "Codex" : provider === "copilot" ? "Copilot" : provider === "pi" ? "Pi" : "Claude";
-  return `${providerLabel}: ${displayName}`;
-}
 
 export function CreateIssuePanel({
   projectId,
@@ -144,12 +127,7 @@ export function CreateIssuePanel({
     });
   }, [startWorkspace, projectId]);
 
-  const isClaudeSelected = selectedProfile === ""
-    ? (settings.provider !== "codex" && settings.provider !== "copilot" && settings.provider !== "pi")
-    : selectedProfile.startsWith("claude:");
-  const isCodexSelected = selectedProfile === ""
-    ? settings.provider === "codex"
-    : selectedProfile.startsWith("codex:");
+  const { isClaudeSelected, isCodexSelected } = providerFromSelection(selectedProfile, settings.provider);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
