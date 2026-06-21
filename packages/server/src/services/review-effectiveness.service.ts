@@ -8,6 +8,12 @@ import {
   getProjectIssueIds,
   getReviewEffectivenessSessionRows,
 } from "../repositories/review-effectiveness.repository.js";
+import {
+  aggregateReviewWorkspaceStats,
+  bucketScorecardScores,
+  classifyReviewVerdictText,
+  classifyTrigger,
+} from "../lib/review-effectiveness-aggregation.js";
 
 /**
  * Reconstructs each ticket's build -> review -> merge lifecycle from sessions +
@@ -40,30 +46,10 @@ export interface ReviewEffectivenessScope {
   deep?: boolean;
 }
 
-export type ReviewKind = "review" | "build" | "rework" | "noise" | "other";
-
-export function classifyTrigger(t: string | null): ReviewKind {
-  if (!t) return "build"; // legacy initial sessions have null triggerType
-  if (t === "review" || t.startsWith("skill:code-review")) return "review";
-  if (t.startsWith("skill:board-monitor") || t.startsWith("skill:board-navigator")) return "noise";
-  if (t === "chat" || t === "fix-and-merge" || t === "fix-conflicts" || t === "plan-reject") return "rework";
-  if (t === "verify" || t === "learning" || t === "bisect" || t === "reconcile") return "other";
-  return "build"; // agent, auto-start, manual, plan-implement, skill:<other>
-}
-
-function parseStats(raw: string | null) {
-  if (!raw) return { cost: 0, durationMs: 0, turns: 0 };
-  try {
-    const s = JSON.parse(raw) as Record<string, unknown>;
-    return {
-      cost: typeof s.totalCostUsd === "number" ? s.totalCostUsd : 0,
-      durationMs: typeof s.durationMs === "number" ? s.durationMs : 0,
-      turns: typeof s.numTurns === "number" ? s.numTurns : 0,
-    };
-  } catch {
-    return { cost: 0, durationMs: 0, turns: 0 };
-  }
-}
+// classifyTrigger / ReviewKind live in the pure aggregation lib (#860); re-exported
+// here so existing importers (CLI, tests) keep their import path.
+export { classifyTrigger };
+export type { ReviewKind } from "../lib/review-effectiveness-aggregation.js";
 
 function countBy<T>(items: T[], key: (item: T) => string): Record<string, number> {
   const out: Record<string, number> = {};
@@ -158,96 +144,7 @@ export async function computeReviewEffectiveness(
   const wsIds = [...new Set(rows.map((r) => r.workspaceId))];
   const commentRows = await getDiffCommentRowsForWorkspaces(wsIds, database);
 
-  type WS = {
-    workspaceId: string;
-    issueNumber: number | null;
-    issueTitle: string;
-    issueType: string;
-    branch: string;
-    provider: string | null;
-    wsStatus: string;
-    mergedAt: string | null;
-    readyForMerge: boolean;
-    requiresReview: boolean;
-    scorecardScore: number | null;
-    builds: number;
-    reviews: number;
-    reworks: number;
-    firstReviewAt: string | null;
-    lastReviewAt: string | null;
-    changeAfterReview: boolean;
-    reviewCost: number;
-    buildCost: number;
-    reviewDurationMs: number;
-    comments: number;
-    commentsResolved: number;
-    reviewSessionIds: string[];
-  };
-  const byWs = new Map<string, WS>();
-  const commentsByWs = new Map<string, { total: number; resolved: number }>();
-  for (const c of commentRows) {
-    const e = commentsByWs.get(c.workspaceId) ?? { total: 0, resolved: 0 };
-    e.total++;
-    if (c.resolvedAt) e.resolved++;
-    commentsByWs.set(c.workspaceId, e);
-  }
-
-  const triggerDist: Record<string, number> = {};
-
-  for (const r of rows) {
-    triggerDist[r.triggerType ?? "(null)"] = (triggerDist[r.triggerType ?? "(null)"] ?? 0) + 1;
-    const kind = classifyTrigger(r.triggerType);
-    if (kind === "noise") continue;
-
-    let existing = byWs.get(r.workspaceId);
-    if (!existing) {
-      const cm = commentsByWs.get(r.workspaceId) ?? { total: 0, resolved: 0 };
-      existing = {
-        workspaceId: r.workspaceId,
-        issueNumber: r.issueNumber,
-        issueTitle: r.issueTitle,
-        issueType: r.issueType,
-        branch: r.branch,
-        provider: r.provider,
-        wsStatus: r.wsStatus,
-        mergedAt: r.mergedAt,
-        readyForMerge: r.readyForMerge,
-        requiresReview: r.requiresReview,
-        scorecardScore: r.scorecardScore,
-        builds: 0,
-        reviews: 0,
-        reworks: 0,
-        firstReviewAt: null,
-        lastReviewAt: null,
-        changeAfterReview: false,
-        reviewCost: 0,
-        buildCost: 0,
-        reviewDurationMs: 0,
-        comments: cm.total,
-        commentsResolved: cm.resolved,
-        reviewSessionIds: [],
-      };
-      byWs.set(r.workspaceId, existing);
-    }
-    const ws: WS = existing;
-    const st = parseStats(r.stats);
-    if (kind === "review") {
-      ws.reviews++;
-      ws.reviewCost += st.cost;
-      ws.reviewDurationMs += st.durationMs;
-      ws.reviewSessionIds.push(r.sessionId);
-      if (!ws.firstReviewAt) ws.firstReviewAt = r.startedAt;
-      ws.lastReviewAt = r.startedAt;
-    } else if (kind === "build") {
-      ws.builds++;
-      ws.buildCost += st.cost;
-      if (ws.firstReviewAt && r.startedAt > ws.firstReviewAt) ws.changeAfterReview = true;
-    } else if (kind === "rework") {
-      ws.reworks++;
-      ws.buildCost += st.cost;
-      if (ws.firstReviewAt && r.startedAt > ws.firstReviewAt) ws.changeAfterReview = true;
-    }
-  }
+  const { byWs, triggerDist } = aggregateReviewWorkspaceStats(rows, commentRows);
 
   const all = [...byWs.values()];
   const impl = all.filter((w) => w.builds > 0 || w.reworks > 0);
@@ -267,13 +164,7 @@ export async function computeReviewEffectiveness(
   const buildCost = all.reduce((s, w) => s + w.buildCost, 0);
 
   const scores = reviewed.map((w) => w.scorecardScore).filter((s): s is number => typeof s === "number");
-  const scoreBuckets = { "90-100": 0, "75-89": 0, "60-74": 0, "<60": 0 };
-  for (const s of scores) {
-    if (s >= 90) scoreBuckets["90-100"]++;
-    else if (s >= 75) scoreBuckets["75-89"]++;
-    else if (s >= 60) scoreBuckets["60-74"]++;
-    else scoreBuckets["<60"]++;
-  }
+  const scoreBuckets = bucketScorecardScores(scores);
 
   let verdicts: { approve: number; changesRequested: number; unclear: number } | undefined;
   if (deep) {
@@ -282,13 +173,7 @@ export async function computeReviewEffectiveness(
     for (const sid of reviewSessionIds) {
       const msgRows = await getSessionMessageRows(sid);
       const summary = parseSessionSummary(msgRows);
-      const text = (summary.agentSummary ?? "").toLowerCase();
-      const approve = /ready for merge|marking .*ready|approved|no critical or major|lgtm/.test(text);
-      const changes = /request changes|moving .*back to in progress|moved .*to in progress|needs fixes|requires changes|back to the agent|critical issue|major issue/.test(text);
-      if (changes && !approve) verdicts.changesRequested++;
-      else if (approve && !changes) verdicts.approve++;
-      else if (approve && changes) verdicts.approve++;
-      else verdicts.unclear++;
+      verdicts[classifyReviewVerdictText(summary.agentSummary ?? "")]++;
     }
   }
 
