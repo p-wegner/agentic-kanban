@@ -48,7 +48,7 @@ import type {
 import type { useBoardFilters } from "../hooks/useBoardFilters.js";
 import type { useBoardPanelNavigation } from "../hooks/useBoardPanelNavigation.js";
 import type { useProjectManagement } from "../hooks/useProjectManagement.js";
-import type { useBoardIssueActions } from "../hooks/useBoardIssueActions.js";
+import type { createBoardIssueActions } from "../hooks/createBoardIssueActions.js";
 import type { useBoardMiscHandlers } from "../hooks/useBoardMiscHandlers.js";
 import type { useBoardNavigation } from "../hooks/useBoardNavigation.js";
 import type { useBoardIssueMovement } from "../hooks/useBoardIssueMovement.js";
@@ -65,7 +65,7 @@ import type { buildRunQueueForecast } from "./RunQueueForecastPanel.js";
 type Filters = ReturnType<typeof useBoardFilters>;
 type PanelNav = ReturnType<typeof useBoardPanelNavigation>;
 type ProjectMgmt = ReturnType<typeof useProjectManagement>;
-type IssueActions = ReturnType<typeof useBoardIssueActions>;
+type IssueActions = ReturnType<typeof createBoardIssueActions>;
 type Misc = ReturnType<typeof useBoardMiscHandlers>;
 type Nav = ReturnType<typeof useBoardNavigation>;
 type Movement = ReturnType<typeof useBoardIssueMovement>;

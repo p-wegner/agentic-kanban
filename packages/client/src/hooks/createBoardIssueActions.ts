@@ -30,7 +30,7 @@ interface BoardIssueActionsDeps {
   setWorkspaceOpenCreate: Setter;
 }
 
-export function useBoardIssueActions(deps: BoardIssueActionsDeps) {
+export function createBoardIssueActions(deps: BoardIssueActionsDeps) {
   const {
     activeProject, activeAgentsTarget, columns, columnsRef, pendingBoardRefreshRef,
     refetchBoard, setColumns, setCreatingInColumnId, setError, setExpandedCreatePanel,

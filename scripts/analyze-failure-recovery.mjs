@@ -134,7 +134,7 @@ console.log("─".repeat(78));
 console.log(`SAMPLE RECOVERIES (failed cmd → next move):`);
 console.log("─".repeat(78));
 for (const o of occ.slice(0, nExamples)) {
-  const proj = (o.project.match(/ak-(\d+)/) || [, ""])[1];
+  const proj = (o.project.match(/ak-(\d+)/) || [undefined, ""])[1];
   console.log(`\n[${o.category}]${proj ? "  #" + proj : ""}`);
   console.log(`  failed:  ${o.failedCmd}`);
   console.log(`  error:   ${o.error}`);

@@ -33,10 +33,13 @@
     "typecheck:shared": "pnpm --filter shared typecheck",
     "typecheck:server": "pnpm --filter agentic-kanban exec tsc --noEmit",
     "typecheck:mcp": "pnpm --filter @agentic-kanban/mcp-server typecheck",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "lint:strict": "eslint . --max-warnings 0",
     "lint:arch": "depcruise packages/server/src packages/shared/src packages/mcp-server/src packages/client/src --config .dependency-cruiser.cjs --output-type err",
     "lint:arch:report": "depcruise packages/server/src packages/shared/src packages/mcp-server/src packages/client/src --config .dependency-cruiser.cjs --output-type err-long",
-    "check": "pnpm typecheck && pnpm lint:arch && pnpm test:mine",
-    "check:full": "pnpm typecheck && pnpm lint:arch && pnpm test && pnpm test:e2e && pnpm build",
+    "check": "pnpm typecheck && pnpm lint:arch && pnpm lint && pnpm test:mine",
+    "check:full": "pnpm typecheck && pnpm lint:arch && pnpm lint && pnpm test && pnpm test:e2e && pnpm build",
     "test": "pnpm --filter agentic-kanban test",
     "test:mine": "node scripts/test-mine.mjs",
     "test:unit": "pnpm test",
@@ -63,10 +66,15 @@
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.0",
+    "@eslint/js": "^9.18.0",
     "@rollup/rollup-win32-x64-msvc": "^4.60.4",
     "concurrently": "^9.1.2",
     "dependency-cruiser": "^17.4.3",
     "esbuild": "^0.25.12",
-    "typescript": "^5.8.3"
+    "eslint": "^9.18.0",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "globals": "^15.14.0",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.20.0"
   }
 }

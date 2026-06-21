@@ -49,7 +49,7 @@ export function ConductorCronSection({
     } catch { /* leave prior state */ }
   }
 
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [projectId]);
+  useEffect(() => { load(); }, [projectId]);
 
   async function save(patch: { enabled?: boolean; cron?: string; agent?: "claude" | "codex" }) {
     setSaving(true);
