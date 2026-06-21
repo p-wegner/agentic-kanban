@@ -4,6 +4,7 @@ import { issues, projectStatuses, issueDependencies, agentSkills, tags, issueTag
 import type { DependencyType } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { getProjectById } from "./project.repository.js";
 
 export async function getIssueBasics(
   issueId: string,
@@ -103,12 +104,8 @@ export async function getProjectRepoPath(
   projectId: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select({ repoPath: projects.repoPath })
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .limit(1);
-  return rows[0]?.repoPath ?? null;
+  const project = await getProjectById(projectId, database);
+  return project?.repoPath ?? null;
 }
 
 export async function updateIssueTouchedFiles(
@@ -178,12 +175,8 @@ export async function getProjectNames(
   projectId: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select({ name: projects.name, repoName: projects.repoName })
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .limit(1);
-  return rows[0] ?? null;
+  const project = await getProjectById(projectId, database);
+  return project ? { name: project.name, repoName: project.repoName } : null;
 }
 
 export async function getStatusIdByName(

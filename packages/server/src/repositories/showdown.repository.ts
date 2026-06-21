@@ -1,7 +1,8 @@
 import { eq, inArray } from "drizzle-orm";
-import { showdowns, workspaces, issues, projects, agentSkills } from "@agentic-kanban/shared/schema";
+import { showdowns, workspaces, issues, agentSkills } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { getProjectById } from "./project.repository.js";
 
 export async function getIssueForShowdown(
   issueId: string,
@@ -19,12 +20,8 @@ export async function getProjectDefaultBranch(
   projectId: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select({ defaultBranch: projects.defaultBranch })
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .limit(1);
-  return rows[0] ?? null;
+  const project = await getProjectById(projectId, database);
+  return project ? { defaultBranch: project.defaultBranch } : null;
 }
 
 export async function insertShowdown(

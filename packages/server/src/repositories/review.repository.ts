@@ -1,7 +1,8 @@
-import { agentSkills, issues, preferences, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { agentSkills, issues, preferences, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { getProjectById } from "./project.repository.js";
 
 export async function getProjectScopedReviewSkill(
   skillName: string,
@@ -76,7 +77,8 @@ export async function getProjectDefaultBranch(
   projectId: string,
   database: Database = db,
 ) {
-  return database.select({ defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.id, projectId)).limit(1);
+  const project = await getProjectById(projectId, database);
+  return project ? [{ defaultBranch: project.defaultBranch }] : [];
 }
 
 export async function setWorkspaceStatus(
