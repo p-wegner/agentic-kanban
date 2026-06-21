@@ -4,7 +4,14 @@ import { NotFoundError } from "../errors/index.js";
 import { isAnalyticsNoise } from "./session-filter.js";
 import { getChangedFileNames } from "./git.service.js";
 import { readSessionStdoutFile } from "../repositories/session.repository.js";
-import { countAskFollowupQuestions, computeFileOverlapCounts } from "../lib/workspace-risk-signals.js";
+import {
+  countAskFollowupQuestions,
+  computeFileOverlapCounts,
+  isFailedRiskSession,
+  parseConflictCache,
+  parseDiffStatCache,
+  selectLastSessionAt,
+} from "../lib/workspace-risk-signals.js";
 import {
   getProjectIssueRows,
   getProjectStatusRows,
@@ -239,157 +246,146 @@ export async function getWorkspaceRisk(
 
   const wsIds = scoredWorkspaces.map((w) => w.id);
 
-  // Fetch sessions for failure count and last session timing
-  const sessionRows = await getRiskSessionRowsDesc(wsIds, database);
-
-  const latestSessionByWs = new Map<string, typeof sessionRows[0]>();
-  const failureCountByWs = new Map<string, number>();
-  for (const s of sessionRows) {
-    if (isAnalyticsNoise(s)) continue;
-    if (!latestSessionByWs.has(s.workspaceId)) {
-      latestSessionByWs.set(s.workspaceId, s);
+  // Phase A — latest non-noise session + recent-failure count per workspace.
+  async function computeFailuresAndLatestSessions() {
+    // Fetch sessions for failure count and last session timing
+    const sessionRows = await getRiskSessionRowsDesc(wsIds, database);
+    const latestSessionByWs = new Map<string, typeof sessionRows[0]>();
+    const failureCountByWs = new Map<string, number>();
+    for (const s of sessionRows) {
+      if (isAnalyticsNoise(s)) continue;
+      if (!latestSessionByWs.has(s.workspaceId)) {
+        latestSessionByWs.set(s.workspaceId, s);
+      }
+      // Count failures: zero-output (≤1s or 0 tokens) OR stopped with non-zero exit
+      if (isFailedRiskSession(s)) {
+        failureCountByWs.set(s.workspaceId, (failureCountByWs.get(s.workspaceId) ?? 0) + 1);
+      }
     }
-    // Count failures: zero-output (≤1s or 0 tokens) OR stopped with non-zero exit
-    const durationMs = s.endedAt ? new Date(s.endedAt).getTime() - new Date(s.startedAt).getTime() : Infinity;
-    const isZeroOutput = !!s.endedAt && (durationMs <= 1000 || (() => {
-      try {
-        const p = JSON.parse(s.stats ?? "{}") as Record<string, unknown>;
-        return (p.inputTokens === 0 || p.inputTokens == null) && (p.outputTokens === 0 || p.outputTokens == null);
-      } catch { return false; }
-    })());
-    const isSessionError = s.status === "stopped" && s.exitCode !== null && s.exitCode !== "0";
-    if (isZeroOutput || isSessionError) {
-      failureCountByWs.set(s.workspaceId, (failureCountByWs.get(s.workspaceId) ?? 0) + 1);
-    }
+    return { latestSessionByWs, failureCountByWs };
   }
+  const { latestSessionByWs, failureCountByWs } = await computeFailuresAndLatestSessions();
 
-  // Fetch pending questions per workspace from session messages
-  // Questions are messages of type "tool_use" with name "ask_followup_question" that haven't been answered
-  // Simpler approach: count session messages with type containing "question" for running sessions
-  const pendingQuestionsByWs = new Map<string, number>();
-  const runningWsIds = scoredWorkspaces
-    .filter((w) => {
-      const sess = latestSessionByWs.get(w.id);
-      return sess?.status === "running";
-    })
-    .map((w) => w.id);
+  // Phase B — pending unanswered questions for running sessions.
+  // Questions are messages of type "tool_use" with name "ask_followup_question" that haven't been answered.
+  async function computePendingQuestions() {
+    const pendingQuestionsByWs = new Map<string, number>();
+    const runningWsIds = scoredWorkspaces
+      .filter((w) => {
+        const sess = latestSessionByWs.get(w.id);
+        return sess?.status === "running";
+      })
+      .map((w) => w.id);
 
-  if (runningWsIds.length > 0) {
-    const runningSessionIds = runningWsIds
-      .map((wsId) => latestSessionByWs.get(wsId)?.id)
-      .filter((id): id is string => !!id);
+    if (runningWsIds.length > 0) {
+      const runningSessionIds = runningWsIds
+        .map((wsId) => latestSessionByWs.get(wsId)?.id)
+        .filter((id): id is string => !!id);
 
-    if (runningSessionIds.length > 0) {
-      // Build per-session data map: prefer .out file, fall back to DB rows
-      const sessionDataMap = new Map<string, string>();
-      for (const sid of runningSessionIds) {
-        const fileContent = readSessionStdoutFile(sid);
-        if (fileContent) {
-          sessionDataMap.set(sid, fileContent);
+      if (runningSessionIds.length > 0) {
+        // Build per-session data map: prefer .out file, fall back to DB rows
+        const sessionDataMap = new Map<string, string>();
+        for (const sid of runningSessionIds) {
+          const fileContent = readSessionStdoutFile(sid);
+          if (fileContent) {
+            sessionDataMap.set(sid, fileContent);
+          }
         }
-      }
-      // For sessions without a .out file, fall back to DB
-      const missingFromFile = runningSessionIds.filter((sid) => !sessionDataMap.has(sid));
-      if (missingFromFile.length > 0) {
-        const dbRows = await getSessionMessageDataForSessions(missingFromFile, database);
-        for (const row of dbRows) {
-          if (!row.data) continue;
-          sessionDataMap.set(row.sessionId, (sessionDataMap.get(row.sessionId) ?? "") + row.data);
+        // For sessions without a .out file, fall back to DB
+        const missingFromFile = runningSessionIds.filter((sid) => !sessionDataMap.has(sid));
+        if (missingFromFile.length > 0) {
+          const dbRows = await getSessionMessageDataForSessions(missingFromFile, database);
+          for (const row of dbRows) {
+            if (!row.data) continue;
+            sessionDataMap.set(row.sessionId, (sessionDataMap.get(row.sessionId) ?? "") + row.data);
+          }
         }
-      }
 
-      for (const [sid, data] of sessionDataMap) {
-        const count = countAskFollowupQuestions(data);
-        if (count > 0) {
-          const wsId = runningWsIds.find((id) => latestSessionByWs.get(id)?.id === sid);
-          if (wsId) pendingQuestionsByWs.set(wsId, (pendingQuestionsByWs.get(wsId) ?? 0) + count);
+        for (const [sid, data] of sessionDataMap) {
+          const count = countAskFollowupQuestions(data);
+          if (count > 0) {
+            const wsId = runningWsIds.find((id) => latestSessionByWs.get(id)?.id === sid);
+            if (wsId) pendingQuestionsByWs.set(wsId, (pendingQuestionsByWs.get(wsId) ?? 0) + count);
+          }
         }
       }
     }
+    return pendingQuestionsByWs;
   }
+  const pendingQuestionsByWs = await computePendingQuestions();
 
-  // Gather changed files per workspace for overlap computation
-  const changedFilesByWs = new Map<string, string[]>();
-  await Promise.allSettled(
-    scoredWorkspaces
-      .filter((w) => w.workingDir && (w.status === "active" || w.status === "reviewing" || w.status === "fixing"))
-      .map(async (w) => {
-        try {
-          const diffRef = w.isDirect ? "HEAD" : (w.baseBranch || defaultBranch);
-          if (!diffRef || !w.workingDir) return;
-          const files = await getChangedFileNames(w.workingDir, diffRef);
-          changedFilesByWs.set(w.id, files);
-        } catch { /* ignore git failures */ }
-      }),
-  );
+  // Phase C — changed files per workspace (live git, cached diff-stat fallback) for overlap.
+  async function gatherChangedFiles() {
+    const changedFilesByWs = new Map<string, string[]>();
+    await Promise.allSettled(
+      scoredWorkspaces
+        .filter((w) => w.workingDir && (w.status === "active" || w.status === "reviewing" || w.status === "fixing"))
+        .map(async (w) => {
+          try {
+            const diffRef = w.isDirect ? "HEAD" : (w.baseBranch || defaultBranch);
+            if (!diffRef || !w.workingDir) return;
+            const files = await getChangedFileNames(w.workingDir, diffRef);
+            changedFilesByWs.set(w.id, files);
+          } catch { /* ignore git failures */ }
+        }),
+    );
 
-  // Use cached diff-stat data for workspaces we couldn't get live files for
-  for (const w of scoredWorkspaces) {
-    if (!changedFilesByWs.has(w.id) && w.diffStatCacheFilesChanged && w.diffStatCacheFilesChanged > 0) {
-      // We don't have actual filenames from cache, leave empty — overlap will be 0
-      changedFilesByWs.set(w.id, []);
+    // Use cached diff-stat data for workspaces we couldn't get live files for
+    for (const w of scoredWorkspaces) {
+      if (!changedFilesByWs.has(w.id) && w.diffStatCacheFilesChanged && w.diffStatCacheFilesChanged > 0) {
+        // We don't have actual filenames from cache, leave empty — overlap will be 0
+        changedFilesByWs.set(w.id, []);
+      }
     }
+    return changedFilesByWs;
   }
+  const changedFilesByWs = await gatherChangedFiles();
 
   // Compute per-workspace overlap counts
   const overlapCountByWs = computeFileOverlapCounts(changedFilesByWs);
 
-  // Build risk entries
+  // Phase D — assemble a scored risk entry per workspace.
   const now = Date.now();
-  const entries: WorkspaceRiskEntry[] = [];
-
-  for (const w of scoredWorkspaces) {
-    const issue = issueById.get(w.issueId);
-    if (!issue) continue;
-
-    const latestSession = latestSessionByWs.get(w.id) ?? null;
-    const lastSessionAt = latestSession
-      ? (latestSession.status === "running" ? latestSession.startedAt : latestSession.endedAt)
-      : null;
-
-    const conflicts = w.conflictCacheCheckedAt && w.conflictCacheHasConflicts !== null
-      ? {
-          hasConflicts: w.conflictCacheHasConflicts ?? false,
-          conflictingFiles: (() => {
-            try { return JSON.parse(w.conflictCacheFiles ?? "[]") as string[]; } catch { return []; }
-          })(),
-        }
-      : null;
-
-    const diffStats = w.diffStatCacheCheckedAt && w.diffStatCacheFilesChanged !== null
-      ? {
-          filesChanged: w.diffStatCacheFilesChanged ?? 0,
-          insertions: w.diffStatCacheInsertions ?? 0,
-          deletions: w.diffStatCacheDeletions ?? 0,
-        }
-      : null;
-
-    const { riskScore, riskLevel, signals } = scoreWorkspaceRisk({
+  // Gather one workspace's scoring inputs (per-signal map lookups + cache parses).
+  function buildScoreInput(w: typeof scoredWorkspaces[0], latestSession: { status: string; startedAt: string; endedAt: string | null } | null) {
+    return {
       workspaceStatus: w.status,
-      lastSessionAt,
+      lastSessionAt: selectLastSessionAt(latestSession),
       sessionStatus: latestSession?.status ?? null,
-      diffStats,
-      conflicts,
+      diffStats: parseDiffStatCache(w),
+      conflicts: parseConflictCache(w),
       recentFailureCount: failureCountByWs.get(w.id) ?? 0,
       pendingQuestionCount: pendingQuestionsByWs.get(w.id) ?? 0,
       overlapFileCount: overlapCountByWs.get(w.id) ?? 0,
       nowMs: now,
-    });
-
-    entries.push({
-      workspaceId: w.id,
-      issueId: issue.id,
-      issueNumber: issue.issueNumber,
-      issueTitle: issue.title,
-      issueStatusName: statusNameById.get(issue.statusId) ?? "Unknown",
-      branch: w.branch,
-      workspaceStatus: w.status,
-      riskLevel,
-      riskScore,
-      signals,
-      changedFiles: changedFilesByWs.get(w.id) ?? [],
-    });
+    };
   }
+  function buildEntries(): WorkspaceRiskEntry[] {
+    const entries: WorkspaceRiskEntry[] = [];
+    for (const w of scoredWorkspaces) {
+      const issue = issueById.get(w.issueId);
+      if (!issue) continue;
+
+      const latestSession = latestSessionByWs.get(w.id) ?? null;
+      const { riskScore, riskLevel, signals } = scoreWorkspaceRisk(buildScoreInput(w, latestSession));
+
+      entries.push({
+        workspaceId: w.id,
+        issueId: issue.id,
+        issueNumber: issue.issueNumber,
+        issueTitle: issue.title,
+        issueStatusName: statusNameById.get(issue.statusId) ?? "Unknown",
+        branch: w.branch,
+        workspaceStatus: w.status,
+        riskLevel,
+        riskScore,
+        signals,
+        changedFiles: changedFilesByWs.get(w.id) ?? [],
+      });
+    }
+    return entries;
+  }
+  const entries = buildEntries();
 
   // Sort by risk score descending, then by issue number ascending
   entries.sort((a, b) => b.riskScore - a.riskScore || (a.issueNumber ?? 0) - (b.issueNumber ?? 0));
