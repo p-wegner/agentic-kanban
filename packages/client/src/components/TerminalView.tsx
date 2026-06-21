@@ -1,12 +1,18 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
-import { extractMeaningfulOutput } from "@agentic-kanban/shared";
-import { createAgentOutputParser, type AgentOutputFormat, type DisplayEvent } from "../lib/agent-output-parser.js";
+import { type AgentOutputFormat, type DisplayEvent } from "../lib/agent-output-parser.js";
 import {
   MAX_DISPLAY_EVENTS,
   truncateEventsForDisplay,
   SEARCH_FILTERS,
   buildTranscriptSearchEntries,
+  buildDisplayEventsFromMessages,
+  computeSubagentGrouping,
+  markerColorForEvent,
+  CONNECTION_STATUS_COLORS,
+  CONNECTION_STATUS_LABELS,
+  buildSessionDownloadText,
+  buildSessionDownloadFilename,
   type SearchFilter,
 } from "../lib/terminal-transcript.js";
 import { renderParsedEvent, highlightText, type RenderContext } from "./TerminalEventRenderer.js";
@@ -39,13 +45,12 @@ export function TerminalView({ messages, connectionState, parseOutput = "minimal
   const [searchFilters, setSearchFilters] = useState<Set<SearchFilter>>(new Set());
 
   const handleDownload = useCallback(() => {
-    const lines = extractMeaningfulOutput(messages.map(m => ({ ...m, data: m.data ?? null })), 10000);
-    const text = lines.join("\n");
+    const text = buildSessionDownloadText(messages);
     const blob = new Blob([text], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = sessionId ? `session-${sessionId}.txt` : "session-output.txt";
+    a.download = buildSessionDownloadFilename(sessionId);
     a.click();
     URL.revokeObjectURL(url);
   }, [messages, sessionId]);
@@ -61,52 +66,9 @@ export function TerminalView({ messages, connectionState, parseOutput = "minimal
 
   // Re-parse all messages when they change or parseOutput toggles
   useEffect(() => {
-    if (parseOutput === "false") {
-      setDisplayEvents(
-        messages.map((msg) => {
-          if (msg.type === "exit") {
-            return { kind: "raw" as const, text: `Process exited with code ${msg.exitCode ?? "unknown"}` };
-          }
-          return { kind: "raw" as const, text: msg.data || "" };
-        }).filter((e) => e.text.length > 0),
-      );
-      return;
-    }
-
-    const parser = createAgentOutputParser(outputFormat);
-    const events: DisplayEvent[] = [];
-
-    for (const msg of messages) {
-      if (msg.type === "exit") {
-        events.push({ kind: "raw", text: `Process exited with code ${msg.exitCode ?? "unknown"}` });
-        continue;
-      }
-      if (msg.type === "bisect") {
-        try {
-          const parsed = JSON.parse(msg.data || "{}") as { breakingCommitSha?: string; message?: string; failingTestName?: string; status?: string };
-          events.push({
-            kind: "raw",
-            text: parsed.breakingCommitSha
-              ? `Auto-bisect result: ${parsed.breakingCommitSha} ${parsed.message ?? ""}${parsed.failingTestName ? `\nFailing test: ${parsed.failingTestName}` : ""}`
-              : `Auto-bisect result: ${parsed.status ?? "finished"}`,
-          });
-        } catch {
-          events.push({ kind: "raw", text: msg.data || "Auto-bisect result" });
-        }
-        continue;
-      }
-      if (msg.type === "stderr") {
-        events.push({ kind: "raw", text: msg.data || "" });
-        continue;
-      }
-      if (msg.data) {
-        events.push(...parser.feed(msg.data + "\n"));
-      }
-    }
-
-    events.push(...parser.flush());
-    setDisplayEvents(events);
-    setExpandedSections(new Set());
+    setDisplayEvents(buildDisplayEventsFromMessages(messages, parseOutput, outputFormat));
+    // Collapse expanded sections only when (re)parsing; the raw passthrough leaves them.
+    if (parseOutput !== "false") setExpandedSections(new Set());
   }, [messages, parseOutput, outputFormat]);
 
   // Smart autoscroll: only scroll when user is at bottom
@@ -196,98 +158,19 @@ export function TerminalView({ messages, connectionState, parseOutput = "minimal
     };
   }, [isMaximized]);
 
-  const statusColors: Record<string, string> = {
-    connecting: "bg-yellow-400",
-    open: "bg-green-400",
-    closed: "bg-gray-400",
-    error: "bg-red-400",
-  };
-
-  const statusLabels: Record<string, string> = {
-    connecting: "Connecting...",
-    open: "Connected",
-    closed: "Disconnected",
-    error: "Connection Error",
-  };
+  const statusColors = CONNECTION_STATUS_COLORS;
+  const statusLabels = CONNECTION_STATUS_LABELS;
 
   const isParsed = parseOutput !== "false" && visibleEvents.some((e) => e.kind !== "raw");
 
   const toggleMaximize = () => setIsMaximized((v) => !v);
 
-  // Compute which subagent tool_use_ids are still active (started but no result yet)
-  // Uses proper ID matching: task_started.toolUseId → Agent tool_use.id → tool_result.toolUseId
-  const activeSubagentToolUseIds = (() => {
-    const startedIds = new Set<string>();
-    const completedIds = new Set<string>();
-    for (const ev of visibleEvents) {
-      if (ev.kind === "task_started" && ev.toolUseId) {
-        startedIds.add(ev.toolUseId);
-      }
-      if (ev.kind === "tool_result" && ev.toolName === "Agent" && ev.toolUseId) {
-        completedIds.add(ev.toolUseId);
-      }
-    }
-    const activeSet = new Set<string>();
-    for (const id of startedIds) {
-      if (!completedIds.has(id)) {
-        activeSet.add(id);
-      }
-    }
-    return activeSet;
-  })();
-
-  // Build grouping info: for each event, determine if it belongs to a subagent section
-  // A subagent section spans from an Agent tool_use event through its task_started,
-  // any nested events, to the corresponding tool_result.
-  // Events between an Agent tool_use and its tool_result that aren't part of another
-  // subagent are grouped under that subagent.
-  const subagentGroups = (() => {
-    // Map: toolUseId → { startIdx, endIdx, description, subagentType }
-    const groups = new Map<string, { startIdx: number; endIdx: number; description: string; subagentType: string }>();
-    const openAgents = new Map<string, { idx: number; description: string; subagentType: string }>();
-
-    for (let i = 0; i < visibleEvents.length; i++) {
-      const ev = visibleEvents[i];
-      if (ev.kind === "tool_use" && ev.name === "Agent" && ev.id) {
-        openAgents.set(ev.id, {
-          idx: i,
-          description: (ev.inputParsed?.description as string) || (ev.inputParsed?.prompt as string) || "",
-          subagentType: (ev.inputParsed?.subagent_type as string) || "",
-        });
-      }
-      if (ev.kind === "tool_result" && ev.toolName === "Agent" && ev.toolUseId && openAgents.has(ev.toolUseId)) {
-        const opener = openAgents.get(ev.toolUseId)!;
-        groups.set(ev.toolUseId, {
-          startIdx: opener.idx,
-          endIdx: i,
-          description: opener.description,
-          subagentType: opener.subagentType,
-        });
-        openAgents.delete(ev.toolUseId);
-      }
-    }
-    // Still-open agents (running)
-    for (const [id, opener] of openAgents) {
-      groups.set(id, {
-        startIdx: opener.idx,
-        endIdx: visibleEvents.length - 1,
-        description: opener.description,
-        subagentType: opener.subagentType,
-      });
-    }
-    return groups;
-  })();
-
-  // Map: event index → toolUseId of the containing subagent group
-  const eventToSubagent = (() => {
-    const map = new Map<number, string>();
-    for (const [toolUseId, group] of subagentGroups) {
-      for (let i = group.startIdx; i <= group.endIdx; i++) {
-        map.set(i, toolUseId);
-      }
-    }
-    return map;
-  })();
+  // Subagent grouping (active set + per-group spans + index→group map) via ID matching:
+  // task_started.toolUseId → Agent tool_use.id → Agent tool_result.toolUseId.
+  const { activeSubagentToolUseIds, subagentGroups, eventToSubagent } = useMemo(
+    () => computeSubagentGrouping(visibleEvents),
+    [visibleEvents],
+  );
 
   const ctx: RenderContext = {
     multiTurn,
@@ -442,19 +325,7 @@ export function TerminalView({ messages, connectionState, parseOutput = "minimal
       const event = visibleEvents[idx];
       if (!event || event.kind === "raw") return;
 
-      let color: string;
-      switch (event.kind) {
-        case "assistant": color = "bg-green-500"; break;
-        case "thinking": color = "bg-gray-500"; break;
-        case "tool_use": color = (event.kind === "tool_use" && event.name === "Agent") ? "bg-brand-500" : "bg-yellow-500"; break;
-        case "tool_result": color = event.isError ? "bg-red-500" : "bg-brand-500"; break;
-        case "result": color = event.success ? "bg-emerald-400" : "bg-red-400"; break;
-        case "init": color = "bg-cyan-400"; break;
-        case "task_started": color = "bg-blue-500"; break;
-        case "notification": color = (event.kind === "notification" && event.key === "user") ? "bg-blue-500" : "bg-orange-500"; break;
-        case "rate_limit": color = "bg-yellow-500"; break;
-        default: color = "bg-gray-600";
-      }
+      const color = markerColorForEvent(event);
 
       const pct = (el instanceof HTMLElement ? el.offsetTop : 0) / container.scrollHeight * 100;
       newMarkers.push({ idx, color, pct });
