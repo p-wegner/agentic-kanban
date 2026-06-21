@@ -11,6 +11,7 @@ import {
   type AssistantBuf,
   type ButlerChatMessage as ChatMessage,
 } from "../lib/butler-event-reducer.js";
+import type { ButlerState, ButlerCommand, ButlerSessionSummary, ButlerSessionMessage, ButlerListItem, TabState } from "../lib/butler-types.js";
 import { formatWindow, formatRelativeTs, backendLabel, modelOptionsForBackend, modelLabel } from "../lib/butler-format.js";
 import { buildButlerUrl } from "../lib/butler-url.js";
 import { parseSlashCommand, filterCommands, applyCommandToInput, nextCycleIndex } from "../lib/butler-slash-commands.js";
@@ -20,40 +21,6 @@ import { ChatBubble } from "./ButlerChatParts.js";
 import { ActivityStrip } from "./ButlerChrome.js";
 import { ButlerTabBar } from "./ButlerTabBar.js";
 import { ButlerViewBody } from "./ButlerViewBody.js";
-
-interface ButlerState {
-  backend?: "claude" | "codex" | "mock";
-  active: boolean;
-  sessionId: string | null;
-  contextTokens?: number;
-  model?: string;
-  contextWindow?: number;
-  mcpConnected?: boolean;
-  selectedModel?: string;
-  selectedProfile?: string;
-}
-
-interface ButlerCommand {
-  name: string;
-  description: string;
-  argumentHint?: string;
-}
-
-/** Format a context-window size: 1000000 -> "1M", 200000 -> "200k". */
-interface ButlerSessionSummary {
-  sessionId: string;
-  startedAt: string;
-  endedAt: string;
-  title: string;
-  turnCount: number;
-  model?: string;
-}
-
-interface ButlerSessionMessage {
-  role: "user" | "assistant";
-  text: string;
-  ts: number;
-}
 
 interface ButlerViewProps {
   projectId: string;
@@ -71,48 +38,6 @@ interface ButlerViewProps {
   initialPrompt?: string;
   /** Called after `initialPrompt` has been prefilled, so the parent can clear it. */
   onInitialPromptConsumed?: () => void;
-}
-
-/** A defined butler plus this project's runtime state for it (GET /:id/butlers). */
-interface ButlerListItem {
-  id: string;
-  name: string;
-  model: string;
-  active: boolean;
-  busy: boolean;
-  contextTokens: number;
-  contextWindow?: number;
-  sessionId: string | null;
-  mcpConnected?: boolean;
-  backend?: "claude" | "codex" | "mock";
-}
-
-// ─── Per-tab state ──────────────────────────────────────────────────────────
-
-interface TabState {
-  butlerId: string;
-  butlerName: string;
-  chatMessages: ChatMessage[];
-  butlerState: ButlerState | null;
-  backend: "claude" | "codex" | "mock";
-  contextTokens: number;
-  model: string | undefined;
-  contextWindow: number | undefined;
-  mcpConnected: boolean | undefined;
-  selectedModel: string;
-  sending: boolean;
-  input: string;
-  profiles: string[];
-  selectedProfile: string;
-  globalProfile: string;
-  commands: ButlerCommand[];
-  historyOpen: boolean;
-  historySessions: ButlerSessionSummary[];
-  historyLoading: boolean;
-  historyTranscript: { session: ButlerSessionSummary; messages: ButlerSessionMessage[] } | null;
-  customizeOpen: boolean;
-  customizePrompt: string;
-  customizeBusy: boolean;
 }
 
 function makeTabState(butlerId: string, butlerName: string): TabState {

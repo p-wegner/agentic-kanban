@@ -1,8 +1,12 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 // Presentational render for ButlerView (container/presenter split). All session
 // state, handlers and refs are threaded in via props with the SAME names as the
 // container's locals (passed by shorthand spread, so mis-pairing is impossible),
 // making the JSX below a verbatim, behaviour-preserving move.
+import type { Dispatch, SetStateAction, RefObject, KeyboardEvent as ReactKeyboardEvent } from "react";
+import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
+import type { LiveSessionStats } from "../lib/useBoardEvents.js";
+import type { ButlerCommand, ButlerSessionSummary, ButlerListItem, TabState } from "../lib/butler-types.js";
+import type { ButlerVoiceButtonHandle } from "./ButlerVoiceButton.js";
 import { AgentQuestionsPanel } from "./AgentQuestionsPanel.js";
 import { ButlerVoiceButton } from "./ButlerVoiceButton.js";
 import { ButlerManageModal } from "./ButlerManageModal.js";
@@ -11,67 +15,67 @@ import { ActivityStrip } from "./ButlerChrome.js";
 import { ButlerTabBar } from "./ButlerTabBar.js";
 
 interface ButlerViewBodyProps {
-  activeModelOptions: any;
-  activeTabId: any;
-  addTabOpen: any;
-  addTabRef: any;
-  appendVoiceTranscript: any;
-  applyCommand: any;
-  availableToOpen: any;
-  backendLabel: any;
-  canOpenMore: any;
-  closeTab: any;
-  columns: any;
-  commandIndex: any;
-  commandIndexRef: any;
-  commandMenuOpen: any;
-  fetchButlers: any;
-  filteredCommands: any;
-  formatRelativeTs: any;
-  formatWindow: any;
-  handleClearContext: any;
-  handleKeyDown: any;
-  handleModelChange: any;
-  handleProfileChange: any;
-  handleSend: any;
-  handleStart: any;
-  handleStop: any;
-  hasButler: any;
-  hasDictatedRef: any;
-  inputRef: any;
-  inputValuesRef: any;
-  interimVoiceText: any;
-  isDictating: any;
-  liveActivity: any;
-  liveStats: any;
-  manageOpen: any;
-  messagesEndRef: any;
-  modelSelectRef: any;
-  onIssueClick: any;
-  openCustomize: any;
-  openHistory: any;
-  openHistoryTranscript: any;
-  openTab: any;
-  openTabs: any;
-  profileSelectRef: any;
-  projectId: any;
-  renameButler: any;
-  renamingTabId: any;
-  sanitizeSpeechText: any;
-  saveCustomize: any;
-  setActiveTabId: any;
-  setAddTabOpen: any;
-  setCommandIndex: any;
-  setInterimVoiceText: any;
-  setIsDictating: any;
-  setManageOpen: any;
-  setRenamingTabId: any;
-  setTabInput: any;
-  tab: any;
-  tabStates: any;
-  updateTab: any;
-  voiceButtonRef: any;
-  voiceInterimRef: any;
+  activeModelOptions: readonly { value: string; label: string }[];
+  activeTabId: string;
+  addTabOpen: boolean;
+  addTabRef: RefObject<HTMLDivElement | null>;
+  appendVoiceTranscript: (chunk: string) => void;
+  applyCommand: (name: string) => void;
+  availableToOpen: ButlerListItem[];
+  backendLabel: (backend?: string) => string;
+  canOpenMore: boolean;
+  closeTab: (butlerId: string) => void;
+  columns: StatusWithIssues[];
+  commandIndex: number;
+  commandIndexRef: RefObject<number>;
+  commandMenuOpen: boolean;
+  fetchButlers: () => Promise<ButlerListItem[]>;
+  filteredCommands: ButlerCommand[];
+  formatRelativeTs: (ts: number, now?: number) => string;
+  formatWindow: (n: number) => string;
+  handleClearContext: () => Promise<void>;
+  handleKeyDown: (e: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
+  handleModelChange: (value: string) => Promise<void>;
+  handleProfileChange: (value: string) => Promise<void>;
+  handleSend: (explicitContent?: string) => Promise<void>;
+  handleStart: () => Promise<void>;
+  handleStop: () => Promise<void>;
+  hasButler: boolean;
+  hasDictatedRef: RefObject<boolean>;
+  inputRef: RefObject<HTMLTextAreaElement | null>;
+  inputValuesRef: RefObject<Record<string, string>>;
+  interimVoiceText: string;
+  isDictating: boolean;
+  liveActivity: Record<string, string>;
+  liveStats: Record<string, LiveSessionStats>;
+  manageOpen: boolean;
+  messagesEndRef: RefObject<HTMLDivElement | null>;
+  modelSelectRef: RefObject<HTMLSelectElement | null>;
+  onIssueClick: (issue: IssueWithStatus) => void;
+  openCustomize: () => Promise<void>;
+  openHistory: () => Promise<void>;
+  openHistoryTranscript: (session: ButlerSessionSummary) => Promise<void>;
+  openTab: (butlerId: string, butlerName: string) => void;
+  openTabs: string[];
+  profileSelectRef: RefObject<HTMLSelectElement | null>;
+  projectId: string;
+  renameButler: (butlerId: string, newName: string) => Promise<void>;
+  renamingTabId: string | null;
+  sanitizeSpeechText: (value: string) => string;
+  saveCustomize: () => Promise<void>;
+  setActiveTabId: Dispatch<SetStateAction<string>>;
+  setAddTabOpen: Dispatch<SetStateAction<boolean>>;
+  setCommandIndex: Dispatch<SetStateAction<number>>;
+  setInterimVoiceText: Dispatch<SetStateAction<string>>;
+  setIsDictating: Dispatch<SetStateAction<boolean>>;
+  setManageOpen: Dispatch<SetStateAction<boolean>>;
+  setRenamingTabId: Dispatch<SetStateAction<string | null>>;
+  setTabInput: (butlerId: string, value: string) => void;
+  tab: TabState | undefined;
+  tabStates: Record<string, TabState>;
+  updateTab: (butlerId: string, patch: Partial<TabState>) => void;
+  voiceButtonRef: RefObject<ButlerVoiceButtonHandle | null>;
+  voiceInterimRef: RefObject<string>;
 }
 
 export function ButlerViewBody({
@@ -242,7 +246,7 @@ export function ButlerViewBody({
                   title="Model for this butler. Ctrl+M cycles models without losing context."
                   className="rounded border border-gray-300 dark:border-gray-600 bg-surface-raised dark:bg-surface-raised-dark px-1.5 py-1 text-xs text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-brand-500"
                 >
-                  {activeModelOptions.map((m: any) => (
+                  {activeModelOptions.map((m) => (
                     <option key={m.value} value={m.value}>{m.label}</option>
                   ))}
                 </select>
@@ -258,7 +262,7 @@ export function ButlerViewBody({
                   className="rounded border border-gray-300 dark:border-gray-600 bg-surface-raised dark:bg-surface-raised-dark px-1.5 py-1 text-xs text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
                 >
                   <option value="">{tab.globalProfile ? `Default (${tab.globalProfile})` : "Default"}</option>
-                  {tab.profiles.map((p: any) => (
+                  {tab.profiles.map((p) => (
                     <option key={p} value={p}>{p}</option>
                   ))}
                 </select>
@@ -339,7 +343,7 @@ export function ButlerViewBody({
                       <p className="text-xs text-gray-400 dark:text-gray-500 text-center py-4">No messages found in this session.</p>
                     ) : (
                       <div className="max-w-3xl mx-auto">
-                        {tab.historyTranscript.messages.map((msg: any, i: number) => (
+                        {tab.historyTranscript.messages.map((msg, i) => (
                           <ChatBubble key={i} msg={{ id: `hist-${i}`, role: msg.role, text: msg.text, ts: msg.ts }} />
                         ))}
                       </div>
@@ -360,7 +364,7 @@ export function ButlerViewBody({
                     <p className="text-xs text-gray-400 dark:text-gray-500 py-2">No past butler sessions found.</p>
                   ) : (
                     <div className="space-y-1">
-                      {tab.historySessions.map((s: any) => (
+                      {tab.historySessions.map((s) => (
                         <button
                           key={s.sessionId}
                           onClick={() => void openHistoryTranscript(s)}
@@ -390,7 +394,7 @@ export function ButlerViewBody({
               </div>
             )}
             <div className="max-w-3xl mx-auto">
-              {tab.chatMessages.map((msg: any) => (
+              {tab.chatMessages.map((msg) => (
                 <ChatBubble key={msg.id} msg={msg} />
               ))}
               {tab.sending && (
@@ -412,7 +416,7 @@ export function ButlerViewBody({
                 {commandMenuOpen && (
                   <div className="absolute bottom-full mb-2 left-0 right-0 max-h-60 overflow-y-auto rounded-xl border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark shadow-lg z-10 py-1">
                     <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-gray-400 dark:text-gray-500">Commands</div>
-                    {filteredCommands.map((cmd: any, i: number) => (
+                    {filteredCommands.map((cmd, i) => (
                       <button
                         key={cmd.name}
                         type="button"
@@ -499,7 +503,7 @@ export function ButlerViewBody({
       )}
       {manageOpen && (
         <ButlerManageModal
-          globalBackend={tab?.backend ?? "claude"}
+          globalBackend={tab?.backend === "codex" ? "codex" : "claude"}
           onClose={() => setManageOpen(false)}
           onChanged={() => { void fetchButlers(); }}
         />
