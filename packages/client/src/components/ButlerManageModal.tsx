@@ -28,7 +28,7 @@ export function ButlerManageModal({ globalBackend, onClose, onChanged }: { globa
     } catch { /* ignore */ }
   }
 
-  useEffect(() => { void refresh(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useEffect(() => { void refresh(); }, []);
 
   async function run(fn: () => Promise<unknown>) {
     setBusy(true);

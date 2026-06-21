@@ -702,7 +702,7 @@ export function WorkspaceCard({
             />
           )}
 
-          {((selectedHistoryId ? historyMessages : (activeSession || completedMessages.length > 0)) || ws.workingDir || true /* always show tab bar for Timeline */) && (
+          {/* always render the tab bar (Timeline included) */ (
             <WorkspaceViewTabs
               ws={ws}
               viewMode={viewMode}

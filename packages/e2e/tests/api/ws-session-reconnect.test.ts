@@ -183,7 +183,7 @@ test.describe("/ws/sessions/:sessionId reconnect + unknown-id behavior", () => {
     await request.post(`${SERVER_URL}/api/workspaces/${wsId}/stop`, { data: {} });
   });
 
-  test("connecting with a bogus session id opens and stays quiet (no error/close) — documented lenient behavior", async ({}) => {
+  test("connecting with a bogus session id opens and stays quiet (no error/close) — documented lenient behavior", async () => {
     // NOTE: ws-handler does NOT validate the session id. An unknown id is accepted: the socket
     // opens, the empty buffer replays nothing, and the server emits no error/close frame. We assert
     // that documented lenient contract: OPEN succeeds and no message arrives within a quiet window,

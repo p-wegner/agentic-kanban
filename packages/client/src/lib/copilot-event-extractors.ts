@@ -203,7 +203,7 @@ export function extractResult(obj: Record<string, unknown>): {
   const usage = asRecord(payload.usage) || asRecord(payload.stats) || payload;
   const status = String(payload.status || payload.subtype || "").toLowerCase();
   return {
-    success: Number(payload.exitCode ?? 0) === 0 && !Boolean(payload.is_error || payload.isError || payload.error) && status !== "error" && status !== "failed",
+    success: Number(payload.exitCode ?? 0) === 0 && !(payload.is_error || payload.isError || payload.error) && status !== "error" && status !== "failed",
     durationMs: Number(payload.duration_ms ?? payload.durationMs ?? usage.sessionDurationMs ?? usage.duration_ms ?? usage.durationMs ?? 0) || 0,
     result: getString(payload, ["result", "message", "summary"]) || stringifyValue(payload.error),
     inputTokens: Number(usage.input_tokens ?? usage.inputTokens ?? usage.prompt_tokens ?? usage.promptTokens ?? 0) || 0,

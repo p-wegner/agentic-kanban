@@ -282,7 +282,7 @@ console.log(
 console.log("─".repeat(78));
 for (const r of rows.slice(0, top)) {
   let label = r.key;
-  if (by === "session") label = `${r.provider === "codex" ? "cx" : "cc"}:${r.key.split(":")[1]} ${(r.project.match(/ak-(\d+)/) || [, ""])[1] ? "#" + r.project.match(/ak-(\d+)/)[1] : ""}`.trim();
+  if (by === "session") label = `${r.provider === "codex" ? "cx" : "cc"}:${r.key.split(":")[1]} ${(r.project.match(/ak-(\d+)/) || [undefined, ""])[1] ? "#" + r.project.match(/ak-(\d+)/)[1] : ""}`.trim();
   console.log(
     `${pad(label, keyW)} ${padL(fmtUsd(r.cost), 9)} ${padL(fmtTok(r.tokens.output), 8)} ` +
     `${padL(fmtTok(r.tokens.input), 8)} ${padL(fmtTok(r.tokens.cacheCreation), 8)} ` +

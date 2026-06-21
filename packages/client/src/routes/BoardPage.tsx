@@ -6,7 +6,7 @@ import { useBoardLiveHandlers } from "../hooks/useBoardLiveHandlers.js";
 import { useBoardPanelNavigation } from "../hooks/useBoardPanelNavigation.js";
 import { useProjectManagement } from "../hooks/useProjectManagement.js";
 import { useBoardFilters } from "../hooks/useBoardFilters.js";
-import { useBoardIssueActions } from "../hooks/useBoardIssueActions.js";
+import { createBoardIssueActions } from "../hooks/createBoardIssueActions.js";
 import { useBoardMiscHandlers } from "../hooks/useBoardMiscHandlers.js";
 import { BoardPageView } from "../components/BoardPageView.js";
 import { deferUntilIdle } from "../lib/boardCardSnapshot.js";
@@ -602,7 +602,7 @@ export function BoardPage() {
   }
 
   const activeProject = projects.find((p) => p.id === activeProjectId);
-  const { handleCreateIssue, handleUpdateIssue, handleDeleteIssue, handleDropOnAgentSlot } = useBoardIssueActions({
+  const { handleCreateIssue, handleUpdateIssue, handleDeleteIssue, handleDropOnAgentSlot } = createBoardIssueActions({
     activeProject: activeProject ?? null, activeAgentsTarget, columns, columnsRef, pendingBoardRefreshRef,
     refetchBoard, setColumns, setCreatingInColumnId, setError, setExpandedCreatePanel,
     setMutating, setPendingIssueIds, setPendingWorkspaceIssueIds, setSelectedIssue,
