@@ -103,7 +103,26 @@ export function createWorkspacesRoute(
   // POST /api/workspaces/preview — dry-run preview (read-only, no side effects)
   // Must be registered BEFORE /:id to avoid being matched as an ID param
   router.post("/preview", async (c) => {
-    const body = await parseJsonBody(c);
+    const body = await parseJsonBody<{
+      issueId?: string;
+      branch?: string;
+      isDirect?: boolean;
+      baseBranch?: string;
+      requiresReview?: boolean;
+      thoroughReview?: boolean;
+      planMode?: boolean;
+      tddMode?: boolean;
+      includeVisualProof?: boolean;
+      skipSetup?: boolean;
+      customPrompt?: string;
+      clarifications?: string;
+      skillId?: string;
+      skillName?: string;
+      profile?: { provider?: string; name?: string };
+      claudeProfile?: string;
+      model?: string;
+      skipContextPacker?: boolean;
+    }>(c);
     if (!body.issueId) {
       return c.json({ error: "issueId is required" }, 400);
     }
@@ -167,7 +186,26 @@ export function createWorkspacesRoute(
 
   // POST /api/workspaces — create workspace with worktree + auto-launch agent
   router.post("/", async (c) => {
-    const body = await parseJsonBody(c);
+    const body = await parseJsonBody<{
+      issueId?: string;
+      branch?: string;
+      isDirect?: boolean;
+      baseBranch?: string;
+      requiresReview?: boolean;
+      thoroughReview?: boolean;
+      planMode?: boolean;
+      tddMode?: boolean;
+      includeVisualProof?: boolean;
+      skipSetup?: boolean;
+      customPrompt?: string;
+      clarifications?: string;
+      skillId?: string;
+      skillName?: string;
+      profile?: { provider?: string; name?: string };
+      claudeProfile?: string;
+      model?: string;
+      skipContextPacker?: boolean;
+    }>(c);
     const isDirect = body.isDirect === true;
     if (!body.issueId) {
       return c.json({ error: "issueId is required" }, 400);

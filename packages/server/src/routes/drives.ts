@@ -70,7 +70,11 @@ export function createDrivesRoute(database: Database) {
 
   // POST /api/projects/:projectId/drives  — starts a drive
   router.post("/:projectId/drives", async (c) => {
-    const body = await parseJsonBody(c);
+    const body = await parseJsonBody<{
+      metaIssueId?: string | null;
+      target: string;
+      completionContract?: string | null;
+    }>(c);
     const result = await service.start(c.req.param("projectId"), body);
     return c.json(result, 201);
   });

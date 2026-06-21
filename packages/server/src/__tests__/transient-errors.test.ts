@@ -97,9 +97,8 @@ describe("butler-sdk runLoop swallows ECONNRESET from the SDK iterator", () => {
     let caughtTransient = false;
     let reThrew = false;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       for await (const _msg of iter) {
-        // drain
+        void _msg; // drain
       }
     } catch (err) {
       if (isTransientNetworkError(err)) {

@@ -37,7 +37,7 @@ export function createAgentSkillsRoute(database: Database) {
 
   // POST /api/agent-skills — create a skill
   router.post("/", async (c) => {
-    const body = await parseJsonBody(c);
+    const body = await parseJsonBody<{ name: string; description: string; prompt: string; model?: string; projectId?: string | null }>(c);
     const skill = await agentSkillService.createSkill(body);
     return c.json(skill, 201);
   });
@@ -45,7 +45,7 @@ export function createAgentSkillsRoute(database: Database) {
   // PUT /api/agent-skills/:id — update a skill
   router.put("/:id", async (c) => {
     const id = c.req.param("id");
-    const body = await parseJsonBody(c);
+    const body = await parseJsonBody<{ name?: string; description?: string; prompt?: string; model?: string; projectId?: string | null }>(c);
     const updated = await agentSkillService.updateSkill(id, body);
     return c.json(updated);
   });

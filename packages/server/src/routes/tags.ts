@@ -14,7 +14,7 @@ export function createTagsRoute(database: Database) {
 
   // POST /api/tags
   router.post("/", async (c) => {
-    const body = await parseJsonBody(c);
+    const body = await parseJsonBody<{ name?: string; color?: string | null }>(c);
     if (!body.name) {
       return c.json({ error: "name is required" }, 400);
     }
@@ -24,7 +24,7 @@ export function createTagsRoute(database: Database) {
 
   // PATCH /api/tags/:id
   router.patch("/:id", async (c) => {
-    const body = await parseJsonBody(c);
+    const body = await parseJsonBody<{ name?: string; color?: string }>(c);
     const result = await tagService.updateTagById(c.req.param("id"), body);
     return c.json(result);
   });

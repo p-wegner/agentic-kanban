@@ -24,7 +24,16 @@ export function createScheduledRunsRoute(
 
   // POST /api/scheduled-runs — create
   router.post("/", async (c) => {
-    const body = await parseJsonBody(c);
+    const body = await parseJsonBody<{
+      name: string;
+      projectId: string;
+      description?: string;
+      prompt?: string;
+      skillId?: string;
+      intervalMinutes?: number;
+      cronExpression?: string;
+      enabled?: boolean;
+    }>(c);
     const created = await service.create(body);
     return c.json(created, 201);
   });

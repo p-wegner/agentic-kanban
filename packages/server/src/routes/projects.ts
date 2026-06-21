@@ -78,7 +78,15 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
 
   // POST /api/projects
   router.post("/", async (c) => {
-    const body = await parseJsonBody(c);
+    const body = await parseJsonBody<{
+      repoPath: string;
+      name?: string;
+      description?: string;
+      color?: string;
+      gitignoreTemplate?: string;
+      generateReadme?: boolean;
+      exportSkillsOnRegistration?: boolean;
+    }>(c);
     const result = await projectService.registerProject(body);
     options?.boardEvents?.broadcastProjectsChanged(result.id, "project_created");
     return c.json(result, 201);
@@ -86,7 +94,14 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
 
   // POST /api/projects/create — create a new directory as a git repo and register it
   router.post("/create", async (c) => {
-    const body = await parseJsonBody(c);
+    const body = await parseJsonBody<{
+      name: string;
+      path?: string;
+      description?: string;
+      color?: string;
+      gitignoreTemplate?: string;
+      generateReadme?: boolean;
+    }>(c);
     const result = await projectService.createProject(body);
     options?.boardEvents?.broadcastProjectsChanged(result.id, "project_created");
     return c.json(result, 201);
@@ -159,7 +174,7 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
   // POST /api/projects/:id/statuses
   router.post("/:id/statuses", async (c) => {
     const projectId = c.req.param("id");
-    const body = await parseJsonBody(c);
+    const body = await parseJsonBody<{ name: string; sortOrder?: number }>(c);
     const result = await projectService.addStatus(projectId, body.name, body.sortOrder ?? 0);
     return c.json(result, 201);
   });

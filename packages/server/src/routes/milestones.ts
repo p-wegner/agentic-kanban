@@ -20,7 +20,7 @@ export function createMilestonesRoute(database: Database) {
 
   // POST /api/projects/:projectId/milestones
   router.post("/:projectId/milestones", async (c) => {
-    const body = await parseJsonBody(c);
+    const body = await parseJsonBody<{ name: string; dueDate?: string | null }>(c);
     try {
       const result = await service.create(c.req.param("projectId"), body);
       return c.json(result, 201);
@@ -34,7 +34,7 @@ export function createMilestonesRoute(database: Database) {
 
   // PUT /api/projects/:projectId/milestones/:id
   router.put("/:projectId/milestones/:id", async (c) => {
-    const body = await parseJsonBody(c);
+    const body = await parseJsonBody<{ name?: string; dueDate?: string | null }>(c);
     try {
       const result = await service.update(c.req.param("projectId"), c.req.param("id"), body);
       return c.json(result);

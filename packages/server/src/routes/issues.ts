@@ -191,7 +191,20 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
 
   // POST /api/issues
   router.post("/", async (c) => {
-    const body = await parseJsonBody(c);
+    const body = await parseJsonBody<{
+      projectId: string;
+      title: string;
+      description?: string;
+      priority?: string;
+      issueType?: string;
+      skipAutoReview?: boolean;
+      estimate?: string | null;
+      sortOrder?: number;
+      statusId?: string;
+      workflowTemplateId?: string | null;
+      externalKey?: string | null;
+      externalUrl?: string | null;
+    }>(c);
     if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
     if (!body.title?.trim()) return c.json({ error: "title is required" }, 400);
 
@@ -482,7 +495,7 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   // POST /api/issues/:id/tags
   router.post("/:id/tags", async (c) => {
     const issueId = c.req.param("id");
-    const body = await parseJsonBody(c);
+    const body = await parseJsonBody<{ tagId: string }>(c);
     if (!body.tagId) return c.json({ error: "tagId is required" }, 400);
     const result = await issueService.assignTag(issueId, body.tagId);
     return c.json(result, 201);
@@ -505,7 +518,7 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   // POST /api/issues/:id/dependencies
   router.post("/:id/dependencies", async (c) => {
     const issueId = c.req.param("id");
-    const body = await parseJsonBody(c);
+    const body = await parseJsonBody<{ dependsOnId: string; type?: string }>(c);
     if (!body.dependsOnId) return c.json({ error: "dependsOnId is required" }, 400);
 
     const result = await issueService.addDependency(issueId, body.dependsOnId, body.type);
