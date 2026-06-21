@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { projects } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
+import { getAllProjects } from "../repositories/project.repository.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -35,11 +35,7 @@ export async function getDirtyTrackedSourceFiles(repoPath: string): Promise<stri
 }
 
 export async function scanDirtyMainCheckouts(database: Database = db): Promise<DirtyMainCheckoutWarning[]> {
-  const projectRows = await database.select({
-    id: projects.id,
-    name: projects.name,
-    repoPath: projects.repoPath,
-  }).from(projects);
+  const projectRows = await getAllProjects(database, { includeArchived: true });
   const detectedAt = new Date().toISOString();
   const warnings: DirtyMainCheckoutWarning[] = [];
 

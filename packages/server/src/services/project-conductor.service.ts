@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { preferences, projects } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
+import { getAllProjects } from "../repositories/project.repository.js";
 import {
   PROJECT_CONDUCTOR_OBJECTIVE_RELATIVE_PATH,
   PROJECT_CONDUCTOR_STATE_RELATIVE_DIR,
@@ -100,7 +101,7 @@ export function startProjectConductorSupervisor(options: { database: Database; b
     try {
       if (!existsSync(loopScript)) return;
       const configs = await enabledProjectConductors(database);
-      const projectRows = await database.select().from(projects);
+      const projectRows = await getAllProjects(database, { includeArchived: true });
       const byId = new Map(projectRows.map((project) => [project.id, project]));
 
       for (const project of projectRows) {
