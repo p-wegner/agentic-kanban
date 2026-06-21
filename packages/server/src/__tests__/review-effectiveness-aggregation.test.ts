@@ -185,6 +185,50 @@ describe("aggregateReviewWorkspaceStats", () => {
     expect(byWs.get("ws1")!.changeAfterReview).toBe(false);
   });
 
+  it("does NOT flag changeAfterReview when a build's startedAt EXACTLY equals firstReviewAt (strict >)", () => {
+    const T = "2026-01-01T01:00:00.000Z";
+    const { byWs } = aggregateReviewWorkspaceStats(
+      [
+        row({ sessionId: "b", triggerType: "review", startedAt: T }),
+        row({ sessionId: "c", triggerType: "agent", startedAt: T }), // same instant as the review
+      ],
+      [],
+    );
+    expect(byWs.get("ws1")!.changeAfterReview).toBe(false);
+  });
+
+  it("keeps firstReviewAt fixed while lastReviewAt advances, and flags a build after the FIRST review", () => {
+    const { byWs } = aggregateReviewWorkspaceStats(
+      [
+        row({ sessionId: "r1", triggerType: "review", startedAt: "2026-01-01T01:00:00.000Z" }),
+        row({ sessionId: "r2", triggerType: "review", startedAt: "2026-01-01T02:00:00.000Z" }),
+        row({ sessionId: "b3", triggerType: "agent", startedAt: "2026-01-01T03:00:00.000Z" }),
+      ],
+      [],
+    );
+    const ws = byWs.get("ws1")!;
+    expect(ws.reviews).toBe(2);
+    expect(ws.firstReviewAt).toBe("2026-01-01T01:00:00.000Z");
+    expect(ws.lastReviewAt).toBe("2026-01-01T02:00:00.000Z");
+    expect(ws.changeAfterReview).toBe(true);
+    expect(ws.reviewSessionIds).toEqual(["r1", "r2"]);
+  });
+
+  // Documents the ascending-startedAt PRECONDITION: the function does not sort, so an
+  // out-of-order build (later timestamp, but listed before the review) is processed while
+  // firstReviewAt is still null and therefore does NOT flag a bounce-back. The repository's
+  // .orderBy(sessions.startedAt) is what upholds the contract in production.
+  it("relies on input ordering — an out-of-order later build does not flag changeAfterReview", () => {
+    const { byWs } = aggregateReviewWorkspaceStats(
+      [
+        row({ sessionId: "b", triggerType: "agent", startedAt: "2026-01-01T03:00:00.000Z" }), // later, but first in the array
+        row({ sessionId: "r", triggerType: "review", startedAt: "2026-01-01T01:00:00.000Z" }),
+      ],
+      [],
+    );
+    expect(byWs.get("ws1")!.changeAfterReview).toBe(false);
+  });
+
   it("attaches comment totals/resolved from the comment rows to the first-seen workspace", () => {
     const { byWs } = aggregateReviewWorkspaceStats(
       [row({ workspaceId: "ws1", triggerType: "review" })],
