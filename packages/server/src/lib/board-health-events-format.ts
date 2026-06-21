@@ -51,6 +51,68 @@ export function parseBoardHealthCategories(raw: string | undefined): BoardHealth
 }
 
 /**
+ * Row shape (subset) emitted by the board-health-events repository that the wire
+ * DTOs are projected from. `cycleId` is only present on the single-event read.
+ */
+export interface BoardHealthEventRecord {
+  id: string;
+  cycleId?: string | null;
+  createdAt: string;
+  eventType: string;
+  category: string | null;
+  issueNumber: number | null;
+  summary: string;
+  details: string | null;
+}
+
+/** UI severity for an event row: errors render distinctly, everything else is info. */
+export function boardHealthEventLevel(eventType: string): "error" | "info" {
+  return eventType === "error" ? "error" : "info";
+}
+
+/**
+ * Parse a single event's `details` blob for the full (non-compacted) view: the
+ * parsed JSON value, the raw string when it is not valid JSON, or null when absent.
+ */
+export function parseBoardHealthEventDetails(raw: string | null): unknown {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}
+
+/** Project a row into the list DTO (compacted one-line `details`). */
+export function toBoardHealthEventSummary(event: BoardHealthEventRecord) {
+  return {
+    id: event.id,
+    timestamp: event.createdAt,
+    level: boardHealthEventLevel(event.eventType),
+    type: event.eventType,
+    category: event.category ?? null,
+    issueNumber: event.issueNumber ?? null,
+    summary: event.summary,
+    details: compactBoardHealthEventDetails(event.details),
+  };
+}
+
+/** Project a row into the single-event DTO (full parsed `details` + cycleId). */
+export function toBoardHealthEventDetail(event: BoardHealthEventRecord) {
+  return {
+    id: event.id,
+    cycleId: event.cycleId ?? null,
+    timestamp: event.createdAt,
+    level: boardHealthEventLevel(event.eventType),
+    type: event.eventType,
+    category: event.category ?? null,
+    issueNumber: event.issueNumber ?? null,
+    summary: event.summary,
+    details: parseBoardHealthEventDetails(event.details),
+  };
+}
+
+/**
  * Summarize a JSON `details` blob into a short human-readable line for the events
  * list: scalars verbatim, arrays as "N items", objects as the first 4 non-null
  * fields ("key: value" / "key: N items" / "key: N fields"). Falls back to a 160-char
