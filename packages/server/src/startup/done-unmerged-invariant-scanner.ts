@@ -80,6 +80,19 @@ export interface DoneUnmergedScanResult {
   autoMerged: number;
 }
 
+/** Resolve the scanner's injectable git/db dependencies, defaulting each to the real implementation. */
+function resolveScanDeps(deps: DoneUnmergedScannerDeps) {
+  return {
+    database: deps.database ?? db,
+    ancestorCheck: deps.checkAncestor ?? checkBranchTipIsAncestor,
+    commitCounter: deps.countCommits ?? countUniqueCommits,
+    conflictDetector: deps.detectConflicts ?? detectConflictsByBranch,
+    behindCounter: deps.countBehind ?? countBehindCommits,
+    gitMerge: deps.mergeGitBranch ?? mergeBranch,
+    maxBehind: deps.maxCommitsBehindBase ?? MAX_COMMITS_BEHIND_BASE,
+  };
+}
+
 /**
  * Startup invariant scanner that detects Done-but-unmerged issues (silent-merge-loss)
  * and performs SAFE forward-only auto-recovery: merges clean ahead-only branches into base,
@@ -96,13 +109,8 @@ export interface DoneUnmergedScanResult {
 export async function scanDoneUnmergedWorkspaces(
   deps: DoneUnmergedScannerDeps & { reopenToInReview?: boolean } = {},
 ): Promise<DoneUnmergedScanResult> {
-  const database = deps.database ?? db;
-  const ancestorCheck = deps.checkAncestor ?? checkBranchTipIsAncestor;
-  const commitCounter = deps.countCommits ?? countUniqueCommits;
-  const conflictDetector = deps.detectConflicts ?? detectConflictsByBranch;
-  const behindCounter = deps.countBehind ?? countBehindCommits;
-  const gitMerge = deps.mergeGitBranch ?? mergeBranch;
-  const maxBehind = deps.maxCommitsBehindBase ?? MAX_COMMITS_BEHIND_BASE;
+  const { database, ancestorCheck, commitCounter, conflictDetector, behindCounter, gitMerge, maxBehind } =
+    resolveScanDeps(deps);
 
   const isEnabled = deps.enabled !== undefined
     ? deps.enabled
@@ -165,13 +173,19 @@ export async function scanDoneUnmergedWorkspaces(
   // Track which workspaces have already been attempted this cycle (idempotency guard).
   const attemptedWorkspaceIds = new Set<string>();
 
-  for (const c of candidates) {
-    if (!c.branch || !c.baseBranch || !c.repoPath) continue;
+  /** One row of the candidate query above (a non-direct, unmerged workspace on a Done issue). */
+  type DoneUnmergedCandidate = (typeof candidates)[number];
+
+  // Flag phase: decide whether one candidate is a Done-but-unmerged finding (or null to
+  // skip), recording the violation telemetry. Closes over the injected git fns + maxBehind
+  // + issuesWithAMergedWorkspace + the findings accumulator; runs the gated git I/O in order.
+  async function evaluateCandidateForFinding(c: DoneUnmergedCandidate): Promise<DoneUnmergedFinding | null> {
+    if (!c.branch || !c.baseBranch || !c.repoPath) return null;
 
     // Guard #1: issue already has a genuinely-merged workspace — not a silent-merge-loss.
     if (issuesWithAMergedWorkspace.has(c.issueId)) {
       console.log(`[done-unmerged-scanner] skipping issue #${c.issueNumber ?? "?"} — has a merged workspace (not a silent-merge-loss)`);
-      continue;
+      return null;
     }
 
     let result: Awaited<ReturnType<typeof checkBranchTipIsAncestor>>;
@@ -179,14 +193,14 @@ export async function scanDoneUnmergedWorkspaces(
       result = await ancestorCheck(c.repoPath, c.branch, c.baseBranch, c.workingDir ?? undefined);
     } catch (err) {
       console.warn(`[done-unmerged-scanner] git ancestry check failed for workspace ${c.wsId}:`, err instanceof Error ? err.message : err);
-      continue;
+      return null;
     }
 
     // If the branch IS already an ancestor of base, the work landed — skip.
-    if (result.isAncestor) continue;
+    if (result.isAncestor) return null;
 
     // Branch is not reachable from base — check how many unique commits it has.
-    if (!result.branchSha) continue;
+    if (!result.branchSha) return null;
 
     // Guard #2: staleness check — count how many commits base has that the branch does NOT.
     // A branch 60-658 commits behind is an ancient abandoned workspace (#590 incident), not
@@ -199,7 +213,7 @@ export async function scanDoneUnmergedWorkspaces(
     }
     if (commitsBehind > maxBehind) {
       console.log(`[done-unmerged-scanner] skipping issue #${c.issueNumber ?? "?"} workspace ${c.wsId} — branch is ${commitsBehind} commits behind ${c.baseBranch} (staleness threshold: ${maxBehind})`);
-      continue;
+      return null;
     }
 
     let uniqueCommits: number;
@@ -210,7 +224,7 @@ export async function scanDoneUnmergedWorkspaces(
     }
 
     // Only flag if there is at least 1 unique commit (0-commit branches have no real work).
-    if (uniqueCommits === 0) continue;
+    if (uniqueCommits === 0) return null;
 
     const finding: DoneUnmergedFinding = {
       workspaceId: c.wsId,
@@ -253,14 +267,24 @@ export async function scanDoneUnmergedWorkspaces(
       summary: `Silent merge loss: issue #${c.issueNumber ?? "?"} is '${c.statusName}' but branch '${c.branch}' has ${uniqueCommits} unmerged commit(s) not on ${c.baseBranch}.`,
       details: { workspaceId: c.wsId, branch: c.branch, baseBranch: c.baseBranch, branchSha: result.branchSha, baseSha: result.baseSha, uniqueCommitCount: uniqueCommits },
     }, { database });
+    return finding;
+  }
 
+  // Auto-recovery phase: safe forward-only auto-merge of a flagged finding. Closes over the
+  // injected git fns + database + now, and mutates the cycle counters (autoMerged /
+  // attemptedWorkspaceIds). Same gated I/O order + rate-limit/behind/conflict guards as before.
+  async function attemptForwardOnlyAutoMerge(c: DoneUnmergedCandidate, finding: DoneUnmergedFinding): Promise<void> {
+    // Required fields are guaranteed present here (a finding only exists past
+    // evaluateCandidateForFinding's field guard); re-narrow them for the git calls below
+    // now that this is a separate function scope — the original relied on the loop-level guard.
+    if (!c.branch || !c.baseBranch || !c.repoPath) return;
     // --- SAFE FORWARD-ONLY AUTO-RECOVERY ---
     // Skip if rate limit reached or already attempted this cycle.
     if (autoMerged >= MAX_AUTO_MERGES_PER_CYCLE || attemptedWorkspaceIds.has(c.wsId)) {
       if (autoMerged >= MAX_AUTO_MERGES_PER_CYCLE) {
         console.log(`[done-unmerged-scanner] auto-merge cap (${MAX_AUTO_MERGES_PER_CYCLE}/cycle) reached — leaving workspace ${c.wsId} log-only this cycle`);
       }
-      continue;
+      return;
     }
 
     // Check how far behind base the branch is.
@@ -275,7 +299,7 @@ export async function scanDoneUnmergedWorkspaces(
       console.warn(
         `[done-unmerged-scanner] issue #${c.issueNumber ?? "?"} branch '${c.branch}' is ${behind} commit(s) behind ${c.baseBranch} (limit ${MAX_BEHIND_FOR_AUTO_MERGE}) — leaving log-only`,
       );
-      continue;
+      return;
     }
 
     // Read-only conflict check using the branch names directly from the repo.
@@ -287,18 +311,18 @@ export async function scanDoneUnmergedWorkspaces(
         console.warn(
           `[done-unmerged-scanner] issue #${c.issueNumber ?? "?"} branch '${c.branch}' has merge conflicts with ${c.baseBranch} — leaving log-only`,
         );
-        continue;
+        return;
       }
     } catch (err) {
       console.warn(`[done-unmerged-scanner] conflict check failed for workspace ${c.wsId}:`, err instanceof Error ? err.message : err);
-      continue;
+      return;
     }
 
     // All guards passed: ahead>=1, behind<=limit, no conflicts — attempt auto-merge.
     attemptedWorkspaceIds.add(c.wsId);
     try {
       console.log(
-        `[done-unmerged-scanner] auto-merging: issue #${c.issueNumber ?? "?"} branch '${c.branch}' → ${c.baseBranch} (ahead=${uniqueCommits}, behind=${behind})`,
+        `[done-unmerged-scanner] auto-merging: issue #${c.issueNumber ?? "?"} branch '${c.branch}' → ${c.baseBranch} (ahead=${finding.uniqueCommitCount}, behind=${behind})`,
       );
       await gitMerge(c.repoPath, c.branch, c.baseBranch);
 
@@ -321,7 +345,7 @@ export async function scanDoneUnmergedWorkspaces(
           category: "merge",
           issueNumber: c.issueNumber ?? undefined,
           summary: `Done-but-unmerged auto-recovery: merged branch '${c.branch}' into ${c.baseBranch}. Issue #${c.issueNumber ?? "?"} remains Done.`,
-          details: { workspaceId: c.wsId, branchSha: result.branchSha, baseSha: result.baseSha, uniqueCommitCount: uniqueCommits, behind, autoMergedAt: now },
+          details: { workspaceId: c.wsId, branchSha: finding.branchSha, baseSha: finding.baseSha, uniqueCommitCount: finding.uniqueCommitCount, behind, autoMergedAt: now },
         }, database);
       } catch { /* health event logging is non-fatal */ }
     } catch (err) {
@@ -330,6 +354,12 @@ export async function scanDoneUnmergedWorkspaces(
         err instanceof Error ? err.message : err,
       );
     }
+  }
+
+  for (const c of candidates) {
+    const finding = await evaluateCandidateForFinding(c);
+    if (!finding) continue;
+    await attemptForwardOnlyAutoMerge(c, finding);
   }
 
   if (findings.length > 0) {
