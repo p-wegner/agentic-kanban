@@ -28,6 +28,7 @@ import { IssueDetailHeader } from "./IssueDetailHeader.js";
 // into lib/artifact-utils.ts and lib/artifact-classifiers.ts.
 export { issueArtifactPreview } from "../lib/artifact-utils.js";
 export { issueArtifactKind, issueArtifactAuthor } from "../lib/artifact-classifiers.js";
+import { computeBlockingDependencies, canDecomposeIssue } from "../lib/blockingDependencies.js";
 
 interface StatusOption {
   id: string;
@@ -297,7 +298,7 @@ export function IssueDetailPanel({
           togglingVisualVerify={togglingVisualVerify}
           duplicating={duplicating}
           confirmDelete={confirmDelete}
-          canDecompose={(issue.description?.length ?? 0) > 500 || issueTags.some((t) => t.name === "epic")}
+          canDecompose={canDecomposeIssue(issue.description, issueTags)}
           onHeaderMouseDown={handleHeaderMouseDown}
           onSave={handleSave}
           onCancelEdit={handleCancelEdit}
@@ -338,15 +339,7 @@ export function IssueDetailPanel({
         >
           {/* Blocked banner — shown when issue has unresolved blocking dependencies */}
           {(() => {
-            const RESOLVED = ["done", "cancelled", "ai reviewed"];
-            const blockingDeps = dependencies.dependencies.filter((dep) => {
-              const isIncoming = dep.issueId !== issue.id;
-              const isBlockingType = dep.type === "depends_on" || dep.type === "blocked_by";
-              if (!isBlockingType) return false;
-              if (isIncoming) return false; // incoming depends_on means I'm blocking them, not the other way
-              const statusLower = (dep.issueStatusName ?? "").toLowerCase();
-              return !RESOLVED.includes(statusLower);
-            });
+            const blockingDeps = computeBlockingDependencies(dependencies.dependencies, issue.id);
             if (blockingDeps.length === 0) return null;
             return (
               <div className="bg-amber-50 border border-amber-300 rounded-md px-3 py-2.5 text-sm">
