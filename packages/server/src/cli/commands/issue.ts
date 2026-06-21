@@ -2,7 +2,7 @@ import type { Command } from "commander";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { parseSessionSummary } from "@agentic-kanban/shared";
+import { parseSessionSummary, isTerminalStatusName } from "@agentic-kanban/shared";
 import { runMigrations, getActiveProjectId } from "../shared.js";
 import { isAnalyticsNoise } from "../../services/session-filter.js";
 import { getWorkspaceDiffStats, type WorkspaceDiffStats } from "../../services/workspace-diff-stats.js";
@@ -33,7 +33,7 @@ import {
 } from "../../repositories/issue-service.repository.js";
 import { getMaxIssueNumber } from "../../repositories/issue-ai.repository.js";
 import { getProjectStatuses, getProjectById } from "../../repositories/project.repository.js";
-import { getWorkspacesByIssueId } from "../../repositories/workspace.repository.js";
+import { getWorkspacesByIssueId, findOpenUnmergedWorkspace } from "../../repositories/workspace.repository.js";
 import { getSessionsForWorkspacesDesc } from "../../repositories/workspace-launch-failures.repository.js";
 import { getSessionMessagesByIdDesc, getSessionMessagesByIdAsc } from "../../repositories/session.repository.js";
 import { getWorkspaceArtifactTarget } from "../../repositories/phase-artifacts.repository.js";
@@ -41,6 +41,7 @@ import { buildIssueSummaryLines, buildIssueStatusLines, validateAttachArtifactOp
 import { computeSessionDuration } from "../../lib/issue-summary-projection.js";
 import { extractLastAgentMessageFromRows } from "../../lib/session-message-extraction.js";
 import { validateBatchEdges, formatBatchEdgeResult } from "../../lib/dependency-batch.js";
+import { openWorkspaceBlockMessage } from "../../lib/terminal-move-guard.js";
 import { normalizeBatchInput, validateBatchIssueInputs, formatBatchCreateResult } from "../../lib/batch-create-issues.js";
 
 export function registerIssueCommand(program: Command) {
@@ -313,6 +314,16 @@ Tip: Use 'issue list' to find the issue ID and see available status names.
         if (!target) {
           console.error(`Status '${statusName}' not found. Available: ${statuses.map((s) => s.name).join(", ")}`);
           process.exit(1);
+        }
+
+        // AK-535 guard: don't strand an open, non-direct, unmerged branch by moving
+        // the issue to a terminal status. Same guard as the server PATCH route and MCP.
+        if (isTerminalStatusName(statusName)) {
+          const openWs = await findOpenUnmergedWorkspace(issue.id);
+          if (openWs) {
+            console.error(openWorkspaceBlockMessage(statusName, openWs.branch));
+            process.exit(1);
+          }
         }
 
         await moveIssueToStatus(issue.id, target.id);

@@ -22,8 +22,12 @@ export function MoveToDoneDialog({ issue, onConfirm, onCancel }: MoveToDoneDialo
         await apiDelete(`/api/workspaces/${ws.id}`);
       }
       await onConfirm();
-    } catch {
-      showToast("Action failed", "error");
+    } catch (err) {
+      // Surface the server's AK-535 guard message ("…has an open workspace that has
+      // not been merged. Merge the workspace first…") instead of a generic failure,
+      // so "Just move to Done" / "Stop & move to Done" on a non-direct unmerged
+      // branch explains WHY it was blocked (use "Delete workspace & move to Done").
+      showToast(err instanceof Error ? err.message : "Action failed", "error");
     } finally {
       setLoading(false);
     }

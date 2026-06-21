@@ -25,7 +25,7 @@ async function workspaceStatus(workspaceId: string): Promise<string> {
   return rows[0].status;
 }
 
-async function seedIdleWorkspace(issueId: string): Promise<string> {
+async function seedIdleWorkspace(issueId: string, isDirect = false): Promise<string> {
   const now = new Date().toISOString();
   const workspaceId = randomUUID();
   await db.insert(schema.workspaces).values({
@@ -35,6 +35,7 @@ async function seedIdleWorkspace(issueId: string): Promise<string> {
     workingDir: "/tmp/term-test/.worktrees/work",
     baseBranch: "main",
     status: "idle",
+    isDirect,
     createdAt: now,
     updatedAt: now,
   });
@@ -79,7 +80,11 @@ beforeEach(async () => {
 });
 
 describe("updateIssue closes open workspaces on terminal transition (#776)", () => {
-  it("closes a still-open workspace when the issue moves to Done", async () => {
+  it("closes a still-open DIRECT workspace when the issue moves to Done", async () => {
+    // Post #854 the close-on-Done path only applies to DIRECT workspaces — a
+    // non-direct open workspace now BLOCKS the terminal move (AK-535 guard), so it
+    // is never auto-closed. Direct workspaces commit straight to the default branch
+    // (no branch to strand), so moving to Done is allowed and still closes them.
     const now = new Date().toISOString();
     const issueService = createIssueService({ database: db });
 
@@ -95,7 +100,7 @@ describe("updateIssue closes open workspaces on terminal transition (#776)", () 
       updatedAt: now,
     });
 
-    const workspaceId = await seedIdleWorkspace(issueId);
+    const workspaceId = await seedIdleWorkspace(issueId, true);
     expect(await workspaceStatus(workspaceId)).toBe("idle");
 
     await issueService.updateIssue(issueId, { statusId: doneStatusId });

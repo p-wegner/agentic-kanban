@@ -706,3 +706,63 @@ describe("CLI issue delete (#858 — FK-safe cascade)", () => {
   });
 });
 
+describe("CLI issue move terminal-move guard (#854)", () => {
+  let ctx: ReturnType<typeof createTestDb>;
+  let projectId: string;
+
+  async function seedWorkspace(issueId: string, opts: { status?: string; isDirect?: boolean } = {}) {
+    const client = createClient({ url: `file:${ctx.dbPath}` });
+    const database = drizzle(client, { schema });
+    const now = new Date().toISOString();
+    await database.insert(schema.workspaces).values({
+      id: randomUUID(), issueId, branch: "feature/ak-x", workingDir: "/tmp/g/.worktrees/x",
+      baseBranch: "main", status: opts.status ?? "idle", isDirect: opts.isDirect ?? false,
+      createdAt: now, updatedAt: now,
+    });
+    client.close();
+  }
+
+  beforeEach(async () => {
+    ctx = createTestDb();
+    const project = await seedProject(ctx.dbPath);
+    projectId = project.id;
+  });
+  afterEach(() => { ctx.cleanup(); });
+
+  it("blocks 'issue move <n> Done' while a non-direct workspace is open + unmerged", { timeout: 30_000 }, async () => {
+    const issue = await seedIssue(ctx.dbPath, projectId, { title: "Has open ws" });
+    await seedWorkspace(issue.id, { status: "idle", isDirect: false });
+
+    const result = runCli(["issue", "move", issue.id, "Done"], ctx.dbPath);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("has not been merged");
+
+    // The move was a no-op — the issue did not enter Done.
+    const client = createClient({ url: `file:${ctx.dbPath}` });
+    const database = drizzle(client, { schema });
+    const [row] = await database
+      .select({ statusName: schema.projectStatuses.name })
+      .from(schema.issues)
+      .innerJoin(schema.projectStatuses, eq(schema.issues.statusId, schema.projectStatuses.id))
+      .where(eq(schema.issues.id, issue.id))
+      .limit(1);
+    expect(row.statusName).not.toBe("Done");
+    client.close();
+  });
+
+  it("allows 'issue move <n> Done' when no workspace is open", { timeout: 30_000 }, async () => {
+    const issue = await seedIssue(ctx.dbPath, projectId, { title: "No ws" });
+    const result = runCli(["issue", "move", issue.id, "Done"], ctx.dbPath);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Moved issue to 'Done'");
+  });
+
+  it("allows a non-terminal move even with an open workspace", { timeout: 30_000 }, async () => {
+    const issue = await seedIssue(ctx.dbPath, projectId, { title: "Open ws, non-terminal move" });
+    await seedWorkspace(issue.id, { status: "active", isDirect: false });
+    const result = runCli(["issue", "move", issue.id, "In Progress"], ctx.dbPath);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Moved issue to 'In Progress'");
+  });
+});
+

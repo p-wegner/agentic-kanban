@@ -13,7 +13,7 @@ import {
   testRetryDecisions,
   workflowTransitions,
 } from "@agentic-kanban/shared/schema";
-import { desc, eq, inArray, sql, and, gte, isNotNull } from "drizzle-orm";
+import { desc, eq, ne, inArray, sql, and, gte, isNotNull } from "drizzle-orm";
 
 type Project = typeof projects.$inferSelect;
 import { db } from "../db/index.js";
@@ -321,6 +321,31 @@ async function deleteWorkspaceCascadeRows(
 }
 
 /** Cascade delete a workspace and every table that directly FK-references it. */
+/**
+ * AK-535 terminal-move guard: the open, non-direct, unmerged workspace for an
+ * issue (or null). Open = status != "closed" (a merged workspace is closed);
+ * direct workspaces (isDirect=true) commit straight to the default branch — no
+ * branch to strand — so they are excluded. Moving an issue to a terminal status
+ * while such a workspace exists strands the branch (silent merge loss). The
+ * server-side mirror of mcp-server db-utils.checkOpenUnmergedWorkspace, so the
+ * status-write transports (MCP move/update, server PATCH, CLI move) share one guard.
+ */
+export async function findOpenUnmergedWorkspace(
+  issueId: string,
+  database: Database = db,
+): Promise<{ id: string; branch: string } | null> {
+  const rows = await database
+    .select({ id: workspaces.id, branch: workspaces.branch })
+    .from(workspaces)
+    .where(and(
+      eq(workspaces.issueId, issueId),
+      ne(workspaces.status, "closed"),
+      eq(workspaces.isDirect, false),
+    ))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
 export async function deleteWorkspaceCascade(
   workspaceId: string,
   database: Database = db,
