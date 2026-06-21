@@ -1,4 +1,5 @@
 import { isTerminalStatusName } from "@agentic-kanban/shared";
+import { buildDateAxis, subDays } from "./analytics-window.js";
 
 /**
  * Pure aggregation core for the board's time-series analytics charts
@@ -39,36 +40,6 @@ export interface DoneIssueRow {
   statusChangedAt: string | null;
 }
 
-const MIN_DAYS = 1;
-const MAX_DAYS = 365;
-
-/** Parse + clamp a `days` query param to [1, 365], falling back to `fallback`. */
-export function clampDays(raw: string | undefined, fallback: number): number {
-  const parsed = parseInt(raw ?? String(fallback), 10);
-  return Math.min(Math.max(Number.isNaN(parsed) ? fallback : parsed, MIN_DAYS), MAX_DAYS);
-}
-
-/** `now` shifted back `daysBack` calendar days, as a fresh Date (never mutates `now`). */
-function shiftDays(now: Date, daysBack: number): Date {
-  const d = new Date(now);
-  d.setDate(d.getDate() - daysBack);
-  return d;
-}
-
-/** The DB-side string cutoff (YYYY-MM-DD) for the trailing `days`-day window. */
-export function cutoffDayFor(now: Date, days: number): string {
-  return shiftDays(now, days - 1).toISOString().slice(0, 10);
-}
-
-/** Inclusive YYYY-MM-DD axis from `start` to `end` (one entry per calendar day). */
-export function buildDateAxis(start: Date, end: Date): string[] {
-  const dates: string[] = [];
-  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-    dates.push(d.toISOString().slice(0, 10));
-  }
-  return dates;
-}
-
 export interface BurndownBucket {
   date: string;
   remaining: number;
@@ -91,7 +62,7 @@ export interface BurndownResult {
  * project timeline, not a windowed slice.
  */
 export function computeBurndown(rows: StatusTimelineRow[], days: number, now: Date): BurndownResult {
-  const cutoff = shiftDays(now, days - 1);
+  const cutoff = subDays(now, days - 1);
 
   // Per issue: the day it entered the board (createdAt) and the day it stopped
   // being open (statusChangedAt when the current status is terminal; an issue
@@ -141,7 +112,7 @@ export interface CfdResult {
  * plus today (start = now - days), matching the original handler.
  */
 export function computeCfd(rows: StatusTimelineRow[], days: number, now: Date): CfdResult {
-  const cutoff = shiftDays(now, days);
+  const cutoff = subDays(now, days);
 
   // Statuses sorted by board column order.
   const statusMeta = new Map<string, { sortOrder: number }>();
@@ -178,7 +149,7 @@ export interface ThroughputResult {
 
 /** Issues moved into Done per calendar day across the trailing window. */
 export function computeThroughput(rows: DoneIssueRow[], days: number, now: Date): ThroughputResult {
-  const dates = buildDateAxis(shiftDays(now, days - 1), now);
+  const dates = buildDateAxis(subDays(now, days - 1), now);
   const countByDate = new Map<string, number>(dates.map((d) => [d, 0]));
   for (const r of rows) {
     if (!r.statusChangedAt) continue;
@@ -215,7 +186,7 @@ export interface LeadTimeResult {
  * issues that reached Done in the window. Days with no completions report null.
  */
 export function computeLeadTime(rows: DoneIssueRow[], days: number, now: Date): LeadTimeResult {
-  const dates = buildDateAxis(shiftDays(now, days - 1), now);
+  const dates = buildDateAxis(subDays(now, days - 1), now);
   const byDate = new Map<string, number[]>(dates.map((d) => [d, []]));
   for (const r of rows) {
     if (!r.statusChangedAt || !r.createdAt) continue;

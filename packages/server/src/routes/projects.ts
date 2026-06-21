@@ -2,6 +2,7 @@ import type { Database } from "../db/index.js";
 import { createProjectService } from "../services/project.service.js";
 import { getProjectById, getDoneIssueProviderAttribution } from "../repositories/project.repository.js";
 import { computeThroughputByProvider } from "../services/dashboard-analytics.service.js";
+import { clampDays, cutoffDayFor } from "../lib/analytics-window.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../middleware/ai-operation.js";
@@ -417,19 +418,14 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
   // Returns count + median lead time per provider.
   router.get("/:id/dashboard/throughput-by-provider", async (c) => {
     const projectId = c.req.param("id");
-    const daysRaw = parseInt(c.req.query("days") ?? "14", 10);
-    const days = Math.min(Math.max(Number.isNaN(daysRaw) ? 14 : daysRaw, 1), 365);
-
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - days + 1);
-    const cutoffDay = cutoffDate.toISOString().slice(0, 10);
+    const days = clampDays(c.req.query("days"), 14);
 
     // Find Done issues with their merged workspace's provider/profile.
     // An issue is counted if it's in "Done" status and moved to Done within the window.
     // We join to workspaces where mergedAt is set (actual merge happened) to get the
     // provider attribution. If multiple workspaces merged for the same issue, the first
     // merged workspace wins (deduplicated by issue ID).
-    const rows = await getDoneIssueProviderAttribution(projectId, cutoffDay, database);
+    const rows = await getDoneIssueProviderAttribution(projectId, cutoffDayFor(new Date(), days), database);
     return c.json(computeThroughputByProvider(rows, days));
   });
 

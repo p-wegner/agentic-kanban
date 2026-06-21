@@ -5,12 +5,12 @@ import {
   computeCfd,
   computeThroughput,
   computeLeadTime,
-  cutoffDayFor,
   type BurndownResult,
   type CfdResult,
   type ThroughputResult,
   type LeadTimeResult,
 } from "../lib/issue-analytics.js";
+import { cutoffDayFor } from "../lib/analytics-window.js";
 
 /**
  * Application layer for the board's time-series analytics charts. Each function
