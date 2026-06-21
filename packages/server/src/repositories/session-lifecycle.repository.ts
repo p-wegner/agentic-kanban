@@ -1,7 +1,8 @@
-import { sessions, sessionMessages, workspaces, issues, projects, preferences, agentSkills } from "@agentic-kanban/shared/schema";
+import { sessions, sessionMessages, workspaces, issues, preferences, agentSkills } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { getProjectById } from "./project.repository.js";
 
 export async function getWorkspaceById(
   workspaceId: string,
@@ -27,17 +28,10 @@ export async function getProjectPreflightInfo(
   projectId: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select({
-      repoPath: projects.repoPath,
-      defaultBranch: projects.defaultBranch,
-      symlinkEnabled: projects.symlinkEnabled,
-      symlinkDirs: projects.symlinkDirs,
-    })
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .limit(1);
-  return rows[0] ?? null;
+  const project = await getProjectById(projectId, database);
+  return project
+    ? { repoPath: project.repoPath, defaultBranch: project.defaultBranch, symlinkEnabled: project.symlinkEnabled, symlinkDirs: project.symlinkDirs }
+    : null;
 }
 
 export async function getPrevSessionResumeInfo(

@@ -5,6 +5,7 @@ import {
 import { eq, inArray, and, isNotNull, ne } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { getProjectById } from "./project.repository.js";
 
 export async function updateLatestSetupRunFields(
   workspaceId: string,
@@ -51,20 +52,19 @@ export async function getProjectForWorkspaceCreate(
   projectId: string,
   database: Database = db,
 ) {
-  return database
-    .select({
-      repoPath: projects.repoPath,
-      defaultBranch: projects.defaultBranch,
-      defaultSkillId: projects.defaultSkillId,
-      setupScript: projects.setupScript,
-      setupBlocking: projects.setupBlocking,
-      setupEnabled: projects.setupEnabled,
-      symlinkEnabled: projects.symlinkEnabled,
-      symlinkDirs: projects.symlinkDirs,
-    })
-    .from(projects)
-    .where(eq(projects.id, projectId))
-    .limit(1);
+  const project = await getProjectById(projectId, database);
+  return project
+    ? [{
+        repoPath: project.repoPath,
+        defaultBranch: project.defaultBranch,
+        defaultSkillId: project.defaultSkillId,
+        setupScript: project.setupScript,
+        setupBlocking: project.setupBlocking,
+        setupEnabled: project.setupEnabled,
+        symlinkEnabled: project.symlinkEnabled,
+        symlinkDirs: project.symlinkDirs,
+      }]
+    : [];
 }
 
 export async function getAgentSkillById(

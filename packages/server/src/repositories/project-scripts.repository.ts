@@ -1,14 +1,14 @@
-import { projectScriptShortcuts, projects } from "@agentic-kanban/shared/schema";
+import { projectScriptShortcuts } from "@agentic-kanban/shared/schema";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { getProjectById } from "./project.repository.js";
 
 export async function getProjectForScripts(
   projectId: string,
   database: Database = db,
 ) {
-  const rows = await database.select().from(projects).where(eq(projects.id, projectId)).limit(1);
-  return rows[0] ?? null;
+  return getProjectById(projectId, database);
 }
 
 export async function listProjectScriptShortcuts(
