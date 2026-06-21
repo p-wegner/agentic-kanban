@@ -3,7 +3,7 @@ import { apiFetch, apiPost, apiPut, apiPatch } from "../lib/api.js";
 import { invalidateSettings, setSettings as savePreferences } from "../lib/settingsStore.js";
 import { showToast } from "./Toast.js";
 import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
-import { applyPreflightResult, CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, DEFAULT_SETTINGS, PI_DEFAULT_PROFILE, TABS, uniqueProfiles, type AgentProfileHealth, type McpHealth, type MonitorTunables, type ProjectSettingsState, type ScheduledRun, type Settings, type SettingsPanelProps, type SkillSetting, type Tab, type TagSetting } from "./SettingsPanel.shared.js";
+import { applyPreflightResult, CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, DEFAULT_SETTINGS, PI_DEFAULT_PROFILE, TABS, uniqueProfiles, type AgentProfileHealth, type McpHealth, type MonitorTunables, type ProjectSettingsState, type Settings, type SettingsPanelProps, type SkillSetting, type Tab, type TagSetting } from "./SettingsPanel.shared.js";
 import { buildMigrationConfig } from "../lib/strategy-targets.js";
 import { parseDisabledTools, withToolDisabled } from "../lib/mcp-tool-toggle.js";
 import type { MonitorAction } from "./MonitorPopover.js";
@@ -77,21 +77,6 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
   const [newTemplateBody, setNewTemplateBody] = useState("");
 
   // Scheduled runs state
-  const [scheduledRunsList, setScheduledRunsList] = useState<ScheduledRun[]>([]);
-  const [newRunName, setNewRunName] = useState("");
-  const [newRunPrompt, setNewRunPrompt] = useState("");
-  const [newRunInterval, setNewRunInterval] = useState(60);
-  const [newRunCron, setNewRunCron] = useState("");
-  const [newRunMode, setNewRunMode] = useState<"interval" | "cron">("interval");
-  const [savingRun, setSavingRun] = useState(false);
-  const [triggeringRun, setTriggeringRun] = useState<string | null>(null);
-  const [editingRun, setEditingRun] = useState<string | null>(null);
-  const [editRunName, setEditRunName] = useState("");
-  const [editRunPrompt, setEditRunPrompt] = useState("");
-  const [editRunInterval, setEditRunInterval] = useState(60);
-  const [editRunCron, setEditRunCron] = useState("");
-  const [editRunMode, setEditRunMode] = useState<"interval" | "cron">("interval");
-  const [savingEditRun, setSavingEditRun] = useState(false);
   const [monitorRunning, setMonitorRunning] = useState(false);
   const [monitorStatus, setMonitorStatus] = useState<{
     enabled: boolean;
@@ -227,11 +212,8 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
         setTagsList(boot.tags);
 
         // Project-scoped cheap reads — fire in parallel, don't block the spinner.
+        // (The Schedule tab self-fetches its own runs when opened.)
         if (activeProjectId) {
-          apiFetch<ScheduledRun[]>(`/api/scheduled-runs?projectId=${activeProjectId}`)
-            .then((runs) => { if (!cancelled) setScheduledRunsList(runs); })
-            .catch(() => { /* non-fatal */ });
-
           apiFetch<{ hasBullseye: boolean; bullseyeProvider: string | null; bullseyeProfile: string | null; settingsProvider: string | null; settingsProfile: string | null; diverged: boolean }>(
             `/api/preferences/provider-divergence?projectId=${activeProjectId}`,
           )
@@ -615,39 +597,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
 
               {/* Schedule tab */}
               {tab === "schedule" && (
-                <ScheduleSettings
-                  activeProjectId={activeProjectId}
-                  scheduledRunsList={scheduledRunsList}
-                  setScheduledRunsList={setScheduledRunsList}
-                  newRunName={newRunName}
-                  setNewRunName={setNewRunName}
-                  newRunPrompt={newRunPrompt}
-                  setNewRunPrompt={setNewRunPrompt}
-                  newRunInterval={newRunInterval}
-                  setNewRunInterval={setNewRunInterval}
-                  newRunCron={newRunCron}
-                  setNewRunCron={setNewRunCron}
-                  newRunMode={newRunMode}
-                  setNewRunMode={setNewRunMode}
-                  savingRun={savingRun}
-                  setSavingRun={setSavingRun}
-                  triggeringRun={triggeringRun}
-                  setTriggeringRun={setTriggeringRun}
-                  editingRun={editingRun}
-                  setEditingRun={setEditingRun}
-                  editRunName={editRunName}
-                  setEditRunName={setEditRunName}
-                  editRunPrompt={editRunPrompt}
-                  setEditRunPrompt={setEditRunPrompt}
-                  editRunInterval={editRunInterval}
-                  setEditRunInterval={setEditRunInterval}
-                  editRunCron={editRunCron}
-                  setEditRunCron={setEditRunCron}
-                  editRunMode={editRunMode}
-                  setEditRunMode={setEditRunMode}
-                  savingEditRun={savingEditRun}
-                  setSavingEditRun={setSavingEditRun}
-                />
+                <ScheduleSettings activeProjectId={activeProjectId} />
               )}
 
               {/* Advanced tab */}

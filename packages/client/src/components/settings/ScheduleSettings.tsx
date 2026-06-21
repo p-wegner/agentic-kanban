@@ -1,4 +1,5 @@
-import type { Dispatch, SetStateAction } from "react";
+import { useEffect, useState } from "react";
+import { apiFetch } from "../../lib/api.js";
 import type { ScheduleMode } from "../../lib/scheduled-run-form.js";
 import type { ScheduledRun } from "../SettingsPanel.shared.js";
 import { ScheduledRunRow } from "./ScheduledRunRow.js";
@@ -7,45 +8,38 @@ import { AddScheduledRunForm } from "./AddScheduledRunForm.js";
 
 type ScheduleSettingsProps = {
   activeProjectId?: string | null;
-  scheduledRunsList: ScheduledRun[];
-  setScheduledRunsList: Dispatch<SetStateAction<ScheduledRun[]>>;
-  newRunName: string;
-  setNewRunName: Dispatch<SetStateAction<string>>;
-  newRunPrompt: string;
-  setNewRunPrompt: Dispatch<SetStateAction<string>>;
-  newRunInterval: number;
-  setNewRunInterval: Dispatch<SetStateAction<number>>;
-  newRunCron: string;
-  setNewRunCron: Dispatch<SetStateAction<string>>;
-  newRunMode: ScheduleMode;
-  setNewRunMode: Dispatch<SetStateAction<ScheduleMode>>;
-  savingRun: boolean;
-  setSavingRun: Dispatch<SetStateAction<boolean>>;
-  triggeringRun: string | null;
-  setTriggeringRun: Dispatch<SetStateAction<string | null>>;
-  editingRun: string | null;
-  setEditingRun: Dispatch<SetStateAction<string | null>>;
-  editRunName: string;
-  setEditRunName: Dispatch<SetStateAction<string>>;
-  editRunPrompt: string;
-  setEditRunPrompt: Dispatch<SetStateAction<string>>;
-  editRunInterval: number;
-  setEditRunInterval: Dispatch<SetStateAction<number>>;
-  editRunCron: string;
-  setEditRunCron: Dispatch<SetStateAction<string>>;
-  editRunMode: ScheduleMode;
-  setEditRunMode: Dispatch<SetStateAction<ScheduleMode>>;
-  savingEditRun: boolean;
-  setSavingEditRun: Dispatch<SetStateAction<boolean>>;
 };
 
-export function ScheduleSettings(props: ScheduleSettingsProps) {
-  const {
-    activeProjectId, scheduledRunsList, setScheduledRunsList,
-    triggeringRun, setTriggeringRun,
-    editingRun, setEditingRun,
-    setEditRunName, setEditRunPrompt, setEditRunInterval, setEditRunCron, setEditRunMode,
-  } = props;
+/**
+ * Self-contained Schedule tab. Owns all scheduled-run state and lazily fetches the
+ * list when the tab opens (and when the active project changes) — previously 15
+ * useState hooks + a bootstrap fetch + 30 props were hoisted into SettingsPanel.
+ */
+export function ScheduleSettings({ activeProjectId }: ScheduleSettingsProps) {
+  const [scheduledRunsList, setScheduledRunsList] = useState<ScheduledRun[]>([]);
+  const [newRunName, setNewRunName] = useState("");
+  const [newRunPrompt, setNewRunPrompt] = useState("");
+  const [newRunInterval, setNewRunInterval] = useState(60);
+  const [newRunCron, setNewRunCron] = useState("");
+  const [newRunMode, setNewRunMode] = useState<ScheduleMode>("interval");
+  const [savingRun, setSavingRun] = useState(false);
+  const [triggeringRun, setTriggeringRun] = useState<string | null>(null);
+  const [editingRun, setEditingRun] = useState<string | null>(null);
+  const [editRunName, setEditRunName] = useState("");
+  const [editRunPrompt, setEditRunPrompt] = useState("");
+  const [editRunInterval, setEditRunInterval] = useState(60);
+  const [editRunCron, setEditRunCron] = useState("");
+  const [editRunMode, setEditRunMode] = useState<ScheduleMode>("interval");
+  const [savingEditRun, setSavingEditRun] = useState(false);
+
+  useEffect(() => {
+    if (!activeProjectId) return;
+    let cancelled = false;
+    apiFetch<ScheduledRun[]>(`/api/scheduled-runs?projectId=${activeProjectId}`)
+      .then((runs) => { if (!cancelled) setScheduledRunsList(runs); })
+      .catch(() => { /* non-fatal */ });
+    return () => { cancelled = true; };
+  }, [activeProjectId]);
 
   return (
     <div className="space-y-4">
@@ -63,18 +57,18 @@ export function ScheduleSettings(props: ScheduleSettingsProps) {
               {editingRun === run.id ? (
                 <ScheduledRunEditForm
                   run={run}
-                  editRunName={props.editRunName}
+                  editRunName={editRunName}
                   setEditRunName={setEditRunName}
-                  editRunPrompt={props.editRunPrompt}
+                  editRunPrompt={editRunPrompt}
                   setEditRunPrompt={setEditRunPrompt}
-                  editRunInterval={props.editRunInterval}
+                  editRunInterval={editRunInterval}
                   setEditRunInterval={setEditRunInterval}
-                  editRunCron={props.editRunCron}
+                  editRunCron={editRunCron}
                   setEditRunCron={setEditRunCron}
-                  editRunMode={props.editRunMode}
+                  editRunMode={editRunMode}
                   setEditRunMode={setEditRunMode}
-                  savingEditRun={props.savingEditRun}
-                  setSavingEditRun={props.setSavingEditRun}
+                  savingEditRun={savingEditRun}
+                  setSavingEditRun={setSavingEditRun}
                   setEditingRun={setEditingRun}
                   setScheduledRunsList={setScheduledRunsList}
                 />
@@ -103,18 +97,18 @@ export function ScheduleSettings(props: ScheduleSettingsProps) {
       {/* New run form */}
       <AddScheduledRunForm
         activeProjectId={activeProjectId}
-        newRunName={props.newRunName}
-        setNewRunName={props.setNewRunName}
-        newRunPrompt={props.newRunPrompt}
-        setNewRunPrompt={props.setNewRunPrompt}
-        newRunInterval={props.newRunInterval}
-        setNewRunInterval={props.setNewRunInterval}
-        newRunCron={props.newRunCron}
-        setNewRunCron={props.setNewRunCron}
-        newRunMode={props.newRunMode}
-        setNewRunMode={props.setNewRunMode}
-        savingRun={props.savingRun}
-        setSavingRun={props.setSavingRun}
+        newRunName={newRunName}
+        setNewRunName={setNewRunName}
+        newRunPrompt={newRunPrompt}
+        setNewRunPrompt={setNewRunPrompt}
+        newRunInterval={newRunInterval}
+        setNewRunInterval={setNewRunInterval}
+        newRunCron={newRunCron}
+        setNewRunCron={setNewRunCron}
+        newRunMode={newRunMode}
+        setNewRunMode={setNewRunMode}
+        savingRun={savingRun}
+        setSavingRun={setSavingRun}
         setScheduledRunsList={setScheduledRunsList}
       />
     </div>
