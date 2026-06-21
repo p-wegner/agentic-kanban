@@ -1,5 +1,16 @@
 import { describe, it, expect } from "vitest";
-import { buildQuickLaunchBody } from "./workspace-launch.js";
+import { buildQuickLaunchBody, buildDefaultLaunchPrompt } from "./workspace-launch.js";
+
+describe("buildDefaultLaunchPrompt", () => {
+  it("is just the title when there is no description", () => {
+    expect(buildDefaultLaunchPrompt({ title: "Fix the bug" })).toBe("Fix the bug");
+    expect(buildDefaultLaunchPrompt({ title: "Fix the bug", description: "" })).toBe("Fix the bug");
+    expect(buildDefaultLaunchPrompt({ title: "Fix the bug", description: null })).toBe("Fix the bug");
+  });
+  it("appends a blank-line-separated description when present", () => {
+    expect(buildDefaultLaunchPrompt({ title: "T", description: "do X" })).toBe("T\n\ndo X");
+  });
+});
 
 const base = {
   issueId: "issue-1",

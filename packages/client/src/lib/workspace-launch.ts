@@ -6,6 +6,15 @@
 
 import { profileSelectionFromValue, resolveQuickLaunchDefault } from "./workspace-helpers.js";
 
+/**
+ * The default agent prompt for a freshly-launched workspace: the issue title,
+ * plus a blank-line-separated description when present. Centralizes a string that
+ * was copy-pasted across WorkspacePanel + the workspace hooks (a latent drift risk).
+ */
+export function buildDefaultLaunchPrompt(issue: { title: string; description?: string | null }): string {
+  return `${issue.title}${issue.description ? `\n\n${issue.description}` : ""}`;
+}
+
 export interface QuickLaunchInput {
   issueId: string;
   requiresReview: boolean;

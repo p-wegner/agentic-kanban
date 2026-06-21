@@ -5,7 +5,7 @@
 // are threaded via the options object.
 import { apiFetch, apiPost, apiPatch, apiDelete } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
-import { buildQuickLaunchBody } from "../lib/workspace-launch.js";
+import { buildQuickLaunchBody, buildDefaultLaunchPrompt } from "../lib/workspace-launch.js";
 import { getSettings } from "../lib/settingsStore.js";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import type { AgentOutputMessage, IssueWithStatus, WorkspaceResponse, DiffResponse, SessionSummaryResponse } from "@agentic-kanban/shared";
@@ -96,7 +96,7 @@ export function useWorkspaceActions(deps: WorkspaceActionsDeps) {
       if (result.sessionId) {
         setSelectedWorkspace(result.id);
         setActiveSession(result.sessionId);
-        setLastPrompt(`${issue.title}${issue.description ? `\n\n${issue.description}` : ""}`);
+        setLastPrompt(buildDefaultLaunchPrompt(issue));
       }
       await fetchWorkspaces();
       onWorkspaceChange?.();
@@ -131,7 +131,7 @@ export function useWorkspaceActions(deps: WorkspaceActionsDeps) {
       if (result.sessionId) {
         setSelectedWorkspace(result.id);
         setActiveSession(result.sessionId);
-        setLastPrompt(`${issue.title}${issue.description ? `\n\n${issue.description}` : ""}`);
+        setLastPrompt(buildDefaultLaunchPrompt(issue));
       }
       await fetchWorkspaces();
       onWorkspaceChange?.();

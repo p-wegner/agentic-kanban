@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
+import { buildDefaultLaunchPrompt } from "../lib/workspace-launch.js";
 import type { AgentOutputMessage, SessionSummaryResponse } from "@agentic-kanban/shared";
 
 export type WorkspaceViewMode = "output" | "summary" | "preview" | "artifacts" | "diagnostics" | "timeline" | "context";
@@ -84,7 +85,7 @@ export function useWorkspaceSession({
     if (completedMessages.length > 0 || activeSession) return;
 
     const wsId = selectedWorkspace;
-    const defaultPrompt = `${issue.title}${issue.description ? `\n\n${issue.description}` : ""}`;
+    const defaultPrompt = buildDefaultLaunchPrompt(issue);
 
     const running = sessions.find(s => s.status === "running");
     if (running) {
