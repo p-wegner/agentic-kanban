@@ -77,6 +77,22 @@ describe("buildForkArtifactsDoc", () => {
     expect(doc).toContain("### Branch: feat/a\n\n---\n\n### Branch: feat/b");
   });
 
+  it("uses the shared-mode header job (sequential-stages wording) when sharedWorktree is true", () => {
+    const doc = buildForkArtifactsDoc({
+      issueNumber: 7,
+      issueTitle: "Shared epic",
+      joinNodeName: "Join",
+      childrenCount: 3,
+      joinStrategy: "manual",
+      sharedWorktree: true,
+      mergeResults: [],
+      sections: ["### Branch: x"],
+    });
+    expect(doc).toContain("3 fork stage(s) ran sequentially on this shared branch");
+    expect(doc).toContain(`Issue #7 — "Shared epic"`);
+    expect(doc).not.toContain("## Auto-merge results"); // manual strategy → no merge summary
+  });
+
   it("renders '#?' when the issue has no number, and omits the merge summary for manual joins", () => {
     const doc = buildForkArtifactsDoc({
       issueNumber: null,
