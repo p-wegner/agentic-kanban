@@ -1,0 +1,20 @@
+stages:
+  - review
+
+ai-code-review:
+  stage: review
+  image: node:22-alpine
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  variables:
+    ANTHROPIC_BASE_URL: "https://ao-ai-api-management.azure-api.net/ai-gateway"
+    # GATEWAY_API_KEY: set as masked CI variable in GitLab → Settings → CI/CD → Variables
+  before_script:
+    - cd workshop/review && npm install --silent
+  script:
+    - node run-review.mjs
+  artifacts:
+    name: "review-findings-mr$CI_MERGE_REQUEST_IID"
+    paths:
+      - workshop/review/findings.json
+    expire_in: 30 days
