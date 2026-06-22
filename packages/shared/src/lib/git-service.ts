@@ -1,18 +1,10 @@
-import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, rm, stat, writeFile, lstat, unlink, readdir } from "node:fs/promises";
 import { join, dirname, sep, resolve, parse, relative } from "node:path";
+import { gitExec, gitExecOrThrow } from "./git-exec.js";
 
 function execGit(args: string[], cwd: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile("git", args, { cwd, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err) {
-        reject(new Error(`git ${args.join(" ")} failed: ${stderr || err.message}`));
-      } else {
-        resolve(stdout.toString());
-      }
-    });
-  });
+  return gitExecOrThrow(args, { cwd });
 }
 
 /**
@@ -207,17 +199,11 @@ export async function cloneBranchTo(
   dest: string,
   timeoutMs = 5 * 60 * 1000,
 ): Promise<void> {
-  await new Promise<void>((resolveClone, reject) => {
-    execFile(
-      "git",
-      ["clone", "--quiet", "--single-branch", "--branch", branch, repoPath, dest],
-      { maxBuffer: 10 * 1024 * 1024, timeout: timeoutMs },
-      (err, _stdout, stderr) => {
-        if (err) reject(new Error(`git clone (branch ${branch}) failed: ${stderr || err.message}`));
-        else resolveClone();
-      },
-    );
-  });
+  const { error, stderr } = await gitExec(
+    ["clone", "--quiet", "--single-branch", "--branch", branch, repoPath, dest],
+    { timeout: timeoutMs },
+  );
+  if (error) throw new Error(`git clone (branch ${branch}) failed: ${stderr || error.message}`);
 }
 
 /**
@@ -422,38 +408,26 @@ function isBranchCheckedOutElsewhereError(err: unknown): boolean {
  * Returns an array of conflicting file paths (empty = no markers found).
  */
 async function scanTreeForConflictMarkers(repoPath: string, treeSha: string, pathspecs?: string[]): Promise<string[]> {
-  return new Promise((resolve) => {
-    // git grep exits 0 when matches found, 1 when no matches, 128+ on error.
-    // We treat all errors as "no markers" (safe default — the stage-entry check
-    // is the primary gate; this is belt-and-suspenders only).
-    // Use --perl-regexp with ^ anchor so we only match lines where "<<<<<<<" starts
-    // the line (i.e. actual git conflict markers), not string literals or comments
-    // that happen to contain the substring.
-    const args = ["grep", "--name-only", "-l", "--perl-regexp", "-e", "^<<<<<<<", treeSha];
-    if (pathspecs && pathspecs.length > 0) {
-      args.push("--", ...pathspecs);
-    }
-    execFile(
-      "git",
-      args,
-      { cwd: repoPath, maxBuffer: 10 * 1024 * 1024 },
-      (_err, stdout) => {
-        const output = stdout.toString().trim();
-        if (!output) {
-          resolve([]);
-          return;
-        }
-        // Output format: "<treeSha>:<filepath>", one per line.
-        // Exclude .md files — they legitimately document conflict marker syntax
-        // (e.g. SKILL.md files that describe how to resolve conflicts).
-        const files = output.split("\n")
-          .map((l) => l.replace(/\r$/, "").replace(/^[^:]+:/, "").trim())
-          .filter(Boolean)
-          .filter((f) => !f.endsWith(".md"));
-        resolve(files);
-      },
-    );
-  });
+  // git grep exits 0 when matches found, 1 when no matches, 128+ on error.
+  // We treat all errors as "no markers" (safe default — the stage-entry check
+  // is the primary gate; this is belt-and-suspenders only).
+  // Use --perl-regexp with ^ anchor so we only match lines where "<<<<<<<" starts
+  // the line (i.e. actual git conflict markers), not string literals or comments
+  // that happen to contain the substring.
+  const args = ["grep", "--name-only", "-l", "--perl-regexp", "-e", "^<<<<<<<", treeSha];
+  if (pathspecs && pathspecs.length > 0) {
+    args.push("--", ...pathspecs);
+  }
+  const { stdout } = await gitExec(args, { cwd: repoPath });
+  const output = stdout.trim();
+  if (!output) return [];
+  // Output format: "<treeSha>:<filepath>", one per line.
+  // Exclude .md files — they legitimately document conflict marker syntax
+  // (e.g. SKILL.md files that describe how to resolve conflicts).
+  return output.split("\n")
+    .map((l) => l.replace(/\r$/, "").replace(/^[^:]+:/, "").trim())
+    .filter(Boolean)
+    .filter((f) => !f.endsWith(".md"));
 }
 
 /** Read a blob's content at a given tree-ish path; returns null when the path is absent there. */
@@ -466,19 +440,9 @@ async function readBlobAtRef(repoPath: string, ref: string, path: string): Promi
 }
 
 /** Hash a string into the object DB as a blob and return its SHA. */
-function hashObjectFromStdin(repoPath: string, content: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const child = execFile(
-      "git",
-      ["hash-object", "-w", "--stdin"],
-      { cwd: repoPath, maxBuffer: 10 * 1024 * 1024 },
-      (err, stdout, stderr) => {
-        if (err) reject(new Error(`git hash-object failed: ${stderr || err.message}`));
-        else resolve(stdout.toString().trim());
-      },
-    );
-    child.stdin?.end(content);
-  });
+async function hashObjectFromStdin(repoPath: string, content: string): Promise<string> {
+  const stdout = await gitExecOrThrow(["hash-object", "-w", "--stdin"], { cwd: repoPath, input: content });
+  return stdout.trim();
 }
 
 /**
@@ -561,17 +525,7 @@ async function tryResolveAppendOnlyMerge(
   // Using a scratch index file keeps the real index untouched (safe alongside a checkout).
   const scratchIndex = join(repoPath, ".git", `append-merge-index-${targetSha.slice(0, 8)}`);
   const indexEnvGit = (args: string[]) =>
-    new Promise<string>((resolve, reject) => {
-      execFile(
-        "git",
-        args,
-        { cwd: repoPath, maxBuffer: 10 * 1024 * 1024, env: { ...process.env, GIT_INDEX_FILE: scratchIndex } },
-        (err, stdout, stderr) => {
-          if (err) reject(new Error(`git ${args.join(" ")} failed: ${stderr || err.message}`));
-          else resolve(stdout.toString());
-        },
-      );
-    });
+    gitExecOrThrow(args, { cwd: repoPath, env: { ...process.env, GIT_INDEX_FILE: scratchIndex } });
 
   try {
     await indexEnvGit(["read-tree", mergedTreeSha]);
@@ -751,42 +705,37 @@ export async function mergeBranch(
   // Exit 0 = clean, exit 1 = conflicts; stdout always has the tree SHA on line 1.
   // NOTE: --no-messages is intentionally omitted so stdout stage entries (which we
   // parse for conflict detection) are never suppressed by a git version quirk.
-  const { treeSha, conflictingFiles, mergeTreeHadConflictExit } = await new Promise<{
+  const { treeSha, conflictingFiles, mergeTreeHadConflictExit } = await (async (): Promise<{
     treeSha: string;
     conflictingFiles: string[];
     mergeTreeHadConflictExit: boolean;
-  }>((resolve, reject) => {
-    execFile(
-      "git",
+  }> => {
+    const { stdout, stderr, error, code } = await gitExec(
       ["merge-tree", "--write-tree", targetBranch, featureBranch],
-      { cwd: repoPath, maxBuffer: 10 * 1024 * 1024 },
-      (err, stdout, stderr) => {
-        const output = stdout.toString().trim();
-        // git merge-tree exits 1 for conflicts (expected, output still valid).
-        // A real failure (exit 128+) produces no usable output — propagate the
-        // git error instead of a misleading "no output" message.
-        if (err && !output) {
-          reject(new Error(`git merge-tree --write-tree failed: ${stderr?.toString().trim() || err.message}`));
-          return;
-        }
-        const lines = output.split("\n").filter(Boolean);
-        const treeSha = lines[0]?.trim() ?? "";
-        if (!treeSha) {
-          reject(new Error(`git merge-tree produced no output${stderr?.toString().trim() ? `: ${stderr.toString().trim()}` : ""}`));
-          return;
-        }
-        // Stage 1/2/3 entries indicate conflicting files: "<mode> <sha> <stage>\t<file>"
-        const seen = new Set<string>();
-        for (const line of lines.slice(1)) {
-          const m = line.match(/^\d+ \w+ [123]\t(.+)$/);
-          if (m) seen.add(m[1].replace(/\r$/, ""));
-        }
-        // Track whether git itself reported a conflict exit (belt-and-suspenders).
-        const mergeTreeHadConflictExit = err !== null && (err as NodeJS.ErrnoException & { code?: number }).code === 1;
-        resolve({ treeSha, conflictingFiles: [...seen], mergeTreeHadConflictExit });
-      },
+      { cwd: repoPath },
     );
-  });
+    const output = stdout.trim();
+    // git merge-tree exits 1 for conflicts (expected, output still valid).
+    // A real failure (exit 128+) produces no usable output — propagate the
+    // git error instead of a misleading "no output" message.
+    if (error && !output) {
+      throw new Error(`git merge-tree --write-tree failed: ${stderr.trim() || error.message}`);
+    }
+    const lines = output.split("\n").filter(Boolean);
+    const treeSha = lines[0]?.trim() ?? "";
+    if (!treeSha) {
+      throw new Error(`git merge-tree produced no output${stderr.trim() ? `: ${stderr.trim()}` : ""}`);
+    }
+    // Stage 1/2/3 entries indicate conflicting files: "<mode> <sha> <stage>\t<file>"
+    const seen = new Set<string>();
+    for (const line of lines.slice(1)) {
+      const m = line.match(/^\d+ \w+ [123]\t(.+)$/);
+      if (m) seen.add(m[1].replace(/\r$/, ""));
+    }
+    // Track whether git itself reported a conflict exit (belt-and-suspenders).
+    const mergeTreeHadConflictExit = code === 1;
+    return { treeSha, conflictingFiles: [...seen], mergeTreeHadConflictExit };
+  })();
 
   // #763: when the ONLY conflicts are pure-append hot files (both sides appended
   // distinct trailing content to a shared-ancestor file, no edits to existing lines),
@@ -1570,34 +1519,28 @@ export async function detectConflicts(
   worktreePath: string,
   baseBranch: string,
 ): Promise<{ hasConflicts: boolean; conflictingFiles: string[] }> {
-  return new Promise((resolve, reject) => {
-    // merge-tree exits 0 for clean merge, 1 for conflicts.
-    // Stdout: tree SHA on line 1, then conflict entries (mode sha stage\tfile) for conflicting files.
-    execFile(
-      "git",
-      ["merge-tree", "--write-tree", "--no-messages", "HEAD", baseBranch],
-      { cwd: worktreePath, maxBuffer: 10 * 1024 * 1024 },
-      (err, stdout, stderr) => {
-        const output = stdout.toString().trim();
-        // A real failure (exit 128+) produces no usable output — reject so callers
-        // don't silently treat it as "no conflicts". Exit 1 (conflicts) is fine:
-        // output still has the tree SHA + conflict entries.
-        if (err && !output) {
-          reject(new Error(`git merge-tree --write-tree (detectConflicts) failed: ${stderr?.toString().trim() || err.message}`));
-          return;
-        }
-        const lines = output.split("\n").slice(1).filter(Boolean);
-        // Lines with stage 1/2/3 indicate conflicting files: "<mode> <sha> <stage>\t<file>"
-        const seen = new Set<string>();
-        for (const line of lines) {
-          const m = line.match(/^\d+ \w+ [123]\t(.+)$/);
-          if (m) seen.add(m[1].replace(/\r$/, ""));
-        }
-        const conflictingFiles = [...seen];
-        resolve({ hasConflicts: conflictingFiles.length > 0, conflictingFiles });
-      },
-    );
-  });
+  // merge-tree exits 0 for clean merge, 1 for conflicts.
+  // Stdout: tree SHA on line 1, then conflict entries (mode sha stage\tfile) for conflicting files.
+  const { stdout, stderr, error } = await gitExec(
+    ["merge-tree", "--write-tree", "--no-messages", "HEAD", baseBranch],
+    { cwd: worktreePath },
+  );
+  const output = stdout.trim();
+  // A real failure (exit 128+) produces no usable output — throw so callers
+  // don't silently treat it as "no conflicts". Exit 1 (conflicts) is fine:
+  // output still has the tree SHA + conflict entries.
+  if (error && !output) {
+    throw new Error(`git merge-tree --write-tree (detectConflicts) failed: ${stderr.trim() || error.message}`);
+  }
+  const lines = output.split("\n").slice(1).filter(Boolean);
+  // Lines with stage 1/2/3 indicate conflicting files: "<mode> <sha> <stage>\t<file>"
+  const seen = new Set<string>();
+  for (const line of lines) {
+    const m = line.match(/^\d+ \w+ [123]\t(.+)$/);
+    if (m) seen.add(m[1].replace(/\r$/, ""));
+  }
+  const conflictingFiles = [...seen];
+  return { hasConflicts: conflictingFiles.length > 0, conflictingFiles };
 }
 
 /**
@@ -1900,28 +1843,22 @@ export async function detectConflictsByBranch(
   featureBranch: string,
   baseBranch: string,
 ): Promise<{ hasConflicts: boolean; conflictingFiles: string[] }> {
-  return new Promise((resolve, reject) => {
-    execFile(
-      "git",
-      ["merge-tree", "--write-tree", "--no-messages", baseBranch, featureBranch],
-      { cwd: repoPath, maxBuffer: 10 * 1024 * 1024 },
-      (err, stdout, stderr) => {
-        const output = stdout.toString().trim();
-        if (err && !output) {
-          reject(new Error(`git merge-tree (detectConflictsByBranch) failed: ${stderr?.toString().trim() || err.message}`));
-          return;
-        }
-        const lines = output.split("\n").slice(1).filter(Boolean);
-        const seen = new Set<string>();
-        for (const line of lines) {
-          const m = line.match(/^\d+ \w+ [123]\t(.+)$/);
-          if (m) seen.add(m[1].replace(/\r$/, ""));
-        }
-        const conflictingFiles = [...seen];
-        resolve({ hasConflicts: conflictingFiles.length > 0, conflictingFiles });
-      },
-    );
-  });
+  const { stdout, stderr, error } = await gitExec(
+    ["merge-tree", "--write-tree", "--no-messages", baseBranch, featureBranch],
+    { cwd: repoPath },
+  );
+  const output = stdout.trim();
+  if (error && !output) {
+    throw new Error(`git merge-tree (detectConflictsByBranch) failed: ${stderr.trim() || error.message}`);
+  }
+  const lines = output.split("\n").slice(1).filter(Boolean);
+  const seen = new Set<string>();
+  for (const line of lines) {
+    const m = line.match(/^\d+ \w+ [123]\t(.+)$/);
+    if (m) seen.add(m[1].replace(/\r$/, ""));
+  }
+  const conflictingFiles = [...seen];
+  return { hasConflicts: conflictingFiles.length > 0, conflictingFiles };
 }
 
 /**
