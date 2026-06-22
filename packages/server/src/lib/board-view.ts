@@ -173,7 +173,7 @@ export function buildBoardColumns<
         const { checklistJson, ...rest } = i;
         let checklist: { id: string; text: string; completed: boolean }[] | undefined;
         if (checklistJson) {
-          try { checklist = JSON.parse(checklistJson); } catch { checklist = undefined; }
+          try { checklist = JSON.parse(checklistJson) as { id: string; text: string; completed: boolean }[]; } catch { checklist = undefined; }
         }
         return {
           ...rest,

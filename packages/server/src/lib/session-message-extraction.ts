@@ -1,10 +1,12 @@
 // Pure string-parsing helpers for agent session output (JSONL stdout) and
 // JSON-encoded DB columns. No dependencies on the database or other services.
 
+import type { ParsedLine } from "@agentic-kanban/shared/lib/session-output-handlers";
+
 export function safeParseStringArray(raw: string | null | undefined): string[] {
   if (!raw) return [];
   try {
-    const parsed = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed.filter((v): v is string => typeof v === "string");
   } catch {
@@ -84,9 +86,9 @@ export function extractLastAgentMessageFromRows(
       const trimmed = line.trim();
       if (!trimmed) continue;
       try {
-        const obj = JSON.parse(trimmed);
+        const obj = JSON.parse(trimmed) as ParsedLine;
         if (obj.type === "assistant") {
-          const content = obj.message?.content as Array<Record<string, unknown>> | undefined;
+          const content = obj.message?.content;
           if (content) {
             for (const block of [...content].reverse()) {
               if (block.type === "text" && typeof block.text === "string" && block.text.trim()) {
@@ -96,7 +98,7 @@ export function extractLastAgentMessageFromRows(
           }
         }
         if (obj.type === "assistant.message") {
-          const data = obj.data as Record<string, unknown> | undefined;
+          const data = obj.data;
           if (data) {
             const raw = data.content;
             const contentStr = typeof raw === "string" ? raw
@@ -109,8 +111,9 @@ export function extractLastAgentMessageFromRows(
             if (contentStr.trim()) lastAgentMsg = contentStr;
           }
         }
-        if (obj.type === "item.completed" && obj.item?.type === "agent_message" && typeof obj.item.text === "string") {
-          lastAgentMsg = obj.item.text;
+        const item = obj.item;
+        if (obj.type === "item.completed" && item?.type === "agent_message" && typeof item.text === "string") {
+          lastAgentMsg = item.text;
         }
       } catch { /* not JSON */ }
     }

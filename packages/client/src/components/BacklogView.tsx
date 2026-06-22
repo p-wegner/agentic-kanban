@@ -84,7 +84,7 @@ function isGroupMode(value: unknown): value is GroupMode {
 function parsePresets(raw: string | undefined): BacklogPreset[] {
   if (!raw) return [];
   try {
-    const parsed = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed.flatMap((item): BacklogPreset[] => {
       if (!item || typeof item !== "object") return [];

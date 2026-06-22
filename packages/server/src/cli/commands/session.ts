@@ -519,7 +519,7 @@ Examples:
 
         let stats: Record<string, unknown>;
         try {
-          stats = JSON.parse(session.stats);
+          stats = JSON.parse(session.stats) as Record<string, unknown>;
         } catch {
           console.error(`Invalid stats data for session ${targetSessionId}.`);
           process.exit(1);
@@ -577,7 +577,7 @@ Examples:
         for (const r of rows) {
           if (!r.stats) continue;
           let parsed: { friction?: SessionFrictionStats };
-          try { parsed = JSON.parse(r.stats); } catch { continue; }
+          try { parsed = JSON.parse(r.stats) as { friction?: SessionFrictionStats }; } catch { continue; }
           const f = parsed.friction;
           if (!f) continue;
           sessionsWithFriction++;

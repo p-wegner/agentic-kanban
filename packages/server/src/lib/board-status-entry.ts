@@ -31,10 +31,17 @@ export interface BoardStatusEntrySession {
   stats: string | null;
 }
 
+/**
+ * The fields read off a parsed session `stats` blob. All optional because the
+ * blob is untrusted JSON; each read applies a `?? default` fallback below. This
+ * mirrors the non-null `BoardStatusIssue["sessionStats"]` wire shape.
+ */
+type ParsedSessionStats = Partial<NonNullable<BoardStatusIssue["sessionStats"]>>;
+
 /** Parse a session `stats` blob into the board-status shape; null on bad JSON. */
 export function parseSessionStats(stats: string): BoardStatusIssue["sessionStats"] {
   try {
-    const p = JSON.parse(stats);
+    const p = JSON.parse(stats) as ParsedSessionStats;
     return {
       durationMs: p.durationMs ?? 0,
       totalCostUsd: p.totalCostUsd ?? 0,

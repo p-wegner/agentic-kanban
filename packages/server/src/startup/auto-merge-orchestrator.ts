@@ -94,7 +94,7 @@ export function createAutoMergeOrchestrator(deps: {
       if (verifyMatch && value && value.trim()) { gatedProjectIds.add(verifyMatch[1]); continue; }
       const profileMatch = key.match(/^project_stack_profile_([0-9a-f-]+)$/);
       if (profileMatch && value) {
-        try { if (JSON.parse(value)?.isWeb === true) gatedProjectIds.add(profileMatch[1]); } catch { /* not JSON */ }
+        try { if ((JSON.parse(value) as { isWeb?: boolean } | null)?.isWeb === true) gatedProjectIds.add(profileMatch[1]); } catch { /* not JSON */ }
       }
     }
 

@@ -14,6 +14,20 @@ import {
   classifyBoardStatusIssueMergeState as classifyMergeState,
 } from "@agentic-kanban/shared/lib/board-status-classifiers";
 
+// Shape of the persisted session stats JSON blob. Every field is optional because the
+// blob is untrusted/variant (stored by different agent providers across versions); the
+// reader below supplies a fallback for each, so this only types the boundary.
+interface PersistedSessionStats {
+  durationMs?: number;
+  totalCostUsd?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  numTurns?: number;
+  model?: string;
+  success?: boolean;
+  agentSummary?: string;
+}
+
 export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, getDiffShortstat } = deps;
   server.tool(
@@ -147,7 +161,7 @@ export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodD
           let sessionStats: BoardStatusIssue["sessionStats"] = null;
           if (latestSession?.stats) {
             try {
-              const p = JSON.parse(latestSession.stats);
+              const p = JSON.parse(latestSession.stats) as PersistedSessionStats;
               sessionStats = {
                 durationMs: p.durationMs ?? 0,
                 totalCostUsd: p.totalCostUsd ?? 0,

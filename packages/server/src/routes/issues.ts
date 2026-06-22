@@ -257,7 +257,7 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     const json = row.touchedFilesJson;
     let files: unknown[] = [];
     if (json) {
-      try { files = JSON.parse(json); } catch { files = []; }
+      try { files = JSON.parse(json) as unknown[]; } catch { files = []; }
     }
     return c.json({ files, cached: true });
   });
@@ -277,7 +277,7 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     const json = row.touchedFilesJson;
     if (!json) return c.json({ related: [] });
     let myFiles: { path: string }[] = [];
-    try { myFiles = JSON.parse(json); } catch { return c.json({ related: [] }); }
+    try { myFiles = JSON.parse(json) as { path: string }[]; } catch { return c.json({ related: [] }); }
     const myPaths = new Set(myFiles.map((f) => f.path));
     if (myPaths.size === 0) return c.json({ related: [] });
 
@@ -288,7 +288,7 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
       if (candidate.id === issueId) continue;
       if (!candidate.touchedFilesJson) continue;
       let candidateFiles: { path: string }[] = [];
-      try { candidateFiles = JSON.parse(candidate.touchedFilesJson); } catch { continue; }
+      try { candidateFiles = JSON.parse(candidate.touchedFilesJson) as { path: string }[]; } catch { continue; }
       const sharedCount = candidateFiles.filter((f) => myPaths.has(f.path)).length;
       if (sharedCount > 0) {
         related.push({ id: candidate.id, issueNumber: candidate.issueNumber, title: candidate.title, sharedFileCount: sharedCount });

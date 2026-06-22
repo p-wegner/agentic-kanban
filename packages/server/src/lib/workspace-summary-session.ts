@@ -63,7 +63,7 @@ export function selectLatestSessionsByWorkspace(
 export function parseContextTokensFromStats(stats: string | null): number | null {
   if (!stats) return null;
   try {
-    const p = JSON.parse(stats);
+    const p: unknown = JSON.parse(stats);
     if (p === null || typeof p !== "object") return null;
     const typed = p as Record<string, unknown>;
     const explicitContextTokens = (typed.contextTokens as number) ?? 0;

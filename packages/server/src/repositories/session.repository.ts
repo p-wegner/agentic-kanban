@@ -419,7 +419,7 @@ export async function getSessionStats(
   if (!statsStr) return { status: "no_stats" };
 
   try {
-    return { status: "found", stats: JSON.parse(statsStr) };
+    return { status: "found", stats: JSON.parse(statsStr) as Record<string, unknown> };
   } catch {
     throw new Error("Invalid stats data");
   }
@@ -463,7 +463,7 @@ export async function getSessionSummaryData(
 
   let stats: Record<string, unknown> | null = null;
   if (session.stats) {
-    try { stats = JSON.parse(session.stats); } catch { /* ignore */ }
+    try { stats = JSON.parse(session.stats) as Record<string, unknown>; } catch { /* ignore */ }
   }
 
   let duration: string | null = null;

@@ -5,6 +5,8 @@
  * shape ("assistant.message"), and Codex ("item.completed").
  */
 
+import type { ParsedLine } from "@agentic-kanban/shared/lib/session-output-handlers";
+
 const DEFAULT_MAX_LENGTH = 300;
 
 /**
@@ -18,7 +20,7 @@ export function parseAgentMessageFromJsonLine(
   const trimmed = line.trim();
   if (!trimmed) return null;
   try {
-    const obj = JSON.parse(trimmed);
+    const obj = JSON.parse(trimmed) as ParsedLine;
     let message: string | null = null;
     if (obj.type === "assistant" && obj.message?.content) {
       const content = Array.isArray(obj.message.content) ? obj.message.content : [obj.message.content];
@@ -30,7 +32,7 @@ export function parseAgentMessageFromJsonLine(
       }
     }
     if (obj.type === "assistant.message" && obj.data) {
-      const data = obj.data as Record<string, unknown>;
+      const data = obj.data;
       const raw = data.content;
       const contentStr = typeof raw === "string" ? raw
         : Array.isArray(raw)
@@ -41,8 +43,9 @@ export function parseAgentMessageFromJsonLine(
           : "";
       if (contentStr.trim()) message = contentStr.trim().slice(0, maxLength);
     }
-    if (obj.type === "item.completed" && obj.item?.type === "agent_message" && typeof obj.item.text === "string" && obj.item.text.trim()) {
-      message = obj.item.text.trim().slice(0, maxLength);
+    const item = obj.item;
+    if (obj.type === "item.completed" && item?.type === "agent_message" && typeof item.text === "string" && item.text.trim()) {
+      message = item.text.trim().slice(0, maxLength);
     }
     return message;
   } catch {

@@ -25,8 +25,8 @@ export function MonitorPolicyPresets({
       .then((settings) => {
         const raw = settings[key];
         if (raw) {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) setCustomPresets(parsed);
+          const parsed: unknown = JSON.parse(raw);
+          if (Array.isArray(parsed)) setCustomPresets(parsed as MonitorPolicyPreset[]);
         }
       })
       .catch(() => {});

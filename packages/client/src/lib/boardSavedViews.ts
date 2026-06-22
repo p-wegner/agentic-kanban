@@ -50,7 +50,7 @@ export function boardSavedViewsKey(projectId: string) {
 export function sanitizeSavedBoardViews(raw: string | undefined): SavedBoardView[] {
   if (!raw) return [];
   try {
-    const parsed = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed.flatMap((item): SavedBoardView[] => {
       if (!isRecord(item) || !isRecord(item.state)) return [];

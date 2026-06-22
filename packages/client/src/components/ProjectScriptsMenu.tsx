@@ -1,11 +1,18 @@
 import { useEffect, useRef, useState } from "react";
-import type { ProjectScriptShortcutResponse } from "@agentic-kanban/shared";
+import type { ProjectScriptLastRunStatus, ProjectScriptShortcutResponse } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 
 interface ProjectScriptsMenuProps {
   projectId: string | null;
 }
+
+// Wire format of the SSE frames emitted by `POST /api/projects/:id/scripts/:id/run`
+// (server-side `ScriptRunEvent` in project-scripts.service.ts).
+type ScriptRunStreamEvent =
+  | { type: "start"; startedAt: string; cwd: string }
+  | { type: "stdout" | "stderr"; data: string }
+  | { type: "exit"; exitCode: number | null; status: ProjectScriptLastRunStatus; endedAt: string };
 
 type RunState = {
   script: ProjectScriptShortcutResponse;
@@ -85,7 +92,7 @@ export function ProjectScriptsMenu({ projectId }: ProjectScriptsMenuProps) {
       function processFrame(frame: string) {
         const line = frame.split("\n").find((entry) => entry.startsWith("data: "));
         if (!line) return;
-        const event = JSON.parse(line.slice(6));
+        const event = JSON.parse(line.slice(6)) as ScriptRunStreamEvent;
         if (event.type === "start") {
           setRunState((state) => state && { ...state, startedAt: event.startedAt });
         } else if (event.type === "stdout" || event.type === "stderr") {

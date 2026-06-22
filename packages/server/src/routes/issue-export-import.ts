@@ -176,8 +176,9 @@ function parseJsonImport(body: unknown): { rows: ImportRow[]; errors: string[] }
     return { rows: [], errors };
   }
   const rows: ImportRow[] = [];
-  for (let i = 0; i < body.length; i++) {
-    const item = body[i];
+  const items: unknown[] = body;
+  for (let i = 0; i < items.length; i++) {
+    const item: unknown = items[i];
     if (typeof item !== "object" || item === null) {
       errors.push(`Item ${i} is not an object`);
       continue;
@@ -460,10 +461,14 @@ export function createIssueExportImportRoute(
         if (typeof f === "string") hint = f;
       }
     } else if (contentType.includes("application/json")) {
-      const body = await c.req.json().catch(() => null);
-      if (body && typeof body === "object" && !Array.isArray(body) && typeof (body).text === "string") {
-        text = String((body).text);
-        hint = (body).format ? String((body).format) : "auto";
+      const body: unknown = await c.req.json().catch(() => null);
+      const obj =
+        body && typeof body === "object" && !Array.isArray(body)
+          ? (body as Record<string, unknown>)
+          : null;
+      if (obj && typeof obj.text === "string") {
+        text = String(obj.text);
+        hint = obj.format ? String(obj.format) : "auto";
       } else if (typeof body === "string") {
         text = body;
       } else if (Array.isArray(body)) {
@@ -504,13 +509,17 @@ export function createIssueExportImportRoute(
       text = await (file).text();
       hint = formatHintFromFilename((file).name);
     } else if (contentType.includes("application/json")) {
-      const body = await c.req.json().catch(() => null);
+      const body: unknown = await c.req.json().catch(() => null);
+      const obj =
+        body && typeof body === "object" && !Array.isArray(body)
+          ? (body as Record<string, unknown>)
+          : null;
       if (Array.isArray(body)) {
         text = JSON.stringify(body);
         hint = "json";
-      } else if (body && typeof body === "object" && typeof (body).text === "string") {
-        text = String((body).text);
-        hint = (body).format ? String((body).format) : "auto";
+      } else if (obj && typeof obj.text === "string") {
+        text = String(obj.text);
+        hint = obj.format ? String(obj.format) : "auto";
       } else {
         return c.json({ error: "JSON body must be an array of issues or a { text, format } object" }, 400);
       }

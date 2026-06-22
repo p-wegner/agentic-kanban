@@ -97,7 +97,7 @@ function computeUnifiedDiff(original: string, modified: string, filePath: string
 function computeLcs(a: string[], b: string[]): boolean[][] {
   const m = Math.min(a.length, 500); // limit for performance
   const n = Math.min(b.length, 500);
-  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array<number>(n + 1).fill(0));
   for (let i = 1; i <= m; i++) {
     for (let j = 1; j <= n; j++) {
       if (a[i - 1] === b[j - 1]) {
@@ -109,8 +109,8 @@ function computeLcs(a: string[], b: string[]): boolean[][] {
   }
   // Backtrack to find matching lines
   const matched: boolean[][] = [
-    new Array(m).fill(false), // which orig lines are in LCS
-    new Array(n).fill(false), // which mod lines are in LCS
+    new Array<boolean>(m).fill(false), // which orig lines are in LCS
+    new Array<boolean>(n).fill(false), // which mod lines are in LCS
   ];
   let i = m, j = n;
   while (i > 0 && j > 0) {
@@ -268,9 +268,13 @@ export async function previewCodemod(
   }
 
   // Create transform function using AsyncFunction
-  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as new (
+  type AsyncFunctionConstructor = new (
     ...args: string[]
   ) => (...fnArgs: unknown[]) => Promise<void>;
+  const asyncFnProto = Object.getPrototypeOf(async function () {}) as {
+    constructor: AsyncFunctionConstructor;
+  };
+  const AsyncFunction = asyncFnProto.constructor;
 
   let transform: (sourceFile: unknown) => Promise<void>;
   try {

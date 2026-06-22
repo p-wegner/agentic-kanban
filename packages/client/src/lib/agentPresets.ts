@@ -37,7 +37,7 @@ export function agentPresetsKey(projectId: string) {
 export function sanitizeAgentPresets(raw: string | undefined): AgentPreset[] {
   if (!raw) return [];
   try {
-    const parsed = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed.flatMap((item): AgentPreset[] => {
       if (!isRecord(item)) return [];

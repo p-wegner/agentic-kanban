@@ -239,12 +239,12 @@ export function createBisectService(deps: {
       active.child = child;
       let settled = false;
       let output = "";
-      child.stdout?.on("data", (chunk) => {
+      child.stdout?.on("data", (chunk: Buffer) => {
         const data = chunk.toString();
         output = trimOutput(output + data);
         void emit(sessionId, { type: "stdout", sessionId, data });
       });
-      child.stderr?.on("data", (chunk) => {
+      child.stderr?.on("data", (chunk: Buffer) => {
         const data = chunk.toString();
         output = trimOutput(output + data);
         void emit(sessionId, { type: "stderr", sessionId, data });

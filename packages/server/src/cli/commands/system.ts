@@ -312,7 +312,7 @@ Via pnpm (use -- to pass args):
             for (const line of linesToParse) {
               let obj: Record<string, unknown>;
               try {
-                obj = JSON.parse(line);
+                obj = JSON.parse(line) as Record<string, unknown>;
               } catch {
                 continue;
               }

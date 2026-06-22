@@ -58,7 +58,7 @@ export async function tagIfNeedsVisualVerification(repoPath: string, branch: str
     // below misses, so a Kotlin UI change would never be flagged for visual verification.
     let isWebProject = false;
     if (projectId) {
-      try { isWebProject = JSON.parse(prefMap.get(`project_stack_profile_${projectId}`) ?? "{}")?.isWeb === true; } catch { /* no profile */ }
+      try { isWebProject = (JSON.parse(prefMap.get(`project_stack_profile_${projectId}`) ?? "{}") as { isWeb?: boolean } | null)?.isWeb === true; } catch { /* no profile */ }
     }
 
     const base = baseBranch || "main";

@@ -137,7 +137,7 @@ export function useBoardEvents(
 
     ws.onmessage = (event) => {
       try {
-        const msg: BoardWsEvent = JSON.parse(event.data);
+        const msg = JSON.parse(event.data as string) as BoardWsEvent;
         if (msg.type === "board_changed") {
           onBoardChangeRef.current(msg.reason);
           window.dispatchEvent(

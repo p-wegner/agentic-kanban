@@ -33,6 +33,16 @@ interface WaitOptions {
 }
 
 /**
+ * Minimal shape of a board WebSocket frame this command reads: it only cares
+ * about `type === "board_changed"` and the carried `reason`. Both fields are
+ * optional because the frame is untrusted JSON off the socket.
+ */
+interface BoardFrame {
+  type?: string;
+  reason?: string;
+}
+
+/**
  * Look up the latest workspace for an issue number and block until its status
  * leaves the "active" family, reacting to board WebSocket events instead of
  * polling. Returns the process exit code.
@@ -140,7 +150,7 @@ export async function runWorkspaceWait(issueNumberArg: string, options: WaitOpti
     ws.onmessage = (event: MessageEvent) => {
       let reason: string | undefined;
       try {
-        const msg = JSON.parse(typeof event.data === "string" ? event.data : String(event.data));
+        const msg = JSON.parse(typeof event.data === "string" ? event.data : String(event.data)) as BoardFrame;
         if (msg?.type !== "board_changed") return;
         reason = msg.reason;
       } catch {

@@ -101,7 +101,7 @@ export function WorkflowProgress({
     const ws = new WebSocket(url);
     ws.onmessage = (event) => {
       try {
-        const msg = JSON.parse(event.data);
+        const msg = JSON.parse(event.data as string) as { type?: string; reason?: string };
         if (msg.type === "board_changed" && msg.reason === "workflow_transition") {
           load();
         }

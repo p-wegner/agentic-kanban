@@ -52,7 +52,7 @@ export function registerGetFleetFriction(server: McpServer) {
       for (const r of rows) {
         if (!r.stats) continue;
         let parsed: { friction?: SessionFrictionStats };
-        try { parsed = JSON.parse(r.stats); } catch { continue; }
+        try { parsed = JSON.parse(r.stats) as { friction?: SessionFrictionStats }; } catch { continue; }
         const f = parsed.friction;
         if (!f) continue;
         sessionsWithFriction++;

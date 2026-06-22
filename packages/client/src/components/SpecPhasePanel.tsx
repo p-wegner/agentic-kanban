@@ -37,6 +37,13 @@ type ButlerEvent =
   | { type: "result"; text?: string; isError?: boolean }
   | { type: "error"; message: string };
 
+// Minimal shape of the board WebSocket frames this panel reacts to. Untrusted
+// JSON, so only the fields read here are typed (the server emits a wider union).
+interface BoardWsFrame {
+  type?: string;
+  reason?: string;
+}
+
 const SPEC_PHASES = new Set(["specify", "design", "tasks"]);
 
 function phaseKey(phaseName: string): string {
@@ -164,7 +171,7 @@ export function SpecPhasePanel({
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws/board/${issue.projectId}`);
     ws.onmessage = (event) => {
       try {
-        const msg = JSON.parse(event.data);
+        const msg = JSON.parse(event.data as string) as BoardWsFrame;
         if (msg.type === "board_changed" && (msg.reason === "workflow_transition" || msg.reason === "issue_updated")) {
           void loadProgress();
           void loadArtifact();
@@ -265,7 +272,7 @@ export function SpecPhasePanel({
       phaseStreamRef.current?.close();
       const es = new EventSource(`/api/projects/${issue.projectId}/butler/stream`);
       phaseStreamRef.current = es;
-      es.onmessage = (ev) => handleButlerEvent(JSON.parse(ev.data) as ButlerEvent);
+      es.onmessage = (ev) => handleButlerEvent(JSON.parse(ev.data as string) as ButlerEvent);
       es.onerror = () => {
         es.close();
         if (phaseStreamRef.current === es) phaseStreamRef.current = null;

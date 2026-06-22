@@ -1,4 +1,5 @@
 import dagre from "@dagrejs/dagre";
+import type { GraphLabel, NodeLabel, EdgeLabel } from "@dagrejs/dagre";
 
 const NODE_W = 180;
 const NODE_H = 48;
@@ -20,7 +21,7 @@ export function layoutGraph(
   nodes: LayoutNode[],
   edges: LayoutEdge[],
 ): Map<string, { x: number; y: number }> {
-  const g = new dagre.graphlib.Graph();
+  const g = new dagre.graphlib.Graph<GraphLabel, NodeLabel, EdgeLabel>();
   g.setDefaultEdgeLabel(() => ({}));
   g.setGraph({ rankdir: "TB", nodesep: 60, ranksep: 80, marginx: 20, marginy: 20 });
 
@@ -35,7 +36,10 @@ export function layoutGraph(
   const positions = new Map<string, { x: number; y: number }>();
   for (const n of nodes) {
     const p = g.node(n.id);
-    if (p) positions.set(n.id, { x: Math.round(p.x - NODE_W / 2), y: Math.round(p.y - NODE_H / 2) });
+    // dagre's layout populates `x`/`y` (node centers) on every laid-out node.
+    if (p && p.x !== undefined && p.y !== undefined) {
+      positions.set(n.id, { x: Math.round(p.x - NODE_W / 2), y: Math.round(p.y - NODE_H / 2) });
+    }
   }
   return positions;
 }

@@ -338,7 +338,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       } else if (typeof body.symlinkDirs === "string") {
         // Parse and re-serialize to normalize
         try {
-          const parsed = JSON.parse(body.symlinkDirs);
+          const parsed: unknown = JSON.parse(body.symlinkDirs);
           if (Array.isArray(parsed)) {
             updates.symlinkDirs = JSON.stringify(parsed.filter((d: unknown) => typeof d === "string"));
           }

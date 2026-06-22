@@ -28,7 +28,7 @@ export function stripAnsi(str: string): string {
 
 function parseJsonLine(line: string): ParsedLine | null {
   try {
-    return JSON.parse(line);
+    return JSON.parse(line) as ParsedLine;
   } catch {
     return null;
   }

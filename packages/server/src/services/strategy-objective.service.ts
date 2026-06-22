@@ -128,16 +128,35 @@ function segmentWeight(segment: StrategyBullseyeSegment): number {
 
 const VALID_MODES: ProviderPolicyMode[] = ["fill", "throttle", "fallback-only"];
 
+/** Untrusted shape of a single provider policy entry before validation. */
+interface RawProviderPolicy {
+  id: string;
+  provider: string;
+  profileName?: unknown;
+  label?: unknown;
+  mode?: unknown;
+  headroomPct?: unknown;
+  notes?: unknown;
+  quotaProviderId?: unknown;
+  model?: unknown;
+}
+
+function isRawProviderPolicy(p: unknown): p is RawProviderPolicy {
+  if (!p || typeof p !== "object") return false;
+  const candidate = p as Record<string, unknown>;
+  return typeof candidate.id === "string" && typeof candidate.provider === "string";
+}
+
 function parseProviderPolicies(raw: unknown): ProviderProfilePolicy[] {
   if (!Array.isArray(raw)) return [];
-  return raw
-    .filter((p) => p && typeof p === "object" && typeof p.id === "string" && typeof p.provider === "string")
+  return (raw as unknown[])
+    .filter(isRawProviderPolicy)
     .map((p) => ({
-      id: p.id as string,
+      id: p.id,
       provider: (["claude", "codex", "copilot", "pi"].includes(p.provider) ? p.provider : "claude") as "claude" | "codex" | "copilot" | "pi",
       profileName: typeof p.profileName === "string" ? p.profileName : "",
-      label: typeof p.label === "string" ? p.label : p.id as string,
-      mode: (VALID_MODES.includes(p.mode) ? p.mode : "throttle") as ProviderPolicyMode,
+      label: typeof p.label === "string" ? p.label : p.id,
+      mode: (typeof p.mode === "string" && VALID_MODES.includes(p.mode as ProviderPolicyMode) ? p.mode : "throttle") as ProviderPolicyMode,
       headroomPct: clampInt(p.headroomPct, 20, 0, 100),
       notes: typeof p.notes === "string" ? p.notes : "",
       quotaProviderId: typeof p.quotaProviderId === "string" && p.quotaProviderId.trim() ? p.quotaProviderId.trim() : undefined,
