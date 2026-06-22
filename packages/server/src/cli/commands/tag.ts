@@ -4,6 +4,12 @@ import { runMigrations } from "../shared.js";
 const port = () => process.env.KANBAN_SERVER_PORT ?? "3001";
 const apiBase = () => `http://127.0.0.1:${port()}/api`;
 
+interface TagRow {
+  id: string;
+  name: string;
+  color: string | null;
+}
+
 export function registerTagCommand(program: Command) {
   const tagCmd = program.command("tag").description("Manage tags (labels) for categorizing issues.\n\nSubcommands: list, create");
 
@@ -28,7 +34,7 @@ Examples:
           console.error(`Error ${res.status}: ${text}`);
           process.exit(1);
         }
-        const tags = (await res.json()) as Array<Record<string, unknown>>;
+        const tags = (await res.json()) as TagRow[];
         if (options.json) {
           console.log(JSON.stringify(tags, null, 2));
         } else {
@@ -78,7 +84,7 @@ Examples:
           console.error(`Error ${res.status}: ${text}`);
           process.exit(1);
         }
-        const tag = (await res.json()) as Record<string, unknown>;
+        const tag = (await res.json()) as TagRow;
         if (options.json) {
           console.log(JSON.stringify(tag, null, 2));
         } else {

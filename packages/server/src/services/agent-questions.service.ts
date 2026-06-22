@@ -210,7 +210,7 @@ export async function writeAgentQuestionComment(
       db,
     );
   } catch (err) {
-    console.error(`[agent-questions] failed to write agent-question comment: toolUseId=${params.toolUseId} ${err instanceof Error ? err.message : err}`);
+    console.error(`[agent-questions] failed to write agent-question comment: toolUseId=${params.toolUseId} ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -543,7 +543,7 @@ function scheduleBackgroundRecommendation(projectId: string, input: RecommendInp
         await tryAutoAnswer(input.toolUseId, autoAnswerDeps.workspaceId, input.questions, recs, autoAnswerDeps.sendTurn, db);
       }
     } catch (err) {
-      console.error(`[agent-questions] background recommend failed: toolUseId=${input.toolUseId} ${err instanceof Error ? err.message : err}`);
+      console.error(`[agent-questions] background recommend failed: toolUseId=${input.toolUseId} ${err instanceof Error ? err.message : String(err)}`);
       // Cache nulls so we don't re-poll on every list call.
       await setCachedRecommendations(input.toolUseId, input.questions.map(() => null), db);
     } finally {
@@ -613,7 +613,7 @@ export async function tryAutoAnswer(
       `question="${firstQ.slice(0, 80)}" chosen="${chosenLabels.join(" | ")}" rationale="${rationales.slice(0, 160)}"`,
     );
   } catch (err) {
-    console.error(`[agent-questions] auto-answer send failed: toolUseId=${toolUseId} ${err instanceof Error ? err.message : err}`);
+    console.error(`[agent-questions] auto-answer send failed: toolUseId=${toolUseId} ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 

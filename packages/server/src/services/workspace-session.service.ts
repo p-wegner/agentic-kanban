@@ -117,7 +117,7 @@ export function createWorkspaceSessionService(deps: {
       resolvedModel = undefined;
     }
 
-    console.log(`[workspace-service] launch: workspaceId=${id} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"} agentArgs=${agentArgs ?? "none"} profile=${claudeProfile ?? "none"} resumeFromId=${body.resumeFromId ?? "none"} resumeWithNewModel=${resumeWithNewModel} skipPermissions=${skipPermissions ?? "default"} model=${resolvedModel ?? "workspace-default"}`);
+    console.log(`[workspace-service] launch: workspaceId=${id} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"} agentArgs=${agentArgs ?? "none"} profile=${claudeProfile ?? "none"} resumeFromId=${(body.resumeFromId as string | undefined) ?? "none"} resumeWithNewModel=${resumeWithNewModel} skipPermissions=${skipPermissions ?? "default"} model=${resolvedModel ?? "workspace-default"}`);
 
     // Auto-rebase onto baseBranch on continue (not first launch, not direct workspaces)
     if (!ws0.isDirect && ws0.workingDir) {

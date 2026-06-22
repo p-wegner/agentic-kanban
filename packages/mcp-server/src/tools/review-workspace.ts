@@ -26,7 +26,7 @@ export function registerReviewWorkspace(server: McpServer) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({}),
         });
-        const data = await res.json() as Record<string, unknown>;
+        const data = await res.json() as { error?: string; sessionId?: string };
 
         if (!res.ok) {
           return { content: [{ type: "text" as const, text: `Review failed: ${data.error ?? res.statusText}` }] };

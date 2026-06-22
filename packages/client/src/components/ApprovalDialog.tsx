@@ -22,7 +22,7 @@ export function ApprovalDialog({ requests, onResolve }: Props) {
       const s = JSON.stringify(req.toolInput, null, 2);
       return s.length > 800 ? s.slice(0, 800) + "\n..." : s;
     } catch {
-      return String(req.toolInput);
+      return Object.prototype.toString.call(req.toolInput);
     }
   })();
 

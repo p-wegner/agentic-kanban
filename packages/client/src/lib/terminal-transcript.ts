@@ -44,7 +44,7 @@ function stringifySearchValue(value: unknown): string {
   try {
     return JSON.stringify(value);
   } catch {
-    return String(value);
+    return String(value as string);
   }
 }
 
@@ -331,10 +331,10 @@ export function summarizeToolCall(name: string, input: Record<string, unknown>):
     }
     case "Grep":
     case "grep":
-      return `Searching for "${input.pattern || "pattern"}"`;
+      return `Searching for "${(input.pattern as string) || "pattern"}"`;
     case "Glob":
     case "glob":
-      return `Finding ${input.pattern || "files"}`;
+      return `Finding ${(input.pattern as string) || "files"}`;
     case "Agent":
       return `Subagent: ${(input.description as string) || (input.prompt as string) || "delegating to agent"}`;
     case "WebSearch":

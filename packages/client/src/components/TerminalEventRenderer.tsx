@@ -249,11 +249,12 @@ function renderToolUse(event: EventOf<"tool_use">, key: number, ctx: RenderConte
     const input = event.inputParsed || {};
     if (event.name === "TaskCreate") {
       const subject = (input.subject as string) || "";
+      const activeForm = input.activeForm as string | undefined;
       return (
         <div key={key} data-event-idx={key} className={`mb-0.5 ${inSubagent ? "ml-6" : "ml-2"} pl-2`}>
           <span className="text-gray-500 text-[11px]">○ </span>
           <span className="text-gray-300 text-[11px]">{highlightText(subject, searchQuery)}</span>
-          {input.activeForm ? <span className="text-blue-400 text-[10px] ml-1">— {String(input.activeForm)}</span> : null}
+          {activeForm ? <span className="text-blue-400 text-[10px] ml-1">— {activeForm}</span> : null}
         </div>
       );
     }
@@ -339,9 +340,9 @@ function renderAgentToolResult(event: EventOf<"tool_result">, key: number, ctx: 
     if (typeof parsed === "string") {
       summary = parsed;
     } else if (isRecord(parsed) && parsed.result) {
-      summary = String(parsed.result);
+      summary = String(parsed.result as string);
     } else if (isRecord(parsed) && parsed.message) {
-      summary = String(parsed.message);
+      summary = String(parsed.message as string);
     } else if (Array.isArray(parsed)) {
       // Might be content blocks
       const textParts = parsed

@@ -35,7 +35,7 @@ function validateBoardConfigShape(body: unknown): { config: BoardConfigExport; e
   const obj = body as Record<string, unknown>;
 
   if (obj.version !== 1) {
-    errors.push(`Unsupported config version: ${obj.version}`);
+    errors.push(`Unsupported config version: ${String(obj.version)}`);
   }
 
   if (!Array.isArray(obj.statuses)) {

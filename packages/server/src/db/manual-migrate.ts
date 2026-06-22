@@ -62,7 +62,7 @@ export async function applyMigrations(client: Client): Promise<void> {
   let appliedTags = new Set<string>();
   try {
     const result = await client.execute("SELECT hash FROM __drizzle_migrations");
-    appliedTags = new Set(result.rows.map((r) => String(r.hash)));
+    appliedTags = new Set(result.rows.map((r) => String((r as { hash?: string }).hash)));
   } catch { /* table doesn't exist yet */ }
 
   for (let i = 0; i < entries.length; i++) {

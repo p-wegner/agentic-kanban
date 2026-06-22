@@ -331,8 +331,8 @@ export async function listProcesses(): Promise<ProcessRecord[]> {
     return rows.map((row) => ({
       pid: Number(row.ProcessId),
       ppid: Number(row.ParentProcessId ?? 0),
-      name: String(row.Name ?? ""),
-      commandLine: String(row.CommandLine ?? ""),
+      name: String((row.Name as string | null | undefined) ?? ""),
+      commandLine: String((row.CommandLine as string | null | undefined) ?? ""),
     })).filter((row) => Number.isInteger(row.pid) && row.pid > 0);
   }
 

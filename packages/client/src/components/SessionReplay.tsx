@@ -68,10 +68,10 @@ function summarizeInput(name: string, inputParsed: Record<string, unknown>): str
     }
     case "Grep":
     case "grep":
-      return `"${inputParsed.pattern || ""}"`;
+      return `"${(inputParsed.pattern as string) || ""}"`;
     case "Glob":
     case "glob":
-      return String(inputParsed.pattern || "");
+      return String((inputParsed.pattern as string) || "");
     case "Agent":
       return (
         (inputParsed.description as string) ||
@@ -261,7 +261,7 @@ function RightPane({ turn, selectedToolIdx }: { turn: ReplayTurn; selectedToolId
             {filePath}
           </div>
         )}
-        {renderEditDiff(String(inputParsed.old_str), String(inputParsed.new_str))}
+        {renderEditDiff(String(inputParsed.old_str as string), String(inputParsed.new_str as string))}
         {result && (
           <div className="mt-2">
             <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Result</div>
@@ -285,7 +285,7 @@ function RightPane({ turn, selectedToolIdx }: { turn: ReplayTurn; selectedToolId
     return (
       <div className="h-full overflow-y-auto p-4 space-y-3">
         <div className="text-xs text-gray-400 font-mono bg-gray-800 rounded px-2 py-1 truncate">
-          {String(inputParsed.file_path)}
+          {String(inputParsed.file_path as string)}
         </div>
         <pre className="text-xs bg-gray-900 border border-gray-700 rounded p-2 overflow-auto max-h-96 text-green-300 font-mono whitespace-pre-wrap leading-relaxed">
           {content.length > 6000 ? content.slice(0, 6000) + "\n… (truncated)" : content || "(empty)"}

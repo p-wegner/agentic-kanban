@@ -141,7 +141,7 @@ export async function startServer(port?: number, hostname?: string) {
     try {
       tls = { key: readFileSync(tlsKeyPath), cert: readFileSync(tlsCertPath) };
     } catch (err) {
-      console.warn(`[http2] KANBAN_TLS_KEY/CERT set but unreadable — staying on HTTP/1.1: ${err instanceof Error ? err.message : err}`);
+      console.warn(`[http2] KANBAN_TLS_KEY/CERT set but unreadable — staying on HTTP/1.1: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
   const onListen = (info: { port: number }) => {

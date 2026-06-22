@@ -43,6 +43,19 @@ interface ParsedSessionStats {
   agentSummary?: string;
 }
 
+/**
+ * The `deepMethod` block of the review-effectiveness report (untyped `Record` on
+ * the wire). Mirrors the object built in `summarizeReviewEffectiveness` so the
+ * text formatter can interpolate its numeric fields without widening to `unknown`.
+ */
+interface DeepMethodReport {
+  reviewsThatEditedCode: number;
+  reviewsCitingMajorOrCritical: number;
+  reviewsThatFixedAMajorOrCriticalFinding: number;
+  pctOfReviewedThatFixedMajorCritical: number;
+  fixedMajorCriticalIssues: number[];
+}
+
 export function registerSessionCommand(program: Command) {
   const sessionCmd = program.command("session").description("Inspect agent sessions.\n\nSubcommands: analyze, recent, backfill-friction, review-effectiveness, transcript, search, stats, friction, find-similar");
 
@@ -320,14 +333,14 @@ export function registerSessionCommand(program: Command) {
         L.push(`\n=== Reviewer-fixes analysis — last ${days}d (project ${projectId.slice(0, 8)}) ===`);
         L.push(`Reviewed workspaces in window: ${reviewedInWindow}  |  inspected: ${results.length}  |  git-eligible: ${gitEligible}  |  git history resolved: ${gitResolvedCount}`);
         if (options.deep) {
-          const d = report.deepMethod as Record<string, unknown>;
+          const d = report.deepMethod as DeepMethodReport;
           const m = report.methodAgreement as Record<string, number>;
           L.push(`\n-- TRANSCRIPT method [PRIMARY] (what each review session actually did) --`);
-          L.push(`  Reviews that edited code themselves:      ${d.reviewsThatEditedCode}/${results.length}  (${reviewPct(d.reviewsThatEditedCode as number, results.length)}%)`);
+          L.push(`  Reviews that edited code themselves:      ${d.reviewsThatEditedCode}/${results.length}  (${reviewPct(d.reviewsThatEditedCode, results.length)}%)`);
           L.push(`  Reviews citing a MAJOR/CRITICAL finding:  ${d.reviewsCitingMajorOrCritical}/${results.length}`);
           L.push(`  Reviews that FIXED a MAJOR/CRITICAL:      ${d.reviewsThatFixedAMajorOrCriticalFinding}/${results.length}  (${d.pctOfReviewedThatFixedMajorCritical}%)`);
           L.push(`  └ severity is a heuristic text scan; treat as approximate`);
-          L.push(`  Fixed major/critical on issues: ${(d.fixedMajorCriticalIssues as number[]).map((i) => "#" + i).join(", ") || "(none)"}`);
+          L.push(`  Fixed major/critical on issues: ${d.fixedMajorCriticalIssues.map((i) => "#" + i).join(", ") || "(none)"}`);
           L.push(`\n-- Method agreement (transcript vs git) --`);
           L.push(`  both say reviewer fixed: ${m.bothAgreeReviewerFixed}  |  transcript-only: ${m.sessionTranscriptOnly}  |  git-only: ${m.gitOnly}`);
         } else {

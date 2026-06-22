@@ -12,6 +12,64 @@ import { runMigrations, getActiveProjectId } from "../shared.js";
 import { buildWorkspaceApiUrl, buildApiUrl } from "./workspace-api-url.js";
 import { registerWorkspaceInteractionCommands } from "./workspace-interaction.js";
 
+/** Shape of the error envelope every workspace action endpoint returns on failure. */
+interface ErrorResponse {
+  error?: string;
+}
+
+/** POST .../launch — session start. */
+interface LaunchResponse extends ErrorResponse {
+  sessionId?: string;
+}
+
+/** POST /api/workspaces — one-step create + launch. */
+interface StartResponse extends ErrorResponse {
+  id?: string;
+  branch?: string;
+  workingDir?: string;
+}
+
+/** GET .../diff — workspace git diff. */
+interface DiffResponse extends ErrorResponse {
+  stats?: string;
+  changedFiles?: string[];
+  diff?: string;
+}
+
+/** GET .../scorecard — PR quality scorecard. */
+interface ScorecardResponse extends ErrorResponse {
+  score?: number | null;
+  computedAt?: string;
+  dimensions?: Array<{ name: string; score: number; maxScore: number; signal: string }>;
+}
+
+/** POST .../merge — merge result. */
+interface MergeResponse extends ErrorResponse {
+  mergeOutput?: string;
+}
+
+/** POST .../close — close result. */
+interface CloseResponse extends ErrorResponse {
+  status?: string;
+}
+
+/** POST .../stop — stop running sessions. */
+interface StopResponse extends ErrorResponse {
+  sessionsStopped?: number | null;
+}
+
+/** POST .../ready-for-merge — mark ready result. */
+interface MarkReadyResponse extends ErrorResponse {
+  readyForMerge?: boolean;
+}
+
+/** POST .../transition — workflow transition result. */
+interface TransitionResponse extends ErrorResponse {
+  movedTo?: string;
+  status?: string;
+  nextStages?: string[];
+}
+
 export function registerWorkspaceCommand(program: Command) {
   const wsCmd = program.command("workspace").description("Manage workspaces (git worktrees linked to issues).\n\nWorkspaces create isolated git worktrees where agents can work on issues. Each workspace is tied to a single issue.\n\nSubcommands: list, create");
 
@@ -160,7 +218,7 @@ Examples:
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ prompt }),
         });
-        const data = await res.json() as Record<string, unknown>;
+        const data = await res.json() as LaunchResponse;
 
         if (!res.ok) {
           console.error(`Launch failed: ${data.error ?? res.statusText}`);
@@ -168,7 +226,7 @@ Examples:
         }
 
         console.log(`Launched workspace '${workspaceId}'`);
-        console.log(`  sessionId: ${data.sessionId}`);
+        console.log(`  sessionId: ${String(data.sessionId)}`);
         process.exit(0);
       } catch (err) {
         console.error("Error:", err instanceof Error ? err.message : String(err));
@@ -226,7 +284,7 @@ Examples:
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ prompt }),
         });
-        const data = await res.json() as Record<string, unknown>;
+        const data = await res.json() as LaunchResponse;
 
         if (!res.ok) {
           console.error(`Resume failed: ${data.error ?? res.statusText}`);
@@ -235,7 +293,7 @@ Examples:
 
         console.log(`Resumed #${num} (${ws.branch})`);
         console.log(`  workspace: ${ws.id}`);
-        console.log(`  sessionId: ${data.sessionId}`);
+        console.log(`  sessionId: ${String(data.sessionId)}`);
         process.exit(0);
       } catch (err) {
         console.error("Error:", err instanceof Error ? err.message : String(err));
@@ -287,7 +345,7 @@ Example:
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({}),
         });
-        const data = await res.json() as Record<string, unknown>;
+        const data = await res.json() as LaunchResponse;
 
         if (!res.ok) {
           console.error(`Review failed: ${data.error ?? res.statusText}`);
@@ -295,7 +353,7 @@ Example:
         }
 
         console.log(`Review started for workspace '${workspaceId}'`);
-        console.log(`  sessionId: ${data.sessionId}`);
+        console.log(`  sessionId: ${String(data.sessionId)}`);
         process.exit(0);
       } catch (err) {
         console.error("Error:", err instanceof Error ? err.message : String(err));
@@ -329,7 +387,7 @@ Examples:
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
-        const data = await res.json() as Record<string, unknown>;
+        const data = await res.json() as StartResponse;
 
         if (!res.ok) {
           console.error(`Start failed: ${data.error ?? res.statusText}`);
@@ -337,7 +395,7 @@ Examples:
         }
 
         console.log(`Started workspace for issue '${issueId}'`);
-        console.log(`  id: ${data.id}`);
+        console.log(`  id: ${String(data.id)}`);
         if (data.branch) console.log(`  branch: ${data.branch}`);
         if (data.workingDir) console.log(`  dir: ${data.workingDir}`);
         if (data.error) console.warn(`  warning: ${data.error}`);
@@ -362,7 +420,7 @@ Examples:
       try {
         const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
         const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "diff"));
-        const data = await res.json() as Record<string, unknown>;
+        const data = await res.json() as DiffResponse;
 
         if (!res.ok) {
           console.error(`Diff failed: ${data.error ?? res.statusText}`);
@@ -375,7 +433,7 @@ Examples:
           if (data.stats) console.log(`Stats: ${data.stats}`);
           if (Array.isArray(data.changedFiles) && data.changedFiles.length > 0) {
             console.log(`Changed files (${data.changedFiles.length}):`);
-            for (const f of data.changedFiles as string[]) console.log(`  ${f}`);
+            for (const f of data.changedFiles) console.log(`  ${f}`);
           }
           if (data.diff) console.log("\n" + String(data.diff));
         }
@@ -400,7 +458,7 @@ Examples:
       try {
         const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
         const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "scorecard"));
-        const data = await res.json() as Record<string, unknown>;
+        const data = await res.json() as ScorecardResponse;
 
         if (!res.ok) {
           console.error(`Scorecard failed: ${data.error ?? res.statusText}`);
@@ -410,11 +468,11 @@ Examples:
         if (options.json) {
           console.log(JSON.stringify(data, null, 2));
         } else {
-          if (data.score !== undefined) console.log(`Score: ${data.score}/100`);
+          if (data.score !== undefined) console.log(`Score: ${String(data.score)}/100`);
           if (data.computedAt) console.log(`Computed: ${data.computedAt}`);
           if (Array.isArray(data.dimensions)) {
             console.log("Dimensions:");
-            for (const d of data.dimensions as Array<{ name: string; score: number; maxScore: number; signal: string }>) {
+            for (const d of data.dimensions) {
               console.log(`  ${d.name}: ${d.score}/${d.maxScore} — ${d.signal}`);
             }
           }
@@ -442,7 +500,7 @@ Example:
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({}),
         });
-        const data = await res.json() as Record<string, unknown>;
+        const data = await res.json() as MergeResponse;
 
         if (!res.ok) {
           console.error(`Merge failed: ${data.error ?? res.statusText}`);
@@ -474,7 +532,7 @@ Example:
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({}),
         });
-        const data = await res.json() as Record<string, unknown>;
+        const data = await res.json() as CloseResponse;
 
         if (!res.ok) {
           console.error(`Close failed: ${data.error ?? res.statusText}`);
@@ -506,7 +564,7 @@ Example:
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({}),
         });
-        const data = await res.json() as Record<string, unknown>;
+        const data = await res.json() as StopResponse;
 
         if (!res.ok) {
           console.error(`Stop failed: ${data.error ?? res.statusText}`);
@@ -514,7 +572,7 @@ Example:
         }
 
         console.log(`Stopped workspace '${workspaceId}'`);
-        if (data.sessionsStopped !== undefined) console.log(`  sessions stopped: ${data.sessionsStopped}`);
+        if (data.sessionsStopped !== undefined) console.log(`  sessions stopped: ${String(data.sessionsStopped)}`);
         process.exit(0);
       } catch (err) {
         console.error("Error:", err instanceof Error ? err.message : String(err));
@@ -544,7 +602,7 @@ Examples:
           process.exit(0);
         }
 
-        const data = await res.json() as Record<string, unknown>;
+        const data = await res.json() as ErrorResponse;
         if (!res.ok) {
           console.error(`Delete failed: ${data.error ?? res.statusText}`);
           process.exit(1);
@@ -595,7 +653,7 @@ Examples:
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ prompt }),
         });
-        const data = await res.json() as Record<string, unknown>;
+        const data = await res.json() as LaunchResponse;
 
         if (!res.ok) {
           console.error(`Relaunch failed: ${data.error ?? res.statusText}`);
@@ -603,7 +661,7 @@ Examples:
         }
 
         console.log(`Relaunched workspace '${workspaceId}'`);
-        console.log(`  sessionId: ${data.sessionId}`);
+        console.log(`  sessionId: ${String(data.sessionId)}`);
         process.exit(0);
       } catch (err) {
         console.error("Error:", err instanceof Error ? err.message : String(err));
@@ -627,7 +685,7 @@ Example:
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({}),
         });
-        const data = await res.json() as Record<string, unknown>;
+        const data = await res.json() as MarkReadyResponse;
 
         if (!res.ok) {
           console.error(`Mark-ready failed: ${data.error ?? res.statusText}`);
@@ -664,7 +722,7 @@ Examples:
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
-        const data = await res.json() as Record<string, unknown>;
+        const data = await res.json() as TransitionResponse;
 
         if (!res.ok) {
           console.error(`Transition failed: ${data.error ?? res.statusText}`);
@@ -675,7 +733,7 @@ Examples:
         if (data.movedTo) console.log(`  movedTo: ${data.movedTo}`);
         if (data.status) console.log(`  status: ${data.status}`);
         if (Array.isArray(data.nextStages) && data.nextStages.length > 0) {
-          console.log(`  nextStages: ${(data.nextStages as string[]).join(", ")}`);
+          console.log(`  nextStages: ${data.nextStages.join(", ")}`);
         }
         process.exit(0);
       } catch (err) {

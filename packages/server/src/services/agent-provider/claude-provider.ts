@@ -232,7 +232,7 @@ export class ClaudeProvider implements AgentProvider {
       try {
         args.push("--mcp-config", getMcpConfigPath(this.fs));
       } catch (err) {
-        console.warn(`[agent] Failed to generate MCP config: ${err}`);
+        console.warn(`[agent] Failed to generate MCP config: ${String(err)}`);
       }
       if (agentArgs) {
         args.push(...splitArgs(agentArgs));
