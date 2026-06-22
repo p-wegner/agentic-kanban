@@ -352,7 +352,7 @@ export function launch(
     piSkillPaths: provider === "pi" ? materializedSkillFiles(worktreePath) : undefined,
     skipPermissions,
   });
-  const { command, args, useShell, isMockAgent, env: spawnEnv, promptPrefix, suppressStdinPrompt } = launchConfig;
+  const { command, args, useShell, env: spawnEnv, promptPrefix, suppressStdinPrompt } = launchConfig;
   const stdinPrompt = promptPrefix ? `${promptPrefix}\n\n${effectivePrompt}` : effectivePrompt;
   const ports = resolveLaunchPorts(process.env, resolveWorktreeDevPorts(worktreePath));
 

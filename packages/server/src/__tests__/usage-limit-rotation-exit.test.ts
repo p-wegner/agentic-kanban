@@ -117,7 +117,7 @@ describe("exit-workflow: usage-limit rotation relaunch (handleUsageLimitExit)", 
   });
 
   it("rotates a Codex license and relaunches the builder on the fresh profile (codex provider, no claudeProfile)", async () => {
-    const { projectId, issueId, workspaceId, sessionId } = await seedRateLimitedWorkspace(db, "codex-limit");
+    const { projectId, workspaceId, sessionId } = await seedRateLimitedWorkspace(db, "codex-limit");
     rotateCodexLicense.mockResolvedValue({ rotated: true, fromProfile: "ki14", toProfile: "ki15", reason: "rotated to ki15" });
     const sessionManager = makeSessionManager();
 

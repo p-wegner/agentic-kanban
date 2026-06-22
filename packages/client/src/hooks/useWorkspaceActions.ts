@@ -7,8 +7,6 @@ import type { Dispatch, SetStateAction } from "react";
 import { apiFetch, apiPost, apiPatch, apiDelete } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
 import { buildQuickLaunchBody, buildDefaultLaunchPrompt } from "../lib/workspace-launch.js";
-import { getSettings } from "../lib/settingsStore.js";
-import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import type { AgentOutputMessage, IssueWithStatus, WorkspaceResponse, DiffResponse, DiffComment, SessionSummaryResponse } from "@agentic-kanban/shared";
 import type { WorkspaceViewMode } from "./useWorkspaceSession.js";
 

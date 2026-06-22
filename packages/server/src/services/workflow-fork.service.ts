@@ -459,7 +459,6 @@ export function createWorkflowForkService(deps: {
   async function handleChildJoined(childWorkspaceId: string): Promise<void> {
     const rows = await selectChildJoinContext(childWorkspaceId, database);
     if (rows.length === 0 || !rows[0].parentWorkspaceId) return;
-    const child = rows[0];
     const parentId: string = rows[0].parentWorkspaceId;
     const now = new Date().toISOString();
 

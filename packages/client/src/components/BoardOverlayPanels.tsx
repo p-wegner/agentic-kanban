@@ -32,23 +32,8 @@ import type {
   IssueWithStatus,
   ProfileSelection,
   StatusWithIssues,
-  UpdateIssueRequest,
 } from "@agentic-kanban/shared";
 import type { ViewMode } from "../lib/viewRegistry.js";
-
-interface Project {
-  id: string;
-  name: string;
-  repoPath: string;
-  repoName: string;
-  defaultBranch: string | null;
-  remoteUrl: string | null;
-  setupScript?: string | null;
-  setupEnabled?: boolean;
-  setupBlocking?: boolean;
-  symlinkEnabled?: boolean;
-  symlinkDirs?: string | null;
-}
 
 interface Props {
   // Panel visibility

@@ -65,8 +65,6 @@ export async function applyMigrations(client: Client): Promise<void> {
     appliedTags = new Set(result.rows.map((r) => String(r.hash)));
   } catch { /* table doesn't exist yet */ }
 
-  const anyApplied = false;
-
   for (let i = 0; i < entries.length; i++) {
     if (appliedTags.has(entries[i].tag)) continue;
 

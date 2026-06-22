@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
-import { apiFetch, apiPost, apiDelete } from "../lib/api.js";
+import { apiPost, apiDelete } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 
 interface MoveToDoneDialogProps {

@@ -1,5 +1,4 @@
 import { eq, and, inArray, sql, desc } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
 import { issues, projectStatuses, issueDependencies, agentSkills, tags, issueTags, workflowNodes } from "@agentic-kanban/shared/schema";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";

@@ -26,7 +26,7 @@ interface FailurePatternHintProps {
  * Shows top-3 similar past failures when the most recent session ended non-zero.
  * Fetches stderr from the session output and queries /api/failure-patterns/search.
  */
-export function FailurePatternHint({ workspaceId, sessionId }: FailurePatternHintProps) {
+export function FailurePatternHint({ workspaceId: _workspaceId, sessionId }: FailurePatternHintProps) {
   const [matches, setMatches] = useState<PatternMatch[]>([]);
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(false);

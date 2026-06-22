@@ -120,8 +120,6 @@ export interface ApprovalRequestMessage {
   workspaceId?: string;
 }
 
-type BoardWsMessage = BoardEventMessage | ProjectsChangedMessage | SessionActivityMessage | SessionStatsMessage | SessionTodosMessage | ApprovalRequestMessage;
-
 interface BoardEventSubscriber {
   ws: WSContext;
 }

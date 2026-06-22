@@ -1,9 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { db, schema } from "../db.js";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { notifyBoard } from "../notify.js";
-import { requireEntity, mcpError } from "../db-utils.js";
+import { mcpError } from "../db-utils.js";
 
 export function registerRemoveDependency(server: McpServer) {
   server.tool(

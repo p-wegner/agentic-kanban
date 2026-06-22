@@ -75,7 +75,7 @@ test.describe("Search UI", () => {
     await page.waitForTimeout(300);
 
     // Only the matching card should be visible (check by text presence)
-    const suffix = await page.evaluate(() => {
+    await page.evaluate(() => {
       const el = document.querySelector("#search-input") as HTMLInputElement;
       return el?.value ?? "";
     });

@@ -15,7 +15,7 @@ interface TransitionEntry {
   isInitial: boolean;
 }
 
-function buildTransitions(events: ActivityEvent[], currentStatusName?: string | null): TransitionEntry[] {
+function buildTransitions(events: ActivityEvent[], _currentStatusName?: string | null): TransitionEntry[] {
   // Sort oldest-first to build the chronological chain
   const sorted = [...events].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
 
@@ -70,9 +70,7 @@ export function StatusTransitionTimeline({ events, loading, currentStatusName }:
       ) : (
         <ol className="relative border-l border-gray-200 dark:border-gray-700 ml-2 space-y-0">
           {transitions.map((entry, idx) => {
-            const next = transitions[idx + 1];
             const fromStatus = idx === 0 ? null : transitions[idx - 1].toStatus;
-            const isLast = idx === transitions.length - 1;
             if (entry.isInitial && transitions.length === 1) return null;
             if (entry.isInitial) {
               return null;

@@ -32,7 +32,6 @@ import type {
 } from "@agentic-kanban/shared";
 import type { ApprovalRequest, LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import type { BoardViewState, SavedViewReference } from "../lib/boardSavedViews.js";
-import type { ViewMode } from "../lib/viewRegistry.js";
 import type { Theme } from "../hooks/useTheme.js";
 import type { NotificationEvent } from "../hooks/useActivityNotifications.js";
 import type {

@@ -134,7 +134,6 @@ export async function buildDependencyWavePlan(
   const allIssuesById = new Map(projectIssues.map((issue) => [issue.id, issue]));
   const openIssues = projectIssues.filter((issue) => !isTerminalStatusView(issue));
   const openIssueIds = openIssues.map((issue) => issue.id);
-  const openIssuesById = new Map(openIssues.map((issue) => [issue.id, issue]));
 
   const openWorkspaceRows = await getOpenWorkspaceIssueIds(openIssueIds, database);
   const issueIdsWithOpenWorkspace = new Set(openWorkspaceRows.map((row) => row.issueId));
@@ -172,7 +171,6 @@ export async function buildDependencyWavePlan(
     const deps = depsByIssue.get(issue.id) ?? [];
     const startEligible = STARTABLE_STATUS_NAMES.has(issue.statusName) && !issueIdsWithOpenWorkspace.has(issue.id);
     const blockers: Array<{ issueId: string; issueNumber: number | null; title: string; statusName: string }> = [];
-    const reasons: string[] = [];
     const invalidReasons: string[] = [];
 
     for (const dep of deps) {

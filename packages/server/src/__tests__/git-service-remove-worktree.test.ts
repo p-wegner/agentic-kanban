@@ -3,10 +3,6 @@ import { mkdtemp, mkdir, rm, writeFile, symlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
-const execFileAsync = promisify(execFile);
 
 const execFileMock = vi.hoisted(() => vi.fn());
 

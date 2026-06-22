@@ -1,7 +1,7 @@
 import { useEffect, type Dispatch, type RefObject, type SetStateAction } from "react";
 import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
-import { apiFetch, apiPost } from "../lib/api.js";
+import { apiPost } from "../lib/api.js";
 import { registerAction } from "../lib/actions.js";
 import { SHORTCUT_TO_VIEW, VIEW_REGISTRY, type ViewMode } from "../lib/viewRegistry.js";
 import { computeNavTarget, type NavKey } from "../lib/boardKeyboardNav.js";

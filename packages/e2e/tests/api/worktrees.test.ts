@@ -1,11 +1,9 @@
 import { test, expect } from "@playwright/test";
-import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { SERVER_URL } from "../helpers/port.js";
 
 test.describe("@system: Worktrees API", () => {
   let projectId: string;
-  let projectRepoPath: string;
   let statusId: string;
   const createdIssueIds: string[] = [];
   const createdWorkspaceIds: string[] = [];
@@ -15,7 +13,6 @@ test.describe("@system: Worktrees API", () => {
     const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
     const projects = await projectsRes.json();
     projectId = projects[0].id;
-    projectRepoPath = projects[0].repoPath;
 
     const statusesRes = await request.get(`${SERVER_URL}/api/projects/${projectId}/statuses`);
     const statuses = await statusesRes.json();

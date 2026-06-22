@@ -1,4 +1,4 @@
-import { readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { readdir, stat, writeFile } from "node:fs/promises";
 import { join, relative, extname, resolve, sep } from "node:path";
 import { existsSync } from "node:fs";
 import { Project } from "ts-morph";

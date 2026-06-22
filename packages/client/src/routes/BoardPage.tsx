@@ -15,10 +15,8 @@ import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
 import { SkeletonBoard } from "../components/SkeletonBoard.js";
 import { showToast } from "../components/Toast.js";
 import { apiFetch } from "../lib/api.js";
-import { setBoardDragData, getBoardDragData } from "../lib/dragData.js";
 import { matchesBoardFilters } from "../lib/boardFiltering.js";
 import { reconcileSelectedIssue } from "../lib/selectedIssueSync.js";
-import { applyLocalReorder, moveIssueToStatus } from "../lib/issueMoveHelpers.js";
 import { createQuickUpdateHandlers } from "../lib/issueQuickUpdates.js";
 import { useColumnResize } from "../lib/columnResizeHandler.js";
 import { type LiveSessionStats, type TodoItem, type ApprovalRequest } from "../lib/useBoardEvents.js";
@@ -37,7 +35,6 @@ import type {
   IssueWithStatus,
   MilestoneResponse,
   StatusWithIssues,
-  UpdateIssueRequest,
 } from "@agentic-kanban/shared";
 import type { BoardViewState, SavedViewReference } from "../lib/boardSavedViews.js";
 
@@ -537,7 +534,7 @@ export function BoardPage() {
     [columns, prefs.nudgeWipLimit],
   );
 
-  const { openIssueById, navigateTrail, trailControls, ticketTrail } = useBoardNavigation(columns, setSelectedIssue);
+  const { openIssueById, trailControls, ticketTrail } = useBoardNavigation(columns, setSelectedIssue);
 
   const { handleDuplicateIssue, handleMentionClick, toggleGroup, handleCreatedDateDrilldown } = useBoardMiscHandlers({
     selectedIssue, keyboardCursorIssueId, ticketTrail, openIssueById,

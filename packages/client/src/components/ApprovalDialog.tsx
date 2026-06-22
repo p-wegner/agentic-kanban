@@ -1,4 +1,4 @@
-import { apiFetch, apiPut } from "../lib/api.js";
+import { apiPut } from "../lib/api.js";
 import type { ApprovalRequest } from "../lib/useBoardEvents.js";
 
 interface Props {

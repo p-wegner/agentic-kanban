@@ -10,7 +10,7 @@ import { describe, it, expect } from "vitest";
 import * as schema from "@agentic-kanban/shared/schema";
 import { registerMoveIssue } from "../../tools/move-issue.js";
 import { registerUpdateIssue } from "../../tools/update-issue.js";
-import { setupTool, parseResult } from "../helpers/tool-harness.js";
+import { setupTool } from "../helpers/tool-harness.js";
 import { seedProject, seedIssue } from "../helpers/seed.js";
 import { randomUUID } from "node:crypto";
 

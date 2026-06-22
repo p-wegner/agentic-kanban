@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect } from "vitest";
 import { createRoutes } from "../routes/index.js";
 import * as schema from "@agentic-kanban/shared/schema";
 import { randomUUID } from "node:crypto";

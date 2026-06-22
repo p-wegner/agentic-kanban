@@ -1,4 +1,3 @@
-import { Hono } from "hono";
 import { createProjectsRoute } from "./projects.js";
 import { createProjectScriptsRoute } from "./project-scripts.js";
 import { createDriveRoute } from "./drive.js";
@@ -126,15 +125,8 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   return routes;
 }
 
-// Lazy getter for the default session manager (avoids circular imports at module load)
+// Lazy holder for the default session manager (avoids circular imports at module load)
 let _sessionManager: SessionManager | null = null;
-function getDefaultSessionManager(): SessionManager {
-  if (!_sessionManager) {
-    // Dynamic import to avoid circular dependency at module load time
-    throw new Error("Session manager not initialized. Server must be started first.");
-  }
-  return _sessionManager;
-}
 
 export function setSessionManager(sm: SessionManager) {
   _sessionManager = sm;

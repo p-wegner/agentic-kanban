@@ -433,7 +433,7 @@ describe("session-lifecycle", () => {
 
   it("marks workspace idle and session stopped when cleanupStaleSession is called for a dead PID", async () => {
     const workspaceId = await seedWorkspace(db);
-    const { service: agentService, getOnOutput } = createFakeAgentService();
+    const { service: agentService } = createFakeAgentService();
     const state = createSessionState();
 
     const lifecycle = createSessionLifecycle(
@@ -465,7 +465,7 @@ describe("session-lifecycle", () => {
 
   it("stopSession on an already-stopped session is a no-op (does not throw)", async () => {
     const workspaceId = await seedWorkspace(db);
-    const { service: agentService, getOnOutput } = createFakeAgentService();
+    const { service: agentService } = createFakeAgentService();
     const onSessionExit = vi.fn();
     const state = createSessionState();
 

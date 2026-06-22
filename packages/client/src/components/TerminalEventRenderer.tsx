@@ -399,7 +399,6 @@ function renderAgentToolResult(event: EventOf<"tool_result">, key: number, ctx: 
 function renderToolResult(event: EventOf<"tool_result">, key: number, ctx: RenderContext, d: DerivedRenderState): React.ReactNode {
   const { isExpanded, isMinimal, isInsideSubagent, isSubagentStart, isSubagentEnd } = d;
   const { isMaximized, toggleExpand, searchQuery } = ctx;
-  const isAgentResult = event.toolName === "Agent";
   const inSubagent = isInsideSubagent && !isSubagentStart && !isSubagentEnd;
 
   // Agent tool_result: show as subagent completion, not raw output
@@ -464,7 +463,7 @@ function renderToolResult(event: EventOf<"tool_result">, key: number, ctx: Rende
   );
 }
 
-function renderImage(event: EventOf<"image">, key: number, ctx: RenderContext, d: DerivedRenderState): React.ReactNode {
+function renderImage(event: EventOf<"image">, key: number, _ctx: RenderContext, _d: DerivedRenderState): React.ReactNode {
   return (
     <div key={key} data-event-idx={key} className="mb-1 ml-2">
       <img
@@ -476,7 +475,7 @@ function renderImage(event: EventOf<"image">, key: number, ctx: RenderContext, d
   );
 }
 
-function renderResult(event: EventOf<"result">, key: number, ctx: RenderContext, d: DerivedRenderState): React.ReactNode {
+function renderResult(event: EventOf<"result">, key: number, ctx: RenderContext, _d: DerivedRenderState): React.ReactNode {
   const { multiTurn, searchQuery } = ctx;
   return (
     <div key={key} data-event-idx={key} className="mt-2 pt-2 border-t border-gray-700">

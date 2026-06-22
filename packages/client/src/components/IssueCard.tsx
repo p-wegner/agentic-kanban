@@ -1,7 +1,7 @@
 import { memo, useRef, useState } from "react";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
-import { apiFetch, apiPost } from "../lib/api.js";
+import { apiPost } from "../lib/api.js";
 import { getBoardDragData } from "../lib/dragData.js";
 import { prefetchBundle } from "../lib/issueDetailBundleCache.js";
 import { IssueWorkLogBadge } from "./IssueWorkLogBadge.js";

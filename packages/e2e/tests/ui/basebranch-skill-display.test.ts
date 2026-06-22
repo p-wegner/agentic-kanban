@@ -11,7 +11,6 @@ import { SERVER_URL } from "../helpers/port.js";
 test.describe("baseBranch and skill name display in workspace panel", () => {
   let projectId: string;
   let todoStatusId: string;
-  let defaultBranch: string;
   const createdIssueIds: string[] = [];
   const createdWorkspaceIds: string[] = [];
 
@@ -19,7 +18,6 @@ test.describe("baseBranch and skill name display in workspace panel", () => {
     const projectsRes = await request.get(`${SERVER_URL}/api/projects`);
     const projects = await projectsRes.json();
     projectId = projects[0].id;
-    defaultBranch = projects[0].defaultBranch ?? "main";
 
     await request.put(`${SERVER_URL}/api/preferences/active-project`, {
       data: { projectId },

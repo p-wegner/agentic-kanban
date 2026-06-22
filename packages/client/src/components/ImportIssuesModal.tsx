@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { apiFetch, apiPost } from "../lib/api.js";
+import { apiPost } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 
 type ImportFormat = "auto" | "csv" | "markdown";

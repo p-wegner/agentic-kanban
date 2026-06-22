@@ -1,7 +1,6 @@
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { createWorkspaceActionsRoute } from "../routes/workspace-actions.js";
-import { createWorkspaceService } from "../services/workspace.service.js";
 
 const getWorkspaceDiff = vi.fn();
 

@@ -36,11 +36,6 @@ function fmtDuration(ms: number | null): string {
   return d < 10 ? `${d.toFixed(1)}d` : `${Math.round(d)}d`;
 }
 
-function providerLabel(entry: ProviderEntry): string {
-  if (entry.profile) return `${entry.provider}:${entry.profile}`;
-  return entry.provider;
-}
-
 export function AgentThroughputLeaderboard({ projectId }: { projectId: string }) {
   const [data, setData] = useState<ThroughputData | null>(null);
   const [loading, setLoading] = useState(true);

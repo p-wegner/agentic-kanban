@@ -1,6 +1,5 @@
 import { diffComments, issueArtifacts, issues, projects, projectStatuses, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { and, desc, eq } from "drizzle-orm";
-import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
 export async function getHandoffWorkspaceContext(

@@ -195,7 +195,7 @@ describe("reconcileCompletionStates", () => {
 
   it("does NOT reconcile a workspace where PID is alive and issue is In Review but workspace updated recently", async () => {
     const recentTime = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-    const { sessionId, workspaceId } = await setupScenario(db, {
+    const { sessionId } = await setupScenario(db, {
       issueStatusName: "In Review",
       workspaceStatus: "active",
       sessionPid: 12345,

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
-import { apiFetch, apiPost } from "../lib/api.js";
+import { apiPost } from "../lib/api.js";
 import { getSettings } from "../lib/settingsStore.js";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { showToast } from "./Toast.js";

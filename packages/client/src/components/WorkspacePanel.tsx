@@ -38,7 +38,6 @@ import type {
   WorkspaceResponse,
   DiffResponse,
   DiffComment,
-  SessionSummaryResponse,
 } from "@agentic-kanban/shared";
 
 interface WorkspacePanelProps {

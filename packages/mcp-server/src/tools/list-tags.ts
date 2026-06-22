@@ -1,5 +1,4 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { z } from "zod";
 import { db, schema } from "../db.js";
 
 export function registerListTags(server: McpServer) {

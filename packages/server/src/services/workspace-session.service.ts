@@ -2,7 +2,6 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { writeFileSync, readFileSync, existsSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import type { Database } from "../db/index.js";
 import {
   applyPlanImplementWorkspaceUpdate,

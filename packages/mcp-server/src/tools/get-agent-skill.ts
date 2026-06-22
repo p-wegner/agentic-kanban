@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
-import { requireEntity, mcpError } from "../db-utils.js";
+import { mcpError } from "../db-utils.js";
 
 export function registerGetAgentSkill(server: McpServer) {
   server.tool(

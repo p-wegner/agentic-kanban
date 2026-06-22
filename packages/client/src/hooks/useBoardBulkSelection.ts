@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { apiFetch, apiPost, apiPatch } from "../lib/api.js";
+import { apiPost, apiPatch } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
 import type { IssueWithStatus, UpdateIssueRequest } from "@agentic-kanban/shared";
 

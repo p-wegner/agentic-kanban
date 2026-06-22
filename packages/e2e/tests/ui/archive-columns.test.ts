@@ -6,7 +6,6 @@ test.describe("Archive Column Group UI", () => {
   let projectId: string;
   let doneStatusId: string;
   let cancelledStatusId: string;
-  let todoStatusId: string;
   let suffix: string;
   const createdIssueIds: string[] = [];
 
@@ -27,7 +26,6 @@ test.describe("Archive Column Group UI", () => {
 
     doneStatusId = doneStatus.id;
     cancelledStatusId = cancelledStatus.id;
-    todoStatusId = todoStatus.id;
 
     suffix = Date.now().toString(36);
     const doneRes = await request.post(`${SERVER_URL}/api/issues`, {

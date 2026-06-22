@@ -45,7 +45,6 @@ const COMPARE = has('--compare'); // builders vs reviewers, side by side, one pr
 const TOP = parseInt(flag('--top', '0'), 10);
 const DAYS = parseInt(flag('--days', '0'), 10);
 
-const sum = a => a.reduce((x, y) => x + y, 0);
 const pct = (n, d) => d ? Math.round((n / d) * 100) : 0;
 const quant = (a, q) => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(q * s.length))]; };
 

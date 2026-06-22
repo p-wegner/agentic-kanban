@@ -7,7 +7,6 @@
  */
 import { describe, it, expect, vi } from "vitest";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
 import { issues, preferences, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { reconcileStrandedReviews } from "../startup/stranded-review-reconciler.js";

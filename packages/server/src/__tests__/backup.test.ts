@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
-import { existsSync, statSync, writeFileSync, readdirSync, utimesSync, mkdirSync } from "node:fs";
+import { existsSync, writeFileSync, readdirSync, utimesSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createClient } from "@libsql/client";

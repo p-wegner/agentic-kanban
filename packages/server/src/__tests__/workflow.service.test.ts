@@ -256,7 +256,7 @@ describe("workflow.service — analytics", () => {
     const { db } = createTestDb();
     const service = createService(db);
     const { projectId, statusId } = await seedProject(db, "analytics-visits");
-    const { templateId, nodeIds } = await seedLinearWorkflow(db, ["Start", "Build", "Done"]);
+    const { nodeIds } = await seedLinearWorkflow(db, ["Start", "Build", "Done"]);
     const [startId, buildId] = nodeIds;
 
     const issueId = await seedIssue(db, projectId, statusId, 1, "Analytics issue");

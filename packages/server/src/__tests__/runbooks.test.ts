@@ -14,11 +14,6 @@ function createTestApp() {
   });
 }
 
-interface ProjectSeed {
-  projectId: string;
-  repoPath: string;
-}
-
 async function seedProject(db: TestDb, repoPath: string): Promise<string> {
   const projectId = randomUUID();
   await db.insert(schema.projects).values({

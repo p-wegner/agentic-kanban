@@ -89,7 +89,6 @@ export function getNextCronRun(expr: string, from: Date): Date | null {
 }
 
 const DOW_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-const MON_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 export function describeCronExpression(expr: string): string {
   const parts = expr.trim().split(/\s+/);

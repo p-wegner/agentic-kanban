@@ -330,7 +330,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
   });
 
   it("scans 'AI Reviewed' issues too (another terminal Done-equivalent status)", async () => {
-    const { issueId } = await seedWorkspace(db, { issueStatusName: "AI Reviewed" });
+    await seedWorkspace(db, { issueStatusName: "AI Reviewed" });
     const checkAncestor = makeCheckAncestor(false);
     const countCommits = makeCountCommits(1);
 
@@ -1186,15 +1186,13 @@ describe("scanDoneUnmergedWorkspaces", () => {
       { id: wsC, issueId: issueC, branch: "feature/c", workingDir: "/repo/.w/c", baseBranch: "master", isDirect: false, status: "closed", readyForMerge: false, mergedAt: null, provider: "claude", createdAt: now, updatedAt: now },
     ]);
 
-    let callIdx = 0;
     const checkAncestor: CheckAncestor = vi.fn(async (_repo, branch) => {
-      callIdx++;
       if (branch === "feature/a") throw new Error("branch deleted");
       if (branch === "feature/b") return { isAncestor: false as const, branchSha: `sha-b`, baseSha: "sha-master" };
       return { isAncestor: false as const, branchSha: `sha-c`, baseSha: "sha-master" };
     });
 
-    const countCommits: CountCommits = vi.fn(async (_repo, from, to) => {
+    vi.fn(async (_repo, from, to) => {
       // feature/b: behind=0, ahead=0 (0-commit)
       // feature/c: behind=1, ahead=2
       if (to === "sha-b") return 0; // behind for b
@@ -1209,8 +1207,6 @@ describe("scanDoneUnmergedWorkspaces", () => {
     });
 
     // Use a more precise counter that tracks call order per branch
-    let behindCallCount = 0;
-    let aheadCallCount = 0;
     const preciseCountCommits: CountCommits = vi.fn(async (_repo, from, to) => {
       // Behind check: countCommits(repoPath, branchSha, baseSha)
       // Ahead check: countCommits(repoPath, baseSha, branchSha)
@@ -1218,13 +1214,11 @@ describe("scanDoneUnmergedWorkspaces", () => {
         // This is the behind check (counting baseSha→branchSha means behind)
         // Actually, looking at the code: countCommits(repoPath, result.branchSha, result.baseSha) for behind
         // and countCommits(repoPath, result.baseSha, result.branchSha) for ahead
-        behindCallCount++;
         if (from === "sha-b") return 0; // b: 0 behind
         if (from === "sha-c") return 1; // c: 1 behind
         return 0;
       } else {
         // Ahead check: countCommits(repoPath, result.baseSha, result.branchSha)
-        aheadCallCount++;
         if (to === "sha-b") return 0; // b: 0 ahead (0-commit)
         if (to === "sha-c") return 2; // c: 2 ahead (real work)
         return 0;
@@ -1349,7 +1343,6 @@ describe("scanDoneUnmergedWorkspaces", () => {
       createdAt: now, updatedAt: now,
     });
 
-    const callIdx = 0;
     const checkAncestor: CheckAncestor = vi.fn(async (_repo, branch) => {
       if (branch === "feature/branch-deleted-throw") throw new Error("branch not found");
       if (branch === "feature/branch-deleted-no-sha") return { isAncestor: false as const, branchSha: "", baseSha: "sha-master" };
@@ -1399,7 +1392,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     expect(result.autoMerged).toBe(1);
 
     // ACCEPTANCE: every issue stays Done — none were reopened
-    for (const { issueId, scenario } of ids) {
+    for (const { issueId } of ids) {
       const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
       const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
       expect(status.name).toBe("Done");

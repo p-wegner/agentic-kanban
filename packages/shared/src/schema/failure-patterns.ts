@@ -1,4 +1,4 @@
-import { sqliteTable, text, real, index } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, index } from "drizzle-orm/sqlite-core";
 
 export const failurePatterns = sqliteTable("failure_patterns", {
   id: text("id").primaryKey(),

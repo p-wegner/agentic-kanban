@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm";
 import { projects, projectStatuses, issues, workspaces, preferences, sessions, issueComments } from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createMockSessionManager } from "./helpers/mocks.js";
-import { createWorkspaceService, WorkspaceError, type GitService } from "../services/workspace.service.js";
+import { createWorkspaceService, type GitService } from "../services/workspace.service.js";
 import { activeMerges, MERGE_LOCK_STALE_MS } from "../services/workspace-internals.js";
 import { getWorkspaceDetails } from "../repositories/workspace.repository.js";
 
@@ -903,7 +903,7 @@ describe("workspace.service", () => {
     it("moves issue from In Review to Done when git reports branch already merged (no mergedAt in DB yet)", { timeout: 30000 }, async () => {
       // Scenario: git merge completed, master advanced, but the DB update was dropped.
       // mergedAt is null, issue is in In Review. git's mergeBranch returns "already merged".
-      const { projectId, issueId, statusIds } = await seedProjectAndIssueInReview(db);
+      const { issueId } = await seedProjectAndIssueInReview(db);
       const now = new Date().toISOString();
       const wsId = randomUUID();
 
@@ -948,7 +948,7 @@ describe("workspace.service", () => {
 
     it("preserves real conflict detection — conflicts still throw 409, not silently reconciled", { timeout: 30000 }, async () => {
       // Regression guard: the reconciliation path must not swallow genuine conflicts.
-      const { projectId, issueId } = await seedProjectAndIssueInReview(db);
+      const { issueId } = await seedProjectAndIssueInReview(db);
       const now = new Date().toISOString();
       const wsId = randomUUID();
 
@@ -1338,7 +1338,7 @@ describe("workspace.service", () => {
 
     it("skips auto-rebase for direct workspaces even when pref is true", async () => {
       const now = new Date().toISOString();
-      const { projectId, issueId } = await seedProjectAndIssue(db);
+      const { issueId } = await seedProjectAndIssue(db);
       const wsId = randomUUID();
       const sessionId = randomUUID();
       await db.insert(workspaces).values({

@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
-import { PRIORITY_META } from "../lib/chartColors.js";
 
 export interface MomentumViewProps {
   columns: StatusWithIssues[];
@@ -169,7 +168,6 @@ export function MomentumView({ columns, onIssueClick, searchQuery = "" }: Moment
   }, [columns, searchQuery, hideDone]);
 
   const totalIssues = PRIORITY_KEYS.reduce((n, k) => n + issuesByPriority[k].length, 0);
-  const priorityMeta = Object.fromEntries(PRIORITY_META.map((p) => [p.key, p]));
 
   return (
     <div className="flex flex-1 min-h-0 flex-col overflow-hidden bg-gray-50 dark:bg-gray-950">
@@ -215,7 +213,6 @@ export function MomentumView({ columns, onIssueClick, searchQuery = "" }: Moment
         {PRIORITY_KEYS.map((priority) => {
           const items = issuesByPriority[priority];
           const lane = PRIORITY_LANE[priority];
-          const meta = priorityMeta[priority];
 
           return (
             <div key={priority} className="flex min-h-[120px] shrink-0">
