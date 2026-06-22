@@ -9,14 +9,14 @@ import { createTestDb, type TestDb } from "./helpers/test-db.js";
 vi.mock("../services/git.service.js", () => ({
   getChangedFileNames: vi.fn(),
 }));
-vi.mock("../repositories/session.repository.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../repositories/session.repository.js")>()),
+vi.mock("../lib/session-output-reader.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/session-output-reader.js")>()),
   readSessionStdoutFile: vi.fn(),
 }));
 
 import { getWorkspaceRisk } from "../services/workspace-risk.service.js";
 import { getChangedFileNames } from "../services/git.service.js";
-import { readSessionStdoutFile } from "../repositories/session.repository.js";
+import { readSessionStdoutFile } from "../lib/session-output-reader.js";
 
 const mockGetChangedFileNames = vi.mocked(getChangedFileNames);
 const mockReadSessionStdoutFile = vi.mocked(readSessionStdoutFile);

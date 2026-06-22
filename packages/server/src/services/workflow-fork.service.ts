@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { readSessionStdoutFile } from "../repositories/session.repository.js";
+import { readSessionStdoutFile } from "../lib/session-output-reader.js";
 import {
   selectAllPreferences,
   selectAgentSkillById,

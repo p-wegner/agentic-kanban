@@ -134,6 +134,23 @@ module.exports = {
       },
     },
     {
+      name: "repositories-are-infra-pure",
+      comment:
+        "The persistence layer (repositories/) must be PURE DB access — no process, " +
+        "filesystem, or OS primitives. A repository that spawns a subprocess or reads a " +
+        "file is doing infrastructure I/O that belongs in an adapter (lib/ or a service), " +
+        "and it couples the data layer to the host environment, breaking the clean " +
+        "hexagonal boundary (the application core depends on the repository as a data PORT, " +
+        "not on the OS). The lone offender was session.repository.ts reading per-session " +
+        ".out transcript files; those readers moved to lib/session-output-reader.ts (a " +
+        "filesystem adapter). Lands green today — this is a TOTAL error gate: any new " +
+        "child_process/node:fs/node:os import in ANY repository fails pnpm lint:arch. " +
+        "Backlog: 0.",
+      severity: "error",
+      from: { path: "^packages/server/src/repositories/" },
+      to: { path: ["^child_process$", "^node:child_process$", "^node:fs", "^fs$", "^node:os$", "^node:http$", "^node:https$"] },
+    },
+    {
       name: "repositories-not-up-to-services",
       comment:
         "Persistence (repositories) must not depend on the application layer (services). " +

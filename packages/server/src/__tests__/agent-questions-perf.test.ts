@@ -14,7 +14,7 @@ import {
   markDismissed,
   setCachedRecommendations,
 } from "../services/agent-questions.service.js";
-import { readSessionStdoutFileTail } from "../repositories/session.repository.js";
+import { readSessionStdoutFileTail } from "../lib/session-output-reader.js";
 import { sessionOutputPath } from "../lib/session-paths.js";
 import { createTestDb } from "./helpers/test-db.js";
 import { setPreference } from "../repositories/preferences.repository.js";
