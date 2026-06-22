@@ -151,6 +151,7 @@ describe("startup timers are restart-safe for HMR-style reloads", () => {
       boardEvents,
       serverPort: 4123,
       reviewSessionIds: new Set<string>(),
+      fixAndMergeSessionIds: new Set<string>(),
     });
 
     monitorSetup.stop();

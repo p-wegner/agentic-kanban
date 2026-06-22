@@ -4,6 +4,7 @@ import { db } from "../db/index.js";
 import type { MonitorActionName } from "../services/monitor-nudge.js";
 import type { MonitorAction } from "./monitor-helpers.js";
 import type { WorkspaceCandidate } from "./monitor-cycle.js";
+import type { MonitorWorkspaceActions } from "./monitor-workspace-actions.js";
 
 export type LogMonitorActionFn = (action: MonitorActionName, workspaceId: string, issueId: string, extra?: Pick<MonitorAction, "endpoint" | "httpStatus" | "responseSummary" | "verificationResult">) => void;
 
@@ -15,39 +16,40 @@ export async function getProjectStatusIdByName(projectId: string, name: string):
 }
 
 /**
- * Triggers a merge for the workspace; on a non-ok response or network failure,
- * falls back to fix-and-merge with the merge error. The caller keeps ownership
- * of `stats.merged++` (a failed merge that fell back still consumes a merge
- * slot, by design) and of broadcasting the board change.
+ * Triggers a merge for the workspace; on failure (conflict, lock, etc.) falls
+ * back to fix-and-merge with the merge error. Calls the workspace application
+ * service DIRECTLY via the injected port — NOT over self-HTTP. A rejected merge
+ * promise maps 1:1 to the old non-2xx/network-failure branch, so the fix-and-merge
+ * fallback fires under exactly the same conditions. The caller keeps ownership of
+ * `stats.merged++` (a failed merge that fell back still consumes a merge slot, by
+ * design) and of broadcasting the board change.
  */
 export async function mergeWorkspaceWithFixFallback(
   ws: WorkspaceCandidate,
-  serverPort: number,
+  workspaceActions: MonitorWorkspaceActions,
   logAction: LogMonitorActionFn,
   logs: { conflictMsg: string; successMsg: string },
 ): Promise<void> {
-  const mergeEndpoint = `/api/workspaces/${ws.wsId}/merge`;
-  const mergeRes = await fetch(`http://127.0.0.1:${serverPort}${mergeEndpoint}`, { method: "POST" }).catch(() => null);
-  if (!mergeRes || !mergeRes.ok) {
-    const body = mergeRes ? await mergeRes.json().catch(() => ({})) : {};
-    const mergeError = (body as Record<string, string>)?.message || "merge failed";
-    const fixEndpoint = `/api/workspaces/${ws.wsId}/fix-and-merge`;
-    const fixRes = await fetch(`http://127.0.0.1:${serverPort}${fixEndpoint}`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mergeError }),
-    }).catch(() => null);
-    console.log(logs.conflictMsg);
-    logAction("merge", ws.wsId, ws.issueId, {
-      endpoint: fixEndpoint,
-      httpStatus: fixRes?.status,
-      responseSummary: mergeError.slice(0, 200),
-      verificationResult: fixRes?.ok ? "ok" : "failed",
-    });
-  } else {
+  try {
+    await workspaceActions.merge(ws.wsId);
     console.log(logs.successMsg);
     logAction("merge", ws.wsId, ws.issueId, {
-      endpoint: mergeEndpoint,
-      httpStatus: mergeRes.status,
+      endpoint: `POST /api/workspaces/${ws.wsId}/merge`,
       verificationResult: "ok",
+    });
+  } catch (err) {
+    const mergeError = err instanceof Error ? err.message : "merge failed";
+    let fixOk = true;
+    try {
+      await workspaceActions.fixAndMerge(ws.wsId, mergeError);
+    } catch {
+      fixOk = false;
+    }
+    console.log(logs.conflictMsg);
+    logAction("merge", ws.wsId, ws.issueId, {
+      endpoint: `POST /api/workspaces/${ws.wsId}/fix-and-merge`,
+      responseSummary: mergeError.slice(0, 200),
+      verificationResult: fixOk ? "ok" : "failed",
     });
   }
 }
