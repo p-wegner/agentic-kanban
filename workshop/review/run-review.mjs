@@ -1,34 +1,41 @@
 /**
  * Workshop CI Review Runner
  *
- * Fetches the MR diff + linked GitLab issue, passes both to the participant's
- * skill prompt, and writes findings.json as a CI artifact.
+ * Gets the MR diff via git, fetches the linked GitLab issue via API,
+ * passes both to the participant's skill prompt, and writes findings.json.
  *
  * Required CI variables:
- *   CI_API_V4_URL        – set automatically by GitLab
- *   CI_PROJECT_ID        – set automatically by GitLab
- *   CI_MERGE_REQUEST_IID – set automatically by GitLab (MR pipelines only)
- *   CI_JOB_TOKEN         – set automatically by GitLab
- *   ANTHROPIC_BASE_URL   – the API gateway base URL
- *   GATEWAY_API_KEY      – the gateway API key (masked CI variable)
+ *   CI_API_V4_URL              – set automatically by GitLab
+ *   CI_PROJECT_ID              – set automatically by GitLab
+ *   CI_MERGE_REQUEST_IID       – set automatically by GitLab (MR pipelines only)
+ *   CI_MERGE_REQUEST_DIFF_BASE_SHA – set automatically by GitLab
+ *   CI_JOB_TOKEN               – set automatically by GitLab
+ *   ANTHROPIC_BASE_URL         – the API gateway base URL
+ *   GATEWAY_API_KEY            – the gateway API key (masked CI variable)
  */
 
 import Anthropic from "@anthropic-ai/sdk";
 import { readFileSync, writeFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { execSync } from "child_process";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const GITLAB_API = process.env.CI_API_V4_URL ?? "https://code.andrena.de/api/v4";
 const PROJECT_ID = process.env.CI_PROJECT_ID;
 const MR_IID = process.env.CI_MERGE_REQUEST_IID;
+const DIFF_BASE_SHA = process.env.CI_MERGE_REQUEST_DIFF_BASE_SHA;
 const JOB_TOKEN = process.env.CI_JOB_TOKEN;
 const GATEWAY_API_KEY = process.env.GATEWAY_API_KEY;
 const BASE_URL = process.env.ANTHROPIC_BASE_URL;
 
 if (!PROJECT_ID || !MR_IID) {
   console.error("Must run inside a GitLab MR pipeline (CI_PROJECT_ID and CI_MERGE_REQUEST_IID required)");
+  process.exit(1);
+}
+if (!DIFF_BASE_SHA) {
+  console.error("CI_MERGE_REQUEST_DIFF_BASE_SHA is not set. Must run in an MR pipeline.");
   process.exit(1);
 }
 if (!GATEWAY_API_KEY) {
@@ -44,13 +51,13 @@ async function fetchGitlab(path) {
   return res.json();
 }
 
-// --- Fetch MR metadata + diff ---
+// --- Fetch MR metadata ---
 const mr = await fetchGitlab(`/projects/${PROJECT_ID}/merge_requests/${MR_IID}`);
-const mrChanges = await fetchGitlab(`/projects/${PROJECT_ID}/merge_requests/${MR_IID}/changes`);
 
-const diffText = mrChanges.changes
-  .map((d) => `--- ${d.old_path}\n+++ ${d.new_path}\n${d.diff}`)
-  .join("\n\n");
+// --- Get diff via git (CI_JOB_TOKEN cannot access MR diff endpoints) ---
+const repoRoot = join(__dirname, "..", "..");
+const diffText = execSync(`git diff ${DIFF_BASE_SHA}`, { cwd: repoRoot, encoding: "utf-8" });
+console.log(`Diff size: ${diffText.length} chars`);
 
 // --- Fetch linked issue (parses "Closes #N" / "Fixes #N" from MR description) ---
 let issueSection = "";
