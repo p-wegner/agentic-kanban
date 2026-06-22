@@ -46,9 +46,9 @@ async function fetchGitlab(path) {
 
 // --- Fetch MR metadata + diff ---
 const mr = await fetchGitlab(`/projects/${PROJECT_ID}/merge_requests/${MR_IID}`);
-const diffs = await fetchGitlab(`/projects/${PROJECT_ID}/merge_requests/${MR_IID}/diffs`);
+const mrChanges = await fetchGitlab(`/projects/${PROJECT_ID}/merge_requests/${MR_IID}/changes`);
 
-const diffText = diffs
+const diffText = mrChanges.changes
   .map((d) => `--- ${d.old_path}\n+++ ${d.new_path}\n${d.diff}`)
   .join("\n\n");
 
