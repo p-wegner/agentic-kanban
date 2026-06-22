@@ -1,8 +1,8 @@
-import { execFile, execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { resolve, basename, relative } from "node:path";
 import type { ProjectStatsResponse } from "@agentic-kanban/shared";
+import { gitExecOrThrow, gitExecSync } from "@agentic-kanban/shared/lib/git-exec";
 
 export interface RepoInfo {
   repoPath: string;
@@ -12,25 +12,12 @@ export interface RepoInfo {
 }
 
 function execGit(args: string[], cwd: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile("git", args, { cwd, maxBuffer: 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
-      if (err) {
-        reject(new Error(`git ${args.join(" ")} failed: ${stderr || err.message}`));
-      } else {
-        resolve(stdout.toString().trim());
-      }
-    });
-  });
+  return gitExecOrThrow(args, { cwd, maxBuffer: 1024 * 1024 }).then((stdout) => stdout.trim());
 }
 
-/** Async git exec with a timeout, mirroring the sync execFileSync call options. Output is NOT trimmed. */
+/** Async git exec with a timeout, mirroring the sync gitExecSync call options. Output is NOT trimmed. */
 function execGitCapture(args: string[], cwd: string, timeout: number, maxBuffer = 1024 * 1024): Promise<string> {
-  return new Promise((resolvePromise, reject) => {
-    execFile("git", args, { cwd, timeout, maxBuffer, windowsHide: true }, (err, stdout) => {
-      if (err) reject(err instanceof Error ? err : new Error(err.message));
-      else resolvePromise(stdout.toString());
-    });
-  });
+  return gitExecOrThrow(args, { cwd, timeout, maxBuffer });
 }
 
 export async function branchExists(repoPath: string, branch: string): Promise<boolean> {
@@ -383,11 +370,11 @@ function collectHistoryMetrics(repoPath: string, branch: string): Pick<ProjectGi
   let logOut = "";
 
   try {
-    logOut = execFileSync(
-      "git",
-      historyLogArgs(weeks[0].week, branch),
-      { cwd: repoPath, timeout: HISTORY_LOG_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 },
-    ).toString();
+    logOut = gitExecSync(historyLogArgs(weeks[0].week, branch), {
+      cwd: repoPath,
+      timeout: HISTORY_LOG_TIMEOUT_MS,
+      maxBuffer: 4 * 1024 * 1024,
+    });
   } catch {
     // Git history is best-effort. Current LOC still makes the metrics view useful.
   }
@@ -395,11 +382,11 @@ function collectHistoryMetrics(repoPath: string, branch: string): Pick<ProjectGi
   const result = parseHistoryLog(weeks, logOut);
   if (result.hotspots.length === 0) {
     try {
-      const fullOut = execFileSync(
-        "git",
-        hotspotLogArgs(branch),
-        { cwd: repoPath, timeout: HISTORY_LOG_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 },
-      ).toString();
+      const fullOut = gitExecSync(hotspotLogArgs(branch), {
+        cwd: repoPath,
+        timeout: HISTORY_LOG_TIMEOUT_MS,
+        maxBuffer: 4 * 1024 * 1024,
+      });
       result.hotspots = parseHotspotsLog(fullOut);
     } catch {
       // Fallback is best-effort; an empty hotspot list is acceptable.
@@ -434,7 +421,7 @@ async function collectHistoryMetricsAsync(repoPath: string, branch: string): Pro
 function collectProjectCodeAndHistory(repoPath: string, branch: string): CachedMetrics {
   const head = (() => {
     try {
-      return execFileSync("git", ["rev-parse", branch], { cwd: repoPath, timeout: 2000 }).toString().trim();
+      return gitExecSync(["rev-parse", branch], { cwd: repoPath, timeout: 2000 }).trim();
     } catch {
       return branch;
     }
@@ -500,7 +487,7 @@ export function getProjectGitStats(repoPath: string, defaultBranch: string | nul
   if (!branch) {
     for (const candidate of ["main", "master"]) {
       try {
-        execFileSync("git", ["show-ref", "--verify", "--quiet", `refs/heads/${candidate}`], { cwd: repoPath, timeout: 2000 });
+        gitExecSync(["show-ref", "--verify", "--quiet", `refs/heads/${candidate}`], { cwd: repoPath, timeout: 2000 });
         branch = candidate;
         break;
       } catch { /* branch doesn't exist */ }
@@ -517,10 +504,10 @@ export function getProjectGitStats(repoPath: string, defaultBranch: string | nul
   };
 
   try {
-    const countOut = execFileSync("git", ["rev-list", "--count", branch], { cwd: repoPath, timeout: 5000 }).toString().trim();
+    const countOut = gitExecSync(["rev-list", "--count", branch], { cwd: repoPath, timeout: 5000 }).trim();
     commitCount = parseInt(countOut, 10) || 0;
     // Use ASCII unit separator (\x1f) to avoid conflicts with commit message content
-    const logOut = execFileSync("git", ["log", branch, `--format=%H${GIT_SEP}%s${GIT_SEP}%cr`, "-10"], { cwd: repoPath, timeout: 5000 }).toString().trim();
+    const logOut = gitExecSync(["log", branch, `--format=%H${GIT_SEP}%s${GIT_SEP}%cr`, "-10"], { cwd: repoPath, timeout: 5000 }).trim();
     recentCommits = parseRecentCommits(logOut);
   } catch { /* git unavailable or no commits */ }
 
