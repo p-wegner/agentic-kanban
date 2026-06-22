@@ -10,6 +10,7 @@ ai-code-review:
     ANTHROPIC_BASE_URL: "https://ao-ai-api-management.azure-api.net/ai-gateway"
     # GATEWAY_API_KEY: set as masked CI variable in GitLab → Settings → CI/CD → Variables
   before_script:
+    - apk add --no-cache git
     - cd workshop/review && npm install --silent
   script:
     - node run-review.mjs
