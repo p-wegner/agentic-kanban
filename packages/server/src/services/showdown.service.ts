@@ -4,6 +4,7 @@ import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
 import { createWorkspaceCrudService } from "./workspace-crud.service.js";
+import { createWorkspaceService } from "./workspace.service.js";
 import type { ShowdownContestant, ShowdownContestantResult, ShowdownResponse } from "@agentic-kanban/shared";
 import { WorkspaceError } from "./workspace-internals.js";
 import {
@@ -190,11 +191,14 @@ export function createShowdownService(deps: {
     const allWsRows = await getShowdownWorkspaceIds(showdownId, database);
 
     const losers = allWsRows.filter(w => w.id !== winnerWorkspaceId);
+    // Build the workspace service ONCE (was a dynamic import + re-construction per
+    // loser iteration). The dynamic import dodged no cycle — workspace.service does
+    // not import showdown — so a static import is correct and avoids re-resolving
+    // the module and rebuilding the service on every loop pass.
+    const workspaceService = createWorkspaceService(deps);
     for (const loser of losers) {
       try {
-        const { createWorkspaceService } = await import("./workspace.service.js");
-        const svc = createWorkspaceService(deps);
-        await svc.deleteWorkspace(loser.id);
+        await workspaceService.deleteWorkspace(loser.id);
       } catch (err) {
         console.warn(`[showdown] Failed to delete loser workspace ${loser.id}:`, err instanceof Error ? err.message : String(err));
       }
