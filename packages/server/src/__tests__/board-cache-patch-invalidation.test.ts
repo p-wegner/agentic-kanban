@@ -221,8 +221,6 @@ describe("board cache invalidation on PATCH issue statusId", () => {
 
     // This GET will: (a) return stale data, (b) start a background rebuild.
     // The rebuild is async; we intercept to simulate a PATCH arriving during rebuild.
-    let resolveRebuild!: () => void;
-    const rebuildGate = new Promise<void>((res) => { resolveRebuild = res; });
 
     // Patch the projectService to intercept the background rebuild result.
     // We simulate a race by: issuing the stale GET, then patching status, then

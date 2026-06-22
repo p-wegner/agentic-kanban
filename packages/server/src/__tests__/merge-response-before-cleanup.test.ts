@@ -241,7 +241,7 @@ describe("merge endpoint response before cleanup", () => {
     // We simulate this by injecting a failure into updateWorkspaceStatus (the combined
     // status write that follows the early mergedAt stamp) and verifying that mergedAt
     // was still written to the DB before the failure.
-    const { workspaceId, issueId } = await seedWorkspace(db);
+    const { workspaceId } = await seedWorkspace(db);
 
     // Allow the early mergedAt stamp to succeed but fail the full status update
     let updateCallCount = 0;

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 
 // The session manager exports formatToolActivity and tasksToTodoItems as private helpers.
 // We test them by re-implementing the same logic for unit testing, and test the public API

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { apiFetch, apiPatch } from "../lib/api.js";
+import { apiPatch } from "../lib/api.js";
 
 export type PreflightVerdict = "ready" | "needs-clarification" | string;
 
@@ -52,7 +52,7 @@ function verdictLabel(verdict: PreflightVerdict): { text: string; color: string;
 export function PreflightModal({
   result,
   issueId,
-  projectId,
+  projectId: _projectId,
   issueTitle,
   issueDescription,
   isDirect,

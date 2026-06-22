@@ -93,7 +93,7 @@ describe("workflow-engine", () => {
 
   it("routes a bug issue to the Simple Bug template", async () => {
     const { projectId, statusIds } = await seedProject(db);
-    const issueId = await seedIssue(db, projectId, statusIds["Todo"], "bug");
+    await seedIssue(db, projectId, statusIds["Todo"], "bug");
     const templateId = await resolveTemplateForIssue(db as any, { projectId, issueType: "bug" });
     expect(templateId).toBeTruthy();
     const tpl = await db

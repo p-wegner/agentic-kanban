@@ -3,7 +3,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { mcpError, resolveStatusByName, nextIssueNumber, resolveActiveProjectId } from "../db-utils.js";
+import { resolveStatusByName, nextIssueNumber, resolveActiveProjectId } from "../db-utils.js";
 
 export function registerCreateIssue(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, notifyBoard } = deps;

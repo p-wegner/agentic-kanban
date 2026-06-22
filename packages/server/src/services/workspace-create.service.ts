@@ -366,10 +366,6 @@ export function createWorkspaceCreateService(deps: {
     // Hoisted so it is in scope in the catch block's failure handler. The real
     // value (priority-derived default or explicit input) is assigned inside try.
     let planMode = input.planMode === true;
-    // Tracks whether the workspace row was committed to the DB. Used to decide
-    // between rollback-and-throw (post-insert failure) vs insert-then-return-error
-    // (pre-insert failure) in the catch block.
-    let workspaceInserted = false;
 
     const phaseStart = Date.now();
     const timing = (phase: string, startMs: number) =>
@@ -424,7 +420,6 @@ export function createWorkspaceCreateService(deps: {
         skillId: effectiveSkillId, claudeProfile, agentCommand, resolvedProvider, model: agentConfig.model,
         contextPrimer, latestSetup, latestSymlink, now,
       });
-      workspaceInserted = true;
       timing("db-insert", t);
 
       if (setupCompletion) {

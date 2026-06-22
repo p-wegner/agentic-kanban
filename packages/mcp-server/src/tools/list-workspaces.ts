@@ -12,10 +12,6 @@ export function registerListWorkspaces(server: McpServer) {
       status: z.string().optional().describe("Filter by status (active, idle, closed)"),
     },
     async ({ issueId, status }) => {
-      const query = db.select().from(schema.workspaces);
-
-      // Apply filters
-      const conditions = [];
       if (issueId) {
         const result = await db.select().from(schema.workspaces)
           .where(eq(schema.workspaces.issueId, issueId));

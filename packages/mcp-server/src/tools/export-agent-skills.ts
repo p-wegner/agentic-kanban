@@ -58,7 +58,6 @@ export function registerExportAgentSkills(server: McpServer) {
           exportedNames.add(skill.name);
         }
 
-        const scopeDesc = projectId ? `project + global` : "all";
         return {
           content: [{
             type: "text" as const,

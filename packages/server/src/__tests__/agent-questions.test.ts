@@ -254,8 +254,6 @@ describe("listPendingQuestionsForProject — dismiss + staleness integration", (
       closedAt: opts.workspaceClosedAt ?? null,
     });
     const sessionId = `sess-${opts.toolUseId}`;
-    const recentStartedAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-    const recentEndedAt = new Date(Date.now() - 30 * 60 * 1000).toISOString();
     await db.insert(sessions).values({
       id: sessionId,
       workspaceId,
@@ -277,7 +275,6 @@ describe("listPendingQuestionsForProject — dismiss + staleness integration", (
 
   it("lists a pending question and hides it once dismissed", async () => {
     const { db } = createTestDb();
-    const now = new Date().toISOString();
     const recentSessionAt = new Date(Date.now() - 30 * 60 * 1000).toISOString(); // 30 min ago
     const { projectId } = await seed(db, {
       toolUseId: "tu-a",

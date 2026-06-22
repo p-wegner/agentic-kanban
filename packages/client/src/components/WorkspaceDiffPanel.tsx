@@ -1,4 +1,4 @@
-import { apiFetch, apiPost, apiPatch, apiDelete } from "../lib/api.js";
+import { apiPost, apiPatch, apiDelete } from "../lib/api.js";
 import { DiffViewer } from "./DiffViewer.js";
 import type { DiffResponse, DiffComment, CreateDiffCommentRequest } from "@agentic-kanban/shared";
 

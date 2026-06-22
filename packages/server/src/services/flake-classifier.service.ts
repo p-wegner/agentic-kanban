@@ -156,7 +156,7 @@ export function createFlakeClassifierService(database: Database) {
    */
   async function classifyFailure(input: ClassifierInput): Promise<ClassifierResult & { decisionId: string }> {
     // Load project retry settings
-    const project = await getProjectRetrySettings(input.projectId, database);
+    await getProjectRetrySettings(input.projectId, database);
 
     // Load all known flaky tests for this project
     const knownFlaky = await listKnownFlakyByProject(input.projectId, database);

@@ -321,7 +321,7 @@ describe("Agent Throughput by Provider (AK-514)", () => {
 
   it("returns empty providers array when no Done issues exist", async () => {
     const emptyProjectId = await createProjectDirectly(database, { name: "Empty Throughput" });
-    const doneId = await createStatusDirectly(database, emptyProjectId, "Done", 0);
+    await createStatusDirectly(database, emptyProjectId, "Done", 0);
 
     const res = await app.request(
       `/api/projects/${emptyProjectId}/dashboard/throughput-by-provider?days=14`

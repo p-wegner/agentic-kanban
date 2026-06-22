@@ -8,7 +8,6 @@ import * as schema from "@agentic-kanban/shared/schema";
 import {
   initWorkspaceWorkflow,
   proposeTransition,
-  resolveTemplateForIssue,
 } from "@agentic-kanban/shared/lib/workflow-engine";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { ensureBuiltinSkills } from "../db/seed.js";

@@ -3,7 +3,6 @@ import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { getOutputFormatForAgent, getOutputFormatForProvider } from "../lib/agent-output-parser.js";
 import { SessionStatsBadge } from "../lib/session-stats.js";
 import {
-  SESSION_STATUS_COLORS,
   formatDuration,
   getTriggerTypeLabel,
   parseStats,
@@ -65,7 +64,6 @@ export function WorkspaceSessionList({
               })()}
               <div className="space-y-0.5 max-h-48 overflow-y-auto">
               {completedSessions.map((session) => {
-                const sessionBadge = SESSION_STATUS_COLORS[session.status] ?? "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400";
                 const isActive = selectedHistoryId === session.id;
                 const isContinuation = !!session.resumeFromId && completedSessions.some(s => s.id === session.resumeFromId);
                 return (

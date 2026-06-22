@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { eq, desc } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { parseSessionSummary } from "@agentic-kanban/shared";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { requireEntity } from "../db-utils.js";

@@ -4,7 +4,6 @@ import * as schema from "@agentic-kanban/shared/schema";
 import { createTestApp as _createTestApp } from "./helpers/test-app.js";
 import { createMockSessionManager } from "./helpers/mocks.js";
 import { createRoutes } from "../routes/index.js";
-import type { TestDb } from "./helpers/test-db.js";
 
 function createTestApp() {
   return _createTestApp((app, db) => {

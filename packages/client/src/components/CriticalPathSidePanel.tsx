@@ -26,8 +26,6 @@ export function CriticalPathSidePanel({ chainRoot, criticalPathResult, nodeIssue
 
   if (!chain || chain.length === 0) return null;
 
-  const rootIssue = nodeIssueMap.get(chainRoot);
-
   return (
     <div className="absolute top-0 right-0 bottom-0 z-20 animate-slide-in-right" style={{ width: 320 }}>
       <div ref={panelRef} className="h-full bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 shadow-lg flex flex-col">

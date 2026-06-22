@@ -86,10 +86,10 @@ const CARD_GAP_PX = {
 export function BoardColumn({
   column,
   allColumns,
-  projectId,
+  projectId: _projectId,
   creatingInColumn,
   onCreateClick,
-  onCreateCancel,
+  onCreateCancel: _onCreateCancel,
   onIssueClick,
   onWorkspaceClick,
   onOpenDiff,
@@ -315,7 +315,7 @@ export function BoardColumn({
       } ${isColumnDragOver ? "ring-2 ring-brand-300 ring-offset-1 ring-offset-surface dark:ring-offset-surface-dark opacity-75" : ""}`}
       style={columnStyle}
       onDragEnter={handleDragEnter}
-      onDragLeave={(e) => { handleDragLeave(); onColumnDragLeave?.(); }}
+      onDragLeave={() => { handleDragLeave(); onColumnDragLeave?.(); }}
       onDragOver={(e) => { handleDragOver(e); onColumnDragOver?.(e); }}
       onDrop={(e) => { handleDrop(e); onColumnDrop?.(e); }}
       onDragEnd={onColumnDragEnd}

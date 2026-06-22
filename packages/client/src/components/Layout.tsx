@@ -15,12 +15,6 @@ interface Project {
   activeWorkspaceCount?: number;
 }
 
-interface RegisterOptions {
-  repoPath: string;
-  gitignoreTemplate: string;
-  generateReadme: boolean;
-}
-
 interface LayoutProps {
   children: ReactNode;
   projects?: Project[];
@@ -65,8 +59,8 @@ export function Layout({
   onCreateProject,
   searchQuery = "",
   onSearchChange,
-  priorityFilter = "",
-  onPriorityFilterChange,
+  priorityFilter: _priorityFilter = "",
+  onPriorityFilterChange: _onPriorityFilterChange,
   onAllWorkspacesClick,
   onLaunchFailuresClick,
   onWorktreeOverviewClick,

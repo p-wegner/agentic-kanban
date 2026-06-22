@@ -165,7 +165,7 @@ function ActionView({ action, issueNumber, onOpenWorkspace, onClose }: {
 }
 
 /** Render a BoardHealthEvent (from DB) as a replay drawer. Fetches full details from server. */
-function EventView({ event, projectId, onClose }: {
+function EventView({ event, projectId, onClose: _onClose }: {
   event: { id: string; type: string; category: string | null; issueNumber: number | null; summary: string; timestamp: string };
   projectId: string;
   onClose: () => void;

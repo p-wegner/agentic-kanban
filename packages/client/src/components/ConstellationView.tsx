@@ -63,7 +63,7 @@ function colorWithAlpha(hex: string, alpha: number): string {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
-export function ConstellationView({ columns, onIssueClick, searchQuery }: ConstellationViewProps) {
+export function ConstellationView({ columns, onIssueClick, searchQuery: _searchQuery }: ConstellationViewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const nodesRef = useRef<Node[]>([]);
@@ -80,7 +80,6 @@ export function ConstellationView({ columns, onIssueClick, searchQuery }: Conste
 
   const buildLayout = useCallback(
     (width: number, height: number) => {
-      const allIssues = activeColumns.flatMap((c) => c.issues);
       const cx = width / 2;
       const cy = height / 2;
       const clusterCount = activeColumns.length;

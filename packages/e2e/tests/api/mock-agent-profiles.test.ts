@@ -348,7 +348,7 @@ test.describe("Mock agent profiles", () => {
     });
 
     // Wait for agent to fully exit
-    const messages = await waitForSession(request, workspaceId, sessionId);
+    await waitForSession(request, workspaceId, sessionId);
 
     // Get all output
     const outputRes = await request.get(

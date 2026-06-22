@@ -17,7 +17,7 @@ const chromiumPath = path.join(
   "AppData/Local/ms-playwright/chromium-1217/chrome-win64/chrome.exe"
 );
 import * as fs from "fs";
-const executablePath = fs.existsSync(headlessShellPath) ? headlessShellPath : (fs.existsSync(chromiumPath) ? chromiumPath : undefined);
+const _executablePath = fs.existsSync(headlessShellPath) ? headlessShellPath : (fs.existsSync(chromiumPath) ? chromiumPath : undefined);
 function commandWithEnv(envKey: string, envValue: string, command: string[]) {
   return ["node", "packages/e2e/web-server.mjs", envKey, envValue, ...command].join(" ");
 }

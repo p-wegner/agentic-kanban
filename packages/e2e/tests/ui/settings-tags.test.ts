@@ -135,7 +135,7 @@ test.describe("Settings Tags tab", () => {
       data: { name: nameB, color: "#6B7280" },
     });
     const tagA = await resA.json();
-    const tagB = await resB.json();
+    await resB.json();
     createdTagIds.push(tagA.id);
     // tagB will be deleted by the merge — don't add to cleanup list
 

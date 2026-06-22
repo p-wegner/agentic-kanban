@@ -1,5 +1,5 @@
 import type { WSContext } from "hono/ws";
-import type { ParsedStreamEvent, ProviderName } from "../agent-provider.js";
+import type { ProviderName } from "../agent-provider.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import type { TodoItem } from "../board-events.js";
 

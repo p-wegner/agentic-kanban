@@ -1,13 +1,12 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import type { IssueArtifact, IssueWithStatus, UpdateIssueRequest, DependencyInfo, MilestoneResponse } from "@agentic-kanban/shared";
-import { isHttpUrl } from "../lib/url.js";
+import type { IssueWithStatus, UpdateIssueRequest } from "@agentic-kanban/shared";
 import { MarkdownToolbar } from "./MarkdownToolbar.js";
 import { IssueWorkspacesSection } from "./IssueWorkspacesSection.js";
 import { IssueDetailDialogs, type MoveToDonePending, type DependencyImpactPending } from "./IssueDetailDialogs.js";
 import { usePanelLayout } from "../hooks/usePanelLayout.js";
 import { useIssueEditForm } from "../hooks/useIssueEditForm.js";
-import { useIssueDetailData, invalidateAvailableIssuesCache } from "../hooks/useIssueDetailData.js";
+import { useIssueDetailData } from "../hooks/useIssueDetailData.js";
 import { useIssueInlineEdit } from "../hooks/useIssueInlineEdit.js";
 import { useIssueActions } from "../hooks/useIssueActions.js";
 import { IssueSecondaryDetails } from "./IssueSecondaryDetails.js";
@@ -19,8 +18,6 @@ import { IssueWorkLogSection } from "./IssueWorkLogSection.js";
 import { useIssueDisplayData } from "../hooks/useIssueDisplayData.js";
 import { useModalDrag } from "../hooks/useModalDrag.js";
 import { normalizeMarkdown } from "../lib/artifact-utils.js";
-import { type IssueComment } from "./IssueDetailComments.js";
-import { type TouchedFile } from "./IssueTouchedFilesSection.js";
 import { copyIssueArtifactContent, openIssueArtifact } from "./IssueArtifactsSection.js";
 import { IssueDetailHeader } from "./IssueDetailHeader.js";
 

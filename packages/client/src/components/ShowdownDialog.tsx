@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { apiFetch, apiPost } from "../lib/api.js";
+import { apiPost } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 import type { IssueWithStatus, ShowdownResponse } from "@agentic-kanban/shared";
 import { CLAUDE_MODEL_OPTIONS } from "@agentic-kanban/shared";

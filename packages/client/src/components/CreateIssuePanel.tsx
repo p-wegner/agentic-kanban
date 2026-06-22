@@ -6,8 +6,6 @@ import type { CreateIssueFormState } from "./CreateIssueForm.js";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { getSettings } from "../lib/settingsStore.js";
 import { showToast } from "./Toast.js";
-import TicketMentionInput from "./TicketMentionInput.js";
-import TicketMentionRenderer from "./TicketMentionRenderer.js";
 import { MarkdownToolbar } from "./MarkdownToolbar.js";
 import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
 import { buildCreateIssuePayload } from "../lib/createIssuePayload.js";

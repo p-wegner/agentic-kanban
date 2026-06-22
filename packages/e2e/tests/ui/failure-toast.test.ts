@@ -1,5 +1,4 @@
 import { test, expect } from "@playwright/test";
-import { SERVER_URL } from "../helpers/port.js";
 import { getE2EProjectId } from "../helpers/e2e-project.js";
 
 // #184 — FAILURE toast notification lifecycle.
@@ -19,7 +18,6 @@ import { getE2EProjectId } from "../helpers/e2e-project.js";
 //     `button` with text "Add" (type=submit).
 
 test.describe("Failure toast (#184)", () => {
-  let projectId: string;
   let suffix: string;
 
   async function withRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
@@ -36,7 +34,7 @@ test.describe("Failure toast (#184)", () => {
   }
 
   test.beforeAll(async ({ request }) => {
-    projectId = await withRetry(() => getE2EProjectId(request), "getE2EProjectId");
+    await withRetry(() => getE2EProjectId(request), "getE2EProjectId");
     suffix = Date.now().toString(36);
   });
 

@@ -260,7 +260,7 @@ function ActivityHeatmap({
   issues: IssueWithStatus[];
   onCreatedDateClick?: (dateKey: string) => void;
 }) {
-  const { cells, maxCount, weeks } = useMemo(() => {
+  const { maxCount, weeks } = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 

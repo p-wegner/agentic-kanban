@@ -2,24 +2,19 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, apiPost, apiPut, apiDelete } from "../lib/api.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats } from "../lib/useBoardEvents.js";
-import { AgentQuestionsPanel } from "./AgentQuestionsPanel.js";
-import { ButlerVoiceButton, type ButlerVoiceButtonHandle } from "./ButlerVoiceButton.js";
+import { type ButlerVoiceButtonHandle } from "./ButlerVoiceButton.js";
 import {
   reduceButlerEvent,
-  emptyAssistantBuf,
   type ButlerEvent,
   type AssistantBuf,
   type ButlerChatMessage as ChatMessage,
 } from "../lib/butler-event-reducer.js";
 import type { ButlerState, ButlerCommand, ButlerSessionSummary, ButlerSessionMessage, ButlerListItem, TabState } from "../lib/butler-types.js";
-import { formatWindow, formatRelativeTs, backendLabel, modelOptionsForBackend, modelLabel } from "../lib/butler-format.js";
+import { formatWindow, formatRelativeTs, backendLabel, modelOptionsForBackend } from "../lib/butler-format.js";
 import { buildButlerUrl } from "../lib/butler-url.js";
 import { parseSlashCommand, filterCommands, applyCommandToInput, nextCycleIndex } from "../lib/butler-slash-commands.js";
 import { sanitizeSpeechText } from "../lib/butler-speech.js";
-import { ButlerManageModal, type ButlerDef } from "./ButlerManageModal.js";
-import { ChatBubble } from "./ButlerChatParts.js";
-import { ActivityStrip } from "./ButlerChrome.js";
-import { ButlerTabBar } from "./ButlerTabBar.js";
+import { type ButlerDef } from "./ButlerManageModal.js";
 import { ButlerViewBody } from "./ButlerViewBody.js";
 
 interface ButlerViewProps {

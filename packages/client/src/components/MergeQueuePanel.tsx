@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { apiFetch, apiPost } from "../lib/api.js";
+import { apiPost } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import type { IssueWithStatus, MainWorkspaceInfo, StatusWithIssues } from "@agentic-kanban/shared";
 

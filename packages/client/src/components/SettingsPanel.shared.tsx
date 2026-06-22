@@ -17,9 +17,8 @@ export interface SettingsPanelProps {
 export * from "../lib/settings-shared.js";
 export * from "./SettingsPrimitives.js";
 export * from "./WorkflowSections.js";
-import { Field, Toggle } from "./SettingsPrimitives.js";
 import { CAPABILITY_DEFS, getProviderCapabilities } from "../lib/settings-shared.js";
-import type { Settings, MonitorTunables, AgentProvider } from "../lib/settings-shared.js";
+import type { Settings, AgentProvider } from "../lib/settings-shared.js";
 
 const ARCHIVE_THRESHOLDS = [
   { label: "14 days", value: 14 },

@@ -84,7 +84,7 @@ test.describe("Workspace lifecycle API", () => {
         },
       },
     );
-    const body = await res.json();
+    await res.json();
     expect(res.status()).toBeGreaterThanOrEqual(200);
     expect(res.status()).toBeLessThan(600);
   });

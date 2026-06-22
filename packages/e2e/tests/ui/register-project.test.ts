@@ -1,5 +1,4 @@
 import { test, expect } from "@playwright/test";
-import { SERVER_URL } from "../helpers/port.js";
 
 const VALID_REPO_PATH = "C:/andrena/agentic-kanban";
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
-import { apiFetch, apiPatch } from "../lib/api.js";
+import { apiPatch } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 import type { QuickUpdateCallbacks, StatusOption } from "./IssueCard.js";
 

@@ -140,9 +140,9 @@ interface BoardToolbarProps {
 
 export function BoardToolbar({
   activeColumns,
-  onShowTimeReport,
-  focusMode = false,
-  onFocusModeChange,
+  onShowTimeReport: _onShowTimeReport,
+  focusMode: _focusMode = false,
+  onFocusModeChange: _onFocusModeChange,
   onShowQuickTasks,
   autoMonitor,
   monitorRunning,
@@ -162,27 +162,27 @@ export function BoardToolbar({
   butlerBadgeCount = 0,
   projectId,
   onVoiceIssueCreated,
-  onShowMergeQueue,
-  mergeQueueCount = 0,
-  onShowRunQueueForecast,
-  runQueueOpenSlots = 0,
-  onShowLiveActivityTicker,
-  liveActivityCount = 0,
+  onShowMergeQueue: _onShowMergeQueue,
+  mergeQueueCount: _mergeQueueCount = 0,
+  onShowRunQueueForecast: _onShowRunQueueForecast,
+  runQueueOpenSlots: _runQueueOpenSlots = 0,
+  onShowLiveActivityTicker: _onShowLiveActivityTicker,
+  liveActivityCount: _liveActivityCount = 0,
   onViewAllHealthEvents,
-  cardDensity = "comfortable",
-  onCardDensityChange,
-  visibilityColumns,
-  hiddenColumns,
-  onHiddenColumnsChange,
+  cardDensity: _cardDensity = "comfortable",
+  onCardDensityChange: _onCardDensityChange,
+  visibilityColumns: _visibilityColumns,
+  hiddenColumns: _hiddenColumns,
+  onHiddenColumnsChange: _onHiddenColumnsChange,
   showPriorityLegend = false,
-  onShowPriorityLegendChange,
+  onShowPriorityLegendChange: _onShowPriorityLegendChange,
   showCardAgingHeatmap = false,
-  onShowCardAgingHeatmapChange,
+  onShowCardAgingHeatmapChange: _onShowCardAgingHeatmapChange,
   agingWarmDays = 3,
   agingHotDays = 7,
   onAgingThresholdsChange,
-  swimlaneDimension = "none",
-  onSwimlaneChange,
+  swimlaneDimension: _swimlaneDimension = "none",
+  onSwimlaneChange: _onSwimlaneChange,
 }: BoardToolbarProps) {
   const [showMonitorPopover, setShowMonitorPopover] = useState(false);
   const [showViewMenu, setShowViewMenu] = useState(false);
@@ -328,7 +328,7 @@ export function BoardToolbar({
     return () => ro.disconnect();
   }, [butlerBadgeCount, boardActivitySummary]);
 
-  const { visiblePrimaryViews, overflowPrimaryViews, moreViews, activeMoreView } =
+  const { visiblePrimaryViews, moreViews, activeMoreView } =
     splitToolbarViews(PRIMARY_VIEWS, SECONDARY_VIEWS, visibleViewCount, viewMode);
 
   function renderViewTab(view: ViewDescriptor, measuring = false) {

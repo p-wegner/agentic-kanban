@@ -98,8 +98,8 @@ describe("getFileContention", () => {
 
   it("returns no contention when workspaces touch different files", async () => {
     const { projectId, statusId, now } = await seedProject(db);
-    const ws1 = await seedWorkspace(db, projectId, statusId, now, { workingDir: "/tmp/ws1" });
-    const ws2 = await seedWorkspace(db, projectId, statusId, now, { workingDir: "/tmp/ws2" });
+    await seedWorkspace(db, projectId, statusId, now, { workingDir: "/tmp/ws1" });
+    await seedWorkspace(db, projectId, statusId, now, { workingDir: "/tmp/ws2" });
 
     mockGetChangedFileNames
       .mockResolvedValueOnce(["src/foo.ts"])

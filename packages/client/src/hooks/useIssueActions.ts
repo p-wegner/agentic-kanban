@@ -2,7 +2,7 @@
 // artifact copy/open/delete, notes, status-change, delete). Behaviour-preserving:
 // handler bodies are a verbatim move; the panel destructures them with the same
 // names so its render + child props are unchanged.
-import { apiFetch, apiPost, apiPatch, apiDelete } from "../lib/api.js";
+import { apiFetch, apiPost, apiDelete } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
 import { issueArtifactKind } from "../lib/artifact-classifiers.js";
 import { invalidateAvailableIssuesCache } from "./useIssueDetailData.js";

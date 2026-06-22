@@ -1,4 +1,4 @@
-import { projects, projectStatuses, issues, workspaces, preferences, tags, issueTags, scheduledRuns, agentSkills, repos, flakyTests, qualityMetrics, projectScriptShortcuts } from "@agentic-kanban/shared/schema";
+import { projects, projectStatuses, issues, workspaces, preferences, issueTags, scheduledRuns, agentSkills, repos, flakyTests, qualityMetrics, projectScriptShortcuts } from "@agentic-kanban/shared/schema";
 import { eq, sql, and, inArray, isNull, gte } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";

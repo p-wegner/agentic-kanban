@@ -1,5 +1,4 @@
-import { issues, workspaces, sessions, sessionMessages, projectStatuses, workflowNodes, tags, issueTags, issueDependencies, issueArtifacts, agentSkills } from "@agentic-kanban/shared/schema";
-import type { DependencyType } from "@agentic-kanban/shared/schema";
+import { issues, workspaces, sessions, projectStatuses, workflowNodes, tags, issueTags, issueDependencies, issueArtifacts, agentSkills } from "@agentic-kanban/shared/schema";
 import { parseSessionSummary } from "@agentic-kanban/shared";
 import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { eq, inArray, desc, sql, and, gte } from "drizzle-orm";
@@ -11,8 +10,6 @@ import { getSessionMessageRows } from "./session.repository.js";
 import { parseStatsBlob, projectSessionStats, computeSessionDuration } from "../lib/issue-summary-projection.js";
 
 type Issue = typeof issues.$inferSelect;
-type Workspace = typeof workspaces.$inferSelect;
-type Session = typeof sessions.$inferSelect;
 
 export interface IssueSummaryResult {
   issueId: string;

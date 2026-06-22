@@ -1,4 +1,4 @@
-import { test, expect, chromium } from "@playwright/test";
+import { test, expect } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
 
 test.describe("Copy issue reference to clipboard", () => {

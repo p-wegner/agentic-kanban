@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { apiFetch, apiPost } from "../lib/api.js";
+import { apiPost } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 
 interface CodemodFileDiff {

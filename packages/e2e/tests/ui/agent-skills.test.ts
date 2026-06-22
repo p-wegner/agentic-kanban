@@ -327,7 +327,6 @@ test.describe("Settings > Skills tab", () => {
 
 test.describe("Skill selector in workspace creation form", () => {
   let projectId: string;
-  let statusId: string;
   let customSkillId: string;
   let issueId: string;
   const createdWorkspaceIds: string[] = [];
@@ -338,8 +337,7 @@ test.describe("Skill selector in workspace creation form", () => {
 
     const statusesRes = await request.get(`${SERVER_URL}/api/projects/${projectId}/statuses`);
     const statuses = await statusesRes.json();
-    const todoStatus = statuses.find((s: { name: string }) => s.name === "Todo");
-    statusId = todoStatus ? todoStatus.id : statuses[0].id;
+    statuses.find((s: { name: string }) => s.name === "Todo");
 
     // Create a skill so the selector is populated
     const skillRes = await request.post(`${SERVER_URL}/api/agent-skills`, {

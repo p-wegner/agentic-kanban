@@ -1,5 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
-import { eq } from "drizzle-orm";
+import { describe, it, expect } from "vitest";
 import * as schema from "@agentic-kanban/shared/schema";
 import { mcpError, requireEntity, resolveStatusByName, nextIssueNumber } from "../../db-utils.js";
 import { createTestDb } from "../helpers/test-db.js";
@@ -107,7 +106,7 @@ describe("nextIssueNumber", () => {
 
   it("is scoped per project — other projects' issues don't affect the count", async () => {
     const { db } = createTestDb();
-    const { projectId: p1, statusIds: s1 } = await seedProject(db, "Project 1");
+    const { projectId: p1 } = await seedProject(db, "Project 1");
     const { projectId: p2, statusIds: s2 } = await seedProject(db, "Project 2");
     const now = new Date().toISOString();
 

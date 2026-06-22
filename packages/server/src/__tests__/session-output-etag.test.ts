@@ -1,7 +1,6 @@
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { createSessionsRoute } from "../routes/sessions.js";
-import { createSessionReadService } from "../services/session-read.service.js";
 
 const getOutput = vi.fn();
 

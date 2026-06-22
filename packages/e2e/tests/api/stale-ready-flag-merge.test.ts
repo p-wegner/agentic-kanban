@@ -23,7 +23,6 @@ import { getE2EProject } from "../helpers/e2e-project.js";
 test.describe("stale readyForMerge flag: merge succeeds after master advances", () => {
   let projectId: string;
   let projectRepoPath: string;
-  let defaultBranch: string;
   let todoStatusId: string;
   let doneStatusId: string;
   let issueId: string;
@@ -37,7 +36,6 @@ test.describe("stale readyForMerge flag: merge succeeds after master advances", 
     const project = await getE2EProject(request);
     projectId = project.id;
     projectRepoPath = project.repoPath;
-    defaultBranch = project.defaultBranch ?? "master";
 
     const statusesRes = await request.get(`${SERVER_URL}/api/projects/${projectId}/statuses`);
     expect(statusesRes.ok()).toBeTruthy();

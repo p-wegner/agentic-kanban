@@ -8,7 +8,6 @@ import {
 import type { BoardEvents } from "./board-events.js";
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import { teardownWorktree } from "./workspace-teardown.service.js";
-import { updateWorkspaceStatus } from "../repositories/workspace.repository.js";
 import { WorkspaceError, type GitService, type MergeResolutionState } from "./workspace-internals.js";
 import { finalizeMergeCleanup } from "./merge-cleanup.service.js";
 

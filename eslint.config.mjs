@@ -76,8 +76,10 @@ export default tseslint.config(
       // no-explicit-any is DRAINED to 0 — promoted to error so it gates `pnpm lint`
       // and no new explicit `any` can be reintroduced into type-checked source.
       "@typescript-eslint/no-explicit-any": "error",
+      // Drained to 0 — promoted to error. `_`-prefix an intentionally-unused
+      // binding (argsIgnorePattern/varsIgnorePattern `^_`); caught errors are exempt.
       "@typescript-eslint/no-unused-vars": [
-        "warn",
+        "error",
         {
           args: "after-used",
           argsIgnorePattern: "^_",

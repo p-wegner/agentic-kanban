@@ -94,7 +94,6 @@ export function ShowdownPanel({ showdownId, onClose, onWinnerPicked }: ShowdownP
     }
   }
 
-  const allDone = showdown?.contestants.every(c => c.status === "idle" || c.status === "closed");
   const doneCount = showdown?.contestants.filter(c => c.status === "idle" || c.status === "closed").length ?? 0;
   const total = showdown?.contestants.length ?? 0;
 

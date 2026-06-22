@@ -1,11 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
 import { projects, projectStatuses, issues, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createMockSessionManager } from "./helpers/mocks.js";
 import { createWorkspaceSessionService } from "../services/workspace-session.service.js";
-import { WorkspaceError } from "../services/workspace.service.js";
 
 /**
  * Regression tests for AK-300: null-workingDir workspaces could not be relaunched.

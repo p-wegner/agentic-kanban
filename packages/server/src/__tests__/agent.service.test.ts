@@ -44,10 +44,10 @@ describe("agent.service", () => {
       (spawnMock as any).mockReturnValue(mockProc);
 
       const onOutput = vi.fn();
-      const proc = launch("/tmp/worktree", "sess-1", "test prompt", undefined, onOutput);
+      launch("/tmp/worktree", "sess-1", "test prompt", undefined, onOutput);
 
       expect(spawnMock).toHaveBeenCalled();
-      const [cmd, args, opts] = (spawnMock as any).mock.calls[0];
+      const [cmd, _args, opts] = (spawnMock as any).mock.calls[0];
       expect(cmd).toBe("mock-test-agent");
       expect(opts.cwd).toBe("/tmp/worktree");
       expect(getProcess("sess-1")).toBe(mockProc);

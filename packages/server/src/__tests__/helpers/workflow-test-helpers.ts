@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import * as schema from "@agentic-kanban/shared/schema";
 import type { TestDb } from "./test-db.js";
-import { eq } from "drizzle-orm";
 
 const NOW = "2026-05-30T09:00:00.000Z";
 

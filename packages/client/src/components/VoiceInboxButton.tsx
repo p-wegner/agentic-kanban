@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiFetch, apiPost } from "../lib/api.js";
+import { apiPost } from "../lib/api.js";
 import {
   getVoiceLanguageLabel,
   loadVoiceLanguage,
@@ -63,7 +63,7 @@ function getSpeechRecognitionCtor(): (new () => SpeechRecognitionType) | null {
 export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButtonProps) {
   const [state, setState] = useState<RecordingState>("idle");
   const [interimText, setInterimText] = useState("");
-  const [voiceLanguage, setVoiceLanguage] = useState(loadVoiceLanguage);
+  const [voiceLanguage] = useState(loadVoiceLanguage);
   // Editable transcript shown in the review dialog after recording stops.
   const [reviewText, setReviewText] = useState("");
   const recognitionRef = useRef<SpeechRecognitionType | null>(null);

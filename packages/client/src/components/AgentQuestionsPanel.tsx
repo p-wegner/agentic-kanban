@@ -9,7 +9,7 @@
  * agent-blocking questions.
  */
 import { useEffect, useRef, useState } from "react";
-import { apiFetch, apiPost, apiDelete } from "../lib/api.js";
+import { apiPost, apiDelete } from "../lib/api.js";
 import { getAgentQuestions, invalidateAgentQuestions } from "../lib/agentQuestionsStore.js";
 import { startStaggeredPoll } from "../lib/pollScheduler.js";
 import { BOARD_WS_EVENT, type BoardWsEventDetail } from "../lib/useBoardEvents.js";

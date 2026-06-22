@@ -251,7 +251,7 @@ test.describe("merge cascade: board endpoint must stay responsive", () => {
 
   test(
     "all seeded workspace branches reach master after the cascade",
-    async ({ request }) => {
+    async ({ request: _request }) => {
       test.setTimeout(60_000);
 
       // Poll until every branch commit is reachable from master (or timeout).

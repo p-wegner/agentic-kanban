@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { createWorkspaceSummaryCache } from "../services/workspace-summary-cache.service.js";
 import { createBoardEvents, type BoardEventType } from "../services/board-events.js";
 import type { WorkspaceSummary } from "../services/workspace-summary.service.js";

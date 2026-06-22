@@ -1,5 +1,4 @@
 import type { Database } from "../db/index.js";
-import { getIssueProjectId } from "../repositories/issue.repository.js";
 import {
   insertTimeEntry,
   getTimeEntries,

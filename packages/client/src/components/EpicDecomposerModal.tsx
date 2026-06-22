@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
-import { apiFetch, apiPost } from "../lib/api.js";
+import { apiPost } from "../lib/api.js";
 import { showToast } from "./Toast.js";
 
 interface ChildProposal {

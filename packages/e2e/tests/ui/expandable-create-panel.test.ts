@@ -48,7 +48,7 @@ test.describe("Expandable issue creation panel", () => {
 
     // "Start workspace" checkbox is shown when canStartWorkspace is true
     // It may or may not be visible depending on project setup — check label text
-    const labels = await panel.locator("label").allTextContents();
+    await panel.locator("label").allTextContents();
     // Priority select options should include Low/Medium/High/Critical
     await panel.locator("select").first().selectOption("high");
     const selectedVal = await panel.locator("select").first().inputValue();

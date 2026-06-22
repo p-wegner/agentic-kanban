@@ -17,14 +17,6 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 const mockListStaleWorktrees = vi.fn();
 const mockRemoveStaleWorktree = vi.fn();
 
-// Minimal workspace service mock for the route handlers
-function mockWorkspaceService() {
-  return {
-    listStaleWorktrees: mockListStaleWorktrees,
-    removeStaleWorktree: mockRemoveStaleWorktree,
-  } as any;
-}
-
 function createTestApp() {
   const app = new Hono();
 
@@ -164,7 +156,6 @@ describe("stale worktree path safety", () => {
     const worktreesRoot = resolve(dirname(repoPath), ".worktrees");
     const targetResolved = resolve(worktreePath);
     const relativeToWorktreesRoot = relative(worktreesRoot, targetResolved);
-    const root = parse(targetResolved).root;
     const isInside = relativeToWorktreesRoot !== ""
       && relativeToWorktreesRoot !== ".."
       && !relativeToWorktreesRoot.startsWith(`..${sep}`)
@@ -180,7 +171,6 @@ describe("stale worktree path safety", () => {
     const worktreesRoot = resolve(dirname(repoPath), ".worktrees");
     const targetResolved = resolve(worktreePath);
     const relativeToWorktreesRoot = relative(worktreesRoot, targetResolved);
-    const root = parse(targetResolved).root;
     const isInside = relativeToWorktreesRoot !== ""
       && relativeToWorktreesRoot !== ".."
       && !relativeToWorktreesRoot.startsWith(`..${sep}`)
@@ -190,13 +180,12 @@ describe("stale worktree path safety", () => {
   });
 
   it("repo root itself is rejected", () => {
-    const { resolve, dirname, parse, relative, sep } = require("node:path");
+    const { resolve, dirname } = require("node:path");
     const repoPath = "C:\\andrena\\agentic-kanban";
     const worktreePath = "C:\\andrena\\agentic-kanban";
-    const worktreesRoot = resolve(dirname(repoPath), ".worktrees");
+    resolve(dirname(repoPath), ".worktrees");
     const targetResolved = resolve(worktreePath);
     const repoResolved = resolve(repoPath);
-    const relativeToWorktreesRoot = relative(worktreesRoot, targetResolved);
 
     // The repo root itself should be rejected (targetResolved === repoResolved)
     expect(targetResolved).toBe(repoResolved);
@@ -209,7 +198,6 @@ describe("stale worktree path safety", () => {
     const worktreesRoot = resolve(dirname(repoPath), ".worktrees");
     const targetResolved = resolve(worktreePath);
     const relativeToWorktreesRoot = relative(worktreesRoot, targetResolved);
-    const root = parse(targetResolved).root;
     const isInside = relativeToWorktreesRoot !== ""
       && relativeToWorktreesRoot !== ".."
       && !relativeToWorktreesRoot.startsWith(`..${sep}`)

@@ -19,7 +19,7 @@ async function pollUntil<T>(
   fn: () => Promise<T>,
   opts: { attempts?: number; delayMs?: number; label?: string } = {},
 ): Promise<T | null> {
-  const { attempts = 10, delayMs = 1000, label = "poll" } = opts;
+  const { attempts = 10, delayMs = 1000, label: _label = "poll" } = opts;
   for (let i = 0; i < attempts; i++) {
     const result = await fn();
     if (result) return result;
@@ -184,7 +184,7 @@ test.describe("@system: Diff Viewer UI", () => {
     });
 
     test("View Diff button shows diff stats header", async ({ page, request }) => {
-      const d = await expectDiffWithChanges(request, workspaceId);
+      await expectDiffWithChanges(request, workspaceId);
 
       await page.goto("/");
       await page.waitForSelector("h2");

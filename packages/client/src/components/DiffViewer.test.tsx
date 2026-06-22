@@ -63,9 +63,6 @@ describe("DiffViewer", () => {
   });
 
   it("collapses unchanged context beyond 3 lines", () => {
-    const manyContextLines = [
-      " line1", " line2", " line3", " line4", " line5", " line6", " line7",
-    ].join("\n");
     const largeDiff = `diff --git a/src/foo.ts b/src/foo.ts
 --- a/src/foo.ts
 +++ b/src/foo.ts
