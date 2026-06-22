@@ -23,10 +23,10 @@ import {
   deleteArtifact as deleteArtifactRepo,
   getIssueDescription,
 } from "../repositories/issue.repository.js";
+import { nextIssueNumber } from "../repositories/issue-number.repository.js";
 import {
   insertIssue,
   getWorkflowTemplateForProject,
-  getMaxIssueNumber,
   getFirstProjectStatusId,
   insertBatchIssue,
   insertDependency,
@@ -262,7 +262,7 @@ export function createIssueService(deps: {
     }
 
     const results: string[] = await withTransaction(database, async (tx) => {
-      let nextNumber = (await getMaxIssueNumber(projectId, tx) ?? 0) + 1;
+      let nextNumber = await nextIssueNumber(projectId, tx);
 
       const defaultStatusId = await getFirstProjectStatusId(projectId, tx);
       if (defaultStatusId === null) {

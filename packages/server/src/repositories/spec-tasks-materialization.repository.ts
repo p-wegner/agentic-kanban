@@ -57,17 +57,6 @@ export async function getLatestTasksArtifact(
   return rows[0] ?? null;
 }
 
-export async function getMaxIssueNumber(
-  projectId: string,
-  database: DbOrTx = db,
-) {
-  const rows = await database
-    .select({ maxNum: sql<number | null>`max(${issues.issueNumber})` })
-    .from(issues)
-    .where(eq(issues.projectId, projectId));
-  return rows[0]?.maxNum ?? 0;
-}
-
 export async function getBacklogStatusId(
   projectId: string,
   database: DbOrTx = db,

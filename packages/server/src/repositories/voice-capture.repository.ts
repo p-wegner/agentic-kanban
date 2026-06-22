@@ -71,17 +71,6 @@ export async function setIssueStatus(
     .where(eq(issues.id, issueId));
 }
 
-export async function getMaxIssueNumber(
-  projectId: string,
-  database: Database = db,
-): Promise<number | null> {
-  const maxRow = await database
-    .select({ maxNum: sql<number | null>`max(${issues.issueNumber})` })
-    .from(issues)
-    .where(eq(issues.projectId, projectId));
-  return maxRow[0]?.maxNum ?? null;
-}
-
 export async function insertVoiceCaptureIssue(
   values: {
     id: string;

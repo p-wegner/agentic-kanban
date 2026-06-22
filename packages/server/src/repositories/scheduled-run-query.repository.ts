@@ -1,5 +1,5 @@
 import { agentSkills, issues, projectStatuses, workspaces } from "@agentic-kanban/shared/schema";
-import { eq, max } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
@@ -60,16 +60,6 @@ export async function getProjectStatusesForScheduledRun(
     .select()
     .from(projectStatuses)
     .where(eq(projectStatuses.projectId, projectId));
-}
-
-export async function getMaxIssueNumberForProject(
-  projectId: string,
-  database: Database = db,
-) {
-  return database
-    .select({ maxNum: max(issues.issueNumber) })
-    .from(issues)
-    .where(eq(issues.projectId, projectId));
 }
 
 export async function insertScheduledRunSystemIssue(

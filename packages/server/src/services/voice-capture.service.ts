@@ -9,10 +9,10 @@ import {
   getProjectStatusNamesForVoiceCapture,
   getIssueByNumberForVoiceCapture,
   setIssueStatus,
-  getMaxIssueNumber,
   insertVoiceCaptureIssue,
   attachVoiceCaptureTag,
 } from "../repositories/voice-capture.repository.js";
+import { nextIssueNumber } from "../repositories/issue-number.repository.js";
 
 export interface VoiceCaptureInput {
   projectId: string;
@@ -277,7 +277,7 @@ export async function createVoiceCaptureIssue(
   ]);
 
   // Determine next issue number
-  const issueNumber = (await getMaxIssueNumber(projectId, database) ?? 0) + 1;
+  const issueNumber = await nextIssueNumber(projectId, database);
 
   const id = randomUUID();
   const now = new Date().toISOString();
