@@ -13,20 +13,10 @@ import {
   classifyBoardStatusIssueAttention as classifyAttention,
   classifyBoardStatusIssueMergeState as classifyMergeState,
 } from "@agentic-kanban/shared/lib/board-status-classifiers";
-
-// Shape of the persisted session stats JSON blob. Every field is optional because the
-// blob is untrusted/variant (stored by different agent providers across versions); the
-// reader below supplies a fallback for each, so this only types the boundary.
-interface PersistedSessionStats {
-  durationMs?: number;
-  totalCostUsd?: number;
-  inputTokens?: number;
-  outputTokens?: number;
-  numTurns?: number;
-  model?: string;
-  success?: boolean;
-  agentSummary?: string;
-}
+// Shared single-source-of-truth projection. The mcp tool previously inlined its own
+// PersistedSessionStats parse + BoardStatusIssue assembly, which drifted from the
+// server's; now both build the IDENTICAL entry via these helpers.
+import { buildBoardStatusEntry } from "@agentic-kanban/shared/lib/board-status-entry";
 
 export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, getDiffShortstat } = deps;
@@ -158,48 +148,10 @@ export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodD
           const mainSessions = mainWs ? (sessionsByWs.get(mainWs.id) ?? []) : [];
           const latestSession = mainSessions[0] ?? null;
 
-          let sessionStats: BoardStatusIssue["sessionStats"] = null;
-          if (latestSession?.stats) {
-            try {
-              const p = JSON.parse(latestSession.stats) as PersistedSessionStats;
-              sessionStats = {
-                durationMs: p.durationMs ?? 0,
-                totalCostUsd: p.totalCostUsd ?? 0,
-                inputTokens: p.inputTokens ?? 0,
-                outputTokens: p.outputTokens ?? 0,
-                numTurns: p.numTurns ?? 1,
-                model: p.model ?? "",
-                success: p.success ?? false,
-                agentSummary: p.agentSummary,
-              };
-            } catch { /* ignore bad stats JSON */ }
-          }
-
-          const entry: BoardStatusIssue = {
-            issueNumber: issue.issueNumber,
-            issueId: issue.id,
-            title: issue.title,
-            priority: issue.priority,
-            issueType: issue.issueType,
-            statusName: issue.statusName,
-            workspace: mainWs ? {
-              id: mainWs.id, branch: mainWs.branch, status: mainWs.status,
-              workingDir: mainWs.workingDir, baseBranch: mainWs.baseBranch, isDirect: mainWs.isDirect,
-              readyForMerge: mainWs.readyForMerge,
-            } : null,
-            session: latestSession ? {
-              id: latestSession.id, status: latestSession.status,
-              startedAt: latestSession.startedAt, endedAt: latestSession.endedAt,
-            } : null,
-            sessionStats,
-            diffStats: null,
-            conflicts: null,
-            lastActivity: null,
-            lastOutput: [],
-            lastAgentMessage: null,
-            attention: null,
-            mergeState: null,
-          };
+          // Single-source projection (parse stats + assemble the entry), shared with
+          // the server's board-status service. Async-enriched + classification fields
+          // start null/empty and are filled in below.
+          const entry = buildBoardStatusEntry(issue, issue.statusName, mainWs, latestSession);
 
           // For non-closed workspaces with a workingDir: compute diff stats + last output
           if (mainWs && mainWs.workingDir && mainWs.status !== "closed") {
