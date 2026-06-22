@@ -8,6 +8,7 @@ import { runAutoStart } from "./monitor-auto-start.js";
 import { runBacklogEmptyStrategy } from "./monitor-backlog.js";
 import { getRecentAgentExcerpts, logMonitorAction, shouldSkipNudge, type MonitorAction } from "./monitor-helpers.js";
 import { processWorkspaceCandidates } from "./monitor-cycle.js";
+import { createMonitorWorkspaceActions } from "./monitor-workspace-actions.js";
 import { buildMonitorNudgePrompt } from "./review-helpers.js";
 import { snapshotAndCleanStaleDevProcesses, type BoardMonitorResourceSnapshot } from "../services/stale-dev-processes.js";
 import { resolveStartPolicy } from "../services/start-policy.service.js";
@@ -64,6 +65,12 @@ interface MonitorSetupDeps {
   boardEvents: ReturnType<typeof createBoardEvents>;
   serverPort: number;
   reviewSessionIds: Set<string>;
+  /**
+   * The workflow-engine fix-and-merge session set, threaded through so the
+   * monitor's workspace-actions port can register fix-and-merge sessions exactly
+   * as the HTTP route did (preserving isBuilderSession classification on exit).
+   */
+  fixAndMergeSessionIds: Set<string>;
 }
 
 export function setupMonitorRoutes(app: Hono, monitorState: MonitorState, runMonitorCycle: (force?: boolean) => Promise<void>, _syncMonitorState: () => Promise<void>, runResourceSweep?: (force?: boolean) => Promise<BoardMonitorResourceSnapshot | null>) {
@@ -98,8 +105,17 @@ export function setupMonitorRoutes(app: Hono, monitorState: MonitorState, runMon
   });
 }
 
-export function createMonitorSetup({ sessionManager, boardEvents, serverPort, reviewSessionIds }: MonitorSetupDeps) {
+export function createMonitorSetup({ sessionManager, boardEvents, serverPort, reviewSessionIds, fixAndMergeSessionIds }: MonitorSetupDeps) {
   const monitorState: MonitorState = { timer: null, nextRunAt: null, lastRun: null, currentIntervalMin: null, recentActions: [], lastResourceSnapshot: null, warnings: [], lastHealthCheckAt: null };
+  // One workspace-actions port for the monitor's relaunch/merge/fix/delete drives,
+  // wired here in the composition root so the cycle calls the application service
+  // directly instead of self-HTTP. (serverPort is still used by auto-start/backlog.)
+  const workspaceActions = createMonitorWorkspaceActions({
+    database: db,
+    getSessionManager: () => sessionManager,
+    boardEvents,
+    fixAndMergeSessionIds,
+  });
   let lastWarningFingerprint = "";
 
   // Event-driven trigger state. The deterministic monitor is poll-based by default
@@ -224,7 +240,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       Object.assign(cycleStats, await processWorkspaceCandidates(allowedCandidates, {
         sessionManager,
         boardEvents,
-        serverPort,
+        workspaceActions,
         autoMergeEnabled: prefMap.get("auto_merge") === "true" && mergeStrategy === "monitor",
         autoMergeInReview: prefMap.get("auto_merge_in_review") === "true",
         autoMergeDisabledProjectIds,

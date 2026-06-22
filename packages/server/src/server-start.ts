@@ -122,7 +122,7 @@ export async function startServer(port?: number, hostname?: string) {
 
   const serverPort = port || Number(process.env.PORT) || 3001;
   const serverHost = hostname || process.env.KANBAN_HOST || "127.0.0.1";
-  const monitorSetup = createMonitorSetup({ sessionManager, boardEvents, serverPort, reviewSessionIds: workflow.reviewSessionIds });
+  const monitorSetup = createMonitorSetup({ sessionManager, boardEvents, serverPort, reviewSessionIds: workflow.reviewSessionIds, fixAndMergeSessionIds: workflow.fixAndMergeSessionIds });
   cleanupCallbacks.push(() => monitorSetup.stop());
   monitorSetup.setupMonitorRoutes(app);
 

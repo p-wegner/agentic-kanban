@@ -29,6 +29,7 @@ import {
   mergeWorkspaceWithFixFallback,
   type LogMonitorActionFn,
 } from "./monitor-cycle-actions.js";
+import type { MonitorWorkspaceActions } from "./monitor-workspace-actions.js";
 
 export { DEFAULT_STUCK_BUILDER_TIMEOUT_MS } from "./monitor-cycle-rules.js";
 
@@ -55,7 +56,13 @@ export interface WorkspaceCandidate {
 export interface ProcessWorkspaceDeps {
   sessionManager: ReturnType<typeof createSessionManager>;
   boardEvents: ReturnType<typeof createBoardEvents>;
-  serverPort: number;
+  /**
+   * Port for the workspace mutations the monitor drives (relaunch/merge/
+   * fix-and-merge/delete). Injected so the monitor calls the application service
+   * DIRECTLY instead of self-HTTP — see monitor-workspace-actions.ts. Replaced the
+   * old `serverPort` + `fetch('http://127.0.0.1:<port>/...')` plumbing.
+   */
+  workspaceActions: MonitorWorkspaceActions;
   /**
    * Whether the monitor is allowed to auto-merge workspaces on its timer.
    * Gated on the `auto_merge` preference being exactly "true". When false/unset,
@@ -208,7 +215,7 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
       return;
     }
     if (!canStartMerge(ws)) return;
-    await mergeWorkspaceWithFixFallback(ws, deps.serverPort, logAction, {
+    await mergeWorkspaceWithFixFallback(ws, deps.workspaceActions, logAction, {
       conflictMsg: `[monitor] Merge conflict for idle+readyForMerge workspace ${ws.wsId}  triggered fix-and-merge`,
       successMsg: `[monitor] Triggered merge for idle+readyForMerge workspace ${ws.wsId}`,
     });
@@ -253,7 +260,7 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
         if (!gate.skipped) console.log(`[monitor] Pre-merge gate passed for idle In-Review workspace ${ws.wsId} (${gate.stage}); proceeding with auto_merge_in_review`);
       }
       if (!canStartMerge(ws)) return;
-      await mergeWorkspaceWithFixFallback(ws, deps.serverPort, logAction, {
+      await mergeWorkspaceWithFixFallback(ws, deps.workspaceActions, logAction, {
         conflictMsg: `[monitor] Merge conflict for idle In-Review workspace ${ws.wsId} (auto_merge_in_review)  triggered fix-and-merge`,
         successMsg: `[monitor] Auto-merged idle In-Review workspace ${ws.wsId} (auto_merge_in_review, not marked ready)`,
       });
@@ -264,13 +271,16 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
     }
   } else {
     if (!canStartRelaunch(ws)) return;
-    const launchEndpoint = `/api/workspaces/${ws.wsId}/launch`;
-    const launchRes = await fetch(`http://127.0.0.1:${deps.serverPort}${launchEndpoint}`, { method: "POST" }).catch(() => null);
+    let launchOk = true;
+    try {
+      await deps.workspaceActions.launch(ws.wsId);
+    } catch {
+      launchOk = false;
+    }
     stats.relaunched++;
     logAction("relaunch", ws.wsId, ws.issueId, {
-      endpoint: launchEndpoint,
-      httpStatus: launchRes?.status,
-      verificationResult: launchRes?.ok ? "ok" : "failed",
+      endpoint: `POST /api/workspaces/${ws.wsId}/launch`,
+      verificationResult: launchOk ? "ok" : "failed",
     });
     console.log(`[monitor] Relaunched idle workspace ${ws.wsId}`);
     deps.boardEvents.broadcast(ws.projectId, "board_changed");
@@ -285,13 +295,13 @@ async function handleReviewingWorkspace(ws: WorkspaceCandidate, sess: LatestSess
   }
   if (!ws.workingDir) {
     console.log(`[monitor] Ghost workspace ${ws.wsId} (workingDir empty)  deleting and resetting issue to In Progress`);
-    const deleteEndpoint = `/api/workspaces/${ws.wsId}`;
-    const deleteRes = await fetch(`http://127.0.0.1:${deps.serverPort}${deleteEndpoint}`, { method: "DELETE" }).catch(() => null);
+    // Delete failure is non-fatal here (mirrors the old fetch().catch(() => null)):
+    // we still reset the issue to In Progress and log the action either way.
+    await deps.workspaceActions.delete(ws.wsId).catch(() => {});
     const inProgressStatusId = await getProjectStatusIdByName(ws.projectId, "In Progress");
     if (inProgressStatusId) await db.update(issues).set({ statusId: inProgressStatusId }).where(eq(issues.id, ws.issueId)).catch(() => {});
     logAction("mark_idle", ws.wsId, ws.issueId, {
-      endpoint: deleteEndpoint,
-      httpStatus: deleteRes?.status,
+      endpoint: `DELETE /api/workspaces/${ws.wsId}`,
       responseSummary: "Ghost workspace deleted",
       verificationResult: "ok",
     });
@@ -327,13 +337,16 @@ async function handleReviewingWorkspace(ws: WorkspaceCandidate, sess: LatestSess
     if (!canStartMerge(ws)) return;
     // Deliberately NO fix-and-merge fallback on this path: a reviewing
     // workspace whose merge fails must not spawn a fix-and-merge session.
-    const mergeEndpoint = `/api/workspaces/${ws.wsId}/merge`;
-    const mergeRes = await fetch(`http://127.0.0.1:${deps.serverPort}${mergeEndpoint}`, { method: "POST" }).catch(() => null);
+    let mergeOk = true;
+    try {
+      await deps.workspaceActions.merge(ws.wsId);
+    } catch {
+      mergeOk = false;
+    }
     stats.merged++;
     logAction("merge", ws.wsId, ws.issueId, {
-      endpoint: mergeEndpoint,
-      httpStatus: mergeRes?.status,
-      verificationResult: mergeRes?.ok ? "ok" : "failed",
+      endpoint: `POST /api/workspaces/${ws.wsId}/merge`,
+      verificationResult: mergeOk ? "ok" : "failed",
     });
     console.log(`[monitor] Triggered merge for reviewing workspace ${ws.wsId}`);
     deps.boardEvents.broadcast(ws.projectId, "board_changed");
