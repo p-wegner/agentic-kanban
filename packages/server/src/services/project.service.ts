@@ -261,9 +261,10 @@ export function createProjectService(deps: { database: Database; workspaceSummar
 
     try {
       execSync("git init", { cwd: targetPath, stdio: "pipe" });
-    } catch (err: any) {
+    } catch (err: unknown) {
       try { rmSync(targetPath, { recursive: true, force: true }); } catch {}
-      throw new ProjectError(`git init failed: ${err.stderr ? String(err.stderr).trim() : String(err)}`, "BAD_REQUEST");
+      const stderr = (err as { stderr?: unknown }).stderr;
+      throw new ProjectError(`git init failed: ${stderr ? String(stderr).trim() : String(err)}`, "BAD_REQUEST");
     }
 
     const existing = await getProjectByRepoPath(targetPath, database);
@@ -777,8 +778,8 @@ export function createProjectService(deps: { database: Database; workspaceSummar
   async function generateSetupScript(projectId: string) {
     try {
       return await generateSetupScriptAI(projectId, database);
-    } catch (err: any) {
-      if (err.statusCode === 404) throw new ProjectError("Project not found", "NOT_FOUND");
+    } catch (err: unknown) {
+      if ((err as { statusCode?: unknown }).statusCode === 404) throw new ProjectError("Project not found", "NOT_FOUND");
       throw err;
     }
   }
@@ -786,8 +787,8 @@ export function createProjectService(deps: { database: Database; workspaceSummar
   async function generateTeardownScript(projectId: string) {
     try {
       return await generateTeardownScriptAI(projectId, database);
-    } catch (err: any) {
-      if (err.statusCode === 404) throw new ProjectError("Project not found", "NOT_FOUND");
+    } catch (err: unknown) {
+      if ((err as { statusCode?: unknown }).statusCode === 404) throw new ProjectError("Project not found", "NOT_FOUND");
       throw err;
     }
   }
@@ -795,8 +796,8 @@ export function createProjectService(deps: { database: Database; workspaceSummar
   async function generateVerifyScript(projectId: string) {
     try {
       return await generateVerifyScriptAI(projectId, database);
-    } catch (err: any) {
-      if (err.statusCode === 404) throw new ProjectError("Project not found", "NOT_FOUND");
+    } catch (err: unknown) {
+      if ((err as { statusCode?: unknown }).statusCode === 404) throw new ProjectError("Project not found", "NOT_FOUND");
       throw err;
     }
   }

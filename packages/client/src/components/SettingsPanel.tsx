@@ -220,22 +220,22 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
             .then((div) => { if (!cancelled) setProviderDivergence(div); })
             .catch(() => { /* non-fatal */ });
 
-          apiFetch<{ id: string; defaultBranch: string | null; setupScript: string | null; setupBlocking: boolean; color: string | null }[]>("/api/projects")
+          apiFetch<{ id: string; defaultBranch: string | null; setupScript: string | null; setupBlocking: boolean; color: string | null; setupEnabled?: boolean; teardownScript?: string | null; symlinkEnabled?: boolean; symlinkDirs?: string | null; defaultSkillId?: string | null }[]>("/api/projects")
             .then((projects) => {
               if (cancelled) return;
-              const project = projects.find((p: any) => p.id === activeProjectId);
+              const project = projects.find((p) => p.id === activeProjectId);
               if (project) {
                 setProjectSettings({
                   defaultBranch: project.defaultBranch || "",
                   setupScript: project.setupScript || "",
                   setupBlocking: project.setupBlocking !== false,
-                  setupEnabled: (project as any).setupEnabled !== false,
-                  teardownScript: (project as any).teardownScript || "",
+                  setupEnabled: project.setupEnabled !== false,
+                  teardownScript: project.teardownScript || "",
                   verifyScript: (data)[`verify_script_${activeProjectId}`] || "",
                   color: project.color || null,
-                  symlinkEnabled: (project as any).symlinkEnabled === true,
-                  symlinkDirs: (project as any).symlinkDirs || "",
-                  defaultSkillId: (project as any).defaultSkillId || null,
+                  symlinkEnabled: project.symlinkEnabled === true,
+                  symlinkDirs: project.symlinkDirs || "",
+                  defaultSkillId: project.defaultSkillId || null,
                 });
               }
             })

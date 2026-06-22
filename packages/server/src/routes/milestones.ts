@@ -24,7 +24,7 @@ export function createMilestonesRoute(database: Database) {
     try {
       const result = await service.create(c.req.param("projectId"), body);
       return c.json(result, 201);
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (err instanceof MilestoneError && err.code === "BAD_REQUEST") {
         return c.json({ error: err.message }, 400);
       }
@@ -38,7 +38,7 @@ export function createMilestonesRoute(database: Database) {
     try {
       const result = await service.update(c.req.param("projectId"), c.req.param("id"), body);
       return c.json(result);
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (err instanceof MilestoneError) {
         const status = err.code === "NOT_FOUND" ? 404 : err.code === "FORBIDDEN" ? 403 : 400;
         return c.json({ error: err.message }, status);
@@ -52,7 +52,7 @@ export function createMilestonesRoute(database: Database) {
     try {
       await service.remove(c.req.param("projectId"), c.req.param("id"));
       return c.json({ success: true });
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (err instanceof MilestoneError) {
         const status = err.code === "NOT_FOUND" ? 404 : err.code === "FORBIDDEN" ? 403 : 400;
         return c.json({ error: err.message }, status);

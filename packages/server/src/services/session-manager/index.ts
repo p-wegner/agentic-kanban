@@ -1,3 +1,4 @@
+import type { UpgradeWebSocket } from "hono/ws";
 import { createSessionState } from "./types.js";
 import { createWsHandler } from "./ws-handler.js";
 import { createBroadcaster } from "./broadcast.js";
@@ -7,7 +8,7 @@ import type { SessionManagerOptions } from "./types.js";
 export type { StartSessionOptions, SessionManagerOptions } from "./types.js";
 
 function createSessionManager(
-  upgradeWebSocket: (callback: (c: any) => any) => any,
+  upgradeWebSocket: UpgradeWebSocket,
   options?: SessionManagerOptions,
   lifecycleDeps?: SessionLifecycleDeps,
 ) {

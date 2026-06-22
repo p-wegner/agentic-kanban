@@ -1,26 +1,27 @@
+import type { Dispatch, SetStateAction } from "react";
 import type { IssueWithStatus, MilestoneResponse } from "@agentic-kanban/shared";
 import { isHttpUrl } from "../lib/url.js";
 
-type Setter = (value: any) => void;
+type Setter<T> = Dispatch<SetStateAction<T>>;
 
 interface IssueMetadataGridProps {
   editing: boolean;
   issue: IssueWithStatus;
   statuses: { id: string; name: string }[];
   issueType: string;
-  setIssueType: Setter;
+  setIssueType: Setter<string>;
   estimate: string;
-  setEstimate: Setter;
+  setEstimate: Setter<string>;
   dueDate: string;
-  setDueDate: Setter;
+  setDueDate: Setter<string>;
   externalKey: string;
-  setExternalKey: Setter;
+  setExternalKey: Setter<string>;
   externalUrl: string;
-  setExternalUrl: Setter;
+  setExternalUrl: Setter<string>;
   skipAutoReview: boolean;
-  setSkipAutoReview: Setter;
+  setSkipAutoReview: Setter<boolean>;
   milestoneId: string | null;
-  setMilestoneId: Setter;
+  setMilestoneId: Setter<string | null>;
   milestones: MilestoneResponse[];
   estimating: boolean;
   handleStatusChange: (newStatusId: string) => Promise<void> | void;

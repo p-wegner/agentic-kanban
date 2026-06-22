@@ -15,7 +15,7 @@ export function registerApproveToolUse(server: McpServer) {
     },
     async ({ tool_name, tool_input }, extra) => {
       // Get the session ID from the MCP meta (injected by Claude Code)
-      const sessionId = (extra as any)?.sessionId ?? "unknown";
+      const sessionId = extra?.sessionId ?? "unknown";
 
       // Create a pending approval on the kanban server
       let approvalId: string;

@@ -44,10 +44,19 @@ export function createWorkflowsRoute(database: Database, options?: WorkflowsRout
 
   // POST /api/workflows/templates — create a template (optionally cloning another).
   router.post("/templates", async (c) => {
-    const body = await parseJsonBody(c);
-    const { projectId, name, description, ticketType, isDefault, nodes, edges, cloneFrom } = body as any;
+    const body = await parseJsonBody<{
+      projectId?: string;
+      name?: string;
+      description?: string | null;
+      ticketType?: string | null;
+      isDefault?: boolean;
+      nodes?: unknown[];
+      edges?: unknown[];
+      cloneFrom?: string;
+    }>(c);
+    const { projectId, name, description, ticketType, isDefault, nodes, edges, cloneFrom } = body;
     const result = await service.createTemplate({
-      projectId, name, description, ticketType, isDefault, nodes, edges, cloneFrom,
+      projectId: projectId ?? "", name, description, ticketType, isDefault, nodes, edges, cloneFrom,
     });
     if ("error" in result) {
       const status = result.error === "cloneFrom template not found" ? 404
@@ -59,9 +68,9 @@ export function createWorkflowsRoute(database: Database, options?: WorkflowsRout
 
   // POST /api/workflows/templates/import — import JSON as a new project template.
   router.post("/templates/import", async (c) => {
-    const body = await parseJsonBody(c);
-    const projectId = (body as any)?.projectId;
-    const result = await service.importTemplate({ projectId, raw: body });
+    const body = await parseJsonBody<{ projectId?: string }>(c);
+    const projectId = body?.projectId;
+    const result = await service.importTemplate({ projectId: projectId ?? "", raw: body });
     if ("error" in result) {
       return c.json({ error: result.error, errors: result.errors }, 400);
     }
@@ -71,8 +80,15 @@ export function createWorkflowsRoute(database: Database, options?: WorkflowsRout
   // PUT /api/workflows/templates/:id — update a non-builtin template's graph in place.
   router.put("/templates/:id", async (c) => {
     const id = c.req.param("id");
-    const body = await parseJsonBody(c);
-    const { name, description, ticketType, isDefault, nodes, edges } = body as any;
+    const body = await parseJsonBody<{
+      name?: string;
+      description?: string | null;
+      ticketType?: string | null;
+      isDefault?: boolean;
+      nodes?: unknown[];
+      edges?: unknown[];
+    }>(c);
+    const { name, description, ticketType, isDefault, nodes, edges } = body;
     const result = await service.updateTemplate(id, { name, description, ticketType, isDefault, nodes, edges });
     if ("error" in result) {
       const status = result.error === "Template not found" ? 404 : 400;

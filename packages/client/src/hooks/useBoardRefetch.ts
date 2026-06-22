@@ -88,7 +88,9 @@ export function useBoardRefetch({
       let message = `API error: ${res.status} ${res.statusText}`;
       try {
         const body: unknown = await res.json();
-        if ((body as any).error) message = (body as any).error;
+        if (body && typeof body === "object" && "error" in body && typeof body.error === "string") {
+          message = body.error;
+        }
       } catch {}
       throw new Error(message);
     }

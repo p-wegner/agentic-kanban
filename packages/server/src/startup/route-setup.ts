@@ -1,5 +1,6 @@
 import { serveStatic } from "@hono/node-server/serve-static";
 import type { Hono } from "hono";
+import type { UpgradeWebSocket } from "hono/ws";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,7 +20,7 @@ export interface RouteSetupDeps {
   reviewSessionIds: Set<string>;
   fixAndMergeSessionIds: Set<string>;
   db: Database;
-  upgradeWebSocket: (callback: (c: any) => any) => any;
+  upgradeWebSocket: UpgradeWebSocket;
 }
 
 export function setupRoutes(app: Hono, { sessionManager, boardEvents, reviewSessionIds, fixAndMergeSessionIds, db, upgradeWebSocket }: RouteSetupDeps) {

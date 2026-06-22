@@ -5,6 +5,22 @@ import { eq, inArray, desc } from "drizzle-orm";
 import { parseSessionSummary, formatDurationStr } from "@agentic-kanban/shared";
 import { requireEntity, readSessionStdoutFile } from "../db-utils.js";
 
+/**
+ * Shape of the dynamic `sessions.stats` JSON blob, as read by this tool. All
+ * fields are optional because the blob is parsed from untyped JSON and older
+ * sessions may omit any of them (the `??` defaults below cover absent fields).
+ */
+interface SessionStatsBlob {
+  durationMs?: number;
+  totalCostUsd?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  numTurns?: number;
+  model?: string;
+  success?: boolean;
+  agentSummary?: string;
+}
+
 export function registerGetIssueSummary(server: McpServer) {
   server.tool(
     "get_issue_summary",
@@ -93,9 +109,9 @@ export function registerGetIssueSummary(server: McpServer) {
         }
 
         // 5. Parse stats
-        let stats: Record<string, unknown> | null = null;
+        let stats: SessionStatsBlob | null = null;
         if (completedSession.stats) {
-          try { stats = JSON.parse(completedSession.stats); } catch { /* ignore */ }
+          try { stats = JSON.parse(completedSession.stats) as SessionStatsBlob; } catch { /* ignore */ }
         }
 
         // 6. Compute duration
@@ -131,13 +147,13 @@ export function registerGetIssueSummary(server: McpServer) {
             duration,
           },
           stats: stats ? {
-            durationMs: (stats as any).durationMs ?? 0,
-            totalCostUsd: (stats as any).totalCostUsd ?? 0,
-            inputTokens: (stats as any).inputTokens ?? 0,
-            outputTokens: (stats as any).outputTokens ?? 0,
-            numTurns: (stats as any).numTurns ?? 1,
-            model: (stats as any).model ?? summary.model,
-            success: (stats as any).success ?? false,
+            durationMs: stats.durationMs ?? 0,
+            totalCostUsd: stats.totalCostUsd ?? 0,
+            inputTokens: stats.inputTokens ?? 0,
+            outputTokens: stats.outputTokens ?? 0,
+            numTurns: stats.numTurns ?? 1,
+            model: stats.model ?? summary.model,
+            success: stats.success ?? false,
           } : null,
           ...summary,
         };

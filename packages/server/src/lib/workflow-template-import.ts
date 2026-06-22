@@ -6,16 +6,36 @@
  * import from here so the normalization + validation rules can never drift apart.
  */
 
-export function normalizeImportedTemplate(input: any) {
-  const source = input?.template ?? input?.workflow ?? input;
-  const metadata = source?.metadata ?? source ?? {};
+import type { TemplateNodeInput, TemplateEdgeInput } from "@agentic-kanban/shared/lib/workflow-engine";
+
+/**
+ * Structural view of the dynamic JSON payload accepted by an import. Every field
+ * is optional because the source is arbitrary user-supplied JSON; the values are
+ * narrowed downstream by `validateImportedTemplate`.
+ */
+interface RawTemplateImport {
+  template?: RawTemplateImport;
+  workflow?: RawTemplateImport;
+  metadata?: RawTemplateImport;
+  name?: string;
+  description?: string | null;
+  ticketType?: string | null;
+  isDefault?: boolean;
+  nodes?: TemplateNodeInput[];
+  edges?: TemplateEdgeInput[];
+}
+
+export function normalizeImportedTemplate(input: unknown) {
+  const root = (input ?? {}) as RawTemplateImport;
+  const source = root.template ?? root.workflow ?? root;
+  const metadata = source.metadata ?? source ?? {};
   return {
-    name: input?.name ?? source?.name ?? metadata.name,
-    description: input?.description ?? source?.description ?? metadata.description ?? null,
-    ticketType: input?.ticketType ?? source?.ticketType ?? metadata.ticketType ?? null,
-    isDefault: input?.isDefault ?? source?.isDefault ?? metadata.isDefault ?? false,
-    nodes: source?.nodes ?? [],
-    edges: source?.edges ?? [],
+    name: root.name ?? source.name ?? metadata.name ?? "",
+    description: root.description ?? source.description ?? metadata.description ?? null,
+    ticketType: root.ticketType ?? source.ticketType ?? metadata.ticketType ?? null,
+    isDefault: root.isDefault ?? source.isDefault ?? metadata.isDefault ?? false,
+    nodes: source.nodes ?? [],
+    edges: source.edges ?? [],
   };
 }
 

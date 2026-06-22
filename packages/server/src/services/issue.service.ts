@@ -178,8 +178,9 @@ export function createIssueService(deps: {
     let statusId: string;
     try {
       ({ issueNumber, statusId } = await resolveNewIssueDefaults(input.projectId, input.statusId, database));
-    } catch (err: any) {
-      if (err.statusCode === 400) throw new IssueError(err.message, "BAD_REQUEST");
+    } catch (err: unknown) {
+      const e = err as { statusCode?: unknown; message?: unknown };
+      if (e.statusCode === 400) throw new IssueError(String(e.message), "BAD_REQUEST");
       throw err;
     }
 
@@ -254,7 +255,7 @@ export function createIssueService(deps: {
 
     for (let i = 0; i < inputs.length; i++) {
       if (!inputs[i].title || !inputs[i].title.trim()) {
-        const err = new IssueError(`issues[${i}].title is required`, "BAD_REQUEST") as any;
+        const err = new IssueError(`issues[${i}].title is required`, "BAD_REQUEST") as IssueError & { index?: number };
         err.index = i;
         throw err;
       }
@@ -539,12 +540,17 @@ export function createIssueService(deps: {
         type: depType,
         createdAt: new Date().toISOString(),
       }, database);
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const e = err as {
+        message?: string;
+        code?: string;
+        cause?: { message?: string; code?: string };
+      };
       const isUnique =
-        err.message?.includes("UNIQUE constraint") ||
-        err.cause?.message?.includes("UNIQUE constraint") ||
-        err.code === "SQLITE_CONSTRAINT_UNIQUE" ||
-        err.cause?.code === "SQLITE_CONSTRAINT_UNIQUE";
+        e.message?.includes("UNIQUE constraint") ||
+        e.cause?.message?.includes("UNIQUE constraint") ||
+        e.code === "SQLITE_CONSTRAINT_UNIQUE" ||
+        e.cause?.code === "SQLITE_CONSTRAINT_UNIQUE";
       if (isUnique) {
         throw new IssueError("This dependency already exists", "CONFLICT");
       }
@@ -577,22 +583,22 @@ export function createIssueService(deps: {
     for (let i = 0; i < edges.length; i++) {
       const e = edges[i];
       if (!e.issueId || !e.dependsOnId) {
-        const err = new IssueError(`edges[${i}]: issueId and dependsOnId are required`, "BAD_REQUEST") as any;
+        const err = new IssueError(`edges[${i}]: issueId and dependsOnId are required`, "BAD_REQUEST") as IssueError & { index?: number };
         err.index = i;
         throw err;
       }
       if (e.action !== "add" && e.action !== "remove") {
-        const err = new IssueError(`edges[${i}]: action must be 'add' or 'remove'`, "BAD_REQUEST") as any;
+        const err = new IssueError(`edges[${i}]: action must be 'add' or 'remove'`, "BAD_REQUEST") as IssueError & { index?: number };
         err.index = i;
         throw err;
       }
       if (e.action === "add" && e.issueId === e.dependsOnId) {
-        const err = new IssueError(`edges[${i}]: an issue cannot depend on itself`, "BAD_REQUEST") as any;
+        const err = new IssueError(`edges[${i}]: an issue cannot depend on itself`, "BAD_REQUEST") as IssueError & { index?: number };
         err.index = i;
         throw err;
       }
       if (e.type && !VALID_TYPES.includes(e.type)) {
-        const err = new IssueError(`edges[${i}]: invalid type`, "BAD_REQUEST") as any;
+        const err = new IssueError(`edges[${i}]: invalid type`, "BAD_REQUEST") as IssueError & { index?: number };
         err.index = i;
         throw err;
       }
@@ -648,7 +654,7 @@ export function createIssueService(deps: {
               const err = new IssueError(
                 `edges[${i}]: adding dependency ${e.issueId} -> ${e.dependsOnId} would create a cycle`,
                 "CONFLICT",
-              ) as any;
+              ) as IssueError & { index?: number };
               err.index = i;
               throw err;
             }

@@ -6,6 +6,22 @@ import { prodDeps, type ToolDeps } from "./deps.js";
 import { requireEntity } from "../db-utils.js";
 
 /**
+ * Shape of the dynamic `sessions.stats` JSON blob, as read by this tool. All
+ * fields are optional because the blob is parsed from untyped JSON and older
+ * sessions may omit any of them (the `??` defaults below cover absent fields).
+ */
+interface SessionStatsBlob {
+  durationMs?: number;
+  totalCostUsd?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  numTurns?: number;
+  model?: string;
+  success?: boolean;
+  agentSummary?: string;
+}
+
+/**
  * Mirrors `pnpm cli -- session analyze <session-id>`.
  * Returns a consolidated analysis of a session: workspace, issue, parsed summary
  * (tool patterns, files, commands, errors), and token/cost stats.
@@ -68,9 +84,9 @@ export function registerAnalyzeSession(server: McpServer, deps: ToolDeps = prodD
       const summary = parseSessionSummary(msgRows);
 
       // Stats
-      let stats: Record<string, unknown> | null = null;
+      let stats: SessionStatsBlob | null = null;
       if (session.stats) {
-        try { stats = JSON.parse(session.stats); } catch { /* ignore */ }
+        try { stats = JSON.parse(session.stats) as SessionStatsBlob; } catch { /* ignore */ }
       }
 
       return {
@@ -98,14 +114,14 @@ export function registerAnalyzeSession(server: McpServer, deps: ToolDeps = prodD
             summary,
             stats: stats
               ? {
-                  durationMs: (stats as any).durationMs ?? 0,
-                  totalCostUsd: (stats as any).totalCostUsd ?? 0,
-                  inputTokens: (stats as any).inputTokens ?? 0,
-                  outputTokens: (stats as any).outputTokens ?? 0,
-                  numTurns: (stats as any).numTurns ?? 1,
-                  model: (stats as any).model ?? summary.model,
-                  success: (stats as any).success ?? false,
-                  agentSummary: (stats as any).agentSummary,
+                  durationMs: stats.durationMs ?? 0,
+                  totalCostUsd: stats.totalCostUsd ?? 0,
+                  inputTokens: stats.inputTokens ?? 0,
+                  outputTokens: stats.outputTokens ?? 0,
+                  numTurns: stats.numTurns ?? 1,
+                  model: stats.model ?? summary.model,
+                  success: stats.success ?? false,
+                  agentSummary: stats.agentSummary,
                 }
               : null,
           }, null, 2),

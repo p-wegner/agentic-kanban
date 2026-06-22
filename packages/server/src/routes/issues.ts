@@ -3,7 +3,9 @@ import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { ShowdownContestant } from "@agentic-kanban/shared";
 import { analyzeDependencies, enhanceIssue, aiEstimateIssue, decomposeEpic, confirmEpicDecomposition, analyzeTouchedFiles } from "../services/issue-ai.service.js";
+import type { DecomposeChildProposal, DecomposeDependencyProposal } from "../services/issue-ai.service.js";
 import { createIssueService } from "../services/issue.service.js";
+import type { CreateIssueInput } from "../services/issue.service.js";
 import {
   getIssueDescription,
   getIssueTouchedFiles,
@@ -30,6 +32,18 @@ import { getIssueActivity } from "../services/issue-activity.service.js";
 import { createIssueMergedCommitsService } from "../services/issue-merged-commits.service.js";
 import { getIssueCycleTime } from "../services/cycle-time.service.js";
 import { createWebhookSender } from "../services/outbound-webhook.service.js";
+
+/** Shape of the domain errors thrown by the issue service (see IssueError + the `index`-tagged batch errors). */
+interface IssueRouteError {
+  code?: string;
+  message?: string;
+  index?: number;
+}
+
+/** Narrow an unknown caught value to the issue-service error shape. */
+function asIssueRouteError(err: unknown): IssueRouteError {
+  return (typeof err === "object" && err !== null ? err : {}) as IssueRouteError;
+}
 
 export function createIssuesRoute(database: Database, options?: { boardEvents?: BoardEvents; getSessionManager?: () => SessionManager }) {
   const router = createRouter();
@@ -96,7 +110,7 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   // POST /api/issues/:id/decompose/confirm — confirm epic decomposition and create child issues
   router.post("/:id/decompose/confirm", async (c) => {
     const issueId = c.req.param("id");
-    const body = await parseJsonBody<{ projectId: string; children: any[]; dependencies: any[]; driveTarget?: string }>(c);
+    const body = await parseJsonBody<{ projectId: string; children: DecomposeChildProposal[]; dependencies: DecomposeDependencyProposal[]; driveTarget?: string }>(c);
     if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
     if (!Array.isArray(body.children)) return c.json({ error: "children must be an array" }, 400);
     if (!Array.isArray(body.dependencies)) return c.json({ error: "dependencies must be an array" }, 400);
@@ -111,7 +125,7 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   // POST /api/issues/batch — create N issues atomically
   // Optional: parentIssueId wires child_of edges; driveTarget (requires parentIssueId) auto-creates a Drive record.
   router.post("/batch", async (c) => {
-    const body = await parseJsonBody<{ projectId: string; issues: any[]; parentIssueId?: string; driveTarget?: string }>(c);
+    const body = await parseJsonBody<{ projectId: string; issues: Omit<CreateIssueInput, "projectId">[]; parentIssueId?: string; driveTarget?: string }>(c);
     if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
     if (!Array.isArray(body.issues)) return c.json({ error: "issues must be an array" }, 400);
     try {
@@ -120,10 +134,11 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
         driveTarget: body.driveTarget,
       });
       return c.json(result, 201);
-    } catch (err: any) {
-      if (err.code === "BAD_REQUEST") {
-        const payload: any = { error: err.message };
-        if (typeof err.index === "number") payload.index = err.index;
+    } catch (err: unknown) {
+      const e = asIssueRouteError(err);
+      if (e.code === "BAD_REQUEST") {
+        const payload: { error: string | undefined; index?: number } = { error: e.message };
+        if (typeof e.index === "number") payload.index = e.index;
         return c.json(payload, 400);
       }
       throw err;
@@ -132,20 +147,21 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
 
   // POST /api/issues/dependencies/batch — add/remove N dependency edges atomically
   router.post("/dependencies/batch", async (c) => {
-    const body = await parseJsonBody<{ edges: any[] }>(c);
+    const body = await parseJsonBody<{ edges: { issueId: string; dependsOnId: string; type?: string; action: "add" | "remove" }[] }>(c);
     if (!Array.isArray(body.edges)) return c.json({ error: "edges must be an array" }, 400);
     try {
       const result = await issueService.updateDependenciesBatch(body.edges);
       return c.json({ added: result.added, removed: result.removed, skipped: result.skipped });
-    } catch (err: any) {
-      if (err.code === "BAD_REQUEST") {
-        const payload: any = { error: err.message };
-        if (typeof err.index === "number") payload.index = err.index;
+    } catch (err: unknown) {
+      const e = asIssueRouteError(err);
+      if (e.code === "BAD_REQUEST") {
+        const payload: { error: string | undefined; index?: number } = { error: e.message };
+        if (typeof e.index === "number") payload.index = e.index;
         return c.json(payload, 400);
       }
-      if (err.code === "CONFLICT") {
-        const payload: any = { error: err.message };
-        if (typeof err.index === "number") payload.index = err.index;
+      if (e.code === "CONFLICT") {
+        const payload: { error: string | undefined; index?: number } = { error: e.message };
+        if (typeof e.index === "number") payload.index = e.index;
         return c.json(payload, 400);
       }
       throw err;
@@ -163,9 +179,10 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     try {
       const result = await issueService.archiveDoneIssues(body.projectId, days, body.nowOverride);
       return c.json({ archived: result.archived });
-    } catch (err: any) {
-      if (err.code === "BAD_REQUEST") return c.json({ error: err.message }, 400);
-      if (err.code === "NOT_FOUND") return c.json({ error: err.message }, 404);
+    } catch (err: unknown) {
+      const e = asIssueRouteError(err);
+      if (e.code === "BAD_REQUEST") return c.json({ error: e.message }, 400);
+      if (e.code === "NOT_FOUND") return c.json({ error: e.message }, 404);
       throw err;
     }
   });
@@ -182,9 +199,10 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     try {
       const result = await issueService.updateIssuesBulk(body.issueIds, body.updates);
       return c.json({ updated: result.updated });
-    } catch (err: any) {
-      if (err.code === "BAD_REQUEST") return c.json({ error: err.message }, 400);
-      if (err.code === "NOT_FOUND") return c.json({ error: err.message }, 404);
+    } catch (err: unknown) {
+      const e = asIssueRouteError(err);
+      if (e.code === "BAD_REQUEST") return c.json({ error: e.message }, 400);
+      if (e.code === "NOT_FOUND") return c.json({ error: e.message }, 404);
       throw err;
     }
   });
@@ -224,8 +242,9 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
         externalUrl: body.externalUrl,
       });
       return c.json(result, 201);
-    } catch (err: any) {
-      if (err.code === "BAD_REQUEST") return c.json({ error: err.message }, 400);
+    } catch (err: unknown) {
+      const e = asIssueRouteError(err);
+      if (e.code === "BAD_REQUEST") return c.json({ error: e.message }, 400);
       throw err;
     }
   });
@@ -454,9 +473,10 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     try {
       const result = await issueService.updateIssue(id, body);
       return c.json(result);
-    } catch (err: any) {
-      if (err.code === "BAD_REQUEST") return c.json({ error: err.message }, 400);
-      if (err.code === "NOT_FOUND") return c.json({ error: err.message }, 404);
+    } catch (err: unknown) {
+      const e = asIssueRouteError(err);
+      if (e.code === "BAD_REQUEST") return c.json({ error: e.message }, 400);
+      if (e.code === "NOT_FOUND") return c.json({ error: e.message }, 404);
       throw err;
     }
   });
@@ -467,8 +487,9 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     try {
       const result = await issueService.duplicateIssue(id);
       return c.json(result, 201);
-    } catch (err: any) {
-      if (err.code === "NOT_FOUND") return c.json({ error: err.message }, 404);
+    } catch (err: unknown) {
+      const e = asIssueRouteError(err);
+      if (e.code === "NOT_FOUND") return c.json({ error: e.message }, 404);
       throw err;
     }
   });

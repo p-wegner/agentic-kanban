@@ -6,6 +6,21 @@
 
 import { formatDurationStr, type SessionSummary } from "@agentic-kanban/shared";
 
+/**
+ * Shape of the persisted, JSON-parsed session-stats blob the issue renderers read.
+ * All fields optional: it's untyped persisted JSON and every access falls back to
+ * a default, so narrowing here types the boundary without asserting absent fields.
+ */
+interface ParsedSessionStats {
+  durationMs?: number;
+  totalCostUsd?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  numTurns?: number;
+  model?: string;
+  success?: boolean;
+}
+
 export interface IssueSummaryRenderInput {
   num: number;
   title: string;
@@ -34,12 +49,12 @@ export function buildIssueSummaryLines(input: IssueSummaryRenderInput): string[]
   lines.push(`  session: ${sessionStatus}  duration: ${duration ?? "?"}`);
 
   if (stats) {
-    const s = stats as any;
+    const s = stats as ParsedSessionStats;
     const parts: string[] = [];
     if (s.model ?? summary.model) parts.push(`model: ${s.model ?? summary.model}`);
-    if (s.numTurns > 0) parts.push(`turns: ${s.numTurns}`);
-    if (s.totalCostUsd > 0) parts.push(`cost: $${s.totalCostUsd.toFixed(2)}`);
-    if (s.inputTokens > 0 || s.outputTokens > 0) parts.push(`tokens: ${s.inputTokens ?? 0} in / ${s.outputTokens ?? 0} out`);
+    if ((s.numTurns ?? 0) > 0) parts.push(`turns: ${s.numTurns}`);
+    if ((s.totalCostUsd ?? 0) > 0) parts.push(`cost: $${(s.totalCostUsd ?? 0).toFixed(2)}`);
+    if ((s.inputTokens ?? 0) > 0 || (s.outputTokens ?? 0) > 0) parts.push(`tokens: ${s.inputTokens ?? 0} in / ${s.outputTokens ?? 0} out`);
     if (parts.length > 0) lines.push(`  ${parts.join("  ")}`);
   }
 
@@ -242,13 +257,13 @@ export function buildIssueSummaryJson(input: IssueSummaryJsonInput): Record<stri
       duration,
     },
     stats: stats ? {
-      durationMs: (stats as any).durationMs ?? 0,
-      totalCostUsd: (stats as any).totalCostUsd ?? 0,
-      inputTokens: (stats as any).inputTokens ?? 0,
-      outputTokens: (stats as any).outputTokens ?? 0,
-      numTurns: (stats as any).numTurns ?? 1,
-      model: (stats as any).model ?? summary.model,
-      success: (stats as any).success ?? false,
+      durationMs: (stats as ParsedSessionStats).durationMs ?? 0,
+      totalCostUsd: (stats as ParsedSessionStats).totalCostUsd ?? 0,
+      inputTokens: (stats as ParsedSessionStats).inputTokens ?? 0,
+      outputTokens: (stats as ParsedSessionStats).outputTokens ?? 0,
+      numTurns: (stats as ParsedSessionStats).numTurns ?? 1,
+      model: (stats as ParsedSessionStats).model ?? summary.model,
+      success: (stats as ParsedSessionStats).success ?? false,
     } : null,
     ...summary,
   };

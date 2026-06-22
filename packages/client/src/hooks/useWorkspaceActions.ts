@@ -3,17 +3,41 @@
 // handler bodies are a verbatim move; the panel destructures them with the same
 // names so its render + child props are unchanged. Deps (page state + setters)
 // are threaded via the options object.
+import type { Dispatch, SetStateAction } from "react";
 import { apiFetch, apiPost, apiPatch, apiDelete } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
 import { buildQuickLaunchBody, buildDefaultLaunchPrompt } from "../lib/workspace-launch.js";
 import { getSettings } from "../lib/settingsStore.js";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
-import type { AgentOutputMessage, IssueWithStatus, WorkspaceResponse, DiffResponse, SessionSummaryResponse } from "@agentic-kanban/shared";
+import type { AgentOutputMessage, IssueWithStatus, WorkspaceResponse, DiffResponse, DiffComment, SessionSummaryResponse } from "@agentic-kanban/shared";
+import type { WorkspaceViewMode } from "./useWorkspaceSession.js";
 
-/** Setter type that accepts either a value or a functional update (React Dispatch
- * is assignable to it); kept permissive because the runtime value IS the page's
- * setState and the handler bodies are a verbatim move. */
-type Setter = (value: any) => void;
+/** React state setter that accepts either a value or a functional update —
+ * structurally identical to `React.Dispatch<React.SetStateAction<T>>`, which is
+ * exactly what the page passes for each of these deps. */
+type Setter<T> = Dispatch<SetStateAction<T>>;
+
+/** Conflict-resolution panel state shared with the diff endpoint shape. */
+type ConflictState = { hasConflicts: boolean; conflictingFiles: string[] } | null;
+/** Optimistic launch banner state for fix-and-merge / resolve-conflicts. */
+type LaunchingFix = { wsId: string; kind: "fix-and-merge" | "resolve" } | null;
+/** Inline merge-error banner state, keyed to the failing workspace. */
+type MergeErrorState = { wsId: string; message: string } | null;
+/** Per-workspace session listing — structurally mirrors the page's session rows. */
+interface SessionInfo {
+  id: string;
+  workspaceId: string;
+  executor: string;
+  status: string;
+  startedAt: string;
+  endedAt: string | null;
+  exitCode: string | null;
+  stats: string | null;
+  providerSessionId: string | null;
+  resumeFromId: string | null;
+  triggerType: string | null;
+  skillName: string | null;
+}
 
 interface WorkspaceActionsDeps {
   issue: IssueWithStatus;
@@ -34,31 +58,31 @@ interface WorkspaceActionsDeps {
   onWorkspaceChange?: () => void;
   onWorkspaceCreating?: (issueId: string) => void;
   onWorkspaceCreateSettled?: (issueId: string) => void;
-  setActionLoading: Setter;
-  setActiveSession: Setter;
-  setCompletedMessages: Setter;
-  setConflictState: Setter;
-  setDiff: Setter;
-  setDiffComments: Setter;
-  setEditingProfileWsId: Setter;
-  setError: Setter;
-  setHistoryMessages: Setter;
-  setLastPrompt: Setter;
-  setLastSessionPerWorkspace: Setter;
-  setLaunchingFix: Setter;
-  setMergeError: Setter;
-  setMonitorRunning: Setter;
-  setPlanEditMode: Setter;
-  setPlanEditText: Setter;
-  setPrompt: Setter;
-  setQuickDropdownOpen: Setter;
-  setRejectFeedback: Setter;
-  setRejectMode: Setter;
-  setSelectedHistoryId: Setter;
-  setSelectedWorkspace: Setter;
-  setShowCreate: Setter;
-  setViewMode: Setter;
-  setWorkspaceSessions: Setter;
+  setActionLoading: Setter<boolean>;
+  setActiveSession: Setter<string | null>;
+  setCompletedMessages: Setter<AgentOutputMessage[]>;
+  setConflictState: Setter<ConflictState>;
+  setDiff: Setter<DiffResponse | null>;
+  setDiffComments: Setter<DiffComment[]>;
+  setEditingProfileWsId: Setter<string | null>;
+  setError: Setter<string | null>;
+  setHistoryMessages: Setter<AgentOutputMessage[]>;
+  setLastPrompt: Setter<string>;
+  setLastSessionPerWorkspace: Setter<Record<string, string>>;
+  setLaunchingFix: Setter<LaunchingFix>;
+  setMergeError: Setter<MergeErrorState>;
+  setMonitorRunning: Setter<boolean>;
+  setPlanEditMode: Setter<Record<string, boolean>>;
+  setPlanEditText: Setter<Record<string, string>>;
+  setPrompt: Setter<string>;
+  setQuickDropdownOpen: Setter<boolean>;
+  setRejectFeedback: Setter<Record<string, string>>;
+  setRejectMode: Setter<Record<string, boolean>>;
+  setSelectedHistoryId: Setter<string | null>;
+  setSelectedWorkspace: Setter<string | null>;
+  setShowCreate: Setter<boolean>;
+  setViewMode: Setter<WorkspaceViewMode>;
+  setWorkspaceSessions: Setter<Record<string, SessionInfo[]>>;
 }
 
 export function useWorkspaceActions(deps: WorkspaceActionsDeps) {
@@ -213,7 +237,7 @@ export function useWorkspaceActions(deps: WorkspaceActionsDeps) {
       }
       setActiveSession(null);
       await fetchWorkspaces();
-      setWorkspaceSessions((prev: Record<string, unknown>) => {
+      setWorkspaceSessions((prev: Record<string, SessionInfo[]>) => {
         const next = { ...prev };
         delete next[wsId];
         return next;
