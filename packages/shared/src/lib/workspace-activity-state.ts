@@ -8,6 +8,8 @@
  * the CLI `status` command, and the sprint-capacity monitor.
  */
 
+import { parseSessionStatsBlob } from "./session-stats-blob.js";
+
 export type WorkspaceActivityState =
   | "active"          // session running
   | "fixing"          // fix-and-merge conflict-resolution session running
@@ -52,19 +54,15 @@ export function isFailedLaunchSession(session: SessionActivityInput): boolean {
   if (!session.endedAt) return false;
   const durationMs = new Date(session.endedAt).getTime() - new Date(session.startedAt).getTime();
   if (durationMs <= 1000) return true;
-  if (session.stats) {
-    try {
-      const s = JSON.parse(session.stats) as Record<string, unknown>;
-      if (
-        (s.inputTokens === 0 || s.inputTokens == null) &&
-        (s.outputTokens === 0 || s.outputTokens == null)
-      ) {
-        return true;
-      }
-      if (s.launchFailure === true) return true;
-    } catch {
-      /* ignore bad JSON */
+  const s = parseSessionStatsBlob(session.stats);
+  if (s) {
+    if (
+      (s.inputTokens === 0 || s.inputTokens == null) &&
+      (s.outputTokens === 0 || s.outputTokens == null)
+    ) {
+      return true;
     }
+    if (s.launchFailure === true) return true;
   }
   return false;
 }

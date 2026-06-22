@@ -1,3 +1,4 @@
+import { parseSessionStatsBlob } from "@agentic-kanban/shared";
 import type { WorkspaceCandidate } from "./monitor-cycle.js";
 
 export const MAX_SESSIONS = 10;
@@ -19,13 +20,7 @@ export function parseStuckBuilderTimeoutMs(): number {
 }
 
 export function parseSessionStats(stats: string | null): Record<string, unknown> {
-  if (!stats) return {};
-  try {
-    const parsed: unknown = JSON.parse(stats);
-    return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : {};
-  } catch {
-    return {};
-  }
+  return parseSessionStatsBlob(stats) ?? {};
 }
 
 export function hasRepeatedFailedCommand(stats: string | null): boolean {

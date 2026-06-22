@@ -1,4 +1,4 @@
-import { formatDurationStr } from "@agentic-kanban/shared";
+import { formatDurationStr, parseSessionStatsBlob } from "@agentic-kanban/shared";
 
 // Pure projection helpers extracted from issue.repository.getIssueSummary. The
 // repository fetches rows; these turn the raw session `stats` blob and timestamps
@@ -16,15 +16,7 @@ export interface IssueSummaryStats {
 }
 
 /** Parse a session `stats` JSON blob to an object, or null on absent/malformed input. */
-export function parseStatsBlob(stats: string | null): Record<string, unknown> | null {
-  if (!stats) return null;
-  try {
-    const parsed: unknown = JSON.parse(stats);
-    return parsed !== null && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
-  } catch {
-    return null;
-  }
-}
+export const parseStatsBlob = parseSessionStatsBlob;
 
 function num(v: unknown, fallback: number): number {
   return typeof v === "number" ? v : fallback;
