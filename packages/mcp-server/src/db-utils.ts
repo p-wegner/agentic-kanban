@@ -1,9 +1,12 @@
 import { eq, sql, and, ne } from "drizzle-orm";
-import { readFileSync, existsSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { ToolDb } from "./tools/deps.js";
 import type * as schemaModule from "@agentic-kanban/shared/schema";
+
+// The per-session .out transcript reader is shared with the server (single source
+// of truth in @agentic-kanban/shared/lib/session-files), not a hand-synced fork.
+// Re-exported so the existing MCP tool imports (`from "../db-utils.js"`) are
+// unchanged; the bounded readSessionStdoutFileTail is also available there.
+export { readSessionStdoutFile } from "@agentic-kanban/shared/lib/session-files";
 
 export type McpResponse = { content: Array<{ type: "text"; text: string }> };
 
@@ -36,21 +39,6 @@ export function workspaceClosedError(workspaceId: string): McpResponse {
 
 export function workspaceMissingWorkingDirError(workspaceId: string): McpResponse {
   return mcpStructuredError("WORKSPACE_WORKING_DIR_MISSING", "Workspace has no working directory", { workspaceId });
-}
-
-/**
- * Read stdout content from the per-session .out file, or null when absent.
- * Mirrors the server-side readSessionStdoutFile — kept in sync manually.
- */
-export function readSessionStdoutFile(sessionId: string): string | null {
-  const outPath = join(tmpdir(), `kanban-session-${sessionId}.out`);
-  if (!existsSync(outPath)) return null;
-  try {
-    const content = readFileSync(outPath, "utf-8");
-    return content || null;
-  } catch {
-    return null;
-  }
 }
 
 /**
