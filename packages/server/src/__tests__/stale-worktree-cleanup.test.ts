@@ -1,3 +1,4 @@
+import { resolve, dirname, parse, relative, sep } from "node:path";
 import { Hono } from "hono";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
@@ -150,7 +151,6 @@ describe("stale worktree cleanup API", () => {
 
 describe("stale worktree path safety", () => {
   it("path inside .worktrees/ is considered safe", () => {
-    const { resolve, dirname, parse, relative, sep } = require("node:path");
     const repoPath = "C:\\andrena\\agentic-kanban";
     const worktreePath = "C:\\andrena\\.worktrees\\feature_ak-42-test";
     const worktreesRoot = resolve(dirname(repoPath), ".worktrees");
@@ -165,7 +165,6 @@ describe("stale worktree path safety", () => {
   });
 
   it("path outside .worktrees/ is rejected", () => {
-    const { resolve, dirname, parse, relative, sep } = require("node:path");
     const repoPath = "C:\\andrena\\agentic-kanban";
     const worktreePath = "C:\\Users\\evil\\dangerous";
     const worktreesRoot = resolve(dirname(repoPath), ".worktrees");
@@ -180,7 +179,6 @@ describe("stale worktree path safety", () => {
   });
 
   it("repo root itself is rejected", () => {
-    const { resolve, dirname } = require("node:path");
     const repoPath = "C:\\andrena\\agentic-kanban";
     const worktreePath = "C:\\andrena\\agentic-kanban";
     resolve(dirname(repoPath), ".worktrees");
@@ -192,7 +190,6 @@ describe("stale worktree path safety", () => {
   });
 
   it("traversal attack with .. is rejected", () => {
-    const { resolve, dirname, parse, relative, sep } = require("node:path");
     const repoPath = "C:\\andrena\\agentic-kanban";
     const worktreePath = "C:\\andrena\\.worktrees\\..\\evil";
     const worktreesRoot = resolve(dirname(repoPath), ".worktrees");

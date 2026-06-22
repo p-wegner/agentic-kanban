@@ -50,7 +50,7 @@ export function registerExportAgentSkills(server: McpServer) {
         const exportedNames = new Set<string>();
 
         for (const skill of rows) {
-          if (/[\/\\]|\.\./.test(skill.name)) {
+          if (/[/\\]|\.\./.test(skill.name)) {
             console.warn(`[export] skipping skill with unsafe name: ${skill.name}`);
             continue;
           }

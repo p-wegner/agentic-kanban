@@ -372,7 +372,7 @@ export function createButlerRoute(
     const defs = await listButlerDefinitions(database);
     const states = new Map(listProjectButlerStates(projectId).map((s) => [s.butlerId, s]));
     const globalBackend = await resolveButlerBackend(projectId);
-    const butlers = await Promise.all(defs.map(async (d) => {
+    const butlers = defs.map((d) => {
       const st = states.get(d.id);
       // Prefer: active session's backend → per-butler provider → global provider
       const itemBackend = st?.backend ?? d.provider ?? globalBackend.provider;
@@ -389,7 +389,7 @@ export function createButlerRoute(
         backend: itemBackend,
         provider: d.provider ?? null,
       };
-    }));
+    });
     return c.json({ butlers });
   });
 

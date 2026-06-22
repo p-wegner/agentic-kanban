@@ -89,12 +89,15 @@ export default tseslint.config(
         },
       ],
       "@typescript-eslint/ban-ts-comment": "warn",
-      "@typescript-eslint/no-unsafe-function-type": "warn",
-      "@typescript-eslint/no-require-imports": "warn",
+      // Mechanical-tail rules drained to 0 — promoted to error. no-require-imports
+      // is OFF for JS files (CJS scripts/scaffolds legitimately use require); it
+      // gates TypeScript source, where ESM imports are the norm.
+      "@typescript-eslint/no-unsafe-function-type": "error",
+      "@typescript-eslint/no-require-imports": "error",
       "@typescript-eslint/no-empty-object-type": "warn",
       "prefer-const": "warn",
       "no-empty": ["warn", { allowEmptyCatch: true }],
-      "no-useless-escape": "warn",
+      "no-useless-escape": "error",
 
       // Domain-intentional: this app parses terminal/speech/agent text, so control
       // chars + emoji-spanning char classes in regexes are deliberate, not bugs.
@@ -110,7 +113,7 @@ export default tseslint.config(
       "@typescript-eslint/no-unsafe-call": "error",
       "@typescript-eslint/no-unsafe-argument": "error",
       "@typescript-eslint/no-unsafe-return": "error",
-      "@typescript-eslint/no-redundant-type-constituents": "warn",
+      "@typescript-eslint/no-redundant-type-constituents": "error",
       // Drained to 0 — promoted to error. Type the value's source (esp. untyped
       // `await res.json()` casts) or wrap a nullish primitive in `String(x)`;
       // never `?? ""` (changes output). A genuine `[object Object]` means a real bug.
@@ -120,9 +123,10 @@ export default tseslint.config(
       // Autofix mis-narrows `X | {}` unions (settings store, parseOptionalJsonBody)
       // — the empty-object `{}` top-type confuses it. Keep visible, don't gate/fix.
       "@typescript-eslint/no-unnecessary-type-assertion": "warn",
-      // async fn with no await: often intentional (interface conformance) and
-      // removing `async` changes the return type — backlog, not a gate.
-      "@typescript-eslint/require-await": "warn",
+      // Drained to 0 — promoted to error. When removing `async` would break a
+      // Promise return contract, keep the Promise explicitly (e.g. `() =>
+      // Promise.resolve(x)`) rather than reintroducing a bodyless `async`.
+      "@typescript-eslint/require-await": "error",
 
       // no-misused-promises: keep the real-bug parts (a promise used in a condition,
       // an async fn passed where a sync void is required AT RUNTIME), but allow async
@@ -183,6 +187,13 @@ export default tseslint.config(
     languageOptions: {
       ...(tseslint.configs.disableTypeChecked.languageOptions ?? {}),
       globals: { ...globals.node },
+    },
+    rules: {
+      ...tseslint.configs.disableTypeChecked.rules,
+      // CommonJS scripts/scaffolds (.cjs, and CJS-style .js tooling like the
+      // scaffold gate-runner and debug query scripts) legitimately use require().
+      // The rule still gates TypeScript source (ESM is the norm there).
+      "@typescript-eslint/no-require-imports": "off",
     },
   },
 );

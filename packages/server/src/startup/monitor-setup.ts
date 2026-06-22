@@ -67,7 +67,7 @@ interface MonitorSetupDeps {
 }
 
 export function setupMonitorRoutes(app: Hono, monitorState: MonitorState, runMonitorCycle: (force?: boolean) => Promise<void>, _syncMonitorState: () => Promise<void>, runResourceSweep?: (force?: boolean) => Promise<BoardMonitorResourceSnapshot | null>) {
-  app.post("/api/internal/monitor-run", async (c) => {
+  app.post("/api/internal/monitor-run", (c) => {
     if (monitorState.timer) clearTimeout(monitorState.timer);
     monitorState.timer = setTimeout(() => {}, 0);
     monitorState.nextRunAt = null;

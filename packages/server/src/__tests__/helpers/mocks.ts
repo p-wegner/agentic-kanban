@@ -7,7 +7,7 @@ import type { SessionManager } from "../../services/session.manager.js";
  * Useful for testing agent.service and related code that spawns subprocesses.
  */
 export function createMockProc(overrides: Partial<ChildProcess> = {}): ChildProcess {
-  const listeners: Record<string, Function[]> = {};
+  const listeners: Record<string, ((...args: unknown[]) => unknown)[]> = {};
   return {
     pid: 12345,
     stdin: {
@@ -16,18 +16,18 @@ export function createMockProc(overrides: Partial<ChildProcess> = {}): ChildProc
       destroyed: false,
     } as any,
     stdout: {
-      on: vi.fn((event: string, cb: Function) => {
+      on: vi.fn((event: string, cb: (...args: unknown[]) => unknown) => {
         listeners[`stdout_${event}`] = listeners[`stdout_${event}`] || [];
         listeners[`stdout_${event}`].push(cb);
       }),
     } as any,
     stderr: {
-      on: vi.fn((event: string, cb: Function) => {
+      on: vi.fn((event: string, cb: (...args: unknown[]) => unknown) => {
         listeners[`stderr_${event}`] = listeners[`stderr_${event}`] || [];
         listeners[`stderr_${event}`].push(cb);
       }),
     } as any,
-    on: vi.fn((event: string, cb: Function) => {
+    on: vi.fn((event: string, cb: (...args: unknown[]) => unknown) => {
       listeners[event] = listeners[event] || [];
       listeners[event].push(cb);
     }),

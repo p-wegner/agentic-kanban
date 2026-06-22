@@ -30,7 +30,7 @@ export function createProjectScriptsRoute(database: Database) {
     return c.json({ success: true });
   });
 
-  router.post("/:projectId/scripts/:scriptId/run", async (c) => {
+  router.post("/:projectId/scripts/:scriptId/run", (c) => {
     const stream = new ReadableStream({
       start(controller) {
         const encoder = new TextEncoder();

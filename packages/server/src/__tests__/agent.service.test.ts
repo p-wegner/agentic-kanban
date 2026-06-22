@@ -143,7 +143,7 @@ describe("agent.service", () => {
       // Find the stdout data handler
       const stdoutHandler = mockProc.stdout.on.mock.calls.find(
         (c: any[]) => c[0] === "data",
-      )?.[1] as Function;
+      )?.[1] as (...args: unknown[]) => unknown;
       stdoutHandler(Buffer.from("output line"));
 
       expect(onOutput).toHaveBeenCalledWith({
@@ -162,7 +162,7 @@ describe("agent.service", () => {
 
       const stderrHandler = mockProc.stderr.on.mock.calls.find(
         (c: any[]) => c[0] === "data",
-      )?.[1] as Function;
+      )?.[1] as (...args: unknown[]) => unknown;
       stderrHandler(Buffer.from("error msg"));
 
       expect(onOutput).toHaveBeenCalledWith({
@@ -181,7 +181,7 @@ describe("agent.service", () => {
 
       const exitHandler = mockProc.on.mock.calls.find(
         (c: any[]) => c[0] === "exit",
-      )?.[1] as Function;
+      )?.[1] as (...args: unknown[]) => unknown;
       exitHandler(0, null);
 
       expect(onOutput).toHaveBeenCalledWith({
@@ -207,12 +207,12 @@ describe("agent.service", () => {
       // Trigger stdout (which will throw) then exit (should still fire)
       const stdoutHandler = mockProc.stdout.on.mock.calls.find(
         (c: any[]) => c[0] === "data",
-      )?.[1] as Function;
+      )?.[1] as (...args: unknown[]) => unknown;
       stdoutHandler(Buffer.from("data"));
 
       const exitHandler = mockProc.on.mock.calls.find(
         (c: any[]) => c[0] === "exit",
-      )?.[1] as Function;
+      )?.[1] as (...args: unknown[]) => unknown;
       exitHandler(0, null);
 
       // Exit callback should still be called despite stdout throwing
@@ -261,7 +261,7 @@ describe("agent.service", () => {
 
       const errorHandler = mockProc.on.mock.calls.find(
         (c: any[]) => c[0] === "error",
-      )?.[1] as Function;
+      )?.[1] as (...args: unknown[]) => unknown;
       errorHandler(new Error("spawn ENOENT"));
 
       expect(onOutput).toHaveBeenCalledWith(

@@ -128,7 +128,7 @@ const SKIP_DIRS = new Set([
   "target",
 ]);
 const SOURCE_FILE_RE = /\.(c|cc|cpp|cs|css|go|h|hpp|html|java|js|jsx|kt|mjs|py|rb|rs|scss|sh|sql|svelte|swift|ts|tsx|vue)$/;
-const TEST_PATH_RE = /(^|\/)(__tests__|__mocks__|test|tests|spec|e2e|playwright)(\/|$)|\.(test|spec)\.[^.\/]+$/;
+const TEST_PATH_RE = /(^|\/)(__tests__|__mocks__|test|tests|spec|e2e|playwright)(\/|$)|\.(test|spec)\.[^./]+$/;
 type CachedMetrics = Pick<ProjectGitStats, "codeMetrics" | "history" | "hotspots">;
 const metricsCache = new Map<string, { timestamp: number; metrics: CachedMetrics }>();
 // Dedupes concurrent cold computations: requests arriving while a compute for the same

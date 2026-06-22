@@ -101,14 +101,14 @@ export function tokenizeJS(code: string): Token[] {
     }
     // Operator / punctuation
     const op = code[i];
-    if (/[=+\-*/%<>!&|^~?:;,.()\[\]{}]/.test(op)) {
+    if (/[=+\-*/%<>!&|^~?:;,.()[\]{}]/.test(op)) {
       tokens.push({ t: "op", v: op });
       i++;
       continue;
     }
     // Whitespace / other
     let j = i;
-    while (j < code.length && !/[a-zA-Z0-9_$`"'=+\-*/%<>!&|^~?:;,.()\[\]{}/]/.test(code[j])) j++;
+    while (j < code.length && !/[a-zA-Z0-9_$`"'=+\-*/%<>!&|^~?:;,.()[\]{}/]/.test(code[j])) j++;
     if (j === i) j = i + 1;
     tokens.push({ t: "plain", v: code.slice(i, j) });
     i = j;
@@ -132,9 +132,9 @@ export function tokenizeJSON(code: string): Token[] {
       i = j + 1;
       continue;
     }
-    if (/[0-9\-]/.test(code[i])) {
+    if (/[0-9-]/.test(code[i])) {
       let j = i + (code[i] === "-" ? 1 : 0);
-      while (j < code.length && /[0-9.eE+\-]/.test(code[j])) j++;
+      while (j < code.length && /[0-9.eE+-]/.test(code[j])) j++;
       if (j > i) { tokens.push({ t: "num", v: code.slice(i, j) }); i = j; continue; }
     }
     if (code.slice(i, i + 4) === "true" || code.slice(i, i + 5) === "false" || code.slice(i, i + 4) === "null") {
@@ -169,9 +169,9 @@ export function tokenizeCSS(code: string): Token[] {
       tokens.push({ t: "num", v: code.slice(i, j) }); i = j; continue;
     }
     // CSS property / selector
-    if (/[a-zA-Z_\-]/.test(code[i])) {
+    if (/[a-zA-Z_-]/.test(code[i])) {
       let j = i;
-      while (j < code.length && /[a-zA-Z0-9_\-]/.test(code[j])) j++;
+      while (j < code.length && /[a-zA-Z0-9_-]/.test(code[j])) j++;
       const word = code.slice(i, j);
       const after = code.slice(j).trimStart();
       tokens.push({ t: after.startsWith(":") ? "kw" : "plain", v: word });

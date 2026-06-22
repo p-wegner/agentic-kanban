@@ -155,7 +155,7 @@ export function BoardPage() {
   const [sessionTodos, setSessionTodos] = useState<Record<string, TodoItem[]>>({});
   const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>([]);
   const pendingBoardRefreshRef = useRef(false);
-  const loadProjectsRef = useRef<() => Promise<string | undefined>>(async () => undefined);
+  const loadProjectsRef = useRef<() => Promise<string | undefined>>(() => Promise.resolve(undefined));
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<ExpandedCreatePanel>(null);
   const [keyboardCursorIssueId, setKeyboardCursorIssueId] = useState<string | null>(null);
   const keyboardCursorIssueIdRef = useRef<string | null>(null);

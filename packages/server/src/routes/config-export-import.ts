@@ -13,11 +13,11 @@ export interface BoardConfigExport {
   exportedAt: string;
   projectId: string;
   statuses: Array<{ name: string; sortOrder: number; isDefault?: boolean | null }>;
-  boardStrategy: unknown | null;
+  boardStrategy: unknown;
   workflowPreferences: Record<string, string>;
 }
 
-function parseBoardStrategy(raw: string | undefined): unknown | null {
+function parseBoardStrategy(raw: string | undefined): unknown {
   if (!raw) return null;
   try {
     return JSON.parse(raw);
