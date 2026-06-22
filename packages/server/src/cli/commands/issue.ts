@@ -21,7 +21,7 @@ import {
   deleteIssueCascade,
   createIssuesBatchWithDepsAndTags,
 } from "../../repositories/issue-service.repository.js";
-import { getMaxIssueNumber } from "../../repositories/issue-ai.repository.js";
+import { nextIssueNumber } from "../../repositories/issue-number.repository.js";
 import { getProjectStatuses, getProjectById } from "../../repositories/project.repository.js";
 import { getWorkspacesByIssueId, findOpenUnmergedWorkspace } from "../../repositories/workspace.repository.js";
 import { getSessionsForWorkspacesDesc } from "../../repositories/workspace-launch-failures.repository.js";
@@ -817,7 +817,7 @@ Each dependency: issueIndex, dependsOnIndex (0-based indices), type (optional, d
           parentIssueId = resolvedParentId;
         }
 
-        const nextNumber = ((await getMaxIssueNumber(projectId)) ?? 0) + 1;
+        const nextNumber = await nextIssueNumber(projectId);
         const now = new Date().toISOString();
 
         const { created } = await createIssuesBatchWithDepsAndTags({

@@ -9,6 +9,7 @@ import { invokeClaudePrompt } from "./claude-cli.service.js";
 import { NotFoundError } from "../errors/index.js";
 import { createDrive } from "../repositories/drive.repository.js";
 import * as repo from "../repositories/issue-ai.repository.js";
+import { nextIssueNumber } from "../repositories/issue-number.repository.js";
 
 export interface EnhanceIssueResult {
   title: string;
@@ -455,8 +456,7 @@ export async function confirmEpicDecomposition(
 
   // Create child issues
   const now = new Date().toISOString();
-  const maxNum = await repo.getMaxIssueNumber(projectId, database);
-  let nextNumber = (maxNum ?? 0) + 1;
+  let nextNumber = await nextIssueNumber(projectId, database);
 
   const defaultStatusId = backlogStatusId ?? (await repo.getDefaultStatusId(projectId, database));
   if (!defaultStatusId) throw new NotFoundError("No statuses found for project");

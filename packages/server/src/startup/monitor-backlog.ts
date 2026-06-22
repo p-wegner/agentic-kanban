@@ -5,6 +5,7 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { createBoardEvents } from "../services/board-events.js";
 import { setPreference } from "../repositories/preferences.repository.js";
+import { nextIssueNumber } from "../repositories/issue-number.repository.js";
 import type { MonitorActionName } from "../services/monitor-nudge.js";
 import { resolveMonitorTunables } from "../services/strategy-objective.service.js";
 import { monitorEligibleIssueSql } from "./monitor-eligibility.js";
@@ -187,9 +188,7 @@ export async function runBacklogEmptyStrategy(
     // Create a synthetic host issue to carry the generation workspace. It is placed
     // directly in "In Progress" (not Todo) so it never counts as backlog itself and
     // cannot re-trigger this strategy on the next cycle.
-    const nextNumberRows = await database.select({ max: sql<number>`COALESCE(MAX(${issues.issueNumber}), 0)` }).from(issues)
-      .where(eq(issues.projectId, projectId));
-    const issueNumber = (Number(nextNumberRows[0]?.max ?? 0)) + 1;
+    const issueNumber = await nextIssueNumber(projectId, database);
     const nowIso = new Date(now).toISOString();
     const hostIssueId = await createHostIssue({
       projectId,

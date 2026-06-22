@@ -215,17 +215,6 @@ export async function insertTag(
   await database.insert(tags).values(values).catch(() => {});
 }
 
-export async function getMaxIssueNumber(
-  projectId: string,
-  database: Database = db,
-) {
-  const rows = await database
-    .select({ maxNum: sql<number | null>`max(${issues.issueNumber})` })
-    .from(issues)
-    .where(eq(issues.projectId, projectId));
-  return rows[0]?.maxNum ?? null;
-}
-
 export async function getDefaultStatusId(
   projectId: string,
   database: Database = db,

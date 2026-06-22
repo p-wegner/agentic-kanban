@@ -5,11 +5,11 @@ import {
   getWorkspaceMaterializationContext,
   getExistingChildLinks,
   getLatestTasksArtifact,
-  getMaxIssueNumber,
   getBacklogStatusId,
   insertMaterializedIssue,
   insertIssueDependency,
 } from "../repositories/spec-tasks-materialization.repository.js";
+import { nextIssueNumber } from "../repositories/issue-number.repository.js";
 
 interface ParsedTask {
   tempId: string;
@@ -163,7 +163,7 @@ export async function materializeSpecTasksForWorkspace(
       return;
     }
 
-    let nextNumber = (await getMaxIssueNumber(workspace.projectId, tx)) + 1;
+    let nextNumber = await nextIssueNumber(workspace.projectId, tx);
 
     const statusId = await getBacklogStatusId(workspace.projectId, tx);
     if (!statusId) throw new Error("No statuses found for project");

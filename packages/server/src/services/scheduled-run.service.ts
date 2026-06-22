@@ -18,9 +18,9 @@ import {
   getScheduledRunProjectId,
   getScheduledRunIssueId,
   getProjectStatusesForScheduledRun,
-  getMaxIssueNumberForProject,
   insertScheduledRunSystemIssue,
 } from "../repositories/scheduled-run-query.repository.js";
+import { nextIssueNumber } from "../repositories/issue-number.repository.js";
 import type { CreateWorkspaceInput, CreateWorkspaceResult } from "./workspace-internals.js";
 import { getAllPreferences } from "../repositories/preferences.repository.js";
 import { resolveStartPolicy } from "./start-policy.service.js";
@@ -314,8 +314,7 @@ export function createScheduledRunService(deps: {
       if (!todoStatus) return null;
 
       const issueId = randomUUID();
-      const numRows = await getMaxIssueNumberForProject(projectId, database);
-      const nextNum = (numRows[0]?.maxNum ?? 0) + 1;
+      const nextNum = await nextIssueNumber(projectId, database);
 
       const now = new Date().toISOString();
       await insertScheduledRunSystemIssue({

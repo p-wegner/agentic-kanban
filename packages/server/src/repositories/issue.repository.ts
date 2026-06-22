@@ -1,12 +1,13 @@
 import { issues, workspaces, sessions, projectStatuses, workflowNodes, tags, issueTags, issueDependencies, issueArtifacts, agentSkills } from "@agentic-kanban/shared/schema";
 import { parseSessionSummary } from "@agentic-kanban/shared";
 import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
-import { eq, inArray, desc, sql, and, gte } from "drizzle-orm";
+import { eq, inArray, desc, and, gte } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { ValidationError } from "../errors/index.js";
 import { getSessionMessageRows } from "./session.repository.js";
+import { nextIssueNumber } from "./issue-number.repository.js";
 import { parseStatsBlob, projectSessionStats, computeSessionDuration } from "../lib/issue-summary-projection.js";
 
 type Issue = typeof issues.$inferSelect;
@@ -72,11 +73,8 @@ export async function resolveNewIssueDefaults(
   providedStatusId: string | undefined,
   database: Database = db,
 ): Promise<{ issueNumber: number; statusId: string }> {
-  const [maxResult, statusRows] = await Promise.all([
-    database
-      .select({ maxNum: sql<number | null>`max(${issues.issueNumber})` })
-      .from(issues)
-      .where(eq(issues.projectId, projectId)),
+  const [issueNumber, statusRows] = await Promise.all([
+    nextIssueNumber(projectId, database),
     providedStatusId
       ? Promise.resolve(null)
       : database
@@ -85,8 +83,6 @@ export async function resolveNewIssueDefaults(
           .where(eq(projectStatuses.projectId, projectId))
           .limit(1),
   ]);
-
-  const issueNumber = (maxResult[0]?.maxNum ?? 0) + 1;
 
   if (providedStatusId) {
     return { issueNumber, statusId: providedStatusId };
@@ -724,11 +720,7 @@ export async function createIssueWithNextNumber(
   },
   database: Database = db,
 ): Promise<{ id: string; issueNumber: number }> {
-  const maxResult = await database
-    .select({ maxNum: sql<number | null>`max(${issues.issueNumber})` })
-    .from(issues)
-    .where(eq(issues.projectId, input.projectId));
-  const issueNumber = (maxResult[0]?.maxNum ?? 0) + 1;
+  const issueNumber = await nextIssueNumber(input.projectId, database);
 
   const id = randomUUID();
   const now = new Date().toISOString();
@@ -781,11 +773,7 @@ export async function createSubIssueWithParentLink(
   },
   database: Database = db,
 ): Promise<{ id: string; issueNumber: number; dependencyId: string }> {
-  const maxResult = await database
-    .select({ maxNum: sql<number | null>`max(${issues.issueNumber})` })
-    .from(issues)
-    .where(eq(issues.projectId, input.projectId));
-  const issueNumber = (maxResult[0]?.maxNum ?? 0) + 1;
+  const issueNumber = await nextIssueNumber(input.projectId, database);
 
   const id = randomUUID();
   const dependencyId = randomUUID();
