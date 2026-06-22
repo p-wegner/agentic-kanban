@@ -1,17 +1,21 @@
 /**
  * Workshop CI Review Runner
  *
- * Gets the MR diff via git, fetches the linked GitLab issue via API,
- * passes both to the participant's skill prompt, and writes findings.json.
+ * Always reviews the example PR defined by REVIEW_MR_IID (default: 1).
+ * Fetches MR metadata + linked issue via GitLab API, builds the diff via git,
+ * then calls Claude and writes findings.json as a CI artifact.
  *
- * Required CI variables:
- *   CI_API_V4_URL              – set automatically by GitLab
- *   CI_PROJECT_ID              – set automatically by GitLab
- *   CI_MERGE_REQUEST_IID       – set automatically by GitLab (MR pipelines only)
- *   CI_MERGE_REQUEST_DIFF_BASE_SHA – set automatically by GitLab
- *   CI_JOB_TOKEN               – set automatically by GitLab
- *   ANTHROPIC_BASE_URL         – the API gateway base URL
- *   GATEWAY_API_KEY            – the gateway API key (masked CI variable)
+ * Required CI variables (automatic):
+ *   CI_API_V4_URL    – GitLab API base URL
+ *   CI_PROJECT_ID    – current project ID
+ *   CI_JOB_TOKEN     – short-lived job token (read access to project API)
+ *
+ * Required CI variables (manual):
+ *   ANTHROPIC_BASE_URL  – API gateway base URL
+ *   GATEWAY_API_KEY     – gateway API key (masked)
+ *
+ * Optional:
+ *   REVIEW_MR_IID    – which MR to review (default: 1)
  */
 
 import Anthropic from "@anthropic-ai/sdk";
@@ -24,18 +28,13 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const GITLAB_API = process.env.CI_API_V4_URL ?? "https://code.andrena.de/api/v4";
 const PROJECT_ID = process.env.CI_PROJECT_ID;
-const MR_IID = process.env.CI_MERGE_REQUEST_IID;
-const DIFF_BASE_SHA = process.env.CI_MERGE_REQUEST_DIFF_BASE_SHA;
 const JOB_TOKEN = process.env.CI_JOB_TOKEN;
 const GATEWAY_API_KEY = process.env.GATEWAY_API_KEY;
 const BASE_URL = process.env.ANTHROPIC_BASE_URL;
+const REVIEW_MR_IID = process.env.REVIEW_MR_IID ?? "1";
 
-if (!PROJECT_ID || !MR_IID) {
-  console.error("Must run inside a GitLab MR pipeline (CI_PROJECT_ID and CI_MERGE_REQUEST_IID required)");
-  process.exit(1);
-}
-if (!DIFF_BASE_SHA) {
-  console.error("CI_MERGE_REQUEST_DIFF_BASE_SHA is not set. Must run in an MR pipeline.");
+if (!PROJECT_ID) {
+  console.error("CI_PROJECT_ID is not set.");
   process.exit(1);
 }
 if (!GATEWAY_API_KEY) {
@@ -51,31 +50,31 @@ async function fetchGitlab(path) {
   return res.json();
 }
 
-// --- Fetch MR metadata ---
-const mr = await fetchGitlab(`/projects/${PROJECT_ID}/merge_requests/${MR_IID}`);
+// --- Fetch example MR metadata ---
+console.log(`Reviewing MR !${REVIEW_MR_IID} …`);
+const mr = await fetchGitlab(`/projects/${PROJECT_ID}/merge_requests/${REVIEW_MR_IID}`);
+console.log(`MR: "${mr.title}" (${mr.source_branch} → ${mr.target_branch})`);
 
-// --- Get diff via git (CI_JOB_TOKEN cannot access MR diff endpoints) ---
+// --- Build diff via git fetch of MR source branch ---
 const repoRoot = join(__dirname, "..", "..");
-const diffText = execSync(`git diff ${DIFF_BASE_SHA}`, { cwd: repoRoot, encoding: "utf-8" });
-console.log(`Diff size: ${diffText.length} chars`);
+execSync(`git fetch --depth=1 origin ${mr.source_branch}`, { cwd: repoRoot, stdio: "inherit" });
+const diffText = execSync(
+  `git diff origin/${mr.target_branch}..FETCH_HEAD`,
+  { cwd: repoRoot, encoding: "utf-8" }
+);
+console.log(`Diff: ${diffText.length} chars`);
 
-// --- Fetch linked issue (parses "Closes #N" / "Fixes #N" from MR description) ---
+// --- Fetch linked issue via GitLab API ---
 let issueSection = "";
 const issueMatch = mr.description?.match(/(?:closes|fixes|resolves)\s+#(\d+)/i);
 if (issueMatch) {
-  try {
-    const issue = await fetchGitlab(`/projects/${PROJECT_ID}/issues/${issueMatch[1]}`);
-    issueSection = `## Linked Issue #${issue.iid}: ${issue.title}\n\n${issue.description ?? ""}\n\n`;
-    console.log(`Fetched linked issue #${issue.iid}`);
-  } catch (e) {
-    console.warn(`Could not fetch issue: ${e.message}`);
-  }
+  const issue = await fetchGitlab(`/projects/${PROJECT_ID}/issues/${issueMatch[1]}`);
+  issueSection = `## Linked Issue #${issue.iid}: ${issue.title}\n\n${issue.description ?? ""}\n\n`;
+  console.log(`Issue: #${issue.iid} "${issue.title}"`);
 }
 
 // --- Load participant's skill prompt ---
-const skillPath = join(__dirname, "skill.md");
-const skillPrompt = readFileSync(skillPath, "utf-8").trim();
-
+const skillPrompt = readFileSync(join(__dirname, "skill.md"), "utf-8").trim();
 if (!skillPrompt) {
   console.error("skill.md is empty.");
   process.exit(1);
@@ -113,12 +112,10 @@ Respond with a JSON object in this exact format (no prose outside the JSON):
 const client = new Anthropic({
   apiKey: "sk-ant-placeholder",
   baseURL: BASE_URL,
-  defaultHeaders: {
-    "x-api-key": GATEWAY_API_KEY,
-  },
+  defaultHeaders: { "x-api-key": GATEWAY_API_KEY },
 });
 
-console.log(`Calling Claude (model: claude-opus-4-8) …`);
+console.log("Calling Claude …");
 const response = await client.messages.create({
   model: "claude-opus-4-8",
   max_tokens: 4096,
@@ -128,9 +125,7 @@ const response = await client.messages.create({
 });
 
 // --- Parse findings ---
-const textBlock = response.content.find((b) => b.type === "text");
-const raw = textBlock?.text ?? "";
-
+const raw = response.content.find((b) => b.type === "text")?.text ?? "";
 let findings;
 try {
   const jsonMatch = raw.match(/```json\s*([\s\S]*?)\s*```/);
@@ -139,9 +134,8 @@ try {
   findings = { parse_error: true, raw, findings: [] };
 }
 
-// Attach metadata
 findings.meta = {
-  mr_iid: MR_IID,
+  reviewed_mr: `!${REVIEW_MR_IID}`,
   mr_title: mr.title,
   model: response.model,
   input_tokens: response.usage.input_tokens,
@@ -155,4 +149,4 @@ console.log(`\n=== ${findings.findings?.length ?? 0} finding(s) ===`);
 for (const f of findings.findings ?? []) {
   console.log(`[${f.severity?.toUpperCase()}] ${f.id} — ${f.description}`);
 }
-console.log(`\nArtifact written to ${outPath}`);
+console.log(`\nArtifact: ${outPath}`);
