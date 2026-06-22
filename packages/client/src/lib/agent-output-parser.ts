@@ -186,7 +186,7 @@ export class CopilotOutputParser implements AgentOutputParser {
     const linesAdded = Number(codeChanges?.linesAdded ?? 0);
     const linesRemoved = Number(codeChanges?.linesRemoved ?? 0);
     const durationMs = Number(data.totalApiDurationMs ?? 0);
-    const shutdownType = String(data.shutdownType || "");
+    const shutdownType = String((data.shutdownType as string | undefined) || "");
     return [{
       kind: "result",
       success: shutdownType !== "error" && shutdownType !== "abrupt",

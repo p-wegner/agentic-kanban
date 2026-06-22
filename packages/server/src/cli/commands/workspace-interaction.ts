@@ -3,6 +3,7 @@
 // verbatim from workspace.ts (#859 CLI god-file split); registered onto the same wsCmd so
 // `pnpm cli -- workspace <sub>` is unchanged. CLI stays a thin transport (no inline db).
 import type { Command } from "commander";
+import type { DiffComment } from "@agentic-kanban/shared/types";
 import { randomUUID } from "node:crypto";
 import { getWorkspaceIssueContext } from "../../repositories/workspace.repository.js";
 import { insertIssueComment } from "../../repositories/issue-comments.repository.js";
@@ -110,7 +111,7 @@ Examples:
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ refresh: options.refresh ?? false }),
         });
-        const data = await res.json() as Record<string, unknown>;
+        const data = await res.json() as { error?: string; files?: string[] };
 
         if (!res.ok) {
           console.error(`Analyze failed: ${data.error ?? res.statusText}`);
@@ -121,8 +122,8 @@ Examples:
           console.log(JSON.stringify(data, null, 2));
         } else {
           if (Array.isArray(data.files)) {
-            console.log(`Predicted touched files (${(data.files as string[]).length}):`);
-            for (const f of data.files as string[]) console.log(`  ${f}`);
+            console.log(`Predicted touched files (${data.files.length}):`);
+            for (const f of data.files) console.log(`  ${f}`);
           } else {
             console.log(JSON.stringify(data, null, 2));
           }
@@ -155,7 +156,13 @@ Examples:
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ limit: Number(limit) }),
         });
-        const data = await res.json() as Record<string, unknown>;
+        const data = await res.json() as {
+          error?: string;
+          sessionStatus?: string;
+          totalMessages?: number;
+          returned?: number;
+          messages?: Array<{ type: string; data?: string; exitCode?: number }>;
+        };
 
         if (!res.ok) {
           console.error(`Terminal failed: ${data.error ?? res.statusText}`);
@@ -168,7 +175,7 @@ Examples:
           if (data.sessionStatus) console.log(`Session status: ${data.sessionStatus}`);
           if (data.totalMessages !== undefined) console.log(`Messages: ${data.returned ?? "?"} of ${data.totalMessages}`);
           if (Array.isArray(data.messages)) {
-            for (const msg of data.messages as Array<{ type: string; data?: string; exitCode?: number }>) {
+            for (const msg of data.messages) {
               if (msg.type === "stdout" && msg.data) process.stdout.write(msg.data);
               else if (msg.type === "exit") console.log(`[exit: ${msg.exitCode ?? "?"}]`);
             }
@@ -200,17 +207,17 @@ Examples:
           ? buildApiUrl(port, `/api/workspaces/${encodeURIComponent(workspaceId)}/comments?filePath=${encodeURIComponent(options.file)}`)
           : buildApiUrl(port, `/api/workspaces/${encodeURIComponent(workspaceId)}/comments`);
         const res = await fetch(url);
-        const data = await res.json();
+        const data = await res.json() as DiffComment[] | { error?: string };
 
         if (!res.ok) {
-          console.error(`Comment list failed: ${(data as Record<string, unknown>).error ?? res.statusText}`);
+          console.error(`Comment list failed: ${(data as { error?: string }).error ?? res.statusText}`);
           process.exit(1);
         }
 
         if (options.json) {
           console.log(JSON.stringify(data, null, 2));
         } else {
-          const comments = Array.isArray(data) ? data as Array<Record<string, unknown>> : [];
+          const comments: DiffComment[] = Array.isArray(data) ? data : [];
           if (comments.length === 0) {
             console.log("No comments found.");
           } else {
@@ -267,7 +274,7 @@ Examples:
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-        const data = await res.json() as Record<string, unknown>;
+        const data = await res.json() as { id?: string; error?: string };
 
         if (!res.ok) {
           console.error(`Comment add failed: ${data.error ?? res.statusText}`);
@@ -302,7 +309,7 @@ Examples:
         if (!res.ok) {
           let errorText = res.statusText;
           try {
-            const errData = await res.json() as Record<string, unknown>;
+            const errData = await res.json() as { error?: string };
             errorText = String(errData.error ?? res.statusText);
           } catch { /* ignore */ }
           console.error(`Handoff bundle failed: ${errorText}`);
@@ -355,7 +362,7 @@ Examples:
             toolInput,
           }),
         });
-        const data = await res.json() as Record<string, unknown>;
+        const data = await res.json() as { id?: string; error?: string };
 
         if (!res.ok) {
           console.error(`Approve-tool failed: ${data.error ?? res.statusText}`);

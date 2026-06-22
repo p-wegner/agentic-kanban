@@ -897,7 +897,7 @@ At least 2 issue numbers are required.
 
         const issuesWithoutCache = issueRows.filter((r) => !r.touchedFilesJson).map((r) => r.issueNumber);
 
-        const result: Record<string, unknown> = { overlap };
+        const result: { overlap: Record<string, number[]>; warning?: string } = { overlap };
         if (issuesWithoutCache.length > 0) {
           result.warning = `${issuesWithoutCache.length} issue(s) have no cached prediction yet: #${issuesWithoutCache.join(", #")}`;
         }

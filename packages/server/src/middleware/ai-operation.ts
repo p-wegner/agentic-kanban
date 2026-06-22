@@ -16,7 +16,7 @@ export async function wrapAiOperation<T>(label: string, fn: () => Promise<T>): P
     if (err instanceof AppError) {
       throw err;
     }
-    const e = err as { message?: string; stderr?: unknown };
+    const e = err as { message?: string; stderr?: string | Buffer };
     if (err instanceof SyntaxError || e.message?.includes("JSON")) {
       console.error(`[${label}] failed to parse AI output:`, e.message);
       throw new AiOperationError("Failed to parse AI response");

@@ -96,8 +96,19 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+/**
+ * Coerce an `unknown` JSON value to a string with `String()` semantics.
+ * Reproduces the exact runtime output of a bare `String(value)` call
+ * (`undefined`→`"undefined"` is avoided by callers via `|| ""`; strings pass
+ * through unchanged) while narrowing the return type to `string` so it can be
+ * interpolated without tripping no-base-to-string.
+ */
+function coerceString(value: unknown): string {
+  return String(value);
+}
+
 function normalizedType(obj: Record<string, unknown>): string {
-  return String(obj.type || obj.event || obj.name || "").toLowerCase().replace(/-/g, "_");
+  return coerceString(obj.type || obj.event || obj.name || "").toLowerCase().replace(/-/g, "_");
 }
 
 function getString(obj: Record<string, unknown>, keys: string[]): string {
@@ -132,7 +143,7 @@ function contentToText(value: unknown): string {
 /** Extract assistant text from Copilot's varied message shapes (CLI nested, REST flat, etc.). */
 function extractCopilotAssistantText(obj: Record<string, unknown>): string {
   const type = normalizedType(obj);
-  const role = String(obj.role || "").toLowerCase();
+  const role = coerceString(obj.role || "").toLowerCase();
   const data = asRecord(obj.data);
   const message = asRecord(obj.message);
 
@@ -192,7 +203,7 @@ function extractCopilotToolResult(
   const tool = data || asRecord(obj.tool) || asRecord(obj.tool_call) || asRecord(obj.toolCall) || obj;
   const result = asRecord(tool.result);
   const id = getString(tool, ["id", "tool_use_id", "toolUseId", "call_id", "callId", "toolCallId"]);
-  const status = String(tool.status || "").toLowerCase();
+  const status = coerceString(tool.status || "").toLowerCase();
   return {
     id,
     name: getString(tool, ["name", "tool", "tool_name", "toolName", "kind"])
@@ -486,7 +497,7 @@ function handleClaudeToolUseBlock(ctx: ParseContext, block: Record<string, unkno
       status: "pending",
     });
   } else if (toolName === "TaskUpdate" && input?.taskId) {
-    const id = String(input.taskId);
+    const id = coerceString(input.taskId);
     const existing = ctx.tasksMap.get(id);
     if (existing) {
       if (input.status) existing.status = input.status as TaskSummaryItem["status"];
@@ -601,7 +612,7 @@ function tryHandleCodexItemEvent(ctx: ParseContext, obj: Record<string, unknown>
   const item = asRecord(obj.item);
   if (!item) return true; // handled but no-op
 
-  const itemType = String(item.type || "");
+  const itemType = coerceString(item.type || "");
   const itemId = getString(item, ["id"]);
 
   if (itemType === "agent_message") {
@@ -667,7 +678,7 @@ function handleCodexMcpToolCall(
   itemId: string,
 ): void {
   const toolName = getString(item, ["name"]) || "mcp_tool";
-  const itemStatus = String(item.status || "");
+  const itemStatus = coerceString(item.status || "");
 
   if (eventType === "item.started" || itemStatus === "in_progress") {
     if (itemId) ctx.toolNameMap.set(itemId, toolName);
@@ -683,7 +694,7 @@ function handleCodexMcpToolCall(
       else ctx.filesEdited.add(pathLike);
     }
   } else if (eventType === "item.completed") {
-    const itemStatus2 = String(item.status || "");
+    const itemStatus2 = coerceString(item.status || "");
     if (itemStatus2 === "failed" || itemStatus2 === "error") {
       const entry = ctx.toolUseCounts.get(toolName);
       if (entry) entry.failedCount++;

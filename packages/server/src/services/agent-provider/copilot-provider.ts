@@ -123,7 +123,7 @@ function extractCopilotToolResult(
     const toolUseId = stringValue(payload.tool_use_id ?? payload.toolUseId ?? payload.toolCallId ?? obj.id ?? item?.id);
     if (toolUseId) return { toolUseId };
   } else if (item?.type === "command_execution" && item.id && type.includes("completed")) {
-    return { toolUseId: String(item.id) };
+    return { toolUseId: String(item.id as string | number) };
   }
   return undefined;
 }
@@ -197,7 +197,7 @@ export class CopilotProvider implements AgentProvider {
       try {
         args.push("--additional-mcp-config", `@${getMcpConfigPath(this.fs)}`);
       } catch (err) {
-        console.warn(`[agent] Failed to generate MCP config: ${err}`);
+        console.warn(`[agent] Failed to generate MCP config: ${String(err)}`);
       }
       args.push("--disable-builtin-mcps");
 

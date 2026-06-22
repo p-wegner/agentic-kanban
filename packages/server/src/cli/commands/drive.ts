@@ -1,6 +1,7 @@
 import type { Command } from "commander";
 import { runMigrations, getActiveProjectId } from "../shared.js";
 import { getDriveById } from "../../repositories/drive.repository.js";
+import type { DriveRow } from "../../repositories/drive.repository.js";
 import {
   computeReviewEffectiveness,
   renderReviewEffectivenessReport,
@@ -52,7 +53,7 @@ Examples:
           console.error(`Error ${res.status}: ${text}`);
           process.exit(1);
         }
-        const drive = (await res.json()) as Record<string, unknown>;
+        const drive = (await res.json()) as DriveRow;
         if (options.json) {
           console.log(JSON.stringify(drive, null, 2));
         } else {
@@ -95,7 +96,7 @@ Examples:
           console.error(`Error ${res.status}: ${text}`);
           process.exit(1);
         }
-        let drives = (await res.json()) as Array<Record<string, unknown>>;
+        let drives = (await res.json()) as DriveRow[];
         if (options.status) {
           drives = drives.filter((d) => d.status === options.status);
         }
@@ -145,7 +146,7 @@ Examples:
           console.error(`Error ${res.status}: ${text}`);
           process.exit(1);
         }
-        const drive = (await res.json()) as Record<string, unknown>;
+        const drive = (await res.json()) as DriveRow;
         if (options.json) {
           console.log(JSON.stringify(drive, null, 2));
         } else {
@@ -199,13 +200,13 @@ Examples:
           console.error(`Error ${res.status}: ${text}`);
           process.exit(1);
         }
-        const drive = (await res.json()) as Record<string, unknown>;
+        const drive = (await res.json()) as DriveRow & { retroPath?: string | null };
         if (options.json) {
           console.log(JSON.stringify(drive, null, 2));
         } else {
           console.log(`Drive ${drive.id} finished.`);
           console.log(`  Status:   ${drive.status}`);
-          console.log(`  Finished: ${drive.finishedAt}`);
+          console.log(`  Finished: ${String(drive.finishedAt)}`);
           if (drive.retroPath) console.log(`  Retro:    ${drive.retroPath}`);
         }
         process.exit(0);

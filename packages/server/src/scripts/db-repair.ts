@@ -116,7 +116,8 @@ async function main() {
       await client.execute("PRAGMA wal_checkpoint(TRUNCATE)");
       log("WAL checkpoint complete.");
       const res = await client.execute("PRAGMA integrity_check");
-      const verdict = String(res.rows[0]?.integrity_check ?? "");
+      const integrityRow = res.rows[0] as { integrity_check?: string } | undefined;
+      const verdict = String(integrityRow?.integrity_check ?? "");
       if (verdict === "ok") {
         log("integrity_check: ok.");
       } else {

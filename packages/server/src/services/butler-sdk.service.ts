@@ -252,7 +252,7 @@ export async function interruptButler(projectId: string, butlerId: string = "def
   try {
     await s.query.interrupt();
   } catch (err) {
-    console.warn(`[butler-sdk] interrupt failed: project=${projectId} butler=${butlerId} ${err instanceof Error ? err.message : err}`);
+    console.warn(`[butler-sdk] interrupt failed: project=${projectId} butler=${butlerId} ${err instanceof Error ? err.message : String(err)}`);
     return false;
   }
   s.busy = false;
@@ -524,7 +524,7 @@ async function fetchSessionCapabilities(session: ButlerSession, q: Query): Promi
     const commands: SlashCommand[] = await q.supportedCommands();
     session.commands = commands.map((c) => ({ name: c.name, description: c.description, argumentHint: c.argumentHint }));
   } catch (err) {
-    console.warn(`[butler-sdk] supportedCommands failed: project=${session.projectId} ${err instanceof Error ? err.message : err}`);
+    console.warn(`[butler-sdk] supportedCommands failed: project=${session.projectId} ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -551,7 +551,7 @@ async function broadcastContextUsage(session: ButlerSession, q: Query): Promise<
       broadcast(session, { type: "meta", model: session.model, contextWindow: max, mcpConnected: session.mcpConnected });
     }
   } catch (err) {
-    console.warn(`[butler-sdk] getContextUsage failed: project=${session.projectId} ${err instanceof Error ? err.message : err}`);
+    console.warn(`[butler-sdk] getContextUsage failed: project=${session.projectId} ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -691,7 +691,7 @@ function dispatchButlerMessage(session: ButlerSession, msg: Record<string, unkno
  */
 function recoverButlerResume(session: ButlerSession, input: Pushable<SDKUserMessage>, options: Options, message: string): boolean {
   const reason = isStaleResumeError(message) ? "not found" : "had an invalid thinking-block signature";
-  console.warn(`[butler-sdk] resume session ${(options as Record<string, unknown>).resume} ${reason}, starting fresh: project=${session.projectId}`);
+  console.warn(`[butler-sdk] resume session ${String((options as Record<string, unknown>).resume)} ${reason}, starting fresh: project=${session.projectId}`);
   delete (options as Record<string, unknown>).resume;
   session.sessionId = undefined;
   const pendingTurn = session.busy

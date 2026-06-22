@@ -57,7 +57,7 @@ export const RESULT_TYPES = new Set([
 ]);
 
 export function normalizedType(obj: Record<string, unknown>): string {
-  return String(obj.type || obj.event || obj.name || "").toLowerCase().replace(/-/g, "_");
+  return String((obj.type as string) || (obj.event as string) || (obj.name as string) || "").toLowerCase().replace(/-/g, "_");
 }
 
 export function getString(obj: Record<string, unknown>, keys: string[]): string {
@@ -110,7 +110,7 @@ export function formatShutdownResult(
 
 export function extractAssistantText(obj: Record<string, unknown>): string {
   const type = normalizedType(obj);
-  const role = String(obj.role || "").toLowerCase();
+  const role = String((obj.role as string) || "").toLowerCase();
   const data = asRecord(obj.data);
   const message = asRecord(obj.message);
 
@@ -177,7 +177,7 @@ export function extractToolResult(obj: Record<string, unknown>, toolNameMap: Map
     || "copilot_tool";
   const result = asRecord(tool.result);
   const output = stringifyValue(result?.content ?? result?.detailedContent ?? tool.output ?? tool.result ?? tool.content ?? tool.message ?? tool.error);
-  const status = String(tool.status || "").toLowerCase();
+  const status = String((tool.status as string) || "").toLowerCase();
 
   return {
     toolName,
@@ -201,7 +201,7 @@ export function extractResult(obj: Record<string, unknown>): {
   const data = asRecord(obj.data);
   const payload = data || obj;
   const usage = asRecord(payload.usage) || asRecord(payload.stats) || payload;
-  const status = String(payload.status || payload.subtype || "").toLowerCase();
+  const status = String((payload.status as string) || (payload.subtype as string) || "").toLowerCase();
   return {
     success: Number(payload.exitCode ?? 0) === 0 && !(payload.is_error || payload.isError || payload.error) && status !== "error" && status !== "failed",
     durationMs: Number(payload.duration_ms ?? payload.durationMs ?? usage.sessionDurationMs ?? usage.duration_ms ?? usage.durationMs ?? 0) || 0,

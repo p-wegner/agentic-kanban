@@ -16,9 +16,9 @@ export function formatToolActivity(name: string, input: Record<string, unknown>)
       return `Running: ${cmd}`;
     }
     case "Grep":
-      return `Searching for ${input.pattern || ""}`;
+      return `Searching for ${input.pattern as string || ""}`;
     case "Glob":
-      return `Finding ${input.pattern || "files"}`;
+      return `Finding ${input.pattern as string || "files"}`;
     case "Agent":
       return `Delegating to agent`;
     case "WebSearch":

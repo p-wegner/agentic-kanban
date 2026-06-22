@@ -48,7 +48,7 @@ export function protectedPids(): Set<number> {
 export function guardProcessKill(pid: number, context: Record<string, unknown>): boolean {
   if (protectedPids().has(pid)) {
     auditProcessEvent({ action: "process-kill-blocked", pid, reason: "protected-pid", ...context });
-    console.warn(`[process-guard] blocked protected pid kill: pid=${pid} reason=${String(context.reason ?? "unknown")}`);
+    console.warn(`[process-guard] blocked protected pid kill: pid=${pid} reason=${(context.reason as string | undefined) ?? "unknown"}`);
     return false;
   }
   auditProcessEvent({ action: "process-kill-allowed", pid, ...context });

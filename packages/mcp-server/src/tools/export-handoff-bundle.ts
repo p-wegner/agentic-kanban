@@ -18,7 +18,7 @@ export function registerExportHandoffBundle(server: McpServer) {
         if (!res.ok) {
           let errorText = res.statusText;
           try {
-            const data = await res.json() as Record<string, unknown>;
+            const data = await res.json() as { error?: string };
             errorText = String(data.error ?? res.statusText);
           } catch { /* ignore parse failure */ }
           return { content: [{ type: "text" as const, text: `Export failed: ${errorText}` }] };

@@ -46,10 +46,16 @@ Examples:
               console.log(`\n${key} (${value.length}):`);
               for (const item of value) {
                 if (typeof item === "object" && item !== null) {
-                  const obj = item as Record<string, unknown>;
+                  const obj = item as {
+                    issueId?: string | number;
+                    id?: string | number;
+                    workspaceId?: string | number;
+                    reason?: string;
+                    status?: string;
+                  };
                   const label = obj.issueId ?? obj.id ?? obj.workspaceId ?? JSON.stringify(obj);
                   const reason = obj.reason ?? obj.status ?? "";
-                  console.log(`  - ${label}${reason ? `: ${reason}` : ""}`);
+                  console.log(`  - ${String(label)}${reason ? `: ${String(reason)}` : ""}`);
                 } else {
                   console.log(`  - ${item}`);
                 }
@@ -57,10 +63,10 @@ Examples:
             } else if (typeof value === "object" && value !== null) {
               console.log(`\n${key}:`);
               for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-                console.log(`  ${k}: ${v}`);
+                console.log(`  ${k}: ${String(v)}`);
               }
             } else {
-              console.log(`${key}: ${value}`);
+              console.log(`${key}: ${String(value)}`);
             }
           }
         }

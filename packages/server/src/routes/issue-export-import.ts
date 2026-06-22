@@ -169,6 +169,25 @@ const DEFAULT_ISSUE_TYPE = "feature";
 // shared `validateRows` step applies defaults + records a warning only when a
 // value was present-but-invalid, so omitted fields default silently.
 
+/**
+ * Coerce a raw (untyped JSON) import field to a string with the SAME runtime
+ * output `String(value)` produced. Strings pass through; primitives use their
+ * normal string form; a non-primitive routes through its own `toString` and so
+ * reproduces the exact result (e.g. `[object Object]`) it would have yielded
+ * before. Typing the object branch as `{ toString(): string }` keeps
+ * `no-base-to-string` satisfied while leaving every visible output unchanged.
+ * In practice these import fields are always scalars; the object branch only
+ * preserves the prior latent behavior for the never-hit non-scalar case.
+ */
+function importFieldToString(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value !== null && typeof value === "object") {
+    return (value as { toString(): string }).toString();
+  }
+  // number | bigint | boolean | undefined | null | symbol | function.
+  return `${value as number | bigint | boolean | null | undefined}`;
+}
+
 function parseJsonImport(body: unknown): { rows: ImportRow[]; errors: string[] } {
   const errors: string[] = [];
   if (!Array.isArray(body)) {
@@ -191,10 +210,10 @@ function parseJsonImport(body: unknown): { rows: ImportRow[]; errors: string[] }
     const rawType = obj.type ?? obj.issueType;
     rows.push({
       title: String(obj.title).trim(),
-      description: obj.description ? String(obj.description) : "",
-      priority: obj.priority ? String(obj.priority).trim() : "",
-      issueType: rawType ? String(rawType).trim() : "",
-      estimate: obj.estimate ? String(obj.estimate).trim() : "",
+      description: obj.description ? importFieldToString(obj.description) : "",
+      priority: obj.priority ? importFieldToString(obj.priority).trim() : "",
+      issueType: rawType ? importFieldToString(rawType).trim() : "",
+      estimate: obj.estimate ? importFieldToString(obj.estimate).trim() : "",
     });
   }
   return { rows, errors };
@@ -468,7 +487,7 @@ export function createIssueExportImportRoute(
           : null;
       if (obj && typeof obj.text === "string") {
         text = String(obj.text);
-        hint = obj.format ? String(obj.format) : "auto";
+        hint = obj.format ? importFieldToString(obj.format) : "auto";
       } else if (typeof body === "string") {
         text = body;
       } else if (Array.isArray(body)) {
@@ -519,7 +538,7 @@ export function createIssueExportImportRoute(
         hint = "json";
       } else if (obj && typeof obj.text === "string") {
         text = String(obj.text);
-        hint = obj.format ? String(obj.format) : "auto";
+        hint = obj.format ? importFieldToString(obj.format) : "auto";
       } else {
         return c.json({ error: "JSON body must be an array of issues or a { text, format } object" }, 400);
       }

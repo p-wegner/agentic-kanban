@@ -165,7 +165,8 @@ async function libsqlBackupRowCounts(path: string): Promise<BackupRowCounts> {
   const c = createClient({ url: pathToFileURL(path).href });
   try {
     const integrity = await c.execute("PRAGMA integrity_check");
-    const verdict = String(integrity.rows[0]?.integrity_check ?? "");
+    const integrityRow = integrity.rows[0] as { integrity_check?: string } | undefined;
+    const verdict = String(integrityRow?.integrity_check ?? "");
     if (verdict !== "ok") {
       throw new Error(`integrity_check failed: ${JSON.stringify(integrity.rows[0])}`);
     }

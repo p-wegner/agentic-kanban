@@ -164,7 +164,7 @@ export function buildSpawnEnv(claudeProfile?: string, fs: FileSystem = nodeFileS
       Object.assign(spawnEnv, profileEnv);
     }
   } catch (err) {
-    console.warn(`[agent] Failed to read profile env from ${settingsPath}: ${err}`);
+    console.warn(`[agent] Failed to read profile env from ${settingsPath}: ${String(err)}`);
   }
 
   return spawnEnv;

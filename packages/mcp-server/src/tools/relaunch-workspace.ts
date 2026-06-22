@@ -36,7 +36,7 @@ export function registerRelaunchWorkspace(server: McpServer, deps: ToolDeps = pr
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ prompt }),
         });
-        const data = await res.json() as Record<string, unknown>;
+        const data = await res.json() as { error?: string; sessionId?: string };
 
         if (!res.ok) {
           return { content: [{ type: "text" as const, text: `Launch failed: ${data.error ?? res.statusText}` }] };

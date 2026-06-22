@@ -263,7 +263,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       execSync("git init", { cwd: targetPath, stdio: "pipe" });
     } catch (err: unknown) {
       try { rmSync(targetPath, { recursive: true, force: true }); } catch {}
-      const stderr = (err as { stderr?: unknown }).stderr;
+      const stderr = (err as { stderr?: string | Buffer }).stderr;
       throw new ProjectError(`git init failed: ${stderr ? String(stderr).trim() : String(err)}`, "BAD_REQUEST");
     }
 

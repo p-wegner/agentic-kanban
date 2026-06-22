@@ -258,7 +258,7 @@ async function runAgentTurn(opts: {
       return { text: "Monitor cycle aborted (timeout or shutdown)", isError: true, toolsUsed };
     }
     if (isTransientNetworkError(err)) {
-      console.warn(`[monitor-butler] transient network error (ignored): ${err instanceof Error ? err.message : err}`);
+      console.warn(`[monitor-butler] transient network error (ignored): ${err instanceof Error ? err.message : String(err)}`);
       return { text: "Transient network error", isError: true, toolsUsed };
     }
     throw err;

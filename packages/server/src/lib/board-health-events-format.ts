@@ -123,7 +123,7 @@ export function compactBoardHealthEventDetails(raw: string | null): string | nul
   try {
     const details = JSON.parse(raw) as unknown;
     if (details === null || details === undefined) return null;
-    if (typeof details !== "object") return String(details);
+    if (typeof details !== "object") return String(details as string | number | boolean);
     if (Array.isArray(details)) return `${details.length} item${details.length === 1 ? "" : "s"}`;
 
     const entries = Object.entries(details as Record<string, unknown>)
@@ -135,7 +135,7 @@ export function compactBoardHealthEventDetails(raw: string | null): string | nul
       .map(([key, value]) => {
         if (Array.isArray(value)) return `${key}: ${value.length} item${value.length === 1 ? "" : "s"}`;
         if (typeof value === "object") return `${key}: ${Object.keys(value as Record<string, unknown>).length} fields`;
-        return `${key}: ${String(value)}`;
+        return `${key}: ${String(value as string | number | boolean)}`;
       })
       .join(", ");
   } catch {

@@ -111,8 +111,11 @@ export default tseslint.config(
       "@typescript-eslint/no-unsafe-argument": "error",
       "@typescript-eslint/no-unsafe-return": "error",
       "@typescript-eslint/no-redundant-type-constituents": "warn",
-      "@typescript-eslint/restrict-template-expressions": "warn",
-      "@typescript-eslint/no-base-to-string": "warn",
+      // Drained to 0 — promoted to error. Type the value's source (esp. untyped
+      // `await res.json()` casts) or wrap a nullish primitive in `String(x)`;
+      // never `?? ""` (changes output). A genuine `[object Object]` means a real bug.
+      "@typescript-eslint/restrict-template-expressions": "error",
+      "@typescript-eslint/no-base-to-string": "error",
       "@typescript-eslint/unbound-method": "warn",
       // Autofix mis-narrows `X | {}` unions (settings store, parseOptionalJsonBody)
       // — the empty-object `{}` top-type confuses it. Keep visible, don't gate/fix.
