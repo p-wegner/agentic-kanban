@@ -4,5 +4,5 @@ export { ClaudeProvider } from "./claude-provider.js";
 export { CodexProvider } from "./codex-provider.js";
 export { CopilotProvider } from "./copilot-provider.js";
 export { PiProvider } from "./pi-provider.js";
-export { getProvider, setDefaultProvider, buildAgentLaunchConfig, narrowProviderName, getProfilePrefKey } from "./registry.js";
+export { getProvider, buildAgentLaunchConfig, narrowProviderName, getProfilePrefKey } from "./registry.js";
 export { buildSpawnEnv, nodeFileSystem } from "./helpers.js";

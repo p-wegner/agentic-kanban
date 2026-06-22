@@ -6,22 +6,23 @@ import { CopilotProvider } from "./copilot-provider.js";
 import { PiProvider } from "./pi-provider.js";
 
 const providers = new Map<string, AgentProvider>();
-let defaultProviderName = "claude";
+
+// Claude is the fixed default when no provider is named. This was previously a
+// mutable `let defaultProviderName` with a `setDefaultProvider()` mutator, but the
+// mutator was never called anywhere — provider selection is always explicit via
+// `options.provider` / narrowProviderName — so the global was vestigial (and a
+// footgun: a caller "setting the default" would have no effect on those paths).
+const DEFAULT_PROVIDER_NAME = "claude";
 
 function registerProvider(provider: AgentProvider): void {
   providers.set(provider.name, provider);
 }
 
 export function getProvider(name?: string): AgentProvider {
-  const key = name === "claude-code" ? "claude" : (name ?? defaultProviderName);
+  const key = name === "claude-code" ? "claude" : (name ?? DEFAULT_PROVIDER_NAME);
   const provider = providers.get(key);
   if (!provider) throw new Error(`Unknown agent provider: ${key}`);
   return provider;
-}
-
-export function setDefaultProvider(name: string): void {
-  if (!providers.has(name)) throw new Error(`Unknown agent provider: ${name}`);
-  defaultProviderName = name;
 }
 
 registerProvider(new ClaudeProvider());
