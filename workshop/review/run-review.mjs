@@ -8,9 +8,10 @@
  * Required CI variables (automatic):
  *   CI_API_V4_URL    – GitLab API base URL
  *   CI_PROJECT_ID    – current project ID
- *   CI_JOB_TOKEN     – short-lived job token (read access to project API)
+ *   CI_JOB_TOKEN     – short-lived job token (set automatically)
  *
  * Required CI variables (manual):
+ *   GITLAB_READ_TOKEN   – project access token with read_api scope (masked)
  *   ANTHROPIC_BASE_URL  – API gateway base URL
  *   GATEWAY_API_KEY     – gateway API key (masked)
  *
@@ -22,19 +23,22 @@ import Anthropic from "@anthropic-ai/sdk";
 import { readFileSync, writeFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { execSync } from "child_process";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const GITLAB_API = process.env.CI_API_V4_URL ?? "https://code.andrena.de/api/v4";
 const PROJECT_ID = process.env.CI_PROJECT_ID;
-const JOB_TOKEN = process.env.CI_JOB_TOKEN;
+const GITLAB_READ_TOKEN = process.env.GITLAB_READ_TOKEN;
 const GATEWAY_API_KEY = process.env.GATEWAY_API_KEY;
 const BASE_URL = process.env.ANTHROPIC_BASE_URL;
 const REVIEW_MR_IID = process.env.REVIEW_MR_IID ?? "1";
 
 if (!PROJECT_ID) {
   console.error("CI_PROJECT_ID is not set.");
+  process.exit(1);
+}
+if (!GITLAB_READ_TOKEN) {
+  console.error("GITLAB_READ_TOKEN is not set. Add a project access token (read_api) as a masked CI variable.");
   process.exit(1);
 }
 if (!GATEWAY_API_KEY) {
@@ -44,7 +48,7 @@ if (!GATEWAY_API_KEY) {
 
 async function fetchGitlab(path) {
   const res = await fetch(`${GITLAB_API}${path}`, {
-    headers: { "JOB-TOKEN": JOB_TOKEN },
+    headers: { "PRIVATE-TOKEN": GITLAB_READ_TOKEN },
   });
   if (!res.ok) throw new Error(`GitLab API ${res.status}: GET ${path}`);
   return res.json();
@@ -55,14 +59,12 @@ console.log(`Reviewing MR !${REVIEW_MR_IID} …`);
 const mr = await fetchGitlab(`/projects/${PROJECT_ID}/merge_requests/${REVIEW_MR_IID}`);
 console.log(`MR: "${mr.title}" (${mr.source_branch} → ${mr.target_branch})`);
 
-// --- Build diff via git fetch of MR source branch ---
-const repoRoot = join(__dirname, "..", "..");
-execSync(`git fetch --depth=1 origin ${mr.source_branch}`, { cwd: repoRoot, stdio: "inherit" });
-const diffText = execSync(
-  `git diff origin/${mr.target_branch}..FETCH_HEAD`,
-  { cwd: repoRoot, encoding: "utf-8" }
-);
-console.log(`Diff: ${diffText.length} chars`);
+// --- Fetch MR diff ---
+const mrChanges = await fetchGitlab(`/projects/${PROJECT_ID}/merge_requests/${REVIEW_MR_IID}/changes`);
+const diffText = mrChanges.changes
+  .map((d) => `--- ${d.old_path}\n+++ ${d.new_path}\n${d.diff}`)
+  .join("\n\n");
+console.log(`Diff: ${mrChanges.changes.length} file(s), ${diffText.length} chars`);
 
 // --- Fetch linked issue via GitLab API ---
 let issueSection = "";
