@@ -73,7 +73,9 @@ export default tseslint.config(
 
       // The ratchet backlog: real signals, but too many pre-existing hits to gate
       // on today. Kept as warnings so they're visible and trend down over time.
-      "@typescript-eslint/no-explicit-any": "warn",
+      // no-explicit-any is DRAINED to 0 — promoted to error so it gates `pnpm lint`
+      // and no new explicit `any` can be reintroduced into type-checked source.
+      "@typescript-eslint/no-explicit-any": "error",
       "@typescript-eslint/no-unused-vars": [
         "warn",
         {
