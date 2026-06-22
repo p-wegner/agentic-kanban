@@ -99,9 +99,8 @@ if (!hasArgs) {
       const allProjects = await getAllProjects(undefined, { includeArchived: true });
       if (allProjects.length === 0) {
         try {
-          const { promisify } = await import("node:util");
-          const execFileAsync = promisify(execFile);
-          await execFileAsync("git", ["-C", process.cwd(), "rev-parse", "--git-dir"]);
+          const { gitExecOrThrow } = await import("@agentic-kanban/shared/lib/git-exec");
+          await gitExecOrThrow(["-C", process.cwd(), "rev-parse", "--git-dir"], {});
           // CWD is a git repo — register it
           const { registerProject } = await import("../services/project-registration.js");
           const { project, created } = await registerProject(process.cwd());

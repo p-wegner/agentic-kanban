@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { gitExecSync } from "@agentic-kanban/shared/lib/git-exec";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { preferences } from "@agentic-kanban/shared/schema";
@@ -365,16 +365,11 @@ export function commitObjectiveFile(repoPath: string): boolean {
   const objectivePath = join(repoPath, STRATEGY_RELATIVE_PATH);
   if (!existsSync(objectivePath)) return false;
   try {
-    const status = execFileSync("git", ["status", "--porcelain", "--", STRATEGY_RELATIVE_PATH], {
-      cwd: repoPath,
-      encoding: "utf8",
-      windowsHide: true,
-    }).trim();
+    const status = gitExecSync(["status", "--porcelain", "--", STRATEGY_RELATIVE_PATH], { cwd: repoPath }).trim();
     if (!status) return false;
-    execFileSync(
-      "git",
+    gitExecSync(
       ["commit", "-m", "chore(monitor): sync objective.md from Strategy Bullseye save", "--", STRATEGY_RELATIVE_PATH],
-      { cwd: repoPath, windowsHide: true },
+      { cwd: repoPath },
     );
     return true;
   } catch {

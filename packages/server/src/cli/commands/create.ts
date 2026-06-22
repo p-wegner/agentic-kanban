@@ -58,9 +58,7 @@ Setup:
 
         const { mkdir, access, rm } = await import("node:fs/promises");
         const { join, resolve: resolvePath, sep } = await import("node:path");
-        const { execFile } = await import("node:child_process");
-        const { promisify } = await import("node:util");
-        const execFileAsync = promisify(execFile);
+        const { gitExecOrThrow } = await import("@agentic-kanban/shared/lib/git-exec");
 
         const resolvedBase = resolvePath(baseFolder);
         const repoPath = resolvePath(join(resolvedBase, folderName));
@@ -89,18 +87,18 @@ Setup:
 
         const branch = options.branch ?? "main";
         try {
-          await execFileAsync("git", ["-C", repoPath, "init", `-b`, branch]);
+          await gitExecOrThrow(["-C", repoPath, "init", `-b`, branch], {});
         } catch {
-          await execFileAsync("git", ["-C", repoPath, "init"]);
+          await gitExecOrThrow(["-C", repoPath, "init"], {});
           try {
-            await execFileAsync("git", ["-C", repoPath, "checkout", "-b", branch]);
+            await gitExecOrThrow(["-C", repoPath, "checkout", "-b", branch], {});
           } catch {
             // Branch may already be correct, ignore
           }
         }
 
         try {
-          await execFileAsync("git", ["-C", repoPath, "commit", "--allow-empty", "-m", "Initial commit"]);
+          await gitExecOrThrow(["-C", repoPath, "commit", "--allow-empty", "-m", "Initial commit"], {});
         } catch (commitErr) {
           await cleanup();
           const msg = commitErr instanceof Error ? commitErr.message : String(commitErr);

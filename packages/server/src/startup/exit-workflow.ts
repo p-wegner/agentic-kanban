@@ -5,7 +5,7 @@ import { buildSmokeCheck, getStackProfile } from "../services/stack-profile.serv
 import { runUnderBuildGate } from "../services/jvm-build-gate.js";
 import { issues, preferences, projectStatuses, projects, scheduledRunHistory, scheduledRuns, sessions, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { desc, eq } from "drizzle-orm";
-import { execFile } from "node:child_process";
+import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { db as defaultDb } from "../db/index.js";
@@ -166,14 +166,14 @@ async function hasCommittedChanges(workspace: WorkspaceRow, defaultBranch: strin
   try {
     if (workspace.isDirect) {
       const baseRef = workspace.baseCommitSha || "HEAD~1";
-      return await new Promise<boolean>((resolve) => execFile("git", ["diff", "--quiet", baseRef, "HEAD"], { cwd: workspace.workingDir! }, (err: Error | null) => resolve(!!err)));
+      return (await gitExec(["diff", "--quiet", baseRef, "HEAD"], { cwd: workspace.workingDir! })).code !== 0;
     }
     const baseBranch = workspace.baseBranch || defaultBranch;
     if (!baseBranch) {
       console.warn(`[workflow] workspace ${workspaceId} has no base/default branch; treating as no committed changes`);
       return false;
     }
-    return await new Promise<boolean>((resolve) => execFile("git", ["diff", "--quiet", baseBranch], { cwd: workspace.workingDir! }, (err: Error | null) => resolve(!!err)));
+    return (await gitExec(["diff", "--quiet", baseBranch], { cwd: workspace.workingDir! })).code !== 0;
   } catch { return false; }
 }
 
@@ -593,9 +593,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
         );
         if (revertPaths.length) {
           try {
-            await new Promise<void>((resolve) =>
-              execFile("git", ["checkout", "--", ...revertPaths], { cwd: workspace.workingDir! }, () => resolve()),
-            );
+            await gitExec(["checkout", "--", ...revertPaths], { cwd: workspace.workingDir! });
           } catch { /* best-effort cleanup */ }
         }
       }

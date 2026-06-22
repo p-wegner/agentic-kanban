@@ -1,11 +1,10 @@
 import { db } from "../db/index.js";
 import { randomUUID } from "node:crypto";
 import { resolve, basename } from "node:path";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { detectRepoInfo } from "./git-info.service.js";
 import { initializeProjectStatuses } from "../repositories/issue.repository.js";
 import { getCurrentBranch } from "./git.service.js";
+import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { populateStackProfile, getStackProfile, populateVerifyScript, verifyScriptPrefKey, populateSetupScript } from "./stack-profile.service.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import {
@@ -28,8 +27,6 @@ import {
   getProjectStatusIdsByProject,
   updateProjectDefaultBranch,
 } from "../repositories/project-registration.repository.js";
-
-const execFileAsync = promisify(execFile);
 
 /**
  * Resolve a non-null default branch for a freshly-registered repo.
@@ -56,8 +53,8 @@ async function resolveDefaultBranch(
 
 async function tryGetGitRoot(repoPath: string): Promise<string | null> {
   try {
-    const out = await execFileAsync("git", ["rev-parse", "--show-toplevel"], { cwd: repoPath, timeout: 5000 });
-    return resolve(out.stdout.trim());
+    const stdout = await gitExecOrThrow(["rev-parse", "--show-toplevel"], { cwd: repoPath, timeout: 5000 });
+    return resolve(stdout.trim());
   } catch {
     return null;
   }

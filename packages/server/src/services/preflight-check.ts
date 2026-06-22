@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { existsSync, readFileSync } from "node:fs";
 import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -41,15 +41,7 @@ export interface WorkspaceLaunchPreflightResult extends PreflightResult {
 }
 
 function execGit(args: string[], cwd: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile("git", args, { cwd, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err) {
-        reject(new Error(`git ${args.join(" ")} failed: ${stderr || err.message}`));
-      } else {
-        resolve(stdout.toString());
-      }
-    });
-  });
+  return gitExecOrThrow(args, { cwd });
 }
 
 async function defaultExists(root: string, relativePath: string): Promise<boolean> {

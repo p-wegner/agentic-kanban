@@ -1,7 +1,7 @@
 import { db } from "../db/index.js";
 import { sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { eq, inArray } from "drizzle-orm";
-import { execFile } from "node:child_process";
+import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 
 interface WorkflowSets {
   reviewSessionIds: Set<string>;
@@ -42,9 +42,7 @@ async function restoreWorkflowSets({ reviewSessionIds, fixAndMergeSessionIds, le
  * exits non-zero when there is a diff, so a non-null err means "has changes".
  */
 async function workspaceHasCommits(workingDir: string, baseBranch: string): Promise<boolean> {
-  return new Promise<boolean>((resolve) => {
-    execFile("git", ["diff", "--quiet", baseBranch], { cwd: workingDir }, (err: Error | null) => resolve(!!err));
-  });
+  return (await gitExec(["diff", "--quiet", baseBranch], { cwd: workingDir })).code !== 0;
 }
 
 /** Reset workspaces stuck in active/reviewing/fixing with no running session.

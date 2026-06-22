@@ -1,17 +1,14 @@
 import { readdir, stat, readFile, realpath } from "node:fs/promises";
 import { join, resolve, extname, relative, isAbsolute } from "node:path";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import type { Database } from "../db/index.js";
 import { NotFoundError, ValidationError } from "../errors/index.js";
 import { issueArtifacts } from "@agentic-kanban/shared/schema";
+import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import {
   getWorkspaceWorkingDirAndBase,
   workspaceExists,
   getWorkspaceArtifacts,
 } from "../repositories/session-artifacts.repository.js";
-
-const execFileAsync = promisify(execFile);
 
 export interface ArtifactEntry {
   /** Relative path from the workspace workingDir */
@@ -185,12 +182,8 @@ export function createSessionArtifactsService(deps: { database: Database }) {
     if (!baseBranch) return null;
     try {
       const [diffOut, untrackedOut] = await Promise.all([
-        execFileAsync("git", ["diff", "--name-only", `${baseBranch}...HEAD`], { cwd: workingDir })
-          .then((r) => r.stdout)
-          .catch(() => ""),
-        execFileAsync("git", ["ls-files", "--others", "--exclude-standard"], { cwd: workingDir })
-          .then((r) => r.stdout)
-          .catch(() => ""),
+        gitExec(["diff", "--name-only", `${baseBranch}...HEAD`], { cwd: workingDir }).then((r) => r.stdout),
+        gitExec(["ls-files", "--others", "--exclude-standard"], { cwd: workingDir }).then((r) => r.stdout),
       ]);
       const paths = new Set<string>();
       for (const line of (diffOut + "\n" + untrackedOut).split("\n")) {
