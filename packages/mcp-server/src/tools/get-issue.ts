@@ -81,7 +81,7 @@ export function registerGetIssue(server: McpServer, deps: ToolDeps = prodDeps) {
       // Only outgoing deps matter — incoming deps mean OTHER issues depend on this one, which
       // doesn't block THIS issue.
       const isBlocked = outgoing.some((dep) => {
-        const type = (dep as any).type;
+        const type = dep.type;
         return (type === "depends_on" || type === "blocked_by") &&
           !isResolvedDependencyStatusView({
             currentNodeId: dep.issueCurrentNodeId,

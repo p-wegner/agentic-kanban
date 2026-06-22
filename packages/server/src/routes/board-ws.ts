@@ -1,3 +1,5 @@
+import type { Context } from "hono";
+import type { UpgradeWebSocket, WSContext } from "hono/ws";
 import type { BoardEvents } from "../services/board-events.js";
 
 /**
@@ -10,16 +12,16 @@ import type { BoardEvents } from "../services/board-events.js";
  *   app.get("/ws/board/:projectId", createBoardWsRoute(upgradeWebSocket, boardEvents));
  */
 export function createBoardWsRoute(
-  upgradeWebSocket: (callback: (c: any) => any) => any,
+  upgradeWebSocket: UpgradeWebSocket,
   boardEvents: BoardEvents,
 ) {
-  return upgradeWebSocket((c: any) => {
-    const projectId = c.req.param("projectId");
+  return upgradeWebSocket((c: Context) => {
+    const projectId = c.req.param("projectId")!;
     return {
-      onOpen(_event: any, ws: any) {
+      onOpen(_event: Event, ws: WSContext) {
         boardEvents.subscribe(projectId, ws);
       },
-      onClose(_event: any, ws: any) {
+      onClose(_event: CloseEvent, ws: WSContext) {
         boardEvents.unsubscribe(projectId, ws);
       },
     };

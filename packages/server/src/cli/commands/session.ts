@@ -26,6 +26,23 @@ import { buildReviewWorkspaces, buildReviewResult, summarizeReviewEffectiveness,
 const DEFAULT_PORT = process.env.KANBAN_SERVER_PORT ?? "3001";
 const BASE_URL = `http://127.0.0.1:${DEFAULT_PORT}`;
 
+/**
+ * Shape of the persisted, JSON-parsed `session.stats` blob this command reads.
+ * Every field is optional because the blob is untyped persisted JSON and each
+ * access falls back to a default — narrowing here keeps the parse boundary typed
+ * without asserting fields that may be absent.
+ */
+interface ParsedSessionStats {
+  durationMs?: number;
+  totalCostUsd?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  numTurns?: number;
+  model?: string;
+  success?: boolean;
+  agentSummary?: string;
+}
+
 export function registerSessionCommand(program: Command) {
   const sessionCmd = program.command("session").description("Inspect agent sessions.\n\nSubcommands: analyze, recent, backfill-friction, review-effectiveness, transcript, search, stats, friction, find-similar");
 
@@ -53,9 +70,9 @@ export function registerSessionCommand(program: Command) {
 
         const summary = parseSessionSummary(msgRows);
 
-        let stats: Record<string, unknown> | null = null;
+        let stats: ParsedSessionStats | null = null;
         if (session.stats) {
-          try { stats = JSON.parse(session.stats); } catch { /* ignore */ }
+          try { stats = JSON.parse(session.stats) as ParsedSessionStats; } catch { /* ignore */ }
         }
 
         console.log(JSON.stringify({
@@ -77,14 +94,14 @@ export function registerSessionCommand(program: Command) {
           issue,
           summary,
           stats: stats ? {
-            durationMs: (stats as any).durationMs ?? 0,
-            totalCostUsd: (stats as any).totalCostUsd ?? 0,
-            inputTokens: (stats as any).inputTokens ?? 0,
-            outputTokens: (stats as any).outputTokens ?? 0,
-            numTurns: (stats as any).numTurns ?? 1,
-            model: (stats as any).model ?? summary.model,
-            success: (stats as any).success ?? false,
-            agentSummary: (stats as any).agentSummary,
+            durationMs: stats.durationMs ?? 0,
+            totalCostUsd: stats.totalCostUsd ?? 0,
+            inputTokens: stats.inputTokens ?? 0,
+            outputTokens: stats.outputTokens ?? 0,
+            numTurns: stats.numTurns ?? 1,
+            model: stats.model ?? summary.model,
+            success: stats.success ?? false,
+            agentSummary: stats.agentSummary,
           } : null,
         }, null, 2));
         process.exit(0);

@@ -118,7 +118,7 @@ export function registerUpdateWorkflowTemplate(server: McpServer, deps: ToolDeps
       const res = await updateWorkflowTemplate(deps.db, templateId, {
         name, description, ticketType, isDefault, nodes: nodes, edges: edges,
       });
-      if (!res.ok) return json({ error: res.error, errors: (res as any).errors });
+      if (!res.ok) return json({ error: res.error, errors: res.errors });
       const t = await getTemplateGraph(deps.db, templateId);
       if (t?.projectId) deps.notifyBoard(t.projectId, "mcp_update_workflow_template");
       return json({ ok: true, id: templateId });

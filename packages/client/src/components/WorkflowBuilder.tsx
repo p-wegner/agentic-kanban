@@ -57,6 +57,47 @@ type WorkflowSnapshot = {
   selectedEdgeId: string | null;
 };
 
+/** Arbitrary data carried on a react-flow edge in this builder. */
+type EdgeData = {
+  label: string | null;
+  condition: string;
+  isLoop: boolean;
+};
+
+/** A workflow-node row as returned by GET /api/workflows/templates/:id. */
+type WorkflowTemplateNode = {
+  id: string;
+  name: string;
+  nodeType: string;
+  statusName: string | null;
+  skillId: string | null;
+  skillName: string | null;
+  maxVisits: number | null;
+  config: string | null;
+  posX: number | null;
+  posY: number | null;
+};
+
+/** A workflow-edge row as returned by GET /api/workflows/templates/:id. */
+type WorkflowTemplateEdge = {
+  id: string;
+  fromNodeId: string;
+  toNodeId: string;
+  label: string | null;
+  condition: string;
+  isLoop: boolean;
+};
+
+/** The full template graph returned by GET /api/workflows/templates/:id. */
+type WorkflowTemplateDetail = {
+  name: string;
+  description: string | null;
+  ticketType: string | null;
+  isBuiltin: boolean;
+  nodes: WorkflowTemplateNode[];
+  edges: WorkflowTemplateEdge[];
+};
+
 let tmpCounter = 0;
 const tmpId = () => `tmp-${Date.now()}-${tmpCounter++}`;
 
@@ -157,12 +198,12 @@ export function WorkflowBuilder({
 
   useEffect(() => {
     if (!templateId) return;
-    apiFetch<any>(`/api/workflows/templates/${templateId}`).then((t) => {
+    apiFetch<WorkflowTemplateDetail>(`/api/workflows/templates/${templateId}`).then((t) => {
       setName(t.name);
       setDescription(t.description ?? "");
       setTicketType(t.ticketType ?? "");
       setIsBuiltin(!!t.isBuiltin);
-      const rawNodes = (t.nodes as any[]).map((n) => ({
+      const rawNodes = t.nodes.map((n) => ({
         id: n.id,
         position: { x: n.posX ?? 0, y: n.posY ?? 0 },
         data: {
@@ -176,7 +217,7 @@ export function WorkflowBuilder({
         },
         style: nodeStyle(n.nodeType),
       }));
-      const rawEdges = (t.edges as any[]).map((e) => ({
+      const rawEdges = t.edges.map((e) => ({
         id: e.id,
         source: e.fromNodeId,
         target: e.toNodeId,
@@ -285,7 +326,7 @@ export function WorkflowBuilder({
     setEdges((eds) =>
       eds.map((e) =>
         e.id === id
-          ? { ...e, data: { ...(e.data ?? {}), ...patch }, label: edgeLabel(patch.label ?? (e.data as any)?.label, patch.condition ?? (e.data as any)?.condition) }
+          ? { ...e, data: { ...(e.data ?? {}), ...patch }, label: edgeLabel(patch.label ?? (e.data as EdgeData | undefined)?.label, patch.condition ?? (e.data as EdgeData | undefined)?.condition) }
           : e,
       ),
     );
@@ -351,9 +392,9 @@ export function WorkflowBuilder({
       edges: edges.map((e, i) => ({
         fromNodeId: e.source,
         toNodeId: e.target,
-        label: (e.data as any)?.label ?? null,
-        condition: (e.data as any)?.condition ?? "manual",
-        isLoop: !!(e.data as any)?.isLoop,
+        label: (e.data as EdgeData | undefined)?.label ?? null,
+        condition: (e.data as EdgeData | undefined)?.condition ?? "manual",
+        isLoop: !!(e.data as EdgeData | undefined)?.isLoop,
         sortOrder: i,
       })),
     };
@@ -367,8 +408,9 @@ export function WorkflowBuilder({
       showToast("Workflow saved", "success");
       onSaved();
       onClose();
-    } catch (err: any) {
-      const data = err?.body ?? err?.data;
+    } catch (err: unknown) {
+      const errObj = err as { body?: { errors?: string[] }; data?: { errors?: string[] } } | null;
+      const data = errObj?.body ?? errObj?.data;
       if (data?.errors) setErrors(data.errors);
       showToast(err instanceof Error ? err.message : "Save failed", "error");
     } finally {
@@ -526,13 +568,13 @@ export function WorkflowBuilder({
             <div className="space-y-2">
               <div className="font-semibold text-xs uppercase text-gray-400">Edge</div>
               <label className="block text-xs">Label
-                <input value={(selectedEdge.data as any)?.label ?? ""} onChange={(e) => patchEdge(selectedEdge.id, { label: e.target.value || null })} className="w-full mt-0.5 border rounded px-2 py-1 dark:bg-gray-800 dark:border-gray-600" />
+                <input value={(selectedEdge.data as EdgeData | undefined)?.label ?? ""} onChange={(e) => patchEdge(selectedEdge.id, { label: e.target.value || null })} className="w-full mt-0.5 border rounded px-2 py-1 dark:bg-gray-800 dark:border-gray-600" />
               </label>
               <label className="block text-xs">Condition
                 <select
-                  value={edgeConditionBase((selectedEdge.data as any)?.condition ?? "manual")}
+                  value={edgeConditionBase((selectedEdge.data as EdgeData | undefined)?.condition ?? "manual")}
                   onChange={(e) => {
-                    const currentCondition = (selectedEdge.data as any)?.condition ?? "manual";
+                    const currentCondition = (selectedEdge.data as EdgeData | undefined)?.condition ?? "manual";
                     const nextCondition = e.target.value === "diff_touches"
                       ? writeDiffTouchesCondition(readDiffTouchesGlob(currentCondition))
                       : e.target.value;
@@ -543,10 +585,10 @@ export function WorkflowBuilder({
                   {EDGE_CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
               </label>
-              {edgeConditionBase((selectedEdge.data as any)?.condition ?? "manual") === "diff_touches" && (
+              {edgeConditionBase((selectedEdge.data as EdgeData | undefined)?.condition ?? "manual") === "diff_touches" && (
                 <label className="block text-xs">Glob
                   <input
-                    value={readDiffTouchesGlob((selectedEdge.data as any)?.condition ?? "")}
+                    value={readDiffTouchesGlob((selectedEdge.data as EdgeData | undefined)?.condition ?? "")}
                     onChange={(e) => patchEdge(selectedEdge.id, { condition: writeDiffTouchesCondition(e.target.value) })}
                     placeholder="packages/server/**"
                     className="w-full mt-0.5 border rounded px-2 py-1 dark:bg-gray-800 dark:border-gray-600"
@@ -556,7 +598,7 @@ export function WorkflowBuilder({
               <label className="flex items-center gap-2 text-xs">
                 <input
                   type="checkbox"
-                  checked={!!(selectedEdge.data as any)?.isLoop}
+                  checked={!!(selectedEdge.data as EdgeData | undefined)?.isLoop}
                   onChange={(e) => patchEdge(selectedEdge.id, { isLoop: e.target.checked })}
                 />
                 Intentional loop edge

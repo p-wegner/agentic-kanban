@@ -480,8 +480,8 @@ Examples:
         const duration = computeSessionDuration(completedSession.startedAt, completedSession.endedAt);
 
         const summary = parseSessionSummary(msgRows);
-        if (!summary.agentSummary && stats && typeof (stats as any).agentSummary === "string") {
-          summary.agentSummary = (stats as any).agentSummary;
+        if (!summary.agentSummary && stats && typeof stats.agentSummary === "string") {
+          summary.agentSummary = stats.agentSummary;
         }
 
         const matchingWorkspace = wsRows.find(w => w.id === completedSession.workspaceId);

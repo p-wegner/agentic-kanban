@@ -1,14 +1,16 @@
 // Issue-action handlers extracted from BoardPage (create/update/delete + the
 // drag-to-agent-slot launch). Behaviour-preserving verbatim move; BoardPage
 // destructures them with the same names so its render is unchanged.
+import type { Dispatch, SetStateAction } from "react";
 import { apiPost, apiPatch, apiDelete } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
 import { getSettings } from "../lib/settingsStore.js";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { runCreateIssueFlow, type CreateIssuePayload } from "../lib/createIssueService.js";
+import type { ExpandedCreatePanel, WorkspaceInitial } from "../routes/BoardPage.js";
 import type { IssueWithStatus, UpdateIssueRequest, StatusWithIssues } from "@agentic-kanban/shared";
 
-type Setter = (value: any) => void;
+type Setter<T> = Dispatch<SetStateAction<T>>;
 
 interface BoardIssueActionsDeps {
   activeProject: { id: string; repoPath?: string; defaultBranch?: string | null } | null;
@@ -17,17 +19,17 @@ interface BoardIssueActionsDeps {
   columnsRef: React.RefObject<StatusWithIssues[]>;
   pendingBoardRefreshRef: React.RefObject<boolean>;
   refetchBoard: (projectId?: string, options?: { force?: boolean }) => Promise<StatusWithIssues[] | undefined>;
-  setColumns: Setter;
-  setCreatingInColumnId: Setter;
-  setError: Setter;
-  setExpandedCreatePanel: Setter;
-  setMutating: Setter;
-  setPendingIssueIds: Setter;
-  setPendingWorkspaceIssueIds: Setter;
-  setSelectedIssue: Setter;
-  setWorkspaceInitial: Setter;
-  setWorkspaceIssue: Setter;
-  setWorkspaceOpenCreate: Setter;
+  setColumns: Setter<StatusWithIssues[]>;
+  setCreatingInColumnId: Setter<string | null>;
+  setError: Setter<string | null>;
+  setExpandedCreatePanel: Setter<ExpandedCreatePanel>;
+  setMutating: Setter<boolean>;
+  setPendingIssueIds: Setter<Set<string>>;
+  setPendingWorkspaceIssueIds: Setter<Set<string>>;
+  setSelectedIssue: Setter<IssueWithStatus | null>;
+  setWorkspaceInitial: Setter<WorkspaceInitial>;
+  setWorkspaceIssue: Setter<IssueWithStatus | null>;
+  setWorkspaceOpenCreate: Setter<boolean>;
 }
 
 export function createBoardIssueActions(deps: BoardIssueActionsDeps) {

@@ -1,9 +1,10 @@
-import type { WSContext } from "hono/ws";
+import type { Context } from "hono";
+import type { UpgradeWebSocket, WSContext } from "hono/ws";
 import type { SessionState } from "./types.js";
 
 export function createWsHandler(
   state: SessionState,
-  upgradeWebSocket: (callback: (c: any) => any) => any,
+  upgradeWebSocket: UpgradeWebSocket,
 ) {
   function subscribe(sessionId: string, ws: WSContext) {
     if (!state.subscribers.has(sessionId)) {
@@ -40,11 +41,11 @@ export function createWsHandler(
   }
 
   function wsRoute() {
-    return upgradeWebSocket((c: any) => {
-      const sessionId = c.req.param("sessionId");
+    return upgradeWebSocket((c: Context) => {
+      const sessionId = c.req.param("sessionId")!;
       return {
-        onOpen(_event: any, ws: WSContext) { subscribe(sessionId, ws); },
-        onClose(_event: any, ws: WSContext) { unsubscribe(sessionId, ws); },
+        onOpen(_event: Event, ws: WSContext) { subscribe(sessionId, ws); },
+        onClose(_event: CloseEvent, ws: WSContext) { unsubscribe(sessionId, ws); },
       };
     });
   }

@@ -123,9 +123,10 @@ Only include genuinely useful dependencies, not just topical similarity.`;
         createdAt: new Date().toISOString(),
       }, database);
       created.push({ id, type: dep.type, issueId: dep.issueId, reason: dep.reason ?? "" });
-    } catch (err: any) {
-      if (err.message?.includes("UNIQUE constraint")) continue;
-      console.error("[issue-ai] failed to create dependency:", err.message);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : undefined;
+      if (message?.includes("UNIQUE constraint")) continue;
+      console.error("[issue-ai] failed to create dependency:", message);
     }
   }
 

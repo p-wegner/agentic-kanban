@@ -228,8 +228,8 @@ export function DependencyDisplay({
             setDepSearch("");
             setDepDropdownOpen(false);
             setDepHighlightIdx(0);
-          } catch (err: any) {
-            const msg = err?.message ?? "Failed to add dependency";
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : "Failed to add dependency";
             showToast(msg, "error");
           }
         };

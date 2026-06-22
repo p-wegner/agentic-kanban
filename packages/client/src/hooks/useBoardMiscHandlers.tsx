@@ -3,13 +3,14 @@
 // Behaviour-preserving verbatim move; BoardPage destructures them with the same
 // names so its render is unchanged.
 import { useCallback, useEffect } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import { apiPost } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import type { useTicketTrail } from "./useTicketTrail.js";
 import type { ViewMode } from "../lib/viewRegistry.js";
 
-type Setter = (value: any) => void;
+type Setter<T> = Dispatch<SetStateAction<T>>;
 
 interface BoardMiscHandlersDeps {
   selectedIssue: IssueWithStatus | null;
@@ -18,8 +19,8 @@ interface BoardMiscHandlersDeps {
   openIssueById: (id: string) => void;
   handleViewModeChange: (mode: ViewMode) => void;
   refetchBoard: (projectId?: string, options?: { force?: boolean }) => Promise<unknown>;
-  setCollapsedGroups: Setter;
-  setCreatedDateFilter: Setter;
+  setCollapsedGroups: Setter<Set<string>>;
+  setCreatedDateFilter: Setter<string | null>;
 }
 
 export function useBoardMiscHandlers(deps: BoardMiscHandlersDeps) {

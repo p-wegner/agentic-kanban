@@ -8,8 +8,11 @@ import {
 } from "../../services/workflow.service.js";
 import { runMigrations, getActiveProjectId } from "../shared.js";
 import { normalizeImportedTemplate, validateImportedTemplate } from "../../lib/workflow-template-import.js";
+import type { TemplateInput } from "@agentic-kanban/shared/lib/workflow-engine";
 
-function toExportJson(graph: any) {
+type WorkflowTemplateGraph = NonNullable<Awaited<ReturnType<typeof cliGetWorkflowTemplateGraph>>>;
+
+function toExportJson(graph: WorkflowTemplateGraph) {
   return {
     version: 1,
     exportedAt: new Date().toISOString(),
@@ -109,7 +112,7 @@ export function registerWorkflowCommand(program: Command) {
       try {
         await runMigrations();
         const projectId = await getActiveProjectId();
-        const spec = readJsonFile(jsonFile) as any;
+        const spec = readJsonFile(jsonFile) as Omit<TemplateInput, "projectId">;
         const res = await cliCreateWorkflowTemplate({
           projectId,
           name: spec.name,

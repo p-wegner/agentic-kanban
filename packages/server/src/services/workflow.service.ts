@@ -15,7 +15,8 @@ import {
   computeWorkspaceSignals,
   evaluateCondition,
 } from "@agentic-kanban/shared/lib/workflow-engine";
-import type { SignalContext } from "@agentic-kanban/shared/lib/workflow-engine";
+import type { SignalContext, TemplateNodeInput, TemplateEdgeInput, GraphNodeInput } from "@agentic-kanban/shared/lib/workflow-engine";
+import type { workflowTemplates } from "@agentic-kanban/shared/schema";
 import {
   loadGraph,
   listTemplateRows,
@@ -66,9 +67,11 @@ interface WorkflowTemplateJson {
   edges: unknown[];
 }
 
+type WorkflowTemplateRow = typeof workflowTemplates.$inferSelect;
+
 // ── Pure helpers (module-level, no DB dependency) ──────────────────────────
 
-function toTemplateJson(template: any, graph: { nodes: unknown[]; edges: unknown[] }): WorkflowTemplateJson {
+function toTemplateJson(template: WorkflowTemplateRow, graph: { nodes: unknown[]; edges: unknown[] }): WorkflowTemplateJson {
   return {
     version: 1,
     exportedAt: new Date().toISOString(),
@@ -176,14 +179,14 @@ export function createWorkflowService(deps: WorkflowServiceDeps) {
     description?: string | null;
     ticketType?: string | null;
     isDefault?: boolean;
-    nodes?: any[];
-    edges?: any[];
+    nodes?: unknown[];
+    edges?: unknown[];
     cloneFrom?: string;
   }) {
     if (!opts.projectId) return { error: "projectId is required" as const };
 
-    let srcNodes = opts.nodes ?? [];
-    let srcEdges = opts.edges ?? [];
+    let srcNodes = (opts.nodes ?? []) as TemplateNodeInput[];
+    let srcEdges = (opts.edges ?? []) as TemplateEdgeInput[];
     let tplName = opts.name;
     let tplDesc: string | null | undefined = opts.description;
     let tplType = opts.ticketType ?? null;
@@ -201,8 +204,8 @@ export function createWorkflowService(deps: WorkflowServiceDeps) {
     if (!tplName) return { error: "name is required" as const };
 
     const errors = validateGraph(
-      srcNodes.map((n: any) => ({ id: String(n.id), name: n.name, nodeType: n.nodeType })),
-      srcEdges.map((e: any) => ({ fromNodeId: String(e.fromNodeId), toNodeId: String(e.toNodeId), isLoop: !!e.isLoop })),
+      srcNodes.map((n) => ({ id: String(n.id), name: n.name, nodeType: n.nodeType })) as GraphNodeInput[],
+      srcEdges.map((e) => ({ fromNodeId: String(e.fromNodeId), toNodeId: String(e.toNodeId), isLoop: !!e.isLoop })),
     );
     if (errors.length > 0 && srcNodes.length > 0) {
       return { error: "Invalid workflow graph" as const, errors };
@@ -220,7 +223,7 @@ export function createWorkflowService(deps: WorkflowServiceDeps) {
     return { data: { ...rows[0], ...(await loadGraph(database, id)) } };
   }
 
-  async function importTemplate(opts: { projectId: string; raw: any }) {
+  async function importTemplate(opts: { projectId: string; raw: unknown }) {
     if (!opts.projectId) return { error: "projectId is required" as const };
     const spec = normalizeImportedTemplate(opts.raw);
     const importErrors = validateImportedTemplate(spec);
@@ -249,8 +252,8 @@ export function createWorkflowService(deps: WorkflowServiceDeps) {
     description?: string | null;
     ticketType?: string | null;
     isDefault?: boolean;
-    nodes?: any[];
-    edges?: any[];
+    nodes?: unknown[];
+    edges?: unknown[];
   }) {
     const rows = await getTemplateRow(id, database);
     if (rows.length === 0) return { error: "Template not found" as const };
@@ -259,12 +262,12 @@ export function createWorkflowService(deps: WorkflowServiceDeps) {
     }
 
     const shouldWriteGraph = opts.nodes !== undefined || opts.edges !== undefined;
-    const nodes = opts.nodes ?? [];
-    const edges = opts.edges ?? [];
+    const nodes = (opts.nodes ?? []) as TemplateNodeInput[];
+    const edges = (opts.edges ?? []) as TemplateEdgeInput[];
     if (shouldWriteGraph) {
       const errors = validateGraph(
-        nodes.map((n: any) => ({ id: String(n.id), name: n.name, nodeType: n.nodeType })),
-        edges.map((e: any) => ({ fromNodeId: String(e.fromNodeId), toNodeId: String(e.toNodeId), isLoop: !!e.isLoop })),
+        nodes.map((n) => ({ id: String(n.id), name: n.name, nodeType: n.nodeType })) as GraphNodeInput[],
+        edges.map((e) => ({ fromNodeId: String(e.fromNodeId), toNodeId: String(e.toNodeId), isLoop: !!e.isLoop })),
       );
       if (errors.length > 0) return { error: "Invalid workflow graph" as const, errors };
     }

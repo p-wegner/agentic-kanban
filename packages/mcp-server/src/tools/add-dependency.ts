@@ -86,8 +86,9 @@ export function registerAddDependency(server: McpServer) {
           type: depType,
           createdAt: new Date().toISOString(),
         });
-      } catch (err: any) {
-        if (err.message?.includes("UNIQUE constraint")) {
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : undefined;
+        if (message?.includes("UNIQUE constraint")) {
           return { content: [{ type: "text" as const, text: "Error: This dependency already exists" }] };
         }
         throw err;

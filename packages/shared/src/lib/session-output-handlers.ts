@@ -1,3 +1,11 @@
+/** A Claude assistant message content block (text or tool_use). */
+export interface ContentBlock {
+  type?: string;
+  text?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+}
+
 export interface ParsedLine {
   type?: string;
   subtype?: string;
@@ -11,7 +19,7 @@ export interface ParsedLine {
     result?: { content?: string; detailedContent?: string } | string;
     success?: boolean;
   };
-  message?: { content?: any[] };
+  message?: { content?: ContentBlock[] };
   result?: string;
   is_error?: boolean;
   summary?: string;

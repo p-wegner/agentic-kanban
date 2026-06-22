@@ -62,7 +62,7 @@ export async function applyMigrations(client: Client): Promise<void> {
   let appliedTags = new Set<string>();
   try {
     const result = await client.execute("SELECT hash FROM __drizzle_migrations");
-    appliedTags = new Set(result.rows.map((r: any) => String(r.hash)));
+    appliedTags = new Set(result.rows.map((r) => String(r.hash)));
   } catch { /* table doesn't exist yet */ }
 
   const anyApplied = false;
@@ -83,13 +83,14 @@ export async function applyMigrations(client: Client): Promise<void> {
     for (const stmt of statements) {
       try {
         await client.execute(stmt);
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const e = err as { code?: unknown; message?: { includes?: (s: string) => boolean } } | null | undefined;
         // Ignore spurious SQLITE_OK "not an error" from libsql
-        if (err?.code === "SQLITE_OK" || (err?.message?.includes?.("not an error"))) {
+        if (e?.code === "SQLITE_OK" || (e?.message?.includes?.("not an error"))) {
           continue;
         }
         // Ignore "duplicate column name" / "table already exists" — migration already applied
-        if (err?.message?.includes?.("duplicate column name") || err?.message?.includes?.("already exists")) {
+        if (e?.message?.includes?.("duplicate column name") || e?.message?.includes?.("already exists")) {
           continue;
         }
         throw err;

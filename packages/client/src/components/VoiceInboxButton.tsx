@@ -117,8 +117,9 @@ export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButton
         showToast(`Created #${result.issueNumber}: ${result.title}`, "success");
         onIssueCreated?.();
       }
-    } catch (err: any) {
-      showToast(`Voice capture failed: ${err.message}`, "error");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      showToast(`Voice capture failed: ${message}`, "error");
     } finally {
       setState("idle");
       setInterimText("");

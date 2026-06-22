@@ -15,10 +15,11 @@ for (const dbPath of dbPaths) {
   try {
     unlinkSync(dbPath);
     console.log(`Deleted ${dbPath}`);
-  } catch (e: any) {
-    if (e.code === "ENOENT") {
+  } catch (e: unknown) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
       // File doesn't exist — skip
-    } else if (e.code === "EBUSY") {
+    } else if (code === "EBUSY") {
       console.error(`Error: ${dbPath} is locked. Stop the dev server first.`);
       process.exit(1);
     } else {

@@ -8,7 +8,9 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     let body: unknown;
     try {
       body = await res.json();
-      if ((body as any).error) message = (body as any).error;
+      if (body && typeof body === "object" && "error" in body && typeof body.error === "string") {
+        message = body.error;
+      }
     } catch {
       // response body wasn't JSON, use default message
     }
