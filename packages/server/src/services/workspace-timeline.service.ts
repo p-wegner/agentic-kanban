@@ -1,7 +1,7 @@
 import type { Database } from "../db/index.js";
 import { NotFoundError } from "../errors/index.js";
 import type { WorkspaceTimelineEvent, WorkspaceTimelineResponse, WorkspaceTimelineEventType } from "@agentic-kanban/shared";
-import { readSessionStdoutFile } from "../repositories/session.repository.js";
+import { readSessionStdoutFile } from "../lib/session-output-reader.js";
 import {
   getWorkspaceById,
   getWorkspaceSessions,

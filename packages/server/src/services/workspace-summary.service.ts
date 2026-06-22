@@ -5,7 +5,7 @@ import { isAnalyticsNoise } from "./session-filter.js";
 import { computeWorkspaceCodeMetrics, parseStoredWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import type { WorkspaceCodeMetrics, WorkspaceSummary } from "@agentic-kanban/shared";
 import { ACTIVE_WORKSPACE_STATUSES, workspaceStatusPriority } from "@agentic-kanban/shared";
-import { readSessionStdoutFile } from "../repositories/session.repository.js";
+import { readSessionStdoutFile } from "../lib/session-output-reader.js";
 import { extractAssistantMessage, extractToolName, safeParseStringArray } from "../lib/session-message-extraction.js";
 import { selectLatestSessionsByWorkspace, parseContextTokensFromStats } from "../lib/workspace-summary-session.js";
 import { selectCachedDiffStats, isPlanOnlySession, isDiffCacheStale } from "../lib/workspace-diff-cache.js";

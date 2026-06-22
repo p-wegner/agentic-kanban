@@ -15,7 +15,7 @@ import { isTerminalStatusView } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
 import { getPreference, setPreference } from "../repositories/preferences.repository.js";
 import { ensureButlerSession, sendButlerTurn, subscribeButler, getButlerSession } from "./butler-sdk.service.js";
-import { readSessionStdoutFileTail } from "../repositories/session.repository.js";
+import { readSessionStdoutFileTail } from "../lib/session-output-reader.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 import {
   getWorkspaceIssueId,

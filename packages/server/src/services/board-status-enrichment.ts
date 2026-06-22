@@ -4,7 +4,7 @@ import { detectConflicts } from "./git.service.js";
 import { getWorkspaceDiffStats } from "./workspace-diff-stats.js";
 import { extractMeaningfulOutput } from "@agentic-kanban/shared";
 import type { BoardStatusIssue } from "@agentic-kanban/shared";
-import { readSessionStdoutFile } from "../repositories/session.repository.js";
+import { readSessionStdoutFile } from "../lib/session-output-reader.js";
 import { getRecentSessionMessages } from "../repositories/board-status-enrichment.repository.js";
 import { parseAgentMessageFromJsonLine, parseLastAgentMessage } from "./session-message-parser.js";
 

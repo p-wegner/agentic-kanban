@@ -2,7 +2,7 @@ import { sessionMessages } from "@agentic-kanban/shared/schema";
 import { desc, eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { MonitorActionName } from "../services/monitor-nudge.js";
-import { readSessionStdoutFile } from "../repositories/session.repository.js";
+import { readSessionStdoutFile } from "../lib/session-output-reader.js";
 
 export type MonitorAction = {
   at: string;

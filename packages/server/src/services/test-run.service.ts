@@ -1,5 +1,5 @@
 import type { Database } from "../db/index.js";
-import { readSessionStdoutFile } from "../repositories/session.repository.js";
+import { readSessionStdoutFile } from "../lib/session-output-reader.js";
 import {
   insertTestRunBatch,
   getFlakyAggregates,
