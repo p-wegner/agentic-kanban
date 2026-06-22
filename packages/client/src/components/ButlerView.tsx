@@ -158,7 +158,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
     const es = new EventSource(butlerUrl(butlerId, "/stream"));
     es.onmessage = (ev) => {
       try {
-        handleButlerEvent(butlerId, JSON.parse(ev.data) as ButlerEvent);
+        handleButlerEvent(butlerId, JSON.parse(ev.data as string) as ButlerEvent);
       } catch { /* ignore non-JSON heartbeats */ }
     };
     es.onerror = () => { /* EventSource auto-reconnects */ };

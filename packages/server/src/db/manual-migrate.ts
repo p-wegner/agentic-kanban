@@ -46,7 +46,7 @@ export async function applyMigrations(client: Client): Promise<void> {
       `Run 'git merge --abort' in the main checkout to recover, then restart the server.`,
     );
   }
-  const journal = JSON.parse(journalRaw);
+  const journal = JSON.parse(journalRaw) as { entries: Array<{ tag: string; when: number; breakpoints: boolean }> };
   const entries: Array<{ tag: string; when: number; breakpoints: boolean }> = journal.entries;
 
   // Create drizzle's migration tracking table

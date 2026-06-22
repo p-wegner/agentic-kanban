@@ -21,7 +21,7 @@ export function registerCheckIssueOverlap(server: McpServer, deps: ToolDeps = pr
       for (const row of rows) {
         if (!row.touchedFilesJson) continue;
         let files: { path: string }[];
-        try { files = JSON.parse(row.touchedFilesJson); } catch { continue; }
+        try { files = JSON.parse(row.touchedFilesJson) as { path: string }[]; } catch { continue; }
         for (const f of files) {
           if (!f.path) continue;
           if (!overlap[f.path]) overlap[f.path] = [];

@@ -111,6 +111,11 @@ export function getMcpServersConfig(): Record<string, { command: string; args: s
 
 // --- Environment building ---
 
+/** The subset of a Claude `settings_*.json` profile we read at the parse boundary. */
+interface ClaudeProfileSettings {
+  env?: Record<string, string>;
+}
+
 const PROFILE_OWNED_ENV_VARS = [
   "ANTHROPIC_API_KEY",
   "ANTHROPIC_AUTH_TOKEN",
@@ -129,8 +134,8 @@ export function profileDefinesCustomEndpoint(profileName: string | undefined, fs
   const settingsPath = join(homedir(), ".claude", `settings_${profileName}.json`);
   if (!fs.existsSync(settingsPath)) return false;
   try {
-    const profileSettings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
-    const env = profileSettings.env as Record<string, string> | undefined;
+    const profileSettings = JSON.parse(fs.readFileSync(settingsPath, "utf-8")) as ClaudeProfileSettings;
+    const env = profileSettings.env;
     return !!(env && typeof env === "object" && env.ANTHROPIC_BASE_URL);
   } catch {
     return false;
@@ -150,9 +155,9 @@ export function buildSpawnEnv(claudeProfile?: string, fs: FileSystem = nodeFileS
   if (!fs.existsSync(settingsPath)) return spawnEnv;
 
   try {
-    const profileSettings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+    const profileSettings = JSON.parse(fs.readFileSync(settingsPath, "utf-8")) as ClaudeProfileSettings;
     if (profileSettings.env && typeof profileSettings.env === "object") {
-      const profileEnv = profileSettings.env as Record<string, string>;
+      const profileEnv = profileSettings.env;
       if (profileEnv.ANTHROPIC_AUTH_TOKEN && !profileEnv.ANTHROPIC_API_KEY) {
         delete spawnEnv.ANTHROPIC_API_KEY;
       }

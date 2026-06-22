@@ -9,6 +9,10 @@ import type { SubagentGroup } from "../lib/terminal-transcript.js";
 
 export type { SubagentGroup };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export interface RenderContext {
   multiTurn?: boolean;
   expandedSections: Set<number>;
@@ -330,19 +334,20 @@ function renderAgentToolResult(event: EventOf<"tool_result">, key: number, ctx: 
   // Summarize the output — try to extract meaningful text
   let summary = "";
   try {
-    const parsed = JSON.parse(event.output);
+    const parsed: unknown = JSON.parse(event.output);
     // Claude subagent results often have a "result" field
     if (typeof parsed === "string") {
       summary = parsed;
-    } else if (parsed?.result) {
+    } else if (isRecord(parsed) && parsed.result) {
       summary = String(parsed.result);
-    } else if (parsed?.message) {
+    } else if (isRecord(parsed) && parsed.message) {
       summary = String(parsed.message);
     } else if (Array.isArray(parsed)) {
       // Might be content blocks
       const textParts = parsed
-        .filter((b: Record<string, unknown>) => b.type === "text")
-        .map((b: Record<string, unknown>) => b.text as string);
+        .filter(isRecord)
+        .filter((b) => b.type === "text")
+        .map((b) => b.text as string);
       if (textParts.length > 0) summary = textParts.join("\n");
     }
   } catch {

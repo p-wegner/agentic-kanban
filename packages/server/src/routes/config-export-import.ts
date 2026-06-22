@@ -41,8 +41,9 @@ function validateBoardConfigShape(body: unknown): { config: BoardConfigExport; e
   if (!Array.isArray(obj.statuses)) {
     errors.push("statuses must be an array");
   } else {
-    for (let i = 0; i < obj.statuses.length; i++) {
-      const s = obj.statuses[i];
+    const statuses: unknown[] = obj.statuses;
+    for (let i = 0; i < statuses.length; i++) {
+      const s: unknown = statuses[i];
       if (typeof s !== "object" || s === null) {
         errors.push(`statuses[${i}] must be an object`);
         continue;

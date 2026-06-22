@@ -16,7 +16,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     }
     throw Object.assign(new Error(message), { body });
   }
-  return res.json();
+  return res.json() as Promise<T>;
 }
 
 // ───────────────────────── Typed verb helpers ─────────────────────────

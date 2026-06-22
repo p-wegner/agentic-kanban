@@ -123,7 +123,7 @@ export function parseVitestJson(
 ): Omit<TestRunRecord, "sessionId" | "commitSha">[] {
   let parsed: VitestJsonOutput;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(raw) as VitestJsonOutput;
   } catch {
     return [];
   }
@@ -168,7 +168,7 @@ export function parsePlaywrightJson(
 ): Omit<TestRunRecord, "sessionId" | "commitSha">[] {
   let parsed: PlaywrightJsonOutput;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(raw) as PlaywrightJsonOutput;
   } catch {
     return [];
   }

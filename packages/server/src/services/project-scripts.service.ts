@@ -198,8 +198,8 @@ export function createProjectScriptsService(deps: { database: Database }) {
       { cwd, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] },
     );
 
-    child.stdout?.on("data", (chunk) => onEvent({ type: "stdout", data: chunk.toString("utf8") }));
-    child.stderr?.on("data", (chunk) => onEvent({ type: "stderr", data: chunk.toString("utf8") }));
+    child.stdout?.on("data", (chunk: Buffer) => onEvent({ type: "stdout", data: chunk.toString("utf8") }));
+    child.stderr?.on("data", (chunk: Buffer) => onEvent({ type: "stderr", data: chunk.toString("utf8") }));
 
     return new Promise<void>((resolvePromise) => {
       let finished = false;

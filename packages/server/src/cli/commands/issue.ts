@@ -474,7 +474,7 @@ Examples:
 
         let stats: Record<string, unknown> | null = null;
         if (completedSession.stats) {
-          try { stats = JSON.parse(completedSession.stats); } catch { /* ignore */ }
+          try { stats = JSON.parse(completedSession.stats) as Record<string, unknown>; } catch { /* ignore */ }
         }
 
         const duration = computeSessionDuration(completedSession.startedAt, completedSession.endedAt);
@@ -884,7 +884,7 @@ At least 2 issue numbers are required.
         for (const row of issueRows) {
           if (!row.touchedFilesJson) continue;
           let files: { path: string }[];
-          try { files = JSON.parse(row.touchedFilesJson); } catch { continue; }
+          try { files = JSON.parse(row.touchedFilesJson) as { path: string }[]; } catch { continue; }
           for (const f of files) {
             if (!f.path) continue;
             if (!overlap[f.path]) overlap[f.path] = [];

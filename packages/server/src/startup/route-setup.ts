@@ -27,7 +27,7 @@ export function setupRoutes(app: Hono, { sessionManager, boardEvents, reviewSess
   app.post("/api/workspaces/:id/review", async (c) => {
     const workspaceId = c.req.param("id");
     try {
-      const body = await c.req.json().catch(() => ({}));
+      const body = await c.req.json<{ thoroughReview?: boolean }>().catch(() => ({}) as { thoroughReview?: boolean });
       const thoroughReview = body.thoroughReview === true;
       const { sessionId } = await startManualReview(db, () => sessionManager, boardEvents, reviewSessionIds, workspaceId, thoroughReview);
       console.log(`[workflow] manual review session ${sessionId} for workspace ${workspaceId}`);

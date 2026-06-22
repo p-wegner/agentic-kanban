@@ -9,7 +9,7 @@ import type { MouseEvent as ReactMouseEvent } from "react";
  */
 export function useColumnResize() {
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
-    try { return JSON.parse(localStorage.getItem("kanban-column-widths") ?? "{}"); } catch { return {}; }
+    try { return JSON.parse(localStorage.getItem("kanban-column-widths") ?? "{}") as Record<string, number>; } catch { return {}; }
   });
   const resizingRef = useRef<{ colId: string; startX: number; startWidth: number } | null>(null);
 

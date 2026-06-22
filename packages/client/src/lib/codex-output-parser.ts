@@ -65,7 +65,7 @@ export class CodexOutputParser {
 
   private parseLine(line: string): DisplayEvent[] {
     try {
-      const obj = JSON.parse(line);
+      const obj = JSON.parse(line) as Record<string, unknown>;
       this._isCodexJson = true;
       return this.parseEvent(obj);
     } catch {

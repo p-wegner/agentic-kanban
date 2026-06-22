@@ -212,7 +212,7 @@ Examples:
           console.log(text);
         } else {
           try {
-            const parsed = JSON.parse(text);
+            const parsed: unknown = JSON.parse(text);
             console.log(JSON.stringify(parsed, null, 2));
           } catch {
             console.log(text);
@@ -257,7 +257,7 @@ Valid actions: add, remove
 
         let edges: Array<{ issueId: string; dependsOnId: string; type?: string; action: "add" | "remove" }>;
         try {
-          edges = JSON.parse(fileContent);
+          edges = JSON.parse(fileContent) as Array<{ issueId: string; dependsOnId: string; type?: string; action: "add" | "remove" }>;
         } catch {
           console.error("Invalid JSON in file.");
           process.exit(1);

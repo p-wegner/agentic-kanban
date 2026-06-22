@@ -99,12 +99,15 @@ export default tseslint.config(
       "no-control-regex": "warn", // existing per-site disables still suppress
       "no-misleading-character-class": "warn",
 
-      // ── Type-aware backlog (any-driven; warn until the `any` count drops) ─────
-      "@typescript-eslint/no-unsafe-assignment": "warn",
-      "@typescript-eslint/no-unsafe-member-access": "warn",
-      "@typescript-eslint/no-unsafe-call": "warn",
-      "@typescript-eslint/no-unsafe-argument": "warn",
-      "@typescript-eslint/no-unsafe-return": "warn",
+      // ── The no-unsafe-* family is DRAINED to 0 (boundary anys typed) — promoted
+      //    to error so it gates `pnpm lint` and dynamic `any` values can't leak
+      //    back in untyped. (Re-warn a rule only if a future change needs a
+      //    temporary backlog.)
+      "@typescript-eslint/no-unsafe-assignment": "error",
+      "@typescript-eslint/no-unsafe-member-access": "error",
+      "@typescript-eslint/no-unsafe-call": "error",
+      "@typescript-eslint/no-unsafe-argument": "error",
+      "@typescript-eslint/no-unsafe-return": "error",
       "@typescript-eslint/no-redundant-type-constituents": "warn",
       "@typescript-eslint/restrict-template-expressions": "warn",
       "@typescript-eslint/no-base-to-string": "warn",

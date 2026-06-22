@@ -27,7 +27,7 @@ const program = new Command();
 program
   .name("agentic-kanban")
   .description("CLI for managing agentic-kanban projects")
-  .version(JSON.parse(readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../../package.json"), "utf8")).version)
+  .version((JSON.parse(readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../../package.json"), "utf8")) as { version: string }).version)
   .usage("<command> [options]")
   .addHelpText("after", `
 Examples:

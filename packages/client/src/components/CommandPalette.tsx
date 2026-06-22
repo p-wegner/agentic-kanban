@@ -26,7 +26,7 @@ const MAX_RECENT = 5;
 
 function getRecentIds(): string[] {
   try {
-    return JSON.parse(localStorage.getItem(RECENT_KEY) || "[]");
+    return JSON.parse(localStorage.getItem(RECENT_KEY) || "[]") as string[];
   } catch {
     return [];
   }

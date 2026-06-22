@@ -42,7 +42,7 @@ export async function getRecentAgentExcerpts(sessionId: string, count = 3): Prom
       const trimmed = line.trim();
       if (!trimmed) continue;
       let obj: Record<string, unknown>;
-      try { obj = JSON.parse(trimmed); } catch { continue; }
+      try { obj = JSON.parse(trimmed) as Record<string, unknown>; } catch { continue; }
       if (obj.type !== "assistant") continue;
       const content = ((obj.message as Record<string, unknown>)?.content as Array<Record<string, unknown>>) || [];
       for (const block of content) {
@@ -66,7 +66,7 @@ export async function getRecentAgentExcerpts(sessionId: string, count = 3): Prom
       const trimmed = line.trim();
       if (!trimmed) continue;
       let obj: Record<string, unknown>;
-      try { obj = JSON.parse(trimmed); } catch { continue; }
+      try { obj = JSON.parse(trimmed) as Record<string, unknown>; } catch { continue; }
       if (obj.type !== "assistant") continue;
       const content = ((obj.message as Record<string, unknown>)?.content as Array<Record<string, unknown>>) || [];
       for (const block of content) {

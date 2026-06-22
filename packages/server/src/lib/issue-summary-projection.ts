@@ -19,7 +19,7 @@ export interface IssueSummaryStats {
 export function parseStatsBlob(stats: string | null): Record<string, unknown> | null {
   if (!stats) return null;
   try {
-    const parsed = JSON.parse(stats);
+    const parsed: unknown = JSON.parse(stats);
     return parsed !== null && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
   } catch {
     return null;

@@ -4,6 +4,32 @@ import { join } from "node:path";
 import type { AgentLaunchConfig, AgentProvider, FileSystem, ParsedStreamEvent, ProviderLaunchOptions } from "./types.js";
 import { getMcpConfigPath, buildSpawnEnv, splitArgs, nodeFileSystem, profileDefinesCustomEndpoint } from "./helpers.js";
 
+// --- Stream-event content shapes ---
+// Claude assistant/user messages carry a `content` array of typed blocks. These
+// interfaces type the boundary so member access on parsed JSON is checked. All
+// fields are optional because the shapes are untrusted JSONL from agent stdout.
+
+interface ClaudeContentBlock {
+  type?: string;
+  text?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+  id?: string;
+  tool_use_id?: string;
+  content?: unknown;
+}
+
+interface ClaudeImageSource {
+  type?: string;
+  data?: string;
+  media_type?: string;
+}
+
+interface ClaudeToolResultContentBlock {
+  type?: string;
+  source?: ClaudeImageSource;
+}
+
 // --- parseStreamEvent extractors ---
 // Each mutates the shared `result` for one Claude stream-event shape. They run in a
 // fixed order (see parseStreamEvent) because two `type === "result"` blocks interact
@@ -56,17 +82,17 @@ function applyClaudeAssistantMessage(result: ParsedStreamEvent, obj: Record<stri
   const content = message.content;
   if (!Array.isArray(content)) return;
   const textParts: string[] = [];
-  for (const block of content) {
+  for (const block of content as ClaudeContentBlock[]) {
     if (block.type === "text" && typeof block.text === "string" && block.text) {
       textParts.push(block.text);
     } else if (block.type === "tool_use" && !result.toolActivity) {
       result.toolActivity = {
-        name: block.name,
+        name: block.name ?? "",
         input: block.input ?? {},
         toolUseId: block.id,
       };
       if (block.name === "TodoWrite" && Array.isArray(block.input?.todos)) {
-        result.todos = (block.input.todos as Array<{ subject: string; status: string }>).map(
+        result.todos = (block.input?.todos as Array<{ subject: string; status: string }>).map(
           (t) => ({ subject: t.subject, status: t.status }),
         );
       }
@@ -108,11 +134,11 @@ function applyClaudeToolResult(result: ParsedStreamEvent, obj: Record<string, un
   if (obj.type !== "user" || !(obj.message as Record<string, unknown> | undefined)?.content) return;
   const content = (obj.message as Record<string, unknown>).content;
   if (!Array.isArray(content)) return;
-  for (const block of content) {
+  for (const block of content as ClaudeContentBlock[]) {
     if (block.type === "tool_result" && block.tool_use_id) {
       const images: Array<{ mediaType: string; data: string }> = [];
       if (Array.isArray(block.content)) {
-        for (const inner of block.content) {
+        for (const inner of block.content as ClaudeToolResultContentBlock[]) {
           if (inner.type === "image" && inner.source?.type === "base64" && inner.source.data) {
             images.push({ mediaType: inner.source.media_type ?? "image/png", data: inner.source.data });
           }
@@ -251,7 +277,7 @@ export class ClaudeProvider implements AgentProvider {
   parseStreamEvent(line: string): ParsedStreamEvent | undefined {
     let obj: Record<string, unknown>;
     try {
-      obj = JSON.parse(line);
+      obj = JSON.parse(line) as Record<string, unknown>;
     } catch {
       return undefined;
     }

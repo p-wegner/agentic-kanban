@@ -252,6 +252,16 @@ export async function setCachedRecommendations(
   invalidateAgentQuestionsCache();
 }
 
+/** Shape of one parsed `result` stdout event carrying AskUserQuestion permission denials. */
+interface ResultEventWithDenials {
+  type?: string;
+  permission_denials?: {
+    tool_name?: string;
+    tool_use_id?: string;
+    tool_input?: { questions?: AgentQuestion[] };
+  }[];
+}
+
 /**
  * Parse the last `result` stdout event for AskUserQuestion permission denials and
  * return their structured questions. Returns [] if none.
@@ -265,9 +275,9 @@ export function extractQuestionsFromSession(
     // Each "stdout" row is one JSON line emitted by the agent.
     const line = msg.data.trim();
     if (!line.includes("permission_denials")) continue;
-    let evt: { type?: string; permission_denials?: { tool_name?: string; tool_use_id?: string; tool_input?: { questions?: AgentQuestion[] } }[] };
+    let evt: ResultEventWithDenials;
     try {
-      evt = JSON.parse(line);
+      evt = JSON.parse(line) as ResultEventWithDenials;
     } catch {
       continue;
     }

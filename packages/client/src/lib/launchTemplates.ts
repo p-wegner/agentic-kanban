@@ -40,7 +40,7 @@ export function launchTemplatesKey(projectId: string) {
 export function sanitizeLaunchTemplates(raw: string | undefined): LaunchTemplate[] {
   if (!raw) return [];
   try {
-    const parsed = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed.flatMap((item): LaunchTemplate[] => {
       if (!isRecord(item)) return [];

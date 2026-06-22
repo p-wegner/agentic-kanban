@@ -64,7 +64,7 @@ export async function generateHandoff(
   const statsJson = sessionRows[0]?.stats;
   let parsedStats: Record<string, unknown> = {};
   if (statsJson) {
-    try { parsedStats = JSON.parse(statsJson); } catch { /* ignore */ }
+    try { parsedStats = JSON.parse(statsJson) as Record<string, unknown>; } catch { /* ignore */ }
   }
 
   const data: HandoffData = {

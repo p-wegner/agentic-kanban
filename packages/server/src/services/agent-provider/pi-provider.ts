@@ -297,7 +297,7 @@ export class PiProvider implements AgentProvider {
   parseStreamEvent(line: string): ParsedStreamEvent | undefined {
     let obj: Record<string, unknown>;
     try {
-      obj = JSON.parse(line);
+      obj = JSON.parse(line) as Record<string, unknown>;
     } catch {
       return undefined;
     }

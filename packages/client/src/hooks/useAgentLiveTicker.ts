@@ -72,8 +72,8 @@ export function useAgentLiveTicker(
   const fetchSessionId = useCallback(async (workspaceId: string): Promise<string | null> => {
     if (sessionIdCacheRef.current[workspaceId]) return sessionIdCacheRef.current[workspaceId];
     try {
-      const sessions: Array<{ id: string; status: string; startedAt: string }> =
-        await fetch(`/api/workspaces/${workspaceId}/sessions`).then((r) => r.json());
+      const sessions = await fetch(`/api/workspaces/${workspaceId}/sessions`)
+        .then((r) => r.json() as Promise<Array<{ id: string; status: string; startedAt: string }>>);
       const running = sessions.find((s) => s.status === "running");
       const latest = running ?? sessions.sort((a, b) =>
         new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
@@ -97,7 +97,7 @@ export function useAgentLiveTicker(
     if (!res.ok) return null;
     const newEtag = res.headers.get("ETag");
     if (newEtag) etagsRef.current[sessionId] = newEtag;
-    const msgs: AgentOutputMessage[] = await res.json();
+    const msgs = await res.json() as AgentOutputMessage[];
     return extractLines(msgs.slice(-MAX_TAIL));
   }, []);
 

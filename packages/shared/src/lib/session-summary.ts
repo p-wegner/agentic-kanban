@@ -741,7 +741,7 @@ export function parseSessionSummary(
 
       let obj: Record<string, unknown>;
       try {
-        obj = JSON.parse(trimmed);
+        obj = JSON.parse(trimmed) as Record<string, unknown>;
       } catch {
         continue;
       }

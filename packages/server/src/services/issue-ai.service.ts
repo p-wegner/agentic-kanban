@@ -257,7 +257,7 @@ export async function checkIssueOverlap(
   for (const row of rows) {
     if (!row.touchedFilesJson) continue;
     let files: TouchedFile[];
-    try { files = JSON.parse(row.touchedFilesJson); } catch { continue; }
+    try { files = JSON.parse(row.touchedFilesJson) as TouchedFile[]; } catch { continue; }
     for (const f of files) {
       if (!overlap[f.path]) overlap[f.path] = [];
       if (!overlap[f.path].includes(row.id)) overlap[f.path].push(row.id);

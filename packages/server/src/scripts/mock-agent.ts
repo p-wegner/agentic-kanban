@@ -236,7 +236,7 @@ async function runMultiTurn(sessionId: string, delayMs: number) {
 
   for await (const line of rl) {
     try {
-      const parsed = JSON.parse(line);
+      const parsed = JSON.parse(line) as { type?: string; content?: string };
       if (parsed.type === "user" && parsed.content) {
         const responseText = `Received: ${parsed.content}`;
         emit(buildAssistantTextMsg(responseText));

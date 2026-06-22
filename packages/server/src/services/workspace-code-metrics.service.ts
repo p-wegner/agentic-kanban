@@ -97,7 +97,7 @@ function parseCoverageReport(raw: unknown): { total?: number; covered?: number; 
 
 function parseLintReport(raw: unknown): { errors: number; warnings: number } | null {
   if (Array.isArray(raw)) {
-    return raw.reduce(
+    return (raw as unknown[]).reduce<{ errors: number; warnings: number }>(
       (acc, item) => {
         const parsed = parseLintReport(item);
         if (!parsed) return acc;

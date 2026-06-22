@@ -59,7 +59,7 @@ export function useWebSocket(sessionId: string | null) {
 
     ws.onmessage = (event) => {
       try {
-        const msg: AgentOutputMessage = JSON.parse(event.data);
+        const msg = JSON.parse(event.data as string) as AgentOutputMessage;
         setMessages((prev) => {
           lastMessageCountRef.current = prev.length + 1;
           return [...prev, msg];
@@ -130,7 +130,7 @@ export function useWebSocket(sessionId: string | null) {
       if (msg.type === "exit") return false;
       if (msg.type === "stdout" && msg.data) {
         try {
-          const obj = JSON.parse(msg.data);
+          const obj = JSON.parse(msg.data) as { type?: string };
           if (obj.type === "result") return true;
         } catch { /* not JSON */ }
       }

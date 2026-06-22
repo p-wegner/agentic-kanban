@@ -158,7 +158,7 @@ export class ClaudeOutputParser {
 
   private parseLine(line: string): DisplayEvent[] {
     try {
-      const obj = JSON.parse(line);
+      const obj = JSON.parse(line) as Record<string, unknown>;
       this._isClaudeJson = true;
       return this.parseJsonObject(obj);
     } catch {

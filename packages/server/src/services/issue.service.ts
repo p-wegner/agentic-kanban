@@ -66,7 +66,7 @@ import { materializePhaseArtifactToWorktree } from "./phase-artifacts.service.js
 function parseJsonArray<T>(raw: string | null | undefined, fallback: T[]): T[] {
   if (!raw) return fallback;
   try {
-    const parsed = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed as T[] : fallback;
   } catch {
     return fallback;

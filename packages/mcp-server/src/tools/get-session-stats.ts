@@ -50,7 +50,7 @@ export function registerGetSessionStats(server: McpServer) {
 
       let stats: Record<string, unknown>;
       try {
-        stats = JSON.parse(session.stats);
+        stats = JSON.parse(session.stats) as Record<string, unknown>;
       } catch {
         return { content: [{ type: "text" as const, text: `Invalid stats data for session ${targetSessionId}` }] };
       }

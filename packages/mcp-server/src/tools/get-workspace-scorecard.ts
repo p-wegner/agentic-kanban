@@ -36,7 +36,7 @@ export function registerGetWorkspaceScorecard(server: McpServer) {
 
       let dimensions: unknown[] = [];
       try {
-        dimensions = JSON.parse(ws.scorecardJson);
+        dimensions = JSON.parse(ws.scorecardJson) as unknown[];
       } catch {
         // Ignore malformed JSON and return the total score only.
       }

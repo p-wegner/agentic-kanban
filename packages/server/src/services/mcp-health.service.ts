@@ -171,7 +171,7 @@ function runJsonRpcProbe(
           }));
     });
 
-    child.stderr.on("data", (chunk) => {
+    child.stderr.on("data", (chunk: Buffer) => {
       stderr += chunk.toString("utf8");
       if (stderr.length > 4000) stderr = stderr.slice(-4000);
     });

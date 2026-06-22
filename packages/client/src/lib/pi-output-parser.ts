@@ -201,7 +201,7 @@ export class PiOutputParser {
   }
 
   private parseAgentEnd(obj: Record<string, unknown>): DisplayEvent[] {
-    const messages = Array.isArray(obj.messages) ? obj.messages : [];
+    const messages: unknown[] = Array.isArray(obj.messages) ? obj.messages : [];
     const lastAssistant = [...messages].reverse()
       .map((message) => asRecord(message) as PiMessage | undefined)
       .find((message) => message?.role === "assistant");
