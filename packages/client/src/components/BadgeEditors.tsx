@@ -20,7 +20,7 @@ export function PriorityDropdown({ priority, onChange }: { priority: string; onC
     return () => document.removeEventListener("mousedown", handlePointerDown);
   }, [open]);
 
-  async function select(p: string) {
+  function select(p: string) {
     setOpen(false);
     if (p === current || saving) return;
     setSaving(true);

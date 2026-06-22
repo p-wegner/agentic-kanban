@@ -35,7 +35,7 @@ interface Props {
 }
 
 function markdownEscape(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/([`*_\[\]])/g, "\\$1");
+  return value.replace(/\\/g, "\\\\").replace(/([`*_[\]])/g, "\\$1");
 }
 
 function safeFileSegment(value: string): string {

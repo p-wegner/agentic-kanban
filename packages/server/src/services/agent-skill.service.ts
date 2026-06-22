@@ -22,7 +22,7 @@ export class AgentSkillError extends Error {
   }
 }
 
-const INVALID_NAME_PATTERN = /[\/\\]|\.\./;
+const INVALID_NAME_PATTERN = /[/\\]|\.\./;
 
 export function createAgentSkillService({ database }: { database: Database }) {
   async function listSkills(projectId?: string, globalOnly?: boolean) {

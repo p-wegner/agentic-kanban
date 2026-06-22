@@ -1,4 +1,4 @@
-export type ProviderFilter = "all" | string;
+export type ProviderFilter = string;
 
 export type InsightsRange = "7d" | "30d" | "90d" | "all";
 export type SortDirection = "asc" | "desc";

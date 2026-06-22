@@ -14,7 +14,7 @@ interface TicketMentionInputProps {
   inputRef?: React.Ref<HTMLTextAreaElement>;
 }
 
-const MENTION_REGEX = /(?:^|[\s(\[{,;])#(\d*)$/;
+const MENTION_REGEX = /(?:^|[\s([{,;])#(\d*)$/;
 
 export default function TicketMentionInput({
   value,

@@ -123,7 +123,7 @@ function parseLintReport(raw: unknown): { errors: number; warnings: number } | n
   return { errors, warnings };
 }
 
-async function readJson(filePath: string): Promise<unknown | null> {
+async function readJson(filePath: string): Promise<unknown> {
   try {
     return JSON.parse(await readFile(filePath, "utf8"));
   } catch {

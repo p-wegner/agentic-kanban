@@ -29,7 +29,7 @@ export function registerSessionHistory(server: McpServer) {
       tailLines: z.number().int().positive().optional().default(60).describe("Number of tail lines to parse per session file (default: 60)"),
       all: z.boolean().optional().default(false).describe("Show all session files for the issue, not just the most recent one"),
     },
-    async ({ issueNumber, tailLines = 60, all = false }) => {
+    ({ issueNumber, tailLines = 60, all = false }) => {
       const claudeProjects = join(homedir(), ".claude", "projects");
 
       let allDirs: { name: string; path: string; issueNum: number | null }[] = [];

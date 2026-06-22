@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { apiPatch } from "../lib/api.js";
 
-export type PreflightVerdict = "ready" | "needs-clarification" | string;
+export type PreflightVerdict = string;
 
 export interface PreflightResult {
   verdict: PreflightVerdict;

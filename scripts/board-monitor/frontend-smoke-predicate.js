@@ -25,7 +25,7 @@ const SMOKE_SUCCESS_PATTERN = /Backlog|Todo|In Progress|No issues|No projects re
  * Matches the Vite dev-server "loading" indicator, the React root mounting
  * placeholder, and skeleton / spinner text that appear before hydration.
  */
-const EMPTY_RENDER_PATTERN = /^\s*$|^loading[…\.]*$/i;
+const EMPTY_RENDER_PATTERN = /^\s*$|^loading[….]*$/i;
 
 /**
  * Normalises arbitrary innerText output (which Playwright may return as a

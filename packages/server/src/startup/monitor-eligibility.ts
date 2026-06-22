@@ -7,7 +7,7 @@ type MonitorIssueLike = {
   description?: string | null;
 };
 
-const FEATURE_LIKE_PREFIX = /^(feature|enhancement)\s*[:\-]/i;
+const FEATURE_LIKE_PREFIX = /^(feature|enhancement)\s*[:-]/i;
 const FEATURE_LIKE_TYPES = new Set(["feature", "enhancement"]);
 
 function hasFeatureLikePrefix(value: string | null | undefined): boolean {

@@ -89,7 +89,7 @@ Examples:
     .action(async (name: string, options: { description?: string; prompt?: string; model?: string; project?: string }) => {
       try {
         await runMigrations();
-        if (/[\/\\]|\.\./.test(name)) {
+        if (/[/\\]|\.\./.test(name)) {
           console.error("Skill name cannot contain '/', '\\', or '..'.");
           process.exit(1);
         }
@@ -157,7 +157,7 @@ Examples:
         await ensureCodexSkillsLink(targetPath);
 
         for (const skill of rows) {
-          if (/[\/\\]|\.\./.test(skill.name)) {
+          if (/[/\\]|\.\./.test(skill.name)) {
             console.warn(`  Skipping skill with unsafe name: ${skill.name}`);
             continue;
           }
