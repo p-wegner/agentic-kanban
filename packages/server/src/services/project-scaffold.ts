@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
+import { gitExecSync } from "@agentic-kanban/shared/lib/git-exec";
 import { getCurrentBranch } from "@agentic-kanban/shared/lib/git-service";
 import { db, type Database } from "../db/index.js";
 import { getBoardNavigatorSkillId } from "../repositories/project-scaffold.repository.js";
@@ -116,11 +116,9 @@ export async function commitProjectScaffoldArtifacts(repoPath: string): Promise<
     const branch = await getCurrentBranch(repoPath);
     if (branch === "HEAD") return;
 
-    const status = execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], {
+    const status = gitExecSync(["status", "--porcelain", "--untracked-files=all"], {
       cwd: repoPath,
-      encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
-      windowsHide: true,
     });
 
     const pathsToCommit = new Set<string>();
@@ -143,32 +141,28 @@ export async function commitProjectScaffoldArtifacts(repoPath: string): Promise<
     const claudePaths = paths.filter((pathName) => pathName.startsWith(".claude/"));
 
     if (regularPaths.length > 0) {
-      execFileSync("git", ["add", "-A", "--", ...regularPaths], {
+      gitExecSync(["add", "-A", "--", ...regularPaths], {
         cwd: repoPath,
         stdio: ["ignore", "ignore", "ignore"],
-        windowsHide: true,
       });
     }
     if (claudePaths.length > 0) {
-      execFileSync("git", ["add", "-f", "--", ...claudePaths], {
+      gitExecSync(["add", "-f", "--", ...claudePaths], {
         cwd: repoPath,
         stdio: ["ignore", "ignore", "ignore"],
-        windowsHide: true,
       });
     }
 
     try {
-      execFileSync("git", ["diff", "--cached", "--quiet", "--", ...paths], {
+      gitExecSync(["diff", "--cached", "--quiet", "--", ...paths], {
         cwd: repoPath,
         stdio: ["ignore", "ignore", "ignore"],
-        windowsHide: true,
       });
       return;
     } catch {
-      execFileSync("git", ["commit", "-m", SCAFFOLD_COMMIT_MESSAGE, "--", ...paths], {
+      gitExecSync(["commit", "-m", SCAFFOLD_COMMIT_MESSAGE, "--", ...paths], {
         cwd: repoPath,
         stdio: ["ignore", "ignore", "ignore"],
-        windowsHide: true,
       });
     }
   } catch {
@@ -395,11 +389,9 @@ function getSmartRunnerSource(): string | null {
 /** True when the repo has more than one git worktree. */
 function repoHasWorktrees(repoPath: string): boolean {
   try {
-    const out = execFileSync("git", ["worktree", "list", "--porcelain"], {
+    const out = gitExecSync(["worktree", "list", "--porcelain"], {
       cwd: repoPath,
-      encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
-      windowsHide: true,
     });
     return (out.match(/^worktree /gm) ?? []).length > 1;
   } catch {

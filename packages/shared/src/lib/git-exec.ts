@@ -59,10 +59,10 @@ export function gitExec(args: string[], opts: GitExecOptions = {}): Promise<GitE
   const { cwd, timeout, maxBuffer = DEFAULT_MAX_BUFFER, env, input } = opts;
   return new Promise((resolve) => {
     const child = execFile("git", args, { cwd, timeout, maxBuffer, windowsHide: true, env }, (err, stdout, stderr) => {
-      const error = (err as ExecFileException | null) ?? null;
+      const error: ExecFileException | null = err;
       resolve({
-        stdout: stdout.toString(),
-        stderr: stderr.toString(),
+        stdout: stdout == null ? "" : stdout.toString(),
+        stderr: stderr == null ? "" : stderr.toString(),
         code: exitCodeOf(error, err != null),
         error,
       });

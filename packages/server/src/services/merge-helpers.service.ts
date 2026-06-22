@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
@@ -60,16 +61,9 @@ export async function rebuildSharedIfChanged(
 
 /** Returns conflicting file paths from an in-progress merge/rebase (git diff --name-only --diff-filter=U). */
 export async function getConflictingFiles(workingDir: string): Promise<string[]> {
-  try {
-    const output = await new Promise<string>((res, rej) => {
-      execFile("git", ["diff", "--name-only", "--diff-filter=U"], { cwd: workingDir }, (err, stdout) => {
-        if (err) rej(err instanceof Error ? err : new Error(err.message)); else res(stdout.toString());
-      });
-    });
-    return output.trim().split("\n").filter(Boolean);
-  } catch {
-    return [];
-  }
+  const { stdout, error } = await gitExec(["diff", "--name-only", "--diff-filter=U"], { cwd: workingDir });
+  if (error) return [];
+  return stdout.trim().split("\n").filter(Boolean);
 }
 
 export function buildFixAndMergePrompt(errorMessage: string, baseBranch: string): string {

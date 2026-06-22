@@ -11,7 +11,7 @@
  *  - Size-capped: the assembled primer is truncated to ~8 000 chars (~2 K tokens).
  */
 
-import { execFile } from "node:child_process";
+import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { isTerminalStatusView } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
 import { buildPhaseArtifactsContext } from "./phase-artifacts.service.js";
@@ -47,12 +47,9 @@ const MAX_RELEVANT_FILES = 12;
 const MAX_PRIOR_ISSUES = 3;
 const MAX_RECENT_COMMITS = 5;
 
-function execGitSafe(args: string[], cwd: string): Promise<string> {
-  return new Promise((resolve) => {
-    execFile("git", args, { cwd, maxBuffer: 2 * 1024 * 1024 }, (err, stdout) => {
-      resolve(err ? "" : stdout.toString());
-    });
-  });
+async function execGitSafe(args: string[], cwd: string): Promise<string> {
+  const { stdout, error } = await gitExec(args, { cwd, maxBuffer: 2 * 1024 * 1024 });
+  return error ? "" : stdout;
 }
 
 /** Extract meaningful tokens from a string (lower-cased, de-duped, no stop words). */

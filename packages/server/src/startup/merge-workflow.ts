@@ -2,8 +2,7 @@ import { issueTags, issues, preferences, projects, sessions, tags, workspaces } 
 import { runDoneUnmergedScannerNow } from "./done-unmerged-invariant-scanner.js";
 import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { eq } from "drizzle-orm";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { db } from "../db/index.js";
 import { MOCK_AGENT_COMMAND, isMockProfile, toExecutorProvider } from "../services/agent-settings.service.js";
 import { createBoardEvents } from "../services/board-events.js";
@@ -17,8 +16,6 @@ import { createSessionManager } from "../services/session.manager.js";
 import { getEffectiveProfile, parseProviderPref } from "./review-helpers.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 import { buildLearningStepPrompt } from "../services/merge-helpers.service.js";
-
-const execFileAsync = promisify(execFile);
 
 export type MergeWorkspace = Pick<typeof workspaces.$inferSelect, "id" | "isDirect" | "branch" | "workingDir" | "baseBranch" | "issueId">;
 
@@ -62,7 +59,7 @@ export async function tagIfNeedsVisualVerification(repoPath: string, branch: str
     }
 
     const base = baseBranch || "main";
-    const { stdout } = await execFileAsync("git", ["diff", "--name-only", `${base}...${branch}`], { cwd: repoPath });
+    const stdout = await gitExecOrThrow(["diff", "--name-only", `${base}...${branch}`], { cwd: repoPath });
     const changedFiles = stdout.split("\n").map((f) => f.trim()).filter(Boolean);
     if (!hasVisuallyVerifiableChanges(changedFiles, isWebProject)) return;
 

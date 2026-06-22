@@ -1,4 +1,5 @@
 import { spawn, execFile, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -51,22 +52,13 @@ interface BisectTestCommand {
   display: string;
 }
 
-function execGit(args: string[], cwd: string, allowedExitCodes = [0]): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile("git", args, { cwd, windowsHide: true, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
-      const output = `${stdout.toString()}${stderr.toString()}`;
-      if (err) {
-        const exitCode = typeof (err as { code?: unknown }).code === "number" ? (err as { code: number }).code : null;
-        if (exitCode != null && allowedExitCodes.includes(exitCode)) {
-          resolve(output);
-          return;
-        }
-        reject(new Error(`git ${args.join(" ")} failed: ${output || err.message}`));
-      } else {
-        resolve(output);
-      }
-    });
-  });
+async function execGit(args: string[], cwd: string, allowedExitCodes = [0]): Promise<string> {
+  const { stdout, stderr, code, error } = await gitExec(args, { cwd });
+  const output = `${stdout}${stderr}`;
+  if (error && !(code != null && allowedExitCodes.includes(code))) {
+    throw new Error(`git ${args.join(" ")} failed: ${output || error.message}`);
+  }
+  return output;
 }
 
 function shortSha(sha: string): string {

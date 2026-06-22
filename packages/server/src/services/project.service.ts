@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { execSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { resolve, sep, join } from "node:path";
 import { ensureAgentGitignore, ensureStarterClaudeMd, ensureStarterAgentsMd, ensureHookScaffold, ensureVerifyGateRunner, getDefaultSkillId, commitProjectScaffoldArtifacts } from "./project-scaffold.js";
@@ -8,6 +8,7 @@ import { listAgentSkills } from "../repositories/agent-skill.repository.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import type { Database } from "../db/index.js";
 import { branchExists, detectRepoInfo, getProjectGitStatsAsync } from "./git-info.service.js";
+import { gitExecSync } from "@agentic-kanban/shared/lib/git-exec";
 import { listBranches, listWorktrees, getDiffShortstat, removeWorktree } from "./git.service.js";
 import { buildWorkspaceSummaryMap, buildBlockedMap, buildTagMap, buildGraphEdges } from "./board-aggregation.service.js";
 import { getProjectById, getProjectByRepoPath, getAllProjects, insertProject, deleteProjectCascade, setProjectArchived, getProjectStats, getProjectStatuses, createProjectStatus, deleteProjectStatus, updateProjectStatusSortOrder } from "../repositories/project.repository.js";
@@ -260,7 +261,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     }
 
     try {
-      execSync("git init", { cwd: targetPath, stdio: "pipe" });
+      gitExecSync(["init"], { cwd: targetPath, stdio: "pipe" });
     } catch (err: unknown) {
       try { rmSync(targetPath, { recursive: true, force: true }); } catch {}
       const stderr = (err as { stderr?: string | Buffer }).stderr;

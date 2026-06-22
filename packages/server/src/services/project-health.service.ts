@@ -1,5 +1,3 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { getDirtyTrackedSourceFiles } from "./dirty-main-checkout.js";
@@ -8,8 +6,7 @@ import {
   getProjectHealthRows,
   getIssueCountsByStatus,
 } from "../repositories/project-health.repository.js";
-
-const execFileAsync = promisify(execFile);
+import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 
 interface ProjectHealthEntry {
   id: string;
@@ -28,20 +25,12 @@ interface ProjectHealthResult {
 }
 
 async function validateGitRepo(repoPath: string): Promise<string | null> {
-  try {
-    await execFileAsync("git", ["rev-parse", "HEAD"], {
-      cwd: repoPath,
-      timeout: 5000,
-      windowsHide: true,
-    });
-    return null;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes("not a git repository") || msg.includes("fatal")) {
-      return "Invalid git repository or bad HEAD";
-    }
-    return "Git check failed";
+  const { error } = await gitExec(["rev-parse", "HEAD"], { cwd: repoPath, timeout: 5000 });
+  if (!error) return null;
+  if (error.message.includes("not a git repository") || error.message.includes("fatal")) {
+    return "Invalid git repository or bad HEAD";
   }
+  return "Git check failed";
 }
 
 export async function getProjectHealth(database: Database = db): Promise<ProjectHealthResult> {

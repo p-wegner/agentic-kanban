@@ -415,12 +415,12 @@ function slugify(s: string): string {
 async function commitStageWork(stage: string): Promise<void> {
   try {
     const { writeFileSync } = await import("node:fs");
-    const { execSync } = await import("node:child_process");
+    const { gitExecSync } = await import("@agentic-kanban/shared/lib/git-exec");
     const file = `mock-${slugify(stage)}.md`;
     writeFileSync(file, `# ${stage}\n\nMock contribution for the "${stage}" stage.\n`, "utf-8");
     const opts = { cwd: process.cwd(), stdio: "ignore" as const };
-    execSync("git add -A", opts);
-    execSync(`git commit -m "mock(${slugify(stage)}): stage work" --no-verify`, opts);
+    gitExecSync(["add", "-A"], opts);
+    gitExecSync(["commit", "-m", `mock(${slugify(stage)}): stage work`, "--no-verify"], opts);
   } catch {
     // No git / nothing to commit / hooks — non-fatal for a mock.
   }
