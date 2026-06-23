@@ -90,12 +90,28 @@ export function createPreferenceService({ database }: { database: Database }) {
     return settings;
   }
 
-  async function updateSettings(body: Record<string, string>) {
-    const entries = Object.entries(body)
-      .filter(([key]) => SETTINGS_KEYS.includes(key) || isAllowedDynamicKey(key))
-      .map(([key, value]) => ({ key, value: value ?? "" }));
+  /**
+   * Persist the allowed settings and report which keys were rejected.
+   *
+   * A key not in SETTINGS_KEYS (and not matching isAllowedDynamicKey) used to be
+   * SILENTLY DROPPED — the toggle appeared to work but never persisted (this bit
+   * auto_rebase_on_continue and skip_preflight). Valid keys are still applied, but
+   * the dropped keys are returned so the caller can fail loudly instead of no-op'ing
+   * (ticket #874). SETTINGS_KEYS is a hand-maintained whitelist that must stay in
+   * sync with the client Settings interface + DEFAULT_SETTINGS, so a mistyped or
+   * un-registered key is almost always a bug worth surfacing.
+   */
+  async function updateSettings(body: Record<string, string>): Promise<{ applied: string[]; dropped: string[] }> {
+    const applied: string[] = [];
+    const dropped: string[] = [];
+    for (const key of Object.keys(body)) {
+      if (SETTINGS_KEYS.includes(key) || isAllowedDynamicKey(key)) applied.push(key);
+      else dropped.push(key);
+    }
+    const entries = applied.map((key) => ({ key, value: body[key] ?? "" }));
     await setPreferences(entries, database);
     await updateStrategyObjectives(entries);
+    return { applied, dropped };
   }
 
   async function updateStrategyObjectives(entries: Array<{ key: string; value: string }>) {
