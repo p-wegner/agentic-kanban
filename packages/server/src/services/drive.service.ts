@@ -18,6 +18,7 @@ import {
   verifyScriptPrefKey,
 } from "./stack-profile.service.js";
 import { HARNESS_IDS, harnessSettingKey } from "./harness-settings.js";
+import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
 import { generateDriveRetro } from "@agentic-kanban/shared/lib/drive-retro";
 import { resolveStartPolicy, startModePrefKey, type StartMode } from "./start-policy.service.js";
 
@@ -93,7 +94,7 @@ export async function getDriveStatus(
       autodrive: enabled,
       autoMergeDisabled: prefMap.get(autoMergeDisabledPrefKey(projectId)) === "true",
       autoReview: prefMap.get("auto_review") === "true",
-      autoMerge: prefMap.get("auto_merge") === "true",
+      autoMerge: isAutoMergeEnabled(prefMap),
       hasStackProfile: (await getStackProfile(projectId, database)) !== null,
       hasVerifyScript: !!(verify && verify.trim()),
       startMode: resolveStartPolicy(prefMap, projectId).mode,

@@ -1,4 +1,5 @@
 import { PREF_MERGE_STRATEGY } from "../constants/preference-keys.js";
+import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
 
 export type MergeStrategy = "direct" | "monitor" | "merge_queue";
 
@@ -14,5 +15,5 @@ export function resolveMergeStrategy(prefMap: Map<string, string>): MergeStrateg
 }
 
 export function isAutomaticMergeEnabled(prefMap: Map<string, string>): boolean {
-  return prefMap.get("auto_merge") !== "false" && resolveMergeStrategy(prefMap) !== "direct";
+  return isAutoMergeEnabled(prefMap) && resolveMergeStrategy(prefMap) !== "direct";
 }
