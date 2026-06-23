@@ -29,16 +29,32 @@ function resolveDbPath(): string {
 const dbPath = resolveDbPath();
 const url = dbPath.startsWith("file:") ? dbPath : `file:${dbPath}`;
 
-// Apply WAL mode and busy_timeout so the MCP server doesn't fail with SQLITE_BUSY
-// when the main server is writing. WAL allows concurrent reads, and busy_timeout
-// retries writes for up to 10s before giving up.
+async function applyPragmas(c: ReturnType<typeof createClient>) {
+  // foreign_keys=ON: SQLite/libsql enforce FK constraints per connection.
+  await c.execute("PRAGMA foreign_keys=ON");
+  // journal_mode=WAL: multiple readers never block a writer; writer doesn't block readers.
+  await c.execute("PRAGMA journal_mode=WAL");
+  // busy_timeout: wait up to 10s for a locked DB before throwing SQLITE_BUSY.
+  await c.execute("PRAGMA busy_timeout=10000");
+  // synchronous=NORMAL: crash-safe with WAL; removes an fsync per commit.
+  await c.execute("PRAGMA synchronous=NORMAL");
+  // temp_store=MEMORY: keep transient B-trees in RAM.
+  await c.execute("PRAGMA temp_store=MEMORY");
+  // cache_size=-65536: 64MB page cache.
+  await c.execute("PRAGMA cache_size=-65536");
+  // mmap_size=256MB: memory-map reads to cut syscall overhead.
+  await c.execute("PRAGMA mmap_size=268435456");
+}
+
+// Apply the same pragma discipline as the server DB entrypoint so MCP tools
+// cannot bypass FK enforcement and tolerate normal server write contention.
 const client = createClient({ url });
 try {
-  await client.execute("PRAGMA journal_mode=WAL");
-  await client.execute("PRAGMA busy_timeout=10000");
+  await applyPragmas(client);
 } catch {
   // Non-fatal: pragmas may fail on read-only or in-memory DBs.
 }
 
 export const db = drizzle({ client, schema });
+export const rawClient = client;
 export { schema };
