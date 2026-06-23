@@ -13,8 +13,9 @@ export interface SignalContext {
   diffFiles?: string[];
 }
 
-/** Split a stored condition like `diff_touches:packages/**` into base + arg. */
-export function parseCondition(condition: string): { base: string; arg: string | null } {
+/** Split a stored condition like `diff_touches:packages/**` into base + arg.
+ *  Internal to the condition DSL — used only by evaluateCondition. */
+function parseCondition(condition: string): { base: string; arg: string | null } {
   const idx = condition.indexOf(":");
   if (idx === -1) return { base: condition, arg: null };
   return { base: condition.slice(0, idx), arg: condition.slice(idx + 1) };
@@ -78,4 +79,4 @@ export function evaluateCondition(condition: string, ctx: SignalContext): Condit
       // agent_score / custom_js / unknown — not auto-evaluable in this version.
       return "manual";
   }
-}
+}

@@ -169,8 +169,9 @@ export async function countNodeVisits(
   return Number(rows[0]?.c ?? 0);
 }
 
-/** Resolve a project's status row id by its (case-insensitive) name. */
-export async function resolveStatusId(
+/** Resolve a project's status row id by its (case-insensitive) name.
+ *  Internal — used only within this module's transition/init helpers. */
+async function resolveStatusId(
   db: WorkflowDb,
   projectId: string,
   statusName: string,
@@ -685,4 +686,4 @@ export async function initWorkspaceWorkflow(
 
   const transitions = await getOutgoingTransitions(db, startNode.id);
   return { node: startNode, transitions };
-}
+}
