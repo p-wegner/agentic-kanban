@@ -6,11 +6,15 @@ import type { Project, Tag } from "../routes/BoardPage.js";
 export const boardQueryKeys = {
   activeProjectPreference: ["preferences", "active-project"] as const,
   archivedProjects: ["projects", "archived"] as const,
+  availableIssues: (projectId: string) => ["projects", projectId, "available-issues"] as const,
   board: (projectId: string) => ["projects", projectId, "board"] as const,
+  issueDetail: (projectId: string, issueId?: string) => ["projects", projectId, "issue-detail", issueId ?? "all"] as const,
   milestones: (projectId: string) => ["projects", projectId, "milestones"] as const,
   projects: ["projects", "active"] as const,
+  settings: ["preferences", "settings"] as const,
   sprintCapacity: (projectId: string) => ["projects", projectId, "sprint-capacity"] as const,
   tags: ["tags"] as const,
+  workspaceIssue: (projectId: string, issueId?: string) => ["projects", projectId, "workspaces", issueId ?? "all"] as const,
 };
 
 export function fetchTags() {

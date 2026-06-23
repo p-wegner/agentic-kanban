@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "../lib/api.js";
 import { type AgentOutputFormat } from "../lib/agent-output-parser.js";
 import { detectQuickLaunchProvider, canResumeWorkspace, canRestartWorkspace, type RelaunchContext } from "../lib/workspaceLaunchState.js";
@@ -24,6 +25,7 @@ import { WorkspaceEmptyState } from "./WorkspaceEmptyState.js";
 import { WorkspacePanelHeader } from "./WorkspacePanelHeader.js";
 import { useWorkspaceGithubHandoff } from "../hooks/useWorkspaceGithubHandoff.js";
 import { useWorkspaceActions } from "../hooks/useWorkspaceActions.js";
+import { invalidateClientSurface } from "../lib/clientInvalidation.js";
 import {
   fetchLatestCommits,
   fetchGithubDrafts,
@@ -57,6 +59,7 @@ interface WorkspacePanelProps {
 }
 
 export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onWorkspaceCreating, onWorkspaceCreateSettled, initialWorkspaceId, initialSessionId, autoSelectId, initialShowCreate, initialShowDiff, liveStats }: WorkspacePanelProps) {
+  const queryClient = useQueryClient();
   const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(initialShowCreate ?? false);
@@ -97,8 +100,17 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
   const [mergeError, setMergeError] = useState<{ wsId: string; message: string } | null>(null);
   const [replaySession, setReplaySession] = useState<{ id: string; label: string; outputFormat: string } | null>(null);
 
+  const invalidateWorkspaceSurface = useCallback(async () => {
+    await invalidateClientSurface(queryClient, {
+      surface: "workspace",
+      projectId: issue.projectId,
+      issueId: issue.id,
+    });
+    onWorkspaceChange?.();
+  }, [issue.id, issue.projectId, onWorkspaceChange, queryClient]);
+
   const [latestCommits, setLatestCommits] = useState<Record<string, { sha: string; message: string } | null>>({});
-  const { githubDrafts, setGithubDrafts, handleGenerateGithubDraft, handleCopyGithubDraft, handleExportHandoffBundle } = useWorkspaceGithubHandoff({ setActionLoading, setError, onWorkspaceChange });
+  const { githubDrafts, setGithubDrafts, handleGenerateGithubDraft, handleCopyGithubDraft, handleExportHandoffBundle } = useWorkspaceGithubHandoff({ setActionLoading, setError, onWorkspaceChange: invalidateWorkspaceSurface });
   const [planContent, setPlanContent] = useState<Record<string, string | null>>({});
   const [planEditMode, setPlanEditMode] = useState<Record<string, boolean>>({});
   const [planEditText, setPlanEditText] = useState<Record<string, string>>({});
@@ -329,7 +341,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     issue, selectedProfile, selectedModel, prefs, requiresReview, suggestion,
     isClaudeQuickLaunch, isCodexQuickLaunch, isRunning, prompt, activeSession, messages,
     lastSessionPerWorkspace, disconnect, fetchWorkspaces,
-    onWorkspaceChange, onWorkspaceCreating, onWorkspaceCreateSettled,
+    onWorkspaceChange: invalidateWorkspaceSurface, onWorkspaceCreating, onWorkspaceCreateSettled,
     setActionLoading, setActiveSession, setCompletedMessages, setConflictState,
     setDiff, setDiffComments, setEditingProfileWsId, setError, setHistoryMessages,
     setLastPrompt, setLastSessionPerWorkspace, setLaunchingFix, setMergeError,
@@ -443,7 +455,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
                   setLastPrompt(buildDefaultLaunchPrompt(issue));
                 }
                 void fetchWorkspaces();
-                onWorkspaceChange?.();
+                void invalidateWorkspaceSurface();
               }}
               onCancel={() => setShowCreate(false)}
             />
