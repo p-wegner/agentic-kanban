@@ -620,6 +620,7 @@ const COPILOT_IGNORED_TYPES = new Set([
   "assistant.turn_end",
   "session.background_tasks_changed",
   "session.mcp_servers_loaded",
+  "session.model_change",
   "session.skills_loaded",
   "session.warning",
   "session.tools_updated",
@@ -788,7 +789,7 @@ function parseCopilotEvent(obj: Record<string, unknown>, rawLine: string, contex
     }
   }
 
-  if (type.includes("tool") && (type.includes("completed") || type.includes("result"))) {
+  if (type.includes("tool") && (type.includes("complete") || type.includes("completed") || type.includes("end") || type.includes("result"))) {
     const id = stringValue(payload.id ?? payload.tool_use_id ?? payload.toolUseId ?? payload.toolCallId ?? obj.id ?? item.id);
     if (id) {
       const resultRecord = objectValue(payload.result);
