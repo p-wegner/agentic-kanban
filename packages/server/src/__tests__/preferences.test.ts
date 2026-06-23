@@ -191,23 +191,47 @@ describe("Preferences API - settings", () => {
   });
 
 
-  it("PUT /api/preferences/settings ignores disallowed keys", async () => {
+  it("PUT /api/preferences/settings rejects disallowed keys loudly (422) but persists the valid ones", async () => {
     const { app: freshApp } = createTestApp();
 
-    await freshApp.request("/api/preferences/settings", {
+    const putRes = await freshApp.request("/api/preferences/settings", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         agent_command: "test",
-        malicious_key: "should be ignored",
+        malicious_key: "should be rejected",
       }),
     });
 
+    // #874: an un-whitelisted key no longer silently no-ops — it fails loudly.
+    expect(putRes.status).toBe(422);
+    const putBody = await putRes.json() as any;
+    expect(putBody.ok).toBe(false);
+    expect(putBody.droppedKeys).toEqual(["malicious_key"]);
+    expect(putBody.applied).toEqual(["agent_command"]);
+    expect(putBody.error).toContain("malicious_key");
+
+    // The valid key is still persisted (partial-apply), the rejected one is not.
     const res = await freshApp.request("/api/preferences/settings");
     const body = await res.json() as any;
     expect(body.agent_command).toBe("test");
-    // The malicious key should not have been persisted
     expect(body.malicious_key).toBeUndefined();
+  });
+
+  it("PUT /api/preferences/settings returns 200 + applied keys when all keys are valid", async () => {
+    const { app: freshApp } = createTestApp();
+
+    const putRes = await freshApp.request("/api/preferences/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agent_command: "ok", claude_profile: "mock" }),
+    });
+
+    expect(putRes.status).toBe(200);
+    const putBody = await putRes.json() as any;
+    expect(putBody.ok).toBe(true);
+    expect(putBody.applied).toEqual(expect.arrayContaining(["agent_command", "claude_profile"]));
+    expect(putBody.droppedKeys).toBeUndefined();
   });
 
   it("PUT /api/preferences/settings upserts existing values", async () => {
