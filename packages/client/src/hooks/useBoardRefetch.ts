@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import type { StatusWithIssues } from "@agentic-kanban/shared";
 import {
@@ -8,6 +9,7 @@ import {
   pruneRecordKeys,
 } from "../lib/boardDataReconcile.js";
 import type { LiveSessionStats } from "../lib/useBoardEvents.js";
+import { boardQueryKeys } from "./useBoardDataQueries.js";
 
 /** Trailing-debounce window for coalescing WS-triggered board refetches. */
 const REFETCH_DEBOUNCE_MS = 250;
@@ -54,6 +56,7 @@ export function useBoardRefetch({
   setLiveStats,
   setSessionActivityRaw,
 }: UseBoardRefetchParams): UseBoardRefetchResult {
+  const queryClient = useQueryClient();
   const boardEtagRef = useRef<Record<string, string>>({});
   // Coalesced-refetch bookkeeping: monotonic sequence guard (discard responses
   // that resolve after a newer one was applied), trailing-debounce timer, and
@@ -82,6 +85,7 @@ export function useBoardRefetch({
     if (cachedEtag) headers["If-None-Match"] = cachedEtag;
     const res = await fetch(`/api/projects/${pid}/board`, { headers });
     if (res.status === 304) {
+      queryClient.setQueryData(boardQueryKeys.board(pid), columnsRef.current);
       return columnsRef.current;
     }
     if (!res.ok) {
@@ -109,6 +113,7 @@ export function useBoardRefetch({
     const reconciled = reconcileBoardIssueIdentity(columnsRef.current, board);
     setColumns(reconciled);
     columnsRef.current = reconciled;
+    queryClient.setQueryData(boardQueryKeys.board(pid), reconciled);
     const inactiveIssueIds = deriveInactiveIssueIds(reconciled);
     setPendingWorkspaceIssueIds((prev) => prunePendingWorkspaceIssueIds(prev, reconciled));
     if (inactiveIssueIds.size > 0) {
@@ -116,7 +121,7 @@ export function useBoardRefetch({
       setSessionActivityRaw((prev) => pruneRecordKeys(prev, inactiveIssueIds));
     }
     return reconciled;
-  }, [activeProjectId, columnsRef, setColumns, setPendingWorkspaceIssueIds, setLiveStats, setSessionActivityRaw]);
+  }, [activeProjectId, columnsRef, queryClient, setColumns, setPendingWorkspaceIssueIds, setLiveStats, setSessionActivityRaw]);
 
   // Coalesced board refetch: agent merge/exit cascades broadcast 3-6
   // board_changed events within 1-2s, and each used to trigger its own full
