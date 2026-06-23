@@ -24,7 +24,21 @@ const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "../../../..");
 const ALLOWLIST = new Set([join("packages", "shared", "src", "lib", "git-exec.ts")]);
 
 /** Raw spawn of a literal `git` command: execFile("git"…, execSync(`git …`, spawn("git"…, etc. */
-const RAW_GIT_SPAWN = /(?:exec|spawn)\w*\(\s*[`"']git[\s`"']/;
+const RAW_GIT_SPAWN = /\b(?:exec|spawn)\w*\(\s*[`"']git(?:[\s`"'])/g;
+
+function lineNumberAt(text: string, index: number): number {
+  let line = 1;
+  for (let i = 0; i < index; i++) {
+    if (text[i] === "\n") line++;
+  }
+  return line;
+}
+
+function lineAt(text: string, index: number): string {
+  const lineStart = text.lastIndexOf("\n", index) + 1;
+  const lineEnd = text.indexOf("\n", index);
+  return text.slice(lineStart, lineEnd === -1 ? undefined : lineEnd).trim();
+}
 
 function isExcluded(absPath: string): boolean {
   const parts = absPath.split(sep);
@@ -57,6 +71,15 @@ function collectSourceFiles(dir: string, out: string[]): void {
 }
 
 describe("git-exec single-spawn gate", () => {
+  it("detects raw git spawns when the command literal is on the next line", () => {
+    const source = `const output = execFileSync(
+      "git",
+      ["status"],
+    );`;
+
+    expect([...source.matchAll(RAW_GIT_SPAWN)]).toHaveLength(1);
+  });
+
   it("no package source spawns git outside the git-exec adapter", () => {
     const packagesDir = join(REPO_ROOT, "packages");
     const files: string[] = [];
@@ -70,9 +93,9 @@ describe("git-exec single-spawn gate", () => {
       const rel = relative(REPO_ROOT, file);
       if (ALLOWLIST.has(rel)) continue;
       const text = readFileSync(file, "utf8");
-      text.split("\n").forEach((line, i) => {
-        if (RAW_GIT_SPAWN.test(line)) offenders.push(`${rel}:${i + 1}  ${line.trim()}`);
-      });
+      for (const match of text.matchAll(RAW_GIT_SPAWN)) {
+        offenders.push(`${rel}:${lineNumberAt(text, match.index)}  ${lineAt(text, match.index)}`);
+      }
     }
 
     expect(
@@ -84,6 +107,7 @@ describe("git-exec single-spawn gate", () => {
 
   it("the adapter itself is the sanctioned spawn site (allowlist is live, not stale)", () => {
     const adapter = readFileSync(join(REPO_ROOT, "packages", "shared", "src", "lib", "git-exec.ts"), "utf8");
+    RAW_GIT_SPAWN.lastIndex = 0;
     expect(RAW_GIT_SPAWN.test(adapter)).toBe(true);
   });
 });
