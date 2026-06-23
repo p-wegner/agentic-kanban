@@ -1,9 +1,6 @@
-import { execFile, execSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
+import { execFile } from "node:child_process";
 import { db } from "../db/index.js";
-import { buildSpawnEnv } from "./agent-provider.js";
+import { buildAgentLaunchConfig, narrowProviderName, getProfilePrefKey } from "./agent-provider.js";
 import type { Database } from "../db/index.js";
 import { getClaudeCliPreferences } from "../repositories/claude-cli.repository.js";
 
@@ -14,56 +11,52 @@ export interface ClaudeCliOptions {
   model?: string;
 }
 
+/**
+ * Run a one-shot prompt through the configured agent provider and return its final
+ * answer as plain text. Used by the internal AI utility services (issue enhancement,
+ * voice capture, stack detection, …) — NOT for long-running interactive agents.
+ *
+ * The launch (provider selection, Windows binary resolution, profile→settings path,
+ * env) is delegated to the provider registry via `buildAgentLaunchConfig({ oneShotText })`,
+ * so there is ONE launch implementation per provider. This function no longer
+ * reimplements that logic outside the provider abstraction.
+ */
 export async function invokeClaudePrompt(
   prompt: string,
   opts: ClaudeCliOptions = {}
 ): Promise<string> {
   const { timeout = 60000, database = db, model } = opts;
 
-  let agentCommand = "claude";
-  let claudeProfile: string | undefined;
-  let provider = "claude";
-  let codexProfile: string | undefined;
+  let agentCommand: string | undefined;
+  let providerPref: string | undefined;
+  const profileByKey = new Map<string, string>();
   const prefs = await getClaudeCliPreferences(database);
   for (const p of prefs) {
-    if (p.key === "agent_command" && p.value) agentCommand = p.value;
-    if (p.key === "claude_profile" && p.value) claudeProfile = p.value;
-    if (p.key === "provider" && p.value) provider = p.value;
-    if (p.key === "codex_profile" && p.value) codexProfile = p.value;
-  }
-  const isCodex = provider === "codex";
-  if (isCodex) {
-    agentCommand = "codex";
-    claudeProfile = codexProfile;
+    if (!p.value) continue;
+    if (p.key === "agent_command") agentCommand = p.value;
+    else if (p.key === "provider") providerPref = p.value;
+    else profileByKey.set(p.key, p.value);
   }
 
-  if (process.platform === "win32" && agentCommand === "claude") {
-    try {
-      const resolved = execSync("where claude.exe 2>nul", { encoding: "utf8" }).trim().split("\n")[0]?.trim();
-      if (resolved) agentCommand = resolved;
-    } catch {}
-  }
+  const providerName = narrowProviderName(providerPref);
+  const profileName = profileByKey.get(getProfilePrefKey(providerName));
 
-  const args: string[] = ["--output-format", "text"];
-  if (!isCodex && model) {
-    args.push("--model", model);
-  }
-  if (!isCodex && claudeProfile) {
-    const settingsPath = join(homedir(), ".claude", `settings_${claudeProfile}.json`);
-    if (existsSync(settingsPath)) {
-      args.push("--settings", settingsPath);
-    }
-  }
-  args.push("-p");
+  const { command, args, env, useShell } = buildAgentLaunchConfig({
+    provider: providerName === "claude" ? "claude-code" : providerName,
+    oneShotText: true,
+    agentCommand,
+    model,
+    ...(profileName ? { profile: { provider: providerName, name: profileName } } : {}),
+  });
 
   return new Promise<string>((resolve, reject) => {
-    const child = execFile(agentCommand, args, {
+    const child = execFile(command, args, {
       encoding: "utf8",
       timeout,
-      shell: false,
+      shell: useShell,
       windowsHide: true,
       maxBuffer: 1024 * 1024,
-      env: buildSpawnEnv(claudeProfile),
+      env,
     }, (err, stdout) => {
       if (err) reject(err instanceof Error ? err : new Error(err.message));
       else resolve(stdout ?? "");

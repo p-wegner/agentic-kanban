@@ -200,6 +200,7 @@ export class ClaudeProvider implements AgentProvider {
       permissionPromptTool,
       systemInstructions,
       planMode,
+      oneShotText,
     } = options;
 
     const effectiveProfileName = profile?.name ?? claudeProfile;
@@ -213,6 +214,32 @@ export class ClaudeProvider implements AgentProvider {
         const resolved = execSync("where claude.exe 2>nul", { encoding: "utf8" }).trim().split("\n")[0]?.trim();
         if (resolved) command = resolved;
       } catch {}
+    }
+
+    // One-shot, non-streaming text mode for internal AI utility calls. No
+    // stream-json/MCP wiring — just `claude --output-format text -p` reading the
+    // prompt from stdin and printing the final answer. This is the launch path
+    // `invokeClaudePrompt` used to reimplement outside the provider abstraction.
+    if (oneShotText && !isMockAgent) {
+      const textArgs: string[] = ["--output-format", "text"];
+      if (model && !profileDefinesCustomEndpoint(effectiveProfileName, this.fs)) {
+        textArgs.push("--model", model);
+      }
+      if (effectiveProfileName) {
+        const settingsPath = join(homedir(), ".claude", `settings_${effectiveProfileName}.json`);
+        if (this.fs.existsSync(settingsPath)) {
+          textArgs.push("--settings", settingsPath);
+        }
+      }
+      textArgs.push("-p");
+      return {
+        command,
+        args: textArgs,
+        useShell: isWindows && !!agentCommand,
+        isMockAgent: false,
+        env: buildSpawnEnv(effectiveProfileName, this.fs),
+        keepStdinOpen: false,
+      };
     }
 
     let args: string[];
