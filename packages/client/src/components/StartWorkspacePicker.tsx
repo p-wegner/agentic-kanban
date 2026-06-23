@@ -4,6 +4,7 @@ import { apiPost } from "../lib/api.js";
 import { getSettings } from "../lib/settingsStore.js";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { showToast } from "./Toast.js";
+import { defaultModelForProvider, type AgentProvider } from "../lib/settings-shared.js";
 
 interface StartWorkspacePickerProps {
   issues: IssueWithStatus[];
@@ -61,10 +62,12 @@ export function StartWorkspacePicker({ issues, onClose, onStarted }: StartWorksp
       const [settings] = await Promise.all([
         getSettings().catch(() => ({} as Record<string, string>)),
       ]);
-      const provider = (settings.provider as "claude" | "codex" | "copilot") || "claude";
+      const provider = (settings.provider as AgentProvider) || "claude";
       const profileName =
         provider === "codex"
           ? settings.codex_profile || "default"
+          : provider === "pi"
+          ? settings.pi_profile || "default"
           : provider === "copilot"
           ? settings.copilot_profile || "default"
           : settings.claude_profile || "default";
@@ -75,7 +78,8 @@ export function StartWorkspacePicker({ issues, onClose, onStarted }: StartWorksp
         branch,
         profile: { provider, name: profileName },
       };
-      if (settings.default_model) body.model = settings.default_model;
+      const model = defaultModelForProvider(settings, provider);
+      if (model) body.model = model;
 
       const result = await apiPost<{ id: string; sessionId?: string }>("/api/workspaces", body);
       showToast(`Workspace started for #${issue.issueNumber} ${issue.title}`, "success");

@@ -24,6 +24,7 @@ import {
   type AgentPreset,
 } from "../lib/agentPresets.js";
 import { buildCreateWorkspaceBody } from "../lib/createWorkspaceBody.js";
+import { defaultModelForProvider, type AgentProvider } from "../lib/settings-shared.js";
 
 interface Project {
   id: string;
@@ -145,7 +146,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
       } else {
         setSelectedProfile("");
       }
-      setSelectedModel(settings.default_model || "");
+      setSelectedModel(defaultModelForProvider(settings, ((globalProvider || "claude") as AgentProvider)));
       // Per-project TDD preference (falls back to global tdd_mode)
       const projectTddKey = project ? `tdd_mode_${project.id}` : null;
       const tddPref = projectTddKey ? (settings[projectTddKey] ?? settings.tdd_mode) : settings.tdd_mode;

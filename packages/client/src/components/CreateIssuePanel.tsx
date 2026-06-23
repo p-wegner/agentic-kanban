@@ -18,6 +18,7 @@ import {
   profileOptionLabel,
   providerFromSelection,
 } from "../lib/profileOptionLabels.js";
+import { defaultModelForProvider, type AgentProvider } from "../lib/settings-shared.js";
 
 interface Skill {
   id: string;
@@ -121,7 +122,7 @@ export function CreateIssuePanel({
       setCodexProfiles(uniqueProfiles(codexData.profiles, CODEX_DEFAULT_PROFILE));
       setCopilotProfiles(uniqueProfiles(copilotData.profiles, COPILOT_DEFAULT_PROFILE));
       setPiProfiles(uniqueProfiles(piData.profiles, PI_DEFAULT_PROFILE));
-      setSelectedModel(settingsData.default_model || "");
+      setSelectedModel(defaultModelForProvider(settingsData, ((settingsData.provider || "claude") as AgentProvider)));
     });
   }, [startWorkspace, projectId]);
 
