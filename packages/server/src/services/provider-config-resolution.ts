@@ -35,6 +35,7 @@ export interface ProviderConfigInput {
   legacyProfileOverride?: string | null;
   strategySelection?: { provider: ProviderName; profileName: string } | null;
   requestedModel?: string | null;
+  commandOverride?: string;
 }
 
 export interface ResolvedProviderConfig {
@@ -46,6 +47,7 @@ export interface ResolvedProviderConfig {
   agentCommand: string | undefined;
   agentArgs: string | undefined;
   permissionPromptTool: string | undefined;
+  resumeWithNewModel: boolean;
   /** `{provider, name}` selection echoed back for the workspace record. */
   profileSelection: { provider: ProviderName; name: string } | undefined;
   /** Diagnostics for the caller to log (kept side-effect-free here). */
@@ -81,8 +83,9 @@ export function resolveProviderConfig(input: ProviderConfigInput): ResolvedProvi
     claudeProfile: resolvedProfile,
     profile: profileSelection,
     provider,
+    resumeWithNewModel,
     permissionPromptTool,
-  } = resolveAgentSettings(prefMap);
+  } = resolveAgentSettings(prefMap, input.commandOverride);
 
   const profileName = provider === "claude"
     ? (resolvedProfile || legacyProfileOverride || prefMap.get("claude_profile") || undefined)
@@ -102,6 +105,7 @@ export function resolveProviderConfig(input: ProviderConfigInput): ResolvedProvi
     agentCommand,
     agentArgs,
     permissionPromptTool,
+    resumeWithNewModel,
     profileSelection,
     notes,
   };
