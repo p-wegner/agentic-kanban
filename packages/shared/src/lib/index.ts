@@ -1,5 +1,6 @@
 export * from "./session-output.js";
 export * from "./session-stats-blob.js";
+export * from "./agent-stream-parser.js";
 export * from "./provider-models.js";
 export * from "./mcp-tool-definitions.js";
 export * from "./session-summary.js";

@@ -17,7 +17,7 @@ import { desc, eq, ne, inArray, sql, and, gte, isNotNull } from "drizzle-orm";
 
 type Project = typeof projects.$inferSelect;
 import { db } from "../db/index.js";
-import type { Database } from "../db/index.js";
+import type { Database, TransactionClient } from "../db/index.js";
 import { mapWorkspaceDetailsRow } from "../lib/workspace-details-projection.js";
 
 type Workspace = typeof workspaces.$inferSelect;
@@ -305,7 +305,7 @@ export async function moveIssueToInProgressStrict(
   issueId: string,
   projectId: string,
   now: string,
-  database: Database = db,
+  database: Database | TransactionClient = db,
 ): Promise<void> {
   const statuses = await database.select().from(projectStatuses).where(eq(projectStatuses.projectId, projectId));
   const inProgress = statuses.find(s => s.name === "In Progress");

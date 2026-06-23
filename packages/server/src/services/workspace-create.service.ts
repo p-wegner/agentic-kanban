@@ -14,7 +14,7 @@ import { randomUUID } from "node:crypto";
 import { isResolvedDependencyStatusView } from "@agentic-kanban/shared/lib/status-view";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { derivePortsFromBranch } from "./worktree-ports.js";
-import { withTransaction, type Database } from "../db/index.js";
+import { withTransaction, type Database, type TransactionClient } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
 import * as crudRepo from "../repositories/workspace-crud.repository.js";
@@ -29,6 +29,7 @@ import {
 } from "./workspace-run-records.js";
 import { parseSymlinkDirs } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
 import { initWorkspaceWorkflow } from "@agentic-kanban/shared/lib/workflow-engine";
+import type { WorkflowDb } from "@agentic-kanban/shared/lib/workflow-engine";
 import { toExecutorProvider } from "./agent-settings.service.js";
 import { preflightAgentProfile } from "./agent-profile-health.service.js";
 import { emitButlerSystemEvent } from "./butler-event-feed.js";
@@ -128,7 +129,7 @@ export function createWorkspaceCreateService(deps: {
     latestSetup: LatestSetupRun;
     latestSymlink: LatestSymlinkRun;
     now: string;
-    database?: Database;
+    database?: Database | TransactionClient;
   }): Promise<void> {
     await crudRepo.insertWorkspaceRecordRow({
       id: params.id,
@@ -402,7 +403,7 @@ export function createWorkspaceCreateService(deps: {
         // Place the workspace on the workflow start node + sync the derived status.
         // Any failure here rolls back the workspace row inserted above.
         if (hasWorkflowStart) {
-          await initWorkspaceWorkflow(tx, { workspaceId: id, issueId: input.issueId });
+          await initWorkspaceWorkflow(tx as unknown as WorkflowDb, { workspaceId: id, issueId: input.issueId });
         } else {
           await moveIssueToInProgressStrict(input.issueId, issue.projectId, now, tx);
         }
