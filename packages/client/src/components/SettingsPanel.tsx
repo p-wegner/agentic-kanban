@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { apiFetch, apiPost, apiPut, apiPatch } from "../lib/api.js";
-import { invalidateSettings, setSettings as savePreferences } from "../lib/settingsStore.js";
+import { setSettings as savePreferences } from "../lib/settingsStore.js";
+import { invalidateClientSurfaceLocal } from "../lib/clientInvalidation.js";
 import { showToast } from "./Toast.js";
 import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
 import { applyPreflightResult, CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, DEFAULT_SETTINGS, PI_DEFAULT_PROFILE, TABS, uniqueProfiles, type AgentProfileHealth, type McpHealth, type MonitorTunables, type ProjectSettingsState, type Settings, type SettingsPanelProps, type SkillSetting, type Tab, type TagSetting } from "./SettingsPanel.shared.js";
@@ -396,7 +397,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
       await Promise.all(promises);
       // Invalidate BEFORE onClose: the close handler re-reads settings via the
       // shared store and must see the freshly saved values, not the cache.
-      invalidateSettings();
+      invalidateClientSurfaceLocal({ surface: "settings" });
       showToast("Settings saved", "success");
       onClose();
     } catch {

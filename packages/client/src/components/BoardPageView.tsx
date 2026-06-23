@@ -615,7 +615,6 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
               issue={workspaceIssue}
               project={activeProject ?? null}
               onClose={() => { setWorkspaceIssue(null); setWorkspaceInitial(null); setWorkspaceOpenCreate(false); setWorkspaceInitialDiff(false); }}
-              onWorkspaceChange={() => refetchBoard()}
               onWorkspaceCreating={(issueId) => setPendingWorkspaceIssueIds((prev) => new Set([...prev, issueId]))}
               onWorkspaceCreateSettled={(issueId) => setPendingWorkspaceIssueIds((prev) => {
                 const next = new Set(prev);

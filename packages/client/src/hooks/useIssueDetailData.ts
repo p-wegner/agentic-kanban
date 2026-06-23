@@ -2,6 +2,12 @@ import { useEffect, useState } from "react";
 import type { IssueArtifact, IssueWithStatus, DependencyInfo, MilestoneResponse } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { getCachedBundle, revalidateBundle } from "../lib/issueDetailBundleCache.js";
+import {
+  clearAvailableIssuesCache,
+  getCachedAvailableIssues,
+  invalidateClientSurfaceLocal,
+  setCachedAvailableIssues,
+} from "../lib/clientInvalidation.js";
 // Type-only imports (erased at compile time, so they don't violate the
 // hooks-can't-import-components arch rule).
 import type { ActivityEvent } from "../components/IssueActivitySection.js";
@@ -13,22 +19,18 @@ import type { IssueComment } from "../components/IssueDetailComments.js";
 // payload in the app on every panel open. slim=1 omits descriptions (~60% of
 // the bytes) — the picker never renders them. Invalidated explicitly when the
 // panel creates issues; the short TTL covers out-of-band mutations.
-const AVAILABLE_ISSUES_TTL_MS = 30_000;
-const availableIssuesCache = new Map<string, { data: IssueWithStatus[]; ts: number }>();
-
 function fetchAvailableIssues(projectId: string): Promise<IssueWithStatus[]> {
-  const cached = availableIssuesCache.get(projectId);
-  if (cached && Date.now() - cached.ts < AVAILABLE_ISSUES_TTL_MS) {
-    return Promise.resolve(cached.data);
-  }
+  const cached = getCachedAvailableIssues<IssueWithStatus>(projectId);
+  if (cached) return Promise.resolve(cached);
   return apiFetch<IssueWithStatus[]>(`/api/issues?projectId=${projectId}&slim=1`).then((data) => {
-    availableIssuesCache.set(projectId, { data, ts: Date.now() });
+    setCachedAvailableIssues(projectId, data);
     return data;
   });
 }
 
 export function invalidateAvailableIssuesCache(projectId: string) {
-  availableIssuesCache.delete(projectId);
+  clearAvailableIssuesCache(projectId);
+  invalidateClientSurfaceLocal({ surface: "issue-detail", projectId });
 }
 
 // Shape of GET /api/issues/:id/detail-bundle — the per-issue panel data folded
