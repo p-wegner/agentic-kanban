@@ -315,6 +315,90 @@ describe("agent.service", () => {
     });
   });
 
+  describe("hang watchdog", () => {
+    const originalHangTimeout = process.env.KANBAN_AGENT_HANG_TIMEOUT_MS;
+
+    beforeEach(() => {
+      // Disable the mock-agent path so the real watchdog arms, and use a small timeout.
+      delete process.env.AGENT_COMMAND;
+      process.env.KANBAN_AGENT_HANG_TIMEOUT_MS = "1000";
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      if (originalHangTimeout !== undefined) {
+        process.env.KANBAN_AGENT_HANG_TIMEOUT_MS = originalHangTimeout;
+      } else {
+        delete process.env.KANBAN_AGENT_HANG_TIMEOUT_MS;
+      }
+    });
+
+    it("kills the process and emits a diagnostic stderr after prolonged silence", () => {
+      const mockProc = createMockProc();
+      (spawnMock as any).mockReturnValue(mockProc);
+      const onOutput = vi.fn();
+
+      // agentCommand "claude" → useShell on Windows → attached pipe mode (deterministic
+      // in tests, no file watcher). isMockAgent stays false so the watchdog arms.
+      launch("/tmp", "hang-1", "prompt", undefined, onOutput, undefined, "claude", undefined, undefined, undefined, undefined, "claude");
+      expect(getProcess("hang-1")).toBeDefined();
+
+      vi.advanceTimersByTime(1001);
+
+      expect(onOutput).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "stderr",
+          sessionId: "hang-1",
+          data: expect.stringContaining("hang watchdog"),
+        }),
+      );
+      // kill() removed it from tracking
+      expect(getProcess("hang-1")).toBeUndefined();
+    });
+
+    it("does NOT fire if output keeps arriving (watchdog resets on activity)", () => {
+      const mockProc = createMockProc();
+      (spawnMock as any).mockReturnValue(mockProc);
+      const onOutput = vi.fn();
+
+      launch("/tmp", "hang-2", "prompt", undefined, onOutput, undefined, "claude", undefined, undefined, undefined, undefined, "claude");
+
+      const stdoutHandler = mockProc.stdout.on.mock.calls.find(
+        (c: any[]) => c[0] === "data",
+      )?.[1] as (...args: unknown[]) => unknown;
+
+      // Emit output every 600ms — under the 1000ms timeout — three times.
+      for (let i = 0; i < 3; i++) {
+        vi.advanceTimersByTime(600);
+        stdoutHandler(Buffer.from(`chunk ${i}`));
+      }
+
+      // No hang stderr emitted, process still alive.
+      const hangCalls = onOutput.mock.calls.filter(
+        (c: any[]) => typeof c[0]?.data === "string" && c[0].data.includes("hang watchdog"),
+      );
+      expect(hangCalls.length).toBe(0);
+      expect(getProcess("hang-2")).toBeDefined();
+    });
+
+    it("is disabled when KANBAN_AGENT_HANG_TIMEOUT_MS=0", () => {
+      process.env.KANBAN_AGENT_HANG_TIMEOUT_MS = "0";
+      const mockProc = createMockProc();
+      (spawnMock as any).mockReturnValue(mockProc);
+      const onOutput = vi.fn();
+
+      launch("/tmp", "hang-3", "prompt", undefined, onOutput, undefined, "claude", undefined, undefined, undefined, undefined, "claude");
+      vi.advanceTimersByTime(60_000);
+
+      const hangCalls = onOutput.mock.calls.filter(
+        (c: any[]) => typeof c[0]?.data === "string" && c[0].data.includes("hang watchdog"),
+      );
+      expect(hangCalls.length).toBe(0);
+      expect(getProcess("hang-3")).toBeDefined();
+    });
+  });
+
   describe("kill", () => {
     it("returns false for unknown session", () => {
       expect(kill("nonexistent")).toBe(false);

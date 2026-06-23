@@ -22,6 +22,25 @@ export interface AgentOutputEvent {
 
 export type AgentOutputCallback = (event: AgentOutputEvent) => void;
 
+/**
+ * Spawn-layer hang watchdog timeout. If a launched agent produces NO stdout/stderr
+ * activity for this long, the watchdog kills it — a hang at the spawn layer
+ * (provider deadlocked on a prompt, stuck on a network call, waiting on stdin that
+ * was never closed) used to be invisible to the server and was punted entirely to
+ * the out-of-process monitor's ~30-min cycle. This catches it directly, independent
+ * of any monitor. Resets on every output event; only fires on true silence.
+ * Override with KANBAN_AGENT_HANG_TIMEOUT_MS (0 disables).
+ */
+export const DEFAULT_AGENT_HANG_TIMEOUT_MS = 15 * 60 * 1000;
+
+function resolveHangTimeoutMs(): number {
+  const raw = process.env.KANBAN_AGENT_HANG_TIMEOUT_MS;
+  if (raw === undefined) return DEFAULT_AGENT_HANG_TIMEOUT_MS;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_AGENT_HANG_TIMEOUT_MS;
+  return parsed;
+}
+
 /** Encapsulates all runtime state for active agent processes. Injectable for testing. */
 export class AgentState {
   readonly activeProcesses = new Map<string, ChildProcess>();
@@ -29,6 +48,8 @@ export class AgentState {
   readonly stdinOpen = new Map<string, boolean>();
   readonly outputWatchers = new Map<string, { close(): void }>();
   readonly pidWatchers = new Map<string, { close(): void }>();
+  /** Per-session inactivity watchdogs: { reset(), close() } keyed by sessionId. */
+  readonly hangWatchdogs = new Map<string, { reset(): void; close(): void }>();
 
   /** Close all watchers and clear all state without killing processes. Intended for test cleanup. */
   reset(): void {
@@ -36,6 +57,8 @@ export class AgentState {
     this.outputWatchers.clear();
     for (const w of this.pidWatchers.values()) w.close();
     this.pidWatchers.clear();
+    for (const wd of this.hangWatchdogs.values()) wd.close();
+    this.hangWatchdogs.clear();
     this.activeProcesses.clear();
     this.activePids.clear();
     this.stdinOpen.clear();
@@ -194,12 +217,58 @@ function startPidWatcher(
   };
 }
 
-/** Close + forget this session's output/pid watchers (shared by the exit/error handlers). */
+/**
+ * Start a per-session inactivity watchdog. After `timeoutMs` of NO reset() call
+ * (i.e. no agent output), `onHang` fires once. The caller resets it on every
+ * output event, so it only fires on genuine silence. timeoutMs <= 0 disables it
+ * (returns inert handles).
+ */
+function startHangWatchdog(
+  sessionId: string,
+  timeoutMs: number,
+  onHang: () => void,
+): { reset(): void; close(): void } {
+  if (timeoutMs <= 0) {
+    return { reset() {}, close() {} };
+  }
+  let closed = false;
+  let timer: NodeJS.Timeout | undefined;
+  let fired = false;
+  const arm = () => {
+    if (closed) return;
+    timer = setTimeout(() => {
+      if (closed || fired) return;
+      fired = true;
+      try {
+        onHang();
+      } catch (err) {
+        console.error(`[agent] hang-watchdog callback error: sessionId=${sessionId}`, err);
+      }
+    }, timeoutMs);
+    if (timer.unref) timer.unref();
+  };
+  arm();
+  return {
+    reset() {
+      if (closed || fired) return;
+      if (timer) clearTimeout(timer);
+      arm();
+    },
+    close() {
+      closed = true;
+      if (timer) clearTimeout(timer);
+    },
+  };
+}
+
+/** Close + forget this session's output/pid/hang watchers (shared by the exit/error handlers). */
 function closeSessionWatchers(sessionId: string): void {
   const watcher = agentState.outputWatchers.get(sessionId);
   if (watcher) { watcher.close(); agentState.outputWatchers.delete(sessionId); }
   const pidW = agentState.pidWatchers.get(sessionId);
   if (pidW) { pidW.close(); agentState.pidWatchers.delete(sessionId); }
+  const hangW = agentState.hangWatchdogs.get(sessionId);
+  if (hangW) { hangW.close(); agentState.hangWatchdogs.delete(sessionId); }
 }
 
 /**
@@ -352,9 +421,19 @@ export function launch(
     piSkillPaths: provider === "pi" ? materializedSkillFiles(worktreePath) : undefined,
     skipPermissions,
   });
-  const { command, args, useShell, env: spawnEnv, promptPrefix, suppressStdinPrompt } = launchConfig;
+  const { command, args, useShell, env: spawnEnv, promptPrefix, suppressStdinPrompt, isMockAgent } = launchConfig;
   const stdinPrompt = promptPrefix ? `${promptPrefix}\n\n${effectivePrompt}` : effectivePrompt;
   const ports = resolveLaunchPorts(process.env, resolveWorktreeDevPorts(worktreePath));
+
+  // Spawn-layer hang watchdog: reset on every output event; fire on prolonged
+  // silence. Disabled for the mock agent (deterministic, short-lived) so tests
+  // aren't held open. The wrapped callback below feeds resets.
+  const hangTimeoutMs = isMockAgent ? 0 : resolveHangTimeoutMs();
+  const onOutputWithWatchdog: AgentOutputCallback = (event) => {
+    const wd = agentState.hangWatchdogs.get(sessionId);
+    if (wd) wd.reset();
+    onOutput(event);
+  };
 
   console.log(`[agent] launching: command=${command} provider=${provider ?? "auto"} worktree=${worktreePath} sessionId=${sessionId} resume=${providerSessionId ?? "none"}`);
 
@@ -425,8 +504,29 @@ export function launch(
     agentState.activePids.set(sessionId, proc.pid);
   }
 
-  setupChildOutput(proc, sessionId, shouldDetach, onOutput);
-  attachProcessHandlers(proc, sessionId, shouldDetach, onOutput);
+  // Arm the hang watchdog. On a hang we surface a diagnostic stderr (so the
+  // launch-failure classifier has a reason to attribute) and kill the process —
+  // the kill drives the normal exit path, which finalizes the session. Independent
+  // of the out-of-process monitor.
+  if (hangTimeoutMs > 0) {
+    const watchdog = startHangWatchdog(sessionId, hangTimeoutMs, () => {
+      console.warn(`[agent] hang watchdog fired: sessionId=${sessionId} pid=${proc.pid} — no output for ${Math.round(hangTimeoutMs / 1000)}s; killing`);
+      try {
+        onOutput({
+          type: "stderr",
+          sessionId,
+          data: `Agent hang watchdog: no output for ${Math.round(hangTimeoutMs / 1000)}s — process killed at the spawn layer.`,
+        });
+      } catch (err) {
+        console.error(`[agent] hang-watchdog stderr emit error: sessionId=${sessionId}`, err);
+      }
+      kill(sessionId);
+    });
+    agentState.hangWatchdogs.set(sessionId, watchdog);
+  }
+
+  setupChildOutput(proc, sessionId, shouldDetach, onOutputWithWatchdog);
+  attachProcessHandlers(proc, sessionId, shouldDetach, onOutputWithWatchdog);
 
   return proc;
 }
@@ -453,6 +553,8 @@ export function kill(sessionId: string): boolean {
   if (watcher) { watcher.close(); agentState.outputWatchers.delete(sessionId); }
   const pidW = agentState.pidWatchers.get(sessionId);
   if (pidW) { pidW.close(); agentState.pidWatchers.delete(sessionId); }
+  const hangW = agentState.hangWatchdogs.get(sessionId);
+  if (hangW) { hangW.close(); agentState.hangWatchdogs.delete(sessionId); }
   cleanupOutputFile(sessionId);
   return killed;
 }
@@ -501,6 +603,8 @@ export function killAll(): number {
   agentState.outputWatchers.clear();
   for (const w of agentState.pidWatchers.values()) w.close();
   agentState.pidWatchers.clear();
+  for (const wd of agentState.hangWatchdogs.values()) wd.close();
+  agentState.hangWatchdogs.clear();
   return count;
 }
 
