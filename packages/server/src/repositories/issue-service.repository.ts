@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { issues, issueTags, issueDependencies, issueArtifacts, issueComments, showdowns, workspaces, projectStatuses, workflowTemplates, workflowNodes, sessions, tags } from "@agentic-kanban/shared/schema";
+import { issues, issueTags, issueDependencies, issueArtifacts, workspaces, projectStatuses, workflowTemplates, workflowNodes, sessions, tags } from "@agentic-kanban/shared/schema";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
 import { deleteIssueCascade as deleteIssueCascadeShared } from "@agentic-kanban/shared/lib/cascade-delete";
-import { eq, and, or, sql, inArray, desc } from "drizzle-orm";
+import { eq, and, sql, inArray, desc } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database, TransactionClient } from "../db/index.js";
 import { hasPath } from "../lib/dependency-graph.js";
@@ -193,53 +193,11 @@ export async function updateIssuesByIds(
   await database.update(issues).set(updates).where(inArray(issues.id, ids));
 }
 
-export async function deleteIssueArtifactsForIssue(
-  id: string,
-  database: DbOrTx = db,
-): Promise<void> {
-  await database.delete(issueArtifacts).where(eq(issueArtifacts.issueId, id));
-}
-
-export async function deleteIssueCommentsForIssue(
-  id: string,
-  database: DbOrTx = db,
-): Promise<void> {
-  await database.delete(issueComments).where(eq(issueComments.issueId, id));
-}
-
 export async function getWorkspaceIdsForIssue(
   id: string,
   database: DbOrTx = db,
 ) {
   return database.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.issueId, id));
-}
-
-export async function deleteIssueTagsForIssue(
-  id: string,
-  database: DbOrTx = db,
-): Promise<void> {
-  await database.delete(issueTags).where(eq(issueTags.issueId, id));
-}
-
-export async function deleteDependenciesTouchingIssue(
-  id: string,
-  database: DbOrTx = db,
-): Promise<void> {
-  await database.delete(issueDependencies).where(or(eq(issueDependencies.issueId, id), eq(issueDependencies.dependsOnId, id)));
-}
-
-export async function deleteShowdownsForIssue(
-  id: string,
-  database: DbOrTx = db,
-): Promise<void> {
-  await database.delete(showdowns).where(eq(showdowns.issueId, id));
-}
-
-export async function deleteIssueRow(
-  id: string,
-  database: DbOrTx = db,
-): Promise<void> {
-  await database.delete(issues).where(eq(issues.id, id));
 }
 
 export async function getIssueProjectIdsPair(
