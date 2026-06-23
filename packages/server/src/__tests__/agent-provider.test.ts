@@ -234,6 +234,37 @@ describe("ClaudeProvider", () => {
 
       Object.defineProperty(process, "platform", { value: originalPlatform });
     });
+
+    describe("oneShotText mode", () => {
+      it("emits plain text args (no stream-json/MCP) ending in -p", () => {
+        const config = provider.buildLaunchConfig({ oneShotText: true });
+        expect(config.args).toEqual(["--output-format", "text", "-p"]);
+        expect(config.args).not.toContain("stream-json");
+        expect(config.args).not.toContain("--mcp-config");
+        expect(config.isMockAgent).toBe(false);
+        expect(config.keepStdinOpen).toBe(false);
+      });
+
+      it("passes --model when provided", () => {
+        const config = provider.buildLaunchConfig({ oneShotText: true, model: "claude-haiku-4-5" });
+        expect(config.args).toEqual(["--output-format", "text", "--model", "claude-haiku-4-5", "-p"]);
+      });
+
+      it("appends --settings for a profile whose settings file exists", () => {
+        (existsSyncMock as any).mockImplementation((p: string) => p.includes("settings_anth.json"));
+        const config = provider.buildLaunchConfig({ oneShotText: true, profile: { provider: "claude", name: "anth" } });
+        expect(config.args).toContain("--settings");
+        expect(config.args.some((a) => a.includes("settings_anth.json"))).toBe(true);
+      });
+
+      it("still spawns the real binary in one-shot mode under a mock env", () => {
+        process.env.AGENT_COMMAND = "mock-agent";
+        const config = provider.buildLaunchConfig({ oneShotText: true });
+        // Mock agents have no one-shot text contract — fall through to mock launch.
+        expect(config.isMockAgent).toBe(true);
+        expect(config.args).not.toContain("--output-format");
+      });
+    });
   });
 
   describe("parseStreamEvent", () => {
@@ -666,6 +697,34 @@ describe("CodexProvider", () => {
   it("has no prompt prefix when not in plan mode", () => {
     const config = provider.buildLaunchConfig({});
     expect(config.promptPrefix).toBeUndefined();
+  });
+
+  describe("oneShotText mode", () => {
+    it("uses `codex exec` WITHOUT --json, reading the prompt from stdin", () => {
+      const config = provider.buildLaunchConfig({ oneShotText: true });
+      expect(config.args).toEqual([
+        "exec", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust",
+        "-",
+      ]);
+      expect(config.args).not.toContain("--json");
+      // No Claude-only flags leak into the codex invocation (the old bug).
+      expect(config.args).not.toContain("-p");
+      expect(config.args).not.toContain("--output-format");
+    });
+
+    it("passes a non-default codex profile and model", () => {
+      const config = provider.buildLaunchConfig({
+        oneShotText: true,
+        profile: { provider: "codex", name: "fast" },
+        model: "gpt-5.5",
+      });
+      expect(config.args).toEqual([
+        "exec", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust",
+        "--profile", "fast",
+        "--model", "gpt-5.5",
+        "-",
+      ]);
+    });
   });
 
   it("parses agent_message item text as assistantText", () => {

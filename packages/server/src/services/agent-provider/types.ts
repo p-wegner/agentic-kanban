@@ -54,6 +54,16 @@ export interface ProviderLaunchOptions {
   piSkillPaths?: string[];
   /** Skip permission prompts (use Copilot --allow-all, Claude system setting). */
   skipPermissions?: boolean;
+  /**
+   * One-shot, non-streaming text mode for internal AI utility calls (issue
+   * enhancement, voice capture, stack detection, …) that just need the model's
+   * final answer as plain text on stdout — NOT a long-running interactive agent.
+   * Providers emit their plain-text invocation (e.g. Claude `--output-format text`,
+   * Codex `exec` without `--json`) and skip stream-json/MCP wiring. This is the
+   * single source of truth for the one-shot launch that `invokeClaudePrompt` used
+   * to reimplement outside the provider abstraction.
+   */
+  oneShotText?: boolean;
 }
 
 /**
