@@ -7,7 +7,7 @@
  * - The =======, <<<<<<<, and >>>>>>> markers are all detected.
  * - assertNoCommittedConflictMarkers logs [fatal] alerts on findings.
  *
- * We mock `node:child_process` so no real git repo is required.
+ * We mock the git adapter so no real git repo is required.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -19,8 +19,8 @@ function gitGrepLine(file: string, line: number, content: string): string {
 // Control variable for the mock
 let _mockExecResult: { output: string; exitCode: number } = { output: "", exitCode: 1 };
 
-vi.mock("node:child_process", () => ({
-  execFileSync: vi.fn((..._args: unknown[]) => {
+vi.mock("@agentic-kanban/shared/lib/git-exec", () => ({
+  gitExecSync: vi.fn((..._args: unknown[]) => {
     if (_mockExecResult.exitCode === 1) {
       const err = Object.assign(new Error("git grep no matches"), { status: 1 });
       throw err;
