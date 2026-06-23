@@ -13,6 +13,7 @@
     "./lib/agent-skill-files": { "development": "./src/lib/agent-skill-files.ts", "types": "./dist/lib/agent-skill-files.d.ts", "import": "./dist/lib/agent-skill-files.js", "default": "./src/lib/agent-skill-files.ts" },
     "./lib/agent-stream-parser": { "development": "./src/lib/agent-stream-parser.ts", "types": "./dist/lib/agent-stream-parser.d.ts", "import": "./dist/lib/agent-stream-parser.js", "default": "./src/lib/agent-stream-parser.ts" },
     "./lib/branch": { "development": "./src/lib/branch.ts", "types": "./dist/lib/branch.d.ts", "import": "./dist/lib/branch.js", "default": "./src/lib/branch.ts" },
+    "./lib/cascade-delete": { "development": "./src/lib/cascade-delete.ts", "types": "./dist/lib/cascade-delete.d.ts", "import": "./dist/lib/cascade-delete.js", "default": "./src/lib/cascade-delete.ts" },
     "./lib/git-service": { "development": "./src/lib/git-service.ts", "types": "./dist/lib/git-service.d.ts", "import": "./dist/lib/git-service.js", "default": "./src/lib/git-service.ts" },
     "./lib/git-service.js": { "development": "./src/lib/git-service.ts", "types": "./dist/lib/git-service.d.ts", "import": "./dist/lib/git-service.js", "default": "./src/lib/git-service.ts" },
     "./lib/git-exec": { "development": "./src/lib/git-exec.ts", "types": "./dist/lib/git-exec.d.ts", "import": "./dist/lib/git-exec.js", "default": "./src/lib/git-exec.ts" },
