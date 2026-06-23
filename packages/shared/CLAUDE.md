@@ -24,6 +24,9 @@ enforced by `packages/shared/__tests__/barrel-client-safety.test.ts`, not just c
 ## Migration journal required
 Every new `packages/shared/drizzle/NNNN_name.sql` file needs a matching entry in `packages/shared/drizzle/meta/_journal.json`. Without it, `drizzle-kit migrate` silently skips the file. See `.llm/workflows.md` for diagnosis workflow.
 
+## Schema ↔ migrations drift gate
+`packages/server/src/__tests__/migration-schema-drift.test.ts` is the CI gate (arch-review #871): it fails on a duplicate `NNNN` number on disk, an un-journaled (orphan) `.sql` file, a journal entry with no file, AND on schema↔migrations divergence — it applies every journaled migration to a fresh in-memory DB and diffs the resulting table+column set against the Drizzle schema (`getTableConfig`). So a schema column with no migration (or the reverse) breaks the build. NOTE: the drizzle snapshot chain (`meta/NNNN_snapshot.json`) was abandoned at 0006, so `drizzle-kit generate --check` is NOT reliable here — this fresh-apply test is the substitute. Don't add an orphaned dup-numbered file (that was the original bug: `0039_direct_workspace_base_commit.sql` shadowed by the journaled `0040_*`).
+
 ## Migration statement-breakpoint
 Multi-statement SQL files require `--> statement-breakpoint` between each statement. Without it drizzle-kit only executes the first. Always check existing multi-statement migrations for the marker.
 
