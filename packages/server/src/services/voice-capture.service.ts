@@ -12,7 +12,9 @@ import {
   insertVoiceCaptureIssue,
   attachVoiceCaptureTag,
 } from "../repositories/voice-capture.repository.js";
-import { nextIssueNumber } from "../repositories/issue-number.repository.js";
+import { isIssueNumberUniqueConstraintError, nextIssueNumber } from "../repositories/issue-number.repository.js";
+
+const ISSUE_NUMBER_INSERT_ATTEMPTS = 3;
 
 export interface VoiceCaptureInput {
   projectId: string;
@@ -276,22 +278,39 @@ export async function createVoiceCaptureIssue(
     ensureVoiceCaptureTagRepo(database),
   ]);
 
-  // Determine next issue number
-  const issueNumber = await nextIssueNumber(projectId, database);
+  let id: string | null = null;
+  let issueNumber: number | null = null;
+  for (let attempt = 1; attempt <= ISSUE_NUMBER_INSERT_ATTEMPTS; attempt++) {
+    issueNumber = await nextIssueNumber(projectId, database);
 
-  const id = randomUUID();
-  const now = new Date().toISOString();
+    id = randomUUID();
+    const now = new Date().toISOString();
 
-  await insertVoiceCaptureIssue({
-    id,
-    issueNumber,
-    title: structured.title,
-    description: structured.description,
-    priority: structured.priority,
-    statusId,
-    projectId,
-    now,
-  }, database);
+    try {
+      await insertVoiceCaptureIssue({
+        id,
+        issueNumber,
+        title: structured.title,
+        description: structured.description,
+        priority: structured.priority,
+        statusId,
+        projectId,
+        now,
+      }, database);
+      break;
+    } catch (err: unknown) {
+      id = null;
+      issueNumber = null;
+      if (attempt < ISSUE_NUMBER_INSERT_ATTEMPTS && isIssueNumberUniqueConstraintError(err)) {
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  if (id === null || issueNumber === null) {
+    throw new Error("Could not allocate a unique issue number");
+  }
 
   // Attach the voice-capture tag
   await attachVoiceCaptureTag(id, tagId, database);
