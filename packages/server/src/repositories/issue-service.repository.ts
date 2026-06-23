@@ -1,11 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { issues, issueTags, issueDependencies, issueArtifacts, issueComments, showdowns, workspaces, projectStatuses, workflowTemplates, workflowNodes, sessions, tags } from "@agentic-kanban/shared/schema";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
+import { deleteIssueCascade as deleteIssueCascadeShared } from "@agentic-kanban/shared/lib/cascade-delete";
 import { eq, and, or, sql, inArray, desc } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database, TransactionClient } from "../db/index.js";
-import { deleteWorkspaceCascade } from "./workspace.repository.js";
-import { deleteTimeEntriesForIssue } from "./issue-time-entries.repository.js";
 import { hasPath } from "../lib/dependency-graph.js";
 import type { BatchIssueInput, BatchDependencyInput } from "../lib/batch-create-issues.js";
 
@@ -510,17 +509,7 @@ export async function applyDependencyEdgeBatch(
  * delete FK-fail. Each delete is by issueId and idempotent.
  */
 export async function deleteIssueCascade(issueId: string, database: Database = db): Promise<void> {
-  const wsRows = await database.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.issueId, issueId));
-  for (const ws of wsRows) {
-    await deleteWorkspaceCascade(ws.id, database);
-  }
-  await deleteDependenciesTouchingIssue(issueId, database);
-  await deleteIssueArtifactsForIssue(issueId, database);
-  await deleteIssueCommentsForIssue(issueId, database);
-  await deleteTimeEntriesForIssue(issueId, database);
-  await deleteShowdownsForIssue(issueId, database);
-  await deleteIssueTagsForIssue(issueId, database);
-  await deleteIssueRow(issueId, database);
+  await deleteIssueCascadeShared(issueId, database);
 }
 
 /**
