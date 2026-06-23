@@ -322,6 +322,88 @@ describe("Issues route — time entries edge cases", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Transactional issue deletion (file-based — DELETE cascade runs in a tx)
+// arch-review #879: HTTP DELETE must cascade ALL direct child tables, including
+// issue_time_entries, atomically — same single shared implementation as CLI/MCP.
+// ---------------------------------------------------------------------------
+
+describe("Issues route — DELETE cascade includes time entries", () => {
+  const { app, db, cleanup } = fileSetup();
+  let ids: Awaited<ReturnType<typeof fullSeed>>;
+
+  beforeEach(async () => { ids = await fullSeed(db); });
+  afterEach(() => { cleanup?.(); });
+
+  it("DELETE /:id removes issue_time_entries (regression: forked cascade missed them)", async () => {
+    // Seed a time entry via the HTTP endpoint so it lands like a real one.
+    const post = await app.request(`/api/issues/${ids.issueId}/time-entries`, json("POST", { minutes: 25, note: "work" }));
+    expect(post.status).toBe(201);
+
+    const before = await db.select().from(schema.issueTimeEntries).where(eq(schema.issueTimeEntries.issueId, ids.issueId));
+    expect(before).toHaveLength(1);
+
+    const del = await app.request(`/api/issues/${ids.issueId}`, { method: "DELETE" });
+    expect(del.status).toBe(200);
+
+    // Issue gone…
+    const issueRows = await db.select().from(schema.issues).where(eq(schema.issues.id, ids.issueId));
+    expect(issueRows).toHaveLength(0);
+    // …and its time entries gone with it. Before the fix the non-cascading FK
+    // either orphaned these rows or made the delete FK-fail mid-cascade.
+    const after = await db.select().from(schema.issueTimeEntries).where(eq(schema.issueTimeEntries.issueId, ids.issueId));
+    expect(after).toHaveLength(0);
+  });
+
+  it("DELETE /:id cascades every direct child table atomically", async () => {
+    // A comment, a tag link, a showdown, a workspace + session, and a dependency
+    // edge in both directions — every table the cascade must clear.
+    const commentRes = await app.request(`/api/issues/${ids.issueId}/comments`, json("POST", { body: "c" }));
+    expect(commentRes.status).toBe(201);
+    await app.request(`/api/issues/${ids.issueId}/time-entries`, json("POST", { minutes: 5 }));
+
+    const otherIssueId = await seedIssue(db, ids.projectId, ids.inProgressId, { issueNumber: 2, title: "Other" });
+    await db.insert(schema.issueDependencies).values({
+      id: randomUUID(), issueId: ids.issueId, dependsOnId: otherIssueId,
+      type: "depends_on", createdAt: new Date().toISOString(),
+    });
+
+    const tagId = randomUUID();
+    await db.insert(schema.tags).values({ id: tagId, name: "t", color: null, createdAt: new Date().toISOString() });
+    await db.insert(schema.issueTags).values({ id: randomUUID(), issueId: ids.issueId, tagId });
+
+    await db.insert(schema.showdowns).values({
+      id: randomUUID(), issueId: ids.issueId,
+      status: "active", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    });
+
+    const wsId = randomUUID();
+    await db.insert(schema.workspaces).values({
+      id: wsId, issueId: ids.issueId, branch: "feature/del", status: "idle",
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    });
+    await db.insert(schema.sessions).values({
+      id: randomUUID(), workspaceId: wsId, executor: "claude-code", status: "completed",
+      createdAt: new Date().toISOString(),
+    });
+
+    const del = await app.request(`/api/issues/${ids.issueId}`, { method: "DELETE" });
+    expect(del.status).toBe(200);
+
+    // The issue and every directly-referencing row are gone; nothing orphaned.
+    expect(await db.select().from(schema.issues).where(eq(schema.issues.id, ids.issueId))).toHaveLength(0);
+    expect(await db.select().from(schema.issueTimeEntries).where(eq(schema.issueTimeEntries.issueId, ids.issueId))).toHaveLength(0);
+    expect(await db.select().from(schema.issueComments).where(eq(schema.issueComments.issueId, ids.issueId))).toHaveLength(0);
+    expect(await db.select().from(schema.issueTags).where(eq(schema.issueTags.issueId, ids.issueId))).toHaveLength(0);
+    expect(await db.select().from(schema.showdowns).where(eq(schema.showdowns.issueId, ids.issueId))).toHaveLength(0);
+    expect(await db.select().from(schema.issueDependencies).where(eq(schema.issueDependencies.issueId, ids.issueId))).toHaveLength(0);
+    expect(await db.select().from(schema.workspaces).where(eq(schema.workspaces.issueId, ids.issueId))).toHaveLength(0);
+    expect(await db.select().from(schema.sessions).where(eq(schema.sessions.workspaceId, wsId))).toHaveLength(0);
+    // The dependency target issue is untouched.
+    expect(await db.select().from(schema.issues).where(eq(schema.issues.id, otherIssueId))).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Issue CRUD edge cases (file-based, supports transactions)
 // ---------------------------------------------------------------------------
 
