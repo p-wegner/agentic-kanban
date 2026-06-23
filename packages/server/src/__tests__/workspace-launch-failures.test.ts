@@ -64,10 +64,14 @@ describe("getWorkspaceLaunchFailures", () => {
     expect(result.failures).toHaveLength(0);
   });
 
-  it("detects zero-output session (<=1s duration)", async () => {
+  it("flags a fast non-zero-exit session as session-error, NOT zero-output (no duration heuristic)", async () => {
+    // Under the old heuristic a <=1s session was auto-flagged "zero-output". The
+    // explicit-signal contract no longer lets wall-clock decide: a 500ms session
+    // with no launchFailure/success signal is classified purely by its exit code,
+    // so a non-zero exit surfaces as session-error (the lifecycle owns the
+    // launch-failure stamp). This is the fast-legit-run misclassification fix.
     const { db } = createTestDb();
     const now = new Date().toISOString();
-    // Session that lasted only 500ms
     const start = new Date(Date.now() - 60 * 60 * 1000);
     const end = new Date(start.getTime() + 500);
 
@@ -89,16 +93,20 @@ describe("getWorkspaceLaunchFailures", () => {
 
     const result = await getWorkspaceLaunchFailures(projectId, db);
     expect(result.failures).toHaveLength(1);
-    expect(result.failures[0].failureCategory).toBe("zero-output");
+    expect(result.failures[0].failureCategory).toBe("session-error");
     expect(result.failures[0].workspaceId).toBe(wsId);
     expect(result.failures[0].issueNumber).toBe(1);
   });
 
-  it("detects zero-output session via zero token counts in stats", async () => {
+  it("does NOT flag a fast clean-exit session with zero tokens (no zero-token heuristic)", async () => {
+    // The old heuristic flagged any session with zero input AND output tokens as a
+    // failure, even on a clean exit — misclassifying slow/healthy runs whose token
+    // stats the parser failed to extract. Without an explicit launchFailure/
+    // success=false signal and with exitCode 0, this is now treated as healthy.
     const { db } = createTestDb();
     const now = new Date().toISOString();
     const start = new Date(Date.now() - 60 * 60 * 1000);
-    const end = new Date(start.getTime() + 5000); // 5s but zero tokens
+    const end = new Date(start.getTime() + 5000);
 
     const projectId = randomUUID();
     const statusId = randomUUID();
@@ -113,7 +121,35 @@ describe("getWorkspaceLaunchFailures", () => {
     await db.insert(sessions).values(baseSession(sessionId, wsId, now, {
       startedAt: start.toISOString(),
       endedAt: end.toISOString(),
+      exitCode: "0",
       stats: JSON.stringify({ inputTokens: 0, outputTokens: 0, durationMs: 5000 }),
+    }));
+
+    const result = await getWorkspaceLaunchFailures(projectId, db);
+    expect(result.failures).toHaveLength(0);
+  });
+
+  it("flags a session stamped success=false as zero-output (explicit provider signal)", async () => {
+    const { db } = createTestDb();
+    const now = new Date().toISOString();
+    const start = new Date(Date.now() - 60 * 60 * 1000);
+    const end = new Date(start.getTime() + 5000);
+
+    const projectId = randomUUID();
+    const statusId = randomUUID();
+    const issueId = randomUUID();
+    const wsId = randomUUID();
+    const sessionId = randomUUID();
+
+    await db.insert(projects).values(baseProject(projectId, now));
+    await db.insert(projectStatuses).values(baseStatus(statusId, projectId, "In Progress", now));
+    await db.insert(issues).values(baseIssue(issueId, projectId, statusId, now));
+    await db.insert(workspaces).values(baseWorkspace(wsId, issueId, now));
+    await db.insert(sessions).values(baseSession(sessionId, wsId, now, {
+      startedAt: start.toISOString(),
+      endedAt: end.toISOString(),
+      exitCode: "0",
+      stats: JSON.stringify({ inputTokens: 100, outputTokens: 50, durationMs: 5000, success: false }),
     }));
 
     const result = await getWorkspaceLaunchFailures(projectId, db);

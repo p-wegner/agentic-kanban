@@ -152,6 +152,14 @@ export type AgentProfileHealth = {
     provider: AgentProvider;
     profileName: string;
     flags: string[];
+    /** CLI version probe verdict (optional — older server builds omit it). */
+    version?: {
+      detected: boolean;
+      raw: string | null;
+      version: string | null;
+      status: "ok" | "below-min" | "above-known" | "unparseable" | "unavailable";
+      message: string | null;
+    } | null;
   };
   latestFailure: {
     at: string;
