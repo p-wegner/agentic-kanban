@@ -32,6 +32,7 @@ export function applyMigrationsToClient(client: Client): void {
 export function createTestDb() {
   const client = createClient({ url: ":memory:" });
   applyMigrationsToClient(client);
+  client.execute("PRAGMA foreign_keys=ON");
   const db = drizzle(client, { schema });
   return { client, db };
 }

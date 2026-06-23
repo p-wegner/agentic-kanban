@@ -1,9 +1,9 @@
-import { projects, projectStatuses, issues, workspaces, preferences, issueTags, scheduledRuns, agentSkills, repos, flakyTests, qualityMetrics, projectScriptShortcuts } from "@agentic-kanban/shared/schema";
-import { eq, sql, and, inArray, isNull, gte } from "drizzle-orm";
+import { projects, projectStatuses, issues, preferences, scheduledRuns, scheduledRunHistory, agentSkills, repos, flakyTests, qualityMetrics, projectScriptShortcuts, boardHealthEvents, workflowTemplates } from "@agentic-kanban/shared/schema";
+import { eq, sql, and, isNull, gte } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
-import { deleteWorkspaceCascade } from "./workspace.repository.js";
+import { deleteIssueCascade } from "./issue-service.repository.js";
 import { initializeProjectStatuses } from "./issue.repository.js";
 
 export async function getProjectById(
@@ -97,20 +97,20 @@ export async function deleteProjectCascade(
 ): Promise<void> {
   const projectIssues = await database.select({ id: issues.id }).from(issues).where(eq(issues.projectId, projectId));
   if (projectIssues.length > 0) {
-    const issueIds = projectIssues.map((i) => i.id);
-    await database.delete(issueTags).where(inArray(issueTags.issueId, issueIds));
-    const wsRows = await database.select({ id: workspaces.id }).from(workspaces).where(inArray(workspaces.issueId, issueIds));
-    for (const ws of wsRows) {
-      await deleteWorkspaceCascade(ws.id, database);
+    for (const issue of projectIssues) {
+      await deleteIssueCascade(issue.id, database);
     }
-    await database.delete(issues).where(inArray(issues.id, issueIds));
   }
 
+  await database.delete(scheduledRunHistory).where(eq(scheduledRunHistory.projectId, projectId));
   await database.delete(scheduledRuns).where(eq(scheduledRuns.projectId, projectId));
   await database.delete(projectScriptShortcuts).where(eq(projectScriptShortcuts.projectId, projectId));
+  await database.delete(workflowTemplates).where(eq(workflowTemplates.projectId, projectId));
+  await database.update(projects).set({ defaultSkillId: null }).where(eq(projects.id, projectId));
   await database.delete(agentSkills).where(eq(agentSkills.projectId, projectId));
   await database.delete(flakyTests).where(eq(flakyTests.projectId, projectId));
   await database.delete(qualityMetrics).where(eq(qualityMetrics.projectId, projectId));
+  await database.delete(boardHealthEvents).where(eq(boardHealthEvents.projectId, projectId));
   await database.delete(repos).where(eq(repos.projectId, projectId));
   await database.delete(projectStatuses).where(eq(projectStatuses.projectId, projectId));
   await database.delete(preferences).where(and(eq(preferences.key, "activeProjectId"), eq(preferences.value, projectId)));
