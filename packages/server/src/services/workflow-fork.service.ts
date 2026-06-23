@@ -54,6 +54,7 @@ import {
 } from "@agentic-kanban/shared/lib/workflow-engine";
 import { writeAgentSkillFile, readLocalSkillPrompt, copySkillToWorktree } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
+import { resolveEffectiveModel } from "./effective-config.service.js";
 import {
   buildForkArtifactsDoc,
   buildJoinConsolidateLine,
@@ -83,7 +84,7 @@ export function createWorkflowForkService(deps: {
     const prefRows = await selectAllPreferences(database);
     const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
     const s = resolveAgentSettings(prefMap);
-    const model = s.provider === "claude" ? prefMap.get("default_model") || undefined : undefined;
+    const model = resolveEffectiveModel({ prefMap, provider: s.provider }).model;
     return { ...s, model };
   }
 

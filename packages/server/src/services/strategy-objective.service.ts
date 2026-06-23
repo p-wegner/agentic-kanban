@@ -2,11 +2,11 @@ import { gitExecSync } from "@agentic-kanban/shared/lib/git-exec";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { preferences } from "@agentic-kanban/shared/schema";
-import { modelBelongsToProvider } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
 import { getProfilePrefKey } from "./agent-provider.js";
 import { fetchLiveQuotaUsage } from "./quota-usage.service.js";
 import type { QuotaUsageResult } from "./quota-usage.service.js";
+import { resolveEffectiveModel } from "./effective-config.service.js";
 
 export type StrategySegmentKind = "work-type" | "provider" | "area" | "custom";
 
@@ -570,7 +570,13 @@ export async function resolveStrategyProviderSelection(
     // passed as --model and kill the launch (#696). Mismatches are dropped here so the provider
     // default is used instead.
     const policyModel = selected.policy.model;
-    const model = policyModel && modelBelongsToProvider(policyModel, selected.provider) ? policyModel : undefined;
+    const model = policyModel
+      ? resolveEffectiveModel({
+          prefMap: new Map(),
+          provider: selected.provider,
+          requestedModel: policyModel,
+        }).model
+      : undefined;
     return { provider: selected.provider, profileName: selected.profileName, model };
   } catch {
     return null;

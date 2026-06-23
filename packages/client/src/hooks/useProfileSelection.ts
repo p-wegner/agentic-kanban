@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { getSettings } from "../lib/settingsStore.js";
+import { defaultModelForProvider, type AgentProvider } from "../lib/settings-shared.js";
 import {
   CODEX_DEFAULT_PROFILE,
   COPILOT_DEFAULT_PROFILE,
@@ -41,7 +42,7 @@ export function useProfileSelection(issueId: string): UseProfileSelectionResult 
         setPrefs(s);
         setRequiresReview(s.auto_review !== "false");
         setSelectedProfile(defaultSelectedProfile(s));
-        setSelectedModel(s.default_model || "");
+        setSelectedModel(defaultModelForProvider(s, ((s.provider || "claude") as AgentProvider)));
       })
       .catch(() => {});
     Promise.all([
