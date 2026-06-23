@@ -1,4 +1,9 @@
 import type { Database } from "../db/index.js";
+import {
+  createAgentStreamExtractionContext,
+  extractToolResultTextFromLine,
+  parseAgentStreamExtractionLine,
+} from "../lib/agent-stream-extraction.js";
 import { readSessionStdoutFile } from "../lib/session-output-reader.js";
 import {
   insertTestRunBatch,
@@ -360,26 +365,6 @@ export function parseTestResultsFromText(
 // directly. We walk each line, pull out any human-readable text we can find, and
 // concatenate it so the text parsers above can scan for test-result lines.
 
-/** Recursively collect string values that look like console text from a parsed JSON value. */
-function collectText(value: unknown, out: string[]): void {
-  if (typeof value === "string") {
-    if (value.length > 0) out.push(value);
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const v of value) collectText(v, out);
-    return;
-  }
-  if (value && typeof value === "object") {
-    const obj = value as Record<string, unknown>;
-    // tool_result content lives under `content` (string or [{type:"text",text}]) and
-    // sometimes a top-level `text`/`output`/`stdout`/`result` field.
-    for (const key of ["content", "text", "output", "stdout", "result", "message"]) {
-      if (key in obj) collectText(obj[key], out);
-    }
-  }
-}
-
 /**
  * Extract candidate console text from one persisted stdout message's `data`.
  * Handles: (a) plain text, (b) a single JSON object/JSONL line whose tool_result
@@ -387,21 +372,23 @@ function collectText(value: unknown, out: string[]): void {
  */
 export function extractTextFromMessageData(data: string): string {
   const parts: string[] = [];
-  let sawJson = false;
+  let sawAgentStream = false;
+  const context = createAgentStreamExtractionContext();
   for (const line of data.split(/\r?\n/)) {
     const t = line.trim();
     if (!t) continue;
-    if (t.startsWith("{") || t.startsWith("[")) {
-      try {
-        collectText(JSON.parse(t), parts);
-        sawJson = true;
-        continue;
-      } catch { /* not a complete JSON line — fall through to raw */ }
+    const parsed = parseAgentStreamExtractionLine(t, context);
+    if (parsed) {
+      sawAgentStream = true;
+      const text = extractToolResultTextFromLine(t, context);
+      if (text) parts.push(text);
+      continue;
     }
-    if (!sawJson) parts.push(line);
+    if (!sawAgentStream) parts.push(line);
   }
-  // If nothing JSON-structured was found, treat the whole blob as raw console text.
-  if (parts.length === 0) return data;
+  // If no agent stream events were found, treat the whole blob as raw console
+  // text so direct JSON reporter output remains parseable.
+  if (parts.length === 0 && !sawAgentStream) return data;
   return parts.join("\n");
 }
 
