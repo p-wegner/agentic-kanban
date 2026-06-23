@@ -4,6 +4,7 @@ import { isTerminalStatusIdView, ACTIVE_WORKSPACE_STATUSES, workspaceStatusPrior
 import type { BoardStatusResponse, BoardStatusIssue } from "@agentic-kanban/shared";
 import { isAnalyticsNoise } from "./session-filter.js";
 import { NotFoundError } from "../errors/index.js";
+import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
 import { buildBoardStatusEntry, selectLatestRelevantSession } from "../lib/board-status-entry.js";
 import {
   classifyBoardStatusIssueAttention,
@@ -80,7 +81,7 @@ export async function getBoardStatus(
   const preferenceRows = await getAutoMergePreferences(database);
   const preferenceMap = new Map(preferenceRows.map((pref) => [pref.key, pref.value]));
   const classificationOptions: BoardStatusClassificationOptions = {
-    autoMergeEnabled: preferenceMap.get("auto_merge") === "true",
+    autoMergeEnabled: isAutoMergeEnabled(preferenceMap),
     autoMergeInReview: preferenceMap.get("auto_merge_in_review") === "true",
   };
 

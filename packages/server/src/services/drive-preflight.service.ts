@@ -8,6 +8,7 @@ import { parseStrategyBullseyeConfig, selectProviderFromStrategy } from "./strat
 import { cooldownKey as claudeCooldownKey } from "./claude-subscription-ring.js";
 import { cooldownKey as codexCooldownKey } from "./codex-license-ring.js";
 import { autodrivePrefKey, autoMergeDisabledPrefKey, getDriveStatus, setDriveEnabled } from "./drive.service.js";
+import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
 import type { DriveEnablementStatus } from "./drive.service.js";
 
 /**
@@ -264,7 +265,7 @@ export async function runDrivePreflight(
     const autodriveOn = prefMap.get(autodrivePrefKey(projectId)) === "true";
     const killSwitchOn = prefMap.get(autoMergeDisabledPrefKey(projectId)) === "true";
     const autoReviewOn = prefMap.get("auto_review") === "true";
-    const autoMergeOn = prefMap.get("auto_merge") === "true";
+    const autoMergeOn = isAutoMergeEnabled(prefMap);
 
     const incoherent: string[] = [];
     if (!autodriveOn) incoherent.push("autodrive off");

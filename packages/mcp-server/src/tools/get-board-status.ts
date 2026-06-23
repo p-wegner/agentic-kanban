@@ -17,6 +17,7 @@ import {
 // PersistedSessionStats parse + BoardStatusIssue assembly, which drifted from the
 // server's; now both build the IDENTICAL entry via these helpers.
 import { buildBoardStatusEntry } from "@agentic-kanban/shared/lib/board-status-entry";
+import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
 
 export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, getDiffShortstat } = deps;
@@ -52,7 +53,7 @@ export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodD
           .where(inArray(schema.preferences.key, ["auto_merge", "auto_merge_in_review"]));
         const preferenceMap = new Map(preferenceRows.map((pref) => [pref.key, pref.value]));
         const classificationOptions = {
-          autoMergeEnabled: preferenceMap.get("auto_merge") === "true",
+          autoMergeEnabled: isAutoMergeEnabled(preferenceMap),
           autoMergeInReview: preferenceMap.get("auto_merge_in_review") === "true",
         };
 

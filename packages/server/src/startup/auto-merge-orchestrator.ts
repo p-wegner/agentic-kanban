@@ -8,6 +8,7 @@ import { createWorkspaceMergeService } from "../services/workspace-merge.service
 import { buildStrandedBatch, pickIntegrationWorkspace } from "../services/reconciler.service.js";
 import type { SessionManager } from "../services/session.manager.js";
 import { resolveMergeStrategy } from "./merge-strategy.js";
+import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
 import { reconcileCompletionStates } from "./completion-state-reconciler.js";
 import { reconcileDriveCompletion } from "./drive-completion-reconciler.js";
 import { reconcileProjectCompletion } from "./project-completion-reconciler.js";
@@ -65,7 +66,7 @@ export function createAutoMergeOrchestrator(deps: {
       .from(preferences)
       .where(inArray(preferences.key, ["auto_merge", "auto_monitor", "merge_strategy"]));
     const prefMap = new Map(prefRows.map((row) => [row.key, row.value]));
-    return prefMap.get("auto_merge") !== "false" && resolveMergeStrategy(prefMap) === "merge_queue";
+    return isAutoMergeEnabled(prefMap) && resolveMergeStrategy(prefMap) === "merge_queue";
   }
 
   async function findCompletedWorkspaceIds(): Promise<string[]> {
