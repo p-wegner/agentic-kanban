@@ -120,6 +120,24 @@ describe("parseTestResultsFromText — JSON-first then text fallback", () => {
 });
 
 describe("extractTextFromMessageData", () => {
+  it("leaves direct JSON reporter output parseable", () => {
+    const json = JSON.stringify({
+      testResults: [
+        {
+          testFilePath: "/repo/src/a.test.ts",
+          assertionResults: [{ fullName: "g > direct", status: "passed", duration: 1 }],
+        },
+      ],
+    });
+    expect(parseTestResultsFromText(extractTextFromMessageData(json))).toHaveLength(1);
+  });
+
+  it("does not scrape arbitrary JSON message fields as console output", () => {
+    const json = JSON.stringify({ message: "\u2713 src/a.test.ts > g > false positive 1ms" });
+    expect(extractTextFromMessageData(json)).toBe(json);
+    expect(parseTestResultsFromText(extractTextFromMessageData(json))).toEqual([]);
+  });
+
   it("pulls console text out of a Claude tool_result stream-json line", () => {
     const line = JSON.stringify({
       type: "user",

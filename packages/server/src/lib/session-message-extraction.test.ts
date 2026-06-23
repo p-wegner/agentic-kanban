@@ -45,6 +45,15 @@ describe("extractLastAgentMessageFromRows", () => {
     expect(extractLastAgentMessageFromRows([row("stdout", j)])).toBe("done");
   });
 
+  it("handles Pi assistant deltas through the shared provider parser", () => {
+    const j = JSON.stringify({
+      type: "message_update",
+      message: { model: "gpt-5" },
+      assistantMessageEvent: { type: "text_delta", delta: "from pi" },
+    });
+    expect(extractLastAgentMessageFromRows([row("stdout", j)])).toBe("from pi");
+  });
+
   it("ignores non-JSON lines", () => {
     const data = ["not json", assistant("ok"), "{broken"].join("\n");
     expect(extractLastAgentMessageFromRows([row("stdout", data)])).toBe("ok");
@@ -64,6 +73,10 @@ describe("extractToolName", () => {
   it("returns the first tool_use name", () => {
     const j = JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash" }] } });
     expect(extractToolName(j)).toBe("Bash");
+  });
+  it("returns a Codex MCP tool call name", () => {
+    const j = JSON.stringify({ type: "item.started", item: { id: "call-1", type: "mcp_tool_call", name: "propose_transition", args: {} } });
+    expect(extractToolName(j)).toBe("propose_transition");
   });
   it("returns null when no tool_use", () => {
     expect(extractToolName(assistant("text only"))).toBeNull();
