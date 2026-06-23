@@ -1,10 +1,9 @@
-import { preferences, workspaces } from "@agentic-kanban/shared/schema";
+import { workspaces } from "@agentic-kanban/shared/schema";
 import type { WorkspaceSetupRun, WorkspaceSymlinkRun } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
 import type { ProviderName } from "./agent-provider.js";
 import type { AgentSettings } from "./agent-settings.service.js";
-import { resolveAgentSettings } from "./agent-settings.service.js";
-import { resolveStrategyProviderSelection, applyProviderSelectionToPrefMap } from "./strategy-objective.service.js";
+import { loadProjectRuntimeConfig } from "./project-runtime-config.service.js";
 import * as realGitService from "./git.service.js";
 import { detectWorkspaceMergeConflicts } from "./workspace-merge-conflict.service.js";
 
@@ -23,7 +22,7 @@ export function applyWorkspaceAgentSelection(
   workspace: typeof workspaces.$inferSelect,
 ): AgentSettings {
   const provider = workspace.provider;
-  if (provider !== "claude" && provider !== "codex" && provider !== "copilot") return settings;
+  if (provider !== "claude" && provider !== "codex" && provider !== "copilot" && provider !== "pi") return settings;
 
   const profileName = workspace.claudeProfile || undefined;
   const agentArgs = provider === "claude"
@@ -62,18 +61,27 @@ export async function resolveRelaunchAgentSelection(
   workspace: typeof workspaces.$inferSelect,
   commandOverride?: string,
 ): Promise<AgentSettings> {
-  const prefRows = await database.select().from(preferences);
-  const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
-
-  const selected = await resolveStrategyProviderSelection(database, projectId);
-  if (selected) {
-    applyProviderSelectionToPrefMap(prefMap, selected);
-    console.log(`[relaunch] strategy provider selection: ${selected.provider}:${selected.profileName} (workspace baked=${workspace.provider}:${workspace.claudeProfile})`);
-    return resolveAgentSettings(prefMap, commandOverride);
+  const runtime = await loadProjectRuntimeConfig(database, {
+    projectId: projectId ?? "",
+    workspaceSelection: {
+      provider: workspace.provider,
+      profileName: workspace.claudeProfile,
+    },
+    commandOverride,
+  });
+  if (runtime.provider.source === "strategy") {
+    console.log(`[relaunch] strategy provider selection: ${runtime.provider.provider}:${runtime.provider.profileName ?? ""} (workspace baked=${workspace.provider}:${workspace.claudeProfile})`);
   }
 
-  // No strategy default configured — fall back to the workspace's baked provider.
-  return applyWorkspaceAgentSelection(resolveAgentSettings(prefMap, commandOverride), workspace);
+  return {
+    agentCommand: runtime.provider.agentCommand,
+    agentArgs: runtime.provider.agentArgs,
+    claudeProfile: runtime.provider.provider === "claude" ? runtime.provider.profileName : undefined,
+    profile: runtime.provider.profileSelection,
+    provider: runtime.provider.provider,
+    resumeWithNewModel: runtime.provider.resumeWithNewModel,
+    permissionPromptTool: runtime.provider.permissionPromptTool,
+  };
 }
 
 export function requireBaseBranch(baseBranch: string | null | undefined): string {

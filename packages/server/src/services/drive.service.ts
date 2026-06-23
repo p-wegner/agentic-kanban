@@ -17,10 +17,14 @@ import {
   populateVerifyScript,
   verifyScriptPrefKey,
 } from "./stack-profile.service.js";
-import { HARNESS_IDS, harnessSettingKey } from "./harness-settings.js";
-import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
 import { generateDriveRetro } from "@agentic-kanban/shared/lib/drive-retro";
-import { resolveStartPolicy, startModePrefKey, type StartMode } from "./start-policy.service.js";
+import type { StartMode } from "./start-policy.service.js";
+import {
+  buildDriveRuntimePreferencePatch,
+  resolveProjectRuntimeConfig,
+} from "./project-runtime-config.service.js";
+
+export { autodrivePrefKey, autoMergeDisabledPrefKey } from "./project-runtime-config.service.js";
 
 /**
  * One-switch "Drive this project" (#806).
@@ -51,14 +55,6 @@ import { resolveStartPolicy, startModePrefKey, type StartMode } from "./start-po
  * as-is — they are equally useful for manual triage and re-enabling Drive must be cheap.
  */
 
-export function autodrivePrefKey(projectId: string): string {
-  return `board_autodrive_${projectId}`;
-}
-
-export function autoMergeDisabledPrefKey(projectId: string): string {
-  return `auto_merge_disabled_${projectId}`;
-}
-
 export interface DriveEnablementStatus {
   /** Whether the single Drive switch is ON for this project. */
   enabled: boolean;
@@ -87,17 +83,17 @@ export async function getDriveStatus(
 ): Promise<DriveEnablementStatus> {
   const prefMap = await loadPrefMap(database);
   const verify = prefMap.get(verifyScriptPrefKey(projectId));
-  const enabled = prefMap.get(autodrivePrefKey(projectId)) === "true";
+  const runtime = resolveProjectRuntimeConfig({ projectId, prefMap });
   return {
-    enabled,
+    enabled: runtime.drive.enabled,
     details: {
-      autodrive: enabled,
-      autoMergeDisabled: prefMap.get(autoMergeDisabledPrefKey(projectId)) === "true",
-      autoReview: prefMap.get("auto_review") === "true",
-      autoMerge: isAutoMergeEnabled(prefMap),
+      autodrive: runtime.drive.enabled,
+      autoMergeDisabled: runtime.drive.autoMergeDisabled,
+      autoReview: runtime.drive.autoReview,
+      autoMerge: runtime.drive.autoMerge,
       hasStackProfile: (await getStackProfile(projectId, database)) !== null,
       hasVerifyScript: !!(verify && verify.trim()),
-      startMode: resolveStartPolicy(prefMap, projectId).mode,
+      startMode: runtime.startPolicy.mode,
     },
   };
 }
@@ -119,29 +115,9 @@ export async function setDriveEnabled(
   enabled: boolean,
   database: Database,
 ): Promise<DriveEnablementStatus> {
-  const entries: Array<{ key: string; value: string }> = [];
-
-  // The keystone per-project flags — always set, both directions.
-  entries.push({ key: autodrivePrefKey(projectId), value: enabled ? "true" : "false" });
-  // Kill-switch is the inverse of drive: clear it ON, re-arm it OFF.
-  entries.push({ key: autoMergeDisabledPrefKey(projectId), value: enabled ? "false" : "true" });
-  // Start Mode is the single source of truth that gates every auto-start path; keep it
-  // coherent with the one-switch so they never drift. (The dogfood board sets `conductor`
-  // out-of-band; this maps the binary Drive toggle to monitor⇄manual.)
-  entries.push({ key: startModePrefKey(projectId), value: enabled ? "monitor" : "manual" });
+  const entries = buildDriveRuntimePreferencePatch(projectId, enabled);
 
   if (enabled) {
-    // The drive needs the global review→merge pipeline live; without these the project is
-    // auto-driven but nothing ever reviews or lands. They are global, but turning them ON
-    // is non-destructive (other projects benefit; a project opts out via its kill-switch).
-    entries.push({ key: "auto_review", value: "true" });
-    entries.push({ key: "auto_merge", value: "true" });
-    // planMode-off: a driven builder must implement, not stall waiting for a plan to be
-    // continued. Enable auto-continue for every harness.
-    for (const harness of HARNESS_IDS) {
-      entries.push({ key: harnessSettingKey(harness, "plan_auto_continue"), value: "true" });
-    }
-
     // Ensure the harness has a stack profile + verify gate to run. Both are idempotent and
     // non-destructive (never clobber an existing profile/override). Best-effort: a detection
     // failure must not block enabling Drive.
