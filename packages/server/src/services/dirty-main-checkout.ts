@@ -1,10 +1,7 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { getAllProjects } from "../repositories/project.repository.js";
-
-const execFileAsync = promisify(execFile);
 
 const SOURCE_PATHSPECS = [
   ":(glob)packages/**/*.ts",
@@ -23,10 +20,9 @@ export interface DirtyMainCheckoutWarning {
 }
 
 export async function getDirtyTrackedSourceFiles(repoPath: string): Promise<string[]> {
-  const { stdout } = await execFileAsync(
-    "git",
+  const stdout = await gitExecOrThrow(
     ["diff", "--name-only", "HEAD", "--", ...SOURCE_PATHSPECS],
-    { cwd: repoPath, timeout: 5000, windowsHide: true, maxBuffer: 1024 * 1024 },
+    { cwd: repoPath, timeout: 5000, maxBuffer: 1024 * 1024 },
   );
   return stdout
     .split(/\r?\n/)

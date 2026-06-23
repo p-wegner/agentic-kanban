@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { gitExecSync } from "@agentic-kanban/shared/lib/git-exec";
 
 /**
  * Conflict marker patterns — same three markers as the Stop hook.
@@ -22,8 +22,7 @@ export interface ConflictMarkerFinding {
  */
 export function scanCommittedConflictMarkers(repoRoot: string): ConflictMarkerFinding[] {
   try {
-    const output = execFileSync(
-      "git",
+    const output = gitExecSync(
       [
         "grep",
         "--line-number",
@@ -38,11 +37,9 @@ export function scanCommittedConflictMarkers(repoRoot: string): ConflictMarkerFi
       ],
       {
         cwd: repoRoot,
-        encoding: "utf8" as const,
         timeout: 15_000,
-        windowsHide: true,
         stdio: ["ignore", "pipe", "ignore"] as const,
-      }
+      },
     );
 
     const findings: ConflictMarkerFinding[] = [];
