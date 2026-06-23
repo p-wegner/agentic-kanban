@@ -3,17 +3,11 @@ import {
   issues,
   projects,
   sessions,
-  sessionMessages,
-  diffComments,
   projectStatuses,
   agentSkills,
-  issueArtifacts,
-  issueComments,
-  repos,
-  testRetryDecisions,
-  workflowTransitions,
 } from "@agentic-kanban/shared/schema";
-import { desc, eq, ne, inArray, sql, and, gte, isNotNull } from "drizzle-orm";
+import { desc, eq, ne, inArray, and, gte, isNotNull } from "drizzle-orm";
+import { deleteWorkspaceCascade as deleteWorkspaceCascadeShared } from "@agentic-kanban/shared/lib/cascade-delete";
 
 type Project = typeof projects.$inferSelect;
 import { db } from "../db/index.js";
@@ -315,29 +309,6 @@ export async function moveIssueToInProgressStrict(
   await database.update(issues).set({ statusId: inProgress.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, issueId));
 }
 
-async function deleteWorkspaceCascadeRows(
-  workspaceId: string,
-  database: Database,
-): Promise<void> {
-  const wsSessions = await database
-    .select({ id: sessions.id })
-    .from(sessions)
-    .where(eq(sessions.workspaceId, workspaceId));
-  const sessionIds = wsSessions.map(s => s.id);
-
-  await database.delete(workflowTransitions).where(eq(workflowTransitions.workspaceId, workspaceId));
-  await database.delete(testRetryDecisions).where(eq(testRetryDecisions.workspaceId, workspaceId));
-  await database.delete(diffComments).where(eq(diffComments.workspaceId, workspaceId));
-  await database.delete(issueArtifacts).where(eq(issueArtifacts.workspaceId, workspaceId));
-  await database.delete(issueComments).where(eq(issueComments.workspaceId, workspaceId));
-  await database.delete(repos).where(eq(repos.workspaceId, workspaceId));
-  if (sessionIds.length > 0) {
-    await database.delete(sessionMessages).where(inArray(sessionMessages.sessionId, sessionIds));
-  }
-  await database.delete(sessions).where(eq(sessions.workspaceId, workspaceId));
-  await database.delete(workspaces).where(eq(workspaces.id, workspaceId));
-}
-
 /** Cascade delete a workspace and every table that directly FK-references it. */
 /**
  * AK-535 terminal-move guard: the open, non-direct, unmerged workspace for an
@@ -368,14 +339,7 @@ export async function deleteWorkspaceCascade(
   workspaceId: string,
   database: Database = db,
 ): Promise<void> {
-  await database.run(sql.raw("begin immediate"));
-  try {
-    await deleteWorkspaceCascadeRows(workspaceId, database);
-    await database.run(sql.raw("commit"));
-  } catch (err) {
-    await database.run(sql.raw("rollback")).catch(() => {});
-    throw err;
-  }
+  await deleteWorkspaceCascadeShared(workspaceId, database);
 }
 
 // WorkspaceDetails + its pure row->DTO projection live in lib/workspace-details-projection.
