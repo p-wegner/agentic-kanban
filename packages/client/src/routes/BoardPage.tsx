@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Layout } from "../components/Layout.js";
 import { useTheme } from "../hooks/useTheme.js";
 import { useAgentQuestionsCount } from "../components/AgentQuestionsPanel.js";
@@ -9,12 +10,10 @@ import { useBoardFilters } from "../hooks/useBoardFilters.js";
 import { createBoardIssueActions } from "../hooks/createBoardIssueActions.js";
 import { useBoardMiscHandlers } from "../hooks/useBoardMiscHandlers.js";
 import { BoardPageView } from "../components/BoardPageView.js";
-import { deferUntilIdle } from "../lib/boardCardSnapshot.js";
 import { useBoardRefetch } from "../hooks/useBoardRefetch.js";
 import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
 import { SkeletonBoard } from "../components/SkeletonBoard.js";
 import { showToast } from "../components/Toast.js";
-import { apiFetch } from "../lib/api.js";
 import { matchesBoardFilters } from "../lib/boardFiltering.js";
 import { reconcileSelectedIssue } from "../lib/selectedIssueSync.js";
 import { createQuickUpdateHandlers } from "../lib/issueQuickUpdates.js";
@@ -30,10 +29,20 @@ import { useBoardBulkSelection } from "../hooks/useBoardBulkSelection.js";
 import { useBoardIssueMovement } from "../hooks/useBoardIssueMovement.js";
 import { useBoardKeyboardShortcuts } from "../hooks/useBoardKeyboardShortcuts.js";
 import { useAgentLiveTicker } from "../hooks/useAgentLiveTicker.js";
+import {
+  boardQueryKeys,
+  fetchTags,
+  useActiveProjectPreferenceQuery,
+  useArchivedProjectsQuery,
+  useBoardQuery,
+  useMilestonesQuery,
+  useProjectsQuery,
+  useSprintCapacityQuery,
+  useTagsQuery,
+} from "../hooks/useBoardDataQueries.js";
 import type {
   DependencyInfo,
   IssueWithStatus,
-  MilestoneResponse,
   StatusWithIssues,
 } from "@agentic-kanban/shared";
 import type { BoardViewState, SavedViewReference } from "../lib/boardSavedViews.js";
@@ -88,6 +97,7 @@ const BACKLOG_STATUS_NAME = "Backlog";
  * fetches out of the first-paint request window.
  */
 export function BoardPage() {
+  const queryClient = useQueryClient();
   const { theme: _theme, setTheme, isDark } = useTheme();
   // Warm the overlay-panels chunk shortly after the board paints. It is lazy (keeps it
   // off the initial bundle) but hosts the event-driven ApprovalDialog, so prefetching
@@ -101,11 +111,21 @@ export function BoardPage() {
   }, []);
   const [columns, setColumns] = useState<StatusWithIssues[]>([]);
   const columnsRef = useRef<StatusWithIssues[]>([]);
-  const [loading, setLoading] = useState(true);
   const [switchingProject, setSwitchingProject] = useState(false);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [archivedProjects, setArchivedProjects] = useState<Project[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const projectsQuery = useProjectsQuery();
+  const archivedProjectsQuery = useArchivedProjectsQuery();
+  const activeProjectPreferenceQuery = useActiveProjectPreferenceQuery();
+  const boardQuery = useBoardQuery(activeProjectId);
+  const sprintCapacityQuery = useSprintCapacityQuery(activeProjectId);
+  const tagsQuery = useTagsQuery(activeProjectId);
+  const milestonesQuery = useMilestonesQuery(activeProjectId);
+  const projects = projectsQuery.data ?? [];
+  const archivedProjects = archivedProjectsQuery.data ?? [];
+  const allTags = tagsQuery.data ?? [];
+  const milestones = milestonesQuery.data ?? [];
+  const activeAgentsTarget = sprintCapacityQuery.data?.policy.activeAgentsTarget;
+  const tagsLoaded = tagsQuery.isSuccess;
   const notifications = useActivityNotifications(activeProjectId);
   const { addBoardEvent: addNotificationBoardEvent, addApprovalEvent: addNotificationApprovalEvent } = notifications;
   const [creatingInColumnId, setCreatingInColumnId] = useState<string | null>(null);
@@ -136,7 +156,6 @@ export function BoardPage() {
     handleSetTagFilterIds,
   } = useBoardFilters(activeProjectId);
   const [milestoneFilterId, setMilestoneFilterId] = useState<string | null>(null);
-  const [milestones, setMilestones] = useState<MilestoneResponse[]>([]);
   const [createdDateFilter, setCreatedDateFilter] = useState<string | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
     new Set(["archive"]),
@@ -156,6 +175,7 @@ export function BoardPage() {
   const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>([]);
   const pendingBoardRefreshRef = useRef(false);
   const loadProjectsRef = useRef<() => Promise<string | undefined>>(() => Promise.resolve(undefined));
+  const bootstrappedIssueParamRef = useRef(false);
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<ExpandedCreatePanel>(null);
   const [keyboardCursorIssueId, setKeyboardCursorIssueId] = useState<string | null>(null);
   const keyboardCursorIssueIdRef = useRef<string | null>(null);
@@ -168,8 +188,6 @@ export function BoardPage() {
     handleViewModeChange,
   } = useBoardPageRoute();
 
-  const [activeAgentsTarget, setActiveAgentsTarget] = useState<number | undefined>(undefined);
-
   // Extracted hooks
   const prefs = useBoardPreferences(activeProjectId);
   const panels = useBoardPanels();
@@ -181,8 +199,6 @@ export function BoardPage() {
   const [dependencyImpactPending, setDependencyImpactPending] = useState<DependencyImpactPending>(null);
   const [pendingIssueIds, setPendingIssueIds] = useState<Set<string>>(new Set());
   const [pendingWorkspaceIssueIds, setPendingWorkspaceIssueIds] = useState<Set<string>>(new Set());
-  const [allTags, setAllTags] = useState<Tag[]>([]);
-  const [tagsLoaded, setTagsLoaded] = useState(false);
 
   const { refetchBoard, scheduleRefetch } = useBoardRefetch({
     activeProjectId,
@@ -227,79 +243,53 @@ export function BoardPage() {
     }
   }, [creatingInColumnId, refetchBoard]);
 
-  const loadArchivedProjects = useCallback(async () => {
-    try {
-      const all = await apiFetch<Project[]>("/api/projects?includeArchived=true");
-      setArchivedProjects(all.filter((p) => p.archivedAt));
-    } catch {
-      // non-fatal — archived list is supplementary
-    }
-  }, []);
-
   const loadProjects = useCallback(async () => {
-    const projs = await apiFetch<Project[]>("/api/projects");
-    setProjects(projs);
-    void loadArchivedProjects();
-    if (projs.length === 0) {
-      setActiveProjectId(null);
-      return undefined;
-    }
-    try {
-      const pref = await apiFetch<{ projectId: string | null }>("/api/preferences/active-project");
-      if (pref.projectId && projs.some((p) => p.id === pref.projectId)) {
-        setActiveProjectId(pref.projectId);
-        return pref.projectId;
-      }
-    } catch {
-      // fall back to first project
-    }
-    const firstId = projs[0].id;
-    setActiveProjectId(firstId);
-    return firstId;
-  }, [loadArchivedProjects]);
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: boardQueryKeys.projects }),
+      queryClient.invalidateQueries({ queryKey: boardQueryKeys.archivedProjects }),
+    ]);
+    return activeProjectId ?? undefined;
+  }, [activeProjectId, queryClient]);
   loadProjectsRef.current = loadProjects;
 
   useEffect(() => {
-    async function load() {
-      try {
-        const pid = await loadProjects();
-        if (pid) {
-          const board = await apiFetch<StatusWithIssues[]>(
-            `/api/projects/${pid}/board`,
-          );
-          setColumns(board);
-          columnsRef.current = board;
-
-          const params = new URLSearchParams(window.location.search);
-          const issueParam = params.get("issue");
-          if (issueParam != null) {
-            const issueNumber = parseInt(issueParam, 10);
-            if (!isNaN(issueNumber)) {
-              const found = board.flatMap((c) => c.issues).find((i) => i.issueNumber === issueNumber);
-              if (found) setSelectedIssue(found);
-            }
-          }
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load board");
-      }
-      setLoading(false);
+    const projs = projectsQuery.data;
+    if (!projs) return;
+    if (projs.length === 0) {
+      setActiveProjectId(null);
+      return;
     }
-    void load();
-  }, [loadProjects]);
+    const preferredId = activeProjectPreferenceQuery.data?.projectId;
+    const nextId = preferredId && projs.some((p) => p.id === preferredId) ? preferredId : projs[0].id;
+    setActiveProjectId((current) => current ?? nextId);
+  }, [activeProjectPreferenceQuery.data?.projectId, projectsQuery.data]);
 
   useEffect(() => {
-    if (!activeProjectId) return;
-    // Deferred to idle: only feeds the drag-to-agent-slot capacity guard, so
-    // it must not compete with the board fetch in the first-paint window.
-    return deferUntilIdle(() => {
-      apiFetch<{ policy: { activeAgentsTarget: number } }>(`/api/projects/${activeProjectId}/sprint-capacity`)
-        .then((plan) => setActiveAgentsTarget(plan.policy.activeAgentsTarget))
-        .catch(() => {});
-    });
-  }, [activeProjectId]);
+    if (projectsQuery.error) setError(projectsQuery.error instanceof Error ? projectsQuery.error.message : "Failed to load projects");
+  }, [projectsQuery.error]);
 
+  useEffect(() => {
+    if (boardQuery.error) setError(boardQuery.error instanceof Error ? boardQuery.error.message : "Failed to load board");
+  }, [boardQuery.error]);
 
+  useEffect(() => {
+    const board = boardQuery.data;
+    if (!board) return;
+    setColumns(board);
+    columnsRef.current = board;
+
+    if (bootstrappedIssueParamRef.current) return;
+    bootstrappedIssueParamRef.current = true;
+    const params = new URLSearchParams(window.location.search);
+    const issueParam = params.get("issue");
+    if (issueParam != null) {
+      const issueNumber = parseInt(issueParam, 10);
+      if (!isNaN(issueNumber)) {
+        const found = board.flatMap((c) => c.issues).find((i) => i.issueNumber === issueNumber);
+        if (found) setSelectedIssue(found);
+      }
+    }
+  }, [boardQuery.data]);
   const {
     handleProjectChange,
     handleRegisterProject,
@@ -392,11 +382,12 @@ export function BoardPage() {
   );
   const loadSavedViewTags = useCallback(async (): Promise<SavedViewReference[]> => {
     if (tagsLoaded) return boardTagOptions;
-    const tags = await apiFetch<Tag[]>("/api/tags");
-    setAllTags(tags);
-    setTagsLoaded(true);
+    const tags = await queryClient.fetchQuery({
+      queryKey: boardQueryKeys.tags,
+      queryFn: fetchTags,
+    });
     return tags.map((tag) => ({ id: tag.id, name: tag.name }));
-  }, [boardTagOptions, tagsLoaded]);
+  }, [boardTagOptions, queryClient, tagsLoaded]);
 
   useEffect(() => {
     if (statusFilterId && columns.length > 0 && !columns.some((col) => col.id === statusFilterId)) {
@@ -412,24 +403,6 @@ export function BoardPage() {
       }
     }
   }, [allTags, activeTagIds, tagsLoaded]);
-
-  useEffect(() => {
-    if (!activeProjectId || tagsLoaded) return;
-    apiFetch<Tag[]>("/api/tags")
-      .then((tags) => { setAllTags(tags); setTagsLoaded(true); })
-      .catch(() => {});
-  }, [activeProjectId, tagsLoaded]);
-
-  useEffect(() => {
-    if (!activeProjectId) return;
-    // Deferred to idle: milestones feed the filter menu / detail panel, not
-    // the first board paint.
-    return deferUntilIdle(() => {
-      apiFetch<MilestoneResponse[]>(`/api/projects/${activeProjectId}/milestones`)
-        .then((ms) => setMilestones(ms))
-        .catch(() => {});
-    });
-  }, [activeProjectId]);
 
   const applyBoardViewState = useCallback((state: BoardViewState) => {
     handleSetTagFilterIds(state.tagIds);
@@ -508,9 +481,10 @@ export function BoardPage() {
   async function loadTags(): Promise<SavedViewReference[]> {
     if (tagsLoaded) return allTags;
     try {
-      const tags = await apiFetch<Tag[]>("/api/tags");
-      setAllTags(tags);
-      setTagsLoaded(true);
+      const tags = await queryClient.fetchQuery({
+        queryKey: boardQueryKeys.tags,
+        queryFn: fetchTags,
+      });
       return tags;
     } catch {
       showToast("Failed to load tags", "error");
@@ -572,6 +546,10 @@ export function BoardPage() {
     },
   );
 
+  const loading =
+    projectsQuery.isLoading ||
+    activeProjectPreferenceQuery.isLoading ||
+    (!!activeProjectId && boardQuery.isLoading && columns.length === 0);
 
   if (loading) {
     return (
