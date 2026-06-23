@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { notifyBoard } from "../notify.js";
 import { requireEntity } from "../db-utils.js";
+import { buildAdjacency, wouldCreateCycle as graphWouldCreateCycle } from "@agentic-kanban/shared/lib/dependency-graph.js";
 
 const VALID_TYPES = ["depends_on", "blocked_by", "related_to", "duplicates", "parent_of", "child_of"] as const;
 
@@ -18,26 +19,8 @@ async function wouldCreateCycle(issueId: string, dependsOnId: string, projectId:
     .innerJoin(schema.issues, eq(schema.issueDependencies.issueId, schema.issues.id))
     .where(eq(schema.issues.projectId, projectId));
 
-  const adj = new Map<string, Set<string>>();
-  for (const dep of allDeps) {
-    let set = adj.get(dep.depIssueId);
-    if (!set) { set = new Set(); adj.set(dep.depIssueId, set); }
-    set.add(dep.depDependsOnId);
-  }
-
-  const visited = new Set<string>();
-  const stack = [dependsOnId];
-  while (stack.length > 0) {
-    const current = stack.pop()!;
-    if (current === issueId) return true;
-    if (visited.has(current)) continue;
-    visited.add(current);
-    const neighbors = adj.get(current);
-    if (neighbors) {
-      for (const n of neighbors) stack.push(n);
-    }
-  }
-  return false;
+  const adj = buildAdjacency(allDeps.map((d) => ({ from: d.depIssueId, to: d.depDependsOnId })));
+  return graphWouldCreateCycle(adj, issueId, dependsOnId);
 }
 
 export function registerAddDependency(server: McpServer) {
