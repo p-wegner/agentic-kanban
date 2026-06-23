@@ -297,6 +297,24 @@ export async function moveIssueToInProgress(
   }
 }
 
+/**
+ * Transaction-safe variant for workspace creation. Unlike moveIssueToInProgress,
+ * this throws so callers inside a transaction can roll back the workspace insert.
+ */
+export async function moveIssueToInProgressStrict(
+  issueId: string,
+  projectId: string,
+  now: string,
+  database: Database = db,
+): Promise<void> {
+  const statuses = await database.select().from(projectStatuses).where(eq(projectStatuses.projectId, projectId));
+  const inProgress = statuses.find(s => s.name === "In Progress");
+  if (!inProgress) {
+    throw new Error(`Project ${projectId} has no In Progress status`);
+  }
+  await database.update(issues).set({ statusId: inProgress.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, issueId));
+}
+
 async function deleteWorkspaceCascadeRows(
   workspaceId: string,
   database: Database,
