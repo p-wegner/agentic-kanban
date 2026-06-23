@@ -1,7 +1,4 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
-const execFileAsync = promisify(execFile);
+import { execShellCommand } from "./process-exec.js";
 
 const SCRIPT_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -12,16 +9,11 @@ export async function runScript(
   extraEnv?: Record<string, string>,
 ): Promise<{ ok: boolean; output: string }> {
   try {
-    const isWindows = process.platform === "win32";
-    const shell = isWindows ? "cmd.exe" : "/bin/sh";
-    const shellArgs = isWindows ? ["/c", script] : ["-c", script];
-
-    const { stdout, stderr } = await execFileAsync(shell, shellArgs, {
+    const { stdout, stderr } = await execShellCommand(script, {
       cwd,
       timeout: SCRIPT_TIMEOUT_MS,
       maxBuffer: 1024 * 1024,
-      windowsHide: true,
-      env: extraEnv ? { ...process.env, ...extraEnv } : process.env,
+      mergeEnv: extraEnv,
     });
 
     const output = (stdout || "") + (stderr || "");
