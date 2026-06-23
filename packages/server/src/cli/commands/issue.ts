@@ -21,7 +21,7 @@ import {
   deleteIssueCascade,
   createIssuesBatchWithDepsAndTags,
 } from "../../repositories/issue-service.repository.js";
-import { nextIssueNumber } from "../../repositories/issue-number.repository.js";
+import { isIssueNumberUniqueConstraintError, nextIssueNumber } from "../../repositories/issue-number.repository.js";
 import { getProjectStatuses, getProjectById } from "../../repositories/project.repository.js";
 import { getWorkspacesByIssueId, findOpenUnmergedWorkspace } from "../../repositories/workspace.repository.js";
 import { getSessionsForWorkspacesDesc } from "../../repositories/workspace-launch-failures.repository.js";
@@ -33,6 +33,8 @@ import { extractLastAgentMessageFromRows } from "../../lib/session-message-extra
 import { openWorkspaceBlockMessage } from "../../lib/terminal-move-guard.js";
 import { registerIssueDependencyCommands } from "./issue-dependency.js";
 import { normalizeBatchInput, validateBatchIssueInputs, formatBatchCreateResult } from "../../lib/batch-create-issues.js";
+
+const ISSUE_NUMBER_INSERT_ATTEMPTS = 3;
 
 export function registerIssueCommand(program: Command) {
   const issueCmd = program.command("issue").description("Manage issues on the board.\n\nSubcommands: list, create, update, move, summary, dependency");
@@ -817,18 +819,33 @@ Each dependency: issueIndex, dependsOnIndex (0-based indices), type (optional, d
           parentIssueId = resolvedParentId;
         }
 
-        const nextNumber = await nextIssueNumber(projectId);
         const now = new Date().toISOString();
 
-        const { created } = await createIssuesBatchWithDepsAndTags({
-          projectId,
-          startNumber: nextNumber,
-          now,
-          issueInputs,
-          dependencyInputs,
-          statuses,
-          parentIssueId,
-        });
+        let created: Array<{ id: string; issueNumber: number; title: string }> | null = null;
+        for (let attempt = 1; attempt <= ISSUE_NUMBER_INSERT_ATTEMPTS; attempt++) {
+          const nextNumber = await nextIssueNumber(projectId);
+          try {
+            ({ created } = await createIssuesBatchWithDepsAndTags({
+              projectId,
+              startNumber: nextNumber,
+              now,
+              issueInputs,
+              dependencyInputs,
+              statuses,
+              parentIssueId,
+            }));
+            break;
+          } catch (err: unknown) {
+            if (attempt < ISSUE_NUMBER_INSERT_ATTEMPTS && isIssueNumberUniqueConstraintError(err)) {
+              continue;
+            }
+            throw err;
+          }
+        }
+
+        if (created === null) {
+          throw new Error("Could not allocate unique issue numbers");
+        }
 
         for (const line of formatBatchCreateResult(created, dependencyInputs.length, options.json ?? false)) {
           console.log(line);

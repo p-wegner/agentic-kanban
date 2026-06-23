@@ -3,7 +3,9 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { nextIssueNumber, resolveStatusByName } from "../db-utils.js";
+import { isIssueNumberUniqueConstraintError, nextIssueNumber, resolveStatusByName } from "../db-utils.js";
+
+const ISSUE_NUMBER_INSERT_ATTEMPTS = 3;
 
 export function registerCreateSubIssue(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, notifyBoard } = deps;
@@ -50,34 +52,54 @@ export function registerCreateSubIssue(server: McpServer, deps: ToolDeps = prodD
         statusId = statuses[0].id;
       }
 
-      const now = new Date().toISOString();
-      const id = randomUUID();
-      const dependencyId = randomUUID();
-      const issueNumber = await nextIssueNumber(db, schema, parent.projectId);
+      let id: string | null = null;
+      let dependencyId: string | null = null;
+      let issueNumber: number | null = null;
+      for (let attempt = 1; attempt <= ISSUE_NUMBER_INSERT_ATTEMPTS; attempt++) {
+        const now = new Date().toISOString();
+        id = randomUUID();
+        dependencyId = randomUUID();
+        issueNumber = await nextIssueNumber(db, schema, parent.projectId);
 
-      await db.transaction(async (tx) => {
-        await tx.insert(schema.issues).values({
-          id,
-          issueNumber,
-          title,
-          description: description ?? null,
-          priority: priority ?? "medium",
-          issueType: issueType ?? "task",
-          estimate: estimate ?? null,
-          sortOrder: sortOrder ?? 0,
-          statusId,
-          projectId: parent.projectId,
-          createdAt: now,
-          updatedAt: now,
-        });
-        await tx.insert(schema.issueDependencies).values({
-          id: dependencyId,
-          issueId: id,
-          dependsOnId: parentIssueId,
-          type: "child_of",
-          createdAt: now,
-        });
-      });
+        try {
+          await db.transaction(async (tx) => {
+            await tx.insert(schema.issues).values({
+              id: id!,
+              issueNumber: issueNumber!,
+              title,
+              description: description ?? null,
+              priority: priority ?? "medium",
+              issueType: issueType ?? "task",
+              estimate: estimate ?? null,
+              sortOrder: sortOrder ?? 0,
+              statusId,
+              projectId: parent.projectId,
+              createdAt: now,
+              updatedAt: now,
+            });
+            await tx.insert(schema.issueDependencies).values({
+              id: dependencyId!,
+              issueId: id!,
+              dependsOnId: parentIssueId,
+              type: "child_of",
+              createdAt: now,
+            });
+          });
+          break;
+        } catch (err: unknown) {
+          id = null;
+          dependencyId = null;
+          issueNumber = null;
+          if (attempt < ISSUE_NUMBER_INSERT_ATTEMPTS && isIssueNumberUniqueConstraintError(err)) {
+            continue;
+          }
+          throw err;
+        }
+      }
+
+      if (id === null || dependencyId === null || issueNumber === null) {
+        return text("Error: could not allocate a unique issue number");
+      }
 
       notifyBoard(parent.projectId, "mcp_create_sub_issue");
       notifyBoard(parent.projectId, "mcp_dependency_added");

@@ -7,10 +7,11 @@ import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { ValidationError } from "../errors/index.js";
 import { getSessionMessageRows } from "./session.repository.js";
-import { nextIssueNumber } from "./issue-number.repository.js";
+import { isIssueNumberUniqueConstraintError, nextIssueNumber } from "./issue-number.repository.js";
 import { parseStatsBlob, projectSessionStats, computeSessionDuration } from "../lib/issue-summary-projection.js";
 
 type Issue = typeof issues.$inferSelect;
+const ISSUE_NUMBER_INSERT_ATTEMPTS = 3;
 
 export interface IssueSummaryResult {
   issueId: string;
@@ -720,26 +721,37 @@ export async function createIssueWithNextNumber(
   },
   database: Database = db,
 ): Promise<{ id: string; issueNumber: number }> {
-  const issueNumber = await nextIssueNumber(input.projectId, database);
+  for (let attempt = 1; attempt <= ISSUE_NUMBER_INSERT_ATTEMPTS; attempt++) {
+    const issueNumber = await nextIssueNumber(input.projectId, database);
 
-  const id = randomUUID();
-  const now = new Date().toISOString();
+    const id = randomUUID();
+    const now = new Date().toISOString();
 
-  await database.insert(issues).values({
-    id,
-    issueNumber,
-    title: input.title,
-    description: input.description ?? null,
-    priority: (input.priority as "low" | "medium" | "high" | "critical") ?? "medium",
-    issueType: (input.issueType as "task" | "bug" | "feature" | "chore") ?? "task",
-    sortOrder: 0,
-    statusId: input.statusId,
-    projectId: input.projectId,
-    createdAt: now,
-    updatedAt: now,
-  });
+    try {
+      await database.insert(issues).values({
+        id,
+        issueNumber,
+        title: input.title,
+        description: input.description ?? null,
+        priority: (input.priority as "low" | "medium" | "high" | "critical") ?? "medium",
+        issueType: (input.issueType as "task" | "bug" | "feature" | "chore") ?? "task",
+        sortOrder: 0,
+        statusId: input.statusId,
+        projectId: input.projectId,
+        createdAt: now,
+        updatedAt: now,
+      });
 
-  return { id, issueNumber };
+      return { id, issueNumber };
+    } catch (err: unknown) {
+      if (attempt < ISSUE_NUMBER_INSERT_ATTEMPTS && isIssueNumberUniqueConstraintError(err)) {
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  throw new Error("Could not allocate a unique issue number");
 }
 
 /**
@@ -773,36 +785,47 @@ export async function createSubIssueWithParentLink(
   },
   database: Database = db,
 ): Promise<{ id: string; issueNumber: number; dependencyId: string }> {
-  const issueNumber = await nextIssueNumber(input.projectId, database);
+  for (let attempt = 1; attempt <= ISSUE_NUMBER_INSERT_ATTEMPTS; attempt++) {
+    const issueNumber = await nextIssueNumber(input.projectId, database);
 
-  const id = randomUUID();
-  const dependencyId = randomUUID();
-  const now = new Date().toISOString();
+    const id = randomUUID();
+    const dependencyId = randomUUID();
+    const now = new Date().toISOString();
 
-  await database.transaction(async (tx) => {
-    await tx.insert(issues).values({
-      id,
-      issueNumber,
-      title: input.title,
-      description: input.description ?? null,
-      priority: (input.priority as "low" | "medium" | "high" | "critical") ?? "medium",
-      issueType: (input.issueType as "task" | "bug" | "feature" | "chore") ?? "task",
-      sortOrder: 0,
-      statusId: input.statusId,
-      projectId: input.projectId,
-      createdAt: now,
-      updatedAt: now,
-    });
-    await tx.insert(issueDependencies).values({
-      id: dependencyId,
-      issueId: id,
-      dependsOnId: input.parentId,
-      type: "child_of",
-      createdAt: now,
-    });
-  });
+    try {
+      await database.transaction(async (tx) => {
+        await tx.insert(issues).values({
+          id,
+          issueNumber,
+          title: input.title,
+          description: input.description ?? null,
+          priority: (input.priority as "low" | "medium" | "high" | "critical") ?? "medium",
+          issueType: (input.issueType as "task" | "bug" | "feature" | "chore") ?? "task",
+          sortOrder: 0,
+          statusId: input.statusId,
+          projectId: input.projectId,
+          createdAt: now,
+          updatedAt: now,
+        });
+        await tx.insert(issueDependencies).values({
+          id: dependencyId,
+          issueId: id,
+          dependsOnId: input.parentId,
+          type: "child_of",
+          createdAt: now,
+        });
+      });
 
-  return { id, issueNumber, dependencyId };
+      return { id, issueNumber, dependencyId };
+    } catch (err: unknown) {
+      if (attempt < ISSUE_NUMBER_INSERT_ATTEMPTS && isIssueNumberUniqueConstraintError(err)) {
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  throw new Error("Could not allocate a unique issue number");
 }
 
 /**
