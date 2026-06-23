@@ -135,7 +135,7 @@ export class CodexProvider implements AgentProvider {
   }
 
   buildLaunchConfig(options: ProviderLaunchOptions): AgentLaunchConfig {
-    const { agentArgs, providerSessionId, agentCommand, keepAlive, profile, model, planMode, systemInstructions } = options;
+    const { agentArgs, providerSessionId, agentCommand, keepAlive, profile, model, planMode, systemInstructions, oneShotText } = options;
     const isWindows = process.platform === "win32";
 
     const isMockAgent = !!process.env.AGENT_COMMAND || (agentCommand?.includes("mock-agent") ?? false);
@@ -144,6 +144,37 @@ export class CodexProvider implements AgentProvider {
 
     const args: string[] = [];
     let promptPrefix: string | undefined;
+
+    // One-shot, non-streaming text mode for internal AI utility calls. `codex exec`
+    // WITHOUT `--json` prints only the final assistant message to stdout — the plain
+    // text these callers parse. The previous claude-cli path sent Claude's
+    // `--output-format text`/`-p` flags to `codex`, which it rejects; routing through
+    // the codex adapter fixes that.
+    if (oneShotText && !isMockAgent) {
+      const entry = resolveCodexDirect(command, this.fs);
+      if (entry) {
+        args.unshift(entry);
+        command = process.execPath;
+        useShell = false;
+      }
+      args.push("exec", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust");
+      const profileName = profile?.provider === "codex" ? profile.name : undefined;
+      if (profileName && profileName !== "default") {
+        args.push("--profile", profileName);
+      }
+      if (model) {
+        args.push("--model", model);
+      }
+      args.push("-");
+      return {
+        command,
+        args,
+        useShell,
+        isMockAgent: false,
+        env: { ...process.env as Record<string, string> },
+        keepStdinOpen: false,
+      };
+    }
 
     if (isMockAgent) {
       if (providerSessionId) {
