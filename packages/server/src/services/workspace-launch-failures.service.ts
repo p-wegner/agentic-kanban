@@ -11,7 +11,7 @@ import {
 } from "../repositories/workspace-launch-failures.repository.js";
 
 export type LaunchFailureCategory =
-  | "zero-output"   // session exited in <=1s or had zero tokens
+  | "zero-output"   // session stamped with an explicit launchFailure/success=false signal by the lifecycle
   | "rate-limited"  // provider quota/usage limit blocked launch
   | "setup-failed"  // workspace setup script failed (non-zero exit)
   | "preflight-failed" // launch preflight refused before a session row existed
@@ -46,22 +46,33 @@ export interface WorkspaceLaunchFailuresResponse {
   failures: WorkspaceLaunchFailure[];
 }
 
-/** A session is a zero-output launch failure if it lasted <=1000ms or had zero tokens */
-function isZeroOutputSession(session: { startedAt: string; endedAt: string | null; stats: string | null }): boolean {
-  if (!session.endedAt) return false;
-  const durationMs = new Date(session.endedAt).getTime() - new Date(session.startedAt).getTime();
-  if (durationMs <= 1000) return true;
-  if (session.stats) {
-    try {
-      const s = JSON.parse(session.stats) as Record<string, unknown>;
-      // Zero input AND zero output tokens = no provider activity
-      if ((s.inputTokens === 0 || s.inputTokens == null) && (s.outputTokens === 0 || s.outputTokens == null)) {
-        return true;
-      }
-      // Explicit launch failure flag set by session-lifecycle
-      if (s.launchFailure === true) return true;
-    } catch { /* ignore bad JSON */ }
-  }
+/**
+ * A session is a launch failure when an EXPLICIT signal says so — never inferred
+ * from wall-clock duration or token counts.
+ *
+ * The old heuristic ("lasted <=1000ms OR had zero tokens") misclassified both
+ * directions: a fast-legit run that committed in under a second was flagged as a
+ * failure, and a slow-healthy run whose token stats the parser failed to extract
+ * was too. The session lifecycle (session-lifecycle.ts) now owns failure
+ * classification at the source — using the provider's own per-provider success
+ * signal (the parsed `result`/`turn.completed` event's `success` flag plus
+ * substantive-output tracking) — and stamps an explicit `launchFailure: true` /
+ * `success: false` into the stored stats. This service simply TRUSTS that signal.
+ *
+ * Order of trust:
+ *  1. `launchFailure === true`  → definitive launch failure (lifecycle stamped it).
+ *  2. `success === false` with `launchFailure` unset → a recorded provider result
+ *     that did not succeed (e.g. error result event).
+ * A session with no stats yet (still running, or stats not persisted) is NOT a
+ * failure here — duration/tokens no longer get a vote.
+ */
+function isZeroOutputSession(session: { stats: string | null }): boolean {
+  if (!session.stats) return false;
+  try {
+    const s = JSON.parse(session.stats) as Record<string, unknown>;
+    if (s.launchFailure === true) return true;
+    if (s.success === false) return true;
+  } catch { /* ignore bad JSON */ }
   return false;
 }
 

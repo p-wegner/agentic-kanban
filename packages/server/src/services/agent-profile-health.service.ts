@@ -9,6 +9,7 @@ import { buildAgentLaunchConfig, type ProviderName } from "./agent-provider.js";
 import { resolvePiExecutable, splitArgs } from "./agent-provider/helpers.js";
 import { parseCodexLicenseRing, codexHomeHasAuth, resolveCodexHomeForProfile } from "./codex-license-ring.js";
 import { parseClaudeSubscriptionRing, claudeConfigDirHasAuth, resolveClaudeConfigDirForProfile } from "./claude-subscription-ring.js";
+import { detectCliVersion, type CliVersionResult, type VersionRunner } from "./agent-cli-version.service.js";
 
 export type ProfileHealthStatus = "ok" | "warning" | "error" | "unknown";
 
@@ -31,6 +32,8 @@ export interface AgentProfilePreflightResult {
   profileName: string;
   provider: ProviderName;
   flags: string[];
+  /** CLI version probe result. Null when the version check was skipped (e.g. no command resolvable, or a sync preflight). */
+  version: CliVersionResult | null;
 }
 
 export interface AgentProfileHealthRow {
@@ -290,7 +293,76 @@ export function preflightAgentProfile(
     profileName,
     provider,
     flags,
+    version: null,
   };
+}
+
+/**
+ * Fold a CLI version-probe verdict into a (synchronous) preflight result. A
+ * below-minimum version becomes a hard error; a newer-than-known / unparseable /
+ * unavailable probe a non-blocking warning (the binary-exists check already owns
+ * "not installed"). A null verdict (probe skipped) returns the preflight unchanged
+ * apart from recording `version: null`. Pure — no I/O.
+ */
+export function foldVersionIntoPreflight(
+  preflight: AgentProfilePreflightResult,
+  version: CliVersionResult | null,
+): AgentProfilePreflightResult {
+  if (!version) return { ...preflight, version: null };
+
+  const errors = [...preflight.errors];
+  const warnings = [...preflight.warnings];
+  if (version.status === "below-min" && version.message) {
+    errors.push(version.message);
+  } else if (version.message && (version.status === "above-known" || version.status === "unparseable" || version.status === "unavailable")) {
+    warnings.push(version.message);
+  }
+
+  return {
+    ...preflight,
+    errors,
+    warnings,
+    version,
+    ok: errors.length === 0,
+    status: errors.length > 0 ? "error" : warnings.length > 0 ? "warning" : "ok",
+  };
+}
+
+/**
+ * Augment a (synchronous) preflight result with a CLI version probe. Runs
+ * `<cli> --version` and folds the supported-range verdict in via
+ * foldVersionIntoPreflight. Never throws — a probe failure must not block an
+ * otherwise-healthy launch.
+ *
+ * Split from preflightAgentProfile because spawning `--version` is async; callers
+ * that only need the static checks keep the synchronous function.
+ */
+export async function augmentPreflightWithVersion(
+  preflight: AgentProfilePreflightResult,
+  runner?: VersionRunner,
+): Promise<AgentProfilePreflightResult> {
+  // Skip the probe for the mock agent and when no real command resolved — those
+  // are not third-party CLIs whose flag contract can drift.
+  if (preflight.command === "mock-agent" || !preflight.command) {
+    return { ...preflight, version: null };
+  }
+
+  let version: CliVersionResult;
+  try {
+    version = await detectCliVersion(preflight.provider, preflight.command, runner);
+  } catch (err) {
+    // Defensive: detectCliVersion is designed never to throw, but a probe failure
+    // must never escalate into a preflight failure.
+    version = {
+      detected: false,
+      raw: null,
+      version: null,
+      status: "unavailable",
+      message: `Version probe error: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
+  return foldVersionIntoPreflight(preflight, version);
 }
 
 export async function listAgentProfileHealth(
@@ -325,35 +397,64 @@ export async function listAgentProfileHealth(
   ];
 
   const seen = new Set<string>();
-  return candidates
-    .filter((candidate) => {
-      const id = profileKey(candidate.provider, candidate.profileName);
-      if (seen.has(id)) return false;
-      seen.add(id);
-      return true;
-    })
-    .map((candidate) => {
-      const preflight = preflightAgentProfile(prefMap, candidate.provider, candidate.profileName);
-      const failureRaw = failureRows.get(failurePreferenceKey(candidate.provider, candidate.profileName));
-      let latestFailure: AgentProfileFailureSummary | null = null;
-      if (failureRaw) {
-        try {
-          latestFailure = JSON.parse(failureRaw) as AgentProfileFailureSummary;
-        } catch {
-          latestFailure = null;
-        }
+  const uniqueCandidates = candidates.filter((candidate) => {
+    const id = profileKey(candidate.provider, candidate.profileName);
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+
+  // Run the static preflight for every candidate up front.
+  const preflights = uniqueCandidates.map((candidate) => ({
+    candidate,
+    preflight: preflightAgentProfile(prefMap, candidate.provider, candidate.profileName),
+  }));
+
+  // Probe `<cli> --version` ONCE per distinct (provider, command) pair — many
+  // profiles of the same provider share one binary, so we must not spawn the same
+  // `--version` N times. Results are cached and folded into every profile that
+  // resolved to that command.
+  const versionByCmdKey = new Map<string, CliVersionResult | null>();
+  const distinct = new Map<string, { provider: ProviderName; command: string }>();
+  for (const { preflight } of preflights) {
+    if (!preflight.command || preflight.command === "mock-agent") continue;
+    const key = `${preflight.provider}:${preflight.command}`;
+    if (!distinct.has(key)) distinct.set(key, { provider: preflight.provider, command: preflight.command });
+  }
+  await Promise.all(
+    [...distinct].map(async ([key, { provider, command }]) => {
+      try {
+        versionByCmdKey.set(key, await detectCliVersion(provider, command));
+      } catch {
+        versionByCmdKey.set(key, null);
       }
-      return {
-        id: profileKey(candidate.provider, candidate.profileName),
-        provider: candidate.provider,
-        profileName: candidate.profileName,
-        command: preflight.command,
-        selected: candidate.provider === selectedProvider && candidate.profileName === selectedProfileName(prefMap, selectedProvider),
-        status: latestFailure ? "error" : preflight.status,
-        preflight,
-        latestFailure,
-      };
-    });
+    }),
+  );
+
+  return preflights.map(({ candidate, preflight: basePreflight }) => {
+    const cmdKey = `${basePreflight.provider}:${basePreflight.command}`;
+    const version = versionByCmdKey.get(cmdKey) ?? null;
+    const preflight = foldVersionIntoPreflight(basePreflight, version);
+    const failureRaw = failureRows.get(failurePreferenceKey(candidate.provider, candidate.profileName));
+    let latestFailure: AgentProfileFailureSummary | null = null;
+    if (failureRaw) {
+      try {
+        latestFailure = JSON.parse(failureRaw) as AgentProfileFailureSummary;
+      } catch {
+        latestFailure = null;
+      }
+    }
+    return {
+      id: profileKey(candidate.provider, candidate.profileName),
+      provider: candidate.provider,
+      profileName: candidate.profileName,
+      command: preflight.command,
+      selected: candidate.provider === selectedProvider && candidate.profileName === selectedProfileName(prefMap, selectedProvider),
+      status: latestFailure ? "error" : preflight.status,
+      preflight,
+      latestFailure,
+    };
+  });
 }
 
 export async function recordAgentProfileLaunchFailure(
