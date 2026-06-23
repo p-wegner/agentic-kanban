@@ -9,6 +9,33 @@ import type * as schemaModule from "@agentic-kanban/shared/schema";
 export { readSessionStdoutFile } from "@agentic-kanban/shared/lib/session-files";
 
 export type McpResponse = { content: Array<{ type: "text"; text: string }> };
+const ISSUE_NUMBER_UNIQUE_INDEX = "idx_issues_project_id_issue_number";
+
+function errorText(err: unknown): string {
+  const record = typeof err === "object" && err !== null ? err as Record<string, unknown> : {};
+  const cause = record.cause;
+  return [
+    err instanceof Error ? err.message : "message" in record ? String(record.message) : String(err),
+    typeof cause === "object" && cause !== null && "message" in cause
+      ? String((cause as { message?: unknown }).message)
+      : "",
+    "code" in record ? String(record.code) : "",
+    typeof cause === "object" && cause !== null && "code" in cause
+      ? String((cause as { code?: unknown }).code)
+      : "",
+  ].join("\n");
+}
+
+export function isIssueNumberUniqueConstraintError(err: unknown): boolean {
+  const text = errorText(err);
+  return (
+    (text.includes("UNIQUE constraint") || text.includes("SQLITE_CONSTRAINT_UNIQUE")) &&
+    (
+      text.includes(ISSUE_NUMBER_UNIQUE_INDEX) ||
+      (text.includes("issues.project_id") && text.includes("issues.issue_number"))
+    )
+  );
+}
 
 /** Standardized MCP error response factory. */
 export function mcpError(message: string): McpResponse {
