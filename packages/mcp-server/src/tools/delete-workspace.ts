@@ -1,14 +1,15 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { db, schema } from "../db.js";
-import { eq, inArray } from "drizzle-orm";
-import { notifyBoard } from "../notify.js";
+import { eq } from "drizzle-orm";
 import { requireEntity } from "../db-utils.js";
+import { prodDeps, type ToolDeps } from "./deps.js";
+import { deleteWorkspaceCascade } from "@agentic-kanban/shared/lib/cascade-delete";
 
-export function registerDeleteWorkspace(server: McpServer) {
+export function registerDeleteWorkspace(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema, notifyBoard } = deps;
   server.tool(
     "delete_workspace",
-    "Delete a workspace and all its sessions, messages, and diff comments",
+    "Delete a workspace and all its associated data",
     {
       workspaceId: z.string().describe("The workspace ID to delete"),
     },
@@ -25,19 +26,7 @@ export function registerDeleteWorkspace(server: McpServer) {
         .where(eq(schema.issues.id, r.value.issueId))
         .limit(1);
 
-      // Get sessions for cascade delete
-      const wsSessions = await db.select({ id: schema.sessions.id })
-        .from(schema.sessions)
-        .where(eq(schema.sessions.workspaceId, workspaceId));
-
-      // Delete cascade: diff comments → session messages → sessions → workspace
-      await db.delete(schema.diffComments).where(eq(schema.diffComments.workspaceId, workspaceId));
-      if (wsSessions.length > 0) {
-        await db.delete(schema.sessionMessages)
-          .where(inArray(schema.sessionMessages.sessionId, wsSessions.map(s => s.id)));
-      }
-      await db.delete(schema.sessions).where(eq(schema.sessions.workspaceId, workspaceId));
-      await db.delete(schema.workspaces).where(eq(schema.workspaces.id, workspaceId));
+      await deleteWorkspaceCascade(workspaceId, db);
 
       if (issueRows[0]?.projectId) {
         notifyBoard(issueRows[0].projectId, "mcp_delete_workspace");
