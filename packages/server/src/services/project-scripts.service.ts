@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { isAbsolute, resolve, sep } from "node:path";
-import { spawn, type ChildProcess } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import type { Database } from "../db/index.js";
+import { spawnShellCommand } from "./process-exec.js";
 import {
   getProjectForScripts,
   listProjectScriptShortcuts,
@@ -191,12 +192,7 @@ export function createProjectScriptsService(deps: { database: Database }) {
     lastRuns.set(shortcutId, { status: "running", startedAt, endedAt: null, exitCode: null });
     onEvent({ type: "start", startedAt, cwd });
 
-    const isWindows = process.platform === "win32";
-    const child: ChildProcess = spawn(
-      isWindows ? "cmd.exe" : "/bin/sh",
-      isWindows ? ["/d", "/s", "/c", shortcut.command] : ["-c", shortcut.command],
-      { cwd, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] },
-    );
+    const child: ChildProcess = spawnShellCommand(shortcut.command, { cwd, stdio: ["ignore", "pipe", "pipe"] });
 
     child.stdout?.on("data", (chunk: Buffer) => onEvent({ type: "stdout", data: chunk.toString("utf8") }));
     child.stderr?.on("data", (chunk: Buffer) => onEvent({ type: "stderr", data: chunk.toString("utf8") }));

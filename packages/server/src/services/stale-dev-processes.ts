@@ -1,31 +1,25 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { db, type Database } from "../db/index.js";
 import { auditProcessEvent, guardProcessKill, protectedPids } from "./process-guard.js";
 import { resolveWorktreeDevPorts as resolveWorktreeDevPortsByPath } from "./worktree-ports.js";
 import { getAllWorkspaceWorkingDirs, getActiveWorkspaceResourceRows } from "../repositories/stale-dev-processes.repository.js";
-
-const execFileAsync = promisify(execFile);
+import {
+  listOsPortListeners,
+  listOsProcesses,
+  safeParsePowerShellJson,
+  taskkillTree,
+  type OsPortListener,
+  type OsProcessRecord,
+} from "./process-exec.js";
 const DEFAULT_BOARD_SERVER_PORT = 3001;
 const DEFAULT_BOARD_CLIENT_PORT = 5173;
 
-export interface ProcessRecord {
-  pid: number;
-  ppid: number;
-  name: string;
-  commandLine: string;
-}
+export type ProcessRecord = OsProcessRecord;
 
 export interface SnapshotProcessRecord extends ProcessRecord {
   parentAlive: boolean;
 }
 
-export interface PortListener {
-  pid: number;
-  port: number;
-  address: string;
-  protocol: "tcp" | "udp";
-}
+export type PortListener = OsPortListener;
 
 export interface ActiveWorkspaceResource {
   workspaceId: string;
@@ -280,7 +274,7 @@ async function getWorkspaceCleanupScopePaths(database: Database): Promise<string
 async function defaultKillTree(pid: number): Promise<void> {
   if (!guardProcessKill(pid, { reason: "monitor-stale-dev-tree" })) return;
   if (process.platform === "win32") {
-    await execFileAsync("taskkill", ["/PID", String(pid), "/T", "/F"], { timeout: 5000, windowsHide: true });
+    await taskkillTree(pid, { timeout: 5000 });
   } else {
     try {
       process.kill(-pid, "SIGKILL");
@@ -298,69 +292,14 @@ async function defaultKillTree(pid: number): Promise<void> {
  * all control chars U+0000..U+001F and retries, returning `[]` if it still cannot parse, so process
  * enumeration never throws and never aborts the monitor cycle.
  */
-export function safeParseProcessJson(
-  stdout: string,
-): Array<Record<string, unknown>> | Record<string, unknown> {
-  const raw = stdout || "[]";
-  const tryParse = (s: string) => JSON.parse(s) as Array<Record<string, unknown>> | Record<string, unknown>;
-  try {
-    return tryParse(raw);
-  } catch {
-    try {
-      // Remove control chars that are illegal inside JSON string literals.
-      // eslint-disable-next-line no-control-regex
-      const sanitized = raw.replace(/[\u0000-\u001f]/g, " ");
-      return tryParse(sanitized);
-    } catch {
-      return [];
-    }
-  }
-}
+export const safeParseProcessJson = safeParsePowerShellJson;
 
 export async function listProcesses(): Promise<ProcessRecord[]> {
-  if (process.platform === "win32") {
-    const script = "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress";
-    const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-Command", script], { timeout: 10000, windowsHide: true });
-    // ConvertTo-Json can emit raw control characters (e.g. a literal newline/backspace inside a
-    // process CommandLine) that are invalid inside a JSON string literal, making JSON.parse throw
-    // "Bad control character in string literal". A single such process must NOT abort the entire
-    // monitor cycle (it runs snapshotAndCleanStaleDevProcesses before auto-start/merge), so strip
-    // unescaped control chars and fall back to an empty process list on any remaining parse error.
-    const parsed = safeParseProcessJson(stdout);
-    const rows = Array.isArray(parsed) ? parsed : [parsed];
-    return rows.map((row) => ({
-      pid: Number(row.ProcessId),
-      ppid: Number(row.ParentProcessId ?? 0),
-      name: String((row.Name as string | null | undefined) ?? ""),
-      commandLine: String((row.CommandLine as string | null | undefined) ?? ""),
-    })).filter((row) => Number.isInteger(row.pid) && row.pid > 0);
-  }
-
-  const { stdout } = await execFileAsync("ps", ["-eo", "pid=,ppid=,comm=,args="], { timeout: 10000 });
-  return stdout.split("\n").map((line) => {
-    const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/);
-    if (!match) return null;
-    return { pid: Number(match[1]), ppid: Number(match[2]), name: match[3], commandLine: match[4] };
-  }).filter((row): row is ProcessRecord => !!row);
+  return listOsProcesses();
 }
 
 export async function listPortListeners(): Promise<PortListener[]> {
-  const { stdout } = await execFileAsync("netstat", ["-ano"], { timeout: 10000, windowsHide: true });
-  const listeners: PortListener[] = [];
-  for (const line of stdout.split("\n")) {
-    const parts = line.trim().split(/\s+/);
-    if (parts.length < 4) continue;
-    const proto = parts[0]?.toLowerCase();
-    if (proto !== "tcp" && proto !== "udp") continue;
-    if (proto === "tcp" && parts[3] !== "LISTENING") continue;
-    const local = parts[1] ?? "";
-    const pidText = proto === "tcp" ? parts[4] : parts[3];
-    const port = Number(local.match(/:(\d+)$/)?.[1]);
-    const pid = Number(pidText);
-    if (!Number.isInteger(port) || !Number.isInteger(pid) || pid <= 0) continue;
-    listeners.push({ pid, port, address: local, protocol: proto });
-  }
-  return listeners;
+  return listOsPortListeners();
 }
 
 async function getActiveWorkspaceResources(database: Database): Promise<ActiveWorkspaceResource[]> {

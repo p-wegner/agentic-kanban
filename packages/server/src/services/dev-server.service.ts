@@ -16,7 +16,7 @@
 //   - stopDevServer: kill ONLY the resolved port's listener (reuses killProcessesOnPorts) —
 //     never all node, never a range.
 
-import { spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { openSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -25,6 +25,7 @@ import type { Database } from "../db/index.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { getStackProfile } from "./stack-profile.service.js";
 import { killProcessesOnPorts } from "./process-cleanup.js";
+import { spawnShellCommand } from "./process-exec.js";
 import { resolveWorktreeDevPorts } from "./worktree-ports.js";
 
 /** Per-project preference keys for explicit dev-server overrides. */
@@ -180,7 +181,7 @@ export interface StartDevServerResult {
 }
 
 export interface StartDevServerDeps {
-  spawnImpl?: typeof spawn;
+  spawnImpl?: (command: string, options?: Parameters<typeof spawnShellCommand>[1]) => ChildProcess;
   openLog?: (path: string) => number;
 }
 
@@ -200,22 +201,17 @@ export function startDevServer(
   options?: { logLabel?: string; env?: Record<string, string> },
   deps: StartDevServerDeps = {},
 ): StartDevServerResult {
-  const spawnImpl = deps.spawnImpl ?? spawn;
+  const spawnImpl = deps.spawnImpl ?? spawnShellCommand;
   const openLog = deps.openLog ?? ((p: string) => openSync(p, "a"));
   const label = (options?.logLabel ?? "devserver").replace(/[^A-Za-z0-9_-]/g, "_");
   const logPath = join(tmpdir(), `kanban-${label}.log`);
 
-  const isWindows = process.platform === "win32";
-  const shell = isWindows ? "cmd.exe" : "/bin/sh";
-  const shellArgs = isWindows ? ["/c", plan.command] : ["-c", plan.command];
-
   const fd = openLog(logPath);
-  const child = spawnImpl(shell, shellArgs, {
+  const child = spawnImpl(plan.command, {
     cwd,
     detached: true,
-    windowsHide: true,
     stdio: ["ignore", fd, fd],
-    env: options?.env ? { ...process.env, ...options.env } : process.env,
+    mergeEnv: options?.env,
   });
   child.unref();
 

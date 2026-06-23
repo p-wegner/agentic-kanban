@@ -133,9 +133,9 @@ describe("startDevServer", () => {
     expect(unref).toHaveBeenCalled();
     expect(openLog).toHaveBeenCalled();
 
-    const [, , opts] = spawnImpl.mock.calls[0];
+    const [command, opts] = spawnImpl.mock.calls[0];
+    expect(command).toBe("pnpm dev");
     expect(opts.detached).toBe(true);
-    expect(opts.windowsHide).toBe(true);
     expect(opts.cwd).toBe("C:/some/project");
     expect(opts.stdio).toEqual(["ignore", 7, 7]);
   });
