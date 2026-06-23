@@ -1,6 +1,6 @@
 import type { Dispatch, SetStateAction } from "react";
 import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
-import { CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, PI_DEFAULT_PROFILE, CapabilityMatrixTable, Field, defaultHarnessLabel, formatHealthTime, profileOptionLabel, providerDisplayName, settingsProfileValue, statusClasses, type AgentProfileHealth, type Settings, type SettingsTextSetter } from "../SettingsPanel.shared.js";
+import { CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, PI_DEFAULT_PROFILE, CapabilityMatrixTable, Field, defaultHarnessLabel, defaultModelForProvider, defaultModelKeyForProvider, formatHealthTime, profileOptionLabel, providerDisplayName, settingsProfileValue, statusClasses, type AgentProfileHealth, type AgentProvider, type Settings, type SettingsTextSetter } from "../SettingsPanel.shared.js";
 import { CodexLicenseRingEditor } from "./CodexLicenseRingEditor.js";
 import { ClaudeSubscriptionRingEditor } from "./ClaudeSubscriptionRingEditor.js";
 import { AgentPresetsEditor } from "./AgentPresetsEditor.js";
@@ -30,6 +30,8 @@ type AgentSettingsProps = {
 };
 
 export function AgentSettings({ settings, set, setSettings, profiles, codexProfiles, copilotProfiles, piProfiles, profileHealth, preflightingProfileId, onProfilePreflight: handleProfilePreflight, activeProjectId, providerDivergence }: AgentSettingsProps) {
+  const selectedProvider = ((settings.provider || "claude") as AgentProvider);
+  const selectedModelKey = defaultModelKeyForProvider(selectedProvider);
   return (
 <>
                   <Field label="Agent Command" hint="Binary name or path. Leave empty for default (claude). Examples: claude, claude-glm, /usr/local/bin/claude">
@@ -110,8 +112,11 @@ export function AgentSettings({ settings, set, setSettings, profiles, codexProfi
                   />
                   <Field label="Default Model" hint="Default model for new workspaces (passed via --model). Options follow the selected provider (Claude or Codex). Per-workspace selection overrides this. Ignored for Claude profiles with a custom endpoint (e.g. z.ai) and for Copilot.">
                     <select
-                      value={settings.default_model || ""}
-                      onChange={(e) => set("default_model")(e.target.value)}
+                      value={defaultModelForProvider(settings, selectedProvider)}
+                      onChange={(e) => {
+                        if (selectedModelKey) set(selectedModelKey)(e.target.value);
+                      }}
+                      disabled={!selectedModelKey}
                       className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500"
                     >
                       {(settings.provider === "codex" ? CODEX_MODEL_OPTIONS : CLAUDE_MODEL_OPTIONS).map((m) => (

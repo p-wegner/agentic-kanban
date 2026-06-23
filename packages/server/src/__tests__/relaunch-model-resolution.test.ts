@@ -74,6 +74,25 @@ describe("relaunch model resolution (#698)", () => {
     expect(startCall.model).toBe("claude-opus-4-5");
   });
 
+  it("prefers the provider-specific default model on relaunch", async () => {
+    const { workspaceId } = await seedWorkspace(db, { bakedModel: "old-baked-model", provider: "claude" });
+    await db.insert(preferences).values([
+      { key: "default_model", value: "gpt-5.5" },
+      { key: "default_model_claude", value: "sonnet" },
+    ]);
+
+    const sessionManager = createMockSessionManager();
+    const service = createWorkspaceSessionService({
+      database: db,
+      getSessionManager: () => sessionManager,
+    });
+
+    await service.launchSession(workspaceId);
+
+    const startCall = (sessionManager.startSession as ReturnType<typeof import("vitest").vi.fn>).mock.calls[0][0];
+    expect(startCall.model).toBe("sonnet");
+  });
+
   it("uses no model when default_model pref is cleared (not baked-in model)", async () => {
     // Workspace was created with gpt-5.5 baked in while using codex, then user switched to claude
     // and cleared default_model — relaunch should NOT pass gpt-5.5 to claude

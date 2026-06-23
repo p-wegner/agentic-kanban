@@ -13,6 +13,9 @@ export interface Settings {
   claude_subscription_rotation?: string;
   provider?: string;
   default_model?: string;
+  default_model_claude?: string;
+  default_model_codex?: string;
+  default_model_pi?: string;
   permission_prompt_tool?: string;
   auto_review?: string;
   auto_merge?: string;
@@ -71,6 +74,9 @@ export const DEFAULT_SETTINGS: Settings = {
   claude_subscription_rotation: "true",
   provider: "claude",
   default_model: "",
+  default_model_claude: "",
+  default_model_codex: "",
+  default_model_pi: "",
   permission_prompt_tool: "false",
   auto_review: "true",
   auto_merge: "true",
@@ -135,6 +141,19 @@ export type AgentProvider = "claude" | "codex" | "copilot" | "pi";
 export const COPILOT_DEFAULT_PROFILE = "default";
 export const CODEX_DEFAULT_PROFILE = "default";
 export const PI_DEFAULT_PROFILE = "default";
+
+export function defaultModelKeyForProvider(provider: AgentProvider): keyof Settings | null {
+  if (provider === "claude") return "default_model_claude";
+  if (provider === "codex") return "default_model_codex";
+  if (provider === "pi") return "default_model_pi";
+  return null;
+}
+
+export function defaultModelForProvider(settings: Settings | Record<string, string>, provider: AgentProvider): string {
+  const key = defaultModelKeyForProvider(provider);
+  if (!key) return "";
+  return settings[key] || settings.default_model || "";
+}
 
 export type AgentProfileHealth = {
   id: string;

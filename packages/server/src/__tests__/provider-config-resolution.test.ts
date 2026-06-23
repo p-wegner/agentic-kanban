@@ -124,6 +124,30 @@ describe("resolveProviderConfig — model resolution", () => {
     expect(r.model).toBe("gpt-5.5");
   });
 
+  it("uses the provider-specific default model before legacy default_model", () => {
+    const r = resolveProviderConfig({
+      prefMap: prefs({
+        provider: "claude",
+        claude_profile: "anth",
+        default_model: "gpt-5.5",
+        default_model_claude: "sonnet",
+      }),
+    });
+    expect(r.model).toBe("sonnet");
+  });
+
+  it("keeps provider-specific model defaults isolated across providers", () => {
+    const r = resolveProviderConfig({
+      prefMap: prefs({
+        provider: "codex",
+        codex_profile: "ki14",
+        default_model_claude: "opus",
+        default_model_codex: "gpt-5.5",
+      }),
+    });
+    expect(r.model).toBe("gpt-5.5");
+  });
+
   it("drops a codex default_model when the active provider is claude (#696)", () => {
     const r = resolveProviderConfig({
       prefMap: prefs({ provider: "claude", claude_profile: "anth", default_model: "gpt-5.5" }),
