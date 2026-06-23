@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { projects, projectStatuses, issues, workspaces, preferences, sessions, issueComments } from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createMockSessionManager } from "./helpers/mocks.js";
@@ -346,7 +346,7 @@ describe("workspace.service", () => {
       expect(wsRows[0].latestLaunchError).toContain("spawn ENOENT");
     });
 
-    it("returns 201-equivalent record with error field when worktree setup fails before insert", async () => {
+    it("returns an error result without persisting a workspace when worktree setup fails before insert", async () => {
       // Pre-insert failure path: createWorktree throws before the DB row is written,
       // so the catch block calls handleCreateFailure. This is the path that hit the
       // `planMode is not defined` ReferenceError — planMode must be in catch-block scope.
@@ -367,11 +367,41 @@ describe("workspace.service", () => {
       const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-setup-fail" });
 
       expect(result.id).toBeDefined();
-      expect(result.status).toBe("active");
+      expect(result.status).toBe("error");
       expect(result.error).toContain("worktree setup boom");
       // planMode was correctly in scope and defaulted on for the high-priority issue.
       expect(result.planMode).toBe(true);
       expect(sessionManager.startSession).not.toHaveBeenCalled();
+
+      const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, result.id));
+      expect(wsRows).toHaveLength(0);
+    });
+
+    it("rolls back the workspace row and removes the worktree when a later create DB write fails", async () => {
+      const { projectId, issueId } = await seedProjectAndIssue(db);
+      await db
+        .delete(projectStatuses)
+        .where(and(eq(projectStatuses.projectId, projectId), eq(projectStatuses.name, "In Progress")));
+      const gitService = createFakeGitService();
+      const sessionManager = createMockSessionManager();
+      const service = createWorkspaceService({
+        database: db,
+        getSessionManager: () => sessionManager,
+        gitService,
+      });
+
+      const result = await service.createWorkspace({ issueId, branch: "feature/ak-1-status-fail" });
+
+      expect(result.status).toBe("error");
+      expect(result.error).toContain("has no In Progress status");
+      expect(gitService.removeWorktree).toHaveBeenCalledWith(
+        "/tmp/test-repo",
+        "/tmp/test-repo/.worktrees/feature-1",
+      );
+      expect(sessionManager.startSession).not.toHaveBeenCalled();
+
+      const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, result.id));
+      expect(wsRows).toHaveLength(0);
     });
 
     it("auto-generates branch name from issue when branch is omitted", async () => {
