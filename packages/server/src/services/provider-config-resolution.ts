@@ -3,7 +3,7 @@
  *
  * Extracted from `buildAgentConfig` in `workspace-crud.service.ts`, where the
  * codex-vs-claude branching was tangled with DB reads, strategy-bullseye parsing
- * and live-quota lookups — making it impossible to unit-test in isolation.
+ * and live-quota lookups - making it impossible to unit-test in isolation.
  *
  * This function does the *pure decision* only. All side effects (reading the
  * preferences table, fetching the strategy config, and consulting live quota
@@ -19,14 +19,14 @@
  * agent-settings fields the caller threads into the workspace record.
  *
  * NOTE: this mutates `prefMap` (mirroring overrides/strategy onto it) so the
- * shared `resolveAgentSettings` reads a consistent view — pass a copy if the
+ * shared `resolveAgentSettings` reads a consistent view - pass a copy if the
  * caller needs the original. The caller already builds a fresh map per call.
  */
-import { modelBelongsToProvider } from "@agentic-kanban/shared";
 import type { ProviderName } from "./agent-provider.js";
 import { narrowProviderName, getProfilePrefKey } from "./agent-provider.js";
 import { resolveAgentSettings } from "./agent-settings.service.js";
 import { applyProviderSelectionToPrefMap } from "./strategy-objective.service.js";
+import { resolveEffectiveModel } from "./effective-config.service.js";
 
 export interface ProviderConfigInput {
   prefMap: Map<string, string>;
@@ -88,28 +88,17 @@ export function resolveProviderConfig(input: ProviderConfigInput): ResolvedProvi
     ? (resolvedProfile || legacyProfileOverride || prefMap.get("claude_profile") || undefined)
     : profileSelection?.name;
 
-  const requestedModel = typeof input.requestedModel === "string" ? input.requestedModel.trim() : "";
-  // Claude, Codex, and Pi honor the `default_model` preference (overridable per
-  // workspace via requestedModel). Codex/Pi pass it through as `--model`. Copilot has
-  // no model flag, so it stays undefined.
-  //
-  // `default_model` is a single, provider-agnostic preference, so a leftover model id
-  // from the other provider (e.g. a Codex `gpt-5.5` surviving a switch to Claude) would
-  // otherwise be passed as `--model gpt-5.5` to claude.exe — which exits in ~5s with an
-  // invalid-model error and silently fails every launch (#696). Drop a model id that
-  // doesn't belong to the active provider's family rather than launch a doomed agent.
-  let model = (provider === "claude" || provider === "codex" || provider === "pi")
-    ? ((requestedModel || prefMap.get("default_model")) || undefined)
-    : undefined;
-  if (model && !modelBelongsToProvider(model, provider)) {
-    notes.push(`ignoring default_model "${model}" — not a ${provider} model; using provider default`);
-    model = undefined;
-  }
+  const effectiveModel = resolveEffectiveModel({
+    prefMap,
+    provider,
+    requestedModel: input.requestedModel,
+  });
+  notes.push(...effectiveModel.notes);
 
   return {
     provider,
     profileName,
-    model,
+    model: effectiveModel.model,
     agentCommand,
     agentArgs,
     permissionPromptTool,

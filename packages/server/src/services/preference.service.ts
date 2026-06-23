@@ -7,15 +7,29 @@ import { getPreference, setPreference, getAllPreferences, setPreferences } from 
 import { getProjectById } from "../repositories/project.repository.js";
 import { allHarnessSettingKeys } from "./harness-settings.js";
 import { commitObjectiveFile, isBoardStrategyKey, parseStrategyBullseyeConfig, PROJECT_CONDUCTOR_OBJECTIVE_RELATIVE_PATH, projectIdFromBoardStrategyKey, selectProviderFromStrategy, writeStrategyObjective } from "./strategy-objective.service.js";
-import { PREF_BUILDER_GUARDRAILS, PREF_MERGE_STRATEGY, PREF_PI_PROFILE, PREF_CODEX_LICENSE_RING, PREF_CODEX_LICENSE_ROTATION, PREF_CLAUDE_SUBSCRIPTION_RING, PREF_CLAUDE_SUBSCRIPTION_ROTATION } from "../constants/preference-keys.js";
+import {
+  PREF_BUILDER_GUARDRAILS,
+  PREF_CLAUDE_SUBSCRIPTION_RING,
+  PREF_CLAUDE_SUBSCRIPTION_ROTATION,
+  PREF_CODEX_LICENSE_RING,
+  PREF_CODEX_LICENSE_ROTATION,
+  PREF_DEFAULT_MODEL,
+  PREF_DEFAULT_MODEL_CLAUDE,
+  PREF_DEFAULT_MODEL_CODEX,
+  PREF_DEFAULT_MODEL_PI,
+  PREF_MERGE_STRATEGY,
+  PREF_PI_PROFILE,
+} from "../constants/preference-keys.js";
 import { parseCodexLicenseRing, ringProfileNames, discoverCodexHomeProfiles } from "./codex-license-ring.js";
 import { parseClaudeSubscriptionRing, ringProfileNames as claudeRingProfileNames, discoverClaudeConfigDirProfiles } from "./claude-subscription-ring.js";
-import { getProfilePrefKey } from "./agent-provider.js";
 import { isProjectScopedDynamicKey } from "../lib/dynamic-preference-keys.js";
+import { resolveEffectiveProviderProfile } from "./effective-config.service.js";
 
 export const SETTINGS_KEYS = [
   "agent_command", "agent_args", "output_parser", "skip_permissions", "claude_profile",
-  "codex_profile", PREF_PI_PROFILE, "copilot_profile", "provider", "default_model", "mock_agent_profile", "mock_agent_delay_ms",
+  "codex_profile", PREF_PI_PROFILE, "copilot_profile", "provider",
+  PREF_DEFAULT_MODEL, PREF_DEFAULT_MODEL_CLAUDE, PREF_DEFAULT_MODEL_CODEX, PREF_DEFAULT_MODEL_PI,
+  "mock_agent_profile", "mock_agent_delay_ms",
   "permission_prompt_tool", "auto_review", "auto_merge", "auto_merge_in_review", "resume_with_new_model",
   "review_auto_fix", "disabled_mcp_tools", "auto_start_followup", "require_manual_approval",
   // auto_rebase_on_continue: read by workspace-session.service before relaunch.
@@ -247,8 +261,9 @@ export function createPreferenceService({ database }: { database: Database }) {
       return { hasBullseye: true, bullseyeProvider: null, bullseyeProfile: null, settingsProvider: null, settingsProfile: null, diverged: false };
     }
 
-    const settingsProvider = prefMap.get("provider") || "claude";
-    const settingsProfile = prefMap.get(getProfilePrefKey(settingsProvider)) || null;
+    const settingsSelection = resolveEffectiveProviderProfile(prefMap);
+    const settingsProvider = settingsSelection.provider;
+    const settingsProfile = settingsSelection.profileName || null;
 
     const providerDiverged = bullseyeProvider !== null && bullseyeProvider !== settingsProvider;
     const profileDiverged = bullseyeProfile !== null && bullseyeProfile !== "" && bullseyeProfile !== settingsProfile;
