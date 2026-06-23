@@ -4,7 +4,7 @@ import {
 } from "@agentic-kanban/shared/schema";
 import { eq, inArray, and, isNotNull, ne } from "drizzle-orm";
 import { db } from "../db/index.js";
-import type { Database } from "../db/index.js";
+import type { Database, TransactionClient } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
 
 export async function updateLatestSetupRunFields(
@@ -80,7 +80,7 @@ export async function getAllPreferences(database: Database = db) {
 
 export async function insertWorkspaceRecordRow(
   values: typeof workspaces.$inferInsert,
-  database: Database = db,
+  database: Database | TransactionClient = db,
 ): Promise<void> {
   await database.insert(workspaces).values(values);
 }

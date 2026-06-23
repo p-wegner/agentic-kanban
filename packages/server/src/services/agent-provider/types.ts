@@ -1,3 +1,5 @@
+import type { ParsedStreamEvent } from "@agentic-kanban/shared/lib/agent-stream-parser";
+
 /** Sentinel markers wrapping the machine-readable plan block emitted by a plan-mode run. */
 export const PLAN_BEGIN_MARKER = "===PLAN BEGIN===";
 export const PLAN_END_MARKER = "===PLAN END===";
@@ -66,64 +68,7 @@ export interface ProviderLaunchOptions {
   oneShotText?: boolean;
 }
 
-/**
- * Provider-neutral parsed event from a single JSONL line of agent stdout.
- * The session manager uses these to update session state, live stats, and UI.
- */
-export interface ParsedStreamEvent {
-  /** Set when the provider emits its internal session/resume ID. */
-  providerSessionId?: string;
-  /** Set when ExitPlanMode was denied in the result event (non-interactive mode). */
-  exitPlanModeDenied?: boolean;
-  /** Set on result/final events with aggregate usage. */
-  stats?: {
-    durationMs: number;
-    totalCostUsd: number;
-    inputTokens: number;
-    outputTokens: number;
-    contextTokens?: number;
-    numTurns: number;
-    model: string;
-    success: boolean;
-    agentSummary?: string;
-  };
-  /** Set when a result event signals turn completion (multi-turn mode). */
-  turnComplete?: boolean;
-  /** Set on assistant events with model/context info. */
-  liveStats?: {
-    model: string;
-    contextTokens: number;
-    toolUses?: number;
-    subagentDelta?: number;
-  };
-  /** Set on tool_use events. */
-  toolActivity?: {
-    name: string;
-    input: Record<string, unknown>;
-    toolUseId?: string;
-  };
-  /** Set on tool_result events for tracked tool_use IDs. */
-  toolResult?: {
-    toolUseId: string;
-    images?: Array<{ mediaType: string; data: string }>;
-    agentResultText?: string;
-  };
-  /** Set on assistant events that contain text content. */
-  assistantText?: string;
-  /** Set on TodoWrite or equivalent task-tracking events. */
-  todos?: Array<{ subject: string; status: string }>;
-  /** Set on rate_limit_event events. */
-  rateLimitInfo?: {
-    status: string;
-    rateLimitType: string;
-    resetsAt?: number;
-    retryAfter?: string;
-    message?: string;
-    overageStatus?: string;
-    overageDisabledReason?: string;
-    isUsingOverage?: boolean;
-  };
-}
+export type { ParsedStreamEvent };
 
 export interface AgentProvider {
   readonly name: string;
