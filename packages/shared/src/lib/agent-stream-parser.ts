@@ -178,6 +178,18 @@ export function parseAgentStreamLine(
   }
 }
 
+export function parseAgentProviderStreamLine(
+  provider: AgentStreamProvider,
+  line: string,
+  context: ParseContext = createAgentStreamParseContext(),
+): ParsedStreamEvent | undefined {
+  const parsed = parseAgentStreamLine(provider, line, context);
+  if (!parsed) return undefined;
+  const providerEvent = { ...parsed };
+  delete providerEvent.displayEvents;
+  return hasProviderFields(providerEvent) ? providerEvent : undefined;
+}
+
 function objectValue(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -200,7 +212,7 @@ function numberValue(value: unknown): number {
 function stringifyValue(value: unknown): string {
   if (typeof value === "string") return value;
   if (value === undefined) return "";
-  return JSON.stringify(value);
+  return JSON.stringify(value) ?? "";
 }
 
 function contentToText(value: unknown): string {
@@ -233,6 +245,11 @@ function pushDisplay(result: ParsedStreamEvent, event: AgentDisplayEvent): void 
 }
 
 function hasFields(result: ParsedStreamEvent): boolean {
+  return hasProviderFields(result) ||
+    (result.displayEvents?.length ?? 0) > 0;
+}
+
+function hasProviderFields(result: ParsedStreamEvent): boolean {
   return result.providerSessionId !== undefined ||
     result.exitPlanModeDenied !== undefined ||
     result.stats !== undefined ||
@@ -242,8 +259,7 @@ function hasFields(result: ParsedStreamEvent): boolean {
     result.toolResult !== undefined ||
     result.assistantText !== undefined ||
     result.todos !== undefined ||
-    result.rateLimitInfo !== undefined ||
-    (result.displayEvents?.length ?? 0) > 0;
+    result.rateLimitInfo !== undefined;
 }
 
 function parseInput(value: unknown): Record<string, unknown> {
