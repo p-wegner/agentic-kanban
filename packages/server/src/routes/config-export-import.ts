@@ -228,8 +228,9 @@ export function createConfigExportImportRoute(database: Database) {
       prefsToApply[boardStrategyKey] = JSON.stringify(config.boardStrategy);
     }
 
+    let droppedKeys: string[] = [];
     if (Object.keys(prefsToApply).length > 0) {
-      await preferenceService.updateSettings(prefsToApply);
+      ({ dropped: droppedKeys } = await preferenceService.updateSettings(prefsToApply));
     }
 
     return c.json({
@@ -237,6 +238,10 @@ export function createConfigExportImportRoute(database: Database) {
       statusChanges,
       prefChanges,
       strategyChanged,
+      // Non-fatal: an imported config may carry keys this server build doesn't
+      // recognize (older/newer schema). Valid prefs still applied; surface the
+      // rest so an unknown key isn't silently swallowed (#874).
+      droppedKeys,
     });
   });
 

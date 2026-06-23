@@ -71,11 +71,27 @@ export function createPreferencesRoute(database: Database) {
     });
   });
 
-  // PUT /api/preferences/settings — update agent settings
+  // PUT /api/preferences/settings — update agent settings.
+  // Valid keys are persisted regardless, but any key not on the SETTINGS_KEYS
+  // whitelist (nor a recognized dynamic key) is rejected with a 422 listing the
+  // dropped keys — so a mistyped / un-registered setting fails loudly instead of
+  // silently no-op'ing the way auto_rebase_on_continue and skip_preflight once did
+  // (#874).
   router.put("/settings", async (c) => {
     const body = await parseJsonBody<Record<string, string>>(c);
-    await preferenceService.updateSettings(body);
-    return c.json({ ok: true });
+    const { applied, dropped } = await preferenceService.updateSettings(body);
+    if (dropped.length > 0) {
+      return c.json(
+        {
+          ok: false,
+          applied,
+          droppedKeys: dropped,
+          error: `Unknown setting key(s) rejected (not on the SETTINGS_KEYS whitelist): ${dropped.join(", ")}`,
+        },
+        422,
+      );
+    }
+    return c.json({ ok: true, applied });
   });
 
   // GET /api/preferences/claude-profiles — list available claude profiles
