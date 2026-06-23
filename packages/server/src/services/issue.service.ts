@@ -23,7 +23,7 @@ import {
   deleteArtifact as deleteArtifactRepo,
   getIssueDescription,
 } from "../repositories/issue.repository.js";
-import { nextIssueNumber } from "../repositories/issue-number.repository.js";
+import { isIssueNumberUniqueConstraintError, nextIssueNumber } from "../repositories/issue-number.repository.js";
 import {
   insertIssue,
   getWorkflowTemplateForProject,
@@ -72,6 +72,8 @@ export class IssueError extends Error {
     super(message);
   }
 }
+
+const ISSUE_NUMBER_INSERT_ATTEMPTS = 3;
 
 /**
  * Validate an optional external-tracker URL: must be absent/null/empty, or a
@@ -162,56 +164,73 @@ export function createIssueService(deps: {
   const { database, boardEvents, sendWebhook } = deps;
 
   async function createIssue(input: CreateIssueInput): Promise<CreateIssueResult> {
-    const now = new Date().toISOString();
-    const id = randomUUID();
-
-    let issueNumber: number;
-    let statusId: string;
-    try {
-      ({ issueNumber, statusId } = await resolveNewIssueDefaults(input.projectId, input.statusId, database));
-    } catch (err: unknown) {
-      const e = err as { statusCode?: unknown; message?: unknown };
-      if (e.statusCode === 400) throw new IssueError(String(e.message), "BAD_REQUEST");
-      throw err;
-    }
-
     const externalKey = normalizeExternalKey(input.externalKey);
     const externalUrl = validateExternalUrl(input.externalUrl);
 
-    const workflowDefaults = input.workflowTemplateId
-      ? await resolveInitialWorkflowState(input.projectId, input.workflowTemplateId, statusId)
-      : { currentNodeId: null, statusId };
+    let createdId: string | null = null;
+    for (let attempt = 1; attempt <= ISSUE_NUMBER_INSERT_ATTEMPTS; attempt++) {
+      const now = new Date().toISOString();
+      const id = randomUUID();
 
-    await insertIssue({
-      id,
-      issueNumber,
-      title: input.title,
-      description: input.description ?? null,
-      priority: input.priority ?? "medium",
-      issueType: input.issueType ?? "task",
-      skipAutoReview: input.skipAutoReview ?? false,
-      estimate: input.estimate ?? null,
-      sortOrder: input.sortOrder ?? 0,
-      workflowTemplateId: input.workflowTemplateId ?? null,
-      externalKey,
-      externalUrl,
-      currentNodeId: workflowDefaults.currentNodeId,
-      statusId: workflowDefaults.statusId,
-      projectId: input.projectId,
-      createdAt: now,
-      updatedAt: now,
-    }, database);
+      let issueNumber: number;
+      let statusId: string;
+      try {
+        ({ issueNumber, statusId } = await resolveNewIssueDefaults(input.projectId, input.statusId, database));
+      } catch (err: unknown) {
+        const e = err as { statusCode?: unknown; message?: unknown };
+        if (e.statusCode === 400) throw new IssueError(String(e.message), "BAD_REQUEST");
+        throw err;
+      }
+
+      const workflowDefaults = input.workflowTemplateId
+        ? await resolveInitialWorkflowState(input.projectId, input.workflowTemplateId, statusId)
+        : { currentNodeId: null, statusId };
+
+      try {
+        await insertIssue({
+          id,
+          issueNumber,
+          title: input.title,
+          description: input.description ?? null,
+          priority: input.priority ?? "medium",
+          issueType: input.issueType ?? "task",
+          skipAutoReview: input.skipAutoReview ?? false,
+          estimate: input.estimate ?? null,
+          sortOrder: input.sortOrder ?? 0,
+          workflowTemplateId: input.workflowTemplateId ?? null,
+          externalKey,
+          externalUrl,
+          currentNodeId: workflowDefaults.currentNodeId,
+          statusId: workflowDefaults.statusId,
+          projectId: input.projectId,
+          createdAt: now,
+          updatedAt: now,
+        }, database);
+        createdId = id;
+      } catch (err: unknown) {
+        if (attempt < ISSUE_NUMBER_INSERT_ATTEMPTS && isIssueNumberUniqueConstraintError(err)) {
+          continue;
+        }
+        throw err;
+      }
+
+      break;
+    }
+
+    if (!createdId) {
+      throw new IssueError("Could not allocate a unique issue number", "CONFLICT");
+    }
 
     // Align currentNodeId with the status the issue was actually created in.
     // No-op without a workflow template; for one, it sets currentNodeId to the
     // node mapping to that status (null for statuses with no node, e.g. "Todo").
     if (input.workflowTemplateId) {
-      await syncCurrentNodeToStatus(database, id).catch(() => {});
+      await syncCurrentNodeToStatus(database, createdId).catch(() => {});
     }
 
     if (input.projectId) boardEvents?.broadcast(input.projectId, "issue_created");
 
-    return (await getIssueDescription(id, database));
+    return (await getIssueDescription(createdId, database));
   }
 
   async function resolveInitialWorkflowState(
@@ -252,48 +271,63 @@ export function createIssueService(deps: {
       }
     }
 
-    const results: string[] = await withTransaction(database, async (tx) => {
-      let nextNumber = await nextIssueNumber(projectId, tx);
+    let results: string[] | null = null;
+    for (let attempt = 1; attempt <= ISSUE_NUMBER_INSERT_ATTEMPTS; attempt++) {
+      try {
+        results = await withTransaction(database, async (tx) => {
+          let nextNumber = await nextIssueNumber(projectId, tx);
 
-      const defaultStatusId = await getFirstProjectStatusId(projectId, tx);
-      if (defaultStatusId === null) {
-        const err = new IssueError("No statuses found for project", "BAD_REQUEST");
+          const defaultStatusId = await getFirstProjectStatusId(projectId, tx);
+          if (defaultStatusId === null) {
+            const err = new IssueError("No statuses found for project", "BAD_REQUEST");
+            throw err;
+          }
+
+          const now = new Date().toISOString();
+          const insertedIds: string[] = [];
+          for (const input of inputs) {
+            const id = randomUUID();
+            const issueNumber = nextNumber++;
+            await insertBatchIssue({
+              id,
+              issueNumber,
+              title: input.title,
+              description: input.description ?? null,
+              priority: input.priority ?? "medium",
+              issueType: input.issueType ?? "task",
+              skipAutoReview: input.skipAutoReview ?? false,
+              estimate: input.estimate ?? null,
+              sortOrder: input.sortOrder ?? 0,
+              statusId: input.statusId ?? defaultStatusId,
+              projectId,
+              createdAt: now,
+              updatedAt: now,
+            }, tx);
+            if (opts?.parentIssueId) {
+              await insertDependency({
+                id: randomUUID(),
+                issueId: id,
+                dependsOnId: opts.parentIssueId,
+                type: "child_of",
+                createdAt: now,
+              }, tx);
+            }
+            insertedIds.push(id);
+          }
+          return insertedIds;
+        });
+        break;
+      } catch (err: unknown) {
+        if (attempt < ISSUE_NUMBER_INSERT_ATTEMPTS && isIssueNumberUniqueConstraintError(err)) {
+          continue;
+        }
         throw err;
       }
+    }
 
-      const now = new Date().toISOString();
-      const insertedIds: string[] = [];
-      for (const input of inputs) {
-        const id = randomUUID();
-        const issueNumber = nextNumber++;
-        await insertBatchIssue({
-          id,
-          issueNumber,
-          title: input.title,
-          description: input.description ?? null,
-          priority: input.priority ?? "medium",
-          issueType: input.issueType ?? "task",
-          skipAutoReview: input.skipAutoReview ?? false,
-          estimate: input.estimate ?? null,
-          sortOrder: input.sortOrder ?? 0,
-          statusId: input.statusId ?? defaultStatusId,
-          projectId,
-          createdAt: now,
-          updatedAt: now,
-        }, tx);
-        if (opts?.parentIssueId) {
-          await insertDependency({
-            id: randomUUID(),
-            issueId: id,
-            dependsOnId: opts.parentIssueId,
-            type: "child_of",
-            createdAt: now,
-          }, tx);
-        }
-        insertedIds.push(id);
-      }
-      return insertedIds;
-    });
+    if (!results) {
+      throw new IssueError("Could not allocate unique issue numbers", "CONFLICT");
+    }
 
     const out: CreateIssueResult[] = [];
     for (const id of results) {
