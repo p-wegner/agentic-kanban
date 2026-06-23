@@ -15,6 +15,7 @@ import { resolveStartPolicy } from "../services/start-policy.service.js";
 import { scanDirtyMainCheckouts, type DirtyMainCheckoutWarning } from "../services/dirty-main-checkout.js";
 import { scanAutodriveStallWarnings, type AutodriveStallWarning } from "../services/autodrive-stall-warning.service.js";
 import { resolveMergeStrategy } from "./merge-strategy.js";
+import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
 
 /**
  * Per-project hands-off mode. A `board_autodrive_<projectId>` preference set to
@@ -241,7 +242,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
         sessionManager,
         boardEvents,
         workspaceActions,
-        autoMergeEnabled: prefMap.get("auto_merge") === "true" && mergeStrategy === "monitor",
+        autoMergeEnabled: isAutoMergeEnabled(prefMap) && mergeStrategy === "monitor",
         autoMergeInReview: prefMap.get("auto_merge_in_review") === "true",
         autoMergeDisabledProjectIds,
         reviewSessionIds,

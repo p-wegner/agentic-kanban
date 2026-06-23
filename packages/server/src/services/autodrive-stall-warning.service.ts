@@ -3,6 +3,7 @@ import { db } from "../db/index.js";
 import { isCodexUsageLimitStats } from "./codex-rate-limit.js";
 import { resolveStartPolicy } from "./start-policy.service.js";
 import { parseSessionStats } from "../startup/monitor-cycle-rules.js";
+import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
 import {
   getAllPreferences,
   getActiveAutodriveWorkspaceRows,
@@ -135,7 +136,7 @@ function classifyCause(rows: ActiveWorkspaceWithSessions[], prefMap: Map<string,
     return "fix_and_merge_zombie";
   }
 
-  const autoMergeOn = prefMap.get("auto_merge") === "true";
+  const autoMergeOn = isAutoMergeEnabled(prefMap);
   const autoMergeInReview = prefMap.get("auto_merge_in_review") === "true";
   if (autoMergeOn && rows.some((row) => {
     const disabled = prefMap.get(`auto_merge_disabled_${row.projectId}`) === "true";
