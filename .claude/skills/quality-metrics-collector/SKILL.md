@@ -1,6 +1,6 @@
 ---
 name: quality-metrics-collector
-description: Gather repository quality metrics such as productive code lines, test ratio, and available test or lint counts, then post them to the agentic-kanban quality metrics endpoint. Use when asked to collect, refresh, record, or publish quality metrics for the current project.
+description: Collect repository code-health metrics and POST them to the board Quality Metrics API
 ---
 
 # quality-metrics-collector
@@ -42,16 +42,27 @@ elseif (Get-Command scc -ErrorAction SilentlyContinue) { $sccCmd = "scc" }
 
 $metrics = @()
 if ($sccCmd) {
-  $sccJson = & $sccCmd packages/client/src packages/server/src packages/shared/src packages/mcp-server/src packages/e2e packages/desktop/src --include-ext ts,tsx,css --no-complexity --format json | ConvertFrom-Json
-  $total = $sccJson | Where-Object { $_.Name -eq "Total" } | Select-Object -First 1
-  $testRows = $sccJson | Where-Object { $_.Name -ne "Total" -and ($_.Location -match '(__tests__|\.test\.|\.spec\.|packages/e2e)') }
-  $testLoc = ($testRows | Measure-Object -Property Code -Sum).Sum
-  $prodLoc = [Math]::Max(0, [double]$total.Code - [double]$testLoc)
+  # Only pass paths that exist — scc prints a non-JSON "file or directory does not exist"
+  # line to stdout for a missing path, which breaks ConvertFrom-Json.
+  $candidatePaths = @("packages/client/src","packages/server/src","packages/shared/src","packages/mcp-server/src","packages/e2e","packages/desktop/src")
+  $paths = $candidatePaths | Where-Object { Test-Path $_ }
+  # --by-file is required: scc's default JSON is one summary row per language with an empty
+  # Files[] array and no "Total" row, so per-file test detection and totals are impossible.
+  # Join the multi-line output before parsing.
+  $raw = & $sccCmd @paths --include-ext ts,tsx,css --no-complexity --by-file --format json
+  $sccJson = ($raw -join "`n") | ConvertFrom-Json
+  $allFiles = $sccJson | ForEach-Object { $_.Files }
+  $totFiles = $allFiles.Count
+  $totCode = ($sccJson | Measure-Object -Property Code -Sum).Sum
+  $testFiles = $allFiles | Where-Object { $_.Location -match '(__tests__|\.test\.|\.spec\.|packages[\\/]e2e)' }
+  $testLoc = ($testFiles | Measure-Object -Property Code -Sum).Sum
+  if (-not $testLoc) { $testLoc = 0 }
+  $prodLoc = [Math]::Max(0, [double]$totCode - [double]$testLoc)
   $testRatio = if (($prodLoc + [double]$testLoc) -gt 0) { ([double]$testLoc / ($prodLoc + [double]$testLoc)) * 100 } else { 0 }
-  $metrics += @{ metricKey = "code.production_loc"; value = $prodLoc; unit = "lines"; meta = @{ source = "scc" } }
+  $metrics += @{ metricKey = "code.production_loc"; value = [double]$prodLoc; unit = "lines"; meta = @{ source = "scc" } }
   $metrics += @{ metricKey = "code.test_loc"; value = [double]$testLoc; unit = "lines"; meta = @{ source = "scc" } }
-  $metrics += @{ metricKey = "code.test_ratio"; value = $testRatio; unit = "percent"; meta = @{ source = "scc" } }
-  $metrics += @{ metricKey = "code.source_files"; value = [double]$total.Files; unit = "files"; meta = @{ source = "scc" } }
+  $metrics += @{ metricKey = "code.test_ratio"; value = [double]$testRatio; unit = "percent"; meta = @{ source = "scc" } }
+  $metrics += @{ metricKey = "code.source_files"; value = [double]$totFiles; unit = "files"; meta = @{ source = "scc" } }
 } else {
   Write-Warning "scc unavailable — skipping LOC metrics. Run setup.ps1 in the code-metrics skill to bundle it."
 }
