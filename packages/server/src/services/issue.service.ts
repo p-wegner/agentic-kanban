@@ -37,13 +37,7 @@ import {
   closeOpenWorkspacesForIssue,
   getIssueIdsAndProjects,
   updateIssuesByIds,
-  deleteIssueArtifactsForIssue,
-  deleteIssueCommentsForIssue,
-  getWorkspaceIdsForIssue,
-  deleteIssueTagsForIssue,
-  deleteDependenciesTouchingIssue,
-  deleteShowdownsForIssue,
-  deleteIssueRow,
+  deleteIssueCascade,
   getIssueProjectIdsPair,
   deleteDependencyByIdAndIssue,
   getIssueIdsAndProjectsForBatch,
@@ -57,7 +51,7 @@ import {
   getDoneCandidateIssues,
   archiveIssuesByIds,
 } from "../repositories/issue-service.repository.js";
-import { deleteWorkspaceCascade, findOpenUnmergedWorkspace } from "../repositories/workspace.repository.js";
+import { findOpenUnmergedWorkspace } from "../repositories/workspace.repository.js";
 import { enrichWorkspacesWithSessionData, wouldCreateCycle } from "./board-aggregation.service.js";
 import { hasPath } from "../lib/dependency-graph.js";
 import { openWorkspaceBlockMessage } from "../lib/terminal-move-guard.js";
@@ -506,21 +500,13 @@ export function createIssueService(deps: {
     const projectId = await getIssueProjectId(id, database);
     if (!projectId) throw new IssueError("Issue not found", "NOT_FOUND");
 
-    // These rows can point at both the issue and its workspaces, so remove them
-    // before deleting workspace rows.
-    await deleteIssueArtifactsForIssue(id, database);
-    await deleteIssueCommentsForIssue(id, database);
-
-    // Find all workspaces for this issue and cascade delete
-    const wsRows = await getWorkspaceIdsForIssue(id, database);
-    for (const ws of wsRows) {
-      await deleteWorkspaceCascade(ws.id, database);
-    }
-
-    await deleteIssueTagsForIssue(id, database);
-    await deleteDependenciesTouchingIssue(id, database);
-    await deleteShowdownsForIssue(id, database);
-    await deleteIssueRow(id, database);
+    // Single transaction-wrapped cascade shared with the CLI/MCP path
+    // (deleteIssueCascade in @agentic-kanban/shared/lib/cascade-delete). It deletes
+    // every workspace and every table that directly references the issue —
+    // including issue_time_entries — atomically, so a mid-cascade error can no
+    // longer leave partially deleted issue state, and the HTTP and CLI paths can no
+    // longer drift. See arch-review #879.
+    await deleteIssueCascade(id, database);
 
     boardEvents?.broadcast(projectId, "issue_deleted");
     return projectId;
