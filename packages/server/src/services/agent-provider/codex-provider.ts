@@ -1,4 +1,4 @@
-import { parseAgentStreamLine } from "@agentic-kanban/shared/lib/agent-stream-parser";
+import { parseAgentProviderStreamLine } from "@agentic-kanban/shared/lib/agent-stream-parser";
 import type { AgentLaunchConfig, AgentProvider, FileSystem, ParsedStreamEvent, ProviderLaunchOptions } from "./types.js";
 import { PLAN_BEGIN_MARKER, PLAN_END_MARKER } from "./types.js";
 import { resolveCodexDirect, splitArgs, nodeFileSystem } from "./helpers.js";
@@ -125,6 +125,6 @@ export class CodexProvider implements AgentProvider {
   }
 
   parseStreamEvent(line: string): ParsedStreamEvent | undefined {
-    return parseAgentStreamLine("codex", line);
+    return parseAgentProviderStreamLine("codex", line);
   }
 }
