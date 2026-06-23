@@ -7,6 +7,8 @@ ensureDataDir();
 const DB_URL = getDbUrl();
 
 async function applyPragmas(c: ReturnType<typeof createClient>) {
+  // foreign_keys=ON: SQLite/libsql enforce FK constraints per connection.
+  await c.execute("PRAGMA foreign_keys=ON");
   // journal_mode=WAL: multiple readers never block a writer; writer doesn't block readers.
   await c.execute("PRAGMA journal_mode=WAL");
   // busy_timeout: wait up to 10s for a locked DB before throwing SQLITE_BUSY.
