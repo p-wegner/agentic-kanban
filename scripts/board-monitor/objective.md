@@ -36,14 +36,14 @@ This is a FRESH session every run — you have NO memory of previous runs. The k
 - Quality: weight 3/5, work-type
 - UX: weight 2/5, work-type
 - Backend: weight 2/5, area, provider codex
-- Frontend: weight 2/5, area, provider claude
+- Frontend: weight 2/5, area, provider codex
 
 ## PROVIDER POLICY (generated - do not hand-edit)
 When selecting a provider for a new workspace, apply these rules in priority order:
 1. **FILL** profiles should always have capacity — start work on them first.
 2. **THROTTLE** profiles are preferred for main work. Respect their headroom percentage.
 3. **FALLBACK-ONLY** profiles are last resort — only use if all others are exhausted or the user explicitly selects them.
-- **Claude** [claude:default]: FILL — use aggressively, keep busy at all times (Board self-improvement drive on codex:default (set 2026-06-14, user directive).)
+- **policy-codex-default** [codex:default]: FILL — use aggressively, keep busy at all times (Primary harness - all new workspaces launch on codex:default. Single source of truth (set-provider-default skill).)
 <!-- STRATEGY_BULLSEYE_GENERATED_END -->
 
 ## FOCUS POLICY (operator directive 2026-06-14 — authoritative; overrides the REFILL_FOCUS wording above)
