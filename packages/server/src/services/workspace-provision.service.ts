@@ -32,9 +32,7 @@ import { writeAgentSkillFile, readLocalSkillPrompt, copySkillToWorktree } from "
 import { writeTicketContextFile } from "@agentic-kanban/shared/lib/ticket-context";
 import { bootstrapSymlinks } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
 import { resolveWorkflowStart, buildTransitionBlock } from "@agentic-kanban/shared/lib/workflow-engine";
-import { resolveStrategyProviderSelection } from "./strategy-objective.service.js";
-import { resolveProviderConfig } from "./provider-config-resolution.js";
-import { DEFAULT_BUILDER_GUARDRAILS, PREF_BUILDER_GUARDRAILS } from "../constants/preference-keys.js";
+import { loadProjectRuntimeConfig } from "./project-runtime-config.service.js";
 import { WorkspaceError, type CreateWorkspaceInput, type GitService } from "./workspace-internals.js";
 import { buildContextPrimer } from "./context-packer.service.js";
 import { getStackProfile } from "./stack-profile.service.js";
@@ -192,42 +190,30 @@ export function createWorkspaceProvisionService(deps: {
     model: string | undefined;
     systemInstructions: string;
   }> {
-    const prefRows = await crudRepo.getAllPreferences(database);
-    const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
-
-    // Impure inputs: an explicit profile/claudeProfile override takes precedence;
-    // otherwise consult the project's strategy config (DB + live quota) for the
-    // provider policy. The pure decision below consumes the resolved selection.
-    const hasOverride = Boolean(input.profile?.name) || Boolean(input.claudeProfile);
-    const strategySelection = !hasOverride && projectId
-      ? await resolveStrategyProviderSelection(database, projectId)
-      : null;
-
-    const resolved = resolveProviderConfig({
-      prefMap,
+    const runtime = await loadProjectRuntimeConfig(database, {
+      projectId: projectId ?? "",
       profileOverride: input.profile,
       legacyProfileOverride: input.claudeProfile,
-      strategySelection,
       // Precedence: an explicit per-workspace model wins; otherwise honor the strategy policy's
       // pinned model (#818) so a project can run e.g. claude/sonnet without the global
       // default_model footgun. resolveProviderConfig still falls back to default_model when both
       // are unset, and drops a model that doesn't belong to the resolved provider.
-      requestedModel: input.model ?? strategySelection?.model,
+      requestedModel: input.model,
     });
-    for (const note of resolved.notes) {
+    for (const note of runtime.provider.notes) {
       console.log(`[workspaces] ${note}`);
     }
 
     return {
-      agentCommand: resolved.agentCommand,
-      agentArgs: resolved.agentArgs,
-      claudeProfile: resolved.profileName,
-      resolvedProfile: resolved.profileName,
-      resolvedProvider: resolved.provider,
-      resolvedProfileSelection: resolved.profileSelection,
-      permissionPromptTool: resolved.permissionPromptTool,
-      model: resolved.model,
-      systemInstructions: prefMap.get(PREF_BUILDER_GUARDRAILS) ?? DEFAULT_BUILDER_GUARDRAILS,
+      agentCommand: runtime.provider.agentCommand,
+      agentArgs: runtime.provider.agentArgs,
+      claudeProfile: runtime.provider.profileName,
+      resolvedProfile: runtime.provider.profileName,
+      resolvedProvider: runtime.provider.provider,
+      resolvedProfileSelection: runtime.provider.profileSelection,
+      permissionPromptTool: runtime.provider.permissionPromptTool,
+      model: runtime.provider.model,
+      systemInstructions: runtime.systemInstructions,
     };
   }
 

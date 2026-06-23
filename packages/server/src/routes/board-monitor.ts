@@ -4,7 +4,7 @@ import { getProjectById } from "../repositories/project.repository.js";
 import { getAllPreferences, getPreference, setPreference } from "../repositories/preferences.repository.js";
 import { readOrchestratorStatus } from "../services/orchestrator-monitor.service.js";
 import { resolveMonitorTunables } from "../services/strategy-objective.service.js";
-import { resolveStartPolicy } from "../services/start-policy.service.js";
+import { resolveProjectRuntimeConfig } from "../services/project-runtime-config.service.js";
 import { conductorAvailable, startConductor, stopConductor } from "../services/conductor-control.service.js";
 import {
   conductorCronPrefKey,
@@ -48,8 +48,8 @@ export function createBoardMonitorRoute(database: Database) {
     const rows = await getAllPreferences(database);
     const prefMap = new Map(rows.map((r) => [r.key, r.value]));
     const { tunables, source } = resolveMonitorTunables(prefMap, projectId);
-    const startPolicy = resolveStartPolicy(prefMap, projectId);
-    return c.json({ tunables, source, startPolicy });
+    const runtime = resolveProjectRuntimeConfig({ projectId, prefMap });
+    return c.json({ tunables, source, startPolicy: runtime.startPolicy });
   });
 
   // Start/stop the out-of-process Conductor loop (dogfood board only). The Start Mode UI
