@@ -3,14 +3,12 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Layout } from "../components/Layout.js";
 import { useTheme } from "../hooks/useTheme.js";
 import { useAgentQuestionsCount } from "../components/AgentQuestionsPanel.js";
-import { useBoardLiveHandlers } from "../hooks/useBoardLiveHandlers.js";
 import { useBoardPanelNavigation } from "../hooks/useBoardPanelNavigation.js";
 import { useProjectManagement } from "../hooks/useProjectManagement.js";
 import { useBoardFilters } from "../hooks/useBoardFilters.js";
 import { createBoardIssueActions } from "../hooks/createBoardIssueActions.js";
 import { useBoardMiscHandlers } from "../hooks/useBoardMiscHandlers.js";
 import { BoardPageView } from "../components/BoardPageView.js";
-import { useBoardRefetch } from "../hooks/useBoardRefetch.js";
 import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
 import { SkeletonBoard } from "../components/SkeletonBoard.js";
 import { showToast } from "../components/Toast.js";
@@ -18,7 +16,6 @@ import { matchesBoardFilters } from "../lib/boardFiltering.js";
 import { reconcileSelectedIssue } from "../lib/selectedIssueSync.js";
 import { createQuickUpdateHandlers } from "../lib/issueQuickUpdates.js";
 import { useColumnResize } from "../lib/columnResizeHandler.js";
-import { type LiveSessionStats, type TodoItem, type ApprovalRequest } from "../lib/useBoardEvents.js";
 import { useActivityNotifications, type NotificationEvent } from "../hooks/useActivityNotifications.js";
 import { buildRunQueueForecast } from "../components/RunQueueForecastPanel.js";
 import { useBoardPageRoute } from "./useBoardPageRoute.js";
@@ -29,21 +26,15 @@ import { useBoardBulkSelection } from "../hooks/useBoardBulkSelection.js";
 import { useBoardIssueMovement } from "../hooks/useBoardIssueMovement.js";
 import { useBoardKeyboardShortcuts } from "../hooks/useBoardKeyboardShortcuts.js";
 import { useAgentLiveTicker } from "../hooks/useAgentLiveTicker.js";
+import { useBoardRealtimeController } from "../hooks/useBoardRealtimeController.js";
+import { useBoardDataController } from "../hooks/useBoardDataController.js";
 import {
   boardQueryKeys,
   fetchTags,
-  useActiveProjectPreferenceQuery,
-  useArchivedProjectsQuery,
-  useBoardQuery,
-  useMilestonesQuery,
-  useProjectsQuery,
-  useSprintCapacityQuery,
-  useTagsQuery,
 } from "../hooks/useBoardDataQueries.js";
 import type {
   DependencyInfo,
   IssueWithStatus,
-  StatusWithIssues,
 } from "@agentic-kanban/shared";
 import type { BoardViewState, SavedViewReference } from "../lib/boardSavedViews.js";
 
@@ -109,28 +100,27 @@ export function BoardPage() {
     const t = setTimeout(warm, 1500);
     return () => clearTimeout(t);
   }, []);
-  const [columns, setColumns] = useState<StatusWithIssues[]>([]);
-  const columnsRef = useRef<StatusWithIssues[]>([]);
-  const [switchingProject, setSwitchingProject] = useState(false);
-  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
-  const projectsQuery = useProjectsQuery();
-  const archivedProjectsQuery = useArchivedProjectsQuery();
-  const activeProjectPreferenceQuery = useActiveProjectPreferenceQuery();
-  const boardQuery = useBoardQuery(activeProjectId);
-  const sprintCapacityQuery = useSprintCapacityQuery(activeProjectId);
-  const tagsQuery = useTagsQuery(activeProjectId);
-  const milestonesQuery = useMilestonesQuery(activeProjectId);
-  const projects = projectsQuery.data ?? [];
-  const archivedProjects = archivedProjectsQuery.data ?? [];
-  const allTags = tagsQuery.data ?? [];
-  const milestones = milestonesQuery.data ?? [];
-  const activeAgentsTarget = sprintCapacityQuery.data?.policy.activeAgentsTarget;
-  const tagsLoaded = tagsQuery.isSuccess;
-  const notifications = useActivityNotifications(activeProjectId);
-  const { addBoardEvent: addNotificationBoardEvent, addApprovalEvent: addNotificationApprovalEvent } = notifications;
   const [creatingInColumnId, setCreatingInColumnId] = useState<string | null>(null);
   const [selectedIssue, setSelectedIssue] = useState<IssueWithStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const {
+    activeAgentsTarget,
+    activeProjectId,
+    allTags,
+    archivedProjects,
+    columns,
+    columnsRef,
+    loading,
+    milestones,
+    projects,
+    setActiveProjectId,
+    setColumns,
+    setSwitchingProject,
+    switchingProject,
+    tagsLoaded,
+  } = useBoardDataController({ setError, setSelectedIssue });
+  const notifications = useActivityNotifications(activeProjectId);
+  const { addBoardEvent: addNotificationBoardEvent, addApprovalEvent: addNotificationApprovalEvent } = notifications;
   const [mutating, setMutating] = useState(false);
   const [workspaceIssue, setWorkspaceIssue] = useState<IssueWithStatus | null>(null);
   const [workspaceInitial, setWorkspaceInitial] = useState<WorkspaceInitial>(null);
@@ -160,22 +150,7 @@ export function BoardPage() {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
     new Set(["archive"]),
   );
-  const [sessionActivityRaw, setSessionActivityRaw] = useState<Record<string, Record<string, string>>>({});
-  const sessionActivity = useMemo(() => {
-    const derived: Record<string, string> = {};
-    for (const [issueId, sessions] of Object.entries(sessionActivityRaw)) {
-      const values = Object.values(sessions);
-      const last = [...values].reverse().find((v: string) => v);
-      if (last) derived[issueId] = last;
-    }
-    return derived;
-  }, [sessionActivityRaw]);
-  const [liveStats, setLiveStats] = useState<Record<string, LiveSessionStats>>({});
-  const [sessionTodos, setSessionTodos] = useState<Record<string, TodoItem[]>>({});
-  const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>([]);
-  const pendingBoardRefreshRef = useRef(false);
   const loadProjectsRef = useRef<() => Promise<string | undefined>>(() => Promise.resolve(undefined));
-  const bootstrappedIssueParamRef = useRef(false);
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<ExpandedCreatePanel>(null);
   const [keyboardCursorIssueId, setKeyboardCursorIssueId] = useState<string | null>(null);
   const keyboardCursorIssueIdRef = useRef<string | null>(null);
@@ -191,7 +166,6 @@ export function BoardPage() {
   // Extracted hooks
   const prefs = useBoardPreferences(activeProjectId);
   const panels = useBoardPanels();
-  const tickerEntries = useAgentLiveTicker(columns, sessionActivity, panels.showLiveActivityTicker);
   const agentQuestionsCount = useAgentQuestionsCount(activeProjectId);
   const { columnWidths, handleColumnResizeStart, resetColumnWidth } = useColumnResize();
 
@@ -200,14 +174,26 @@ export function BoardPage() {
   const [pendingIssueIds, setPendingIssueIds] = useState<Set<string>>(new Set());
   const [pendingWorkspaceIssueIds, setPendingWorkspaceIssueIds] = useState<Set<string>>(new Set());
 
-  const { refetchBoard, scheduleRefetch } = useBoardRefetch({
+  const {
+    approvalRequests,
+    liveStats,
+    pendingBoardRefreshRef,
+    refetchBoard,
+    scheduleRefetch,
+    sessionActivity,
+    sessionTodos,
+    setApprovalRequests,
+  } = useBoardRealtimeController({
     activeProjectId,
     columnsRef,
+    creatingInColumnId,
+    loadProjectsRef,
+    addNotificationApprovalEvent,
+    addNotificationBoardEvent,
     setColumns,
     setPendingWorkspaceIssueIds,
-    setLiveStats,
-    setSessionActivityRaw,
   });
+  const tickerEntries = useAgentLiveTicker(columns, sessionActivity, panels.showLiveActivityTicker);
 
   // Keep selectedIssue in sync with board data (F6 stale data fix). The pure
   // reconcile logic (incl. the stripped-description edge case) lives in
@@ -217,32 +203,6 @@ export function BoardPage() {
     const result = reconcileSelectedIssue(columns, selectedIssue);
     if (result.changed) setSelectedIssue(result.next);
   }, [columns, selectedIssue]);
-  // Real-time board updates via WebSocket (handlers + subscription)
-  useBoardLiveHandlers({
-    activeProjectId,
-    columnsRef,
-    loadProjectsRef,
-    pendingBoardRefreshRef,
-    refetchBoard,
-    scheduleRefetch,
-    setColumns,
-    creatingInColumnId,
-    setSessionActivityRaw,
-    setLiveStats,
-    setSessionTodos,
-    setApprovalRequests,
-    addNotificationBoardEvent,
-    addNotificationApprovalEvent,
-  });
-
-  // Process pending board refresh when create form closes
-  useEffect(() => {
-    if (!creatingInColumnId && pendingBoardRefreshRef.current) {
-      pendingBoardRefreshRef.current = false;
-      void refetchBoard();
-    }
-  }, [creatingInColumnId, refetchBoard]);
-
   const loadProjects = useCallback(async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: boardQueryKeys.projects }),
@@ -252,44 +212,6 @@ export function BoardPage() {
   }, [activeProjectId, queryClient]);
   loadProjectsRef.current = loadProjects;
 
-  useEffect(() => {
-    const projs = projectsQuery.data;
-    if (!projs) return;
-    if (projs.length === 0) {
-      setActiveProjectId(null);
-      return;
-    }
-    const preferredId = activeProjectPreferenceQuery.data?.projectId;
-    const nextId = preferredId && projs.some((p) => p.id === preferredId) ? preferredId : projs[0].id;
-    setActiveProjectId((current) => current ?? nextId);
-  }, [activeProjectPreferenceQuery.data?.projectId, projectsQuery.data]);
-
-  useEffect(() => {
-    if (projectsQuery.error) setError(projectsQuery.error instanceof Error ? projectsQuery.error.message : "Failed to load projects");
-  }, [projectsQuery.error]);
-
-  useEffect(() => {
-    if (boardQuery.error) setError(boardQuery.error instanceof Error ? boardQuery.error.message : "Failed to load board");
-  }, [boardQuery.error]);
-
-  useEffect(() => {
-    const board = boardQuery.data;
-    if (!board) return;
-    setColumns(board);
-    columnsRef.current = board;
-
-    if (bootstrappedIssueParamRef.current) return;
-    bootstrappedIssueParamRef.current = true;
-    const params = new URLSearchParams(window.location.search);
-    const issueParam = params.get("issue");
-    if (issueParam != null) {
-      const issueNumber = parseInt(issueParam, 10);
-      if (!isNaN(issueNumber)) {
-        const found = board.flatMap((c) => c.issues).find((i) => i.issueNumber === issueNumber);
-        if (found) setSelectedIssue(found);
-      }
-    }
-  }, [boardQuery.data]);
   const {
     handleProjectChange,
     handleRegisterProject,
@@ -546,11 +468,6 @@ export function BoardPage() {
     },
   );
 
-  const loading =
-    projectsQuery.isLoading ||
-    activeProjectPreferenceQuery.isLoading ||
-    (!!activeProjectId && boardQuery.isLoading && columns.length === 0);
-
   if (loading) {
     return (
       <Layout onRegisterProject={handleRegisterProject} onCreateProject={handleCreateProject}>
@@ -621,46 +538,56 @@ export function BoardPage() {
   };
   return (
     <BoardPageView
-      {...{
+      board={{
         activeAgentsTarget,
         activeColumns,
-        activeProject,
-        activeProjectId,
-        activeTagIds,
-        agentQuestionsCount,
         allMentionIssues,
         allTags,
-        applyBoardViewState,
-        approvalRequests,
         archiveColumns,
-        archivedProjects,
         backlogColumn,
         boardStatusOptions,
         boardTagOptions,
         boardViewState,
         bulk,
-        butlerInitialPrompt,
         canStartWorkspace,
         collapsedGroups,
         columnWidths,
         columns,
         columnsRef,
-        createdDateFilter,
         creatingInColumnId,
+        expandedCreatePanel,
+        keyboardCursorIssueId,
+        milestones,
+        pendingIssueIds,
+        pendingWorkspaceIssueIds,
+        runQueueForecast,
+        visibilityColumns,
+      }}
+      chrome={{
         dependencyImpactPending,
         error,
-        expandedCreatePanel,
-        focusMode,
         graphFocusIssueId,
-        handleArchiveProject,
+        isDark,
+        moveToDonePending,
+        mutating,
+        panels,
+        prefs,
+        setCreatingInColumnId,
+        setDependencyImpactPending,
+        setError,
+        setExpandedCreatePanel,
+        setGraphFocusIssueId,
+        setMoveToDonePending,
+        setPendingWorkspaceIssueIds,
+        setTheme,
+      }}
+      commands={{
         handleBoardDragStart,
         handleBoardIssueClick,
         handleChatAboutTicket,
-        handleClearTagFilter,
         handleColumnReorder,
         handleColumnResizeStart,
         handleCreateIssue,
-        handleCreateProject,
         handleCreatedDateDrilldown,
         handleDeleteIssue,
         handleDrop,
@@ -668,86 +595,88 @@ export function BoardPage() {
         handleDropWithLane,
         handleDuplicateIssue,
         handleIssueClick,
-        handleIssueTypeFilterChange,
         handleManageWorkspaces,
         handleMentionClick,
-        handleMilestoneOverviewClick,
         handleMoveToNext,
-        handleNotificationEventClick,
         handleOpenDiff,
         handleOpenWorkspaceById,
-        handlePriorityFilterChange,
-        handleProjectChange,
         handlePromoteBacklogIssue,
         handleQuickAddTag,
         handleQuickPriorityChange,
         handleQuickRemoveTag,
         handleQuickTogglePinned,
-        handleRegisterProject,
         handleStartWorkspace,
         handleSwimlaneChange,
-        handleTagFilterToggle,
-        handleUnarchiveProject,
-        handleUnregisterProject,
         handleUpdateIssue,
         handleViewModeChange,
-        isDark,
+        openIssueById,
+        refetchBoard,
+        resetColumnWidth,
+        swimlaneDimension,
+        toggleGroup,
+        trailControls,
+        viewMode,
+      }}
+      filters={{
+        activeTagIds,
+        applyBoardViewState,
+        createdDateFilter,
+        focusMode,
+        handleClearTagFilter,
+        handleIssueTypeFilterChange,
+        handleMilestoneOverviewClick,
+        handlePriorityFilterChange,
+        handleTagFilterToggle,
         issueTypeFilter,
-        keyboardCursorIssueId,
-        liveStats,
         loadSavedViewTags,
         loadTags,
         milestoneFilterId,
-        milestones,
-        moveToDonePending,
-        mutating,
-        notifications,
-        openIssueById,
-        panels,
-        pendingIssueIds,
-        pendingWorkspaceIssueIds,
-        prefs,
         priorityFilter,
-        projects,
-        refetchBoard,
-        resetColumnWidth,
-        runQueueForecast,
         searchQuery,
-        selectedIssue,
-        sessionActivity,
-        sessionTodos,
-        setApprovalRequests,
-        setButlerInitialPrompt,
         setCreatedDateFilter,
-        setCreatingInColumnId,
-        setDependencyImpactPending,
-        setError,
-        setExpandedCreatePanel,
         setFocusMode,
-        setGraphFocusIssueId,
         setMilestoneFilterId,
-        setMoveToDonePending,
-        setPendingWorkspaceIssueIds,
         setSearchQuery,
-        setSelectedIssue,
         setShowBlocked,
         setShowStaleOnly,
         setStatusFilterId,
-        setTheme,
+        showBlocked,
+        showStaleOnly,
+        statusFilterId,
+      }}
+      project={{
+        activeProject,
+        activeProjectId,
+        archivedProjects,
+        handleArchiveProject,
+        handleCreateProject,
+        handleProjectChange,
+        handleRegisterProject,
+        handleUnarchiveProject,
+        handleUnregisterProject,
+        projects,
+        switchingProject,
+      }}
+      realtime={{
+        agentQuestionsCount,
+        approvalRequests,
+        handleNotificationEventClick,
+        liveStats,
+        notifications,
+        sessionActivity,
+        sessionTodos,
+        setApprovalRequests,
+        tickerEntries,
+      }}
+      workspace={{
+        butlerInitialPrompt,
+        selectedIssue,
+        setButlerInitialPrompt,
+        setSelectedIssue,
         setWorkspaceInitial,
         setWorkspaceInitialDiff,
         setWorkspaceIssue,
         setWorkspaceOpenCreate,
-        showBlocked,
-        showStaleOnly,
-        statusFilterId,
-        swimlaneDimension,
-        switchingProject,
-        tickerEntries,
-        toggleGroup,
-        trailControls,
-        viewMode,
-        visibilityColumns,
         workspaceInitial,
         workspaceInitialDiff,
         workspaceIssue,
