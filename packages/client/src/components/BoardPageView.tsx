@@ -78,7 +78,7 @@ const IssueDetailPanel = lazy(() => import("./IssueDetailPanel.js").then((m) => 
 const WorkspacePanel = lazy(() => import("./WorkspacePanel.js").then((m) => ({ default: m.WorkspacePanel })));
 const BoardOverlayPanels = lazy(() => import("./BoardOverlayPanels.js").then((m) => ({ default: m.BoardOverlayPanels })));
 
-interface BoardPageViewProps {
+interface BoardPageViewModel {
   activeAgentsTarget: number | undefined;
   activeColumns: StatusWithIssues[];
   activeProject: Project | undefined;
@@ -213,37 +213,110 @@ interface BoardPageViewProps {
   workspaceOpenCreate: boolean;
 }
 
-export function BoardPageView({
-    activeAgentsTarget,   activeColumns,   activeProject,   activeProjectId,   activeTagIds,   
-  agentQuestionsCount,   allMentionIssues,   allTags,   applyBoardViewState,   approvalRequests,   
-  archiveColumns,   archivedProjects,   backlogColumn,   boardStatusOptions,   boardTagOptions,   
-  boardViewState,   bulk,   butlerInitialPrompt,   canStartWorkspace,   collapsedGroups,   
-  columnWidths,   columns,   columnsRef,   createdDateFilter,   creatingInColumnId,   
-  dependencyImpactPending,   error,   expandedCreatePanel,   focusMode,   graphFocusIssueId,   
-  handleArchiveProject,   handleBoardDragStart,   handleBoardIssueClick,   handleChatAboutTicket,   
-  handleClearTagFilter,   handleColumnReorder,   handleColumnResizeStart,   handleCreateIssue,   
-  handleCreateProject,   handleCreatedDateDrilldown,   handleDeleteIssue,   handleDrop,   
-  handleDropOnAgentSlot,   handleDropWithLane,   handleDuplicateIssue,   handleIssueClick,   
-  handleIssueTypeFilterChange,   handleManageWorkspaces,   handleMentionClick,   
-  handleMilestoneOverviewClick,   handleMoveToNext,   handleNotificationEventClick,   handleOpenDiff, 
-    handleOpenWorkspaceById,   handlePriorityFilterChange,   handleProjectChange,   
-  handlePromoteBacklogIssue,   handleQuickAddTag,   handleQuickPriorityChange,   
-  handleQuickRemoveTag,   handleQuickTogglePinned,   handleRegisterProject,   handleStartWorkspace,   
-  handleSwimlaneChange,   handleTagFilterToggle,   handleUnarchiveProject,   handleUnregisterProject, 
-    handleUpdateIssue,   handleViewModeChange,   isDark,   issueTypeFilter,   keyboardCursorIssueId,  
-   liveStats,   loadSavedViewTags,   loadTags,   milestoneFilterId,   milestones,   
-  moveToDonePending,   mutating,   notifications,   openIssueById,   panels,   pendingIssueIds,   
-  pendingWorkspaceIssueIds,   prefs,   priorityFilter,   projects,   refetchBoard,   
-  resetColumnWidth,   runQueueForecast,   searchQuery,   selectedIssue,   sessionActivity,   
-  sessionTodos,   setApprovalRequests,   setButlerInitialPrompt,   setCreatedDateFilter,   
-  setCreatingInColumnId,   setDependencyImpactPending,   setError,   setExpandedCreatePanel,   
-  setFocusMode,   setGraphFocusIssueId,   setMilestoneFilterId,   setMoveToDonePending,   
-  setPendingWorkspaceIssueIds,   setSearchQuery,   setSelectedIssue,   setShowBlocked,   
-  setShowStaleOnly,   setStatusFilterId,   setTheme,   setWorkspaceInitial,   
-  setWorkspaceInitialDiff,   setWorkspaceIssue,   setWorkspaceOpenCreate,   showBlocked,   
-  showStaleOnly,   statusFilterId,   swimlaneDimension,   switchingProject,   tickerEntries,   
-  toggleGroup,   trailControls,   viewMode,   visibilityColumns,   workspaceInitial,   
-  workspaceInitialDiff,   workspaceIssue,   workspaceOpenCreate, }: BoardPageViewProps) {
+type ProjectController = Pick<BoardPageViewModel,
+  "activeProject" | "activeProjectId" | "archivedProjects" | "projects" | "switchingProject" |
+  "handleArchiveProject" | "handleCreateProject" | "handleProjectChange" | "handleRegisterProject" |
+  "handleUnarchiveProject" | "handleUnregisterProject"
+>;
+type BoardDataController = Pick<BoardPageViewModel,
+  "activeAgentsTarget" | "activeColumns" | "allMentionIssues" | "allTags" | "archiveColumns" |
+  "backlogColumn" | "boardStatusOptions" | "boardTagOptions" | "boardViewState" | "bulk" |
+  "canStartWorkspace" | "collapsedGroups" | "columnWidths" | "columns" | "columnsRef" |
+  "creatingInColumnId" | "expandedCreatePanel" | "keyboardCursorIssueId" | "milestones" |
+  "pendingIssueIds" | "pendingWorkspaceIssueIds" | "runQueueForecast" | "visibilityColumns"
+>;
+type FilterNavigationController = Pick<BoardPageViewModel,
+  "activeTagIds" | "applyBoardViewState" | "createdDateFilter" | "focusMode" |
+  "handleClearTagFilter" | "handleIssueTypeFilterChange" | "handleMilestoneOverviewClick" |
+  "handlePriorityFilterChange" | "handleTagFilterToggle" | "issueTypeFilter" |
+  "loadSavedViewTags" | "loadTags" | "milestoneFilterId" | "priorityFilter" | "searchQuery" |
+  "setCreatedDateFilter" | "setFocusMode" | "setMilestoneFilterId" | "setSearchQuery" |
+  "setShowBlocked" | "setShowStaleOnly" | "setStatusFilterId" | "showBlocked" |
+  "showStaleOnly" | "statusFilterId"
+>;
+type WorkspaceController = Pick<BoardPageViewModel,
+  "butlerInitialPrompt" | "selectedIssue" | "setButlerInitialPrompt" | "setSelectedIssue" |
+  "setWorkspaceInitial" | "setWorkspaceInitialDiff" | "setWorkspaceIssue" |
+  "setWorkspaceOpenCreate" | "workspaceInitial" | "workspaceInitialDiff" | "workspaceIssue" |
+  "workspaceOpenCreate"
+>;
+type RealtimeController = Pick<BoardPageViewModel,
+  "agentQuestionsCount" | "approvalRequests" | "handleNotificationEventClick" | "liveStats" |
+  "notifications" | "sessionActivity" | "sessionTodos" | "setApprovalRequests" | "tickerEntries"
+>;
+type BoardCommandController = Pick<BoardPageViewModel,
+  "handleBoardDragStart" | "handleBoardIssueClick" | "handleChatAboutTicket" |
+  "handleColumnReorder" | "handleColumnResizeStart" | "handleCreateIssue" |
+  "handleCreatedDateDrilldown" | "handleDeleteIssue" | "handleDrop" | "handleDropOnAgentSlot" |
+  "handleDropWithLane" | "handleDuplicateIssue" | "handleIssueClick" |
+  "handleManageWorkspaces" | "handleMentionClick" | "handleMoveToNext" | "handleOpenDiff" |
+  "handleOpenWorkspaceById" | "handlePromoteBacklogIssue" | "handleQuickAddTag" |
+  "handleQuickPriorityChange" | "handleQuickRemoveTag" | "handleQuickTogglePinned" |
+  "handleStartWorkspace" | "handleSwimlaneChange" | "handleUpdateIssue" |
+  "handleViewModeChange" | "openIssueById" | "refetchBoard" | "resetColumnWidth" |
+  "swimlaneDimension" | "toggleGroup" | "trailControls" | "viewMode"
+>;
+type BoardChromeController = Pick<BoardPageViewModel,
+  "dependencyImpactPending" | "error" | "graphFocusIssueId" | "isDark" | "moveToDonePending" |
+  "mutating" | "panels" | "prefs" | "setCreatingInColumnId" | "setDependencyImpactPending" |
+  "setError" | "setExpandedCreatePanel" | "setGraphFocusIssueId" | "setMoveToDonePending" |
+  "setPendingWorkspaceIssueIds" | "setTheme"
+>;
+
+interface BoardPageViewProps {
+  board: BoardDataController;
+  chrome: BoardChromeController;
+  commands: BoardCommandController;
+  filters: FilterNavigationController;
+  project: ProjectController;
+  realtime: RealtimeController;
+  workspace: WorkspaceController;
+}
+
+export function BoardPageView({ board, chrome, commands, filters, project, realtime, workspace }: BoardPageViewProps) {
+  const {
+    activeAgentsTarget, activeColumns, allMentionIssues, allTags, archiveColumns, backlogColumn,
+    boardStatusOptions, boardTagOptions, boardViewState, bulk, canStartWorkspace, collapsedGroups,
+    columnWidths, columns, columnsRef, creatingInColumnId, expandedCreatePanel, keyboardCursorIssueId,
+    milestones, pendingIssueIds, pendingWorkspaceIssueIds, runQueueForecast, visibilityColumns,
+  } = board;
+  const {
+    dependencyImpactPending, error, graphFocusIssueId, isDark, moveToDonePending, mutating, panels,
+    prefs, setCreatingInColumnId, setDependencyImpactPending, setError, setExpandedCreatePanel,
+    setGraphFocusIssueId, setMoveToDonePending, setPendingWorkspaceIssueIds, setTheme,
+  } = chrome;
+  const {
+    handleBoardDragStart, handleBoardIssueClick, handleChatAboutTicket, handleColumnReorder,
+    handleColumnResizeStart, handleCreateIssue, handleCreatedDateDrilldown, handleDeleteIssue,
+    handleDrop, handleDropOnAgentSlot, handleDropWithLane, handleDuplicateIssue, handleIssueClick,
+    handleManageWorkspaces, handleMentionClick, handleMoveToNext, handleOpenDiff,
+    handleOpenWorkspaceById, handlePromoteBacklogIssue, handleQuickAddTag, handleQuickPriorityChange,
+    handleQuickRemoveTag, handleQuickTogglePinned, handleStartWorkspace, handleSwimlaneChange,
+    handleUpdateIssue, handleViewModeChange, openIssueById, refetchBoard, resetColumnWidth,
+    swimlaneDimension, toggleGroup, trailControls, viewMode,
+  } = commands;
+  const {
+    activeTagIds, applyBoardViewState, createdDateFilter, focusMode, handleClearTagFilter,
+    handleIssueTypeFilterChange, handleMilestoneOverviewClick, handlePriorityFilterChange,
+    handleTagFilterToggle, issueTypeFilter, loadSavedViewTags, loadTags, milestoneFilterId,
+    priorityFilter, searchQuery, setCreatedDateFilter, setFocusMode, setMilestoneFilterId,
+    setSearchQuery, setShowBlocked, setShowStaleOnly, setStatusFilterId, showBlocked,
+    showStaleOnly, statusFilterId,
+  } = filters;
+  const {
+    activeProject, activeProjectId, archivedProjects, handleArchiveProject, handleCreateProject,
+    handleProjectChange, handleRegisterProject, handleUnarchiveProject, handleUnregisterProject,
+    projects, switchingProject,
+  } = project;
+  const {
+    agentQuestionsCount, approvalRequests, handleNotificationEventClick, liveStats, notifications,
+    sessionActivity, sessionTodos, setApprovalRequests, tickerEntries,
+  } = realtime;
+  const {
+    butlerInitialPrompt, selectedIssue, setButlerInitialPrompt, setSelectedIssue,
+    setWorkspaceInitial, setWorkspaceInitialDiff, setWorkspaceIssue, setWorkspaceOpenCreate,
+    workspaceInitial, workspaceInitialDiff, workspaceIssue, workspaceOpenCreate,
+  } = workspace;
   return (
     <MentionProvider value={{ issues: allMentionIssues, onMentionClick: handleMentionClick }}>
     <Layout

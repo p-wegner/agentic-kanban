@@ -9,7 +9,7 @@ import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { runCreateIssueFlow, type CreateIssuePayload } from "../lib/createIssueService.js";
 import type { ExpandedCreatePanel, WorkspaceInitial } from "../routes/BoardPage.js";
 import type { IssueWithStatus, UpdateIssueRequest, StatusWithIssues } from "@agentic-kanban/shared";
-import { defaultModelForProvider, type AgentProvider } from "../lib/settings-shared.js";
+import { resolveWorkspaceLaunchDefaults } from "../lib/workspaceLaunchDefaults.js";
 
 type Setter<T> = Dispatch<SetStateAction<T>>;
 
@@ -106,14 +106,7 @@ export function createBoardIssueActions(deps: BoardIssueActionsDeps) {
     setPendingWorkspaceIssueIds((prev: Set<string>) => new Set([...prev, issue.id]));
     try {
       const s = await getSettings();
-      const provider = (s.provider as AgentProvider) || "claude";
-      const profileName = provider === "codex"
-        ? (s.codex_profile || "default")
-        : provider === "pi"
-        ? (s.pi_profile || "default")
-        : provider === "copilot"
-        ? (s.copilot_profile || "default")
-        : (s.claude_profile || "default");
+      const { provider, profileName, model } = resolveWorkspaceLaunchDefaults(s);
 
       const branch = suggestBranchName(issue);
       const body: Record<string, unknown> = {
@@ -124,7 +117,6 @@ export function createBoardIssueActions(deps: BoardIssueActionsDeps) {
         isDirect: false,
         profile: { provider, name: profileName },
       };
-      const model = defaultModelForProvider(s, provider);
       if (model) body.model = model;
 
       const result = await apiPost<{ id: string; sessionId?: string }>("/api/workspaces", body);
