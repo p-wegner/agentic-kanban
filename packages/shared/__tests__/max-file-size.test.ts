@@ -2,40 +2,58 @@ import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 
 /**
- * Architecture gate: no source file may exceed {@link MAX_LINES} lines.
+ * Architecture gate: a cohesion-aware god-module guard (arch-review #875).
  *
- * God-files (one module accreting many concerns) are the recurring code-quality
- * regression in this repo — repeatedly driven back under 1000 lines by hand
- * (the client/server/shared decomposition campaigns). This test makes that
- * convention machine-checked so a file can never silently grow back into a
- * god-module: the moment one crosses the line, CI fails and the author
- * decomposes it (extract a cohesive sub-module, or split a god-file behind a
- * facade barrel — see packages/shared/src/lib/git-service.ts /
- * workflow-engine.ts for the pattern).
+ * The previous gate was a raw 1000-line ceiling. It was honest but it drove
+ * threshold-hugging, not cohesion: hand-maintained files clustered just under
+ * 1000 (WorkspaceCard.tsx 971, issue.service.ts 948, …) and a 971-line module is
+ * still a god-module. Worse, a raw line count both MISSES low-cohesion modules
+ * that happen to be < 1000 lines and would FALSELY implicate cohesive large files
+ * (a single big React component, the pure-DTO wire contract types/api.ts).
  *
- * The bar is 1000 lines, the established team threshold the whole codebase
- * already sits under. The ALLOWLIST is intentionally EMPTY and must only ever
- * SHRINK: prefer decomposing the file over adding an exception. Tests, generated
- * code, dist and vendored code are excluded (they are not hand-maintained
- * modules subject to the same readability budget).
+ * So the gate now fires on TWO signals:
+ *
+ *  1. {@link MAX_LINES} — a hard ceiling kept as an absolute backstop. No single
+ *     module should ever be enormous regardless of how cohesive it claims to be.
+ *
+ *  2. A COHESION signal — a module is a probable god-module when it is large
+ *     ({@link COHESION_MIN_LINES}+) AND exposes a broad BEHAVIORAL export surface
+ *     (> {@link COHESION_MAX_FN_EXPORTS} exported functions/classes). Many
+ *     independent exported behaviors in one big file = many responsibilities =
+ *     low cohesion. This is exactly the shape #875 called out in the post-split
+ *     workflow engine.ts (688 lines, 19 exported functions, ~3 responsibilities)
+ *     — a file the raw line gate waved through. The signal counts FUNCTIONS and
+ *     CLASSES only, NOT exported `const` data tables (gitignore templates, version
+ *     pins, lookup maps) or type/interface exports — those are cohesive data /
+ *     contracts, not separate responsibilities.
+ *
+ * Exemptions (path/shape-based, not a per-file allowlist):
+ *  - the REPOSITORY layer — a data-access module legitimately exports one query
+ *    function per row operation; breadth there is cohesion-by-layer, not a
+ *    grab-bag, so the cohesion signal does not apply (the line ceiling still does);
+ *  - type-only modules (the wire-contract DTOs) — no behavioral surface at all.
+ *
+ * The decompose recipe when a file trips: extract a cohesive sub-module, or split
+ * a god-file behind a facade barrel — see packages/shared/src/lib/git-service.ts
+ * and packages/shared/src/lib/workflow-engine.ts for the pattern. Tests, generated
+ * code, dist and vendored code are excluded.
  */
 
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "../../../..");
 const MAX_LINES = 1000;
-
-/**
- * Files permitted to exceed MAX_LINES, with a reason. Keep this EMPTY if you can;
- * a non-empty entry is a debt marker, not a license to grow. Paths are relative
- * to the repo root and use forward slashes.
- */
-const ALLOWLIST = new Map<string, string>([
-  // e.g. ["packages/shared/src/types/api.ts", "hand-authored wire DTOs; cohesive"],
-]);
+const COHESION_MIN_LINES = 600;
+const COHESION_MAX_FN_EXPORTS = 15;
 
 function isExcluded(absPath: string): boolean {
-  const parts = absPath.split(sep);
+  // Check segments RELATIVE to the repo root: when this test runs from inside a
+  // worktree the absolute path itself contains ".worktrees" (…/.worktrees/<wt>/…),
+  // and matching on the absolute prefix would silently exclude EVERY file, turning
+  // the whole gate into a no-op. We only want to skip a NESTED worktree copy that
+  // appears below the repo root.
+  const parts = relative(REPO_ROOT, absPath).split(sep);
   return (
     parts.includes("node_modules") ||
     parts.includes("dist") ||
@@ -46,6 +64,11 @@ function isExcluded(absPath: string): boolean {
     absPath.endsWith(".spec.ts") ||
     absPath.endsWith(".d.ts")
   );
+}
+
+/** The repository layer exports one query fn per operation — broad by design. */
+function isRepositoryLayer(rel: string): boolean {
+  return rel.includes("/repositories/");
 }
 
 function collectSourceFiles(dir: string, out: string[]): void {
@@ -66,48 +89,93 @@ function collectSourceFiles(dir: string, out: string[]): void {
   }
 }
 
-describe("max-file-size gate", () => {
-  it(`no package source file exceeds ${MAX_LINES} lines`, () => {
-    const packagesDir = join(REPO_ROOT, "packages");
-    const files: string[] = [];
-    for (const pkg of readdirSync(packagesDir)) {
-      if (pkg === ".worktrees") continue;
-      collectSourceFiles(join(packagesDir, pkg, "src"), files);
-    }
+function lineCount(text: string): number {
+  return text.length === 0 ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
+}
 
+/**
+ * Count the BEHAVIORAL export surface: exported function/class declarations plus
+ * exported arrow-function/function-expression consts. Deliberately ignores
+ * exported data consts (lookup tables, templates, version pins) and type/interface
+ * exports — those are cohesive data/contracts, not separate responsibilities.
+ */
+function countFunctionExports(file: string, text: string): number {
+  const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+  let count = 0;
+
+  const isExported = (stmt: ts.Statement): boolean => {
+    const mods = ts.canHaveModifiers(stmt) ? ts.getModifiers(stmt) : undefined;
+    return !!mods?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
+  };
+
+  for (const stmt of sf.statements) {
+    if (ts.isFunctionDeclaration(stmt) && isExported(stmt)) {
+      count++;
+      continue;
+    }
+    if (ts.isClassDeclaration(stmt) && isExported(stmt)) {
+      count++;
+      continue;
+    }
+    if (ts.isVariableStatement(stmt) && isExported(stmt)) {
+      for (const decl of stmt.declarationList.declarations) {
+        const init = decl.initializer;
+        if (init && (ts.isArrowFunction(init) || ts.isFunctionExpression(init))) count++;
+      }
+    }
+  }
+  return count;
+}
+
+function gatherSourceFiles(): string[] {
+  const packagesDir = join(REPO_ROOT, "packages");
+  const files: string[] = [];
+  for (const pkg of readdirSync(packagesDir)) {
+    if (pkg === ".worktrees") continue;
+    collectSourceFiles(join(packagesDir, pkg, "src"), files);
+  }
+  return files;
+}
+
+describe("god-module gate (cohesion-aware)", () => {
+  it(`no source file exceeds the ${MAX_LINES}-line hard ceiling`, () => {
     const offenders: string[] = [];
-    for (const file of files) {
+    for (const file of gatherSourceFiles()) {
       const rel = relative(REPO_ROOT, file).split(sep).join("/");
-      if (ALLOWLIST.has(rel)) continue;
-      // Count newline-terminated lines; a trailing newline does not add a line.
-      const text = readFileSync(file, "utf8");
-      const lineCount = text.length === 0 ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
-      if (lineCount > MAX_LINES) offenders.push(`${rel}  (${lineCount} lines)`);
+      const lines = lineCount(readFileSync(file, "utf8"));
+      if (lines > MAX_LINES) offenders.push(`${rel}  (${lines} lines)`);
     }
 
     expect(
       offenders,
-      `These source files exceed the ${MAX_LINES}-line god-file limit. Decompose them ` +
+      `These source files exceed the ${MAX_LINES}-line hard ceiling. Decompose them ` +
         `(extract a cohesive sub-module, or split behind a facade barrel — see ` +
-        `git-service.ts / workflow-engine.ts) rather than adding them to the allowlist:\n` +
+        `git-service.ts / workflow-engine.ts):\n` +
         offenders.join("\n"),
     ).toEqual([]);
   });
 
-  it("the allowlist is live, not stale (every entry still exists and still exceeds the limit)", () => {
-    const stale: string[] = [];
-    for (const rel of ALLOWLIST.keys()) {
-      const abs = join(REPO_ROOT, rel);
-      let lineCount = 0;
-      try {
-        const text = readFileSync(abs, "utf8");
-        lineCount = text.length === 0 ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
-      } catch {
-        stale.push(`${rel} (missing)`);
-        continue;
+  it(`no large module (${COHESION_MIN_LINES}+ lines) exposes more than ${COHESION_MAX_FN_EXPORTS} exported functions/classes`, () => {
+    const offenders: string[] = [];
+    for (const file of gatherSourceFiles()) {
+      const rel = relative(REPO_ROOT, file).split(sep).join("/");
+      if (isRepositoryLayer(rel)) continue; // broad-by-design data-access layer
+      const text = readFileSync(file, "utf8");
+      const lines = lineCount(text);
+      if (lines < COHESION_MIN_LINES) continue;
+      const fnExports = countFunctionExports(file, text);
+      if (fnExports > COHESION_MAX_FN_EXPORTS) {
+        offenders.push(`${rel}  (${lines} lines, ${fnExports} exported functions/classes)`);
       }
-      if (lineCount <= MAX_LINES) stale.push(`${rel} (now ${lineCount} lines — remove from allowlist)`);
     }
-    expect(stale, `Stale allowlist entries:\n${stale.join("\n")}`).toEqual([]);
+
+    expect(
+      offenders,
+      `These large modules expose a broad behavioral export surface — a low-cohesion ` +
+        `god-module smell (the shape #875 flagged in the old workflow engine.ts). ` +
+        `Split by responsibility into cohesive sub-modules re-exported through a facade ` +
+        `barrel (see workflow-engine.ts / git-service.ts):\n` +
+        offenders.join("\n"),
+    ).toEqual([]);
   });
 });

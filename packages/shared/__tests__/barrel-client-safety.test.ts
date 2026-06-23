@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { builtinModules } from "node:module";
-import { readFileSync, existsSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import { dirname, resolve, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
@@ -100,44 +100,113 @@ function parseModule(file: string): ModuleEdges {
   return { valueSpecs };
 }
 
+/**
+ * Walk the value-reachable module graph from `entry`, returning every reached
+ * on-disk source file plus any direct Node-builtin value-imports found along the
+ * way. Type-only edges are erased and do NOT propagate (matches Vite/TS).
+ */
+function walkValueGraph(entry: string): { visited: Set<string>; nodeImports: string[] } {
+  const visited = new Set<string>();
+  const queue: string[] = [entry];
+  const nodeImports: string[] = [];
+
+  while (queue.length > 0) {
+    const file = queue.shift()!;
+    if (visited.has(file)) continue;
+    visited.add(file);
+
+    const { valueSpecs } = parseModule(file);
+    for (const spec of valueSpecs) {
+      if (isNodeBuiltin(spec)) {
+        nodeImports.push(`${file.replace(sharedSrc, "shared/src")} value-imports Node builtin "${spec}"`);
+        continue;
+      }
+      if (isRelative(spec)) {
+        const resolved = resolveModule(file, spec);
+        if (resolved && resolved.startsWith(sharedSrc)) queue.push(resolved);
+      }
+      // bare npm specifiers (non-builtin) are not followed; they would need their
+      // own client-safety guarantee. The documented failure mode is Node builtins.
+    }
+  }
+  return { visited, nodeImports };
+}
+
+/** Every `.ts`/`.tsx` source file directly under shared/src/lib (one level, the barrel layer). */
+function libBarrelCandidates(): string[] {
+  const libDir = resolve(sharedSrc, "lib");
+  const out: string[] = [];
+  for (const name of readdirSync(libDir)) {
+    const full = join(libDir, name);
+    if (statSync(full).isDirectory()) continue;
+    if (full.endsWith(".ts") || full.endsWith(".tsx")) out.push(full);
+  }
+  return out;
+}
+
 describe("shared barrel client-safety (#791 guard)", () => {
   it("no module reachable as a VALUE through the client barrels imports a Node builtin", () => {
     const entry = resolve(sharedSrc, "index.ts");
     expect(existsSync(entry), `barrel not found: ${entry}`).toBe(true);
 
-    const visited = new Set<string>();
-    const queue: string[] = [entry];
-    const violations: string[] = [];
-
-    while (queue.length > 0) {
-      const file = queue.shift()!;
-      if (visited.has(file)) continue;
-      visited.add(file);
-
-      const { valueSpecs } = parseModule(file);
-      for (const spec of valueSpecs) {
-        if (isNodeBuiltin(spec)) {
-          violations.push(`${file.replace(sharedSrc, "shared/src")} value-imports Node builtin "${spec}"`);
-          continue;
-        }
-        if (isRelative(spec)) {
-          const resolved = resolveModule(file, spec);
-          if (resolved && resolved.startsWith(sharedSrc)) queue.push(resolved);
-        }
-        // bare npm specifiers (non-builtin) are not followed; they would need their
-        // own client-safety guarantee. The documented failure mode is Node builtins.
-      }
-    }
+    const { visited, nodeImports } = walkValueGraph(entry);
 
     expect(
-      violations,
+      nodeImports,
       `These modules ship Node builtins into the client bundle and will white-screen the UI (#791).\n` +
         `Fix: change the offending barrel re-export to \`export type *\` and import the runtime value via its deep path server-side.\n` +
-        violations.join("\n"),
+        nodeImports.join("\n"),
     ).toEqual([]);
 
     // Sanity: the walk actually traversed the graph (guards against a silent no-op
     // if the barrel structure changes and resolution breaks).
     expect(visited.size).toBeGreaterThan(5);
+  });
+
+  /**
+   * #875 — widen the guard beyond the client entry barrel.
+   *
+   * Node-only barrels (git-service.ts, workflow-engine.ts, …) `export *` runtime
+   * values that import node:child_process/fs. They are safe ONLY because they are
+   * imported via their DEEP PATH (@agentic-kanban/shared/lib/git-service) and are
+   * NOT re-exported through src/lib/index.ts — so the client never reaches them.
+   * That safety was incidental (nothing tested it): adding one
+   * `export * from "./git-service.js"` to lib/index.ts would silently re-introduce
+   * the #791 white-screen. This test makes the invariant explicit: any lib-level
+   * barrel that transitively value-imports a Node builtin MUST stay out of the
+   * client-reachable graph.
+   */
+  it("node-only deep-path barrels are NOT reachable as a value from the client entry", () => {
+    const entry = resolve(sharedSrc, "index.ts");
+    const { visited: clientReachable } = walkValueGraph(entry);
+
+    const leaks: string[] = [];
+    for (const barrel of libBarrelCandidates()) {
+      // A barrel is "node-only" if its own value-reachable graph hits a Node builtin.
+      const { nodeImports } = walkValueGraph(barrel);
+      if (nodeImports.length === 0) continue;
+      // Such a barrel must be reachable only via its deep path — never folded into
+      // the client entry graph.
+      if (clientReachable.has(barrel)) {
+        const rel = barrel.replace(sharedSrc, "shared/src").split(sep).join("/");
+        leaks.push(`${rel} (node-only barrel) is reachable from the client entry: ${nodeImports[0]}`);
+      }
+    }
+
+    expect(
+      leaks,
+      `These node-only deep-path barrels leak into the client bundle (#791/#875).\n` +
+        `A node-only barrel (it transitively value-imports a Node builtin) must be imported only via\n` +
+        `its deep path server-side, never re-exported through src/lib/index.ts. Remove the barrel\n` +
+        `re-export from the client graph (or convert it to \`export type *\`):\n` +
+        leaks.join("\n"),
+    ).toEqual([]);
+
+    // Sanity: there is at least one node-only barrel to police (git-service.ts),
+    // so this test can't silently pass by finding nothing to check.
+    const nodeOnlyBarrels = libBarrelCandidates().filter(
+      (b) => walkValueGraph(b).nodeImports.length > 0,
+    );
+    expect(nodeOnlyBarrels.length).toBeGreaterThan(0);
   });
 });
