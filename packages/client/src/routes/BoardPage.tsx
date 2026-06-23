@@ -32,6 +32,7 @@ import {
   boardQueryKeys,
   fetchTags,
 } from "../hooks/useBoardDataQueries.js";
+import { invalidateClientSurface, subscribeClientInvalidations } from "../lib/clientInvalidation.js";
 import type {
   DependencyInfo,
   IssueWithStatus,
@@ -193,6 +194,11 @@ export function BoardPage() {
     setColumns,
     setPendingWorkspaceIssueIds,
   });
+  useEffect(() => subscribeClientInvalidations((event) => {
+    if (event.surface !== "workspace" && event.surface !== "board" && event.surface !== "issue-detail") return;
+    if (!activeProjectId || event.projectId !== activeProjectId) return;
+    scheduleRefetch();
+  }), [activeProjectId, scheduleRefetch]);
   const tickerEntries = useAgentLiveTicker(columns, sessionActivity, panels.showLiveActivityTicker);
 
   // Keep selectedIssue in sync with board data (F6 stale data fix). The pure
@@ -204,10 +210,7 @@ export function BoardPage() {
     if (result.changed) setSelectedIssue(result.next);
   }, [columns, selectedIssue]);
   const loadProjects = useCallback(async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: boardQueryKeys.projects }),
-      queryClient.invalidateQueries({ queryKey: boardQueryKeys.archivedProjects }),
-    ]);
+    await invalidateClientSurface(queryClient, { surface: "projects" });
     return activeProjectId ?? undefined;
   }, [activeProjectId, queryClient]);
   loadProjectsRef.current = loadProjects;
