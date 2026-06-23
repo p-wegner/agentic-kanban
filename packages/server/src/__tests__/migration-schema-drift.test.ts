@@ -8,6 +8,11 @@ import { SQLiteTable } from "drizzle-orm/sqlite-core";
 import * as schema from "@agentic-kanban/shared/schema";
 import { MIGRATIONS_DIR } from "./helpers/migrations.js";
 import { applyMigrationsToClient } from "./helpers/test-db.js";
+import {
+  diffForeignKeyActions,
+  expectedForeignKeyActions,
+  readForeignKeyActions,
+} from "@agentic-kanban/shared/lib/fk-actions";
 
 /**
  * Schema ↔ migrations drift gate (arch-review #871).
@@ -27,12 +32,16 @@ import { applyMigrationsToClient } from "./helpers/test-db.js";
  * This gate fails on BOTH. It is pure (in-memory libsql, no network, no drizzle-kit
  * subprocess) so it runs in the normal vitest suite.
  *
- * Scope note (deliberate): the drift check compares the TABLE + COLUMN sets, which is
- * what catches "schema added a field with no migration" (and the reverse). It does not
- * diff column types / FK actions / defaults — SQLite stores those loosely and the
- * existing migrations predate a snapshot chain (drizzle `meta/NNNN_snapshot.json` froze
- * at 0006), so a full DDL diff would be noise. Table+column coverage is the high-signal,
- * low-false-positive line that would have caught the orphan and an absent-column drift.
+ * Scope note: the drift check compares the TABLE + COLUMN sets (catches "schema added a
+ * field with no migration" and the reverse) AND the FK ACTIONS (`ON DELETE`/`ON UPDATE`)
+ * per foreign key (arch-review #881). It still does not diff arbitrary column types /
+ * column defaults — SQLite stores those loosely and the existing migrations predate a
+ * snapshot chain (drizzle `meta/NNNN_snapshot.json` froze at 0006), so a full DDL diff
+ * would be noise. But FK actions are high-signal: services rely on cascade/set-null
+ * behaviour (e.g. `issue_dependencies` cascade, #858), so a schema that declares a
+ * cascade with no matching migration — leaving live DBs on RESTRICT/NO ACTION — must
+ * break the build. FK-action parity logic lives in the shared `lib/fk-actions` module
+ * so the same comparison powers the db:repair alignment path.
  */
 
 /** Matches a drizzle migration filename: NNNN_some_name.sql */
@@ -198,6 +207,27 @@ describe("schema ↔ migrations drift gate", () => {
       `Schema/migrations COLUMN drift — a schema column with no migration (or the ` +
         `reverse). Add the migration (or update the schema) so they reproduce each other:\n` +
         columnDrift.join("\n"),
+    ).toEqual([]);
+  });
+
+  it("migrated DB and Drizzle schema agree on FK actions (ON DELETE / ON UPDATE)", async () => {
+    const client = createClient({ url: ":memory:" });
+    applyMigrationsToClient(client);
+
+    const expected = expectedForeignKeyActions();
+    const actual = await readForeignKeyActions(client, [...expected.keys()]);
+    const mismatches = diffForeignKeyActions(expected, actual);
+
+    expect(
+      mismatches,
+      `Schema/migrations FK-ACTION drift (arch-review #881). The Drizzle schema declares ` +
+        `an ON DELETE/ON UPDATE action that the migrations never reproduce, so services ` +
+        `that rely on the cascade (e.g. issue-dependency deletes, #858) will behave ` +
+        `differently against a freshly-migrated DB. Add/fix the migration so a fresh apply ` +
+        `produces the schema's FK action:\n` +
+        mismatches
+          .map((m) => `  ${m.table}: ${m.fk} ${m.field} — schema=${m.expected} migrated=${m.actual}`)
+          .join("\n"),
     ).toEqual([]);
   });
 });
