@@ -25,6 +25,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { existsSync, statSync, unlinkSync, writeFileSync, renameSync } from "node:fs";
 import { getMigrationsFolder } from "../db/migrations.js";
 import { createBackup, backupDir } from "../db/backup.js";
+import { alignForeignKeyActions } from "@agentic-kanban/shared/lib/fk-actions-repair";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DB_PATH = resolve(__dirname, "../../kanban.db");
@@ -85,6 +86,30 @@ async function runMigrations(): Promise<void> {
       (err as NodeJS.ErrnoException).code === "SQLITE_OK";
     if (!spurious) throw err;
     log("ignored known libsql SQLITE_OK false-error — db already up to date.");
+  } finally {
+    client.close();
+  }
+}
+
+/**
+ * Align live FK actions to the Drizzle schema (arch-review #881). Migrations bring
+ * the schema *shape* up to date, but they cannot retro-fit an `ON DELETE` action onto
+ * a table an older DB created without it — SQLite has no `ALTER ... FOREIGN KEY`. This
+ * detects FK-action drift and rebuilds only the drifted tables (data-preserving;
+ * column shape untouched). A backup was already taken at the top of main().
+ */
+async function alignFks(): Promise<void> {
+  const client = createClient({ url: dbUrl() });
+  try {
+    const result = await alignForeignKeyActions(client);
+    if (result.driftedTables.length === 0) {
+      log("FK actions already match the schema (no drift).");
+      return;
+    }
+    for (const m of result.mismatches) {
+      log(`  drift: ${m.table}.${m.fk} ${m.field} — schema=${m.expected} live=${m.actual}`);
+    }
+    log(`FK-action drift aligned by rebuilding: ${result.rebuiltTables.join(", ")}`);
   } finally {
     client.close();
   }
@@ -173,6 +198,17 @@ async function main() {
 
   // 4. Bring schema up to date.
   await runMigrations();
+
+  // 5. Align FK actions the migrations can't retro-fit (#881). Skipped when the db
+  //    was just recreated empty (a fresh migrate already produces correct FKs).
+  if (usable) {
+    try {
+      await alignFks();
+    } catch (err) {
+      log(`WARNING: FK-action alignment failed (schema is still up to date): ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   log("done. If you recreated the db, run `pnpm db:seed` next.");
 }
 

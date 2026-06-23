@@ -4,7 +4,9 @@ import { sessions } from "./sessions.js";
 
 export const sessionMessages = sqliteTable("session_messages", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  sessionId: text("session_id").notNull().references(() => sessions.id),
+  // ON DELETE cascade was added to the live DB by migration 0010_session_messages_cascade
+  // but never reflected here; the schema must declare it so the two agree (arch-review #881).
+  sessionId: text("session_id").notNull().references(() => sessions.id, { onDelete: "cascade" }),
   type: text("type").notNull(), // stdout | stderr | exit | bisect
   data: text("data"),
   exitCode: text("exit_code"),
