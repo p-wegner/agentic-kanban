@@ -6,7 +6,7 @@ import type { Database } from "../db/index.js";
 import { getPreference, setPreference, getAllPreferences, setPreferences } from "../repositories/preferences.repository.js";
 import { getProjectById } from "../repositories/project.repository.js";
 import { allHarnessSettingKeys } from "./harness-settings.js";
-import { commitObjectiveFile, isBoardStrategyKey, parseStrategyBullseyeConfig, PROJECT_CONDUCTOR_OBJECTIVE_RELATIVE_PATH, projectIdFromBoardStrategyKey, selectProviderFromStrategy, writeStrategyObjective } from "./strategy-objective.service.js";
+import { commitObjectiveFile, isBoardStrategyKey, PROJECT_CONDUCTOR_OBJECTIVE_RELATIVE_PATH, projectIdFromBoardStrategyKey, writeStrategyObjective } from "./strategy-objective.service.js";
 import {
   PREF_BUILDER_GUARDRAILS,
   PREF_CLAUDE_SUBSCRIPTION_RING,
@@ -23,7 +23,7 @@ import {
 import { parseCodexLicenseRing, ringProfileNames, discoverCodexHomeProfiles } from "./codex-license-ring.js";
 import { parseClaudeSubscriptionRing, ringProfileNames as claudeRingProfileNames, discoverClaudeConfigDirProfiles } from "./claude-subscription-ring.js";
 import { isProjectScopedDynamicKey } from "../lib/dynamic-preference-keys.js";
-import { resolveEffectiveProviderProfile } from "./effective-config.service.js";
+import { resolveProviderDivergence } from "./project-runtime-config.service.js";
 
 export const SETTINGS_KEYS = [
   "agent_command", "agent_args", "output_parser", "skip_permissions", "claude_profile",
@@ -243,37 +243,13 @@ export function createPreferenceService({ database }: { database: Database }) {
     const rows = await getAllPreferences(database);
     const prefMap = new Map(rows.map(r => [r.key, r.value]));
 
-    const strategyRaw = prefMap.get(`board_strategy_${projectId}`);
-    if (!strategyRaw) {
-      return { hasBullseye: false, bullseyeProvider: null, bullseyeProfile: null, settingsProvider: null, settingsProfile: null, diverged: false };
+    const result = resolveProviderDivergence(prefMap, projectId);
+
+    if (result.diverged) {
+      console.warn(`[preferences] provider divergence for project ${projectId}: Bullseye=${result.bullseyeProvider}:${result.bullseyeProfile} vs settings=${result.settingsProvider}:${result.settingsProfile}`);
     }
 
-    let bullseyeProvider: string | null = null;
-    let bullseyeProfile: string | null = null;
-    try {
-      const config = parseStrategyBullseyeConfig(strategyRaw);
-      const selected = selectProviderFromStrategy(config);
-      if (selected) {
-        bullseyeProvider = selected.provider;
-        bullseyeProfile = selected.profileName || null;
-      }
-    } catch {
-      return { hasBullseye: true, bullseyeProvider: null, bullseyeProfile: null, settingsProvider: null, settingsProfile: null, diverged: false };
-    }
-
-    const settingsSelection = resolveEffectiveProviderProfile(prefMap);
-    const settingsProvider = settingsSelection.provider;
-    const settingsProfile = settingsSelection.profileName || null;
-
-    const providerDiverged = bullseyeProvider !== null && bullseyeProvider !== settingsProvider;
-    const profileDiverged = bullseyeProfile !== null && bullseyeProfile !== "" && bullseyeProfile !== settingsProfile;
-    const diverged = providerDiverged || profileDiverged;
-
-    if (diverged) {
-      console.warn(`[preferences] provider divergence for project ${projectId}: Bullseye=${bullseyeProvider}:${bullseyeProfile} vs settings=${settingsProvider}:${settingsProfile}`);
-    }
-
-    return { hasBullseye: true, bullseyeProvider, bullseyeProfile, settingsProvider, settingsProfile, diverged };
+    return result;
   }
 
   return { getActiveProjectId, setActiveProjectId, getSettings, updateSettings, getProviderDivergence, listClaudeProfiles, listCodexProfiles, listCopilotProfiles, listPiProfiles };

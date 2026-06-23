@@ -7,9 +7,9 @@ import { getStackProfile, verifyScriptPrefKey } from "./stack-profile.service.js
 import { parseStrategyBullseyeConfig, selectProviderFromStrategy } from "./strategy-objective.service.js";
 import { cooldownKey as claudeCooldownKey } from "./claude-subscription-ring.js";
 import { cooldownKey as codexCooldownKey } from "./codex-license-ring.js";
-import { autodrivePrefKey, autoMergeDisabledPrefKey, getDriveStatus, setDriveEnabled } from "./drive.service.js";
-import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
+import { getDriveStatus, setDriveEnabled } from "./drive.service.js";
 import type { DriveEnablementStatus } from "./drive.service.js";
+import { resolveProjectRuntimeConfig } from "./project-runtime-config.service.js";
 
 /**
  * Drive preflight (#807): assert the hands-off prerequisites BEFORE a drive starts.
@@ -262,16 +262,13 @@ export async function runDrivePreflight(
     }
 
     // --- Autodrive prefs coherence: the keystone opt-in + kill-switch must agree. Auto-repairable. ---
-    const autodriveOn = prefMap.get(autodrivePrefKey(projectId)) === "true";
-    const killSwitchOn = prefMap.get(autoMergeDisabledPrefKey(projectId)) === "true";
-    const autoReviewOn = prefMap.get("auto_review") === "true";
-    const autoMergeOn = isAutoMergeEnabled(prefMap);
+    const runtime = resolveProjectRuntimeConfig({ projectId, prefMap });
 
     const incoherent: string[] = [];
-    if (!autodriveOn) incoherent.push("autodrive off");
-    if (killSwitchOn) incoherent.push("per-project auto-merge kill-switch armed");
-    if (!autoReviewOn) incoherent.push("auto_review off");
-    if (!autoMergeOn) incoherent.push("auto_merge off");
+    if (!runtime.drive.enabled) incoherent.push("autodrive off");
+    if (runtime.drive.autoMergeDisabled) incoherent.push("per-project auto-merge kill-switch armed");
+    if (!runtime.drive.autoReview) incoherent.push("auto_review off");
+    if (!runtime.drive.autoMerge) incoherent.push("auto_merge off");
     if (incoherent.length === 0) {
       checks.push(ok("autodrivePrefs", "Autodrive prefs coherent", "Autodrive on, kill-switch clear, review+merge on."));
     } else {
