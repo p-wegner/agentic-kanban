@@ -14,7 +14,7 @@ import { randomUUID } from "node:crypto";
 import { isResolvedDependencyStatusView } from "@agentic-kanban/shared/lib/status-view";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { derivePortsFromBranch } from "./worktree-ports.js";
-import type { Database } from "../db/index.js";
+import { withTransaction, type Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
 import type { BoardEvents } from "./board-events.js";
 import * as crudRepo from "../repositories/workspace-crud.repository.js";
@@ -32,7 +32,7 @@ import { initWorkspaceWorkflow } from "@agentic-kanban/shared/lib/workflow-engin
 import { toExecutorProvider } from "./agent-settings.service.js";
 import { preflightAgentProfile } from "./agent-profile-health.service.js";
 import { emitButlerSystemEvent } from "./butler-event-feed.js";
-import { moveIssueToInProgress } from "../repositories/workspace.repository.js";
+import { moveIssueToInProgressStrict } from "../repositories/workspace.repository.js";
 import {
   WorkspaceError,
   type CreateWorkspaceInput,
@@ -128,6 +128,7 @@ export function createWorkspaceCreateService(deps: {
     latestSetup: LatestSetupRun;
     latestSymlink: LatestSymlinkRun;
     now: string;
+    database?: Database;
   }): Promise<void> {
     await crudRepo.insertWorkspaceRecordRow({
       id: params.id,
@@ -167,7 +168,7 @@ export function createWorkspaceCreateService(deps: {
       contextPrimer: params.contextPrimer,
       createdAt: params.now,
       updatedAt: params.now,
-    }, database);
+    }, params.database ?? database);
   }
 
   async function assertNoOpenDirectWorkspaceForIssue(issueId: string): Promise<void> {
@@ -260,30 +261,6 @@ export function createWorkspaceCreateService(deps: {
       }
     }
 
-    try {
-      await crudRepo.insertWorkspaceRecordRow({
-        id: params.id,
-        issueId: params.issueId,
-        branch: params.branch,
-        workingDir: params.worktreePath,
-        baseBranch: params.baseBranch,
-        isDirect: params.isDirect,
-        baseCommitSha: params.baseCommitSha,
-        requiresReview: params.requiresReview,
-        thoroughReview: params.thoroughReview,
-        planMode: params.planMode,
-        includeVisualProof: params.includeVisualProof,
-        status: "active",
-        claudeProfile: params.claudeProfile ?? null,
-        agentCommand: params.agentCommand ?? null,
-        provider: params.resolvedProvider,
-        createdAt: params.now,
-        updatedAt: params.now,
-      }, database);
-    } catch {
-      // DB insert may fail if worktree creation itself failed
-    }
-
     return {
       id: params.id,
       issueId: params.issueId,
@@ -293,7 +270,7 @@ export function createWorkspaceCreateService(deps: {
       isDirect: params.isDirect,
       planMode: params.planMode,
       includeVisualProof: params.includeVisualProof,
-      status: "active",
+      status: "error",
       provider: params.resolvedProvider,
       createdAt: params.now,
       updatedAt: params.now,
@@ -414,13 +391,23 @@ export function createWorkspaceCreateService(deps: {
       resolvedProvider = agentConfig.resolvedProvider;
 
       t = Date.now();
-      await insertWorkspaceRecord({
-        id, issueId: input.issueId, branch, worktreePath, baseBranch, isDirect,
-        baseCommitSha, requiresReview, thoroughReview, planMode, tddMode, includeVisualProof,
-        skillId: effectiveSkillId, claudeProfile, agentCommand, resolvedProvider, model: agentConfig.model,
-        contextPrimer, latestSetup, latestSymlink, now,
-      });
-      timing("db-insert", t);
+      await withTransaction(database, async (tx) => {
+        await insertWorkspaceRecord({
+          id, issueId: input.issueId, branch, worktreePath, baseBranch, isDirect,
+          baseCommitSha, requiresReview, thoroughReview, planMode, tddMode, includeVisualProof,
+          skillId: effectiveSkillId, claudeProfile, agentCommand, resolvedProvider, model: agentConfig.model,
+          contextPrimer, latestSetup, latestSymlink, now, database: tx,
+        });
+
+        // Place the workspace on the workflow start node + sync the derived status.
+        // Any failure here rolls back the workspace row inserted above.
+        if (hasWorkflowStart) {
+          await initWorkspaceWorkflow(tx, { workspaceId: id, issueId: input.issueId });
+        } else {
+          await moveIssueToInProgressStrict(input.issueId, issue.projectId, now, tx);
+        }
+      }, "workspace create db writes");
+      timing("db-writes", t);
 
       if (setupCompletion) {
         setupCompletion
@@ -430,16 +417,6 @@ export function createWorkspaceCreateService(deps: {
 
       if (tddMode && worktreePath) {
         installTddHook(worktreePath);
-      }
-
-      // Place the workspace on the workflow start node + sync the derived status.
-      // Falls back to the legacy "In Progress" move when the issue has no workflow.
-      if (hasWorkflowStart) {
-        await initWorkspaceWorkflow(database, { workspaceId: id, issueId: input.issueId }).catch(() =>
-          moveIssueToInProgress(input.issueId, issue.projectId, now, database),
-        );
-      } else {
-        await moveIssueToInProgress(input.issueId, issue.projectId, now, database);
       }
 
       timing("total", phaseStart);
