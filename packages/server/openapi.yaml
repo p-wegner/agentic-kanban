@@ -1,0 +1,7316 @@
+openapi: 3.1.0
+info:
+  title: agentic-kanban REST API
+  version: 0.1.7
+  description: Auto-generated from Hono route source via scripts/generate-openapi.ts. Schemas are inferred statically (best-effort) — request bodies come from the parseJsonBody<T> type argument; response bodies are untyped.
+servers:
+  - url: /
+    description: "Same-origin (default dev: http://localhost:3001)"
+paths:
+  /api/agent-skills:
+    get:
+      summary: GET /api/agent-skills — list skills
+      tags:
+        - agent-skills
+      operationId: get_api_agent-skills
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: global
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: POST /api/agent-skills — create a skill
+      tags:
+        - agent-skills
+      operationId: post_api_agent-skills
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                prompt:
+                  type: string
+                model:
+                  type: string
+                projectId:
+                  type: string
+                  nullable: true
+              required:
+                - name
+                - description
+                - prompt
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/agent-skills/enhance:
+    post:
+      summary: POST /api/agent-skills/enhance — AI-enhance a skill name, description, and prompt
+      tags:
+        - agent-skills
+      operationId: post_api_agent-skills_enhance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                prompt:
+                  type: string
+              required:
+                - name
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/agent-skills/install-status:
+    get:
+      summary: pass (registered before /:id so the static path wins over the :id param route).
+      tags:
+        - agent-skills
+      operationId: get_api_agent-skills_install-status
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/agent-skills/{id}:
+    delete:
+      summary: DELETE /api/agent-skills/:id
+      tags:
+        - agent-skills
+      operationId: delete_api_agent-skills_id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    get:
+      summary: GET /api/agent-skills/:id — get a single skill
+      tags:
+        - agent-skills
+      operationId: get_api_agent-skills_id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    put:
+      summary: PUT /api/agent-skills/:id — update a skill
+      tags:
+        - agent-skills
+      operationId: put_api_agent-skills_id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                prompt:
+                  type: string
+                model:
+                  type: string
+                projectId:
+                  type: string
+                  nullable: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/agent-skills/{id}/install:
+    post:
+      summary: POST /api/agent-skills/:id/install
+      tags:
+        - agent-skills
+      operationId: post_api_agent-skills_id_install
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/agent-skills/{id}/install-status:
+    get:
+      summary: GET /api/agent-skills/:id/install-status
+      tags:
+        - agent-skills
+      operationId: get_api_agent-skills_id_install-status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/approvals:
+    post:
+      summary: Create a new approval request (called by MCP approve_tool_use tool)
+      tags:
+        - approvals
+      operationId: post_api_approvals
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sessionId:
+                  type: string
+                toolName:
+                  type: string
+                toolInput: {}
+              required:
+                - sessionId
+                - toolName
+                - toolInput
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/approvals/{id}:
+    delete:
+      summary: Clean up after MCP tool is done
+      tags:
+        - approvals
+      operationId: delete_api_approvals_id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    get:
+      summary: Get approval status (polled by MCP tool)
+      tags:
+        - approvals
+      operationId: get_api_approvals_id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+    put:
+      summary: Resolve approval (called by UI)
+      tags:
+        - approvals
+      operationId: put_api_approvals_id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                decision: {}
+              required:
+                - decision
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/butler-definitions:
+    get:
+      summary: GET /api/butler-definitions — list defined butlers (always includes "default").
+      tags:
+        - butler-definitions
+      operationId: get_api_butler-definitions
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: POST /api/butler-definitions — create a named butler { name, model?, provider? }.
+      tags:
+        - butler-definitions
+      operationId: post_api_butler-definitions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                model:
+                  type: string
+                provider:
+                  type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/butler-definitions/{bid}:
+    delete:
+      summary: DELETE /api/butler-definitions/:bid — remove a named butler ("default" is protected).
+      tags:
+        - butler-definitions
+      operationId: delete_api_butler-definitions_bid
+      parameters:
+        - name: bid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+    put:
+      summary: PUT /api/butler-definitions/:bid — update name, model, and/or provider.
+      tags:
+        - butler-definitions
+      operationId: put_api_butler-definitions_bid
+      parameters:
+        - name: bid
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                model:
+                  type: string
+                provider:
+                  type: string
+                  nullable: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/codemods:
+    get:
+      summary: "* GET /api/codemods?projectId=<id>\r
+
+        \   * Returns saved codemods (agent_skills with type='codemod') for a project."
+      tags:
+        - codemods
+      operationId: get_api_codemods
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: "* POST /api/codemods\r
+
+        \   * Body: { name, description, script, projectId? }\r
+
+        \   * Save a codemod to agent_skills with type='codemod'."
+      tags:
+        - codemods
+      operationId: post_api_codemods
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                script:
+                  type: string
+                projectId:
+                  type: string
+                  nullable: true
+              required:
+                - name
+                - description
+                - script
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/codemods/apply:
+    post:
+      summary: "* POST /api/codemods/apply\r
+
+        \   * Body: { projectId: string, changes: [{filePath, modified}], selectedFiles?: string[] }\r
+
+        \   * Returns: { applied: string[], skipped: string[] }\r
+
+        \   *\r
+
+        \   * `projectId` is required: the service uses the project's repo path as a\r
+
+        \   * security boundary and refuses to write to any path outside it."
+      tags:
+        - codemods
+      operationId: post_api_codemods_apply
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+                changes: {}
+                selectedFiles:
+                  type: array
+                  items:
+                    type: string
+              required:
+                - projectId
+                - changes
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/codemods/preview:
+    post:
+      summary: "* POST /api/codemods/preview\r
+
+        \   * Body: { description: string, projectId: string, overrideLimit?: boolean, script?: string }\r
+
+        \   * Returns: { script, description, files: [{filePath, relativePath, diff}], totalTsFiles, limitReached }"
+      tags:
+        - codemods
+      operationId: post_api_codemods_preview
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                description:
+                  type: string
+                projectId:
+                  type: string
+                overrideLimit:
+                  type: boolean
+                script:
+                  type: string
+              required:
+                - description
+                - projectId
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/codemods/{id}:
+    get:
+      summary: "* GET /api/codemods/:id\r
+
+        \   * Returns a single saved codemod."
+      tags:
+        - codemods
+      operationId: get_api_codemods_id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/digest:
+    get:
+      summary: "`now` is injectable for deterministic time-window tests (nowOverride pattern)."
+      tags:
+        - digest
+      operationId: get_api_digest
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: range
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: now
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/flaky-tests:
+    get:
+      summary: GET /api/flaky-tests — list flaky tests
+      tags:
+        - flaky-tests
+      operationId: get_api_flaky-tests
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: minRuns
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: windowDays
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/flaky-tests/parse:
+    post:
+      summary: POST /api/flaky-tests/parse — ingest test output JSON
+      tags:
+        - flaky-tests
+      operationId: post_api_flaky-tests_parse
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/flaky-tests/pin:
+    delete:
+      summary: DELETE /api/flaky-tests/pin — unpin a test
+      tags:
+        - flaky-tests
+      operationId: delete_api_flaky-tests_pin
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: POST /api/flaky-tests/pin — pin a test as known-flaky
+      tags:
+        - flaky-tests
+      operationId: post_api_flaky-tests_pin
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/flaky-tests/pinned:
+    get:
+      summary: GET /api/flaky-tests/pinned — list pinned (known-flaky) tests
+      tags:
+        - flaky-tests
+      operationId: get_api_flaky-tests_pinned
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/focus:
+    get:
+      summary: the focus ranking itself is point-in-time, not windowed.
+      tags:
+        - focus
+      operationId: get_api_focus
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: now
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/health:
+    get:
+      summary: here lets monitors detect a board that is up but unusable.
+      tags:
+        - health
+      operationId: get_api_health
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/health/deps:
+    get:
+      summary: GET /api/health/deps
+      tags:
+        - health
+      operationId: get_api_health_deps
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/insights:
+    get:
+      summary: GET /api/insights
+      tags:
+        - insights
+      operationId: get_api_insights
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: hours
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: range
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/internal/board-notify:
+    post:
+      summary: Internal endpoint for MCP/CLI tools to trigger immediate board refresh
+      tags:
+        - index
+      operationId: post_api_internal_board-notify
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+                reason:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/internal/workflow-advanced:
+    post:
+      summary: orchestration in the main server, which owns the session manager + git.
+      tags:
+        - index
+      operationId: post_api_internal_workflow-advanced
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                workspaceId:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/issues:
+    get:
+      summary: default response shape unchanged.
+      tags:
+        - issues
+      operationId: get_api_issues
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: issueNumber
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: statusName
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: slim
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: POST /api/issues
+      tags:
+        - issues
+      operationId: post_api_issues
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+                title:
+                  type: string
+                description:
+                  type: string
+                priority:
+                  type: string
+                issueType:
+                  type: string
+                skipAutoReview:
+                  type: boolean
+                estimate:
+                  type: string
+                  nullable: true
+                sortOrder:
+                  type: number
+                statusId:
+                  type: string
+                workflowTemplateId:
+                  type: string
+                  nullable: true
+                externalKey:
+                  type: string
+                  nullable: true
+                externalUrl:
+                  type: string
+                  nullable: true
+              required:
+                - projectId
+                - title
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/issues/ai-estimate:
+    post:
+      summary: POST /api/issues/ai-estimate — AI-suggest a T-shirt size estimate for an issue
+      tags:
+        - issues
+      operationId: post_api_issues_ai-estimate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                issueId:
+                  type: string
+              required:
+                - issueId
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/issues/analyze-dependencies:
+    post:
+      summary: POST /api/issues/analyze-dependencies — AI-analyze dependencies for an issue
+      tags:
+        - issues
+      operationId: post_api_issues_analyze-dependencies
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                issueId:
+                  type: string
+                projectId:
+                  type: string
+              required:
+                - issueId
+                - projectId
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/issues/archive-done:
+    post:
+      summary: POST /api/issues/archive-done — move Done issues older than N days to Archived
+      tags:
+        - issues
+      operationId: post_api_issues_archive-done
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+                olderThanDays:
+                  type: number
+                nowOverride:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/issues/batch:
+    post:
+      summary: "Optional: parentIssueId wires child_of edges; driveTarget (requires parentIssueId) auto-creates a Drive record."
+      tags:
+        - issues
+      operationId: post_api_issues_batch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+                issues:
+                  type: array
+                  items: {}
+                parentIssueId:
+                  type: string
+                driveTarget:
+                  type: string
+              required:
+                - projectId
+                - issues
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/issues/bulk:
+    patch:
+      summary: PATCH /api/issues/bulk - update N issues in one request
+      tags:
+        - issues
+      operationId: patch_api_issues_bulk
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                issueIds:
+                  type: array
+                  items:
+                    type: string
+                updates: {}
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/issues/burndown:
+    get:
+      summary: order-sensitive router (fallback for this router's nested params) shadows them.
+      tags:
+        - issues
+      operationId: get_api_issues_burndown
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: days
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/issues/cfd:
+    get:
+      summary: createdAt when no explicit status change is recorded).
+      tags:
+        - issues
+      operationId: get_api_issues_cfd
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: days
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/issues/dependencies/batch:
+    post:
+      summary: POST /api/issues/dependencies/batch — add/remove N dependency edges atomically
+      tags:
+        - issues
+      operationId: post_api_issues_dependencies_batch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                edges:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      issueId:
+                        type: string
+                      dependsOnId:
+                        type: string
+                      type:
+                        type: string
+                      action:
+                        type: string
+                        enum:
+                          - add
+                    required:
+                      - issueId
+                      - dependsOnId
+                      - action
+              required:
+                - edges
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/issues/enhance:
+    post:
+      summary: POST /api/issues/enhance — AI-enhance a ticket title and description
+      tags:
+        - issues
+      operationId: post_api_issues_enhance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                description:
+                  type: string
+                projectId:
+                  type: string
+              required:
+                - title
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/issues/lead-time:
+    get:
+      summary: Returns one bucket per day in the trailing window; buckets with no completions have medianMs/p90Ms = null.
+      tags:
+        - issues
+      operationId: get_api_issues_lead-time
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: days
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/issues/throughput:
+    get:
+      summary: Returns one data point per day for the trailing `days` window (default 14).
+      tags:
+        - issues
+      operationId: get_api_issues_throughput
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: days
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/issues/{id}:
+    delete:
+      summary: DELETE /api/issues/:id
+      tags:
+        - issues
+      operationId: delete_api_issues_id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    get:
+      summary: GET /api/issues/{id}
+      tags:
+        - issues
+      operationId: get_api_issues_id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+    patch:
+      summary: PATCH /api/issues/:id
+      tags:
+        - issues
+      operationId: patch_api_issues_id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/issues/{id}/activity:
+    get:
+      summary: GET /api/issues/:id/activity — chronological audit feed aggregated from workspaces/sessions/comments
+      tags:
+        - issues
+      operationId: get_api_issues_id_activity
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/issues/{id}/analyze-touched-files:
+    post:
+      summary: POST /api/issues/:id/analyze-touched-files — run (or re-run) AI prediction
+      tags:
+        - issues
+      operationId: post_api_issues_id_analyze-touched-files
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refresh:
+                  type: boolean
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/issues/{id}/artifacts:
+    get:
+      summary: GET /api/issues/:id/artifacts
+      tags:
+        - issues
+      operationId: get_api_issues_id_artifacts
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: POST /api/issues/:id/artifacts
+      tags:
+        - issues
+      operationId: post_api_issues_id_artifacts
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                type:
+                  type: string
+                mimeType:
+                  type: string
+                content:
+                  type: string
+                caption:
+                  type: string
+                workspaceId:
+                  type: string
+              required:
+                - type
+                - content
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/issues/{id}/artifacts/{artifactId}:
+    delete:
+      summary: DELETE /api/issues/:id/artifacts/:artifactId
+      tags:
+        - issues
+      operationId: delete_api_issues_id_artifacts_artifactId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: artifactId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/issues/{id}/comments:
+    get:
+      summary: GET /api/issues/:id/comments — durable Q&A / activity thread for an issue
+      tags:
+        - issues
+      operationId: get_api_issues_id_comments
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: POST /api/issues/:id/comments
+      tags:
+        - issues
+      operationId: post_api_issues_id_comments
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                kind: {}
+                author: {}
+                body:
+                  type: string
+                payload: {}
+                workspaceId:
+                  type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/issues/{id}/comments/{commentId}:
+    delete:
+      summary: DELETE /api/issues/:id/comments/:commentId
+      tags:
+        - issues
+      operationId: delete_api_issues_id_comments_commentId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: commentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/issues/{id}/cycle-time:
+    get:
+      summary: GET /api/issues/:id/cycle-time — per-status time aggregation derived from workflow transitions
+      tags:
+        - issues
+      operationId: get_api_issues_id_cycle-time
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/issues/{id}/decompose:
+    post:
+      summary: POST /api/issues/:id/decompose — AI-generate epic decomposition proposal
+      tags:
+        - issues
+      operationId: post_api_issues_id_decompose
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+              required:
+                - projectId
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/issues/{id}/decompose/confirm:
+    post:
+      summary: POST /api/issues/:id/decompose/confirm — confirm epic decomposition and create child issues
+      tags:
+        - issues
+      operationId: post_api_issues_id_decompose_confirm
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+                children:
+                  type: array
+                  items: {}
+                dependencies:
+                  type: array
+                  items: {}
+                driveTarget:
+                  type: string
+              required:
+                - projectId
+                - children
+                - dependencies
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/issues/{id}/dependencies:
+    get:
+      summary: GET /api/issues/:id/dependencies
+      tags:
+        - issues
+      operationId: get_api_issues_id_dependencies
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: POST /api/issues/:id/dependencies
+      tags:
+        - issues
+      operationId: post_api_issues_id_dependencies
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                dependsOnId:
+                  type: string
+                type:
+                  type: string
+              required:
+                - dependsOnId
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/issues/{id}/dependencies/{depId}:
+    delete:
+      summary: DELETE /api/issues/:id/dependencies/:depId
+      tags:
+        - issues
+      operationId: delete_api_issues_id_dependencies_depId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: depId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/issues/{id}/detail-bundle:
+    get:
+      summary: "is independent: a failure degrades that field rather than failing the bundle."
+      tags:
+        - issues
+      operationId: get_api_issues_id_detail-bundle
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/issues/{id}/duplicate:
+    post:
+      summary: POST /api/issues/:id/duplicate
+      tags:
+        - issues
+      operationId: post_api_issues_id_duplicate
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/issues/{id}/merged-commits:
+    get:
+      summary: GET /api/issues/:id/merged-commits — commits that landed on the default branch for this issue
+      tags:
+        - issues
+      operationId: get_api_issues_id_merged-commits
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/issues/{id}/preflight:
+    post:
+      summary: prepend to the launching agent's context.
+      tags:
+        - issues
+      operationId: post_api_issues_id_preflight
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+                clarifications:
+                  type: array
+                  items: {}
+              required:
+                - projectId
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/issues/{id}/related-issues:
+    get:
+      summary: GET /api/issues/:id/related-issues — find other issues that share touched files with this one
+      tags:
+        - issues
+      operationId: get_api_issues_id_related-issues
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/issues/{id}/showdown:
+    get:
+      summary: the browser console with errors every time an issue detail panel opens.)
+      tags:
+        - issues
+      operationId: get_api_issues_id_showdown
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: POST /api/issues/:id/showdown — start a showdown with N contestants
+      tags:
+        - issues
+      operationId: post_api_issues_id_showdown
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                contestants:
+                  type: array
+                  items: {}
+              required:
+                - contestants
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/issues/{id}/summary:
+    get:
+      summary: GET /api/issues/:id/summary
+      tags:
+        - issues
+      operationId: get_api_issues_id_summary
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/issues/{id}/tags:
+    get:
+      summary: GET /api/issues/:id/tags
+      tags:
+        - issues
+      operationId: get_api_issues_id_tags
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: POST /api/issues/:id/tags
+      tags:
+        - issues
+      operationId: post_api_issues_id_tags
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tagId:
+                  type: string
+              required:
+                - tagId
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/issues/{id}/tags/{tagId}:
+    delete:
+      summary: DELETE /api/issues/:id/tags/:tagId
+      tags:
+        - issues
+      operationId: delete_api_issues_id_tags_tagId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: tagId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/issues/{id}/time-entries:
+    get:
+      summary: GET /api/issues/:id/time-entries
+      tags:
+        - issues
+      operationId: get_api_issues_id_time-entries
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: POST /api/issues/:id/time-entries
+      tags:
+        - issues
+      operationId: post_api_issues_id_time-entries
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                minutes:
+                  type: number
+                note:
+                  type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/issues/{id}/time-entries/{entryId}:
+    delete:
+      summary: DELETE /api/issues/:id/time-entries/:entryId
+      tags:
+        - issues
+      operationId: delete_api_issues_id_time-entries_entryId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: entryId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/issues/{id}/touched-files:
+    get:
+      summary: GET /api/issues/:id/touched-files — return cached prediction only (no AI call)
+      tags:
+        - issues
+      operationId: get_api_issues_id_touched-files
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/issues/{id}/workspaces:
+    get:
+      summary: GET /api/issues/:id/workspaces
+      tags:
+        - issues
+      operationId: get_api_issues_id_workspaces
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/merge-queue:
+    post:
+      summary: "* POST /api/merge-queue\r
+
+        \   *\r
+
+        \   * body: { workspaceIds: string[], dryRun?: boolean, skipOnConflict?: boolean }\r
+
+        \   *\r
+
+        \   * - dryRun: true  → returns JSON plan (sorted order + conflict matrix + per-workspace conflictPreviews)\r
+
+        \   * - dryRun: false → streams SSE events while executing the queue"
+      tags:
+        - merge-queue
+      operationId: post_api_merge-queue
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                workspaceIds:
+                  type: array
+                  items:
+                    type: string
+                dryRun:
+                  type: boolean
+                skipOnConflict:
+                  type: boolean
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/merge-queue/preview/{workspaceId}:
+    post:
+      summary: "* POST /api/merge-queue/preview/:workspaceId\r
+
+        \   *\r
+
+        \   * Dry-run conflict preview for a single workspace. Read-only — does not mutate the worktree.\r
+
+        \   * Returns: WorkspaceConflictPreview"
+      tags:
+        - merge-queue
+      operationId: post_api_merge-queue_preview_workspaceId
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/metrics/slow-requests:
+    get:
+      summary: GET /api/metrics/slow-requests
+      tags:
+        - metrics
+      operationId: get_api_metrics_slow-requests
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/preferences/active-project:
+    get:
+      summary: GET /api/preferences/active-project
+      tags:
+        - preferences
+      operationId: get_api_preferences_active-project
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    put:
+      summary: PUT /api/preferences/active-project
+      tags:
+        - preferences
+      operationId: put_api_preferences_active-project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/preferences/agent-profiles/health:
+    get:
+      summary: GET /api/preferences/agent-profiles/health
+      tags:
+        - preferences
+      operationId: get_api_preferences_agent-profiles_health
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/preferences/agent-profiles/preflight:
+    post:
+      summary: POST /api/preferences/agent-profiles/preflight
+      tags:
+        - preferences
+      operationId: post_api_preferences_agent-profiles_preflight
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                provider:
+                  type: string
+                profileName:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/preferences/claude-login:
+    post:
+      summary: only way to do it from the UI; returns the equivalent manual command too.
+      tags:
+        - preferences
+      operationId: post_api_preferences_claude-login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                configDir:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/preferences/claude-profiles:
+    get:
+      summary: GET /api/preferences/claude-profiles — list available claude profiles
+      tags:
+        - preferences
+      operationId: get_api_preferences_claude-profiles
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/preferences/claude-subscriptions:
+    get:
+      summary: ring) + login status. Mirrors /codex-licenses.
+      tags:
+        - preferences
+      operationId: get_api_preferences_claude-subscriptions
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/preferences/codex-licenses:
+    get:
+      summary: (auto-discovered ~/.codex-<name> dirs merged with the rotation ring) + login status.
+      tags:
+        - preferences
+      operationId: get_api_preferences_codex-licenses
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/preferences/codex-login:
+    post:
+      summary: only way to do it from the UI; returns the equivalent manual command too.
+      tags:
+        - preferences
+      operationId: post_api_preferences_codex-login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                codexHome:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/preferences/codex-profiles:
+    get:
+      summary: GET /api/preferences/codex-profiles — list available codex profiles
+      tags:
+        - preferences
+      operationId: get_api_preferences_codex-profiles
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/preferences/copilot-profiles:
+    get:
+      summary: GET /api/preferences/copilot-profiles
+      tags:
+        - preferences
+      operationId: get_api_preferences_copilot-profiles
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/preferences/home-dir:
+    get:
+      summary: default CODEX_HOME (`<home>/.codex-<profile>`) without re-implementing path joins.
+      tags:
+        - preferences
+      operationId: get_api_preferences_home-dir
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/preferences/mcp/health:
+    get:
+      summary: GET /api/preferences/mcp/health
+      tags:
+        - preferences
+      operationId: get_api_preferences_mcp_health
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/preferences/mcp/probe:
+    post:
+      summary: POST /api/preferences/mcp/probe
+      tags:
+        - preferences
+      operationId: post_api_preferences_mcp_probe
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/preferences/pi-profiles:
+    get:
+      summary: GET /api/preferences/pi-profiles
+      tags:
+        - preferences
+      operationId: get_api_preferences_pi-profiles
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/preferences/provider-divergence:
+    get:
+      summary: creation and the butler; divergence means the Settings UI shows a stale value.
+      tags:
+        - preferences
+      operationId: get_api_preferences_provider-divergence
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/preferences/quota-usage:
+    get:
+      summary: GET /api/preferences/quota-usage — live quota from tampermonkey-direct
+      tags:
+        - preferences
+      operationId: get_api_preferences_quota-usage
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "503":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/preferences/settings:
+    get:
+      summary: GET /api/preferences/settings — get all agent settings
+      tags:
+        - preferences
+      operationId: get_api_preferences_settings
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    put:
+      summary: (#874).
+      tags:
+        - preferences
+      operationId: put_api_preferences_settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {}
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "422":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/preferences/settings-bootstrap:
+    get:
+      summary: install-status, branches — stay separate and are loaded deferred by the client.
+      tags:
+        - preferences
+      operationId: get_api_preferences_settings-bootstrap
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects:
+    get:
+      summary: GET /api/projects  (?includeArchived=true to include archived projects)
+      tags:
+        - projects
+      operationId: get_api_projects
+      parameters:
+        - name: includeArchived
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: POST /api/projects
+      tags:
+        - projects
+      operationId: post_api_projects
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                repoPath:
+                  type: string
+                name:
+                  type: string
+                description:
+                  type: string
+                color:
+                  type: string
+                gitignoreTemplate:
+                  type: string
+                generateReadme:
+                  type: boolean
+                exportSkillsOnRegistration:
+                  type: boolean
+              required:
+                - repoPath
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/all/workspaces:
+    get:
+      summary: GET /api/projects/all/workspaces — cross-project workspace summary (all projects)
+      tags:
+        - projects
+      operationId: get_api_projects_all_workspaces
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/create:
+    post:
+      summary: POST /api/projects/create — create a new directory as a git repo and register it
+      tags:
+        - projects
+      operationId: post_api_projects_create
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                path:
+                  type: string
+                description:
+                  type: string
+                color:
+                  type: string
+                gitignoreTemplate:
+                  type: string
+                generateReadme:
+                  type: boolean
+              required:
+                - name
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/generate-setup-script:
+    post:
+      summary: POST /api/projects/generate-setup-script
+      tags:
+        - projects
+      operationId: post_api_projects_generate-setup-script
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/generate-teardown-script:
+    post:
+      summary: POST /api/projects/generate-teardown-script
+      tags:
+        - projects
+      operationId: post_api_projects_generate-teardown-script
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/generate-verify-script:
+    post:
+      summary: POST /api/projects/generate-verify-script
+      tags:
+        - projects
+      operationId: post_api_projects_generate-verify-script
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/health:
+    get:
+      summary: GET /api/projects/health — aggregated health overview for all registered projects
+      tags:
+        - projects
+      operationId: get_api_projects_health
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}:
+    delete:
+      summary: DELETE /api/projects/:id — unregister a project (cascade deletes all associated data)
+      tags:
+        - projects
+      operationId: delete_api_projects_id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    patch:
+      summary: PATCH /api/projects/:id — update project fields
+      tags:
+        - projects
+      operationId: patch_api_projects_id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/activity:
+    get:
+      summary: GET /api/projects/:id/activity — project-wide activity feed (latest N events across all issues)
+      tags:
+        - projects
+      operationId: get_api_projects_id_activity
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/agent-questions:
+    get:
+      summary: GET /api/projects/:id/agent-questions — list pending questions for the project.
+      tags:
+        - agent-questions
+      operationId: get_api_projects_id_agent-questions
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/agent-questions/{toolUseId}:
+    delete:
+      summary: The corresponding workspace is intentionally NOT relaunched or notified.
+      tags:
+        - agent-questions
+      operationId: delete_api_projects_id_agent-questions_toolUseId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: toolUseId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/agent-questions/{toolUseId}/answer:
+    post:
+      summary: "Body: { questions: AgentQuestion[], answers: [{ selectedLabels: string[], freeText?: string }, ...], workspaceId: string }"
+      tags:
+        - agent-questions
+      operationId: post_api_projects_id_agent-questions_toolUseId_answer
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: toolUseId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                questions:
+                  type: array
+                  items: {}
+                answers:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      selectedLabels:
+                        type: array
+                        items:
+                          type: string
+                      freeText:
+                        type: string
+                    required:
+                      - selectedLabels
+                workspaceId:
+                  type: string
+              required:
+                - questions
+                - answers
+                - workspaceId
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/agent-questions/{toolUseId}/recommend:
+    post:
+      summary: does not need to call this.
+      tags:
+        - agent-questions
+      operationId: post_api_projects_id_agent-questions_toolUseId_recommend
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: toolUseId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/archive:
+    post:
+      summary: POST /api/projects/:id/archive — hide a project without deleting its data
+      tags:
+        - projects
+      operationId: post_api_projects_id_archive
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/board:
+    get:
+      summary: GET /api/projects/:id/board
+      tags:
+        - projects
+      operationId: get_api_projects_id_board
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: includeArchived
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/board-health-events:
+    get:
+      summary: GET /api/projects/:id/board-health-events
+      tags:
+        - projects
+      operationId: get_api_projects_id_board-health-events
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: eventType
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/board-health-events/{eventId}:
+    get:
+      summary: GET /api/projects/:id/board-health-events/:eventId — full event details (not compacted)
+      tags:
+        - projects
+      operationId: get_api_projects_id_board-health-events_eventId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: eventId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/board-risk-digest:
+    get:
+      summary: GET /api/projects/:id/board-risk-digest
+      tags:
+        - projects
+      operationId: get_api_projects_id_board-risk-digest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/board/summary:
+    get:
+      summary: GET /api/projects/:id/board/summary — column counts only, no issue bodies
+      tags:
+        - projects
+      operationId: get_api_projects_id_board_summary
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/branches:
+    get:
+      summary: GET /api/projects/:id/branches
+      tags:
+        - projects
+      operationId: get_api_projects_id_branches
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/butler:
+    delete:
+      summary: users apply skill/behavior changes.
+      tags:
+        - butler
+      operationId: delete_api_projects_id_butler
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    get:
+      summary: GET /api/projects/:id/butler — current butler state (for the selected ?butler=<id>)
+      tags:
+        - butler
+      operationId: get_api_projects_id_butler
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/butler/ask:
+    post:
+      summary: MCP tool (separate processes that cannot read the server's in-memory SSE stream).
+      tags:
+        - butler
+      operationId: post_api_projects_id_butler_ask
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content:
+                  type: string
+                timeoutMs:
+                  type: number
+              required:
+                - content
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/butler/commands:
+    get:
+      summary: a project whose session isn't warm yet), deduped by name.
+      tags:
+        - butler
+      operationId: get_api_projects_id_butler_commands
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/butler/ensure:
+    post:
+      summary: POST /api/projects/:id/butler/ensure — start the warm session if not running
+      tags:
+        - butler
+      operationId: post_api_projects_id_butler_ensure
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/butler/interrupt:
+    post:
+      summary: POST /api/projects/:id/butler/interrupt — stop the in-flight turn (keeps the session warm)
+      tags:
+        - butler
+      operationId: post_api_projects_id_butler_interrupt
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/butler/message:
+    post:
+      summary: POST /api/projects/:id/butler/message — send a turn to the warm session
+      tags:
+        - butler
+      operationId: post_api_projects_id_butler_message
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content:
+                  type: string
+              required:
+                - content
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/butler/messages:
+    get:
+      summary: so the chat UI can restore prior messages after a page reload.
+      tags:
+        - butler
+      operationId: get_api_projects_id_butler_messages
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/butler/model:
+    post:
+      summary: selected butler's warm session in this project.
+      tags:
+        - butler
+      operationId: post_api_projects_id_butler_model
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                model:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/butler/profile:
+    post:
+      summary: (forgets the resume id) per the design ("restart only where needed").
+      tags:
+        - butler
+      operationId: post_api_projects_id_butler_profile
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                profile:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/butler/profiles:
+    get:
+      summary: current selection ("" = inherit the global profile).
+      tags:
+        - butler
+      operationId: get_api_projects_id_butler_profiles
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/butler/sessions:
+    get:
+      summary: GET /api/projects/:id/butler/sessions — list recent butler sessions from disk JSONL
+      tags:
+        - butler
+      operationId: get_api_projects_id_butler_sessions
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/butler/sessions/{sid}/messages:
+    get:
+      summary: GET /api/projects/:id/butler/sessions/:sid/messages — transcript of a past session
+      tags:
+        - butler
+      operationId: get_api_projects_id_butler_sessions_sid_messages
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: sid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/butler/skill:
+    get:
+      summary: project-scoped override exists (vs the global default).
+      tags:
+        - butler
+      operationId: get_api_projects_id_butler_skill
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    put:
+      summary: An empty prompt removes the override (revert to the global default).
+      tags:
+        - butler
+      operationId: put_api_projects_id_butler_skill
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                prompt:
+                  type: string
+              required:
+                - prompt
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/butler/stream:
+    get:
+      summary: GET /api/projects/:id/butler/stream — SSE stream of butler events
+      tags:
+        - butler
+      operationId: get_api_projects_id_butler_stream
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/butlers:
+    get:
+      summary: runtime state (warm/cold, busy, context). Powers the butler switcher.
+      tags:
+        - butler
+      operationId: get_api_projects_id_butlers
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/check-overlap:
+    post:
+      summary: POST /api/projects/:id/check-overlap — check for file overlap between issues using cached predictions
+      tags:
+        - projects
+      operationId: post_api_projects_id_check-overlap
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                issueIds:
+                  type: array
+                  items:
+                    type: string
+              required:
+                - issueIds
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/conductor:
+    post:
+      summary: calls this when the user picks "conductor" (start) vs manual/monitor (stop).
+      tags:
+        - board-monitor
+      operationId: post_api_projects_id_conductor
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/conductor-schedule:
+    get:
+      summary: single per-project JSON preference; the minute scheduler (scheduled-tasks.ts) fires it.
+      tags:
+        - board-monitor
+      operationId: get_api_projects_id_conductor-schedule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+    put:
+      summary: PUT /api/projects/{id}/conductor-schedule
+      tags:
+        - board-monitor
+      operationId: put_api_projects_id_conductor-schedule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/dashboard/throughput-by-provider:
+    get:
+      summary: Returns count + median lead time per provider.
+      tags:
+        - projects
+      operationId: get_api_projects_id_dashboard_throughput-by-provider
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: days
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/dependency-waves:
+    get:
+      summary: GET /api/projects/:id/dependency-waves
+      tags:
+        - projects
+      operationId: get_api_projects_id_dependency-waves
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/dependency-waves/start-next:
+    post:
+      summary: POST /api/projects/:id/dependency-waves/start-next
+      tags:
+        - projects
+      operationId: post_api_projects_id_dependency-waves_start-next
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/file-contention:
+    get:
+      summary: GET /api/projects/:id/file-contention — live file contention heatmap for active/reviewing workspaces
+      tags:
+        - projects
+      operationId: get_api_projects_id_file-contention
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/graph:
+    get:
+      summary: GET /api/projects/:id/graph
+      tags:
+        - projects
+      operationId: get_api_projects_id_graph
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/monitor-cycles:
+    get:
+      summary: GET /api/projects/:id/monitor-cycles — aggregated cycle summaries
+      tags:
+        - projects
+      operationId: get_api_projects_id_monitor-cycles
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/monitor-tunables:
+    get:
+      summary: GET /api/projects/{id}/monitor-tunables
+      tags:
+        - board-monitor
+      operationId: get_api_projects_id_monitor-tunables
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/orchestrator:
+    get:
+      summary: GET /api/projects/{id}/orchestrator
+      tags:
+        - board-monitor
+      operationId: get_api_projects_id_orchestrator
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/quality-metrics:
+    get:
+      summary: GET /api/projects/:id/quality-metrics
+      tags:
+        - quality-metrics
+      operationId: get_api_projects_id_quality-metrics
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: metricKey
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: since
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: POST /api/projects/:id/quality-metrics
+      tags:
+        - quality-metrics
+      operationId: post_api_projects_id_quality-metrics
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {}
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/quality-metrics/latest:
+    get:
+      summary: GET /api/projects/:id/quality-metrics/latest
+      tags:
+        - quality-metrics
+      operationId: get_api_projects_id_quality-metrics_latest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/runbooks:
+    get:
+      summary: GET /api/projects/:id/runbooks — list available docs
+      tags:
+        - runbooks
+      operationId: get_api_projects_id_runbooks
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/runbooks/content:
+    get:
+      summary: GET /api/projects/:id/runbooks/content?path=<relative-path> — read file content
+      tags:
+        - runbooks
+      operationId: get_api_projects_id_runbooks_content
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: path
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/sprint-capacity:
+    get:
+      summary: GET /api/projects/:id/sprint-capacity
+      tags:
+        - projects
+      operationId: get_api_projects_id_sprint-capacity
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/stack-profile:
+    get:
+      summary: forces a recompute). The feedback harness reads this ONE descriptor.
+      tags:
+        - projects
+      operationId: get_api_projects_id_stack-profile
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: refresh
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+    put:
+      summary: Marks the saved profile source="manual" so a later auto-detect won't silently clobber it.
+      tags:
+        - projects
+      operationId: put_api_projects_id_stack-profile
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {}
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/stats:
+    get:
+      summary: GET /api/projects/:id/stats — lightweight project stats
+      tags:
+        - projects
+      operationId: get_api_projects_id_stats
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/statuses:
+    get:
+      summary: GET /api/projects/:id/statuses
+      tags:
+        - projects
+      operationId: get_api_projects_id_statuses
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: POST /api/projects/:id/statuses
+      tags:
+        - projects
+      operationId: post_api_projects_id_statuses
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                sortOrder:
+                  type: number
+              required:
+                - name
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/statuses/{statusId}:
+    delete:
+      summary: DELETE /api/projects/:id/statuses/:statusId
+      tags:
+        - projects
+      operationId: delete_api_projects_id_statuses_statusId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: statusId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    patch:
+      summary: PATCH /api/projects/:id/statuses/:statusId
+      tags:
+        - projects
+      operationId: patch_api_projects_id_statuses_statusId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: statusId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/time-report:
+    get:
+      summary: GET /api/projects/:id/time-report?range=30d
+      tags:
+        - time-report
+      operationId: get_api_projects_id_time-report
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: range
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/unarchive:
+    post:
+      summary: POST /api/projects/:id/unarchive — restore an archived project
+      tags:
+        - projects
+      operationId: post_api_projects_id_unarchive
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/voice-capture:
+    post:
+      summary: Creates a Backlog issue from a voice transcript using Claude to structure it.
+      tags:
+        - voice-capture
+      operationId: post_api_projects_id_voice-capture
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                transcript:
+                  type: string
+                speechLanguage:
+                  type: string
+                  nullable: true
+                speechLanguageLabel:
+                  type: string
+                  nullable: true
+              required:
+                - transcript
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "422":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/workspace-launch-failures:
+    get:
+      summary: GET /api/projects/:id/workspace-launch-failures
+      tags:
+        - projects
+      operationId: get_api_projects_id_workspace-launch-failures
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/workspace-risk:
+    get:
+      summary: GET /api/projects/:id/workspace-risk — risk heatmap for active/review workspaces
+      tags:
+        - projects
+      operationId: get_api_projects_id_workspace-risk
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/worktrees:
+    delete:
+      summary: DELETE /api/projects/:id/worktrees
+      tags:
+        - projects
+      operationId: delete_api_projects_id_worktrees
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+    get:
+      summary: GET /api/projects/:id/worktrees
+      tags:
+        - projects
+      operationId: get_api_projects_id_worktrees
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/worktrees/open:
+    post:
+      summary: POST /api/projects/:id/worktrees/open — open a worktree folder in the OS file explorer
+      tags:
+        - projects
+      operationId: post_api_projects_id_worktrees_open
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+              required:
+                - path
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{projectId}/config/export:
+    get:
+      summary: GET /api/projects/:projectId/config/export
+      tags:
+        - config-export-import
+      operationId: get_api_projects_projectId_config_export
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{projectId}/config/import:
+    post:
+      summary: POST /api/projects/:projectId/config/import
+      tags:
+        - config-export-import
+      operationId: post_api_projects_projectId_config_import
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: dryRun
+          in: query
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{projectId}/drive:
+    get:
+      summary: GET /api/projects/{projectId}/drive
+      tags:
+        - drive
+      operationId: get_api_projects_projectId_drive
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    put:
+      summary: PUT /api/projects/{projectId}/drive
+      tags:
+        - drive
+      operationId: put_api_projects_projectId_drive
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled:
+                  type: boolean
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{projectId}/drive-obstacles:
+    get:
+      summary: GET /api/projects/:projectId/drive-obstacles — queryable log
+      tags:
+        - drive-obstacles
+      operationId: get_api_projects_projectId_drive-obstacles
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: driveId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: kind
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: severity
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: POST /api/projects/:projectId/drive-obstacles — record one obstacle
+      tags:
+        - drive-obstacles
+      operationId: post_api_projects_projectId_drive-obstacles
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                driveId:
+                  type: string
+                  nullable: true
+                kind:
+                  type: string
+                severity:
+                  type: string
+                issueNumber:
+                  type: number
+                  nullable: true
+                summary:
+                  type: string
+                details: {}
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{projectId}/drive-obstacles/summary:
+    get:
+      summary: GET /api/projects/:projectId/drive-obstacles/summary — per-kind breakdown for the dashboard
+      tags:
+        - drive-obstacles
+      operationId: get_api_projects_projectId_drive-obstacles_summary
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: driveId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{projectId}/drive/preflight:
+    get:
+      summary: GET /api/projects/{projectId}/drive/preflight
+      tags:
+        - drive
+      operationId: get_api_projects_projectId_drive_preflight
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: POST /api/projects/{projectId}/drive/preflight
+      tags:
+        - drive
+      operationId: post_api_projects_projectId_drive_preflight
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                autoRepair:
+                  type: boolean
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{projectId}/drives:
+    get:
+      summary: GET /api/projects/:projectId/drives
+      tags:
+        - drives
+      operationId: get_api_projects_projectId_drives
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: POST /api/projects/:projectId/drives  — starts a drive
+      tags:
+        - drives
+      operationId: post_api_projects_projectId_drives
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                metaIssueId:
+                  type: string
+                  nullable: true
+                target:
+                  type: string
+                completionContract:
+                  type: string
+                  nullable: true
+              required:
+                - target
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{projectId}/drives/{id}:
+    delete:
+      summary: DELETE /api/projects/:projectId/drives/:id
+      tags:
+        - drives
+      operationId: delete_api_projects_projectId_drives_id
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    get:
+      summary: GET /api/projects/:projectId/drives/:id
+      tags:
+        - drives
+      operationId: get_api_projects_projectId_drives_id
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    put:
+      summary: PUT /api/projects/:projectId/drives/:id
+      tags:
+        - drives
+      operationId: put_api_projects_projectId_drives_id
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{projectId}/drives/{id}/dashboard:
+    get:
+      summary: GET /api/projects/:projectId/drives/:id/dashboard — aggregated drive view (#800)
+      tags:
+        - drives
+      operationId: get_api_projects_projectId_drives_id_dashboard
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{projectId}/drives/{id}/finish:
+    post:
+      summary: POST /api/projects/:projectId/drives/:id/finish
+      tags:
+        - drives
+      operationId: post_api_projects_projectId_drives_id_finish
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum:
+                    - completed
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{projectId}/drives/{id}/review-effectiveness:
+    get:
+      summary: time window and (unless ?wholeProject=true) the meta-issue's dependency subtree.
+      tags:
+        - drives
+      operationId: get_api_projects_projectId_drives_id_review-effectiveness
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: wholeProject
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: deep
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{projectId}/issues/export:
+    get:
+      summary: GET /api/projects/:projectId/issues/export?format=csv|json
+      tags:
+        - issue-export-import
+      operationId: get_api_projects_projectId_issues_export
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{projectId}/issues/import:
+    post:
+      summary: rest into the project's default (Backlog) status.
+      tags:
+        - issue-export-import
+      operationId: post_api_projects_projectId_issues_import
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{projectId}/issues/import/preview:
+    post:
+      summary: per-row warnings/skips so the client can show a preview table before commit.
+      tags:
+        - issue-export-import
+      operationId: post_api_projects_projectId_issues_import_preview
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{projectId}/milestones:
+    get:
+      summary: GET /api/projects/:projectId/milestones
+      tags:
+        - milestones
+      operationId: get_api_projects_projectId_milestones
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: POST /api/projects/:projectId/milestones
+      tags:
+        - milestones
+      operationId: post_api_projects_projectId_milestones
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                dueDate:
+                  type: string
+                  nullable: true
+              required:
+                - name
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{projectId}/milestones/summary:
+    get:
+      summary: GET /api/projects/:projectId/milestones/summary
+      tags:
+        - milestones
+      operationId: get_api_projects_projectId_milestones_summary
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: days
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{projectId}/milestones/{id}:
+    delete:
+      summary: DELETE /api/projects/:projectId/milestones/:id
+      tags:
+        - milestones
+      operationId: delete_api_projects_projectId_milestones_id
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    put:
+      summary: PUT /api/projects/:projectId/milestones/:id
+      tags:
+        - milestones
+      operationId: put_api_projects_projectId_milestones_id
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                dueDate:
+                  type: string
+                  nullable: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{projectId}/scripts:
+    get:
+      summary: GET /api/projects/{projectId}/scripts
+      tags:
+        - project-scripts
+      operationId: get_api_projects_projectId_scripts
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: POST /api/projects/{projectId}/scripts
+      tags:
+        - project-scripts
+      operationId: post_api_projects_projectId_scripts
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{projectId}/scripts/{scriptId}:
+    delete:
+      summary: DELETE /api/projects/{projectId}/scripts/{scriptId}
+      tags:
+        - project-scripts
+      operationId: delete_api_projects_projectId_scripts_scriptId
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: scriptId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    patch:
+      summary: PATCH /api/projects/{projectId}/scripts/{scriptId}
+      tags:
+        - project-scripts
+      operationId: patch_api_projects_projectId_scripts_scriptId
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: scriptId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{projectId}/scripts/{scriptId}/run:
+    post:
+      summary: POST /api/projects/{projectId}/scripts/{scriptId}/run
+      tags:
+        - project-scripts
+      operationId: post_api_projects_projectId_scripts_scriptId_run
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: scriptId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/scheduled-runs:
+    get:
+      summary: GET /api/scheduled-runs?projectId=
+      tags:
+        - scheduled-runs
+      operationId: get_api_scheduled-runs
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: POST /api/scheduled-runs — create
+      tags:
+        - scheduled-runs
+      operationId: post_api_scheduled-runs
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                projectId:
+                  type: string
+                description:
+                  type: string
+                prompt:
+                  type: string
+                skillId:
+                  type: string
+                intervalMinutes:
+                  type: number
+                cronExpression:
+                  type: string
+                enabled:
+                  type: boolean
+              required:
+                - name
+                - projectId
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/scheduled-runs/{id}:
+    delete:
+      summary: DELETE /api/scheduled-runs/:id
+      tags:
+        - scheduled-runs
+      operationId: delete_api_scheduled-runs_id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    put:
+      summary: PUT /api/scheduled-runs/:id — update
+      tags:
+        - scheduled-runs
+      operationId: put_api_scheduled-runs_id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/scheduled-runs/{id}/run:
+    post:
+      summary: POST /api/scheduled-runs/:id/run — manual or scheduled trigger
+      tags:
+        - scheduled-runs
+      operationId: post_api_scheduled-runs_id_run
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: triggeredBy
+          in: query
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/sessions/search:
+    get:
+      summary: GET /api/sessions/search?q=...&projectId=...&status=...&provider=...&limit=...
+      tags:
+        - sessions
+      operationId: get_api_sessions_search
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: provider
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/sessions/{sessionId}/output:
+    get:
+      summary: GET /api/sessions/:sessionId/output
+      tags:
+        - sessions
+      operationId: get_api_sessions_sessionId_output
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/sessions/{sessionId}/stats:
+    get:
+      summary: GET /api/sessions/:sessionId/stats
+      tags:
+        - sessions
+      operationId: get_api_sessions_sessionId_stats
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/sessions/{sessionId}/summary:
+    get:
+      summary: GET /api/sessions/:sessionId/summary
+      tags:
+        - sessions
+      operationId: get_api_sessions_sessionId_summary
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/showdowns/{id}:
+    get:
+      summary: GET /api/showdowns/:id
+      tags:
+        - showdowns
+      operationId: get_api_showdowns_id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/showdowns/{id}/pick-winner:
+    post:
+      summary: POST /api/showdowns/:id/pick-winner
+      tags:
+        - showdowns
+      operationId: post_api_showdowns_id_pick-winner
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                winnerWorkspaceId:
+                  type: string
+              required:
+                - winnerWorkspaceId
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/tags:
+    get:
+      summary: GET /api/tags
+      tags:
+        - tags
+      operationId: get_api_tags
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: POST /api/tags
+      tags:
+        - tags
+      operationId: post_api_tags
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                color:
+                  type: string
+                  nullable: true
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/tags/merge:
+    post:
+      summary: POST /api/tags/merge — merge sourceIds into targetId, then delete sources
+      tags:
+        - tags
+      operationId: post_api_tags_merge
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/tags/{id}:
+    delete:
+      summary: DELETE /api/tags/:id
+      tags:
+        - tags
+      operationId: delete_api_tags_id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    patch:
+      summary: PATCH /api/tags/:id
+      tags:
+        - tags
+      operationId: patch_api_tags_id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                color:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workflows/analytics:
+    get:
+      summary: GET /api/workflows/analytics?projectId=
+      tags:
+        - workflows
+      operationId: get_api_workflows_analytics
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/workflows/analytics/{templateId}/{nodeId}/workspaces:
+    get:
+      summary: GET /api/workflows/analytics/:templateId/:nodeId/workspaces?projectId=
+      tags:
+        - workflows
+      operationId: get_api_workflows_analytics_templateId_nodeId_workspaces
+      parameters:
+        - name: templateId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: nodeId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/workflows/resolve:
+    get:
+      summary: GET /api/workflows/resolve?issueId=&projectId=&issueType=
+      tags:
+        - workflows
+      operationId: get_api_workflows_resolve
+      parameters:
+        - name: issueId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: issueType
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workflows/templates:
+    get:
+      summary: GET /api/workflows/templates?projectId=&ticketType=&graph=1
+      tags:
+        - workflows
+      operationId: get_api_workflows_templates
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: ticketType
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: graph
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: POST /api/workflows/templates — create a template (optionally cloning another).
+      tags:
+        - workflows
+      operationId: post_api_workflows_templates
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+                name:
+                  type: string
+                description:
+                  type: string
+                  nullable: true
+                ticketType:
+                  type: string
+                  nullable: true
+                isDefault:
+                  type: boolean
+                nodes:
+                  type: array
+                  items: {}
+                edges:
+                  type: array
+                  items: {}
+                cloneFrom:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workflows/templates/import:
+    post:
+      summary: POST /api/workflows/templates/import — import JSON as a new project template.
+      tags:
+        - workflows
+      operationId: post_api_workflows_templates_import
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/workflows/templates/{id}:
+    delete:
+      summary: DELETE /api/workflows/templates/:id — delete a non-builtin template (cascade nodes/edges).
+      tags:
+        - workflows
+      operationId: delete_api_workflows_templates_id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    get:
+      summary: GET /api/workflows/templates/:id — full graph for one template.
+      tags:
+        - workflows
+      operationId: get_api_workflows_templates_id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+    put:
+      summary: PUT /api/workflows/templates/:id — update a non-builtin template's graph in place.
+      tags:
+        - workflows
+      operationId: put_api_workflows_templates_id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                  nullable: true
+                ticketType:
+                  type: string
+                  nullable: true
+                isDefault:
+                  type: boolean
+                nodes:
+                  type: array
+                  items: {}
+                edges:
+                  type: array
+                  items: {}
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workflows/templates/{id}/export:
+    get:
+      summary: GET /api/workflows/templates/:id/export — JSON envelope suitable for import.
+      tags:
+        - workflows
+      operationId: get_api_workflows_templates_id_export
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/workflows/workspaces/{id}/progress:
+    get:
+      summary: GET /api/workflows/workspaces/:id/progress
+      tags:
+        - workflows
+      operationId: get_api_workflows_workspaces_id_progress
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/workflows/workspaces/{id}/transition:
+    post:
+      summary: POST /api/workflows/workspaces/:id/transition — manual transition (UI-driven).
+      tags:
+        - workflows
+      operationId: post_api_workflows_workspaces_id_transition
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces:
+    get:
+      summary: "Optional: status=active,idle (comma-separated), limit=N, offset=N"
+      tags:
+        - workspaces
+      operationId: get_api_workspaces
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: issueId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: POST /api/workspaces — create workspace with worktree + auto-launch agent
+      tags:
+        - workspaces
+      operationId: post_api_workspaces
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                issueId:
+                  type: string
+                branch:
+                  type: string
+                isDirect:
+                  type: boolean
+                baseBranch:
+                  type: string
+                requiresReview:
+                  type: boolean
+                thoroughReview:
+                  type: boolean
+                planMode:
+                  type: boolean
+                tddMode:
+                  type: boolean
+                includeVisualProof:
+                  type: boolean
+                skipSetup:
+                  type: boolean
+                customPrompt:
+                  type: string
+                clarifications:
+                  type: string
+                skillId:
+                  type: string
+                skillName:
+                  type: string
+                profile:
+                  type: object
+                  properties:
+                    provider:
+                      type: string
+                    name:
+                      type: string
+                claudeProfile:
+                  type: string
+                model:
+                  type: string
+                skipContextPacker:
+                  type: boolean
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/cleanup-warnings:
+    get:
+      summary: Must be registered BEFORE /:id to avoid being matched as an ID param
+      tags:
+        - workspaces
+      operationId: get_api_workspaces_cleanup-warnings
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/cost-over-time:
+    get:
+      summary: workspace. Must be registered BEFORE /:id to avoid being matched as an ID param.
+      tags:
+        - workspaces
+      operationId: get_api_workspaces_cost-over-time
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: days
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/preview:
+    post:
+      summary: Must be registered BEFORE /:id to avoid being matched as an ID param
+      tags:
+        - workspaces
+      operationId: post_api_workspaces_preview
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                issueId:
+                  type: string
+                branch:
+                  type: string
+                isDirect:
+                  type: boolean
+                baseBranch:
+                  type: string
+                requiresReview:
+                  type: boolean
+                thoroughReview:
+                  type: boolean
+                planMode:
+                  type: boolean
+                tddMode:
+                  type: boolean
+                includeVisualProof:
+                  type: boolean
+                skipSetup:
+                  type: boolean
+                customPrompt:
+                  type: string
+                clarifications:
+                  type: string
+                skillId:
+                  type: string
+                skillName:
+                  type: string
+                profile:
+                  type: object
+                  properties:
+                    provider:
+                      type: string
+                    name:
+                      type: string
+                claudeProfile:
+                  type: string
+                model:
+                  type: string
+                skipContextPacker:
+                  type: boolean
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/provider-mix:
+    get:
+      summary: Must be registered BEFORE /:id to avoid being matched as an ID param
+      tags:
+        - workspaces
+      operationId: get_api_workspaces_provider-mix
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: days
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/scorecard-distribution:
+    get:
+      summary: Must be registered BEFORE /:id to avoid being matched as an ID param
+      tags:
+        - workspaces
+      operationId: get_api_workspaces_scorecard-distribution
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: days
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/stale-worktrees:
+    get:
+      summary: Must be registered BEFORE /:id to avoid being matched as an ID param
+      tags:
+        - workspaces
+      operationId: get_api_workspaces_stale-worktrees
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}:
+    delete:
+      summary: DELETE /api/workspaces/:id — cascade delete sessions and their messages
+      tags:
+        - workspaces
+      operationId: delete_api_workspaces_id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    get:
+      summary: GET /api/workspaces/:id
+      tags:
+        - workspaces
+      operationId: get_api_workspaces_id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+    patch:
+      summary: PATCH /api/workspaces/:id
+      tags:
+        - workspaces
+      operationId: patch_api_workspaces_id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/abort-rebase:
+    post:
+      summary: POST /api/workspaces/:id/abort-rebase
+      tags:
+        - workspace-actions
+      operationId: post_api_workspaces_id_abort-rebase
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/already-merged-status:
+    get:
+      summary: GET /api/workspaces/:id/already-merged-status — check if branch is already merged without modifying state
+      tags:
+        - workspace-actions
+      operationId: get_api_workspaces_id_already-merged-status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/artifacts:
+    get:
+      summary: GET /api/workspaces/:id/artifacts — list recognized artifacts in workspace directory
+      tags:
+        - workspace-actions
+      operationId: get_api_workspaces_id_artifacts
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/artifacts-file:
+    get:
+      summary: GET /api/workspaces/:id/artifacts-file — read a single artifact by ?path= query param
+      tags:
+        - workspace-actions
+      operationId: get_api_workspaces_id_artifacts-file
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: path
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/bisect:
+    post:
+      summary: POST /api/workspaces/:id/bisect
+      tags:
+        - workspace-actions
+      operationId: post_api_workspaces_id_bisect
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scope: {}
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/close:
+    post:
+      summary: POST /api/workspaces/:id/close — close without merging (abandoned or already-merged work)
+      tags:
+        - workspaces
+      operationId: post_api_workspaces_id_close
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/comments:
+    get:
+      summary: GET /api/workspaces/:id/comments
+      tags:
+        - workspace-actions
+      operationId: get_api_workspaces_id_comments
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: filePath
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: POST /api/workspaces/:id/comments
+      tags:
+        - workspace-actions
+      operationId: post_api_workspaces_id_comments
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                filePath:
+                  type: string
+                body:
+                  type: string
+                lineNumOld:
+                  type: number
+                  nullable: true
+                lineNumNew:
+                  type: number
+                  nullable: true
+                side:
+                  type: string
+              required:
+                - filePath
+                - body
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/comments/{commentId}:
+    delete:
+      summary: DELETE /api/workspaces/:id/comments/:commentId
+      tags:
+        - workspace-actions
+      operationId: delete_api_workspaces_id_comments_commentId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: commentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    patch:
+      summary: PATCH /api/workspaces/:id/comments/:commentId
+      tags:
+        - workspace-actions
+      operationId: patch_api_workspaces_id_comments_commentId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: commentId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                body:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/comments/{commentId}/resolve:
+    patch:
+      summary: PATCH /api/workspaces/:id/comments/:commentId/resolve — toggle resolved state
+      tags:
+        - workspace-actions
+      operationId: patch_api_workspaces_id_comments_commentId_resolve
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: commentId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/conflicts:
+    get:
+      summary: GET /api/workspaces/:id/conflicts
+      tags:
+        - workspace-actions
+      operationId: get_api_workspaces_id_conflicts
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/diff:
+    get:
+      summary: GET /api/workspaces/:id/diff
+      tags:
+        - workspace-actions
+      operationId: get_api_workspaces_id_diff
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/fix-and-merge:
+    post:
+      summary: POST /api/workspaces/:id/fix-and-merge
+      tags:
+        - workspace-actions
+      operationId: post_api_workspaces_id_fix-and-merge
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mergeError:
+                  type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/github-handoff-draft:
+    get:
+      summary: GET /api/workspaces/:id/github-handoff-draft
+      tags:
+        - workspace-actions
+      operationId: get_api_workspaces_id_github-handoff-draft
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: POST /api/workspaces/:id/github-handoff-draft
+      tags:
+        - workspace-actions
+      operationId: post_api_workspaces_id_github-handoff-draft
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/handoff-bundle:
+    get:
+      summary: GET /api/workspaces/:id/handoff-bundle — export a compact handoff bundle (JSON or Markdown)
+      tags:
+        - workspace-actions
+      operationId: get_api_workspaces_id_handoff-bundle
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/implement-plan:
+    post:
+      summary: POST /api/workspaces/:id/implement-plan
+      tags:
+        - workspace-actions
+      operationId: post_api_workspaces_id_implement-plan
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                planContent:
+                  type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/latest-commit:
+    get:
+      summary: GET /api/workspaces/:id/latest-commit
+      tags:
+        - workspace-actions
+      operationId: get_api_workspaces_id_latest-commit
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/launch:
+    post:
+      summary: POST /api/workspaces/:id/launch
+      tags:
+        - workspace-actions
+      operationId: post_api_workspaces_id_launch
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/merge:
+    post:
+      summary: POST /api/workspaces/:id/merge
+      tags:
+        - workspace-actions
+      operationId: post_api_workspaces_id_merge
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/open-editor:
+    post:
+      summary: POST /api/workspaces/:id/open-editor
+      tags:
+        - workspace-actions
+      operationId: post_api_workspaces_id_open-editor
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/plan:
+    get:
+      summary: GET /api/workspaces/:id/plan
+      tags:
+        - workspace-actions
+      operationId: get_api_workspaces_id_plan
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/quarantine:
+    post:
+      summary: POST /api/workspaces/:id/quarantine — stop session + move issue back to In Progress
+      tags:
+        - workspace-actions
+      operationId: post_api_workspaces_id_quarantine
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/ready-for-merge:
+    post:
+      summary: POST /api/workspaces/:id/ready-for-merge — mark workspace as reviewed and ready to merge
+      tags:
+        - workspaces
+      operationId: post_api_workspaces_id_ready-for-merge
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/reconcile-as-done:
+    post:
+      summary: POST /api/workspaces/:id/reconcile-as-done — close a workspace whose branch is already on master
+      tags:
+        - workspace-actions
+      operationId: post_api_workspaces_id_reconcile-as-done
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/reject-plan:
+    post:
+      summary: POST /api/workspaces/:id/reject-plan
+      tags:
+        - workspace-actions
+      operationId: post_api_workspaces_id_reject-plan
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/resolve-conflicts:
+    post:
+      summary: POST /api/workspaces/:id/resolve-conflicts
+      tags:
+        - workspace-actions
+      operationId: post_api_workspaces_id_resolve-conflicts
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/retry-cleanup:
+    post:
+      summary: POST /api/workspaces/:id/retry-cleanup — retry worktree cleanup for a workspace with a pending warning
+      tags:
+        - workspace-actions
+      operationId: post_api_workspaces_id_retry-cleanup
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/scorecard:
+    get:
+      summary: GET /api/workspaces/:id/scorecard
+      tags:
+        - workspace-actions
+      operationId: get_api_workspaces_id_scorecard
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/scorecard/refresh:
+    post:
+      summary: POST /api/workspaces/:id/scorecard/refresh
+      tags:
+        - workspace-actions
+      operationId: post_api_workspaces_id_scorecard_refresh
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/sessions:
+    get:
+      summary: GET /api/workspaces/:id/sessions
+      tags:
+        - workspace-actions
+      operationId: get_api_workspaces_id_sessions
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/setup:
+    post:
+      summary: POST /api/workspaces/:id/setup
+      tags:
+        - workspace-actions
+      operationId: post_api_workspaces_id_setup
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/stale-worktree:
+    delete:
+      summary: DELETE /api/workspaces/:id/stale-worktree — safely remove a stale worktree directory
+      tags:
+        - workspace-actions
+      operationId: delete_api_workspaces_id_stale-worktree
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/stop:
+    post:
+      summary: POST /api/workspaces/:id/stop
+      tags:
+        - workspace-actions
+      operationId: post_api_workspaces_id_stop
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/terminal:
+    post:
+      summary: POST /api/workspaces/:id/terminal
+      tags:
+        - workspace-actions
+      operationId: post_api_workspaces_id_terminal
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/timeline:
+    get:
+      summary: GET /api/workspaces/:id/timeline — session failure timeline with restart decisions
+      tags:
+        - workspace-actions
+      operationId: get_api_workspaces_id_timeline
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/turn:
+    post:
+      summary: POST /api/workspaces/:id/turn
+      tags:
+        - workspace-actions
+      operationId: post_api_workspaces_id_turn
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/update-base:
+    post:
+      summary: POST /api/workspaces/:id/update-base
+      tags:
+        - workspace-actions
+      operationId: post_api_workspaces_id_update-base
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/visual-proof:
+    get:
+      summary: GET /api/workspaces/:id/visual-proof — list DB artifacts (visual proof) scoped to this workspace
+      tags:
+        - workspace-actions
+      operationId: get_api_workspaces_id_visual-proof
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
