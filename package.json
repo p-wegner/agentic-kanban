@@ -63,6 +63,7 @@
     "db:repair": "pnpm --filter agentic-kanban db:repair",
     "db:restore": "pnpm --filter agentic-kanban db:restore",
     "db:setup": "pnpm db:migrate && pnpm db:seed && pnpm cli -- register .",
+    "openapi:generate": "pnpm --filter agentic-kanban openapi:generate",
     "dev:desktop": "concurrently \"pnpm --filter agentic-kanban dev\" \"pnpm --filter client dev\" \"pnpm --filter @agentic-kanban/desktop dev\"",
     "version": "changeset version",
     "release": "pnpm build && changeset publish"
