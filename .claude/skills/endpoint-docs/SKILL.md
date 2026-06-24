@@ -42,7 +42,8 @@ Don't grep route files by hand — query the catalog:
 - Specific area: `find butler` / `find "voice"`.
 - One endpoint's contract: `get POST /api/projects`.
 - Who consumes it: `usage /api/projects/{id}/board`.
-If the catalog might be out of date, run `check` first (see below).
+
+The freshness `check` is **optional** — skip it by default and just answer from the catalog. Only run `check` first when the answer depends on routes possibly changed very recently (e.g. you or a just-merged branch touched `packages/server/src/routes/`), or when the user explicitly asks to verify. If invoked with "no verify" / "no check", don't run it at all. When you do skip it, you may note the catalog's recorded `commit` so the user knows the basis.
 
 ### Keep it up to date (the SHA + diff loop)
 The catalog only needs regenerating when **route files** change. Use the recorded SHA to find out cheaply, instead of re-analyzing on every commit:
