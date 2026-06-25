@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   computeCouplingCandidates,
   couplingCandidatesFor,
+  couplingComponents,
   DEFAULT_COUPLING_OVERLAP_THRESHOLD,
   type IssueTouchedFiles,
 } from "../src/lib/coupling-overlap.js";
@@ -114,5 +115,45 @@ describe("couplingCandidatesFor", () => {
       issue("B", ["x.ts"]),
     ]);
     expect(couplingCandidatesFor("Z", all)).toEqual([]);
+  });
+});
+
+/**
+ * `couplingComponents` (#918) — enumerate ALL connected components of the `coupled_with`
+ * peer graph project-wide (no seed). The contract step's discovery primitive; the
+ * undirected-graph inverse of the `parent_of`/`child_of` tree decompose produces.
+ */
+describe("couplingComponents", () => {
+  const edge = (issueId: string, dependsOnId: string) => ({ issueId, dependsOnId });
+
+  it("returns nothing when there are no coupled edges", () => {
+    expect(couplingComponents([])).toEqual([]);
+  });
+
+  it("groups a transitive chain into one component, sorted", () => {
+    const comps = couplingComponents([edge("B", "C"), edge("A", "B")]);
+    expect(comps).toEqual([["A", "B", "C"]]);
+  });
+
+  it("walks edges in both directions (symmetric)", () => {
+    // stored as A->B and C->B; the whole set is one component
+    expect(couplingComponents([edge("A", "B"), edge("C", "B")])).toEqual([["A", "B", "C"]]);
+  });
+
+  it("keeps disjoint components separate and orders them largest-first", () => {
+    const comps = couplingComponents([edge("X", "Y"), edge("A", "B"), edge("B", "C")]);
+    expect(comps).toEqual([["A", "B", "C"], ["X", "Y"]]);
+  });
+
+  it("excludes singletons (an issue with no coupled edge is never a component)", () => {
+    // D has no edge at all; only the A-B pair is a component
+    expect(couplingComponents([edge("A", "B")])).toEqual([["A", "B"]]);
+  });
+
+  it("is deterministic regardless of edge input order", () => {
+    const a = couplingComponents([edge("A", "B"), edge("C", "D"), edge("B", "C")]);
+    const b = couplingComponents([edge("B", "C"), edge("C", "D"), edge("A", "B")]);
+    expect(a).toEqual(b);
+    expect(a).toEqual([["A", "B", "C", "D"]]);
   });
 });

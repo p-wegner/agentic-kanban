@@ -120,6 +120,86 @@ export interface CreateIssueInput {
 
 export type CreateIssueResult = NonNullable<Awaited<ReturnType<typeof getIssueDescription>>>;
 
+/**
+ * A dependency edge seeded alongside a batch create, referenced by the 0-based index
+ * of each issue in the `issues` array (the IDs are generated inside the call). This is
+ * the REST/butler-side mirror of the `create_issues_batch` MCP tool's `dependencies`
+ * input — the SAME mechanism the analyzer writes — so a generating agent can DECLARE
+ * coupling (`coupled_with`) at creation rather than have it reconstructed later (#918).
+ */
+export interface BatchDependencyInput {
+  issueIndex: number;
+  dependsOnIndex: number;
+  type?: DependencyType;
+}
+
+/** Edge types that can form a meaningful cycle (the symmetric peers cannot). */
+const DIRECTIONAL_DEPENDENCY_TYPES = new Set<DependencyType>(["depends_on", "blocked_by", "parent_of", "child_of"]);
+
+/**
+ * Validate index-based batch dependency edges and normalise each `type` (default
+ * `depends_on`). Mirrors the `create_issues_batch` MCP tool: range-checks indices,
+ * rejects self-edges and duplicates, and rejects a cycle across the DIRECTIONAL edges
+ * only (`coupled_with`/`related_to`/`duplicates` are symmetric peers and never cycle).
+ * Throws `IssueError(BAD_REQUEST)` with the offending edge `index` on any violation.
+ */
+export function validateBatchDependencies(
+  edges: BatchDependencyInput[],
+  issueCount: number,
+): Array<{ issueIndex: number; dependsOnIndex: number; type: DependencyType }> {
+  const normalized: Array<{ issueIndex: number; dependsOnIndex: number; type: DependencyType }> = [];
+  const adj = new Map<number, Set<number>>();
+  const seen = new Set<string>();
+  const fail = (msg: string, index: number): never => {
+    const err = new IssueError(msg, "BAD_REQUEST") as IssueError & { index?: number };
+    err.index = index;
+    throw err;
+  };
+  for (let i = 0; i < edges.length; i++) {
+    const e = edges[i];
+    if (!Number.isInteger(e.issueIndex) || e.issueIndex < 0 || e.issueIndex >= issueCount) {
+      fail(`dependencies[${i}].issueIndex ${e.issueIndex} out of range (0..${issueCount - 1})`, i);
+    }
+    if (!Number.isInteger(e.dependsOnIndex) || e.dependsOnIndex < 0 || e.dependsOnIndex >= issueCount) {
+      fail(`dependencies[${i}].dependsOnIndex ${e.dependsOnIndex} out of range (0..${issueCount - 1})`, i);
+    }
+    if (e.issueIndex === e.dependsOnIndex) {
+      fail(`dependencies[${i}]: an issue cannot depend on itself`, i);
+    }
+    const type: DependencyType = e.type ?? "depends_on";
+    const key = `${e.issueIndex} ${e.dependsOnIndex} ${type}`;
+    if (seen.has(key)) {
+      fail(`dependencies[${i}]: duplicate edge (issue ${e.issueIndex} -> ${e.dependsOnIndex}, type ${type})`, i);
+    }
+    seen.add(key);
+    if (DIRECTIONAL_DEPENDENCY_TYPES.has(type)) {
+      let set = adj.get(e.issueIndex);
+      if (!set) { set = new Set(); adj.set(e.issueIndex, set); }
+      set.add(e.dependsOnIndex);
+    }
+    normalized.push({ issueIndex: e.issueIndex, dependsOnIndex: e.dependsOnIndex, type });
+  }
+  const reaches = (from: number, to: number): boolean => {
+    const stack = [from];
+    const visited = new Set<number>();
+    while (stack.length) {
+      const cur = stack.pop()!;
+      if (cur === to) return true;
+      if (visited.has(cur)) continue;
+      visited.add(cur);
+      for (const n of adj.get(cur) ?? []) stack.push(n);
+    }
+    return false;
+  };
+  for (let i = 0; i < normalized.length; i++) {
+    const e = normalized[i];
+    if (DIRECTIONAL_DEPENDENCY_TYPES.has(e.type) && reaches(e.dependsOnIndex, e.issueIndex)) {
+      fail(`dependencies[${i}]: would create a cycle (issue ${e.issueIndex} -> ${e.dependsOnIndex})`, i);
+    }
+  }
+  return normalized;
+}
+
 export type WebhookSender = (projectId: string, payload: WebhookIssueStatusPayload) => void;
 
 /**
@@ -253,8 +333,16 @@ export function createIssueService(deps: {
       parentIssueId?: string;
       /** When set (requires parentIssueId), a Drive record is created with metaIssueId=parentIssueId. */
       driveTarget?: string;
+      /**
+       * Dependency edges between the issues being created, referenced by their 0-based
+       * index in `inputs` (the IDs are generated inside this call). Committed in the SAME
+       * transaction as the issues so the monitor can never observe a ticket before its
+       * edge exists. This is how a generating agent (butler / REST authoring path) DECLARES
+       * coupling at creation — e.g. `type: "coupled_with"` between two vertical slices (#918).
+       */
+      dependencies?: BatchDependencyInput[];
     },
-  ): Promise<{ issues: CreateIssueResult[]; driveId?: string }> {
+  ): Promise<{ issues: CreateIssueResult[]; driveId?: string; dependenciesCreated?: number }> {
     if (inputs.length === 0) return { issues: [] };
 
     for (let i = 0; i < inputs.length; i++) {
@@ -264,6 +352,8 @@ export function createIssueService(deps: {
         throw err;
       }
     }
+
+    const edges = validateBatchDependencies(opts?.dependencies ?? [], inputs.length);
 
     let results: string[] | null = null;
     for (let attempt = 1; attempt <= ISSUE_NUMBER_INSERT_ATTEMPTS; attempt++) {
@@ -308,6 +398,17 @@ export function createIssueService(deps: {
             }
             insertedIds.push(id);
           }
+          // Seed the declared dependency edges in the SAME transaction as the issues, so
+          // autodrive never sees a coupled/blocked ticket before its edge exists (#765/#918).
+          for (const e of edges) {
+            await insertDependency({
+              id: randomUUID(),
+              issueId: insertedIds[e.issueIndex],
+              dependsOnId: insertedIds[e.dependsOnIndex],
+              type: e.type,
+              createdAt: now,
+            }, tx);
+          }
           return insertedIds;
         });
         break;
@@ -338,7 +439,7 @@ export function createIssueService(deps: {
       driveId = drive.id;
     }
 
-    return { issues: out, driveId };
+    return { issues: out, driveId, dependenciesCreated: edges.length };
   }
 
   async function updateIssue(

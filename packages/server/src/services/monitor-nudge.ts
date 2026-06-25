@@ -7,7 +7,9 @@ export type MonitorActionName =
   | "mark_idle"
   | "mark_dead"
   | "auto_start"
-  | "generate_tickets";
+  | "generate_tickets"
+  | "auto_contract"
+  | "auto_contract_suggest";
 
 export function sendMonitorNudge({
   sessionManager,
