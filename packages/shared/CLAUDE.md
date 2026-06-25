@@ -23,7 +23,20 @@ past it (the gate was decorative). The **merge-blocking gate of record is now
 `typescript` devDep, falling back to a regex heuristic for the cohesion count) that exits
 non-zero on any breach. It is wired into `pnpm check:arch` (and thus `pnpm check` / `check:full`)
 and into CI (`.github/workflows/arch-gate.yml`, runs on PRs to master). Keep its thresholds in
-sync with `max-file-size.test.ts` (that test stays as the in-IDE signal). When a file trips,
+sync with `max-file-size.test.ts` (that test stays as the in-IDE signal).
+
+**Cohesion signal counts INTERNAL functions, not just exports (#889).** The cohesion check used
+to count only EXPORTED functions/classes, so a god-module hid behind a few exports —
+`agent-stream-parser.ts` had 3 exports but 28 internal functions at 1042 lines and waved through.
+The signal now counts **top-level function/class declarations + top-level arrow/function-expression
+consts, EXPORTED AND INTERNAL** (`> 20` in a `600+`-line file). Top-level only — nested
+callbacks belong to their enclosing function; `const` data tables and type/interface exports stay
+excluded (cohesive data/contracts). The script's regex fallback (no `typescript` devDep) is anchored
+at column 0 so it counts the same top-level shape. A small **ratchet baseline** (`COHESION_BASELINE`
+in both files) grandfathers the modules that already exceeded 20 at introduction (session-summary 38,
+butler-sdk 30, stack-profile 28, agent.service 27, insights 23, agent-questions 21) at their current
+count: the gate blocks any NEW breach and any GROWTH of a baselined file, but a baselined file may
+only shrink — decompose it and lower/remove its entry. When a file trips,
 decompose it behind a facade barrel — `agent-stream-parser.ts` is the canonical example: the
 per-provider parsers live in `src/lib/agent-stream/{claude,codex,copilot,pi}.ts` + shared helpers
 in `agent-stream/shared.ts`, all re-exported through the unchanged facade so consumers' imports of

@@ -12,7 +12,8 @@ export interface Settings {
   claude_subscription_ring?: string;
   claude_subscription_rotation?: string;
   provider?: string;
-  default_model?: string;
+  // The global, provider-agnostic `default_model` was retired in #902 — model is now ONLY
+  // provider-scoped, so a cross-provider id is unrepresentable. Use default_model_<provider>.
   default_model_claude?: string;
   default_model_codex?: string;
   default_model_pi?: string;
@@ -73,7 +74,6 @@ export const DEFAULT_SETTINGS: Settings = {
   claude_subscription_ring: "",
   claude_subscription_rotation: "true",
   provider: "claude",
-  default_model: "",
   default_model_claude: "",
   default_model_codex: "",
   default_model_pi: "",
@@ -152,7 +152,8 @@ export function defaultModelKeyForProvider(provider: AgentProvider): keyof Setti
 export function defaultModelForProvider(settings: Settings | Record<string, string>, provider: AgentProvider): string {
   const key = defaultModelKeyForProvider(provider);
   if (!key) return "";
-  return settings[key] || settings.default_model || "";
+  // Provider-scoped only (#902) — no fallback to a global `default_model`, which is gone.
+  return settings[key] || "";
 }
 
 export type AgentProfileHealth = {
