@@ -17,7 +17,7 @@ const edgeSchema = z.object({
 export interface DependencyBatchEdge {
   issueId: string;
   dependsOnId: string;
-  type?: string;
+  type?: (typeof VALID_TYPES)[number];
   action: "add" | "remove";
 }
 
