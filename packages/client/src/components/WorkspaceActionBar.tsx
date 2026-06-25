@@ -20,6 +20,7 @@ export interface WorkspaceActionBarProps {
   handleReview: (wsId: string) => void;
   handleMerge: (wsId: string) => void;
   handleUpdateBase: (wsId: string, mode: "rebase" | "merge") => void;
+  handleResetWorkspaceToIdle: (wsId: string) => void;
   handleOpenTerminal: (wsId: string) => void;
   handleOpenEditor: (wsId: string) => void;
   copyPreviewUrl: (url: string) => void;
@@ -44,6 +45,7 @@ export function WorkspaceActionBar({
   handleReview,
   handleMerge,
   handleUpdateBase,
+  handleResetWorkspaceToIdle,
   handleOpenTerminal,
   handleOpenEditor,
   copyPreviewUrl,
@@ -52,6 +54,7 @@ export function WorkspaceActionBar({
   handleDeleteWorkspace,
 }: WorkspaceActionBarProps) {
   const preview = getWorkspacePreviewUrl(ws);
+  const isBlocked = ws.status === "blocked";
   return (
             <div className="flex gap-2 flex-wrap items-center rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-900/40 p-2">
               {ws.workingDir && canResume(ws, sessions) && (
@@ -122,15 +125,25 @@ export function WorkspaceActionBar({
                   </span>
                 );
               })()}
-              {ws.workingDir && (
-              <WorkspaceActionButton
-                intent="primary"
-                onClick={() => handleReview(ws.id)}
-                disabled={actionLoading || isRunning}
-                title="Trigger AI code review"
-              >
-                Review
-              </WorkspaceActionButton>
+              {ws.workingDir && (isBlocked ? (
+                <WorkspaceActionButton
+                  intent="warn"
+                  onClick={() => handleResetWorkspaceToIdle(ws.id)}
+                  disabled={actionLoading}
+                  title="Reset this blocked workspace to idle, then retry review or relaunch with the current provider."
+                >
+                  Reset to idle
+                </WorkspaceActionButton>
+              ) : (
+                <WorkspaceActionButton
+                  intent="primary"
+                  onClick={() => handleReview(ws.id)}
+                  disabled={actionLoading || isRunning}
+                  title="Trigger AI code review"
+                >
+                  Review
+                </WorkspaceActionButton>
+              )
               )}
               {ws.workingDir && (
               <WorkspaceActionButton

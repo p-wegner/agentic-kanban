@@ -329,6 +329,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
     handleOpenTerminal, handleOpenEditor, copyPreviewUrl, handleUpdateBase,
     handleMonitorRunNow, handleAbortRebase, handleResolveConflicts, handleResume,
     handleRestart, handleContinueFromSession, handleAutoBisect, handleReview,
+    handleResetWorkspaceToIdle,
     handleImplementPlan, handleRejectPlan, handleDeleteWorkspace, handleCloseWorkspace,
   } = useWorkspaceActions({
     issue, selectedProfile, selectedModel, prefs, requiresReview, suggestion,
@@ -526,6 +527,7 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
               handleFetchSummary={handleFetchSummary}
               handleReview={handleReview}
               handleMerge={handleMerge}
+              handleResetWorkspaceToIdle={handleResetWorkspaceToIdle}
               handleAutoBisect={handleAutoBisect}
               handleExportHandoffBundle={handleExportHandoffBundle}
               handleSkillQuickLaunch={handleSkillQuickLaunch}
