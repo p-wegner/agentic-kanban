@@ -1,6 +1,15 @@
 import { useEffect, useRef, useCallback } from "react";
-import { startStaggeredPoll, type PollHandle } from "./pollScheduler.js";
 
+/**
+ * Low-frequency safety poll backing the board WebSocket. The WS is the single
+ * push channel that drives board refreshes (#907); this interval exists only as
+ * a backstop for mutations that bypass the WS broadcast — MCP/CLI edits and
+ * second-tab changes. It is visibility-gated (skipped while the tab is hidden,
+ * with one catch-up refresh when it becomes visible) so background tabs don't
+ * hit the server. There is now exactly one board poller, so the former
+ * phase-offset "stagger" (which existed only to spread multiple independent
+ * pollers) is gone — the fix removes redundant pollers, it does not stagger them.
+ */
 const POLL_INTERVAL_MS = 30_000;
 
 /**
@@ -96,7 +105,7 @@ export function useBoardEvents(
   onApprovalRequested?: (req: ApprovalRequest) => void,
 ) {
   const wsRef = useRef<WebSocket | null>(null);
-  const pollRef = useRef<PollHandle | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectDelayRef = useRef(1000);
   const unmountedRef = useRef(false);
@@ -181,14 +190,29 @@ export function useBoardEvents(
     reconnectDelayRef.current = 1000;
     connect();
 
-    // Periodic polling fallback — catches MCP mutations, second-tab changes,
-    // CLI edits, and any other mutations that bypass WS broadcast. Staggered
-    // and visibility-gated so background tabs and phase-aligned pollers don't
-    // storm the server.
+    // The single low-frequency safety poll backing the WS (see POLL_INTERVAL_MS
+    // doc). Visibility-gated: ticks are skipped while the tab is hidden, and one
+    // catch-up refresh runs when it becomes visible again so the board isn't
+    // stale on tab focus. (Headless Chromium reports visible, so E2E is unchanged.)
+    let missedWhileHidden = false;
+    const onVisibilityChange = () => {
+      if (unmountedRef.current) return;
+      if (typeof document !== "undefined" && !document.hidden && missedWhileHidden) {
+        missedWhileHidden = false;
+        onBoardChangeRef.current("poll");
+      }
+    };
     if (projectId) {
-      pollRef.current = startStaggeredPoll(() => {
+      pollTimerRef.current = setInterval(() => {
+        if (typeof document !== "undefined" && document.hidden) {
+          missedWhileHidden = true;
+          return;
+        }
         onBoardChangeRef.current("poll");
       }, POLL_INTERVAL_MS);
+      if (typeof document !== "undefined") {
+        document.addEventListener("visibilitychange", onVisibilityChange);
+      }
     }
 
     return () => {
@@ -202,9 +226,12 @@ export function useBoardEvents(
         wsRef.current.close();
         wsRef.current = null;
       }
-      if (pollRef.current) {
-        pollRef.current.stop();
-        pollRef.current = null;
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibilityChange);
       }
     };
   }, [connect, projectId]);
