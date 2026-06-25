@@ -1,4 +1,4 @@
-import { db, rawClient } from "../db/index.js";
+import { db, rawClient, rawWriteClient } from "../db/index.js";
 import { workspaces, issues, projects, preferences, sessions } from "@agentic-kanban/shared/schema";
 import { and, eq, isNotNull, ne } from "drizzle-orm";
 import { applyMigrations } from "../db/manual-migrate.js";
@@ -12,6 +12,7 @@ import { reconcileAncestorBranchWorkspaces } from "./ancestor-branch-reconciler.
 import { scanDoneUnmergedWorkspaces } from "./done-unmerged-invariant-scanner.js";
 import { reapTerminalWorkspaces } from "./terminal-workspace-reaper.js";
 import { finalizeMergeCleanup, reconcileMergedIssue } from "../services/merge-cleanup.service.js";
+import { assertForeignKeysEnabled, alignForeignKeyActionsOnStartup } from "./fk-alignment.js";
 import { modelBelongsToProvider } from "@agentic-kanban/shared";
 import { PREF_DEFAULT_MODEL, PREF_PROVIDER } from "../constants/preference-keys.js";
 import { MODEL_PREF_KEYS_BY_PROVIDER } from "../services/effective-config.service.js";
@@ -203,6 +204,37 @@ export async function runMigrations(): Promise<void> {
     }
   } catch (err) {
     console.warn("[startup] failure-pattern backfill failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  }
+}
+
+/**
+ * Verify FK enforcement is live, then bring the on-disk DB's FK ACTIONS into line with
+ * the Drizzle schema (arch-review #894). Migrations fixed the schema *shape* above, but
+ * they cannot retro-fit an `ON DELETE` action a long-lived DB was created without —
+ * SQLite has no `ALTER ... FOREIGN KEY`, so this drift previously only got repaired on a
+ * manual `pnpm db:repair`. Run on every boot so the live board's FK actions can never
+ * silently diverge from what `cascade-delete.ts` and the services assume.
+ *
+ * The pragma assertion is FATAL (a connection with FK enforcement off makes every
+ * `onDelete` clause inert with no error — exactly the swallowed-catch hole in db/index.ts).
+ * The action alignment is NON-fatal: the schema shape is already correct, and a rebuild
+ * failure must not stop the board from booting.
+ */
+export async function alignLiveDbForeignKeys(): Promise<void> {
+  // FATAL: both the read and the dedicated write connection must enforce FKs. If
+  // PRAGMA foreign_keys=ON failed to apply on either, fail loud rather than run a
+  // board where deletes silently leave orphans.
+  await assertForeignKeysEnabled(rawClient, "read");
+  await assertForeignKeysEnabled(rawWriteClient, "write");
+
+  // NON-fatal: align ON DELETE/ON UPDATE actions on tables an older DB drifted on.
+  try {
+    await alignForeignKeyActionsOnStartup(rawClient);
+  } catch (err) {
+    console.warn(
+      "[startup] FK-action alignment failed (non-fatal — schema shape is still up to date):",
+      err instanceof Error ? err.message : String(err),
+    );
   }
 }
 
@@ -461,6 +493,7 @@ export async function reconcileSilentlyMergedWorkspaces(database: Database = db)
 export async function runStartupTasks(sessionManager: SessionManager, _deps?: { agentService?: typeof agentServiceType }): Promise<void> {
   await killOrphanedServers();
   await runMigrations();
+  await alignLiveDbForeignKeys();
   await abortStaleMerges();
   await abortStaleRebases();
   await cleanupStaleSessions(sessionManager);
