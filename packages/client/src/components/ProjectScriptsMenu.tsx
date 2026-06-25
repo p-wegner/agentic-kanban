@@ -84,6 +84,7 @@ export function ProjectScriptsMenu({ projectId }: ProjectScriptsMenuProps) {
       exitCode: null,
     });
     try {
+      // eslint-disable-next-line no-restricted-syntax -- SSE stream over POST: needs ReadableStream, not a JSON read for the query layer (see client/CLAUDE.md "SSE from POST endpoints")
       const response = await fetch(`/api/projects/${projectId}/scripts/${script.id}/run`, { method: "POST" });
       if (!response.ok || !response.body) throw new Error(`Script run failed: ${response.status}`);
       const reader = response.body.getReader();
