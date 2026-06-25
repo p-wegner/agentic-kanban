@@ -81,7 +81,7 @@ Examples:
         await runMigrations();
 
         const depType = options.type || "depends_on";
-        const validTypes = ["depends_on", "blocked_by", "related_to", "duplicates", "parent_of", "child_of"];
+        const validTypes = ["depends_on", "blocked_by", "related_to", "duplicates", "parent_of", "child_of", "coupled_with"];
         if (!validTypes.includes(depType)) {
           console.error(`Invalid type '${depType}'. Valid types: ${validTypes.join(", ")}`);
           process.exit(1);
@@ -268,7 +268,7 @@ Valid actions: add, remove
           process.exit(1);
         }
 
-        const VALID_TYPES = ["depends_on", "blocked_by", "related_to", "duplicates", "parent_of", "child_of"] as const;
+        const VALID_TYPES = ["depends_on", "blocked_by", "related_to", "duplicates", "parent_of", "child_of", "coupled_with"] as const;
         const DIRECTIONAL = new Set<string>(["depends_on", "blocked_by", "parent_of", "child_of"]);
 
         const validationError = validateBatchEdges(edges, VALID_TYPES);

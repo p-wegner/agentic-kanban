@@ -52,8 +52,37 @@ Current description: ${description?.trim() || "(none)"}`;
   };
 }
 
+/** A stored dependency edge as seen by the coupling guard. */
+export interface SequentialGuardEdge {
+  issueId: string;
+  dependsOnId: string;
+  type: string;
+}
+
+/**
+ * Guard predicate for the analyzer (#916): a `coupled_with` peer edge must NOT be
+ * auto-created between two issues that already have a sequential (`depends_on` /
+ * `blocked_by`) edge in EITHER direction — those pairs are sequential by design, and
+ * silently converting them to parallel coupling would be wrong. Returns true when such
+ * a sequential edge exists (so the caller should flag instead of create).
+ */
+export function isCouplingAcrossSequentialEdge(
+  issueId: string,
+  otherId: string,
+  edges: SequentialGuardEdge[],
+): boolean {
+  return edges.some(
+    (e) =>
+      (e.type === "depends_on" || e.type === "blocked_by") &&
+      ((e.issueId === issueId && e.dependsOnId === otherId) ||
+        (e.issueId === otherId && e.dependsOnId === issueId)),
+  );
+}
+
 export interface AnalyzeDependenciesResult {
   dependencies: Array<{ id: string; type: string; issueId: string; reason: string }>;
+  /** Suggestions intentionally NOT created — e.g. a `coupled_with` across an existing sequential edge. */
+  flagged?: Array<{ issueId: string; type: string; reason: string }>;
   total: number;
 }
 
@@ -89,12 +118,13 @@ Other open issues on the board (each prefixed with its [id]):
 ${issuesSummary || "(no other open issues)"}
 
 IMPORTANT: You must respond ONLY with valid JSON, no markdown, no explanation:
-{"dependencies": [{"issueId": "<id from brackets>", "type": "depends_on|blocked_by|related_to|parent_of|child_of", "reason": "..."}]}
+{"dependencies": [{"issueId": "<id from brackets>", "type": "depends_on|blocked_by|related_to|parent_of|child_of|coupled_with", "reason": "..."}]}
 
 Use the exact id value from the [brackets] prefix for the issueId field.
 Use "depends_on" when the target issue requires another issue to be done first.
 Use "blocked_by" when another issue blocks this one.
 Use "related_to" when issues share code or functionality.
+Use "coupled_with" when two issues touch the same code and are best implemented together (peer coupling); distinct from depends_on (sequential) and related_to (topical only).
 Use "parent_of" when the target is an epic containing another issue.
 Use "child_of" when the target is a subtask of another issue.
 Only include genuinely useful dependencies, not just topical similarity.`;
@@ -107,12 +137,29 @@ Only include genuinely useful dependencies, not just topical similarity.`;
   const deps = parsed.dependencies ?? [];
 
   const created: Array<{ id: string; type: string; issueId: string; reason: string }> = [];
-  const validTypes: DependencyType[] = ["depends_on", "blocked_by", "related_to", "parent_of", "child_of"];
+  const flagged: Array<{ issueId: string; type: string; reason: string }> = [];
+  const validTypes: DependencyType[] = ["depends_on", "blocked_by", "related_to", "parent_of", "child_of", "coupled_with"];
+
+  // Guard: `coupled_with` is peer/parallel coupling and must NOT be auto-created across an
+  // existing `depends_on`/`blocked_by` edge — those pairs are sequential-by-design. Flag
+  // such a suggestion instead of writing it (the analyzer should not silently convert a
+  // sequential relationship into a parallel one). Existing edges are checked in BOTH
+  // directions since `coupled_with` is symmetric.
+  const existingEdges = await repo.getDependencyEdgesBetween(
+    issueId,
+    deps.map((d) => d.issueId).filter((id): id is string => Boolean(id) && id !== issueId),
+    database,
+  );
 
   for (const dep of deps) {
     if (!dep.issueId || !dep.type) continue;
     if (!validTypes.includes(dep.type as DependencyType)) continue;
     if (dep.issueId === issueId) continue;
+
+    if (dep.type === "coupled_with" && isCouplingAcrossSequentialEdge(issueId, dep.issueId, existingEdges)) {
+      flagged.push({ issueId: dep.issueId, type: dep.type, reason: dep.reason ?? "" });
+      continue;
+    }
 
     try {
       const id = randomUUID();
@@ -131,7 +178,7 @@ Only include genuinely useful dependencies, not just topical similarity.`;
     }
   }
 
-  return { dependencies: created, total: created.length };
+  return { dependencies: created, flagged, total: created.length };
 }
 
 export interface TouchedFile {
@@ -388,7 +435,7 @@ Respond ONLY with valid JSON, no markdown, no explanation:
   };
 
   const validPriorities = ["low", "medium", "high", "urgent"];
-  const validTypes: DependencyType[] = ["depends_on", "blocked_by", "related_to", "parent_of", "child_of"];
+  const validTypes: DependencyType[] = ["depends_on", "blocked_by", "related_to", "parent_of", "child_of", "coupled_with"];
   const tempIds = new Set((parsed.children ?? []).map(c => c.tempId));
 
   const children: DecomposeChildProposal[] = (parsed.children ?? [])
