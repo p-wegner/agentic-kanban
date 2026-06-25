@@ -1,4 +1,5 @@
 import type { ParseContext, ParsedStreamEvent } from "./types.js";
+import { COPILOT_RESULT_TYPES, COPILOT_SESSION_START_TYPES } from "./copilot-event-types.js";
 import {
   contentToText,
   getString,
@@ -15,7 +16,6 @@ import {
   toolNameFor,
 } from "./shared.js";
 
-const COPILOT_SESSION_START_TYPES = new Set(["session_start", "session_started", "session_created", "session.start", "session.started", "session.created"]);
 const COPILOT_IGNORED_TYPES = new Set([
   "assistant.message_start",
   "assistant.message_delta",
@@ -29,7 +29,6 @@ const COPILOT_IGNORED_TYPES = new Set([
   "session.warning",
   "session.tools_updated",
 ]);
-const COPILOT_RESULT_TYPES = new Set(["result", "done", "session_end", "session_ended", "session.end", "session.ended", "turn_completed", "turn.completed", "stats"]);
 
 function normalizedType(obj: Record<string, unknown>): string {
   return String((obj.type as string) || (obj.event as string) || (obj.name as string) || "").toLowerCase().replace(/-/g, "_");
