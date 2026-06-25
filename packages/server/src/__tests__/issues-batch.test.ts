@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { Hono } from "hono";
 import * as schema from "@agentic-kanban/shared/schema";
 import { createIssuesRoute } from "../routes/issues.js";
@@ -40,10 +40,12 @@ async function seed(database: TestDb) {
     defaultBranch: "main", createdAt: now, updatedAt: now,
   });
   const statusId = randomUUID();
-  await database.insert(schema.projectStatuses).values({
-    id: statusId, projectId, name: "Todo", sortOrder: 0, isDefault: true, createdAt: now,
-  });
-  return { projectId, statusId };
+  const cancelledStatusId = randomUUID();
+  await database.insert(schema.projectStatuses).values([
+    { id: statusId, projectId, name: "Todo", sortOrder: 0, isDefault: true, createdAt: now },
+    { id: cancelledStatusId, projectId, name: "Cancelled", sortOrder: 1, isDefault: false, createdAt: now },
+  ]);
+  return { projectId, statusId, cancelledStatusId };
 }
 
 async function insertIssue(database: TestDb, projectId: string, statusId: string, num: number) {
@@ -252,7 +254,7 @@ describe("POST /api/issues/dependencies/batch", () => {
 describe("POST /api/issues/contract-coupled", () => {
   it("rewires external sequential dependencies onto the lead and removes internal coupling", async () => {
     const { app, db } = createTestApp();
-    const { projectId, statusId } = await seed(db);
+    const { projectId, statusId, cancelledStatusId } = await seed(db);
     const lead = await insertIssue(db, projectId, statusId, 1);
     const member = await insertIssue(db, projectId, statusId, 2);
     const externalA = await insertIssue(db, projectId, statusId, 3);
@@ -271,14 +273,23 @@ describe("POST /api/issues/contract-coupled", () => {
     const body = await res.json() as any;
     expect(body.leadIssueId).toBe(lead);
     expect(body.memberIssueIds.sort()).toEqual([lead, member].sort());
-    expect(body.added).toBe(2);
+    expect(body.added).toBe(3);
     expect(body.removed).toBe(3);
 
     const deps = await db.select().from(schema.issueDependencies);
     expect(deps.map((dep) => ({ issueId: dep.issueId, dependsOnId: dep.dependsOnId, type: dep.type })).sort((a, b) => `${a.issueId}${a.dependsOnId}${a.type}`.localeCompare(`${b.issueId}${b.dependsOnId}${b.type}`))).toEqual([
+      { issueId: member, dependsOnId: lead, type: "duplicates" },
       { issueId: externalB, dependsOnId: lead, type: "blocked_by" },
       { issueId: lead, dependsOnId: externalA, type: "depends_on" },
     ].sort((a, b) => `${a.issueId}${a.dependsOnId}${a.type}`.localeCompare(`${b.issueId}${b.dependsOnId}${b.type}`)));
+
+    const issues = await db.select().from(schema.issues).where(inArray(schema.issues.id, [lead, member]));
+    const updatedLead = issues.find((issue) => issue.id === lead);
+    const absorbedMember = issues.find((issue) => issue.id === member);
+    expect(updatedLead?.description).toContain(`### From #1: I1`);
+    expect(updatedLead?.description).toContain(`### From #2: I2`);
+    expect(absorbedMember?.statusId).toBe(cancelledStatusId);
+    expect(absorbedMember?.description).toContain("Absorbed into #1");
   });
 
   it("rejects selection that omits part of the coupled component", async () => {

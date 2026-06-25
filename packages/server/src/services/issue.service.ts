@@ -51,6 +51,14 @@ import {
   getDoneCandidateIssues,
   archiveIssuesByIds,
 } from "../repositories/issue-service.repository.js";
+import {
+  appendIssueDescription,
+  countOpenWorkspacesForIssues,
+  getIssuesForContract,
+  getStatusIdByName,
+  setIssueStatus,
+  updateIssueTitleDescription,
+} from "../repositories/issue-ai.repository.js";
 import { findOpenUnmergedWorkspace } from "../repositories/workspace.repository.js";
 import { enrichWorkspacesWithSessionData, wouldCreateCycle } from "./board-aggregation.service.js";
 import { hasPath, planContraction, resolveCoupledComponent } from "../lib/dependency-graph.js";
@@ -68,6 +76,34 @@ export class IssueError extends Error {
 }
 
 const ISSUE_NUMBER_INSERT_ATTEMPTS = 3;
+
+type ContractIssueRow = {
+  id: string;
+  issueNumber: number;
+  title: string;
+  description: string | null;
+};
+
+function contractPointer(leadIssueNumber: number): string {
+  return `> Absorbed into #${leadIssueNumber} - combined into one coupled ticket.`;
+}
+
+function buildCombinedDescription(leadId: string, members: ContractIssueRow[]): string {
+  const sorted = [...members].sort((a, b) => {
+    if (a.id === leadId) return -1;
+    if (b.id === leadId) return 1;
+    return a.issueNumber - b.issueNumber;
+  });
+  return [
+    "## Combined Coupled Ticket Sources",
+    "",
+    ...sorted.map((member) => [
+      `### From #${member.issueNumber}: ${member.title}`,
+      "",
+      member.description?.trim() || "(no description)",
+    ].join("\n")),
+  ].join("\n");
+}
 
 /**
  * Validate an optional external-tracker URL: must be absent/null/empty, or a
@@ -863,8 +899,56 @@ export function createIssueService(deps: {
       throw new IssueError("issueIds must exactly match the lead issue's coupled component", "BAD_REQUEST");
     }
 
-    const mutations = planContraction(leadId, component, edges);
+    const memberRows = await getIssuesForContract([...component], database);
+    if (memberRows.length !== component.size) {
+      throw new IssueError("One or more issues were not found", "NOT_FOUND");
+    }
+
+    const openWorkspaceCount = await countOpenWorkspacesForIssues([...component], database);
+    if (openWorkspaceCount > 0) {
+      throw new IssueError("Cannot contract a component with open workspaces", "BAD_REQUEST");
+    }
+
+    const leadIssue = memberRows.find((row) => row.id === leadId);
+    if (!leadIssue) {
+      throw new IssueError("leadIssueId must be included in issueIds", "BAD_REQUEST");
+    }
+    const absorbedIssueIds = memberRows
+      .filter((row) => row.id !== leadId)
+      .sort((a, b) => a.issueNumber - b.issueNumber)
+      .map((row) => row.id);
+
+    const terminalStatusId =
+      (await getStatusIdByName(projectId, "Cancelled", database)) ??
+      (await getStatusIdByName(projectId, "Done", database));
+    if (!terminalStatusId) {
+      throw new IssueError("Project must have a Cancelled or Done status to absorb issues", "BAD_REQUEST");
+    }
+
+    const mutations = [
+      ...planContraction(leadId, component, edges),
+      ...absorbedIssueIds.map((id) => ({
+        issueId: id,
+        dependsOnId: leadId,
+        type: "duplicates",
+        action: "add" as const,
+      })),
+    ];
     const result = await updateDependenciesBatch(mutations);
+
+    const now = new Date().toISOString();
+    await updateIssueTitleDescription(
+      leadId,
+      leadIssue.title,
+      buildCombinedDescription(leadId, memberRows),
+      now,
+      database,
+    );
+    for (const id of absorbedIssueIds) {
+      await appendIssueDescription(id, contractPointer(leadIssue.issueNumber), now, database);
+      await setIssueStatus(id, terminalStatusId, now, database);
+    }
+    boardEvents?.broadcast(projectId, "issue_updated");
 
     return {
       leadIssueId: leadId,
