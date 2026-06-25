@@ -9,6 +9,7 @@ import { showToast } from "./Toast.js";
 import { MarkdownToolbar } from "./MarkdownToolbar.js";
 import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
 import { buildCreateIssuePayload } from "../lib/createIssuePayload.js";
+import { handleImagePaste, mergeDescriptionWithImages } from "../lib/pastedImages.js";
 import {
   COPILOT_DEFAULT_PROFILE,
   CODEX_DEFAULT_PROFILE,
@@ -56,6 +57,7 @@ export function CreateIssuePanel({
   const [selectedStatusId, setSelectedStatusId] = useState(statusId);
   const [title, setTitle] = useState(initialState?.title ?? "");
   const [description, setDescription] = useState(initialState?.description ?? "");
+  const [pastedImages, setPastedImages] = useState<string[]>(initialState?.pastedImages ?? []);
   const [issueType, setIssueType] = useState<CreateIssueRequest["issueType"]>(initialState?.issueType ?? "task");
   const [estimate, setEstimate] = useState<IssueEstimate | "">(initialState?.estimate ?? "");
   const [startWorkspace, setStartWorkspace] = useState(initialState?.startWorkspace ?? false);
@@ -78,6 +80,7 @@ export function CreateIssuePanel({
   const { templates: issueTemplates } = useIssueTemplates();
   const titleRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
+  const descriptionWithImages = mergeDescriptionWithImages(description, pastedImages);
 
   async function handleEnhance() {
     if (!title.trim() || enhancing) return;
@@ -143,7 +146,7 @@ export function CreateIssuePanel({
     setSubmitting(true);
     try {
       await onSubmit(buildCreateIssuePayload({
-        title, description, issueType, estimate,
+        title, description: descriptionWithImages, issueType, estimate,
         statusId: selectedStatusId, projectId,
         start, planMode, skipAutoReview, isDirect,
         selectedProfile, selectedModel, skillId,
@@ -242,9 +245,9 @@ export function CreateIssuePanel({
               </div>
             </div>
             {descriptionMode === "preview" ? (
-              description ? (
+              descriptionWithImages ? (
                 <div className="markdown-body flex-1 min-h-[200px] border border-gray-200 dark:border-gray-700 rounded px-3 py-2 dark:text-gray-200">
-                  <ReactMarkdown>{description}</ReactMarkdown>
+                  <ReactMarkdown>{descriptionWithImages}</ReactMarkdown>
                 </div>
               ) : (
                 <p className="text-sm text-gray-400 dark:text-gray-500 italic flex-1 min-h-[200px] border border-gray-200 dark:border-gray-700 rounded px-3 py-2">Nothing to preview.</p>
@@ -254,11 +257,26 @@ export function CreateIssuePanel({
                 <MarkdownToolbar textareaRef={descriptionRef} value={description} onChange={setDescription} />
                 <textarea
                   ref={descriptionRef}
-                  placeholder="Describe the issue, agent instructions, acceptance criteria…"
+                  placeholder="Describe the issue, agent instructions, acceptance criteria… (paste screenshots with Ctrl+V)"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
+                  onPaste={(e) => handleImagePaste(e, (dataUrl) => setPastedImages((prev) => [...prev, dataUrl]))}
                   className="w-full flex-1 min-h-[200px] text-sm border border-gray-300 dark:border-gray-600 rounded-b rounded-t-none px-3 py-2 focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none dark:bg-gray-900 dark:text-gray-100"
                 />
+                {pastedImages.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {pastedImages.map((url, i) => (
+                      <div key={i} className="relative group">
+                        <img src={url} alt={`screenshot-${i + 1}`} className="h-16 w-auto rounded border border-gray-200 dark:border-gray-700 object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => setPastedImages((prev) => prev.filter((_, j) => j !== i))}
+                          className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white rounded-full text-xs leading-none flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                        >×</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </>
             )}
           </div>
