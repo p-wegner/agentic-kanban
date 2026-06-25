@@ -1,4 +1,4 @@
-import { parseAgentProviderStreamLine } from "@agentic-kanban/shared/lib/agent-stream-parser";
+import { parseAgentProviderStreamLine, parseAgentProviderStreamLineObserved } from "@agentic-kanban/shared/lib/agent-stream-parser";
 import type { AgentLaunchConfig, AgentProvider, FileSystem, ParsedStreamEvent, ProviderLaunchOptions } from "./types.js";
 import {
   COPILOT_PLAN_PROMPT_PREFIX,
@@ -114,5 +114,9 @@ export class CopilotProvider implements AgentProvider {
 
   parseStreamEvent(line: string): ParsedStreamEvent | undefined {
     return parseAgentProviderStreamLine("copilot", line);
+  }
+
+  parseStreamEventObserved(line: string): ParsedStreamEvent | undefined {
+    return parseAgentProviderStreamLineObserved("copilot", line);
   }
 }

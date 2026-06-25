@@ -339,7 +339,10 @@ export function createBroadcaster(
       const provider = getProvider(providerName);
       for (const line of message.data.split("\n")) {
         if (!line.trim()) continue;
-        const evt = provider.parseStreamEvent(line);
+        // Observed: a VALID JSON event of an unknown type is counted + logged
+        // (rate-limited) instead of silently swallowed — the drift signal behind
+        // the recurring "0 tokens" misdiagnosis (arch-review #898).
+        const evt = provider.parseStreamEventObserved(line);
         if (!evt) continue;
         applyStreamEvent(state, options, sessionId, evt);
       }
