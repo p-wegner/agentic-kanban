@@ -700,7 +700,7 @@ Be helpful and well-organized; lead with the answer and avoid unnecessary preamb
     // These builtin prompts are refined for token efficiency over time; keep the global
     // rows current so existing installs pick up the trimmed playbooks (the insert loop
     // above only adds missing skills). Project-scoped overrides are untouched.
-    for (const refreshName of ["kanban-workflow", "quality-metrics-collector"]) {
+    for (const refreshName of ["kanban-workflow", "quality-metrics-collector", "dependency-analyzer"]) {
       const refreshSkill = BUILTIN_SKILLS.find((s) => s.name === refreshName);
       if (refreshSkill) {
         await database.update(agentSkills)

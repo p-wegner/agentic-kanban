@@ -667,5 +667,12 @@
       "when": 1780906800013,
       "tag": "0094_unique_issue_numbers",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "6",
+      "when": 1780906800014,
+      "tag": "0095_coupled_with_dependency_type",
+      "breakpoints": true
     }]
 }
