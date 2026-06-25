@@ -97,6 +97,26 @@ export async function bulkRemoveTag(tag: Tag, deps: BulkOpDeps): Promise<void> {
   }
 }
 
+/** Contract a selected coupled_with component through the server-side graph planner. */
+export async function bulkContractCoupled(deps: BulkOpDeps): Promise<void> {
+  const { ids, api, toast, setSelectedIds, setBulkLoading, onRefresh } = deps;
+  if (ids.length < 2) return;
+  setBulkLoading(true);
+  try {
+    const result = await api<{ memberIssueIds: string[] }>("/api/issues/contract-coupled", {
+      method: "POST",
+      body: JSON.stringify({ issueIds: ids, leadIssueId: ids[0] }),
+    });
+    setSelectedIds(new Set());
+    toast(`Contracted ${result.memberIssueIds.length} coupled issue${result.memberIssueIds.length !== 1 ? "s" : ""}`, "success");
+  } catch (err) {
+    toast(err instanceof Error ? err.message : "Contract coupled issues failed", "error");
+  } finally {
+    onRefresh?.();
+    setBulkLoading(false);
+  }
+}
+
 /** Delete all selected issues (per-issue requests, partial failures reported). Caller confirms first. */
 export async function bulkDeleteIssues(deps: BulkOpDeps): Promise<void> {
   const { ids, api, toast, setSelectedIds, setBulkLoading, onRefresh } = deps;

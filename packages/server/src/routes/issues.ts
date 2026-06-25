@@ -200,6 +200,31 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     }
   });
 
+  // POST /api/issues/contract-coupled — contract a full coupled_with component onto one lead.
+  router.post("/contract-coupled", async (c) => {
+    const body = await parseJsonBody<{ issueIds?: string[]; leadIssueId?: string }>(c);
+    if (!Array.isArray(body.issueIds) || body.issueIds.length === 0) {
+      return c.json({ error: "issueIds must be a non-empty array" }, 400);
+    }
+    try {
+      const result = await issueService.contractCoupledIssues(body.issueIds, body.leadIssueId);
+      return c.json({
+        leadIssueId: result.leadIssueId,
+        memberIssueIds: result.memberIssueIds,
+        mutations: result.mutations,
+        added: result.added,
+        removed: result.removed,
+        skipped: result.skipped,
+      });
+    } catch (err: unknown) {
+      const e = asIssueRouteError(err);
+      if (e.code === "BAD_REQUEST") return c.json({ error: e.message }, 400);
+      if (e.code === "NOT_FOUND") return c.json({ error: e.message }, 404);
+      if (e.code === "CONFLICT") return c.json({ error: e.message, index: e.index }, 400);
+      throw err;
+    }
+  });
+
   // POST /api/issues/archive-done — move Done issues older than N days to Archived
   router.post("/archive-done", async (c) => {
     const body = await parseJsonBody<{ projectId?: string; olderThanDays?: number; nowOverride?: string }>(c);

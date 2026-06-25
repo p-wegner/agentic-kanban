@@ -36,7 +36,7 @@ async function seed(database: TestDb) {
   const now = new Date().toISOString();
   const projectId = randomUUID();
   await database.insert(schema.projects).values({
-    id: projectId, name: "P", repoPath: "/tmp/p", repoName: "p",
+    id: projectId, name: "P", repoPath: `/tmp/p-${projectId}`, repoName: `p-${projectId}`,
     defaultBranch: "main", createdAt: now, updatedAt: now,
   });
   const statusId = randomUUID();
@@ -52,6 +52,23 @@ async function insertIssue(database: TestDb, projectId: string, statusId: string
   await database.insert(schema.issues).values({
     id, issueNumber: num, title: `I${num}`, priority: "medium",
     sortOrder: 0, statusId, projectId, createdAt: now, updatedAt: now,
+  });
+  return id;
+}
+
+async function insertDependency(
+  database: TestDb,
+  issueId: string,
+  dependsOnId: string,
+  type: "depends_on" | "blocked_by" | "related_to" | "duplicates" | "parent_of" | "child_of" | "coupled_with" = "depends_on",
+) {
+  const id = randomUUID();
+  await database.insert(schema.issueDependencies).values({
+    id,
+    issueId,
+    dependsOnId,
+    type,
+    createdAt: new Date().toISOString(),
   });
   return id;
 }
@@ -229,6 +246,105 @@ describe("POST /api/issues/dependencies/batch", () => {
 
     const rows = await db.select().from(schema.issueDependencies);
     expect(rows).toHaveLength(0);
+  });
+});
+
+describe("POST /api/issues/contract-coupled", () => {
+  it("rewires external sequential dependencies onto the lead and removes internal coupling", async () => {
+    const { app, db } = createTestApp();
+    const { projectId, statusId } = await seed(db);
+    const lead = await insertIssue(db, projectId, statusId, 1);
+    const member = await insertIssue(db, projectId, statusId, 2);
+    const externalA = await insertIssue(db, projectId, statusId, 3);
+    const externalB = await insertIssue(db, projectId, statusId, 4);
+    await insertDependency(db, lead, member, "coupled_with");
+    await insertDependency(db, member, externalA, "depends_on");
+    await insertDependency(db, externalB, member, "blocked_by");
+
+    const res = await app.request("/api/issues/contract-coupled", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ issueIds: [lead, member], leadIssueId: lead }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.leadIssueId).toBe(lead);
+    expect(body.memberIssueIds.sort()).toEqual([lead, member].sort());
+    expect(body.added).toBe(2);
+    expect(body.removed).toBe(3);
+
+    const deps = await db.select().from(schema.issueDependencies);
+    expect(deps.map((dep) => ({ issueId: dep.issueId, dependsOnId: dep.dependsOnId, type: dep.type })).sort((a, b) => `${a.issueId}${a.dependsOnId}${a.type}`.localeCompare(`${b.issueId}${b.dependsOnId}${b.type}`))).toEqual([
+      { issueId: externalB, dependsOnId: lead, type: "blocked_by" },
+      { issueId: lead, dependsOnId: externalA, type: "depends_on" },
+    ].sort((a, b) => `${a.issueId}${a.dependsOnId}${a.type}`.localeCompare(`${b.issueId}${b.dependsOnId}${b.type}`)));
+  });
+
+  it("rejects selection that omits part of the coupled component", async () => {
+    const { app, db } = createTestApp();
+    const { projectId, statusId } = await seed(db);
+    const a = await insertIssue(db, projectId, statusId, 1);
+    const b = await insertIssue(db, projectId, statusId, 2);
+    const c = await insertIssue(db, projectId, statusId, 3);
+    await insertDependency(db, a, b, "coupled_with");
+    await insertDependency(db, b, c, "coupled_with");
+
+    const res = await app.request("/api/issues/contract-coupled", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ issueIds: [a, b], leadIssueId: a }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json() as any;
+    expect(body.error).toContain("exactly match");
+  });
+
+  it("rejects cross-project contraction", async () => {
+    const { app, db } = createTestApp();
+    const first = await seed(db);
+    const second = await seed(db);
+    const a = await insertIssue(db, first.projectId, first.statusId, 1);
+    const b = await insertIssue(db, second.projectId, second.statusId, 1);
+
+    const res = await app.request("/api/issues/contract-coupled", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ issueIds: [a, b], leadIssueId: a }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json() as any;
+    expect(body.error).toContain("across projects");
+  });
+
+  it("rolls back when inherited dependencies would create a cycle", async () => {
+    const { app, db } = createTestApp();
+    const { projectId, statusId } = await seed(db);
+    const lead = await insertIssue(db, projectId, statusId, 1);
+    const member = await insertIssue(db, projectId, statusId, 2);
+    const external = await insertIssue(db, projectId, statusId, 3);
+    await insertDependency(db, lead, member, "coupled_with");
+    await insertDependency(db, member, external, "depends_on");
+    await insertDependency(db, external, lead, "depends_on");
+
+    const res = await app.request("/api/issues/contract-coupled", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ issueIds: [lead, member], leadIssueId: lead }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json() as any;
+    expect(body.error).toContain("cycle");
+
+    const deps = await db.select().from(schema.issueDependencies);
+    expect(deps.map((dep) => ({ issueId: dep.issueId, dependsOnId: dep.dependsOnId, type: dep.type })).sort((a, b) => `${a.issueId}${a.dependsOnId}${a.type}`.localeCompare(`${b.issueId}${b.dependsOnId}${b.type}`))).toEqual([
+      { issueId: external, dependsOnId: lead, type: "depends_on" },
+      { issueId: lead, dependsOnId: member, type: "coupled_with" },
+      { issueId: member, dependsOnId: external, type: "depends_on" },
+    ].sort((a, b) => `${a.issueId}${a.dependsOnId}${a.type}`.localeCompare(`${b.issueId}${b.dependsOnId}${b.type}`)));
   });
 });
 

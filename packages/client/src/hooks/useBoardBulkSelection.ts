@@ -128,6 +128,29 @@ export function useBoardBulkSelection(
     }
   }, [hasArchivedBoardSelection, allTags, selectedBoardIssues, clearSelection, refetchBoard]);
 
+  const handleBoardContractCoupled = useCallback(async () => {
+    if (hasArchivedBoardSelection) return;
+    const ids = selectedBoardIssues.map((issue) => issue.id);
+    if (ids.length < 2) return;
+    setBoardBulkUpdating(true);
+    try {
+      const result = await apiPost<{ leadIssueId: string; memberIssueIds: string[]; added: number; removed: number }>(
+        "/api/issues/contract-coupled",
+        { issueIds: ids, leadIssueId: ids[0] },
+      );
+      showToast(
+        `Contracted ${result.memberIssueIds.length} coupled issue${result.memberIssueIds.length !== 1 ? "s" : ""}`,
+        "success",
+      );
+      clearSelection();
+      await refetchBoard();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Contract coupled issues failed", "error");
+    } finally {
+      setBoardBulkUpdating(false);
+    }
+  }, [hasArchivedBoardSelection, selectedBoardIssues, clearSelection, refetchBoard]);
+
   return {
     selectedBoardIssueIds,
     setSelectedBoardIssueIds,
@@ -141,5 +164,6 @@ export function useBoardBulkSelection(
     clearSelection,
     handleBoardBulkUpdate,
     handleBoardBulkAddTag,
+    handleBoardContractCoupled,
   };
 }
