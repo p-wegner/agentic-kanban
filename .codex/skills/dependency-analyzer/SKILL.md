@@ -17,7 +17,7 @@ Analyze the given issue and its relationships to other open (non-Done, non-Cance
 4. **Add dependency links** using `add_dependency`:
    - `issueId`: the target issue's ID (the one being analyzed)
    - `dependsOnId`: the ID of the related issue
-   - `type`: choose from `depends_on`, `blocked_by`, `related_to`, `parent_of`, `child_of`
+   - `type`: choose from `depends_on`, `blocked_by`, `related_to`, `coupled_with`, `parent_of`, `child_of`
 5. **Update the issue description** with a `## Dependencies` section listing each relationship and its rationale
 
 ## Dependency type guide
@@ -27,6 +27,7 @@ Analyze the given issue and its relationships to other open (non-Done, non-Cance
 | `depends_on` | Target issue cannot start until the other is complete |
 | `blocked_by` | Another issue is actively blocking the target |
 | `related_to` | Same component/area, merge conflict risk, or thematically paired |
+| `coupled_with` | Two issues touch the same code and are best implemented together (peer coupling) — distinct from `depends_on` (sequential) and `related_to` (topical only) |
 | `parent_of` | Target is an epic; the other is a sub-task |
 | `child_of` | Target is a sub-task of the other issue |
 
@@ -35,5 +36,6 @@ Analyze the given issue and its relationships to other open (non-Done, non-Cance
 - Only add a dependency if there is a **clear technical reason** the issues are coupled — avoid topical similarity alone
 - Prefer `related_to` for In Progress issues that touch the same files (coordination risk)
 - Prefer `depends_on` when one issue must land in production before the other can be implemented
+- Use `coupled_with` for peer issues that touch the same code and should ship together — but never couple two issues that already have a `depends_on` edge (that pairing is sequential by design)
 - Skip issues that are already linked (check existing dependencies in `get_issue` output)
 - Do not link an issue to itself

@@ -1,7 +1,7 @@
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import { ACCENT } from "./chartColors.js";
 
-export type DependencyType = "depends_on" | "blocked_by" | "related_to" | "duplicates" | "parent_of" | "child_of";
+export type DependencyType = "depends_on" | "blocked_by" | "related_to" | "duplicates" | "parent_of" | "child_of" | "coupled_with";
 
 export const DEPENDENCY_TYPE_LABELS: Record<DependencyType, string> = {
   depends_on: "Depends on",
@@ -10,6 +10,7 @@ export const DEPENDENCY_TYPE_LABELS: Record<DependencyType, string> = {
   duplicates: "Duplicates",
   parent_of: "Parent of",
   child_of: "Child of",
+  coupled_with: "Coupled with",
 };
 
 export interface Dependency {
@@ -57,6 +58,7 @@ export const DEPENDENCY_COLORS: Record<DependencyType, string> = {
   parent_of: "#c79a3e",
   child_of: "#c79a3e",
   duplicates: "#b07a8c",
+  coupled_with: "#5b9aa0",
 };
 
 /** Root blocker color — warm brick (same family as TYPE_COLORS.bug). */
