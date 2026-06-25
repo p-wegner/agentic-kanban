@@ -311,6 +311,7 @@ export interface WorkspaceCardProps {
   handleFetchSummary: (sessionId: string, isRunning: boolean) => void;
   handleReview: (wsId: string) => void;
   handleMerge: (wsId: string) => void;
+  handleResetWorkspaceToIdle: (wsId: string) => void;
   handleAutoBisect: (wsId: string, scope?: "related" | "full") => void;
   handleExportHandoffBundle: (wsId: string) => Promise<void>;
   handleSkillQuickLaunch: (skillId: string) => void;
@@ -403,6 +404,7 @@ export function WorkspaceCard({
   handleFetchSummary,
   handleReview,
   handleMerge,
+  handleResetWorkspaceToIdle,
   handleAutoBisect,
   handleExportHandoffBundle,
   handleSkillQuickLaunch,
@@ -686,7 +688,7 @@ export function WorkspaceCard({
             );
           })()}
 
-          {!isRunning && (
+          {!isRunning && ws.status !== "blocked" && (
             <WorkspaceQuickActions
               workspace={ws}
               completedSessions={completedSessions}
@@ -898,6 +900,7 @@ export function WorkspaceCard({
               handleReview={handleReview}
               handleMerge={handleMerge}
               handleUpdateBase={handleUpdateBase}
+              handleResetWorkspaceToIdle={handleResetWorkspaceToIdle}
               handleOpenTerminal={handleOpenTerminal}
               handleOpenEditor={handleOpenEditor}
               copyPreviewUrl={copyPreviewUrl}
