@@ -23,6 +23,7 @@ import { CreateIssuePanel } from "./CreateIssuePanel.js";
 import { ApprovalDialog } from "./ApprovalDialog.js";
 import { MoveToDoneDialog } from "./MoveToDoneDialog.js";
 import { DependencyImpactDialog } from "./DependencyImpactDialog.js";
+import { boardSelectionActions } from "../stores/boardSelectionStore.js";
 import type { CreateIssueFormState } from "./CreateIssueForm.js";
 import type { ApprovalRequest } from "../lib/useBoardEvents.js";
 import type { MonitorStatus } from "./MonitorPopover.js";
@@ -79,18 +80,6 @@ interface Props {
   nudgeWipLimit: string;
   viewMode: ViewMode;
   columnsRef: RefObject<StatusWithIssues[]>;
-
-  // Workspace flow
-  workspaceIssue: IssueWithStatus | null;
-  workspaceInitial: { workspaceId: string; sessionId: string } | null;
-  workspaceOpenCreate: boolean;
-  setWorkspaceIssue: (issue: IssueWithStatus | null) => void;
-  setWorkspaceInitial: (v: { workspaceId: string; sessionId: string } | null) => void;
-  setWorkspaceOpenCreate: (v: boolean) => void;
-
-  // Issue detail
-  selectedIssue: IssueWithStatus | null;
-  setSelectedIssue: (issue: IssueWithStatus | null) => void;
 
   // Dry run
   dryRunIssue: IssueWithStatus | null;
@@ -185,11 +174,9 @@ export function BoardOverlayPanels({
   handleProjectChange,
   onSettingsReloaded,
   settingsBoardTools,
-  setWorkspaceIssue,
-  setWorkspaceInitial,
-  setWorkspaceOpenCreate,
-  setSelectedIssue,
 }: Props) {
+  const { setWorkspaceIssue, setWorkspaceInitial, setWorkspaceOpenCreate, setSelectedIssue } =
+    boardSelectionActions;
   return (
     <>
       <ApprovalDialog

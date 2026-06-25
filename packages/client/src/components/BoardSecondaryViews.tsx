@@ -2,6 +2,7 @@ import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import type { ViewMode } from "../lib/viewRegistry.js";
 import { BoardErrorBoundary } from "./BoardErrorBoundary.js";
+import { boardSelectionActions } from "../stores/boardSelectionStore.js";
 import {
   GraphView, TableView, AgentGrid, TimelineView, MetricsView, CrimeSceneCityView,
   QualityMetricsView, MilestonesOverview, ButlerView, WorkflowsView,
@@ -36,10 +37,6 @@ interface BoardSecondaryViewsProps {
   onDropIssue?: (issue: IssueWithStatus) => void;
   onRefresh: () => void;
   onButlerPromptConsumed: () => void;
-  setSelectedIssue: (issue: IssueWithStatus | null) => void;
-  setWorkspaceIssue: (issue: IssueWithStatus | null) => void;
-  setWorkspaceOpenCreate: (open: boolean) => void;
-  setWorkspaceInitial: (init: { workspaceId: string; sessionId: string } | null) => void;
 }
 
 /**
@@ -71,11 +68,9 @@ export function BoardSecondaryViews({
   onDropIssue,
   onRefresh,
   onButlerPromptConsumed,
-  setSelectedIssue,
-  setWorkspaceIssue,
-  setWorkspaceOpenCreate,
-  setWorkspaceInitial,
 }: BoardSecondaryViewsProps) {
+  const { setSelectedIssue, setWorkspaceIssue, setWorkspaceOpenCreate, setWorkspaceInitial } =
+    boardSelectionActions;
   return (
     <>
       {viewMode === "graph" && activeProjectId ? (

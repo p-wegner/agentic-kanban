@@ -7,9 +7,10 @@ import { showToast } from "../lib/toast.js";
 import { getSettings } from "../lib/settingsStore.js";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { runCreateIssueFlow, type CreateIssuePayload } from "../lib/createIssueService.js";
-import type { ExpandedCreatePanel, WorkspaceInitial } from "../routes/BoardPage.js";
+import type { ExpandedCreatePanel } from "../routes/BoardPage.js";
 import type { IssueWithStatus, UpdateIssueRequest, StatusWithIssues } from "@agentic-kanban/shared";
 import { resolveWorkspaceLaunchDefaults } from "../lib/workspaceLaunchDefaults.js";
+import { boardSelectionActions } from "../stores/boardSelectionStore.js";
 
 type Setter<T> = Dispatch<SetStateAction<T>>;
 
@@ -27,19 +28,16 @@ interface BoardIssueActionsDeps {
   setMutating: Setter<boolean>;
   setPendingIssueIds: Setter<Set<string>>;
   setPendingWorkspaceIssueIds: Setter<Set<string>>;
-  setSelectedIssue: Setter<IssueWithStatus | null>;
-  setWorkspaceInitial: Setter<WorkspaceInitial>;
-  setWorkspaceIssue: Setter<IssueWithStatus | null>;
-  setWorkspaceOpenCreate: Setter<boolean>;
 }
 
 export function createBoardIssueActions(deps: BoardIssueActionsDeps) {
   const {
     activeProject, activeAgentsTarget, columns, columnsRef, pendingBoardRefreshRef,
     refetchBoard, setColumns, setCreatingInColumnId, setError, setExpandedCreatePanel,
-    setMutating, setPendingIssueIds, setPendingWorkspaceIssueIds, setSelectedIssue,
-    setWorkspaceInitial, setWorkspaceIssue, setWorkspaceOpenCreate,
+    setMutating, setPendingIssueIds, setPendingWorkspaceIssueIds,
   } = deps;
+  const { setSelectedIssue, setWorkspaceInitial, setWorkspaceIssue, setWorkspaceOpenCreate } =
+    boardSelectionActions;
   async function handleCreateIssue(data: CreateIssuePayload) {
     await runCreateIssueFlow(data, {
       columns,

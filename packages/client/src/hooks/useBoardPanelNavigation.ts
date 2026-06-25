@@ -2,17 +2,13 @@ import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { buildTicketChatPrompt } from "@agentic-kanban/shared";
 import { showToast } from "../lib/toast.js";
 import type { ViewMode } from "../lib/viewRegistry.js";
+import { boardSelectionActions } from "../stores/boardSelectionStore.js";
 
 interface UseBoardPanelNavigationDeps {
   pendingIssueIds: Set<string>;
   columnsRef: React.RefObject<StatusWithIssues[]>;
   refetchBoard: (projectId?: string) => Promise<StatusWithIssues[] | undefined>;
-  setSelectedIssue: (issue: IssueWithStatus | null) => void;
   setKeyboardCursorIssueId: (id: string | null) => void;
-  setWorkspaceIssue: (issue: IssueWithStatus | null) => void;
-  setWorkspaceOpenCreate: (open: boolean) => void;
-  setWorkspaceInitialDiff: (v: boolean) => void;
-  setWorkspaceInitial: (init: { workspaceId: string; sessionId: string } | null) => void;
   setButlerInitialPrompt: (prompt: string | null) => void;
   handleViewModeChange: (mode: ViewMode) => void;
 }
@@ -29,15 +25,17 @@ export function useBoardPanelNavigation(deps: UseBoardPanelNavigationDeps) {
     pendingIssueIds,
     columnsRef,
     refetchBoard,
-    setSelectedIssue,
     setKeyboardCursorIssueId,
+    setButlerInitialPrompt,
+    handleViewModeChange,
+  } = deps;
+  const {
+    setSelectedIssue,
     setWorkspaceIssue,
     setWorkspaceOpenCreate,
     setWorkspaceInitialDiff,
     setWorkspaceInitial,
-    setButlerInitialPrompt,
-    handleViewModeChange,
-  } = deps;
+  } = boardSelectionActions;
 
   function handleIssueClick(issue: IssueWithStatus) {
     if (pendingIssueIds.has(issue.id)) return;
