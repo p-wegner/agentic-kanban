@@ -7,7 +7,7 @@ import { CollapsibleSection } from "./CollapsibleSection.js";
 import { filterIssues } from "../lib/tableView-filters.js";
 import { applySortDirection, compareSortKey } from "../lib/tableView-sorting.js";
 import type { SortDir, SortKey } from "../lib/tableView-sorting.js";
-import { bulkAddTag, bulkDeleteIssues, bulkMoveStatus, bulkRemoveTag, bulkUpdateIssues } from "../lib/tableView-bulk-ops.js";
+import { bulkAddTag, bulkContractCoupled, bulkDeleteIssues, bulkMoveStatus, bulkRemoveTag, bulkUpdateIssues } from "../lib/tableView-bulk-ops.js";
 import type { BulkOpDeps } from "../lib/tableView-bulk-ops.js";
 import { useBulkOperations } from "../hooks/useBulkOperations.js";
 import type { Tag } from "../hooks/useBulkOperations.js";
@@ -264,6 +264,10 @@ export function TableView({
   async function handleBulkRemoveTag(tag: Tag) {
     setBulkRemoveTagOpen(false);
     await bulkRemoveTag(tag, bulkOpDeps());
+  }
+
+  async function handleBulkContractCoupled() {
+    await bulkContractCoupled(bulkOpDeps());
   }
 
   async function handleBulkDelete() {
@@ -541,6 +545,15 @@ export function TableView({
               </div>
             )}
           </div>
+
+          <button
+            disabled={bulkLoading || activeSelectedIds.length < 2}
+            onClick={handleBulkContractCoupled}
+            className="text-xs px-2.5 py-1 rounded bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+            title={activeSelectedIds.length < 2 ? "Select the full coupled issue set" : "Contract selected coupled issues"}
+          >
+            Contract coupled
+          </button>
 
           {/* Delete */}
           <button
