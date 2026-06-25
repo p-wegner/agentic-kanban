@@ -1,6 +1,7 @@
-import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
+import type { StatusWithIssues } from "@agentic-kanban/shared";
 import { apiPost, apiPut, apiDelete } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
+import { boardSelectionActions } from "../stores/boardSelectionStore.js";
 
 type ProjectRef = { id: string; name: string };
 
@@ -11,8 +12,6 @@ interface UseProjectManagementDeps {
   setActiveProjectId: (id: string | null) => void;
   setColumns: React.Dispatch<React.SetStateAction<StatusWithIssues[]>>;
   columnsRef: React.RefObject<StatusWithIssues[]>;
-  setSelectedIssue: (issue: IssueWithStatus | null) => void;
-  setWorkspaceIssue: (issue: IssueWithStatus | null) => void;
   setSwitchingProject: (v: boolean) => void;
   refetchBoard: (projectId?: string, options?: { force?: boolean }) => Promise<StatusWithIssues[] | undefined>;
   loadProjects: () => Promise<string | undefined> | Promise<void>;
@@ -31,12 +30,11 @@ export function useProjectManagement(deps: UseProjectManagementDeps) {
     setActiveProjectId,
     setColumns,
     columnsRef,
-    setSelectedIssue,
-    setWorkspaceIssue,
     setSwitchingProject,
     refetchBoard,
     loadProjects,
   } = deps;
+  const { setSelectedIssue, setWorkspaceIssue } = boardSelectionActions;
 
   async function handleProjectChange(id: string) {
     setActiveProjectId(id);

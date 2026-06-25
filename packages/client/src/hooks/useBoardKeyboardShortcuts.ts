@@ -7,6 +7,7 @@ import { SHORTCUT_TO_VIEW, VIEW_REGISTRY, type ViewMode } from "../lib/viewRegis
 import { computeNavTarget, type NavKey } from "../lib/boardKeyboardNav.js";
 import { showToast } from "../lib/toast.js";
 import type { BoardPanelState } from "./useBoardPanels.js";
+import { useBoardSelectionStore } from "../stores/boardSelectionStore.js";
 
 export interface BoardKeyboardShortcutProject {
   id: string;
@@ -24,7 +25,6 @@ export interface BoardKeyboardShortcutState {
   keyboardCursorIssueId: string | null;
   keyboardCursorIssueIdRef: RefObject<string | null>;
   searchQuery: string;
-  selectedIssue: IssueWithStatus | null;
   projects: BoardKeyboardShortcutProject[];
   activeProjectId: string | null;
 }
@@ -35,7 +35,6 @@ export interface BoardKeyboardShortcutActions {
   handleProjectChange: (id: string) => Promise<void>;
   setSearchQuery: Dispatch<SetStateAction<string>>;
   setKeyboardCursorIssueId: Dispatch<SetStateAction<string | null>>;
-  setSelectedIssue: Dispatch<SetStateAction<IssueWithStatus | null>>;
   setFocusMode: Dispatch<SetStateAction<boolean>>;
   setExpandedCreatePanel: Dispatch<SetStateAction<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>>;
   setCreatingInColumnId: Dispatch<SetStateAction<string | null>>;
@@ -111,7 +110,8 @@ export function useBoardKeyboardShortcuts(
       }
       if (e.key === "Escape") {
         if (actions.panels.closeTopPanel()) return;
-        if (state.selectedIssue) { actions.setSelectedIssue(null); return; }
+        const selStore = useBoardSelectionStore.getState();
+        if (selStore.selectedIssue) { selStore.setSelectedIssue(null); return; }
         if (state.keyboardCursorIssueIdRef.current) { actions.setKeyboardCursorIssueId(null); return; }
         if (state.searchQuery) {
           actions.setSearchQuery("");
@@ -206,7 +206,6 @@ export function useBoardKeyboardShortcuts(
     state.archiveExpanded,
     state.keyboardCursorIssueId,
     state.keyboardCursorIssueIdRef,
-    state.selectedIssue,
     state.searchQuery,
     state.viewMode,
   ]);
