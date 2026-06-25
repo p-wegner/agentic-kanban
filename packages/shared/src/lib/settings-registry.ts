@@ -66,6 +66,7 @@ export const SETTINGS_REGISTRY = {
   skip_preflight: { type: "bool", default: "false" },
   dependency_auto_chain: { type: "bool", default: "false" },
   coupling_overlap_threshold: { type: "number", default: "0.5" },
+  coupling_contract_min_size: { type: "number", default: "2" },
   dynamic_column_scaling: { type: "bool", default: "false" },
   card_density: { type: "string", default: "" },
   persistent_agent: { type: "bool", default: "false" },

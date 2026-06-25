@@ -150,6 +150,25 @@ describe("create_issues_batch tool", () => {
     expect(deps.notifyBoard).toHaveBeenCalledWith(projectId, "mcp_dependency_added");
   });
 
+  it("accepts a coupled_with edge declared at creation (#918) — symmetric, no cycle check", async () => {
+    const { invoke, db } = setupTool(registerCreateIssuesBatch);
+    const { projectId } = await seedProject(db);
+
+    // Two coupled vertical slices declared together. coupled_with is symmetric, so even a
+    // mutual pair must NOT be rejected as a cycle (only directional edges cycle).
+    const result = await invoke({
+      projectId,
+      issues: [{ title: "Panel UI" }, { title: "Panel endpoint" }],
+      dependencies: [{ issueIndex: 0, dependsOnIndex: 1, type: "coupled_with" }],
+    });
+    const data = parseResult(result);
+    expect(data.dependenciesCreated).toBe(1);
+
+    const edges = await db.select().from(schema.issueDependencies);
+    expect(edges).toHaveLength(1);
+    expect(edges[0].type).toBe("coupled_with");
+  });
+
   it("rolls back issues when a dependency index is out of range — nothing persisted", async () => {
     const { invoke, db } = setupTool(registerCreateIssuesBatch);
     const { projectId } = await seedProject(db);

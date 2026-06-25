@@ -7,9 +7,11 @@ import type { IssueEstimate } from "@agentic-kanban/shared";
 import {
   computeCouplingCandidates,
   couplingCandidatesFor,
+  couplingComponents,
   DEFAULT_COUPLING_OVERLAP_THRESHOLD,
   type IssueTouchedFiles,
 } from "@agentic-kanban/shared/lib/coupling-overlap";
+import { planContraction } from "@agentic-kanban/shared/lib/dependency-graph";
 import type { Database } from "../db/index.js";
 import { invokeClaudePrompt } from "./claude-cli.service.js";
 import { NotFoundError } from "../errors/index.js";
@@ -517,8 +519,10 @@ Rules:
 - Titles should be actionable and specific (verb phrase, under 80 chars)
 - Descriptions should be 2-4 sentences with clear acceptance criteria
 - Use tempIds like "c1", "c2", etc.
-- Dependency type must be "depends_on" (child depends on another child that must be done first)
-- Only add dependencies when there is a genuine technical ordering requirement
+- Dependency types:
+  - "depends_on" — the child needs another child finished first (genuine technical ordering). Default for ordering.
+  - "coupled_with" — two children touch the SAME code and are best implemented together (peer coupling, no ordering). DECLARE this when you knowingly split a feature into vertical slices over shared files, so they aren't built as conflicting parallel workspaces (#918). Symmetric — emit once per pair.
+- Only add dependencies when there is a genuine ordering requirement (depends_on) or genuine shared-code coupling (coupled_with) — not for mere topical similarity
 - Priority: "low", "medium", "high", or "urgent"
 
 Respond ONLY with valid JSON, no markdown, no explanation:
@@ -528,7 +532,8 @@ Respond ONLY with valid JSON, no markdown, no explanation:
     {"tempId": "c2", "title": "...", "description": "...", "priority": "medium"}
   ],
   "dependencies": [
-    {"fromTempId": "c2", "toTempId": "c1", "type": "depends_on"}
+    {"fromTempId": "c2", "toTempId": "c1", "type": "depends_on"},
+    {"fromTempId": "c3", "toTempId": "c4", "type": "coupled_with"}
   ]
 }`;
 
@@ -699,4 +704,215 @@ export async function confirmEpicDecomposition(
   }
 
   return { createdIssues, driveId };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Contract — the INVERSE of decomposeEpic (#918).
+//
+// decomposeEpic SPLITS one epic into a tree of children (forward). contract COLLAPSES
+// a coupled component (a connected set of `coupled_with` peers) back into ONE ticket
+// (inverse). Both use the same propose→confirm shape: a `contractCoupledComponent`
+// generates a proposal (a single merged ticket + the members it would absorb) without
+// mutating anything; `confirmContractComponent` applies it — keeping the lowest-numbered
+// member as the SURVIVOR (preserving its history/number), folding the others' bodies into
+// it, and Cancelling the absorbed members with a pointer back to the survivor.
+//
+// The monitor's gated auto-contract step (off by default) calls these so coupled tickets
+// never fan out into separate conflicting workspaces. Coupling is DISCOVERED with the same
+// primitives the analyzer uses — `getCoupledEdges` + `couplingComponents` over the
+// `coupled_with` edges agents declared at creation (`create_issues_batch`) or the analyzer
+// inferred. Contract lives next to decompose by design; they are a forward/inverse pair.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A member ticket of a coupled component, as seen by the contract proposal. */
+export interface ContractMember {
+  id: string;
+  issueNumber: number;
+  title: string;
+  description: string | null;
+}
+
+export interface ContractComponentProposal {
+  /** The coupled component's members (>= 2), lowest issueNumber first. */
+  members: ContractMember[];
+  /** The member that would be KEPT (lowest issueNumber) — preserves its number/history. */
+  survivorId: string;
+  /** Proposed merged title for the survivor. */
+  mergedTitle: string;
+  /** Proposed merged description (acceptance criteria of all members, deduped). */
+  mergedDescription: string;
+  /** Why these are coupled — surfaced in the UI / monitor log. */
+  reason: string;
+}
+
+export interface ContractCoupledResult {
+  /** One proposal per coupled component found (largest first). Empty when nothing is coupled. */
+  proposals: ContractComponentProposal[];
+}
+
+/** Read the configurable minimum component size for an auto-contract suggestion (default 2). */
+async function getContractMinComponentSize(database: Database): Promise<number> {
+  const raw = await repo.getPreferenceValue("coupling_contract_min_size", database);
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 2 ? Math.floor(n) : 2;
+}
+
+/**
+ * Discover coupled components in a project and PROPOSE contracting each into one ticket.
+ * Propose-only — nothing is mutated. `members` whose ticket count is below the configured
+ * minimum size are skipped. A component with any OPEN workspace is skipped (never absorb
+ * in-flight work). The merged title/description are produced by the model; on any model
+ * failure we fall back to a deterministic concatenation so the proposal is always usable.
+ */
+export async function contractCoupledComponent(
+  projectId: string,
+  database: Database,
+): Promise<ContractCoupledResult> {
+  const minSize = await getContractMinComponentSize(database);
+  const edges = await repo.getCoupledEdges(projectId, database);
+  const components = couplingComponents(edges).filter((c) => c.length >= minSize);
+  if (components.length === 0) return { proposals: [] };
+
+  const proposals: ContractComponentProposal[] = [];
+  for (const componentIds of components) {
+    const rows = await repo.getIssuesForContract(componentIds, database);
+    if (rows.length < minSize) continue;
+    // Never absorb a component that has in-flight work — let those workspaces finish.
+    const openWs = await repo.countOpenWorkspacesForIssues(componentIds, database);
+    if (openWs > 0) continue;
+
+    const members: ContractMember[] = rows
+      .map((r) => ({ id: r.id, issueNumber: r.issueNumber, title: r.title, description: r.description }))
+      .sort((a, b) => a.issueNumber - b.issueNumber);
+    const survivor = members[0];
+
+    const { mergedTitle, mergedDescription } = await proposeMergedTicket(members, database);
+    proposals.push({
+      members,
+      survivorId: survivor.id,
+      mergedTitle,
+      mergedDescription,
+      reason: `Coupled component of ${members.length} tickets (#${members.map((m) => m.issueNumber).join(", #")}) — best implemented as one ticket to avoid conflicting parallel workspaces.`,
+    });
+  }
+  return { proposals };
+}
+
+/** Deterministic fallback merge — concatenate titles/descriptions when the model is unavailable. */
+function deterministicMerge(members: ContractMember[]): { mergedTitle: string; mergedDescription: string } {
+  const mergedTitle = members.map((m) => m.title).join(" + ").slice(0, 120);
+  const mergedDescription = [
+    `Contracted from ${members.length} coupled tickets:`,
+    "",
+    ...members.map((m) => `### #${m.issueNumber} ${m.title}\n${m.description?.trim() || "(no description)"}`),
+  ].join("\n");
+  return { mergedTitle, mergedDescription };
+}
+
+async function proposeMergedTicket(
+  members: ContractMember[],
+  database: Database,
+): Promise<{ mergedTitle: string; mergedDescription: string }> {
+  const prompt = `You are merging several COUPLED kanban tickets (they touch the same code and are best done together) into ONE ticket. Produce a single combined title and description that fully covers all of them, with deduplicated, consolidated acceptance criteria.
+
+Tickets to merge:
+${members.map((m) => `#${m.issueNumber} ${m.title}\n${m.description?.trim() || "(no description)"}`).join("\n\n")}
+
+Respond ONLY with valid JSON, no markdown, no explanation:
+{"title": "concise combined title under 100 chars", "description": "merged description with consolidated acceptance criteria"}`;
+
+  try {
+    const stdout = await invokeClaudePrompt(prompt, { database });
+    const parsed = extractJsonObject(stdout) as { title?: string; description?: string };
+    const title = parsed.title?.trim();
+    const description = parsed.description?.trim();
+    if (title && description) return { mergedTitle: title.slice(0, 120), mergedDescription: description };
+  } catch (err) {
+    console.warn("[issue-ai] contract merge model failed, using deterministic merge:", err instanceof Error ? err.message : err);
+  }
+  return deterministicMerge(members);
+}
+
+export interface ConfirmContractInput {
+  projectId: string;
+  survivorId: string;
+  /** All member ids of the component (must include survivorId). */
+  memberIds: string[];
+  mergedTitle: string;
+  mergedDescription: string;
+}
+
+export interface ConfirmContractResult {
+  survivorId: string;
+  absorbedIds: string[];
+}
+
+/**
+ * Apply a contract proposal: update the SURVIVOR with the merged title/description, then
+ * Cancel every other member (appending a "Contracted into #N" pointer) and drop the now-
+ * internal `coupled_with` edges among the component. Idempotent-ish: an already-Cancelled
+ * member is simply re-stamped. A member with an open workspace aborts the whole contract
+ * (BAD_REQUEST) — the caller must not absorb in-flight work.
+ */
+export async function confirmContractComponent(
+  input: ConfirmContractInput,
+  database: Database,
+): Promise<ConfirmContractResult> {
+  const { projectId, survivorId, memberIds, mergedTitle, mergedDescription } = input;
+  const uniqueMembers = [...new Set(memberIds)];
+  if (!uniqueMembers.includes(survivorId)) {
+    throw new Error("survivorId must be one of memberIds");
+  }
+  if (uniqueMembers.length < 2) {
+    throw new Error("a contract needs at least 2 members");
+  }
+  const memberRows = await repo.getIssuesForContract(uniqueMembers, database);
+  if (memberRows.length !== uniqueMembers.length) {
+    throw new NotFoundError("Contract member issue not found");
+  }
+  const outOfProject = memberRows.find((m) => m.projectId !== projectId);
+  if (outOfProject) {
+    throw new Error("all contract members must belong to the target project");
+  }
+  const survivor = memberRows.find((m) => m.id === survivorId);
+  if (!survivor) throw new NotFoundError("Survivor issue not found");
+
+  // Refuse to absorb in-flight work.
+  const absorbedIds = uniqueMembers.filter((id) => id !== survivorId);
+  const openWs = await repo.countOpenWorkspacesForIssues(uniqueMembers, database);
+  if (openWs > 0) {
+    throw new Error("cannot contract a component with open workspaces");
+  }
+
+  const now = new Date().toISOString();
+  // 1) Survivor takes the merged title + description.
+  await repo.updateIssueTitleDescription(survivorId, mergedTitle, mergedDescription, now, database);
+
+  // 2) Cancel absorbed members with a pointer back to the survivor.
+  const cancelledStatusId =
+    (await repo.getStatusIdByName(projectId, "Cancelled", database)) ??
+    (await repo.getStatusIdByName(projectId, "Done", database));
+  for (const id of absorbedIds) {
+    await repo.appendIssueDescription(id, `> Contracted into #${survivor.issueNumber} — implemented together as one coupled ticket (#918).`, now, database);
+    if (cancelledStatusId) await repo.setIssueStatus(id, cancelledStatusId, now, database);
+  }
+
+  // 3) Rewire the dependency graph: the survivor (lead) absorbs the UNION of the component's
+  //    EXTERNAL sequential edges, and the now-internal coupled_with edges are dropped. This is
+  //    the #916 contraction invariant — apply it via the shared `planContraction` planner so the
+  //    edge-inheritance logic stays on one tested implementation (no dangling/duplicate edges).
+  const allEdges = await repo.getProjectDependencyEdges(projectId, database);
+  const mutations = planContraction(survivorId, uniqueMembers, allEdges);
+  for (const m of mutations) {
+    if (m.action === "remove") {
+      await repo.removeDependencyEdge(m.issueId, m.dependsOnId, m.type as DependencyType, database);
+    } else {
+      await repo.insertIssueDependencySafe(
+        { id: randomUUID(), issueId: m.issueId, dependsOnId: m.dependsOnId, type: m.type as DependencyType, createdAt: now },
+        database,
+      );
+    }
+  }
+
+  return { survivorId, absorbedIds };
 }
