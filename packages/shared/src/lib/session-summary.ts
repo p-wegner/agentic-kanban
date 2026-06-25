@@ -1,3 +1,10 @@
+import {
+  COPILOT_RESULT_TYPES,
+  COPILOT_SESSION_START_TYPES,
+  COPILOT_TOOL_RESULT_TYPES,
+  COPILOT_TOOL_USE_TYPES,
+} from "./agent-stream/copilot-event-types.js";
+
 export interface TaskSummaryItem {
   id: string;
   subject: string;
@@ -44,49 +51,9 @@ export function formatDurationStr(diffMs: number): string {
   return `${hr}h ${remMin}m`;
 }
 
-// ── Copilot event-type constants ──────────────────────────────────────
-
-const COPILOT_SESSION_START_TYPES = new Set([
-  "session_start",
-  "session_started",
-  "session_created",
-  "session.start",
-  "session.started",
-  "session.created",
-]);
-
-const COPILOT_TOOL_USE_TYPES = new Set([
-  "tool_call",
-  "tool_call_start",
-  "tool_call_started",
-  "tool_use",
-  "tool_use_start",
-  "tool_use_started",
-  "tool.start",
-  "tool.started",
-  "tool_call.started",
-]);
-
-const COPILOT_TOOL_RESULT_TYPES = new Set([
-  "tool_result",
-  "tool_call_result",
-  "tool_call_complete",
-  "tool_call_completed",
-  "tool.completed",
-  "tool_call.completed",
-]);
-
-const COPILOT_RESULT_TYPES = new Set([
-  "result",
-  "done",
-  "session_end",
-  "session_ended",
-  "session.end",
-  "session.ended",
-  "turn_completed",
-  "turn.completed",
-  "stats",
-]);
+// Copilot event-type constants now live in ./agent-stream/copilot-event-types.ts
+// (imported above) — the single source of truth shared with the live stream
+// parser (agent-stream/copilot.ts), so the two can no longer drift (#892).
 
 // ── Low-level JSON/value helpers ──────────────────────────────────────
 
