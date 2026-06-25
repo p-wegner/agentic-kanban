@@ -1,5 +1,5 @@
 import { eq, and, or, inArray, sql, desc } from "drizzle-orm";
-import { issues, projectStatuses, issueDependencies, agentSkills, tags, issueTags, workflowNodes } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses, issueDependencies, agentSkills, tags, issueTags, workflowNodes, preferences } from "@agentic-kanban/shared/schema";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -45,6 +45,7 @@ export async function getOpenIssuesWithNode(
       statusId: issues.statusId,
       currentNodeId: issues.currentNodeId,
       currentNodeType: workflowNodes.nodeType,
+      touchedFilesJson: issues.touchedFilesJson,
     })
     .from(issues)
     .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
@@ -106,6 +107,18 @@ export async function getDependencyEdgesBetween(
       ),
     );
   return rows as Array<{ issueId: string; dependsOnId: string; type: DependencyType }>;
+}
+
+export async function getPreferenceValue(
+  key: string,
+  database: Database = db,
+): Promise<string | null> {
+  const rows = await database
+    .select({ value: preferences.value })
+    .from(preferences)
+    .where(eq(preferences.key, key))
+    .limit(1);
+  return rows[0]?.value ?? null;
 }
 
 export async function getIssueForTouchedFiles(
