@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { issues, preferences, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, preferences, projectStatuses, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { ReviewError, startManualReview } from "../services/review.service.js";
 
@@ -20,7 +20,7 @@ function makeSessionManager(sessionIdFn: () => string | Promise<string> = () => 
   };
 }
 
-async function seedWorkspace(db: ReturnType<typeof createTestDb>["db"], overrides: { status?: string } = {}) {
+async function seedWorkspace(db: ReturnType<typeof createTestDb>["db"], overrides: Partial<typeof workspaces.$inferInsert> = {}) {
   const now = new Date().toISOString();
   const projectId = randomUUID();
   const statusId = randomUUID();
@@ -44,12 +44,42 @@ async function seedWorkspace(db: ReturnType<typeof createTestDb>["db"], override
     workingDir: null,
     isDirect: true,
     baseBranch: "main",
-    status: overrides.status ?? "idle",
+    status: "idle",
     createdAt: now, updatedAt: now,
+    ...overrides,
   });
   await db.insert(preferences).values({ key: "claude_profile", value: "mock" });
 
   return { workspaceId, projectId, issueId };
+}
+
+async function seedReviewUsageLimitSession(
+  db: ReturnType<typeof createTestDb>["db"],
+  workspaceId: string,
+  overrides: Partial<typeof sessions.$inferInsert> = {},
+) {
+  const now = new Date().toISOString();
+  const sessionId = randomUUID();
+  await db.insert(sessions).values({
+    id: sessionId,
+    workspaceId,
+    executor: "claude-code",
+    status: "stopped",
+    startedAt: new Date(Date.now() - 60_000).toISOString(),
+    endedAt: now,
+    exitCode: "1",
+    triggerType: "review",
+    stats: JSON.stringify({
+      durationMs: 1000,
+      success: false,
+      launchFailure: true,
+      rateLimited: true,
+      rateLimitKind: "claude-usage-limit",
+      failureReason: "Claude usage limit reached. Your limit will reset at 3pm.",
+    }),
+    ...overrides,
+  });
+  return sessionId;
 }
 
 describe("startManualReview — concurrent trigger hardening (AK-520)", () => {
@@ -81,6 +111,54 @@ describe("startManualReview — concurrent trigger hardening (AK-520)", () => {
     await expect(
       startManualReview(db, () => sessionManager as never, mockBoardEvents as never, reviewSessionIds, workspaceId, false),
     ).rejects.toSatisfy((err: unknown) => err instanceof ReviewError && err.code === "CONFLICT");
+  });
+
+  it("recovers a blocked review rate-limit failure and uses the current board default provider/profile", async () => {
+    const { workspaceId } = await seedWorkspace(db, {
+      status: "blocked",
+      provider: "claude",
+      claudeProfile: "anth",
+    });
+    await seedReviewUsageLimitSession(db, workspaceId);
+    await db.delete(preferences);
+    await db.insert(preferences).values([
+      { key: "provider", value: "codex" },
+      { key: "claude_profile", value: "anth" },
+      { key: "codex_profile", value: "default" },
+    ]);
+    const sessionManager = makeSessionManager(() => "session-recovered");
+    const reviewSessionIds = new Set<string>();
+
+    const result = await startManualReview(db, () => sessionManager as never, mockBoardEvents as never, reviewSessionIds, workspaceId, false);
+
+    expect(result.sessionId).toBe("session-recovered");
+    expect(sessionManager.startSession).toHaveBeenCalledWith(expect.objectContaining({
+      provider: "codex",
+      profile: { provider: "codex", name: "default" },
+      triggerType: "review",
+    }));
+  });
+
+  it("does not recover a blocked workspace while any session is still running", async () => {
+    const { workspaceId } = await seedWorkspace(db, { status: "blocked" });
+    await seedReviewUsageLimitSession(db, workspaceId, {
+      id: randomUUID(),
+      status: "running",
+      endedAt: null,
+    });
+    const sessionManager = makeSessionManager();
+    const reviewSessionIds = new Set<string>();
+
+    await expect(
+      startManualReview(db, () => sessionManager as never, mockBoardEvents as never, reviewSessionIds, workspaceId, false),
+    ).rejects.toSatisfy((err: unknown) => {
+      if (!(err instanceof ReviewError)) return false;
+      expect(err.code).toBe("CONFLICT");
+      expect(err.details).toMatchObject({ retryable: false, reason: "active_session" });
+      return true;
+    });
+
+    expect(sessionManager.startSession).not.toHaveBeenCalled();
   });
 
   it("concurrent review triggers: second call gets CONFLICT, not an uncaught 500", async () => {
@@ -145,7 +223,7 @@ describe("startManualReview — concurrent trigger hardening (AK-520)", () => {
 });
 
 /** Seed a non-direct (worktree) workspace with a workingDir so prepareForReview is called. */
-async function seedWorktreeWorkspace(db: ReturnType<typeof createTestDb>["db"], overrides: { status?: string } = {}) {
+async function seedWorktreeWorkspace(db: ReturnType<typeof createTestDb>["db"], overrides: Partial<typeof workspaces.$inferInsert> = {}) {
   const now = new Date().toISOString();
   const projectId = randomUUID();
   const statusId = randomUUID();
@@ -169,8 +247,9 @@ async function seedWorktreeWorkspace(db: ReturnType<typeof createTestDb>["db"], 
     workingDir: "/tmp/worktree",
     isDirect: false,
     baseBranch: "main",
-    status: overrides.status ?? "idle",
+    status: "idle",
     createdAt: now, updatedAt: now,
+    ...overrides,
   });
   await db.insert(preferences).values({ key: "claude_profile", value: "mock" });
 
@@ -214,6 +293,36 @@ describe("startManualReview — preflight rebase conflict returns structured 409
     expect(sessionManager.startSession).not.toHaveBeenCalled();
     // In-flight guard must be cleared — a retry is possible
     expect(reviewSessionIds.size).toBe(0);
+  });
+
+  it("blocked rate-limit recovery still returns structured conflict details when review preflight conflicts", async () => {
+    const { workspaceId } = await seedWorktreeWorkspace(db, {
+      status: "blocked",
+      provider: "claude",
+      claudeProfile: "anth",
+    });
+    await seedReviewUsageLimitSession(db, workspaceId);
+    mockPrepareForReview.mockResolvedValue({
+      success: false,
+      diffRef: "main",
+      conflictingFiles: ["src/conflict.ts"],
+      error: "CONFLICT (content): Merge conflict in src/conflict.ts",
+    });
+
+    const sessionManager = makeSessionManager();
+    const reviewSessionIds = new Set<string>();
+
+    await expect(
+      startManualReview(db, () => sessionManager as never, mockBoardEvents as never, reviewSessionIds, workspaceId, false),
+    ).rejects.toSatisfy((err: unknown) => {
+      if (!(err instanceof ReviewError)) return false;
+      expect(err.code).toBe("CONFLICT");
+      expect(err.details?.conflictFiles).toEqual(["src/conflict.ts"]);
+      expect(err.message).toContain("1 file(s) conflict");
+      return true;
+    });
+
+    expect(sessionManager.startSession).not.toHaveBeenCalled();
   });
 
   it("throws ReviewError CONFLICT when prepareForReview fails without explicit conflict files", async () => {

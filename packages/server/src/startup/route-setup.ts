@@ -37,6 +37,13 @@ export function setupRoutes(app: Hono, { sessionManager, boardEvents, reviewSess
         if (err.code === "NOT_FOUND") return c.json({ error: err.message, code: err.code }, 404);
         if (err.code === "CONFLICT") {
           const body: Record<string, unknown> = { error: err.message, code: err.code };
+          if (err.details?.workspaceStatus) body.workspaceStatus = err.details.workspaceStatus;
+          if (err.details?.retryable !== undefined) body.retryable = err.details.retryable;
+          if (err.details?.reason) body.reason = err.details.reason;
+          if (err.details?.activeSessionId) body.activeSessionId = err.details.activeSessionId;
+          if (err.details?.activeTriggerType !== undefined) body.activeTriggerType = err.details.activeTriggerType;
+          if (err.details?.latestSessionId) body.latestSessionId = err.details.latestSessionId;
+          if (err.details?.latestTriggerType !== undefined) body.latestTriggerType = err.details.latestTriggerType;
           if (err.details?.conflictFiles?.length) body.conflictFiles = err.details.conflictFiles;
           if (err.details?.uncommittedChanges?.length) body.uncommittedChanges = err.details.uncommittedChanges;
           return c.json(body, 409);
