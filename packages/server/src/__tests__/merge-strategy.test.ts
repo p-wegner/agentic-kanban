@@ -1,15 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PREF_MERGE_STRATEGY } from "../constants/preference-keys.js";
 import { isAutomaticMergeEnabled, resolveMergeStrategy } from "../startup/merge-strategy.js";
-
-// Inline read to avoid pulling in the DB layer (worktrees lack node_modules).
-// We only need to verify the key appears in the whitelist array.
-import fs from "node:fs";
-import path from "node:path";
-const preferenceServiceSrc = fs.readFileSync(
-  path.join(import.meta.dirname!, "../services/preference.service.ts"),
-  "utf-8",
-);
+import { SETTINGS_REGISTRY } from "@agentic-kanban/shared/lib/settings-registry";
 
 describe("merge strategy preferences", () => {
   it("preserves legacy ownership when no explicit strategy is configured", () => {
@@ -23,14 +15,12 @@ describe("merge strategy preferences", () => {
     expect(isAutomaticMergeEnabled(new Map([["merge_strategy", "merge_queue"], ["auto_merge", "true"]]))).toBe(true);
   });
 
-  it("is included in the settings whitelist so UI writes persist", () => {
-    // The SETTINGS_KEYS array must contain the merge_strategy key (via PREF_MERGE_STRATEGY constant).
-    // Regression test for #660 — the key was missing, making the UI selector a silent no-op.
-    const settingsKeysBlock = preferenceServiceSrc.match(/export const SETTINGS_KEYS = \[([\s\S]*?)\];/);
-    expect(settingsKeysBlock).not.toBeNull();
-    // The source uses the constant reference, not the string literal
-    expect(settingsKeysBlock![1]).toContain("PREF_MERGE_STRATEGY");
-    // Verify the constant value matches what the runtime expects
+  it("is included in the settings registry so UI writes persist", () => {
+    // merge_strategy must be a key in the single settings registry (SETTINGS_KEYS is
+    // now DERIVED from it, #903). Regression test for #660 — the key was once missing,
+    // making the UI selector a silent no-op.
+    expect(Object.keys(SETTINGS_REGISTRY)).toContain("merge_strategy");
+    // Verify the constant value matches the registry key the runtime expects.
     expect("merge_strategy").toBe(PREF_MERGE_STRATEGY);
   });
 });
