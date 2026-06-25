@@ -125,7 +125,7 @@ export async function applyUpdateDependenciesBatch(
           id,
           issueId: e.issueId,
           dependsOnId: e.dependsOnId,
-          type,
+          type: type as (typeof VALID_TYPES)[number],
           createdAt: new Date().toISOString(),
         });
         edgeKeyToRow.set(key, { id, projectId: srcProj });
