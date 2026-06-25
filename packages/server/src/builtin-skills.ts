@@ -79,6 +79,7 @@ Issue ID: {{issueId}}`,
 3. **Analyze relationships** for:
    - Sequential dependencies: does the target issue require another to be finished first?
    - Shared code areas: do both issues touch the same component, route, or service?
+   - Predicted touched-file overlap (coupling signal): the analyzer feeds in a deterministic signal listing other issues that share AI-predicted touched files above the configurable coupling_overlap_threshold. Treat a high-overlap pair as a strong coupled_with candidate; these also surface as advisory coupling suggestions in the dependency UI. Never couple across an existing depends_on/blocked_by edge.
    - Merge conflict risk: are two issues In Progress simultaneously and modifying the same files?
    - Parent/child relationships: is one issue a sub-task or epic of the other?
 4. **Add dependency links** using add_dependency:

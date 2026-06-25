@@ -4,6 +4,12 @@ import { join } from "node:path";
 import { isTerminalStatusIdView, TERMINAL_STATUS_NAMES } from "@agentic-kanban/shared";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
 import type { IssueEstimate } from "@agentic-kanban/shared";
+import {
+  computeCouplingCandidates,
+  couplingCandidatesFor,
+  DEFAULT_COUPLING_OVERLAP_THRESHOLD,
+  type IssueTouchedFiles,
+} from "@agentic-kanban/shared/lib/coupling-overlap";
 import type { Database } from "../db/index.js";
 import { invokeClaudePrompt } from "./claude-cli.service.js";
 import { NotFoundError } from "../errors/index.js";
@@ -79,11 +85,58 @@ export function isCouplingAcrossSequentialEdge(
   );
 }
 
+/**
+ * A propose-only coupling suggestion (#917): two backlog tickets whose AI-predicted
+ * touched files overlap above the configured threshold. ADVISORY — never auto-applied.
+ * Accepting it (in the dependency-suggestion UI) creates a `coupled_with` edge via the
+ * `dependencies/batch` path and may offer the contract action (#914).
+ */
+export interface CouplingSuggestion {
+  /** The OTHER issue this target is coupled with. */
+  issueId: string;
+  /** Always `coupled_with` — surfaced through the same suggestion shape. */
+  type: "coupled_with";
+  /** The predicted files both issues share, driving the suggestion. */
+  sharedFiles: string[];
+  /** Overlap coefficient (0..1). */
+  overlapScore: number;
+  /** Human-readable rationale shown in the UI. */
+  reason: string;
+}
+
 export interface AnalyzeDependenciesResult {
   dependencies: Array<{ id: string; type: string; issueId: string; reason: string }>;
   /** Suggestions intentionally NOT created — e.g. a `coupled_with` across an existing sequential edge. */
   flagged?: Array<{ issueId: string; type: string; reason: string }>;
+  /**
+   * Advisory coupling suggestions from predicted touched-file overlap (#917).
+   * Propose-only: nothing here is auto-applied — accepting creates `coupled_with`
+   * edges through `dependencies/batch`.
+   */
+  couplingSuggestions?: CouplingSuggestion[];
   total: number;
+}
+
+/** Parse the cached `touched_files_json` blob into a flat list of predicted file paths. */
+export function parseTouchedFilePaths(touchedFilesJson: string | null | undefined): string[] {
+  if (!touchedFilesJson) return [];
+  try {
+    const parsed = JSON.parse(touchedFilesJson) as Array<{ path?: unknown }>;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((f) => (typeof f?.path === "string" ? f.path : ""))
+      .filter((p): p is string => Boolean(p));
+  } catch {
+    return [];
+  }
+}
+
+/** Read the configurable coupling overlap threshold (0..1), falling back to the default. */
+async function getCouplingThreshold(database: Database): Promise<number> {
+  const raw = await repo.getPreferenceValue("coupling_overlap_threshold", database);
+  if (raw == null || raw === "") return DEFAULT_COUPLING_OVERLAP_THRESHOLD;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 && n <= 1 ? n : DEFAULT_COUPLING_OVERLAP_THRESHOLD;
 }
 
 export async function analyzeDependencies(
@@ -104,10 +157,31 @@ export async function analyzeDependencies(
 
   const skillPrompt = (await repo.getSkillPrompt("dependency-analyzer", projectId, database)) || `Analyze the given issue and its relationship to other open issues on the board.`;
 
+  // Deterministic coupling signal (#917): compute predicted-touched-file overlap between
+  // the target and every other open issue. The high-overlap pairs are (a) appended to the
+  // prompt as context so the model can propose `coupled_with` with knowledge of the shared
+  // files, and (b) seeded directly as ADVISORY coupling suggestions (propose-only, never
+  // auto-created). Threshold is configurable via the `coupling_overlap_threshold` setting.
+  const threshold = await getCouplingThreshold(database);
+  const touchedFilesByIssue: IssueTouchedFiles[] = openIssues.map((i) => ({
+    issueId: i.id,
+    files: parseTouchedFilePaths(i.touchedFilesJson),
+  }));
+  const allCandidates = computeCouplingCandidates(touchedFilesByIssue, { threshold });
+  const targetCandidates = couplingCandidatesFor(issueId, allCandidates);
+
+  const idToNumber = new Map(openIssues.map((i) => [i.id, i.issueNumber] as const));
+
   const issuesSummary = openIssues
     .filter(i => i.id !== issueId)
     .map(i => `  [${i.id}] #${i.issueNumber ?? "?"} ${i.title}${i.description ? `\n    ${i.description.split("\n")[0].slice(0, 100)}` : ""}`)
     .join("\n");
+
+  const overlapContext = targetCandidates.length > 0
+    ? `\n\nDeterministic signal — issues sharing predicted touched files with the target (strong coupling candidates; consider proposing "coupled_with"):\n${targetCandidates
+        .map((c) => `  [${c.otherIssueId}] #${idToNumber.get(c.otherIssueId) ?? "?"} shares ${c.sharedFiles.length} predicted file(s) (overlap ${(c.overlapScore * 100).toFixed(0)}%): ${c.sharedFiles.join(", ")}`)
+        .join("\n")}`
+    : "";
 
   const prompt = `${skillPrompt}
 
@@ -115,7 +189,7 @@ Target issue: [${targetIssue.id}] #${targetIssue.issueNumber ?? "?"} "${targetIs
 ${targetIssue.description ? `Description: ${targetIssue.description}` : ""}
 
 Other open issues on the board (each prefixed with its [id]):
-${issuesSummary || "(no other open issues)"}
+${issuesSummary || "(no other open issues)"}${overlapContext}
 
 IMPORTANT: You must respond ONLY with valid JSON, no markdown, no explanation:
 {"dependencies": [{"issueId": "<id from brackets>", "type": "depends_on|blocked_by|related_to|parent_of|child_of|coupled_with", "reason": "..."}]}
@@ -178,7 +252,38 @@ Only include genuinely useful dependencies, not just topical similarity.`;
     }
   }
 
-  return { dependencies: created, flagged, total: created.length };
+  // Advisory coupling suggestions (#917) from the deterministic touched-file overlap.
+  // Propose-only: nothing is created here. A candidate is suppressed when an edge already
+  // exists between the pair in EITHER direction — whether that is a prior `coupled_with`
+  // (already coupled), a sequential `depends_on`/`blocked_by` (respect direction: do not
+  // suggest contracting across it), or a `coupled_with` the LLM just auto-created this run.
+  const candidateOtherIds = targetCandidates.map((c) => c.otherIssueId);
+  const candidateEdges = candidateOtherIds.length > 0
+    ? await repo.getDependencyEdgesBetween(issueId, candidateOtherIds, database)
+    : [];
+  const justCreatedTargets = new Set(created.map((c) => c.issueId));
+
+  const couplingSuggestions: CouplingSuggestion[] = [];
+  for (const cand of targetCandidates) {
+    if (justCreatedTargets.has(cand.otherIssueId)) continue;
+    const hasExistingEdge = candidateEdges.some(
+      (e) =>
+        (e.issueId === issueId && e.dependsOnId === cand.otherIssueId) ||
+        (e.issueId === cand.otherIssueId && e.dependsOnId === issueId),
+    );
+    if (hasExistingEdge) continue;
+
+    const otherNumber = idToNumber.get(cand.otherIssueId);
+    couplingSuggestions.push({
+      issueId: cand.otherIssueId,
+      type: "coupled_with",
+      sharedFiles: cand.sharedFiles,
+      overlapScore: cand.overlapScore,
+      reason: `Strongly coupled — shares ${cand.sharedFiles.length} predicted file(s) (${(cand.overlapScore * 100).toFixed(0)}% overlap) with #${otherNumber ?? "?"}: ${cand.sharedFiles.join(", ")}. Contract into one?`,
+    });
+  }
+
+  return { dependencies: created, flagged, couplingSuggestions, total: created.length };
 }
 
 export interface TouchedFile {
