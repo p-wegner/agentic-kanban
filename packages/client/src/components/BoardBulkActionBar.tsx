@@ -22,6 +22,7 @@ interface Props {
   allTags: Tag[];
   onBulkUpdate: (updates: UpdateIssueRequest, label: string) => void;
   onBulkAddTag: (tagId: string) => void;
+  onContractCoupled: () => void;
   onLoadTags: () => void;
   onClearSelection: () => void;
 }
@@ -34,10 +35,12 @@ export function BoardBulkActionBar({
   allTags,
   onBulkUpdate,
   onBulkAddTag,
+  onContractCoupled,
   onLoadTags,
   onClearSelection,
 }: Props) {
   if (selectedIssues.length === 0) return null;
+  const contractDisabled = boardBulkUpdating || hasArchivedSelection || selectedIssues.length < 2;
 
   return (
     <div
@@ -105,6 +108,21 @@ export function BoardBulkActionBar({
           <option key={tag.id} value={tag.id}>{tag.name}</option>
         ))}
       </select>
+      <button
+        type="button"
+        disabled={contractDisabled}
+        onClick={onContractCoupled}
+        className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+        title={
+          selectedIssues.length < 2
+            ? "Select the full coupled issue set"
+            : hasArchivedSelection
+              ? "Clear archived selections before contracting"
+              : "Contract selected coupled issues"
+        }
+      >
+        Contract coupled
+      </button>
       <button
         type="button"
         onClick={onClearSelection}

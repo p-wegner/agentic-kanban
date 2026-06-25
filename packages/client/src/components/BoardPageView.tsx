@@ -435,6 +435,7 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
             allTags={allTags}
             onBulkUpdate={bulk.handleBoardBulkUpdate}
             onBulkAddTag={bulk.handleBoardBulkAddTag}
+            onContractCoupled={bulk.handleBoardContractCoupled}
             onLoadTags={loadTags}
             onClearSelection={bulk.clearSelection}
           />
