@@ -3,7 +3,6 @@ import {
   PREF_CLAUDE_PROFILE,
   PREF_CODEX_PROFILE,
   PREF_COPILOT_PROFILE,
-  PREF_DEFAULT_MODEL,
   PREF_DEFAULT_MODEL_CLAUDE,
   PREF_DEFAULT_MODEL_CODEX,
   PREF_DEFAULT_MODEL_PI,
@@ -33,7 +32,7 @@ export interface EffectiveProviderProfile {
 
 export interface EffectiveModel {
   model: string | undefined;
-  source: "requested" | "provider-default" | "legacy-default" | "none";
+  source: "requested" | "provider-default" | "none";
   notes: string[];
 }
 
@@ -73,12 +72,13 @@ export function resolveEffectiveModel(input: {
   const requested = typeof input.requestedModel === "string" ? input.requestedModel.trim() : "";
   const providerKey = providerModelPrefKey(input.provider);
   const providerDefault = providerKey ? readTrimmed(input.prefMap, providerKey) : undefined;
-  const legacyDefault = readTrimmed(input.prefMap, PREF_DEFAULT_MODEL);
 
+  // Only provider-scoped slots are consulted (#902). The global `default_model` key is
+  // gone — a single provider-agnostic model is unrepresentable, so a Codex id can no
+  // longer leak into a Claude launch (the structural cause of the #696/#699 stalls).
   const candidates: Array<{ model: string | undefined; source: EffectiveModel["source"]; prefKey?: string }> = [
     { model: requested || undefined, source: "requested" },
     { model: providerDefault, source: "provider-default", prefKey: providerKey },
-    { model: legacyDefault, source: "legacy-default", prefKey: PREF_DEFAULT_MODEL },
   ];
 
   for (const candidate of candidates) {

@@ -4,9 +4,12 @@
  * Claude launch to receive `--model gpt-5.5`, which made claude.exe exit immediately
  * with an invalid-model error (exit 1, ~0 tokens, "issue with selected model").
  *
- * Fix path: workspace-crud.service.ts `buildAgentConfig` calls `modelBelongsToProvider`
- * and drops any model id that doesn't match the active provider's family.
- * The test below verifies the full chain via the preview endpoint (read-only, no git ops).
+ * Original fix (#696): `modelBelongsToProvider` SILENTLY nullified a wrong-provider model.
+ * Structural fix (#902): the global, provider-agnostic `default_model` key is RETIRED —
+ * the resolver no longer reads it at all, so a cross-provider model is unrepresentable.
+ * A leftover global key therefore has no effect on the preview below (it is ignored, not
+ * nullified). `modelBelongsToProvider` is kept as the guard for an untrusted *requested*
+ * model and its unit contract is still asserted here.
  */
 import { describe, it, expect, beforeAll } from "vitest";
 import { createRoutes } from "../routes/index.js";
@@ -115,8 +118,9 @@ describe("POST /api/workspaces/preview — stale Codex default_model is dropped 
       updatedAt: now,
     });
 
-    // Simulate the stale-default scenario: default_model is set to a Codex model id,
-    // provider and claude_profile are set to Claude ("anth").
+    // Simulate the stale-default scenario: a leftover GLOBAL default_model is a Codex id,
+    // provider and claude_profile are set to Claude ("anth"). Post-#902 the global key is
+    // never read, so it must have NO effect on the resolved model.
     await database.insert(schema.preferences).values([
       { key: "provider", value: "claude" },
       { key: "claude_profile", value: "anth" },
@@ -124,7 +128,7 @@ describe("POST /api/workspaces/preview — stale Codex default_model is dropped 
     ]);
   });
 
-  it("drops the stale Codex default_model and returns model=null for a Claude workspace", async () => {
+  it("ignores the retired global default_model and returns model=null for a Claude workspace", async () => {
     const res = await app.request("/api/workspaces/preview", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
