@@ -117,6 +117,10 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
   const [rejectMode, setRejectMode] = useState<Record<string, boolean>>({});
   const [rejectFeedback, setRejectFeedback] = useState<Record<string, string>>({});
   const initialSessionAppliedRef = useRef(false);
+  // Guards against finalizing the same session more than once: the WS may push
+  // trailing `messages` updates after the terminal `exit`, each re-running the
+  // completion effect before `setActiveSession(null)` has flushed.
+  const completedSessionRef = useRef<string | null>(null);
 
   const [monitorRunning, setMonitorRunning] = useState(false);
   const [visualProofArtifacts, setVisualProofArtifacts] = useState<IssueArtifact[]>([]);
@@ -206,17 +210,22 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
   const canResume = (ws: WorkspaceResponse, sessions: SessionInfo[]) => canResumeWorkspace(ws, sessions, relaunchCtx(ws));
   const canRestart = (ws: WorkspaceResponse, sessions: SessionInfo[]) => canRestartWorkspace(ws, sessions, relaunchCtx(ws));
 
+  // Session completion is driven purely by the per-workspace WebSocket
+  // (`useWebSocket`), which streams agent output including the terminal `exit`
+  // message into `messages`. When that arrives we fetch the final output once
+  // and finalize. The former 1.5s `setInterval` poll of `/api/sessions/:id/output`
+  // was a redundant second realtime channel (#907) — the WS already delivers
+  // `exit`, so the poll only duplicated the same fetch on a timer.
   useEffect(() => {
     if (!activeSession) return;
+    if (!messages.some(m => m.type === "exit")) return;
 
     const wsId = selectedWorkspace;
     const sid = activeSession;
-    let completed = false;
+    if (completedSessionRef.current === sid) return;
+    completedSessionRef.current = sid;
 
     function completeSession(output: AgentOutputMessage[]) {
-      if (completed) return;
-      completed = true;
-      clearInterval(pollInterval);
       if (wsId) {
         setLastSessionPerWorkspace((prev) => ({ ...prev, [wsId]: sid }));
         setCompletedMessages(output);
@@ -230,25 +239,9 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
       void fetchWorkspaces();
     }
 
-    const exitMsg = messages.find(m => m.type === "exit");
-    if (exitMsg) {
-      apiFetch<AgentOutputMessage[]>(`/api/sessions/${sid}/output`)
-        .then((data) => completeSession(data))
-        .catch(() => completeSession([...messages]));
-      return;
-    }
-
-    const pollInterval = setInterval(() => {
-      apiFetch<AgentOutputMessage[]>(`/api/sessions/${sid}/output`)
-        .then((data) => {
-          if (data.some(m => m.type === "exit")) {
-            completeSession(data);
-          }
-        })
-        .catch(() => { /* ignore poll errors */ });
-    }, 1500);
-
-    return () => clearInterval(pollInterval);
+    apiFetch<AgentOutputMessage[]>(`/api/sessions/${sid}/output`)
+      .then((data) => completeSession(data))
+      .catch(() => completeSession([...messages]));
   }, [messages, activeSession]);
 
   async function fetchWorkspaces() {
