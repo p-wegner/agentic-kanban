@@ -5,6 +5,8 @@ import {
   getMonitorNudgeSkill,
   getWorkspaceById,
   getRunningReviewSession,
+  getRunningWorkspaceSession,
+  getLatestWorkspaceSession,
   getIssueProjectAndId,
   getAllPreferenceRows,
   getProjectDefaultBranch,
@@ -224,7 +226,17 @@ export class ReviewError extends Error {
   constructor(
     message: string,
     public readonly code: "NOT_FOUND" | "CONFLICT" | "BAD_REQUEST",
-    public readonly details?: { conflictFiles?: string[]; uncommittedChanges?: string[] },
+    public readonly details?: {
+      conflictFiles?: string[];
+      uncommittedChanges?: string[];
+      workspaceStatus?: string;
+      retryable?: boolean;
+      reason?: string;
+      activeSessionId?: string;
+      activeTriggerType?: string | null;
+      latestSessionId?: string;
+      latestTriggerType?: string | null;
+    },
   ) {
     super(message);
   }
@@ -233,6 +245,81 @@ export class ReviewError extends Error {
 /** In-flight review launches keyed by workspaceId — prevents duplicate sessions when
  *  concurrent requests both pass the idle-status check before either updates the DB. */
 const pendingReviewLaunches = new Set<string>();
+
+function isUsageLimitLaunchFailureStats(stats: string | null): boolean {
+  if (!stats) return false;
+  try {
+    const parsed = JSON.parse(stats) as Record<string, unknown>;
+    if (parsed.rateLimited === true && (parsed.rateLimitKind === "codex-usage-limit" || parsed.rateLimitKind === "claude-usage-limit")) {
+      return true;
+    }
+    const reason = typeof parsed.failureReason === "string" ? parsed.failureReason : "";
+    return parsed.launchFailure === true && /usage limit/i.test(reason);
+  } catch {
+    return false;
+  }
+}
+
+async function classifyBlockedReviewRecovery(
+  workspaceId: string,
+  database: Database,
+): Promise<
+  | { retryable: true; latestSessionId: string }
+  | { retryable: false; message: string; details: NonNullable<ReviewError["details"]> }
+> {
+  const running = await getRunningWorkspaceSession(workspaceId, database);
+  if (running.length > 0) {
+    return {
+      retryable: false,
+      message: `Workspace is blocked but session ${running[0].id} is still running`,
+      details: {
+        workspaceStatus: "blocked",
+        retryable: false,
+        reason: "active_session",
+        activeSessionId: running[0].id,
+        activeTriggerType: running[0].triggerType,
+      },
+    };
+  }
+
+  const latestRows = await getLatestWorkspaceSession(workspaceId, database);
+  const latest = latestRows[0];
+  if (!latest) {
+    return {
+      retryable: false,
+      message: "Workspace is blocked and has no prior session to recover",
+      details: { workspaceStatus: "blocked", retryable: false, reason: "missing_session" },
+    };
+  }
+  if (latest.triggerType !== "review") {
+    return {
+      retryable: false,
+      message: "Workspace is blocked but the latest session is not a review launch",
+      details: {
+        workspaceStatus: "blocked",
+        retryable: false,
+        reason: "latest_session_not_review",
+        latestSessionId: latest.id,
+        latestTriggerType: latest.triggerType,
+      },
+    };
+  }
+  if (latest.status !== "stopped" || !latest.endedAt || !isUsageLimitLaunchFailureStats(latest.stats)) {
+    return {
+      retryable: false,
+      message: "Workspace is blocked and the latest review failure is not retryable",
+      details: {
+        workspaceStatus: "blocked",
+        retryable: false,
+        reason: "not_retryable",
+        latestSessionId: latest.id,
+        latestTriggerType: latest.triggerType,
+      },
+    };
+  }
+
+  return { retryable: true, latestSessionId: latest.id };
+}
 
 export async function startManualReview(
   database: Database,
@@ -245,13 +332,33 @@ export async function startManualReview(
   const wsRows = await getWorkspaceById(workspaceId, database);
   if (wsRows.length === 0) throw new ReviewError("Workspace not found", "NOT_FOUND");
   const workspace = wsRows[0];
+  let recoverBlockedReview = false;
   if (workspace.status !== "idle") {
-    // Check if there's an active review session so we can give a more specific message
-    const runningReview = await getRunningReviewSession(workspaceId, database);
-    if (runningReview.length > 0) {
-      throw new ReviewError(`Review session ${runningReview[0].id} is already running for this workspace`, "CONFLICT");
+    if (workspace.status === "blocked") {
+      const recovery = await classifyBlockedReviewRecovery(workspaceId, database);
+      if (recovery.retryable) {
+        recoverBlockedReview = true;
+      } else {
+        throw new ReviewError(recovery.message, "CONFLICT", recovery.details);
+      }
+    } else {
+      // Check if there's an active review session so we can give a more specific message
+      const runningReview = await getRunningReviewSession(workspaceId, database);
+      if (runningReview.length > 0) {
+        throw new ReviewError(`Review session ${runningReview[0].id} is already running for this workspace`, "CONFLICT", {
+          workspaceStatus: workspace.status,
+          retryable: false,
+          reason: "active_review_session",
+          activeSessionId: runningReview[0].id,
+          activeTriggerType: "review",
+        });
+      }
+      throw new ReviewError("Workspace is not idle", "CONFLICT", {
+        workspaceStatus: workspace.status,
+        retryable: false,
+        reason: "workspace_not_idle",
+      });
     }
-    throw new ReviewError("Workspace is not idle", "CONFLICT");
   }
 
   // Guard against concurrent requests that both passed the idle check before either
@@ -269,7 +376,10 @@ export async function startManualReview(
     const prefRows = await getAllPreferenceRows(database);
     // Review on the same provider/profile the workspace was built with (e.g. its
     // Codex OAuth license), not the global default which may have rotated since.
-    const prefMap = applyWorkspaceProfileToPrefs(new Map(prefRows.map((r) => [r.key, r.value])), workspace);
+    // Exception: a blocked usage-limit review recovery intentionally uses the current
+    // board default so switching providers can recover a stale provider/profile.
+    const defaultPrefMap = new Map(prefRows.map((r) => [r.key, r.value]));
+    const prefMap = recoverBlockedReview ? defaultPrefMap : applyWorkspaceProfileToPrefs(defaultPrefMap, workspace);
     const manualProfile = prefMap.get("claude_profile") || undefined;
     const agentCommand = isMockProfile(manualProfile) ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
     const claudeProfile = isMockProfile(manualProfile) ? undefined : manualProfile;

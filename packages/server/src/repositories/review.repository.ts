@@ -60,6 +60,35 @@ export async function getRunningReviewSession(
     .limit(1);
 }
 
+export async function getRunningWorkspaceSession(
+  workspaceId: string,
+  database: Database = db,
+) {
+  return database
+    .select({ id: sessions.id, triggerType: sessions.triggerType })
+    .from(sessions)
+    .where(and(eq(sessions.workspaceId, workspaceId), eq(sessions.status, "running")))
+    .limit(1);
+}
+
+export async function getLatestWorkspaceSession(
+  workspaceId: string,
+  database: Database = db,
+) {
+  return database
+    .select({
+      id: sessions.id,
+      status: sessions.status,
+      triggerType: sessions.triggerType,
+      stats: sessions.stats,
+      endedAt: sessions.endedAt,
+    })
+    .from(sessions)
+    .where(eq(sessions.workspaceId, workspaceId))
+    .orderBy(desc(sessions.startedAt))
+    .limit(1);
+}
+
 export async function getIssueProjectAndId(
   issueId: string,
   database: Database = db,
