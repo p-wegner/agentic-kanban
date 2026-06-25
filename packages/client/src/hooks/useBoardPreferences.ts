@@ -3,6 +3,7 @@ import { apiFetch, apiPost } from "../lib/api.js";
 import { getSettings, setSettings } from "../lib/settingsStore.js";
 import { getWipLimit, wipLimitKey } from "../lib/wipLimits.js";
 import { startStaggeredPoll, type PollHandle } from "../lib/pollScheduler.js";
+import { showToast } from "../lib/toast.js";
 import type { MonitorStatus } from "../components/MonitorPopover.js";
 
 export type CardDensity = "comfortable" | "compact";
@@ -190,19 +191,36 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
 
   const handleShowCardAgingHeatmapChange = useCallback(async (v: boolean) => {
     if (!projectId) return;
+    const prev = showCardAgingHeatmap;
     setShowCardAgingHeatmap(v);
-    await setSettings({ [`board_card_aging_heatmap_${projectId}`]: String(v) }).catch(() => {});
-  }, [projectId]);
+    // Surface the write failure instead of swallowing it (#904): an
+    // un-whitelisted key 422s and the preference would silently never persist.
+    // Revert the optimistic state so the UI reflects what actually stuck.
+    try {
+      await setSettings({ [`board_card_aging_heatmap_${projectId}`]: String(v) });
+    } catch (err) {
+      setShowCardAgingHeatmap(prev);
+      showToast(`Failed to save card-aging heatmap setting: ${(err as Error).message}`);
+    }
+  }, [projectId, showCardAgingHeatmap]);
 
   const handleAgingThresholdsChange = useCallback(async (warm: number, hot: number) => {
     if (!projectId) return;
+    const prevWarm = agingWarmDays;
+    const prevHot = agingHotDays;
     setAgingWarmDays(warm);
     setAgingHotDays(hot);
-    await setSettings({
-      [`board_aging_warm_days_${projectId}`]: String(warm),
-      [`board_aging_hot_days_${projectId}`]: String(hot),
-    }).catch(() => {});
-  }, [projectId]);
+    try {
+      await setSettings({
+        [`board_aging_warm_days_${projectId}`]: String(warm),
+        [`board_aging_hot_days_${projectId}`]: String(hot),
+      });
+    } catch (err) {
+      setAgingWarmDays(prevWarm);
+      setAgingHotDays(prevHot);
+      showToast(`Failed to save card-aging thresholds: ${(err as Error).message}`);
+    }
+  }, [projectId, agingWarmDays, agingHotDays]);
 
   const handleRecentMergesCollapsedChange = useCallback(async (v: boolean) => {
     if (!projectId) return;
