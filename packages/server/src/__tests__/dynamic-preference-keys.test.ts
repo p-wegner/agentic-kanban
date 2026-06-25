@@ -14,6 +14,17 @@ describe("isProjectScopedDynamicKey", () => {
     }
   });
 
+  // #904: the card-aging heatmap toggle + warm/hot day thresholds were written
+  // client-side but never whitelisted here, so PUT /preferences/settings 422'd
+  // and the write was silently swallowed — the prefs appeared to work but never
+  // persisted (same class as #874). Assert them explicitly so a regression that
+  // drops a prefix fails loudly, not just via the loop above.
+  it("accepts the card-aging board prefixes (#904)", () => {
+    expect(isProjectScopedDynamicKey(`board_card_aging_heatmap_${PROJECT_ID}`)).toBe(true);
+    expect(isProjectScopedDynamicKey(`board_aging_warm_days_${PROJECT_ID}`)).toBe(true);
+    expect(isProjectScopedDynamicKey(`board_aging_hot_days_${PROJECT_ID}`)).toBe(true);
+  });
+
   it("rejects a project-scoped prefix with a non-hex suffix", () => {
     expect(isProjectScopedDynamicKey("start_mode_NotAUuid")).toBe(false);
     expect(isProjectScopedDynamicKey("wip_limit_ZZZ")).toBe(false);
