@@ -46,7 +46,7 @@ export class AgentState {
   readonly activeProcesses = new Map<string, ChildProcess>();
   readonly activePids = new Map<string, number>();
   readonly stdinOpen = new Map<string, boolean>();
-  readonly outputWatchers = new Map<string, { close(): void }>();
+  readonly outputWatchers = new Map<string, { close(): void; drainNow(): void }>();
   readonly pidWatchers = new Map<string, { close(): void }>();
   /** Per-session inactivity watchdogs: { reset(), close() } keyed by sessionId. */
   readonly hangWatchdogs = new Map<string, { reset(): void; close(): void }>();
@@ -142,13 +142,23 @@ function killPid(pid: number, context: Record<string, unknown>): boolean {
   return true;
 }
 
-/** Watch a session output file for new content and feed it to onOutput. */
+/**
+ * Watch a session output file for new content and feed it to onOutput.
+ *
+ * Returns a `drainNow()` in addition to `close()`. `drainNow()` runs the same
+ * read-from-offset-to-EOF logic the 500ms poll uses, but synchronously and on
+ * demand. The exit handler calls it once before emitting the exit event so the
+ * final chunk a fast-crashing detached agent wrote within the last poll interval
+ * is applied BEFORE launch-failure classification reads `hadSubstantiveOutput`
+ * — closing the exit-before-output race that misclassified real runs as
+ * zero-output launch failures (the recurring "~1s, 0 tokens = launch-failed").
+ */
 function startOutputFileWatcher(
   sessionId: string,
   filePath: string,
   onOutput: AgentOutputCallback,
   startOffset = 0,
-): { close(): void } {
+): { close(): void; drainNow(): void } {
   let offset = startOffset;
   let closed = false;
   const poll = () => {
@@ -185,6 +195,18 @@ function startOutputFileWatcher(
     close() {
       closed = true;
       clearInterval(timer);
+    },
+    // Final, synchronous drain to EOF. Tolerates being called after close() — it
+    // bypasses the `closed` guard so the exit handler can flush the tail even
+    // though it closes the watcher in the same teardown.
+    drainNow() {
+      const wasClosed = closed;
+      closed = false;
+      try {
+        poll();
+      } finally {
+        closed = wasClosed;
+      }
     },
   };
 }
@@ -344,6 +366,18 @@ function attachProcessHandlers(
     agentState.activeProcesses.delete(sessionId);
     agentState.activePids.delete(sessionId);
     agentState.stdinOpen.delete(sessionId);
+    // Detached agents stream stdout via a 500ms file poll. A fast crash that writes
+    // output and exits within one poll interval fires this exit handler before the
+    // poll flushed the tail — so do one explicit final drain to EOF here (an "all
+    // output applied" barrier) BEFORE closing the watcher and emitting exit. Without
+    // it the last chunk is lost and a real run is misclassified as a zero-output
+    // launch failure (#909).
+    if (shouldDetach) {
+      const outputWatcher = agentState.outputWatchers.get(sessionId);
+      try { outputWatcher?.drainNow(); } catch (err) {
+        console.error(`[agent] final output drain error: sessionId=${sessionId}`, err);
+      }
+    }
     closeSessionWatchers(sessionId);
     // Drain any captured stderr (detached agents) and surface it BEFORE the exit event,
     // so a process that died with zero stdout but a stderr reason is no longer an invisible
@@ -683,7 +717,16 @@ export function reattachSession(
     console.log(`[agent] reattached process exited: sessionId=${sessionId} pid=${pid}`);
     agentState.activePids.delete(sessionId);
     const w = agentState.outputWatchers.get(sessionId);
-    if (w) { w.close(); agentState.outputWatchers.delete(sessionId); }
+    // Final drain to EOF before closing the watcher and emitting exit — the PID poll is
+    // 5s, so a reattached agent that wrote its tail and died between polls would otherwise
+    // lose that output to the same exit-before-output race the live exit handler closes (#909).
+    if (w) {
+      try { w.drainNow(); } catch (err) {
+        console.error(`[agent] reattach final output drain error: sessionId=${sessionId}`, err);
+      }
+      w.close();
+      agentState.outputWatchers.delete(sessionId);
+    }
     // Keep the .out file for post-session replay
     try {
       onOutput({ type: "exit", sessionId, exitCode: null });
