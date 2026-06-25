@@ -6,17 +6,11 @@ import type { Database } from "../db/index.js";
 import { getPreference, setPreference, getAllPreferences, setPreferences } from "../repositories/preferences.repository.js";
 import { getProjectById } from "../repositories/project.repository.js";
 import { allHarnessSettingKeys } from "./harness-settings.js";
+import { SETTINGS_REGISTRY_KEYS } from "@agentic-kanban/shared/lib/settings-registry";
 import { commitObjectiveFile, isBoardStrategyKey, PROJECT_CONDUCTOR_OBJECTIVE_RELATIVE_PATH, projectIdFromBoardStrategyKey, writeStrategyObjective } from "./strategy-objective.service.js";
 import {
-  PREF_BUILDER_GUARDRAILS,
   PREF_CLAUDE_SUBSCRIPTION_RING,
-  PREF_CLAUDE_SUBSCRIPTION_ROTATION,
   PREF_CODEX_LICENSE_RING,
-  PREF_CODEX_LICENSE_ROTATION,
-  PREF_DEFAULT_MODEL_CLAUDE,
-  PREF_DEFAULT_MODEL_CODEX,
-  PREF_DEFAULT_MODEL_PI,
-  PREF_MERGE_STRATEGY,
   PREF_PI_PROFILE,
 } from "../constants/preference-keys.js";
 import { parseCodexLicenseRing, ringProfileNames, discoverCodexHomeProfiles } from "./codex-license-ring.js";
@@ -25,42 +19,19 @@ import { isProjectScopedDynamicKey } from "../lib/dynamic-preference-keys.js";
 import { resolveProviderDivergence } from "./project-runtime-config.service.js";
 import type { ProviderName } from "./agent-provider.js";
 
-export const SETTINGS_KEYS = [
-  "agent_command", "agent_args", "output_parser", "skip_permissions", "claude_profile",
-  "codex_profile", PREF_PI_PROFILE, "copilot_profile", "provider",
-  PREF_DEFAULT_MODEL_CLAUDE, PREF_DEFAULT_MODEL_CODEX, PREF_DEFAULT_MODEL_PI,
-  "mock_agent_profile", "mock_agent_delay_ms",
-  "permission_prompt_tool", "auto_review", "auto_merge", "auto_merge_in_review", "resume_with_new_model",
-  "review_auto_fix", "disabled_mcp_tools", "auto_start_followup", "require_manual_approval",
-  // auto_rebase_on_continue: read by workspace-session.service before relaunch.
-  // skip_preflight: defaults the per-launch preflight toggle in CreateWorkspaceForm.
-  // Both are surfaced as toggles in SettingsPanel but were absent here, so updateSettings
-  // silently dropped writes to them — the toggles could never persist.
-  "auto_rebase_on_continue", "skip_preflight",
-  "dependency_auto_chain",
-  "dynamic_column_scaling", "card_density", "persistent_agent", "learning_step_after_agent",
-  "learning_step_after_review", "learning_step_before_merge", "auto_monitor",
-  "auto_monitor_interval", "nudge_auto_start", "nudge_wip_limit", "projects_base_path", "plan_auto_continue",
-  "visual_verification_mode", "after_merge_verify_agent",
-  PREF_BUILDER_GUARDRAILS,
-  "backup_interval_min", "backup_keep_last",
-  "butler_event_feed", "butler_event_feed_min_interval_ms",
-  "butler_auto_answer", "butler_auto_answer_min_confidence",
-  "monitor_butler_enabled", "monitor_butler_interval_min",
-  "monitor_maintenance_window_enabled", "monitor_maintenance_window_end",
-  "backlog_empty_strategy", "backlog_empty_skill", "backlog_empty_cooldown_min",
-  "backlog_empty_last_run",
-  "backlog_stale_days",
-  "inprogress_stale_days",
-  "stale_column_threshold_days",
-  "auto_commit_strategy_objective",
-  PREF_MERGE_STRATEGY,
-  "issue_templates",
-  "export_skills_on_registration",
-  PREF_CODEX_LICENSE_RING,
-  PREF_CODEX_LICENSE_ROTATION,
-  PREF_CLAUDE_SUBSCRIPTION_RING,
-  PREF_CLAUDE_SUBSCRIPTION_ROTATION,
+/**
+ * The write/read whitelist for global settings — DERIVED from the single source of
+ * truth (`SETTINGS_REGISTRY` in `@agentic-kanban/shared/lib/settings-registry`) plus
+ * the dynamic per-harness keys (`allHarnessSettingKeys()`, which lives next to the
+ * harness defaults). Adding a setting is now a ONE-place edit in the registry — the
+ * key, its default, and the `Settings` TS type all derive from that entry, so a
+ * missing/typo'd key is a compile error rather than a runtime 422 (#903).
+ *
+ * The parity test `settings-registry-keys.test.ts` asserts this list equals the
+ * registry keys (+ harness keys) so the two never drift.
+ */
+export const SETTINGS_KEYS: string[] = [
+  ...SETTINGS_REGISTRY_KEYS,
   ...allHarnessSettingKeys(),
 ];
 
@@ -71,6 +42,19 @@ export const SETTINGS_KEYS = [
  */
 function isAllowedDynamicKey(key: string): boolean {
   return isProjectScopedDynamicKey(key) || isBoardStrategyKey(key);
+}
+
+/**
+ * Returned (non-null) by `updateSettings` when the write-time divergence guard (#903)
+ * rejects a provider/profile write that would drift from the active project's Bullseye.
+ * No preferences are persisted when this is present.
+ */
+export interface ProviderDivergenceRejection {
+  projectId: string;
+  bullseyeProvider: string | null;
+  bullseyeProfile: string | null;
+  settingsProvider: string | null;
+  settingsProfile: string | null;
 }
 
 function isConductorEnabledPreference(value: string | null | undefined): boolean {
@@ -111,11 +95,23 @@ export function createPreferenceService({ database }: { database: Database }) {
    * SILENTLY DROPPED — the toggle appeared to work but never persisted (this bit
    * auto_rebase_on_continue and skip_preflight). Valid keys are still applied, but
    * the dropped keys are returned so the caller can fail loudly instead of no-op'ing
-   * (ticket #874). SETTINGS_KEYS is a hand-maintained whitelist that must stay in
-   * sync with the client Settings interface + DEFAULT_SETTINGS, so a mistyped or
-   * un-registered key is almost always a bug worth surfacing.
+   * (ticket #874). SETTINGS_KEYS is now DERIVED from the typed settings registry
+   * (#903), so a mistyped or un-registered key is a compile error at the call site
+   * and a 422 on the wire.
+   *
+   * WRITE-TIME DIVERGENCE GUARD (#903): a write that touches the provider/profile
+   * settings prefs (`provider`, `*_profile`) and would put them OUT OF SYNC with the
+   * active project's Strategy Bullseye is REJECTED before anything is persisted —
+   * `divergence` is returned non-null and no rows are written. This turns the old
+   * passive Settings banner (`resolveProviderDivergence`) into an enforced invariant,
+   * retiring the set-provider-default skill's reason to exist: the prefs can no longer
+   * drift from the Bullseye in the first place.
    */
-  async function updateSettings(body: Record<string, string>): Promise<{ applied: string[]; dropped: string[] }> {
+  async function updateSettings(body: Record<string, string>): Promise<{
+    applied: string[];
+    dropped: string[];
+    divergence: ProviderDivergenceRejection | null;
+  }> {
     const applied: string[] = [];
     const dropped: string[] = [];
     for (const key of Object.keys(body)) {
@@ -123,9 +119,45 @@ export function createPreferenceService({ database }: { database: Database }) {
       else dropped.push(key);
     }
     const entries = applied.map((key) => ({ key, value: body[key] ?? "" }));
+
+    const divergence = await checkProviderDivergenceGuard(entries);
+    if (divergence) return { applied: [], dropped, divergence };
+
     await setPreferences(entries, database);
     await updateStrategyObjectives(entries);
-    return { applied, dropped };
+    return { applied, dropped, divergence: null };
+  }
+
+  /**
+   * Provider/profile keys that participate in Bullseye divergence. A write that does
+   * not touch any of these can never CREATE divergence, so the guard skips it (an
+   * unrelated toggle save must never be blocked by a pre-existing, untouched drift).
+   */
+  const PROVIDER_DIVERGENCE_KEYS = new Set(["provider", "claude_profile", "codex_profile", "copilot_profile", "pi_profile"]);
+
+  async function checkProviderDivergenceGuard(
+    entries: Array<{ key: string; value: string }>,
+  ): Promise<ProviderDivergenceRejection | null> {
+    if (!entries.some((e) => PROVIDER_DIVERGENCE_KEYS.has(e.key))) return null;
+
+    const projectId = await getActiveProjectId();
+    if (!projectId) return null;
+
+    // Project the write onto the current prefs and ask whether the RESULT diverges.
+    const rows = await getAllPreferences(database);
+    const projected = new Map(rows.map((r) => [r.key, r.value]));
+    for (const e of entries) projected.set(e.key, e.value);
+
+    const result = resolveProviderDivergence(projected, projectId);
+    if (!result.hasBullseye || !result.diverged) return null;
+
+    return {
+      projectId,
+      bullseyeProvider: result.bullseyeProvider,
+      bullseyeProfile: result.bullseyeProfile,
+      settingsProvider: result.settingsProvider,
+      settingsProfile: result.settingsProfile,
+    };
   }
 
   async function updateStrategyObjectives(entries: Array<{ key: string; value: string }>) {

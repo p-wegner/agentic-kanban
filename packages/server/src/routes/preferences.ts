@@ -79,7 +79,24 @@ export function createPreferencesRoute(database: Database) {
   // (#874).
   router.put("/settings", async (c) => {
     const body = await parseJsonBody<Record<string, string>>(c);
-    const { applied, dropped } = await preferenceService.updateSettings(body);
+    const { applied, dropped, divergence } = await preferenceService.updateSettings(body);
+    // Write-time provider/Bullseye divergence guard (#903): reject BEFORE persisting
+    // so the global provider/profile prefs can never drift from the active project's
+    // Strategy Bullseye. Nothing was written when `divergence` is present.
+    if (divergence) {
+      return c.json(
+        {
+          ok: false,
+          applied: [],
+          divergence,
+          error:
+            `Refusing settings write: provider/profile would diverge from the project's Strategy Bullseye ` +
+            `(${divergence.bullseyeProvider ?? "?"}:${divergence.bullseyeProfile ?? ""}). ` +
+            `Change the default via the Strategy Bullseye instead, or align the Bullseye first.`,
+        },
+        422,
+      );
+    }
     if (dropped.length > 0) {
       return c.json(
         {
