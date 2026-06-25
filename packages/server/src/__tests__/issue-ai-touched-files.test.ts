@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractJsonObject } from "../services/issue-ai.service.js";
+import { extractJsonObject, parseTouchedFilePaths } from "../services/issue-ai.service.js";
 
 describe("extractJsonObject (touched-files prediction robustness)", () => {
   it("parses a bare JSON object", () => {
@@ -49,5 +49,28 @@ describe("extractJsonObject (touched-files prediction robustness)", () => {
     expect(() => extractJsonObject("I could not determine the files.")).toThrow(
       /no JSON object found/,
     );
+  });
+});
+
+describe("parseTouchedFilePaths (coupling overlap input, #917)", () => {
+  it("extracts the path of each touched file", () => {
+    const json = JSON.stringify([
+      { path: "src/a.ts", reason: "x", confidence: "high" },
+      { path: "src/b.ts", reason: "y", confidence: "low" },
+    ]);
+    expect(parseTouchedFilePaths(json)).toEqual(["src/a.ts", "src/b.ts"]);
+  });
+
+  it("returns [] for null/empty/invalid input", () => {
+    expect(parseTouchedFilePaths(null)).toEqual([]);
+    expect(parseTouchedFilePaths(undefined)).toEqual([]);
+    expect(parseTouchedFilePaths("")).toEqual([]);
+    expect(parseTouchedFilePaths("not json")).toEqual([]);
+    expect(parseTouchedFilePaths("{}")).toEqual([]);
+  });
+
+  it("skips entries with no/invalid path", () => {
+    const json = JSON.stringify([{ path: "ok.ts" }, { reason: "no path" }, { path: 5 }]);
+    expect(parseTouchedFilePaths(json)).toEqual(["ok.ts"]);
   });
 });
