@@ -1,0 +1,206 @@
+import type { ParseContext, ParsedStreamEvent } from "./types.js";
+import {
+  getStringArray,
+  hasFields,
+  numberValue,
+  objectValue,
+  pushDisplay,
+  registerToolName,
+  stringValue,
+  toolNameFor,
+} from "./shared.js";
+
+export function parseClaudeEvent(obj: Record<string, unknown>, context: ParseContext): ParsedStreamEvent | undefined {
+  const result: ParsedStreamEvent = {};
+  const type = obj.type;
+  const subtype = obj.subtype;
+  const isSubagentMessage = obj.parent_tool_use_id != null;
+
+  if (type === "system" && subtype === "init") {
+    const sessionId = stringValue(obj.session_id) ?? "";
+    if (sessionId) result.providerSessionId = sessionId;
+    pushDisplay(result, {
+      kind: "init",
+      model: stringValue(obj.model) ?? "unknown",
+      sessionId,
+      cwd: stringValue(obj.cwd) ?? "",
+      tools: getStringArray(obj.tools),
+      mcpServers: Array.isArray(obj.mcp_servers) ? obj.mcp_servers as { name: string; status: string }[] : [],
+      permissionMode: stringValue(obj.permissionMode) ?? "",
+    });
+  } else if (type === "system" && subtype === "task_started") {
+    pushDisplay(result, {
+      kind: "task_started",
+      taskId: stringValue(obj.task_id) ?? "",
+      toolUseId: stringValue(obj.tool_use_id) ?? "",
+      description: stringValue(obj.description) ?? "",
+      taskType: stringValue(obj.task_type) ?? "",
+    });
+  } else if (type === "system" && subtype === "notification") {
+    pushDisplay(result, {
+      kind: "notification",
+      key: stringValue(obj.key) ?? "",
+      text: stringValue(obj.text) ?? "",
+      priority: stringValue(obj.priority) ?? "",
+    });
+  } else if (type === "system" && subtype === "status") {
+    const text = stringValue(obj.status) ?? stringValue(obj.message);
+    if (text) pushDisplay(result, { kind: "raw", text: `[status] ${text}` });
+  } else if (type === "system" && subtype === "task_progress") {
+    const usage = objectValue(obj.usage);
+    const toolUses = numberValue(usage.tool_uses);
+    if (toolUses) result.liveStats = { model: "", contextTokens: 0, toolUses };
+    const text = stringValue(obj.message) ?? stringValue(obj.progress);
+    if (text) pushDisplay(result, { kind: "raw", text: `[progress] ${text}` });
+  }
+
+  if (type === "assistant") {
+    const message = objectValue(obj.message);
+    const usage = objectValue(message.usage);
+    const model = stringValue(message.model) ?? "";
+    const contextTokens = numberValue(usage.cache_read_input_tokens) + numberValue(usage.input_tokens);
+    if (!isSubagentMessage && (model || contextTokens > 0)) {
+      result.liveStats = { model, contextTokens };
+    }
+
+    const content = Array.isArray(message.content) ? message.content as Record<string, unknown>[] : [];
+    const textParts: string[] = [];
+    for (const block of content) {
+      const blockType = block.type;
+      if (blockType === "thinking") {
+        const text = stringValue(block.thinking);
+        if (text) pushDisplay(result, { kind: "thinking", text });
+      } else if (blockType === "text") {
+        const text = stringValue(block.text);
+        if (text) {
+          textParts.push(text);
+          pushDisplay(result, { kind: "assistant", text, model });
+        }
+      } else if (blockType === "image") {
+        const source = objectValue(block.source);
+        if (source.type === "base64" && typeof source.data === "string") {
+          pushDisplay(result, { kind: "image", mediaType: stringValue(source.media_type) ?? "image/png", data: source.data });
+        }
+      } else if (blockType === "tool_use") {
+        const id = stringValue(block.id) ?? "";
+        const name = stringValue(block.name) ?? "unknown";
+        const input = objectValue(block.input);
+        registerToolName(context, id, name);
+        if (!result.toolActivity) result.toolActivity = { name, input, toolUseId: id || undefined };
+        pushDisplay(result, { kind: "tool_use", id, name, input: JSON.stringify(block.input, null, 2), inputParsed: input });
+        if (name === "TodoWrite" && Array.isArray(input.todos)) {
+          result.todos = (input.todos as Array<{ subject: string; status: string }>).map((t) => ({ subject: t.subject, status: t.status }));
+        }
+        if (name === "Agent") {
+          result.liveStats = { ...(result.liveStats ?? { model: "", contextTokens: 0 }), subagentDelta: 1 };
+        }
+      }
+    }
+    if (textParts.length > 0) result.assistantText = textParts.join("\n");
+  }
+
+  if (type === "user") {
+    const content = Array.isArray(objectValue(obj.message).content)
+      ? objectValue(obj.message).content as Record<string, unknown>[]
+      : [];
+    for (const block of content) {
+      if (block.type !== "tool_result") continue;
+      const toolUseId = stringValue(block.tool_use_id) ?? "";
+      const images: Array<{ mediaType: string; data: string }> = [];
+      let output = "";
+      if (typeof block.content === "string") {
+        output = block.content;
+      } else if (Array.isArray(block.content)) {
+        const textParts: string[] = [];
+        for (const inner of block.content as Record<string, unknown>[]) {
+          if (inner.type === "text" && typeof inner.text === "string") textParts.push(inner.text);
+          const source = objectValue(inner.source);
+          if (inner.type === "image" && source.type === "base64" && typeof source.data === "string") {
+            images.push({ mediaType: stringValue(source.media_type) ?? "image/png", data: source.data });
+          }
+        }
+        output = textParts.length > 0 ? textParts.join("\n") : images.length > 0 ? "" : JSON.stringify(block.content);
+      } else {
+        output = JSON.stringify(block.content);
+      }
+      result.toolResult = {
+        toolUseId,
+        ...(images.length > 0 ? { images } : {}),
+        ...(output ? { agentResultText: output } : {}),
+      };
+      pushDisplay(result, {
+        kind: "tool_result",
+        toolName: toolNameFor(context, toolUseId, toolUseId ? `tool_${toolUseId}` : "unknown"),
+        toolUseId,
+        output,
+        isError: block.is_error === true,
+        ...(images.length > 0 ? { images } : {}),
+      });
+    }
+  }
+
+  if (type === "rate_limit_event") {
+    const info = objectValue(obj.rate_limit_info);
+    result.rateLimitInfo = {
+      status: stringValue(info.status) ?? "",
+      rateLimitType: stringValue(info.rateLimitType) ?? "",
+      resetsAt: numberValue(info.resetsAt) || undefined,
+      overageStatus: stringValue(info.overageStatus),
+      overageDisabledReason: stringValue(info.overageDisabledReason),
+      isUsingOverage: typeof info.isUsingOverage === "boolean" ? info.isUsingOverage : undefined,
+    };
+    pushDisplay(result, {
+      kind: "rate_limit",
+      status: result.rateLimitInfo.status,
+      resetsAt: result.rateLimitInfo.resetsAt ?? 0,
+      rateLimitType: result.rateLimitInfo.rateLimitType,
+      overageStatus: result.rateLimitInfo.overageStatus,
+      overageDisabledReason: result.rateLimitInfo.overageDisabledReason,
+      isUsingOverage: result.rateLimitInfo.isUsingOverage,
+    });
+  }
+
+  if (type === "result") {
+    const usage = objectValue(obj.usage);
+    const modelUsage = objectValue(obj.modelUsage);
+    const firstModelEntry = Object.keys(modelUsage).length > 0
+      ? Object.entries(modelUsage)[0] as [string, Record<string, unknown>]
+      : undefined;
+    const firstModelUsage = firstModelEntry?.[1];
+    const rawCost = obj.total_cost_usd ?? obj.cost_usd;
+    const inputTokens = numberValue(firstModelUsage?.inputTokens ?? usage.input_tokens);
+    const outputTokens = numberValue(firstModelUsage?.outputTokens ?? usage.output_tokens);
+    const model = firstModelEntry?.[0] ?? stringValue(obj.model) ?? "";
+    if (!isSubagentMessage) {
+      result.stats = {
+        durationMs: numberValue(obj.duration_ms),
+        totalCostUsd: numberValue(rawCost),
+        inputTokens,
+        outputTokens,
+        numTurns: numberValue(obj.num_turns) || 1,
+        model,
+        success: obj.subtype === "success" && !obj.is_error,
+        agentSummary: stringValue(obj.result),
+      };
+      result.turnComplete = true;
+      pushDisplay(result, {
+        kind: "result",
+        success: result.stats.success,
+        durationMs: result.stats.durationMs,
+        result: result.stats.agentSummary ?? "",
+        totalCostUsd: result.stats.totalCostUsd,
+        inputTokens,
+        outputTokens,
+        model,
+      });
+    }
+    const contextTokens = numberValue(usage.cache_read_input_tokens) + numberValue(usage.input_tokens);
+    if (!isSubagentMessage && contextTokens > 0) {
+      result.liveStats = { ...(result.liveStats ?? { model: "", contextTokens }), contextTokens };
+    }
+    const denials = Array.isArray(obj.permission_denials) ? obj.permission_denials as Array<Record<string, unknown>> : [];
+    if (denials.some((d) => d.tool_name === "ExitPlanMode")) result.exitPlanModeDenied = true;
+  }
+
+  return hasFields(result) ? result : undefined;
+}

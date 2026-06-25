@@ -14,6 +14,21 @@ rejected as pure cost (Drizzle is not going to be swapped; the wire boundary alr
 architecture guardrails (`.dependency-cruiser.cjs`, `pnpm lint:arch`) enforce the layering that
 matters (routes → services → repositories → db; shared is an acyclic leaf) instead.
 
+## God-module gate — the gate of record is a script, not just a test (#888)
+The cohesion-aware god-module guard (>1000-line hard ceiling + low-cohesion export-breadth
+signal, #875) had two parts that drifted: `packages/shared/__tests__/max-file-size.test.ts`
+asserted it, but it lived only in `test:mine` and a 1042-line `agent-stream-parser.ts` merged
+past it (the gate was decorative). The **merge-blocking gate of record is now
+`scripts/check-god-modules.mjs`** — a dependency-light Node script (works with OR without the
+`typescript` devDep, falling back to a regex heuristic for the cohesion count) that exits
+non-zero on any breach. It is wired into `pnpm check:arch` (and thus `pnpm check` / `check:full`)
+and into CI (`.github/workflows/arch-gate.yml`, runs on PRs to master). Keep its thresholds in
+sync with `max-file-size.test.ts` (that test stays as the in-IDE signal). When a file trips,
+decompose it behind a facade barrel — `agent-stream-parser.ts` is the canonical example: the
+per-provider parsers live in `src/lib/agent-stream/{claude,codex,copilot,pi}.ts` + shared helpers
+in `agent-stream/shared.ts`, all re-exported through the unchanged facade so consumers' imports of
+`@agentic-kanban/shared/lib/agent-stream-parser` don't change.
+
 ## Client-bundle safety (#791)
 `shared/src/index.ts → lib/index.ts` is reachable by the **client** bundle. Any module re-exported
 there as a VALUE that imports a Node builtin (`node:child_process`, `fs`, …) white-screens the whole
