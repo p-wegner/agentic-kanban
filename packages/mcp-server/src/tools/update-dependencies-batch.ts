@@ -17,7 +17,7 @@ const edgeSchema = z.object({
 export interface DependencyBatchEdge {
   issueId: string;
   dependsOnId: string;
-  type?: (typeof VALID_TYPES)[number];
+  type?: string;
   action: "add" | "remove";
 }
 
@@ -34,6 +34,9 @@ export async function applyUpdateDependenciesBatch(
     const e = edges[i];
     if (e.action === "add" && e.issueId === e.dependsOnId) {
       return { ok: false, message: `edges[${i}]: an issue cannot depend on itself` };
+    }
+    if (e.type && !VALID_TYPES.includes(e.type as (typeof VALID_TYPES)[number])) {
+      return { ok: false, message: `edges[${i}]: invalid type` };
     }
   }
 
@@ -93,7 +96,7 @@ export async function applyUpdateDependenciesBatch(
   await db.transaction(async (tx) => {
     for (let i = 0; i < edges.length; i++) {
       const e = edges[i];
-      const type = e.type ?? "depends_on";
+      const type = (e.type ?? "depends_on") as (typeof VALID_TYPES)[number];
       const srcProj = projectByIssue.get(e.issueId);
       const tgtProj = projectByIssue.get(e.dependsOnId);
 
