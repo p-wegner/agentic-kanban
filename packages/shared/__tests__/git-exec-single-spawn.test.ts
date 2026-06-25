@@ -226,7 +226,12 @@ function findGitSpawns(filePath: string, text: string): Offender[] {
       const arg0 = node.arguments[0];
       if (arg0) {
         const cmd = resolveString(arg0, stringConsts);
-        if (cmd != null && GIT_COMMANDS.has(cmd.trim())) {
+        // For `exec`/`execSync` the whole shell command line is arg0 (e.g.
+        // `exec("git status")`), so the program is the FIRST whitespace token.
+        // For `execFile`/`spawn` arg0 is already just the binary. Taking the
+        // first token works for both and never widens to a false positive.
+        const program = cmd == null ? null : cmd.trim().split(/\s+/, 1)[0];
+        if (program != null && GIT_COMMANDS.has(program)) {
           const { line } = sf.getLineAndCharacterOfPosition(node.getStart(sf));
           offenders.push({ line: line + 1, snippet: lineTextAt(text, line) });
         }
@@ -259,6 +264,18 @@ describe("git-exec single-spawn gate", () => {
 
     const offenders = findGitSpawns("sample.ts", source);
     expect(offenders.map((o) => o.line)).toEqual([6, 7, 8]);
+  });
+
+  it("flags the `exec`/`execSync` shell-string form where the whole command line is arg0", () => {
+    const source = [
+      `import { exec, execSync } from "node:child_process";`,
+      `const GIT_CMD = "git rev-parse HEAD";`,
+      `execSync("git status --porcelain", { cwd });`, // literal shell command
+      `exec(GIT_CMD, () => {});`, // const-resolved shell command
+    ].join("\n");
+
+    const offenders = findGitSpawns("sample.ts", source);
+    expect(offenders.map((o) => o.line)).toEqual([3, 4]);
   });
 
   it("does not flag legitimate non-git spawns (pnpm, taskkill, where claude)", () => {
