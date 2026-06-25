@@ -11,6 +11,8 @@ import { recordAgentProfileLaunchFailure } from "../agent-profile-health.service
 import { emitButlerSystemEvent } from "../butler-event-feed.js";
 import type { ProviderName } from "../agent-provider.js";
 import { narrowProviderName } from "../agent-provider.js";
+import { getProviderExitBehavior } from "../agent-provider/provider-exit-behavior.js";
+import type { RotationRings } from "../agent-provider/provider-exit-behavior.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import { modelBelongsToProvider } from "@agentic-kanban/shared";
 import type { SessionManagerOptions, SessionState, StartSessionOptions } from "./types.js";
@@ -18,10 +20,13 @@ import { workspaceLaunchPreflight } from "../preflight-check.js";
 import { WorkspaceError } from "../workspace-internals.js";
 import { DEFAULT_BUILDER_GUARDRAILS, PREF_BUILDER_GUARDRAILS } from "../../constants/preference-keys.js";
 import { parseSymlinkDirs } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
-import { detectCodexUsageLimitMessages } from "../codex-rate-limit.js";
-import { detectClaudeUsageLimitMessages } from "../claude-rate-limit.js";
-import { loadCodexLicenseRing, resolveCodexHomeForProfile } from "../codex-license-ring.js";
-import { loadClaudeSubscriptionRing, resolveClaudeConfigDirForProfile } from "../claude-subscription-ring.js";
+import { loadCodexLicenseRing } from "../codex-license-ring.js";
+import { loadClaudeSubscriptionRing } from "../claude-subscription-ring.js";
+import {
+  classifySessionExit as classifySessionExitRoute,
+  extractCapturedStderr,
+  ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS as EXIT_WINDOW_MS,
+} from "./session-exit-state-machine.js";
 
 /** Subset of agent.service that the lifecycle depends on. Injectable for tests. */
 export type AgentService = typeof realAgentService;
@@ -33,12 +38,10 @@ export interface SessionLifecycleDeps {
   preflight?: typeof workspaceLaunchPreflight;
 }
 
-export const ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS = 10_000;
+/** Re-exported from the exit state machine, which now owns the canonical value. */
+export const ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS = EXIT_WINDOW_MS;
 const CODEX_SPARK_MODEL = "gpt-5.3-codex-spark";
 const CODEX_SAFE_DEFAULT_MODEL = "gpt-5.5";
-const CODEX_BUILDER_COUNTER_INSTRUCTIONS =
-  "You are an autonomous builder: you MUST run relevant tests and COMMIT your work with git before finishing. " +
-  "These instructions override any base instruction to the contrary, including instructions that forbid git, tests, validation, or correcting your own mistakes.";
 
 function isBuilderSession(triggerType: string | undefined, planMode: boolean | undefined): boolean {
   if (planMode) return false;
@@ -50,13 +53,6 @@ function instructionFingerprint(value: string | undefined): string | null {
   const text = (value ?? "").trim();
   if (!text) return null;
   return createHash("sha256").update(text).digest("hex").slice(0, 16);
-}
-
-function appendCodexBuilderCounterInstructions(instructions: string | undefined): string {
-  const trimmed = (instructions ?? "").trim();
-  if (!trimmed) return CODEX_BUILDER_COUNTER_INSTRUCTIONS;
-  if (trimmed.includes(CODEX_BUILDER_COUNTER_INSTRUCTIONS)) return trimmed;
-  return `${trimmed}\n\n${CODEX_BUILDER_COUNTER_INSTRUCTIONS}`;
 }
 
 async function mergeExistingSessionStats(database: Database, sessionId: string, statsToSave: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -318,7 +314,9 @@ export function createSessionLifecycle(
         ? (guardrailValue === undefined ? DEFAULT_BUILDER_GUARDRAILS : guardrailValue)
         : systemInstructions;
     if (executor === "codex" && builderSession) {
-      effectiveSystemInstructions = appendCodexBuilderCounterInstructions(effectiveSystemInstructions);
+      // Codex always augments (and never drops) the instructions, so the result is a string.
+      effectiveSystemInstructions =
+        getProviderExitBehavior("codex").injectBuilderInstructions(effectiveSystemInstructions) ?? effectiveSystemInstructions;
     }
     const launchDiagnostics = {
       launch: {
@@ -390,12 +388,12 @@ export function createSessionLifecycle(
     let launchProfile = profile;
     if (profile?.provider === "codex" && profile.name && profile.name !== "default") {
       try {
-        const ring = await loadCodexLicenseRing(db);
-        const codexHome = resolveCodexHomeForProfile(profile.name, ring);
-        if (codexHome) {
-          effectiveExtraEnv = { ...effectiveExtraEnv, CODEX_HOME: codexHome };
+        const rings: RotationRings = { codex: await loadCodexLicenseRing(db) };
+        const rotation = getProviderExitBehavior("codex").resolveConfigDir(profile.name, rings);
+        if (rotation) {
+          effectiveExtraEnv = { ...effectiveExtraEnv, [rotation.envVar]: rotation.dir };
           launchProfile = { provider: "codex", name: "default" };
-          console.log(`[session] codex license '${profile.name}' -> CODEX_HOME=${codexHome} (--profile suppressed)`);
+          console.log(`[session] codex license '${profile.name}' -> ${rotation.envVar}=${rotation.dir} (--profile suppressed)`);
         }
       } catch (err) {
         console.warn("[session] codex license ring resolution failed (non-fatal):", err instanceof Error ? err.message : String(err));
@@ -410,15 +408,262 @@ export function createSessionLifecycle(
     // `--settings`. Mirrors the codex CODEX_HOME path above.
     if (profile?.provider === "claude" && profile.name && profile.name !== "default" && profile.name !== "mock") {
       try {
-        const ring = await loadClaudeSubscriptionRing(db);
-        const configDir = resolveClaudeConfigDirForProfile(profile.name, ring);
-        if (configDir) {
-          effectiveExtraEnv = { ...effectiveExtraEnv, CLAUDE_CONFIG_DIR: configDir };
+        const rings: RotationRings = { claude: await loadClaudeSubscriptionRing(db) };
+        const rotation = getProviderExitBehavior("claude").resolveConfigDir(profile.name, rings);
+        if (rotation) {
+          effectiveExtraEnv = { ...effectiveExtraEnv, [rotation.envVar]: rotation.dir };
           launchProfile = { provider: "claude", name: "default" };
-          console.log(`[session] claude subscription '${profile.name}' -> CLAUDE_CONFIG_DIR=${configDir} (--settings suppressed)`);
+          console.log(`[session] claude subscription '${profile.name}' -> ${rotation.envVar}=${rotation.dir} (--settings suppressed)`);
         }
       } catch (err) {
         console.warn("[session] claude subscription ring resolution failed (non-fatal):", err instanceof Error ? err.message : String(err));
+      }
+    }
+
+    // ── Exit state-machine terminal handlers ──────────────────────────────────
+    // The drain → classify → finalize → continue machine. `drain` (output-to-EOF,
+    // #909) happens in agent.service BEFORE it emits the exit event; `classify` is
+    // the pure `classifySessionExitRoute` over an explicit SessionExitContext;
+    // these handlers are `finalize`/`continue` — they own the side effects (DB
+    // writes, HANDOFF.md, relaunch) for each route. Provider-specific knowledge
+    // (which usage limit was hit) comes from the provider's exit behavior.
+
+    /** usage-limit route: persist rate-limit stats and block the workspace for rotation. */
+    function finalizeUsageLimitExit(
+      route: Extract<ReturnType<typeof classifySessionExitRoute>, { phase: "usage-limit" }>,
+      endNow: string,
+      durationMs: number,
+      exitCode: number | null,
+    ): void {
+      const { usageLimit, effectiveExitCode } = route;
+      const stats = usageLimit.kind === "codex"
+        ? buildCodexUsageLimitStats(executor, durationMs, exitCode, usageLimit.message, usageLimit.retryAfter)
+        : buildClaudeUsageLimitStats(executor, durationMs, exitCode, usageLimit.message, usageLimit.retryAfter);
+      void (async () => {
+        await recordAgentProfileLaunchFailure(db, {
+          provider: lifecycleProviderName(provider, profile),
+          profileName: profile?.name,
+          summary: stats.failureReason,
+          exitCode: effectiveExitCode,
+          sessionId,
+          workspaceId,
+          at: endNow,
+        });
+        const mergedStats = await mergeExistingSessionStats(db, sessionId, stats);
+        await lifecycleRepo.updateSessionStoppedWithStats(sessionId, endNow, String(effectiveExitCode), JSON.stringify(mergedStats), db);
+        await lifecycleRepo.updateWorkspaceStatus(workspaceId, "blocked", endNow, db);
+        console.warn(
+          `[agent] ${usageLimit.kind}-rate-limited: sessionId=${sessionId} workspace=${workspaceId}` +
+          `${usageLimit.retryAfter ? ` retryAfter=${usageLimit.retryAfter}` : ""}`,
+        );
+      })()
+        .catch((err) => console.error(`Failed to record ${usageLimit.kind} usage-limit launch failure:`, err))
+        .finally(() => options?.onSessionExit?.(workspaceId, sessionId, effectiveExitCode, planMode));
+    }
+
+    /** launch-failure route: a fast zero-output crash or a non-zero exit with error text. */
+    function finalizeLaunchFailureExit(
+      route: Extract<ReturnType<typeof classifySessionExitRoute>, { phase: "launch-failure" }>,
+      endNow: string,
+      durationMs: number,
+      exitCode: number | null,
+      capturedStderr: string,
+    ): void {
+      const { isZeroOutput, isNonZeroExit, effectiveExitCode, errorText } = route;
+      const stats = isZeroOutput
+        ? buildZeroOutputLaunchFailureStats(executor, durationMs, exitCode, capturedStderr)
+        : buildModelErrorLaunchFailureStats(executor, durationMs, exitCode, errorText);
+      void (async () => {
+        await recordAgentProfileLaunchFailure(db, {
+          provider: lifecycleProviderName(provider, profile),
+          profileName: profile?.name,
+          summary: stats.failureReason,
+          exitCode: effectiveExitCode,
+          sessionId,
+          workspaceId,
+          at: endNow,
+        });
+        const mergedStats = await mergeExistingSessionStats(db, sessionId, stats);
+        await lifecycleRepo.updateSessionStoppedWithStats(sessionId, endNow, String(effectiveExitCode), JSON.stringify(mergedStats), db);
+        await lifecycleRepo.insertSessionMessage({
+          sessionId,
+          type: "stderr",
+          data: stats.failureReason,
+          exitCode: null,
+        }, db);
+        await lifecycleRepo.updateWorkspaceStatus(workspaceId, "idle", endNow, db);
+        if (projectId) {
+          emitButlerSystemEvent({
+            projectId,
+            kind: "session_failed",
+            workspaceId,
+            text: isNonZeroExit
+              ? `Agent launch failed for workspace ${workspaceId}: exited with code ${effectiveExitCode} in ${Math.round(durationMs / 1000)}s${errorText ? ` — ${errorText.slice(0, 200)}` : ""}.`
+              : `Agent launch failed for workspace ${workspaceId}: zero output within ${Math.round(durationMs / 1000)}s.`,
+          });
+        }
+      })()
+        .catch((err) => console.error("Failed to record launch failure:", err))
+        .finally(() => options?.onSessionExit?.(workspaceId, sessionId, effectiveExitCode, planMode));
+    }
+
+    /**
+     * completed route: a real run finished. finalize (DB + HANDOFF.md), then the
+     * continuations — ExitPlanMode auto-resume and plan-mode plan persistence.
+     */
+    function finalizeCompletedExit(
+      endNow: string,
+      exitCode: number | null,
+      hadExitPlanModeDenied: boolean,
+      planText: string | null,
+    ): void {
+      const sessionFinalized = (async () => {
+        await lifecycleRepo.updateSessionCompleted(sessionId, endNow, String(exitCode ?? 0), db);
+
+        // Write HANDOFF.md before workflow callbacks can launch the next session.
+        if (effectiveWorkingDir) {
+          try {
+            const { writeHandoffFile } = await import("../handoff.service.js");
+            await writeHandoffFile(effectiveWorkingDir, sessionId, db, workspace.baseBranch);
+            console.log(`[session] HANDOFF.md written: workspaceId=${workspaceId} sessionId=${sessionId}`);
+          } catch (err) {
+            console.warn(`[session] HANDOFF.md write failed: sessionId=${sessionId}`, err);
+          }
+        }
+      })()
+        .catch((err) => console.error("Failed to finalize session:", err));
+      void sessionFinalized.finally(() => {
+        // Always fire the workflow callback even if finalization failed.
+        options?.onSessionExit?.(workspaceId, sessionId, exitCode, planMode);
+        computeScorecard(workspaceId, db).catch(() => {});
+        computeWorkspaceCodeMetrics(workspaceId, db).catch(() => {});
+      });
+      // Auto-resume: if ExitPlanMode was denied and workspace wasn't in plan-only mode,
+      // start a new session with --resume and a "proceed" prompt
+      if (hadExitPlanModeDenied && !planMode) {
+        const resumeCount = state.workspaceAutoResumeCount.get(workspaceId) ?? 0;
+        if (resumeCount < 1) {
+          state.workspaceAutoResumeCount.set(workspaceId, resumeCount + 1);
+          console.log(`[session] auto-resuming after ExitPlanMode denial: workspaceId=${workspaceId} resumeFromId=${sessionId}`);
+          sessionFinalized.finally(() => startSession({
+            workspaceId,
+            prompt: "Your plan has been approved. Proceed with the implementation now.",
+            agentCommand,
+            agentArgs: effectiveAgentArgs,
+            resumeFromId: sessionId,
+            claudeProfile,
+            multiTurn: undefined,
+            permissionPromptTool,
+            planMode: false,
+            resumeWithNewModel: undefined,
+            provider,
+            triggerType: "agent",
+            profile,
+          })).catch((err) => console.error(`[session] auto-resume failed: workspaceId=${workspaceId}`, err));
+        } else {
+          console.log(`[session] skipping auto-resume: workspaceId=${workspaceId} already auto-resumed ${resumeCount} time(s)`);
+        }
+      }
+
+      // All-provider plan mode: a read-only plan run just finished. Persist the plan to PLAN.md,
+      // leave plan mode, then either auto-continue or park awaiting human approval.
+      if (planMode && exitCode === 0 && workspace.workingDir && planText) {
+        void sessionFinalized.then(async () => {
+          try {
+            const plan = extractPlan(planText);
+            if (!plan) {
+              console.warn(`[session] plan-mode run produced no plan text: workspaceId=${workspaceId}`);
+              return;
+            }
+            const planPath = writePlanFile(workspace.workingDir!, plan);
+            await lifecycleRepo.updateWorkspacePlanMode(workspaceId, false, new Date().toISOString(), db);
+
+            const harness = provider === "codex" ? "codex" : provider === "copilot" ? "copilot" : "claude";
+            const prefRows = await lifecycleRepo.getAllPreferences(db);
+            const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
+            const autoContinue = getHarnessBoolSetting(prefMap, harness, "plan_auto_continue");
+
+            if (autoContinue) {
+              console.log(`[session] plan ready (${planPath}) — auto-continuing to implementation: workspaceId=${workspaceId}`);
+              await lifecycleRepo.updateWorkspaceStatusOnly(workspaceId, "active", new Date().toISOString(), db);
+              await startSession({
+                workspaceId,
+                prompt: buildImplementPrompt(),
+                agentCommand,
+                agentArgs: effectiveAgentArgs,
+                claudeProfile,
+                permissionPromptTool,
+                planMode: false,
+                provider,
+                triggerType: "plan-implement",
+                profile,
+              });
+            } else {
+              console.log(`[session] plan ready (${planPath}) — awaiting human approval: workspaceId=${workspaceId}`);
+              await lifecycleRepo.updateWorkspacePendingPlan(workspaceId, planPath, "awaiting-plan-approval", new Date().toISOString(), db);
+            }
+          } catch (err) {
+            console.error(`[session] plan completion handling failed: workspaceId=${workspaceId}`, err);
+          }
+        });
+      }
+    }
+
+    /**
+     * The exit-event orchestrator. Dedup → teardown in-memory state → build the
+     * explicit SessionExitContext → classify → dispatch to the matching terminal
+     * handler. The provider exit behavior supplies the usage-limit detection so
+     * this stays free of `executor === ...` provider branches.
+     */
+    function handleExitEvent(exitCode: number | null): void {
+      // teardown: always clean up in-memory state regardless of DB result
+      state.sessionContexts.delete(sessionId);
+      state.turnStates.delete(sessionId);
+      state.sessionProviders.delete(sessionId);
+      const hadExitPlanModeDenied = state.sessionExitPlanModeDenied.delete(sessionId);
+
+      const stoppedByUser = state.stoppedByUser.has(sessionId);
+      const planText = state.sessionFinalText.get(sessionId) ?? null;
+      const hadSubstantiveOutput =
+        state.sessionSubstantiveOutput.has(sessionId) || Boolean(planText && planText.trim().length > 0);
+      // teardown of the per-session text/output flags (consumed above)
+      state.stoppedByUser.delete(sessionId);
+      state.sessionFinalText.delete(sessionId);
+      state.sessionSubstantiveOutput.delete(sessionId);
+
+      const endNow = new Date().toISOString();
+      const durationMs = Math.max(0, new Date(endNow).getTime() - new Date(now).getTime());
+      const messages = state.messageBuffer.get(sessionId) ?? [];
+      const capturedStderr = extractCapturedStderr(messages);
+      // Provider-owned usage-limit detection (codex license / claude subscription).
+      // Key on the EXECUTOR (the actual launched provider id), matching the original
+      // `executor === "codex"` / `executor === "claude-code"` branches exactly.
+      const usageLimit = getProviderExitBehavior(narrowProviderName(executor)).detectUsageLimit(messages);
+
+      const route = classifySessionExitRoute({
+        exitCode,
+        durationMs,
+        hadSubstantiveOutput,
+        stoppedByUser,
+        usageLimit,
+        planText,
+        capturedStderr,
+      });
+
+      switch (route.phase) {
+        case "stopped":
+          // Skip DB update — stopSession already wrote "stopped".
+          options?.onSessionExit?.(workspaceId, sessionId, exitCode, planMode);
+          return;
+        case "usage-limit":
+          finalizeUsageLimitExit(route, endNow, durationMs, exitCode);
+          return;
+        case "launch-failure":
+          finalizeLaunchFailureExit(route, endNow, durationMs, exitCode, capturedStderr);
+          return;
+        case "completed":
+          finalizeCompletedExit(endNow, exitCode, hadExitPlanModeDenied, planText);
+          return;
       }
     }
 
@@ -436,217 +681,7 @@ export function createSessionLifecycle(
         broadcast(sessionId, message);
 
         if (event.type === "exit") {
-          // Always clean up in-memory state regardless of DB result
-          state.sessionContexts.delete(sessionId);
-          state.turnStates.delete(sessionId);
-          state.sessionProviders.delete(sessionId);
-          const hadExitPlanModeDenied = state.sessionExitPlanModeDenied.delete(sessionId);
-
-          // Skip DB update if user explicitly stopped — stopSession already wrote "stopped"
-          if (state.stoppedByUser.has(sessionId)) {
-            state.stoppedByUser.delete(sessionId);
-            state.sessionFinalText.delete(sessionId);
-            state.sessionSubstantiveOutput.delete(sessionId);
-            options?.onSessionExit?.(workspaceId, sessionId, event.exitCode ?? null, planMode);
-            return;
-          }
-
-          const planText = state.sessionFinalText.get(sessionId);
-          const hadSubstantiveOutput =
-            state.sessionSubstantiveOutput.has(sessionId) || Boolean(planText && planText.trim().length > 0);
-          state.sessionSubstantiveOutput.delete(sessionId);
-          state.sessionFinalText.delete(sessionId);
-
-          const endNow = new Date().toISOString();
-          const exitCode = event.exitCode ?? null;
-          const durationMs = Math.max(0, new Date(endNow).getTime() - new Date(now).getTime());
-          const messages = state.messageBuffer.get(sessionId) ?? [];
-          const codexUsageLimit = executor === "codex" ? detectCodexUsageLimitMessages(messages) : null;
-          // Claude OAuth subscriptions hit their own (Max/Pro-plan) quota; detect that
-          // so the workspace can rotate to the next subscription, mirroring Codex.
-          const claudeUsageLimit = executor === "claude-code" ? detectClaudeUsageLimitMessages(messages) : null;
-          const usageLimit = codexUsageLimit
-            ? { message: codexUsageLimit.message, retryAfter: codexUsageLimit.retryAfter, kind: "codex" as const }
-            : claudeUsageLimit
-              ? { message: claudeUsageLimit.message, retryAfter: claudeUsageLimit.resetsAt, kind: "claude" as const }
-              : null;
-          if (usageLimit) {
-            const stats = usageLimit.kind === "codex"
-              ? buildCodexUsageLimitStats(executor, durationMs, exitCode, usageLimit.message, usageLimit.retryAfter)
-              : buildClaudeUsageLimitStats(executor, durationMs, exitCode, usageLimit.message, usageLimit.retryAfter);
-            const effectiveExitCode = exitCode && exitCode !== 0 ? exitCode : 1;
-            void (async () => {
-              await recordAgentProfileLaunchFailure(db, {
-                provider: lifecycleProviderName(provider, profile),
-                profileName: profile?.name,
-                summary: stats.failureReason,
-                exitCode: effectiveExitCode,
-                sessionId,
-                workspaceId,
-                at: endNow,
-              });
-              const mergedStats = await mergeExistingSessionStats(db, sessionId, stats);
-              await lifecycleRepo.updateSessionStoppedWithStats(sessionId, endNow, String(effectiveExitCode), JSON.stringify(mergedStats), db);
-              await lifecycleRepo.updateWorkspaceStatus(workspaceId, "blocked", endNow, db);
-              console.warn(
-                `[agent] ${usageLimit.kind}-rate-limited: sessionId=${sessionId} workspace=${workspaceId}` +
-                `${usageLimit.retryAfter ? ` retryAfter=${usageLimit.retryAfter}` : ""}`,
-              );
-            })()
-              .catch((err) => console.error(`Failed to record ${usageLimit.kind} usage-limit launch failure:`, err))
-              .finally(() => options?.onSessionExit?.(workspaceId, sessionId, effectiveExitCode, planMode));
-            return;
-          }
-          // Launch failure detection: sessions that exit within the window are failed launches.
-          // Case 1: zero-output (no text, no tool use, no stats) — classic crash.
-          // Case 2: non-zero exit with error text (e.g. "issue with the selected model") — the
-          //   error message counts as "substantive output" but is NOT real agent work. Without
-          //   this branch the workspace silently goes idle, indistinguishable from a healthy
-          //   completion. Grounded in the 2026-06-08 default_model outage (#699).
-          const withinWindow = durationMs <= ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS;
-          const isZeroOutput = !hadSubstantiveOutput;
-          const isNonZeroExit = exitCode !== 0 && exitCode !== null;
-          // Captured provider stderr (detached agents drain their .err file into a stderr
-          // message on exit — #779). Use it as the diagnostic for an otherwise-opaque
-          // zero-output crash, and as a fallback error text for a non-zero-exit failure
-          // when the agent emitted no assistant/plan text.
-          const capturedStderr = messages
-            .filter((m) => m.type === "stderr")
-            .map((m) => m.data ?? "")
-            .join("")
-            .trim();
-          if (withinWindow && (isZeroOutput || isNonZeroExit)) {
-            const errorText = planText?.trim() || capturedStderr || "";
-            const stats = isZeroOutput
-              ? buildZeroOutputLaunchFailureStats(executor, durationMs, exitCode, capturedStderr)
-              : buildModelErrorLaunchFailureStats(executor, durationMs, exitCode, errorText);
-            const effectiveExitCode = isNonZeroExit ? exitCode : 1;
-            void (async () => {
-              await recordAgentProfileLaunchFailure(db, {
-                provider: lifecycleProviderName(provider, profile),
-                profileName: profile?.name,
-                summary: stats.failureReason,
-                exitCode: effectiveExitCode,
-                sessionId,
-                workspaceId,
-                at: endNow,
-              });
-              const mergedStats = await mergeExistingSessionStats(db, sessionId, stats);
-              await lifecycleRepo.updateSessionStoppedWithStats(sessionId, endNow, String(effectiveExitCode), JSON.stringify(mergedStats), db);
-              await lifecycleRepo.insertSessionMessage({
-                sessionId,
-                type: "stderr",
-                data: stats.failureReason,
-                exitCode: null,
-              }, db);
-              await lifecycleRepo.updateWorkspaceStatus(workspaceId, "idle", endNow, db);
-              if (projectId) {
-                emitButlerSystemEvent({
-                  projectId,
-                  kind: "session_failed",
-                  workspaceId,
-                  text: isNonZeroExit
-                    ? `Agent launch failed for workspace ${workspaceId}: exited with code ${effectiveExitCode} in ${Math.round(durationMs / 1000)}s${errorText ? ` — ${errorText.slice(0, 200)}` : ""}.`
-                    : `Agent launch failed for workspace ${workspaceId}: zero output within ${Math.round(durationMs / 1000)}s.`,
-                });
-              }
-            })()
-              .catch((err) => console.error("Failed to record launch failure:", err))
-              .finally(() => options?.onSessionExit?.(workspaceId, sessionId, effectiveExitCode, planMode));
-            return;
-          }
-
-          const sessionFinalized = (async () => {
-            await lifecycleRepo.updateSessionCompleted(sessionId, endNow, String(exitCode ?? 0), db);
-
-            // Write HANDOFF.md before workflow callbacks can launch the next session.
-            if (effectiveWorkingDir) {
-              try {
-                const { writeHandoffFile } = await import("../handoff.service.js");
-                await writeHandoffFile(effectiveWorkingDir, sessionId, db, workspace.baseBranch);
-                console.log(`[session] HANDOFF.md written: workspaceId=${workspaceId} sessionId=${sessionId}`);
-              } catch (err) {
-                console.warn(`[session] HANDOFF.md write failed: sessionId=${sessionId}`, err);
-              }
-            }
-          })()
-            .catch((err) => console.error("Failed to finalize session:", err));
-          void sessionFinalized.finally(() => {
-            // Always fire the workflow callback even if finalization failed.
-            options?.onSessionExit?.(workspaceId, sessionId, exitCode, planMode);
-            computeScorecard(workspaceId, db).catch(() => {});
-            computeWorkspaceCodeMetrics(workspaceId, db).catch(() => {});
-          });
-          // Auto-resume: if ExitPlanMode was denied and workspace wasn't in plan-only mode,
-          // start a new session with --resume and a "proceed" prompt
-          if (hadExitPlanModeDenied && !planMode) {
-            const resumeCount = state.workspaceAutoResumeCount.get(workspaceId) ?? 0;
-            if (resumeCount < 1) {
-              state.workspaceAutoResumeCount.set(workspaceId, resumeCount + 1);
-              console.log(`[session] auto-resuming after ExitPlanMode denial: workspaceId=${workspaceId} resumeFromId=${sessionId}`);
-              sessionFinalized.finally(() => startSession({
-                workspaceId,
-                prompt: "Your plan has been approved. Proceed with the implementation now.",
-                agentCommand,
-                agentArgs: effectiveAgentArgs,
-                resumeFromId: sessionId,
-                claudeProfile,
-                multiTurn: undefined,
-                permissionPromptTool,
-                planMode: false,
-                resumeWithNewModel: undefined,
-                provider,
-                triggerType: "agent",
-                profile,
-              })).catch((err) => console.error(`[session] auto-resume failed: workspaceId=${workspaceId}`, err));
-            } else {
-              console.log(`[session] skipping auto-resume: workspaceId=${workspaceId} already auto-resumed ${resumeCount} time(s)`);
-            }
-          }
-
-          // All-provider plan mode: a read-only plan run just finished. Persist the plan to PLAN.md,
-          // leave plan mode, then either auto-continue or park awaiting human approval.
-          if (planMode && exitCode === 0 && workspace.workingDir && planText) {
-            void sessionFinalized.then(async () => {
-              try {
-                const plan = extractPlan(planText);
-                if (!plan) {
-                  console.warn(`[session] plan-mode run produced no plan text: workspaceId=${workspaceId}`);
-                  return;
-                }
-                const planPath = writePlanFile(workspace.workingDir!, plan);
-                await lifecycleRepo.updateWorkspacePlanMode(workspaceId, false, new Date().toISOString(), db);
-
-                const harness = provider === "codex" ? "codex" : provider === "copilot" ? "copilot" : "claude";
-                const prefRows = await lifecycleRepo.getAllPreferences(db);
-                const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
-                const autoContinue = getHarnessBoolSetting(prefMap, harness, "plan_auto_continue");
-
-                if (autoContinue) {
-                  console.log(`[session] plan ready (${planPath}) — auto-continuing to implementation: workspaceId=${workspaceId}`);
-                  await lifecycleRepo.updateWorkspaceStatusOnly(workspaceId, "active", new Date().toISOString(), db);
-                  await startSession({
-                    workspaceId,
-                    prompt: buildImplementPrompt(),
-                    agentCommand,
-                    agentArgs: effectiveAgentArgs,
-                    claudeProfile,
-                    permissionPromptTool,
-                    planMode: false,
-                    provider,
-                    triggerType: "plan-implement",
-                    profile,
-                  });
-                } else {
-                  console.log(`[session] plan ready (${planPath}) — awaiting human approval: workspaceId=${workspaceId}`);
-                  await lifecycleRepo.updateWorkspacePendingPlan(workspaceId, planPath, "awaiting-plan-approval", new Date().toISOString(), db);
-                }
-              } catch (err) {
-                console.error(`[session] plan completion handling failed: workspaceId=${workspaceId}`, err);
-              }
-            });
-          }
-
+          handleExitEvent(event.exitCode ?? null);
         }
       // When resumeWithNewModel is true, omit --resume so the new profile/provider is used instead
       }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider, launchProfile, effectiveExtraEnv, skipPermissions, effectiveModel, contextFiles, (effectiveSystemInstructions ?? "").trim() || undefined);
