@@ -94,7 +94,7 @@ export function DependencyDisplay({
           {(() => {
             // Compute effective display type based on direction
             // For incoming deps, we show the inverse perspective
-            type DisplayCategory = "depends_on" | "blocked_by" | "blocking" | "child_of" | "parent_of" | "related_to" | "duplicates";
+            type DisplayCategory = "depends_on" | "blocked_by" | "blocking" | "child_of" | "parent_of" | "related_to" | "duplicates" | "coupled_with";
 
             function getDisplayType(dep: typeof dependencies.dependencies[number]): DisplayCategory {
               const isOutgoing = dep.issueId === issue.id;
@@ -110,6 +110,7 @@ export function DependencyDisplay({
                 case "child_of": return "parent_of";    // someone is my child = I'm their parent
                 case "related_to": return "related_to";
                 case "duplicates": return "duplicates";
+                case "coupled_with": return "coupled_with";  // symmetric — same both directions
                 default: return "related_to";
               }
             }
@@ -122,6 +123,7 @@ export function DependencyDisplay({
               duplicates: "Duplicates",
               parent_of: "Parent of",
               child_of: "Child of",
+              coupled_with: "Coupled with",
             };
 
             type DepWithDisplay = typeof dependencies.dependencies[number] & { displayType: DisplayCategory };
@@ -138,7 +140,7 @@ export function DependencyDisplay({
               byDisplayType.set(dep.displayType, list);
             }
 
-            const typeOrder: DisplayCategory[] = ["depends_on", "blocked_by", "blocking", "child_of", "parent_of", "related_to", "duplicates"];
+            const typeOrder: DisplayCategory[] = ["depends_on", "blocked_by", "blocking", "child_of", "parent_of", "related_to", "duplicates", "coupled_with"];
             const typeColors: Record<DisplayCategory, string> = {
               depends_on: "bg-blue-50 text-blue-700",
               blocked_by: "bg-red-50 text-red-700",
@@ -147,6 +149,7 @@ export function DependencyDisplay({
               duplicates: "bg-yellow-50 text-yellow-700",
               parent_of: "bg-green-50 text-green-700",
               child_of: "bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300",
+              coupled_with: "bg-purple-50 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300",
             };
             return typeOrder
               .filter((t) => byDisplayType.has(t))
