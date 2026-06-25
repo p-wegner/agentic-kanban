@@ -1,7 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { randomUUID } from "node:crypto";
+import { mkdtempSync, existsSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { eq } from "drizzle-orm";
-import { projects, projectStatuses, issues, workspaces, sessions, agentSkills } from "@agentic-kanban/shared/schema";
+import { projects, projectStatuses, issues, workspaces, sessions, agentSkills, preferences } from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createMockProc } from "./helpers/mocks.js";
 import { createSessionState } from "../services/session-manager/types.js";
@@ -461,6 +464,130 @@ describe("session-lifecycle", () => {
     expect(state.sessionContexts.has(sessionId)).toBe(false);
     expect(state.turnStates.has(sessionId)).toBe(false);
     expect(state.sessionProviders.has(sessionId)).toBe(false);
+  });
+
+  // --- Plan mode (#924): never strand the workspace ---
+
+  /** A broadcast that also records messages into the state's messageBuffer (like the real one). */
+  function recordingBroadcast(state: ReturnType<typeof createSessionState>) {
+    return vi.fn((sessionId: string, message: AgentOutputMessage) => {
+      if (!state.messageBuffer.has(sessionId)) state.messageBuffer.set(sessionId, []);
+      state.messageBuffer.get(sessionId)!.push(message);
+    });
+  }
+
+  const PLAN_BEGIN = "===PLAN BEGIN===";
+  const PLAN_END = "===PLAN END===";
+
+  /** Put the workspace into plan mode with a REAL temp working dir (so writePlanFile works). */
+  async function enterPlanMode(workspaceId: string): Promise<string> {
+    const dir = mkdtempSync(join(tmpdir(), "ak924-"));
+    await db.update(workspaces).set({ planMode: true, workingDir: dir }).where(eq(workspaces.id, workspaceId));
+    return dir;
+  }
+
+  it("recovers a codex plan from the raw stream buffer and clears planMode (auto-continues)", async () => {
+    const workspaceId = await seedWorkspace(db);
+    // Flip the workspace into plan mode (a plan-mode launch sets this).
+    const dir = await enterPlanMode(workspaceId);
+    const { service: agentService, getOnOutput } = createFakeAgentService();
+    const onSessionExit = vi.fn();
+    const state = createSessionState();
+    const broadcast = recordingBroadcast(state);
+
+    const lifecycle = createSessionLifecycle(state, { onSessionExit }, broadcast, { db, agentService, preflight: okPreflight() });
+    const sessionId = await lifecycle.startSession({ workspaceId, prompt: "plan it", provider: "codex", planMode: true });
+    // The real broadcaster parses stdout and flags substantive output; the recording
+    // broadcast only buffers, so flag it directly (the agent did emit an agent_message).
+    state.sessionSubstantiveOutput.add(sessionId);
+
+    const onOutput = getOnOutput();
+    expect(onOutput).toBeDefined();
+    // Codex emits the plan as an agent_message item. The lifecycle's sessionFinalText
+    // capture is the path that was observed to miss this; the raw-buffer fallback recovers it.
+    const planText = `Here is the plan.\n${PLAN_BEGIN}\n# Plan\n1. Do the work\n${PLAN_END}`;
+    onOutput!({
+      type: "stdout",
+      data: JSON.stringify({ type: "item.completed", item: { id: "i1", type: "agent_message", text: planText } }),
+    } as never);
+    onOutput!({ type: "exit", exitCode: 0 } as never);
+
+    await flush(() => onSessionExit.mock.calls.length > 0);
+    // The auto-continue path launches an implement session — wait for the 2nd launch.
+    await flush(() => (agentService.launch as ReturnType<typeof vi.fn>).mock.calls.length >= 2);
+
+    const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(wsRows[0].planMode).toBe(false);
+    // plan_auto_continue defaults true → an implement session was launched (status active).
+    expect(wsRows[0].status).toBe("active");
+    const launchCalls = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls;
+    expect(launchCalls.length).toBeGreaterThanOrEqual(2);
+    // PLAN.md was written with the recovered plan block.
+    expect(existsSync(join(dir, "PLAN.md"))).toBe(true);
+    expect(readFileSync(join(dir, "PLAN.md"), "utf-8")).toContain("1. Do the work");
+  });
+
+  it("parks at awaiting-plan-approval when plan_auto_continue is disabled", async () => {
+    const workspaceId = await seedWorkspace(db);
+    await enterPlanMode(workspaceId);
+    // Disable auto-continue (legacy flat key consulted by getHarnessBoolSetting).
+    const now = new Date().toISOString();
+    await db.insert(preferences).values({ key: "plan_auto_continue", value: "false", updatedAt: now });
+    const { service: agentService, getOnOutput } = createFakeAgentService();
+    const onSessionExit = vi.fn();
+    const state = createSessionState();
+    const broadcast = recordingBroadcast(state);
+
+    const lifecycle = createSessionLifecycle(state, { onSessionExit }, broadcast, { db, agentService, preflight: okPreflight() });
+    const sessionId = await lifecycle.startSession({ workspaceId, prompt: "plan it", provider: "codex", planMode: true });
+    state.sessionSubstantiveOutput.add(sessionId);
+
+    const onOutput = getOnOutput();
+    const planText = `${PLAN_BEGIN}\n# Plan\n1. Do the work\n${PLAN_END}`;
+    onOutput!({
+      type: "stdout",
+      data: JSON.stringify({ type: "item.completed", item: { id: "i1", type: "agent_message", text: planText } }),
+    } as never);
+    onOutput!({ type: "exit", exitCode: 0 } as never);
+
+    await flush(() => onSessionExit.mock.calls.length > 0);
+    await flush(() => false); // settle the async plan handler
+
+    const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(wsRows[0].planMode).toBe(false);
+    expect(wsRows[0].status).toBe("awaiting-plan-approval");
+    expect(wsRows[0].pendingPlanPath).toBe("PLAN.md");
+  });
+
+  it("clears planMode and marks the workspace blocked when a plan run produces NO plan", async () => {
+    const workspaceId = await seedWorkspace(db);
+    await enterPlanMode(workspaceId);
+    const { service: agentService, getOnOutput } = createFakeAgentService();
+    const onSessionExit = vi.fn();
+    const state = createSessionState();
+    const broadcast = recordingBroadcast(state);
+
+    const lifecycle = createSessionLifecycle(state, { onSessionExit }, broadcast, { db, agentService, preflight: okPreflight() });
+    const sessionId = await lifecycle.startSession({ workspaceId, prompt: "plan it", provider: "codex", planMode: true });
+    state.sessionSubstantiveOutput.add(sessionId);
+
+    const onOutput = getOnOutput();
+    // Agent message with NO marker block (the strand scenario).
+    onOutput!({
+      type: "stdout",
+      data: JSON.stringify({ type: "item.completed", item: { id: "i1", type: "agent_message", text: "I considered the problem but produced no plan block." } }),
+    } as never);
+    onOutput!({ type: "exit", exitCode: 0 } as never);
+
+    await flush(() => onSessionExit.mock.calls.length > 0);
+    await flush(() => false); // settle the async plan handler
+
+    const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
+    // planMode must NOT be left stuck-true (the #924 strand) — a follow-up turn must not re-run read-only.
+    expect(wsRows[0].planMode).toBe(false);
+    expect(wsRows[0].status).toBe("blocked");
+    // No implement session launched.
+    expect((agentService.launch as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
   });
 
   it("stopSession on an already-stopped session is a no-op (does not throw)", async () => {

@@ -3,7 +3,7 @@ import type { Database } from "../../db/index.js";
 import { createHash, randomUUID } from "node:crypto";
 import * as lifecycleRepo from "../../repositories/session-lifecycle.repository.js";
 import * as realAgentService from "../agent.service.js";
-import { extractPlan, writePlanFile, buildImplementPrompt } from "../plan-mode.service.js";
+import { extractPlanFromMessages, writePlanFile, buildImplementPrompt } from "../plan-mode.service.js";
 import { getHarnessBoolSetting } from "../harness-settings.js";
 import { computeScorecard } from "../workspace-scorecard.service.js";
 import { computeWorkspaceCodeMetrics } from "../workspace-code-metrics.service.js";
@@ -565,47 +565,102 @@ export function createSessionLifecycle(
         }
       }
 
-      // All-provider plan mode: a read-only plan run just finished. Persist the plan to PLAN.md,
-      // leave plan mode, then either auto-continue or park awaiting human approval.
-      if (planMode && exitCode === 0 && workspace.workingDir && planText) {
-        void sessionFinalized.then(async () => {
-          try {
-            const plan = extractPlan(planText);
-            if (!plan) {
-              console.warn(`[session] plan-mode run produced no plan text: workspaceId=${workspaceId}`);
-              return;
-            }
-            const planPath = writePlanFile(workspace.workingDir!, plan);
-            await lifecycleRepo.updateWorkspacePlanMode(workspaceId, false, new Date().toISOString(), db);
+      // All-provider plan mode: a read-only plan run just finished. The handler now
+      // runs whenever the session was launched in plan mode — NOT only when a plan was
+      // captured — so a plan-mode run can never silently leave the workspace parked with
+      // planMode stuck true (which made every follow-up turn re-run read-only/plan-only,
+      // the #924 strand). Three outcomes, all of which CLEAR planMode and leave a visible
+      // state:
+      //   1. plan extracted → write PLAN.md, then auto-continue or park awaiting approval.
+      //   2. no plan / non-zero exit → mark the workspace blocked (needs-attention).
+      if (planMode) {
+        void sessionFinalized.then(() =>
+          finalizePlanModeExit(workspaceId, exitCode, planText, {
+            agentCommand,
+            agentArgs: effectiveAgentArgs,
+            claudeProfile,
+            permissionPromptTool,
+            provider,
+            profile,
+          }),
+        );
+      }
+    }
 
-            const harness = provider === "codex" ? "codex" : provider === "copilot" ? "copilot" : "claude";
-            const prefRows = await lifecycleRepo.getAllPreferences(db);
-            const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
-            const autoContinue = getHarnessBoolSetting(prefMap, harness, "plan_auto_continue");
+    /**
+     * Plan-mode completion (#924). Always clears planMode and lands the workspace in a
+     * VISIBLE state — never a silent idle In Progress with planMode stuck true. Extracted
+     * so the "no plan captured / non-zero exit" recovery path is explicit and testable.
+     */
+    async function finalizePlanModeExit(
+      workspaceId: string,
+      exitCode: number | null,
+      planText: string | null,
+      relaunch: {
+        agentCommand: string | undefined;
+        agentArgs: string | undefined;
+        claudeProfile: string | undefined;
+        permissionPromptTool: string | undefined;
+        provider: import("../agent-provider.js").ProviderId | undefined;
+        profile: { provider: ProviderName; name: string } | undefined;
+      },
+    ): Promise<void> {
+      try {
+        // `planText` is already the strict marker-block (or null) from the raw-buffer scan;
+        // a non-zero exit invalidates it (a crashed run can't have produced a real plan).
+        const plan = exitCode === 0 ? planText : null;
+        const nowIso = () => new Date().toISOString();
 
-            if (autoContinue) {
-              console.log(`[session] plan ready (${planPath}) — auto-continuing to implementation: workspaceId=${workspaceId}`);
-              await lifecycleRepo.updateWorkspaceStatusOnly(workspaceId, "active", new Date().toISOString(), db);
-              await startSession({
-                workspaceId,
-                prompt: buildImplementPrompt(),
-                agentCommand,
-                agentArgs: effectiveAgentArgs,
-                claudeProfile,
-                permissionPromptTool,
-                planMode: false,
-                provider,
-                triggerType: "plan-implement",
-                profile,
-              });
-            } else {
-              console.log(`[session] plan ready (${planPath}) — awaiting human approval: workspaceId=${workspaceId}`);
-              await lifecycleRepo.updateWorkspacePendingPlan(workspaceId, planPath, "awaiting-plan-approval", new Date().toISOString(), db);
-            }
-          } catch (err) {
-            console.error(`[session] plan completion handling failed: workspaceId=${workspaceId}`, err);
+        // No usable plan (empty text, extract failed, or non-zero exit): clear plan mode
+        // and surface a needs-attention state instead of stranding the workspace. A normal
+        // follow-up turn then implements (never re-runs read-only — planMode is now false).
+        if (!plan || !workspace.workingDir) {
+          await lifecycleRepo.updateWorkspacePlanMode(workspaceId, false, nowIso(), db);
+          await lifecycleRepo.updateWorkspaceStatusOnly(workspaceId, "blocked", nowIso(), db);
+          const reason = exitCode !== 0
+            ? `plan run exited with code ${exitCode}`
+            : "plan run produced no plan text";
+          console.warn(`[session] plan-mode run produced no usable plan (${reason}): workspaceId=${workspaceId} — cleared planMode, marked blocked`);
+          if (projectId) {
+            emitButlerSystemEvent({
+              projectId,
+              kind: "session_failed",
+              workspaceId,
+              text: `Plan-mode run for workspace ${workspaceId} produced no usable plan (${reason}). Cleared plan mode and marked the workspace blocked — a normal turn will now implement.`,
+            });
           }
-        });
+          return;
+        }
+
+        const planPath = writePlanFile(workspace.workingDir, plan);
+        await lifecycleRepo.updateWorkspacePlanMode(workspaceId, false, nowIso(), db);
+
+        const harness = relaunch.provider === "codex" ? "codex" : relaunch.provider === "copilot" ? "copilot" : "claude";
+        const prefRows = await lifecycleRepo.getAllPreferences(db);
+        const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
+        const autoContinue = getHarnessBoolSetting(prefMap, harness, "plan_auto_continue");
+
+        if (autoContinue) {
+          console.log(`[session] plan ready (${planPath}) — auto-continuing to implementation: workspaceId=${workspaceId}`);
+          await lifecycleRepo.updateWorkspaceStatusOnly(workspaceId, "active", nowIso(), db);
+          await startSession({
+            workspaceId,
+            prompt: buildImplementPrompt(),
+            agentCommand: relaunch.agentCommand,
+            agentArgs: relaunch.agentArgs,
+            claudeProfile: relaunch.claudeProfile,
+            permissionPromptTool: relaunch.permissionPromptTool,
+            planMode: false,
+            provider: relaunch.provider,
+            triggerType: "plan-implement",
+            profile: relaunch.profile,
+          });
+        } else {
+          console.log(`[session] plan ready (${planPath}) — awaiting human approval: workspaceId=${workspaceId}`);
+          await lifecycleRepo.updateWorkspacePendingPlan(workspaceId, planPath, "awaiting-plan-approval", nowIso(), db);
+        }
+      } catch (err) {
+        console.error(`[session] plan completion handling failed: workspaceId=${workspaceId}`, err);
       }
     }
 
@@ -623,9 +678,19 @@ export function createSessionLifecycle(
       const hadExitPlanModeDenied = state.sessionExitPlanModeDenied.delete(sessionId);
 
       const stoppedByUser = state.stoppedByUser.has(sessionId);
-      const planText = state.sessionFinalText.get(sessionId) ?? null;
+      const messages = state.messageBuffer.get(sessionId) ?? [];
+      const capturedFinalText = state.sessionFinalText.get(sessionId) ?? null;
+      // Plan text for a plan-mode run is the STRICT marker block scanned out of the RAW
+      // message buffer (#924) — provider-agnostic, and never marker-less chatter. Codex's
+      // final agent_message was observed to slip past `sessionFinalText`, leaving the
+      // parser-captured text empty; scanning the raw stdout recovers the
+      // `===PLAN BEGIN/END===` block regardless of which fields the parser populated. When
+      // NO marker block exists, this is null and the workspace is surfaced as needs-attention
+      // rather than auto-continuing on unrelated text. Non-plan runs keep the captured text.
+      const planText = planMode ? extractPlanFromMessages(messages) : capturedFinalText;
       const hadSubstantiveOutput =
-        state.sessionSubstantiveOutput.has(sessionId) || Boolean(planText && planText.trim().length > 0);
+        state.sessionSubstantiveOutput.has(sessionId) ||
+        Boolean((planText ?? capturedFinalText)?.trim().length);
       // teardown of the per-session text/output flags (consumed above)
       state.stoppedByUser.delete(sessionId);
       state.sessionFinalText.delete(sessionId);
@@ -633,7 +698,6 @@ export function createSessionLifecycle(
 
       const endNow = new Date().toISOString();
       const durationMs = Math.max(0, new Date(endNow).getTime() - new Date(now).getTime());
-      const messages = state.messageBuffer.get(sessionId) ?? [];
       const capturedStderr = extractCapturedStderr(messages);
       // Provider-owned usage-limit detection (codex license / claude subscription).
       // Key on the EXECUTOR (the actual launched provider id), matching the original
