@@ -1,4 +1,4 @@
-import { eq, and, inArray, sql, desc } from "drizzle-orm";
+import { eq, and, or, inArray, sql, desc } from "drizzle-orm";
 import { issues, projectStatuses, issueDependencies, agentSkills, tags, issueTags, workflowNodes } from "@agentic-kanban/shared/schema";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
@@ -79,6 +79,33 @@ export async function insertIssueDependency(
   database: Database = db,
 ): Promise<void> {
   await database.insert(issueDependencies).values(values);
+}
+
+/**
+ * All dependency edges between `issueId` and any of `otherIds`, in EITHER direction.
+ * Used by the analyzer's coupling guard to detect a pre-existing sequential
+ * (`depends_on`/`blocked_by`) edge before auto-creating a `coupled_with` peer edge.
+ */
+export async function getDependencyEdgesBetween(
+  issueId: string,
+  otherIds: string[],
+  database: Database = db,
+): Promise<Array<{ issueId: string; dependsOnId: string; type: DependencyType }>> {
+  if (otherIds.length === 0) return [];
+  const rows = await database
+    .select({
+      issueId: issueDependencies.issueId,
+      dependsOnId: issueDependencies.dependsOnId,
+      type: issueDependencies.type,
+    })
+    .from(issueDependencies)
+    .where(
+      or(
+        and(eq(issueDependencies.issueId, issueId), inArray(issueDependencies.dependsOnId, otherIds)),
+        and(eq(issueDependencies.dependsOnId, issueId), inArray(issueDependencies.issueId, otherIds)),
+      ),
+    );
+  return rows as Array<{ issueId: string; dependsOnId: string; type: DependencyType }>;
 }
 
 export async function getIssueForTouchedFiles(

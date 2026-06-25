@@ -4,7 +4,7 @@ import { eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { prodDeps, type ToolDeps } from "./deps.js";
 
-const VALID_TYPES = ["depends_on", "blocked_by", "related_to", "duplicates", "parent_of", "child_of"] as const;
+const VALID_TYPES = ["depends_on", "blocked_by", "related_to", "duplicates", "parent_of", "child_of", "coupled_with"] as const;
 const DIRECTIONAL = new Set<string>(["depends_on", "blocked_by", "parent_of", "child_of"]);
 
 const edgeSchema = z.object({

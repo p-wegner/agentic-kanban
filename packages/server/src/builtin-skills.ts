@@ -84,7 +84,7 @@ Issue ID: {{issueId}}`,
 4. **Add dependency links** using add_dependency:
    - issueId: the target issue's ID (the one being analyzed)
    - dependsOnId: the ID of the related issue
-   - type: choose from depends_on, blocked_by, related_to, parent_of, child_of
+   - type: choose from depends_on, blocked_by, related_to, coupled_with, parent_of, child_of
 5. **Update the issue description** with a "## Dependencies" section listing each relationship and its rationale
 
 ## Dependency type guide
@@ -92,6 +92,7 @@ Issue ID: {{issueId}}`,
 - depends_on: target issue cannot start until the other is complete
 - blocked_by: another issue is actively blocking the target
 - related_to: same component/area, merge conflict risk, or thematically paired
+- coupled_with: two issues touch the same code and are best implemented together (peer coupling); distinct from depends_on (sequential) and related_to (topical only). Do NOT couple two issues that already have a depends_on edge between them — that pairing is sequential by design.
 - parent_of: target is an epic; the other is a sub-task
 - child_of: target is a sub-task of the other issue
 
@@ -308,7 +309,7 @@ npx agentic-kanban workspace review <workspace-id>               # trigger AI re
 \`\`\`
 npx agentic-kanban issue dependency list <issue-id>
 npx agentic-kanban issue dependency add <issue-id> <target-id> -t depends_on
-# Types: depends_on, blocked_by, related_to, duplicates, parent_of, child_of
+# Types: depends_on, blocked_by, related_to, duplicates, parent_of, child_of, coupled_with
 \`\`\`
 
 ### Project management

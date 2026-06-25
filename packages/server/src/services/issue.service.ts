@@ -522,7 +522,7 @@ export function createIssueService(deps: {
     }
 
     const depType = (type || "depends_on") as DependencyType;
-    const validTypes: string[] = ["depends_on", "blocked_by", "related_to", "duplicates", "parent_of", "child_of"];
+    const validTypes: string[] = ["depends_on", "blocked_by", "related_to", "duplicates", "parent_of", "child_of", "coupled_with"];
     if (!validTypes.includes(depType)) {
       throw new IssueError(`Invalid dependency type. Must be one of: ${validTypes.join(", ")}`, "BAD_REQUEST");
     }
@@ -588,7 +588,7 @@ export function createIssueService(deps: {
     skipped: { edge: typeof edges[number]; reason: string }[];
     projectIds: string[];
   }> {
-    const VALID_TYPES = ["depends_on", "blocked_by", "related_to", "duplicates", "parent_of", "child_of"];
+    const VALID_TYPES = ["depends_on", "blocked_by", "related_to", "duplicates", "parent_of", "child_of", "coupled_with"];
     const DIRECTIONAL = new Set(["depends_on", "blocked_by", "parent_of", "child_of"]);
 
     for (let i = 0; i < edges.length; i++) {
