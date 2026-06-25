@@ -14,6 +14,8 @@ Agent subprocesses are spawned with `detached: true` + `proc.unref()` in `agent.
 
 On startup, `server-start.ts` checks which "running" sessions still have a live PID (`process.kill(pid, 0)`). Dead sessions are marked "stopped" and their workspaces set to "idle". Surviving sessions are reattached: the session manager restores in-memory state (context, provider), the output file watcher resumes from the last byte offset, and a PID poll monitors for exit. The shutdown handler only calls `agentService.killAll()` on `SIGINT` (user Ctrl+C), not `SIGTERM` (hot-reload signal), so agents survive server restarts but are cleaned up on intentional shutdown.
 
+**Exit-before-output drain (#909) — don't remove it.** The output file watcher polls every 500ms (5s for a reattached PID poll), so a detached agent that writes output and crashes within one poll interval would fire `exit` before its tail was read — and launch-failure classification, reading `hadSubstantiveOutput`, would MISCLASSIFY the real run as a zero-output launch failure (the "~1s, 0 tokens = launch-failed" false positive). The watcher therefore exposes `drainNow()` (a synchronous read-to-EOF that bypasses the `closed` guard so it works during teardown); BOTH exit paths (live proc `exit` handler and the reattach PID-poll exit) MUST call `drainNow()` before emitting the exit event. Removing or reordering that call reopens the race. Regression: `agent-exit-output-drain.test.ts`.
+
 ## WebSocket setup
 `@hono/node-ws` requires `createNodeWebSocket({ app })` then `injectWebSocket(server)` after `serve()` returns.
 
