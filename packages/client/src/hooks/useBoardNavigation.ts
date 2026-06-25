@@ -1,12 +1,11 @@
 import { useCallback, useMemo } from "react";
 import { useTicketTrail } from "./useTicketTrail.js";
-import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
+import type { StatusWithIssues } from "@agentic-kanban/shared";
+import { boardSelectionActions } from "../stores/boardSelectionStore.js";
 
-export function useBoardNavigation(
-  columns: StatusWithIssues[],
-  setSelectedIssue: (issue: IssueWithStatus | null) => void,
-) {
+export function useBoardNavigation(columns: StatusWithIssues[]) {
   const ticketTrail = useTicketTrail();
+  const { setSelectedIssue } = boardSelectionActions;
 
   const openIssueById = useCallback(
     (issueId: string): boolean => {

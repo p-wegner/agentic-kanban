@@ -24,6 +24,7 @@ import { AgentLiveTickerPanel } from "./AgentLiveTickerPanel.js";
 import { SkeletonBoard } from "./SkeletonBoard.js";
 import { ViewLoadingFallback } from "./ViewLoadingFallback.js";
 import { MentionProvider } from "../lib/MentionContext.js";
+import { useBoardSelectionStore } from "../stores/boardSelectionStore.js";
 import type { Dispatch, MouseEvent as ReactMouseEvent, MutableRefObject, SetStateAction } from "react";
 import type {
   IssueWithStatus,
@@ -40,7 +41,6 @@ import type {
   MoveToDonePending,
   DependencyImpactPending,
   ExpandedCreatePanel,
-  WorkspaceInitial,
 } from "../routes/BoardPage.js";
 // Hook/factory return shapes — type-only (erased), so the props stay exactly in
 // sync with the container's producers without runtime imports or coupling.
@@ -172,7 +172,6 @@ interface BoardPageViewModel {
   resetColumnWidth: ColumnResize["resetColumnWidth"];
   runQueueForecast: ReturnType<typeof buildRunQueueForecast>;
   searchQuery: string;
-  selectedIssue: IssueWithStatus | null;
   sessionActivity: Record<string, string>;
   sessionTodos: Record<string, TodoItem[]>;
   setApprovalRequests: Dispatch<SetStateAction<ApprovalRequest[]>>;
@@ -188,15 +187,10 @@ interface BoardPageViewModel {
   setMoveToDonePending: Dispatch<SetStateAction<MoveToDonePending>>;
   setPendingWorkspaceIssueIds: Dispatch<SetStateAction<Set<string>>>;
   setSearchQuery: Dispatch<SetStateAction<string>>;
-  setSelectedIssue: Dispatch<SetStateAction<IssueWithStatus | null>>;
   setShowBlocked: Dispatch<SetStateAction<boolean>>;
   setShowStaleOnly: Dispatch<SetStateAction<boolean>>;
   setStatusFilterId: Dispatch<SetStateAction<string | null>>;
   setTheme: (theme: Theme) => void;
-  setWorkspaceInitial: Dispatch<SetStateAction<WorkspaceInitial>>;
-  setWorkspaceInitialDiff: Dispatch<SetStateAction<boolean>>;
-  setWorkspaceIssue: Dispatch<SetStateAction<IssueWithStatus | null>>;
-  setWorkspaceOpenCreate: Dispatch<SetStateAction<boolean>>;
   showBlocked: boolean;
   showStaleOnly: boolean;
   statusFilterId: string | null;
@@ -207,10 +201,6 @@ interface BoardPageViewModel {
   trailControls: Nav["trailControls"];
   viewMode: Route["viewMode"];
   visibilityColumns: StatusWithIssues[];
-  workspaceInitial: WorkspaceInitial;
-  workspaceInitialDiff: boolean;
-  workspaceIssue: IssueWithStatus | null;
-  workspaceOpenCreate: boolean;
 }
 
 type ProjectController = Pick<BoardPageViewModel,
@@ -235,10 +225,7 @@ type FilterNavigationController = Pick<BoardPageViewModel,
   "showStaleOnly" | "statusFilterId"
 >;
 type WorkspaceController = Pick<BoardPageViewModel,
-  "butlerInitialPrompt" | "selectedIssue" | "setButlerInitialPrompt" | "setSelectedIssue" |
-  "setWorkspaceInitial" | "setWorkspaceInitialDiff" | "setWorkspaceIssue" |
-  "setWorkspaceOpenCreate" | "workspaceInitial" | "workspaceInitialDiff" | "workspaceIssue" |
-  "workspaceOpenCreate"
+  "butlerInitialPrompt" | "setButlerInitialPrompt"
 >;
 type RealtimeController = Pick<BoardPageViewModel,
   "agentQuestionsCount" | "approvalRequests" | "handleNotificationEventClick" | "liveStats" |
@@ -312,11 +299,19 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
     agentQuestionsCount, approvalRequests, handleNotificationEventClick, liveStats, notifications,
     sessionActivity, sessionTodos, setApprovalRequests, tickerEntries,
   } = realtime;
-  const {
-    butlerInitialPrompt, selectedIssue, setButlerInitialPrompt, setSelectedIssue,
-    setWorkspaceInitial, setWorkspaceInitialDiff, setWorkspaceIssue, setWorkspaceOpenCreate,
-    workspaceInitial, workspaceInitialDiff, workspaceIssue, workspaceOpenCreate,
-  } = workspace;
+  const { butlerInitialPrompt, setButlerInitialPrompt } = workspace;
+  // Selection slice (#905) — read reactively from the board store instead of via
+  // props. The orchestration hooks write to the same store, so these stay in sync.
+  const selectedIssue = useBoardSelectionStore((s) => s.selectedIssue);
+  const workspaceIssue = useBoardSelectionStore((s) => s.workspaceIssue);
+  const workspaceInitial = useBoardSelectionStore((s) => s.workspaceInitial);
+  const workspaceInitialDiff = useBoardSelectionStore((s) => s.workspaceInitialDiff);
+  const workspaceOpenCreate = useBoardSelectionStore((s) => s.workspaceOpenCreate);
+  const setSelectedIssue = useBoardSelectionStore((s) => s.setSelectedIssue);
+  const setWorkspaceIssue = useBoardSelectionStore((s) => s.setWorkspaceIssue);
+  const setWorkspaceInitial = useBoardSelectionStore((s) => s.setWorkspaceInitial);
+  const setWorkspaceInitialDiff = useBoardSelectionStore((s) => s.setWorkspaceInitialDiff);
+  const setWorkspaceOpenCreate = useBoardSelectionStore((s) => s.setWorkspaceOpenCreate);
   return (
     <MentionProvider value={{ issues: allMentionIssues, onMentionClick: handleMentionClick }}>
     <Layout
@@ -472,10 +467,6 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
           onDropIssue={handleDropOnAgentSlot}
           onRefresh={() => refetchBoard()}
           onButlerPromptConsumed={() => setButlerInitialPrompt(null)}
-          setSelectedIssue={setSelectedIssue}
-          setWorkspaceIssue={setWorkspaceIssue}
-          setWorkspaceOpenCreate={setWorkspaceOpenCreate}
-          setWorkspaceInitial={setWorkspaceInitial}
         />
         {viewMode === "backlog" && (
           <BoardErrorBoundary columnName="Backlog View">
@@ -659,10 +650,6 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
         nudgeWipLimit={prefs.nudgeWipLimit}
         viewMode={viewMode}
         columnsRef={columnsRef}
-        workspaceIssue={workspaceIssue}
-        workspaceInitial={workspaceInitial}
-        workspaceOpenCreate={workspaceOpenCreate}
-        selectedIssue={selectedIssue}
         handleStartWorkspace={handleStartWorkspace}
         approvalRequests={approvalRequests}
         setApprovalRequests={setApprovalRequests}
@@ -685,10 +672,6 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
             // monitorStatus is set by the hook's internal interval but we can trigger a re-read
           }
         }}
-        setWorkspaceIssue={setWorkspaceIssue}
-        setWorkspaceInitial={setWorkspaceInitial}
-        setWorkspaceOpenCreate={setWorkspaceOpenCreate}
-        setSelectedIssue={setSelectedIssue}
         settingsBoardTools={
           <>
             {activeProjectId && (
