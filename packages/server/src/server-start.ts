@@ -12,6 +12,7 @@ import { createWorkflowEngine } from "./startup/exit-workflow.js";
 import { createAutoMerge } from "./startup/merge-workflow.js";
 import { startAutoMergeOrchestrator, stopAutoMergeOrchestrator } from "./startup/auto-merge-orchestrator.js";
 import { startStrandedReviewReconciler, stopStrandedReviewReconciler } from "./startup/stranded-review-reconciler.js";
+import { startStrandedPlanReconciler, stopStrandedPlanReconciler } from "./startup/plan-mode-reconciler.js";
 import { startZombieFixSessionReconciler, stopZombieFixSessionReconciler } from "./startup/zombie-fix-session-reconciler.js";
 import { startAncestorBranchReconciler, stopAncestorBranchReconciler } from "./startup/ancestor-branch-reconciler.js";
 import { startDoneUnmergedScanner, stopDoneUnmergedScanner } from "./startup/done-unmerged-invariant-scanner.js";
@@ -176,6 +177,14 @@ export async function startServer(port?: number, hostname?: string) {
     reviewSessionIds: workflow.reviewSessionIds,
   });
   cleanupCallbacks.push(stopStrandedReviewReconciler);
+  // Crash-safe recovery for plan-mode workspaces stranded with planMode stuck true (#924):
+  // recovers the captured plan (or clears planMode + marks blocked) so the workspace never
+  // silently parks idle re-running read-only on every follow-up turn.
+  startStrandedPlanReconciler({
+    getSessionManager: () => sessionManager,
+    boardEvents,
+  });
+  cleanupCallbacks.push(stopStrandedPlanReconciler);
   // Crash-safe recovery for zombie fix-and-merge/review sessions: sessions that are
   // marked 'running' but have zero output messages and no live process (#596).
   startZombieFixSessionReconciler({ boardEvents });
