@@ -139,6 +139,38 @@ describe("startManualReview — concurrent trigger hardening (AK-520)", () => {
     }));
   });
 
+  it("recovers a blocked review rate-limit failure with the Strategy Bullseye default when settings diverge", async () => {
+    const { workspaceId, projectId } = await seedWorkspace(db, {
+      status: "blocked",
+      provider: "claude",
+      claudeProfile: "anth",
+    });
+    await seedReviewUsageLimitSession(db, workspaceId);
+    await db.delete(preferences);
+    await db.insert(preferences).values([
+      { key: "provider", value: "claude" },
+      { key: "claude_profile", value: "anth" },
+      { key: "codex_profile", value: "default" },
+      {
+        key: `board_strategy_${projectId}`,
+        value: JSON.stringify({
+          version: 1,
+          providerPolicies: [{ provider: "codex", profileName: "default", mode: "fill" }],
+        }),
+      },
+    ]);
+    const sessionManager = makeSessionManager(() => "session-recovered");
+    const reviewSessionIds = new Set<string>();
+
+    await startManualReview(db, () => sessionManager as never, mockBoardEvents as never, reviewSessionIds, workspaceId, false);
+
+    expect(sessionManager.startSession).toHaveBeenCalledWith(expect.objectContaining({
+      provider: "codex",
+      profile: { provider: "codex", name: "default" },
+      triggerType: "review",
+    }));
+  });
+
   it("does not recover a blocked workspace while any session is still running", async () => {
     const { workspaceId } = await seedWorkspace(db, { status: "blocked" });
     await seedReviewUsageLimitSession(db, workspaceId, {

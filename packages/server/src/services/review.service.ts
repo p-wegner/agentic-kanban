@@ -18,6 +18,7 @@ import type { BoardEvents } from "./board-events.js";
 import type { SessionManager } from "./session.manager.js";
 import * as gitService from "./git.service.js";
 import { MOCK_AGENT_COMMAND, isMockProfile, toExecutorProvider } from "./agent-settings.service.js";
+import { loadProjectRuntimeConfig } from "./project-runtime-config.service.js";
 
 export const DEFAULT_MONITOR_NUDGE_PROMPT =
   "Please continue with the task. If you are waiting for input or unsure how to proceed, use your best judgment and keep moving forward. Check the issue description and any open questions, then take the next logical step.";
@@ -380,13 +381,18 @@ export async function startManualReview(
     // board default so switching providers can recover a stale provider/profile.
     const defaultPrefMap = new Map(prefRows.map((r) => [r.key, r.value]));
     const prefMap = recoverBlockedReview ? defaultPrefMap : applyWorkspaceProfileToPrefs(defaultPrefMap, workspace);
+    const runtime = recoverBlockedReview
+      ? await loadProjectRuntimeConfig(database, { projectId })
+      : null;
     const manualProfile = prefMap.get("claude_profile") || undefined;
-    const agentCommand = isMockProfile(manualProfile) ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined);
-    const claudeProfile = isMockProfile(manualProfile) ? undefined : manualProfile;
-    const provider = parseProviderPref(prefMap);
+    const provider = runtime?.provider.provider ?? parseProviderPref(prefMap);
+    const agentCommand = runtime?.provider.agentCommand ?? (isMockProfile(manualProfile) ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined));
+    const claudeProfile = runtime
+      ? (runtime.provider.provider === "claude" ? runtime.provider.profileName : undefined)
+      : (isMockProfile(manualProfile) ? undefined : manualProfile);
     const effectiveProfileName = getEffectiveProfile(prefMap, provider, claudeProfile);
-    const manualProfileSelection = effectiveProfileName ? { provider, name: effectiveProfileName } : undefined;
-    const reviewArgs = buildReviewArgs(prefMap, provider);
+    const manualProfileSelection = runtime?.provider.profileSelection ?? (effectiveProfileName ? { provider, name: effectiveProfileName } : undefined);
+    const reviewArgs = runtime?.provider.agentArgs ?? buildReviewArgs(prefMap, provider);
     const autoFix = prefMap.get("review_auto_fix") !== "false";
 
     const projectRows = await getProjectDefaultBranch(projectId, database);
@@ -420,6 +426,7 @@ export async function startManualReview(
       database, workspace.branch, diffRef, issueId, autoFix, projectId,
       undefined, undefined, workspaceId, manualSkillName, verifyAgent,
     );
+    const runtimeModel = runtime?.provider.model;
     const reviewArgsWithModel = reviewModel && provider === "claude" ? `${reviewArgs ?? ""} --model ${reviewModel}`.trim() : reviewArgs;
 
     const now = new Date().toISOString();
@@ -433,6 +440,9 @@ export async function startManualReview(
         workspaceId, prompt: reviewPromptText, agentCommand, agentArgs: reviewArgsWithModel,
         claudeProfile, profile: manualProfileSelection, provider: toExecutorProvider(provider),
         triggerType: "review", extraEnv: reviewExtraEnv,
+        permissionPromptTool: runtime?.provider.permissionPromptTool,
+        resumeWithNewModel: runtime?.provider.resumeWithNewModel,
+        model: runtimeModel,
       });
     } catch (sessionErr) {
       // Revert the workspace status so retries are possible — don't leave it stuck at "reviewing"
