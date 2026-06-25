@@ -14,7 +14,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     } catch {
       // response body wasn't JSON, use default message
     }
-    throw Object.assign(new Error(message), { body });
+    throw Object.assign(new Error(message), { body, status: res.status, statusText: res.statusText });
   }
   return res.json() as Promise<T>;
 }
