@@ -2,10 +2,10 @@ import type { Database } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { ShowdownContestant } from "@agentic-kanban/shared";
-import { analyzeDependencies, enhanceIssue, aiEstimateIssue, decomposeEpic, confirmEpicDecomposition, analyzeTouchedFiles } from "../services/issue-ai.service.js";
+import { analyzeDependencies, enhanceIssue, aiEstimateIssue, decomposeEpic, confirmEpicDecomposition, contractCoupledComponent, confirmContractComponent, analyzeTouchedFiles } from "../services/issue-ai.service.js";
 import type { DecomposeChildProposal, DecomposeDependencyProposal } from "../services/issue-ai.service.js";
 import { createIssueService } from "../services/issue.service.js";
-import type { CreateIssueInput } from "../services/issue.service.js";
+import type { CreateIssueInput, BatchDependencyInput } from "../services/issue.service.js";
 import {
   getIssueDescription,
   getIssueTouchedFiles,
@@ -122,16 +122,48 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     return c.json(result, 201);
   });
 
+  // POST /api/issues/contract — propose contracting coupled components into single tickets.
+  // The documented INVERSE of /decompose: decompose splits one epic into many; contract
+  // collapses a coupled component (coupled_with peers) back into one. Propose-only.
+  router.post("/contract", async (c) => {
+    const body = await parseJsonBody<{ projectId: string }>(c);
+    if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
+    return c.json(await wrapAiOperation("contract", () => contractCoupledComponent(body.projectId, database)));
+  });
+
+  // POST /api/issues/contract/confirm — apply a contract proposal (keep survivor, absorb the rest).
+  router.post("/contract/confirm", async (c) => {
+    const body = await parseJsonBody<{ projectId: string; survivorId: string; memberIds: string[]; mergedTitle: string; mergedDescription: string }>(c);
+    if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
+    if (!body.survivorId) return c.json({ error: "survivorId is required" }, 400);
+    if (!Array.isArray(body.memberIds) || body.memberIds.length < 2) return c.json({ error: "memberIds must be an array of at least 2 ids" }, 400);
+    if (!body.mergedTitle?.trim()) return c.json({ error: "mergedTitle is required" }, 400);
+    try {
+      const result = await confirmContractComponent(
+        { projectId: body.projectId, survivorId: body.survivorId, memberIds: body.memberIds, mergedTitle: body.mergedTitle, mergedDescription: body.mergedDescription ?? "" },
+        database,
+      );
+      options?.boardEvents?.broadcast(body.projectId, "board_changed");
+      return c.json(result);
+    } catch (err: unknown) {
+      const e = asIssueRouteError(err);
+      if (e.code === "NOT_FOUND") return c.json({ error: e.message }, 404);
+      return c.json({ error: err instanceof Error ? err.message : "contract failed" }, 400);
+    }
+  });
+
   // POST /api/issues/batch — create N issues atomically
   // Optional: parentIssueId wires child_of edges; driveTarget (requires parentIssueId) auto-creates a Drive record.
   router.post("/batch", async (c) => {
-    const body = await parseJsonBody<{ projectId: string; issues: Omit<CreateIssueInput, "projectId">[]; parentIssueId?: string; driveTarget?: string }>(c);
+    const body = await parseJsonBody<{ projectId: string; issues: Omit<CreateIssueInput, "projectId">[]; parentIssueId?: string; driveTarget?: string; dependencies?: BatchDependencyInput[] }>(c);
     if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
     if (!Array.isArray(body.issues)) return c.json({ error: "issues must be an array" }, 400);
+    if (body.dependencies !== undefined && !Array.isArray(body.dependencies)) return c.json({ error: "dependencies must be an array" }, 400);
     try {
       const result = await issueService.createIssuesBatch(body.projectId, body.issues, {
         parentIssueId: body.parentIssueId,
         driveTarget: body.driveTarget,
+        dependencies: body.dependencies,
       });
       return c.json(result, 201);
     } catch (err: unknown) {

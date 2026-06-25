@@ -5,6 +5,7 @@ import { db } from "../db/index.js";
 import { createBoardEvents } from "../services/board-events.js";
 import { createSessionManager } from "../services/session.manager.js";
 import { runAutoStart } from "./monitor-auto-start.js";
+import { runAutoContract } from "./monitor-contract.js";
 import { runBacklogEmptyStrategy } from "./monitor-backlog.js";
 import { getRecentAgentExcerpts, logMonitorAction, shouldSkipNudge, type MonitorAction } from "./monitor-helpers.js";
 import { processWorkspaceCandidates } from "./monitor-cycle.js";
@@ -256,6 +257,11 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
           return Number.isFinite(minutes) && minutes > 0 ? minutes * 60 * 1000 : undefined;
         })(),
       }));
+      // Gated auto-contract (#918): BEFORE fan-out, contract (or suggest contracting) coupled
+      // components so coupled tickets never start as separate conflicting workspaces. Off by
+      // default — only projects with `auto_contract_coupled_<id>` set act, and only those the
+      // monitor would otherwise auto-start work for (same gate as runAutoStart below).
+      await runAutoContract(prefMap, { boardEvents, allowProject: shouldAutoStartProject, logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
       await runAutoStart(prefMap, { serverPort, boardEvents, allowProject: shouldAutoStartProject, isAutoDrivenProject: (projectId) => resolveStartPolicy(prefMap, projectId).mode !== "manual", logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
       await runBacklogEmptyStrategy(prefMap, { serverPort, boardEvents, allowProject: allowBacklogRefill, logMonitorAction: (action, workspaceId, issueId) => logMonitorAction(monitorState.recentActions, action, workspaceId, issueId) });
     } catch (err) {

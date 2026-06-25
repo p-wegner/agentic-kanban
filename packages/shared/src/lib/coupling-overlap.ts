@@ -120,6 +120,58 @@ export function computeCouplingCandidates(
 }
 
 /**
+ * Connected components of the `coupled_with` peer graph.
+ *
+ * `coupled_with` is symmetric, so a set of coupled tickets forms an undirected graph;
+ * its connected components are the "coupled components" the contract step (#918) acts on
+ * — the INVERSE of the `parent_of`/`child_of` tree `decomposeEpic` produces (decompose
+ * splits one ticket into a tree; contract collapses a coupled component back into one).
+ *
+ * Pure (no DB) so it is unit-testable and client-safe. Components are returned largest-
+ * first, and the ids within each component are sorted for determinism. Singletons (issues
+ * with no coupled edge) are NOT returned — only components of size >= 2.
+ */
+export function couplingComponents(
+  edges: Array<{ issueId: string; dependsOnId: string }>,
+): string[][] {
+  const adj = new Map<string, Set<string>>();
+  const link = (a: string, b: string) => {
+    if (a === b) return;
+    let s = adj.get(a);
+    if (!s) { s = new Set(); adj.set(a, s); }
+    s.add(b);
+  };
+  for (const e of edges) {
+    if (!e.issueId || !e.dependsOnId) continue;
+    link(e.issueId, e.dependsOnId);
+    link(e.dependsOnId, e.issueId);
+  }
+
+  const seen = new Set<string>();
+  const components: string[][] = [];
+  for (const start of adj.keys()) {
+    if (seen.has(start)) continue;
+    const stack = [start];
+    const members: string[] = [];
+    seen.add(start);
+    while (stack.length) {
+      const cur = stack.pop()!;
+      members.push(cur);
+      for (const n of adj.get(cur) ?? []) {
+        if (!seen.has(n)) { seen.add(n); stack.push(n); }
+      }
+    }
+    if (members.length >= 2) components.push(members.sort());
+  }
+
+  components.sort((a, b) => {
+    if (b.length !== a.length) return b.length - a.length;
+    return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0;
+  });
+  return components;
+}
+
+/**
  * Candidates that involve a given target issue, returned as the OTHER issue id
  * plus the shared files. Used by `analyzeDependencies`, which is scoped to one
  * target issue.

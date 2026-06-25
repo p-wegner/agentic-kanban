@@ -33,6 +33,7 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   "cold_clone_check",
   "project_stack_profile",
   "auto_merge_disabled",
+  "auto_contract_coupled",
 ] as const;
 
 /**
