@@ -29,8 +29,12 @@ async function applyPragmas(c: ReturnType<typeof createClient>) {
 const client = createClient({ url: DB_URL });
 try {
   await applyPragmas(client);
-} catch {
-  // Non-fatal: pragmas may fail on read-only or in-memory DBs.
+} catch (err) {
+  // Pragmas may legitimately fail on read-only or in-memory DBs, so this is not a
+  // module-load crash — but it must NOT be silent: a failed `PRAGMA foreign_keys=ON`
+  // leaves every ON DELETE clause inert. `assertForeignKeysEnabled` in startup-tasks
+  // re-checks and fails loud; log here so the cause is visible even before that.
+  console.warn("[db] applyPragmas(read) failed:", err instanceof Error ? err.message : String(err));
 }
 
 // Write connection — dedicated to the high-volume session-message write stream and
@@ -40,8 +44,9 @@ try {
 const writeClient = createClient({ url: DB_URL });
 try {
   await applyPragmas(writeClient);
-} catch {
-  // Non-fatal.
+} catch (err) {
+  // See the read connection above: not a crash, but never silent.
+  console.warn("[db] applyPragmas(write) failed:", err instanceof Error ? err.message : String(err));
 }
 
 export const db = drizzle({ client, schema });
