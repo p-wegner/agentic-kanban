@@ -1,5 +1,5 @@
 import { extname } from "node:path";
-import { parseAgentProviderStreamLine } from "@agentic-kanban/shared/lib/agent-stream-parser";
+import { parseAgentProviderStreamLine, parseAgentProviderStreamLineObserved } from "@agentic-kanban/shared/lib/agent-stream-parser";
 import type { AgentLaunchConfig, AgentProvider, FileSystem, ParsedStreamEvent, ProviderLaunchOptions } from "./types.js";
 import { PLAN_BEGIN_MARKER, PLAN_END_MARKER } from "./types.js";
 import { nodeFileSystem, resolvePiExecutable, splitArgs } from "./helpers.js";
@@ -121,5 +121,9 @@ export class PiProvider implements AgentProvider {
 
   parseStreamEvent(line: string): ParsedStreamEvent | undefined {
     return parseAgentProviderStreamLine("pi", line);
+  }
+
+  parseStreamEventObserved(line: string): ParsedStreamEvent | undefined {
+    return parseAgentProviderStreamLineObserved("pi", line);
   }
 }

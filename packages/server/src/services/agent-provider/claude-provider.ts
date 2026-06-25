@@ -1,7 +1,7 @@
 import { execSync } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { parseAgentProviderStreamLine } from "@agentic-kanban/shared/lib/agent-stream-parser";
+import { parseAgentProviderStreamLine, parseAgentProviderStreamLineObserved } from "@agentic-kanban/shared/lib/agent-stream-parser";
 import type { AgentLaunchConfig, AgentProvider, FileSystem, ParsedStreamEvent, ProviderLaunchOptions } from "./types.js";
 import { getMcpConfigPath, buildSpawnEnv, splitArgs, nodeFileSystem, profileDefinesCustomEndpoint } from "./helpers.js";
 
@@ -129,5 +129,9 @@ export class ClaudeProvider implements AgentProvider {
 
   parseStreamEvent(line: string): ParsedStreamEvent | undefined {
     return parseAgentProviderStreamLine("claude", line);
+  }
+
+  parseStreamEventObserved(line: string): ParsedStreamEvent | undefined {
+    return parseAgentProviderStreamLineObserved("claude", line);
   }
 }
