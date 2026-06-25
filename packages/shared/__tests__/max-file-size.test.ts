@@ -62,7 +62,8 @@ const COHESION_BASELINE: Record<string, number> = {
   "packages/server/src/services/stack-profile.service.ts": 28,
   "packages/server/src/services/agent.service.ts": 27,
   "packages/server/src/services/insights.service.ts": 23,
-  "packages/server/src/services/agent-questions.service.ts": 21,
+  // agent-questions.service.ts decomposed into ./agent-questions/* sub-modules (#912);
+  // the facade barrel re-exports only, so its baseline entry is removed.
 };
 
 function isExcluded(absPath: string): boolean {
