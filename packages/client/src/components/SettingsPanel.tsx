@@ -117,6 +117,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
     if (!activeProjectId || configExporting) return;
     setConfigExporting(true);
     try {
+      // eslint-disable-next-line no-restricted-syntax -- binary download: response is a blob, not a JSON read for the query layer
       const resp = await fetch(`/api/projects/${activeProjectId}/config/export`);
       if (!resp.ok) throw new Error(`Export failed: ${resp.status}`);
       const blob = await resp.blob();
