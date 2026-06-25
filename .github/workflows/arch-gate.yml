@@ -1,0 +1,29 @@
+name: arch-gate
+
+# Makes the god-module architecture gate (arch-review #875, #888) actually BLOCK
+# merges instead of only living in `test:mine`. Runs on every PR into master and
+# on direct pushes to master. Enable branch protection on `master` requiring this
+# check so a breaching file (a 1000+ line god-module) cannot land — which is
+# exactly the failure #888 documented (a 1042-line file merged past a red gate).
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+
+jobs:
+  god-module-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      # The gate needs `typescript` for a precise behavioral-export count; it falls
+      # back to a regex heuristic if absent. A full install keeps the count precise.
+      - run: pnpm install --frozen-lockfile
+      - name: god-module gate
+        run: pnpm check:arch
