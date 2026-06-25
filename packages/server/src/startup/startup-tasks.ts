@@ -12,14 +12,11 @@ import { reconcileAncestorBranchWorkspaces } from "./ancestor-branch-reconciler.
 import { scanDoneUnmergedWorkspaces } from "./done-unmerged-invariant-scanner.js";
 import { reapTerminalWorkspaces } from "./terminal-workspace-reaper.js";
 import { finalizeMergeCleanup, reconcileMergedIssue } from "../services/merge-cleanup.service.js";
-<<<<<<< HEAD
 import { assertForeignKeysEnabled, alignForeignKeyActionsOnStartup } from "./fk-alignment.js";
-=======
 import { modelBelongsToProvider } from "@agentic-kanban/shared";
 import { PREF_DEFAULT_MODEL, PREF_PROVIDER } from "../constants/preference-keys.js";
 import { MODEL_PREF_KEYS_BY_PROVIDER } from "../services/effective-config.service.js";
 import { narrowProviderName } from "../services/agent-provider.js";
->>>>>>> master
 
 /** Kill orphaned tsx server processes from previous hot-reload cycles (Windows only). */
 export function shouldKillOrphanedServerProcess(input: {
