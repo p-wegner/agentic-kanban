@@ -23,6 +23,7 @@ interface WorkflowTemplate {
 export interface CreateIssueFormState {
   title: string;
   description: string;
+  pastedImages: string[];
   issueType: CreateIssueRequest["issueType"];
   estimate?: IssueEstimate | "";
   startWorkspace: boolean;
@@ -52,7 +53,7 @@ export function CreateIssueForm({
 }: CreateIssueFormProps) {
   const [title, setTitle] = useState(initialState?.title ?? "");
   const [description, setDescription] = useState(initialState?.description ?? "");
-  const [pastedImages, setPastedImages] = useState<string[]>([]);
+  const [pastedImages, setPastedImages] = useState<string[]>(initialState?.pastedImages ?? []);
   const [issueType, setIssueType] = useState<CreateIssueRequest["issueType"]>(initialState?.issueType ?? "task");
   const [estimate, setEstimate] = useState<IssueEstimate | "">(initialState?.estimate ?? "");
   const [startWorkspace, setStartWorkspace] = useState(initialState?.startWorkspace ?? false);
@@ -421,7 +422,7 @@ export function CreateIssueForm({
         {onExpand && (
           <button
             type="button"
-            onClick={() => onExpand({ title, description, issueType, estimate, startWorkspace, planMode, skipAutoReview, skillId })}
+            onClick={() => onExpand({ title, description, pastedImages, issueType, estimate, startWorkspace, planMode, skipAutoReview, skillId })}
             className="ml-auto text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 p-1 rounded"
             title="Expand form"
           >

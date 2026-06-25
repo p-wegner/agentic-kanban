@@ -57,7 +57,7 @@ export function CreateIssuePanel({
   const [selectedStatusId, setSelectedStatusId] = useState(statusId);
   const [title, setTitle] = useState(initialState?.title ?? "");
   const [description, setDescription] = useState(initialState?.description ?? "");
-  const [pastedImages, setPastedImages] = useState<string[]>([]);
+  const [pastedImages, setPastedImages] = useState<string[]>(initialState?.pastedImages ?? []);
   const [issueType, setIssueType] = useState<CreateIssueRequest["issueType"]>(initialState?.issueType ?? "task");
   const [estimate, setEstimate] = useState<IssueEstimate | "">(initialState?.estimate ?? "");
   const [startWorkspace, setStartWorkspace] = useState(initialState?.startWorkspace ?? false);
@@ -80,6 +80,7 @@ export function CreateIssuePanel({
   const { templates: issueTemplates } = useIssueTemplates();
   const titleRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
+  const descriptionWithImages = mergeDescriptionWithImages(description, pastedImages);
 
   async function handleEnhance() {
     if (!title.trim() || enhancing) return;
@@ -145,7 +146,7 @@ export function CreateIssuePanel({
     setSubmitting(true);
     try {
       await onSubmit(buildCreateIssuePayload({
-        title, description: mergeDescriptionWithImages(description, pastedImages), issueType, estimate,
+        title, description: descriptionWithImages, issueType, estimate,
         statusId: selectedStatusId, projectId,
         start, planMode, skipAutoReview, isDirect,
         selectedProfile, selectedModel, skillId,
@@ -244,9 +245,9 @@ export function CreateIssuePanel({
               </div>
             </div>
             {descriptionMode === "preview" ? (
-              description ? (
+              descriptionWithImages ? (
                 <div className="markdown-body flex-1 min-h-[200px] border border-gray-200 dark:border-gray-700 rounded px-3 py-2 dark:text-gray-200">
-                  <ReactMarkdown>{description}</ReactMarkdown>
+                  <ReactMarkdown>{descriptionWithImages}</ReactMarkdown>
                 </div>
               ) : (
                 <p className="text-sm text-gray-400 dark:text-gray-500 italic flex-1 min-h-[200px] border border-gray-200 dark:border-gray-700 rounded px-3 py-2">Nothing to preview.</p>
