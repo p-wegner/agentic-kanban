@@ -109,27 +109,27 @@ describe("resolveProviderConfig — strategy selection", () => {
 });
 
 describe("resolveProviderConfig — model resolution", () => {
-  it("requestedModel overrides default_model for claude", () => {
+  it("requestedModel overrides the provider-scoped default for claude", () => {
     const r = resolveProviderConfig({
-      prefMap: prefs({ provider: "claude", claude_profile: "anth", default_model: "sonnet" }),
+      prefMap: prefs({ provider: "claude", claude_profile: "anth", default_model_claude: "sonnet" }),
       requestedModel: "opus",
     });
     expect(r.model).toBe("opus");
   });
 
-  it("falls back to default_model when no requestedModel (codex)", () => {
+  it("falls back to the provider-scoped default when no requestedModel (codex)", () => {
     const r = resolveProviderConfig({
-      prefMap: prefs({ provider: "codex", codex_profile: "ki14", default_model: "gpt-5.5" }),
+      prefMap: prefs({ provider: "codex", codex_profile: "ki14", default_model_codex: "gpt-5.5" }),
     });
     expect(r.model).toBe("gpt-5.5");
   });
 
-  it("uses the provider-specific default model before legacy default_model", () => {
+  it("ignores the retired global default_model — only the provider-scoped slot is consulted (#902)", () => {
     const r = resolveProviderConfig({
       prefMap: prefs({
         provider: "claude",
         claude_profile: "anth",
-        default_model: "gpt-5.5",
+        default_model: "gpt-5.5", // legacy global key — must have no effect
         default_model_claude: "sonnet",
       }),
     });
@@ -148,15 +148,17 @@ describe("resolveProviderConfig — model resolution", () => {
     expect(r.model).toBe("gpt-5.5");
   });
 
-  it("drops a codex default_model when the active provider is claude (#696)", () => {
+  it("a stale global default_model never leaks into a launch — it is unrepresentable now (#902/#696)", () => {
+    // Pre-#902 this was the footgun: a leftover global `default_model=gpt-5.5` (a Codex id)
+    // got fed to claude.exe and killed every launch. Now the global key is simply not read,
+    // so with no provider-scoped slot set the model is undefined (provider default).
     const r = resolveProviderConfig({
       prefMap: prefs({ provider: "claude", claude_profile: "anth", default_model: "gpt-5.5" }),
     });
     expect(r.model).toBeUndefined();
-    expect(r.notes.some(n => n.includes("ignoring default_model"))).toBe(true);
   });
 
-  it("drops a claude default_model when the active provider is codex", () => {
+  it("global default_model has no effect for codex either", () => {
     const r = resolveProviderConfig({
       prefMap: prefs({ provider: "codex", codex_profile: "ki14", default_model: "opus" }),
     });
@@ -165,14 +167,14 @@ describe("resolveProviderConfig — model resolution", () => {
 
   it("copilot never gets a model (no model flag)", () => {
     const r = resolveProviderConfig({
-      prefMap: prefs({ provider: "copilot", copilot_profile: "gh", default_model: "gpt-5.5" }),
+      prefMap: prefs({ provider: "copilot", copilot_profile: "gh", default_model_codex: "gpt-5.5" }),
     });
     expect(r.model).toBeUndefined();
   });
 
-  it("whitespace-only requestedModel is ignored, falls back to default_model", () => {
+  it("whitespace-only requestedModel is ignored, falls back to the provider-scoped default", () => {
     const r = resolveProviderConfig({
-      prefMap: prefs({ provider: "claude", claude_profile: "anth", default_model: "opus" }),
+      prefMap: prefs({ provider: "claude", claude_profile: "anth", default_model_claude: "opus" }),
       requestedModel: "   ",
     });
     expect(r.model).toBe("opus");

@@ -21,7 +21,33 @@ import { createRequire } from "node:module";
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const MAX_LINES = 1000;
 const COHESION_MIN_LINES = 600;
-const COHESION_MAX_FN_EXPORTS = 15;
+// The cohesion signal counts a module's top-level function-like DECLARATIONS —
+// exported AND internal (arch-review #889). Exports alone undercount: a low-cohesion
+// god-module can hide many independent responsibilities behind a handful of exports
+// (agent-stream-parser.ts: 3 exports, 28 internal fns at 1042 lines, waved straight
+// through the old export-only signal). The count = top-level `function`/`class`
+// declarations + top-level arrow/function-expression consts (exported or not). It is
+// deliberately TOP-LEVEL only — nested callbacks/handlers belong to their enclosing
+// function and are not separate responsibilities — and ignores `const` data tables and
+// type/interface exports (cohesive data/contracts, not behaviors).
+const COHESION_MAX_FN_DECLS = 20;
+
+// Ratchet baseline (arch-review #889). These large modules already exceeded the
+// internal-declaration threshold when it was introduced. They are grandfathered at
+// their CURRENT count so the merge-blocking gate ships green, while still BLOCKING any
+// new breach and any GROWTH of a baselined file — a baselined file may only shrink
+// (decompose it and lower/remove its entry). The number is max(AST, regex-heuristic)
+// so the gate passes on BOTH counting paths. Decomposition is tracked on the board
+// (#911 stack-profile, #912 agent-questions, #913 the rest); drop a file's entry once
+// it is split. Goal: drain this map to empty so the flat threshold governs everything.
+const COHESION_BASELINE = {
+  "packages/shared/src/lib/session-summary.ts": 38,
+  "packages/server/src/services/butler-sdk.service.ts": 30,
+  "packages/server/src/services/stack-profile.service.ts": 28,
+  "packages/server/src/services/agent.service.ts": 27,
+  "packages/server/src/services/insights.service.ts": 23,
+  "packages/server/src/services/agent-questions.service.ts": 21,
+};
 
 // typescript is the precise way to count behavioral exports. If it isn't
 // installed (e.g. a partially-provisioned worktree) fall back to a regex
@@ -75,18 +101,21 @@ function lineCount(text) {
   return text.length === 0 ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
 }
 
-function countFunctionExports(file, text) {
+/**
+ * Count the cohesion signal: top-level function-like DECLARATIONS, exported AND
+ * internal (#889). Top-level `function`/`class` declarations + top-level
+ * arrow/function-expression consts. Nested callbacks are NOT counted (they belong to
+ * their enclosing function); `const` data tables and type/interface exports are NOT
+ * counted (cohesive data/contracts).
+ */
+function countInternalFunctions(file, text) {
   if (ts) {
     const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
     let count = 0;
-    const isExported = (stmt) => {
-      const mods = ts.canHaveModifiers(stmt) ? ts.getModifiers(stmt) : undefined;
-      return !!mods?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
-    };
     for (const stmt of sf.statements) {
-      if (ts.isFunctionDeclaration(stmt) && isExported(stmt)) { count++; continue; }
-      if (ts.isClassDeclaration(stmt) && isExported(stmt)) { count++; continue; }
-      if (ts.isVariableStatement(stmt) && isExported(stmt)) {
+      if (ts.isFunctionDeclaration(stmt)) { count++; continue; }
+      if (ts.isClassDeclaration(stmt)) { count++; continue; }
+      if (ts.isVariableStatement(stmt)) {
         for (const decl of stmt.declarationList.declarations) {
           const init = decl.initializer;
           if (init && (ts.isArrowFunction(init) || ts.isFunctionExpression(init))) count++;
@@ -95,10 +124,13 @@ function countFunctionExports(file, text) {
     }
     return count;
   }
-  // Heuristic fallback (no typescript installed).
-  const fn = (text.match(/^export\s+(async\s+)?function\s/gm) || []).length;
-  const cls = (text.match(/^export\s+(abstract\s+)?class\s/gm) || []).length;
-  const arrow = (text.match(/^export\s+const\s+\w+\s*[:=][^=]*=>/gm) || []).length;
+  // Heuristic fallback (no typescript installed). Anchored at column 0 so only
+  // TOP-LEVEL declarations match — keeps the count aligned with the AST path.
+  const fn = (text.match(/^(export\s+)?(async\s+)?function\s+\w+/gm) || []).length;
+  const cls = (text.match(/^(export\s+)?(abstract\s+)?class\s+\w+/gm) || []).length;
+  const arrow =
+    (text.match(/^(export\s+)?const\s+\w+\s*(:[^=\n]+)?=\s*(async\s*)?(\([^)]*\)|[A-Za-z_$][\w$]*)\s*(:[^=\n]+)?=>/gm) || [])
+      .length;
   return fn + cls + arrow;
 }
 
@@ -122,9 +154,13 @@ for (const file of files) {
   const lines = lineCount(text);
   if (lines > MAX_LINES) lineOffenders.push(`${rel}  (${lines} lines)`);
   if (!isRepositoryLayer(rel) && lines >= COHESION_MIN_LINES) {
-    const fnExports = countFunctionExports(file, text);
-    if (fnExports > COHESION_MAX_FN_EXPORTS) {
-      cohesionOffenders.push(`${rel}  (${lines} lines, ${fnExports} exported functions/classes)`);
+    const fnDecls = countInternalFunctions(file, text);
+    const allowed = Math.max(COHESION_MAX_FN_DECLS, COHESION_BASELINE[rel] ?? 0);
+    if (fnDecls > allowed) {
+      const baselineNote = COHESION_BASELINE[rel]
+        ? ` — grandfathered at ${COHESION_BASELINE[rel]}, GREW past its baseline`
+        : "";
+      cohesionOffenders.push(`${rel}  (${lines} lines, ${fnDecls} functions/classes${baselineNote})`);
     }
   }
 }
@@ -142,8 +178,9 @@ if (lineOffenders.length > 0) {
 if (cohesionOffenders.length > 0) {
   failed = true;
   console.error(
-    `\n[god-module gate] ${cohesionOffenders.length} large module(s) expose more than ` +
-      `${COHESION_MAX_FN_EXPORTS} exported functions/classes — a low-cohesion god-module smell.\n` +
+    `\n[god-module gate] ${cohesionOffenders.length} large module(s) declare more than ` +
+      `${COHESION_MAX_FN_DECLS} top-level functions/classes (exported + internal) — a low-cohesion ` +
+      `god-module smell (#889).\n` +
       `Split by responsibility into cohesive sub-modules re-exported through a facade barrel:\n  ` +
       cohesionOffenders.join("\n  "),
   );

@@ -12,7 +12,14 @@ import { reconcileAncestorBranchWorkspaces } from "./ancestor-branch-reconciler.
 import { scanDoneUnmergedWorkspaces } from "./done-unmerged-invariant-scanner.js";
 import { reapTerminalWorkspaces } from "./terminal-workspace-reaper.js";
 import { finalizeMergeCleanup, reconcileMergedIssue } from "../services/merge-cleanup.service.js";
+<<<<<<< HEAD
 import { assertForeignKeysEnabled, alignForeignKeyActionsOnStartup } from "./fk-alignment.js";
+=======
+import { modelBelongsToProvider } from "@agentic-kanban/shared";
+import { PREF_DEFAULT_MODEL, PREF_PROVIDER } from "../constants/preference-keys.js";
+import { MODEL_PREF_KEYS_BY_PROVIDER } from "../services/effective-config.service.js";
+import { narrowProviderName } from "../services/agent-provider.js";
+>>>>>>> master
 
 /** Kill orphaned tsx server processes from previous hot-reload cycles (Windows only). */
 export function shouldKillOrphanedServerProcess(input: {
@@ -95,6 +102,48 @@ export async function killOrphanedServers(): Promise<void> {
   }
 }
 
+/**
+ * One-time migration (#902): retire the global, provider-agnostic `default_model` pref.
+ *
+ * The global key was the structural footgun — a single model id fed to whichever provider
+ * won, with only a silent-nullify guard between a stale Codex `gpt-5.5` and a doomed
+ * `claude.exe --model gpt-5.5` launch (#696/#699). Model is now ONLY provider-scoped.
+ *
+ * Behavior: if a global value exists and belongs to the currently-active provider AND that
+ * provider's scoped slot is empty, copy it across (preserve the user's intent). Then ALWAYS
+ * delete the global key. A wrong-provider or already-superseded value is simply dropped.
+ * Idempotent: once the key is gone this is a no-op.
+ */
+export async function migrateGlobalDefaultModelToProviderScope(database: Database = db): Promise<void> {
+  const rows = await database
+    .select({ key: preferences.key, value: preferences.value })
+    .from(preferences)
+    .where(eq(preferences.key, PREF_DEFAULT_MODEL));
+  if (rows.length === 0) return;
+
+  const globalValue = (rows[0].value ?? "").trim();
+  if (globalValue) {
+    const provider = narrowProviderName(
+      (await database.select({ value: preferences.value }).from(preferences).where(eq(preferences.key, PREF_PROVIDER)))[0]?.value ?? undefined,
+    );
+    const scopedKey = MODEL_PREF_KEYS_BY_PROVIDER[provider as keyof typeof MODEL_PREF_KEYS_BY_PROVIDER];
+    if (scopedKey && modelBelongsToProvider(globalValue, provider as "claude" | "codex" | "copilot" | "pi")) {
+      const existing = (
+        await database.select({ value: preferences.value }).from(preferences).where(eq(preferences.key, scopedKey))
+      )[0]?.value?.trim();
+      if (!existing) {
+        const now = new Date().toISOString();
+        await database.insert(preferences).values({ key: scopedKey, value: globalValue, updatedAt: now })
+          .onConflictDoUpdate({ target: preferences.key, set: { value: globalValue, updatedAt: now } });
+        console.log(`[startup] #902 migration: moved global default_model="${globalValue}" into ${scopedKey}`);
+      }
+    }
+  }
+
+  await database.delete(preferences).where(eq(preferences.key, PREF_DEFAULT_MODEL));
+  console.log("[startup] #902 migration: deleted the global default_model pref (model is now provider-scoped only)");
+}
+
 /** Run database migrations, seed built-in tags and skills, deduplicate projects, disable auto_monitor, and backfill failure patterns. */
 export async function runMigrations(): Promise<void> {
   // Cheap insurance: a verified snapshot before any schema change.
@@ -134,6 +183,16 @@ export async function runMigrations(): Promise<void> {
   await db.insert(preferences).values({ key: "auto_monitor", value: "false", updatedAt: now })
     .onConflictDoUpdate({ target: preferences.key, set: { value: "false", updatedAt: now } });
   console.log("[startup] auto_monitor disabled — re-enable in Settings → Workflow → Board Monitoring");
+
+  // One-time migration (#902): the global provider-agnostic `default_model` pref is gone.
+  // Move any live value into the active provider's scoped slot (if that slot is empty and the
+  // model belongs to the provider) and DELETE the global key so a cross-provider model is
+  // structurally unrepresentable. Idempotent — a no-op once the key is absent.
+  try {
+    await migrateGlobalDefaultModelToProviderScope(db);
+  } catch (err) {
+    console.warn("[startup] default_model provider-scope migration failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  }
 
   // Backfill failure patterns from docs/learnings/ in all registered projects (non-fatal)
   try {

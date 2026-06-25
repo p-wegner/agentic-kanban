@@ -20,15 +20,18 @@ import ts from "typescript";
  *     module should ever be enormous regardless of how cohesive it claims to be.
  *
  *  2. A COHESION signal — a module is a probable god-module when it is large
- *     ({@link COHESION_MIN_LINES}+) AND exposes a broad BEHAVIORAL export surface
- *     (> {@link COHESION_MAX_FN_EXPORTS} exported functions/classes). Many
- *     independent exported behaviors in one big file = many responsibilities =
- *     low cohesion. This is exactly the shape #875 called out in the post-split
- *     workflow engine.ts (688 lines, 19 exported functions, ~3 responsibilities)
- *     — a file the raw line gate waved through. The signal counts FUNCTIONS and
- *     CLASSES only, NOT exported `const` data tables (gitignore templates, version
- *     pins, lookup maps) or type/interface exports — those are cohesive data /
- *     contracts, not separate responsibilities.
+ *     ({@link COHESION_MIN_LINES}+) AND declares a broad BEHAVIORAL surface
+ *     (> {@link COHESION_MAX_FN_DECLS} top-level functions/classes, EXPORTED AND
+ *     INTERNAL). Many independent top-level behaviors in one big file = many
+ *     responsibilities = low cohesion. Counting only EXPORTS undercounts (#889): a
+ *     god-module hides behind a few exports while declaring dozens of internal
+ *     helpers — agent-stream-parser.ts had 3 exports but 28 internal functions at
+ *     1042 lines, waved straight through the old export-only signal. The count is
+ *     TOP-LEVEL function/class declarations + top-level arrow/function-expression
+ *     consts (nested callbacks belong to their enclosing function, not separate
+ *     responsibilities), and ignores `const` data tables (gitignore templates,
+ *     version pins, lookup maps) and type/interface exports — cohesive data /
+ *     contracts, not behaviors.
  *
  * Exemptions (path/shape-based, not a per-file allowlist):
  *  - the REPOSITORY layer — a data-access module legitimately exports one query
@@ -45,7 +48,22 @@ import ts from "typescript";
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "../../../..");
 const MAX_LINES = 1000;
 const COHESION_MIN_LINES = 600;
-const COHESION_MAX_FN_EXPORTS = 15;
+// Top-level function-like declarations, exported AND internal (#889). Keep in sync
+// with scripts/check-god-modules.mjs (the merge-blocking gate of record).
+const COHESION_MAX_FN_DECLS = 20;
+
+// Ratchet baseline (#889): large modules grandfathered at their current top-level
+// declaration count so the gate ships green. A baselined file may only SHRINK — the
+// gate fails if it grows past its baseline. Keep in sync with check-god-modules.mjs.
+// Decomposition tracked on the board (#911/#912/#913); drop an entry once split.
+const COHESION_BASELINE: Record<string, number> = {
+  "packages/shared/src/lib/session-summary.ts": 38,
+  "packages/server/src/services/butler-sdk.service.ts": 30,
+  "packages/server/src/services/stack-profile.service.ts": 28,
+  "packages/server/src/services/agent.service.ts": 27,
+  "packages/server/src/services/insights.service.ts": 23,
+  "packages/server/src/services/agent-questions.service.ts": 21,
+};
 
 function isExcluded(absPath: string): boolean {
   // Check segments RELATIVE to the repo root: when this test runs from inside a
@@ -94,30 +112,27 @@ function lineCount(text: string): number {
 }
 
 /**
- * Count the BEHAVIORAL export surface: exported function/class declarations plus
- * exported arrow-function/function-expression consts. Deliberately ignores
- * exported data consts (lookup tables, templates, version pins) and type/interface
- * exports — those are cohesive data/contracts, not separate responsibilities.
+ * Count the BEHAVIORAL surface: top-level function/class declarations plus top-level
+ * arrow-function/function-expression consts — EXPORTED AND INTERNAL (#889). Counting
+ * only exports undercounts a god-module that hides internal helpers behind a few
+ * exports. Deliberately ignores data consts (lookup tables, templates, version pins)
+ * and type/interface exports — cohesive data/contracts, not separate responsibilities
+ * — and counts TOP-LEVEL only (nested callbacks belong to their enclosing function).
  */
-function countFunctionExports(file: string, text: string): number {
+function countInternalFunctions(file: string, text: string): number {
   const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
   let count = 0;
 
-  const isExported = (stmt: ts.Statement): boolean => {
-    const mods = ts.canHaveModifiers(stmt) ? ts.getModifiers(stmt) : undefined;
-    return !!mods?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
-  };
-
   for (const stmt of sf.statements) {
-    if (ts.isFunctionDeclaration(stmt) && isExported(stmt)) {
+    if (ts.isFunctionDeclaration(stmt)) {
       count++;
       continue;
     }
-    if (ts.isClassDeclaration(stmt) && isExported(stmt)) {
+    if (ts.isClassDeclaration(stmt)) {
       count++;
       continue;
     }
-    if (ts.isVariableStatement(stmt) && isExported(stmt)) {
+    if (ts.isVariableStatement(stmt)) {
       for (const decl of stmt.declarationList.declarations) {
         const init = decl.initializer;
         if (init && (ts.isArrowFunction(init) || ts.isFunctionExpression(init))) count++;
@@ -155,7 +170,7 @@ describe("god-module gate (cohesion-aware)", () => {
     ).toEqual([]);
   });
 
-  it(`no large module (${COHESION_MIN_LINES}+ lines) exposes more than ${COHESION_MAX_FN_EXPORTS} exported functions/classes`, () => {
+  it(`no large module (${COHESION_MIN_LINES}+ lines) declares more than ${COHESION_MAX_FN_DECLS} top-level functions/classes`, () => {
     const offenders: string[] = [];
     for (const file of gatherSourceFiles()) {
       const rel = relative(REPO_ROOT, file).split(sep).join("/");
@@ -163,18 +178,22 @@ describe("god-module gate (cohesion-aware)", () => {
       const text = readFileSync(file, "utf8");
       const lines = lineCount(text);
       if (lines < COHESION_MIN_LINES) continue;
-      const fnExports = countFunctionExports(file, text);
-      if (fnExports > COHESION_MAX_FN_EXPORTS) {
-        offenders.push(`${rel}  (${lines} lines, ${fnExports} exported functions/classes)`);
+      const fnDecls = countInternalFunctions(file, text);
+      const allowed = Math.max(COHESION_MAX_FN_DECLS, COHESION_BASELINE[rel] ?? 0);
+      if (fnDecls > allowed) {
+        const baselineNote = COHESION_BASELINE[rel]
+          ? ` — grandfathered at ${COHESION_BASELINE[rel]}, GREW past its baseline`
+          : "";
+        offenders.push(`${rel}  (${lines} lines, ${fnDecls} functions/classes${baselineNote})`);
       }
     }
 
     expect(
       offenders,
-      `These large modules expose a broad behavioral export surface — a low-cohesion ` +
-        `god-module smell (the shape #875 flagged in the old workflow engine.ts). ` +
+      `These large modules declare a broad behavioral surface (top-level functions/classes, ` +
+        `exported + internal) — a low-cohesion god-module smell (#889). ` +
         `Split by responsibility into cohesive sub-modules re-exported through a facade ` +
-        `barrel (see workflow-engine.ts / git-service.ts):\n` +
+        `barrel (see workflow-engine.ts / git-service.ts / agent-stream-parser.ts):\n` +
         offenders.join("\n"),
     ).toEqual([]);
   });

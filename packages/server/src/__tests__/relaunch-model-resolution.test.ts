@@ -7,14 +7,18 @@ import { createWorkspaceSessionService } from "../services/workspace-session.ser
 
 /**
  * Regression tests for #698: relaunch reuses baked-in model instead of re-reading
- * the current default_model preference.
+ * the current default-model preference.
  *
  * The bug: POST /api/workspaces/:id/launch passed no model to startSession, so
  * session-lifecycle fell back to workspace.model (captured at creation). Clearing or
- * changing the default_model pref had no effect until the workspace was deleted and
+ * changing the default-model pref had no effect until the workspace was deleted and
  * recreated.
  *
- * The fix: launchSession now re-reads default_model on every relaunch.
+ * The fix: launchSession now re-reads the (provider-scoped) default model on every relaunch.
+ *
+ * NOTE (#902): the global, provider-agnostic `default_model` key was retired. Relaunch
+ * now reads ONLY the provider-scoped slot (`default_model_<provider>`), so these tests
+ * seed `default_model_claude`/`default_model_codex` rather than the dead global key.
  */
 
 async function seedWorkspace(
@@ -57,10 +61,10 @@ describe("relaunch model resolution (#698)", () => {
     ({ db } = createTestDb());
   });
 
-  it("picks up the current default_model pref instead of the workspace's baked-in model", async () => {
+  it("picks up the current provider-scoped default pref instead of the workspace's baked-in model", async () => {
     const { workspaceId } = await seedWorkspace(db, { bakedModel: "old-baked-model" });
     // Simulate user having cleared the old pref and set a new one
-    await db.insert(preferences).values({ key: "default_model", value: "claude-opus-4-5" });
+    await db.insert(preferences).values({ key: "default_model_claude", value: "claude-opus-4-5" });
 
     const sessionManager = createMockSessionManager();
     const service = createWorkspaceSessionService({
@@ -77,7 +81,7 @@ describe("relaunch model resolution (#698)", () => {
   it("prefers the provider-specific default model on relaunch", async () => {
     const { workspaceId } = await seedWorkspace(db, { bakedModel: "old-baked-model", provider: "claude" });
     await db.insert(preferences).values([
-      { key: "default_model", value: "gpt-5.5" },
+      { key: "default_model_codex", value: "gpt-5.5" },
       { key: "default_model_claude", value: "sonnet" },
     ]);
 
@@ -112,8 +116,9 @@ describe("relaunch model resolution (#698)", () => {
     expect(startCall.model).toBeUndefined();
   });
 
-  it("drops a cross-provider model id from the pref to prevent failed launches (#696)", async () => {
-    // User has default_model=gpt-5.5 leftover from codex but workspace provider is claude
+  it("ignores a leftover global default_model — cross-provider leak is unrepresentable (#902/#696)", async () => {
+    // Pre-#902 a stale global `default_model=gpt-5.5` (codex id) leaked into a claude relaunch.
+    // The global key is retired now: it is never read, so it cannot reach the launch at all.
     const { workspaceId } = await seedWorkspace(db, { bakedModel: null, provider: "claude" });
     await db.insert(preferences).values({ key: "default_model", value: "gpt-5.5" });
 
@@ -126,13 +131,13 @@ describe("relaunch model resolution (#698)", () => {
     await service.launchSession(workspaceId);
 
     const startCall = (sessionManager.startSession as ReturnType<typeof import("vitest").vi.fn>).mock.calls[0][0];
-    // gpt-5.5 is not a claude model — must be dropped, not forwarded
+    // The global key has no effect — no model forwarded.
     expect(startCall.model).toBeUndefined();
   });
 
   it("respects a model passed explicitly in the request body", async () => {
     const { workspaceId } = await seedWorkspace(db, { bakedModel: "old-model" });
-    await db.insert(preferences).values({ key: "default_model", value: "claude-haiku-4-5-20251001" });
+    await db.insert(preferences).values({ key: "default_model_claude", value: "claude-haiku-4-5-20251001" });
 
     const sessionManager = createMockSessionManager();
     const service = createWorkspaceSessionService({
