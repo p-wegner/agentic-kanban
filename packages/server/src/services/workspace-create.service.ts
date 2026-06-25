@@ -225,6 +225,33 @@ export function createWorkspaceCreateService(deps: {
     });
   }
 
+  /**
+   * Compensating rollback for the on-disk git worktree + branch provisioned by
+   * setupWorktree BEFORE the DB transaction opens. Cross-resource atomicity gap
+   * (#893): if anything after provisioning throws (txn rollback, workflow-init
+   * failure, or a WorkspaceError surfaced from agent-config resolution), the
+   * worktree directory + branch persist with no backing DB row — an orphan the
+   * board can't see or cascade-clean. Removing it here is the compensation step.
+   *
+   * No-op for direct workspaces (they reuse the main checkout — there is nothing
+   * to remove) and when no worktree was provisioned (failure happened earlier).
+   * Best-effort: a failed removal is logged, never re-thrown, so it can't mask the
+   * original error.
+   */
+  async function rollbackOrphanedWorktree(
+    isDirect: boolean,
+    worktreePath: string | null,
+    repoPath: string | null,
+  ): Promise<void> {
+    if (isDirect || !worktreePath || !repoPath) return;
+    try {
+      await gitService.removeWorktree(repoPath, worktreePath);
+      console.log(`[workspaces] cleaned up orphaned worktree: ${worktreePath}`);
+    } catch (cleanupErr) {
+      console.warn(`[workspaces] failed to remove worktree after create error: ${cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)}`);
+    }
+  }
+
   async function handleCreateFailure(err: unknown, params: {
     id: string;
     issueId: string;
@@ -253,14 +280,7 @@ export function createWorkspaceCreateService(deps: {
       }
     } catch { /* best-effort */ }
 
-    if (!params.isDirect && params.worktreePath && params.repoPath) {
-      try {
-        await gitService.removeWorktree(params.repoPath, params.worktreePath);
-        console.log(`[workspaces] cleaned up orphaned worktree: ${params.worktreePath}`);
-      } catch (cleanupErr) {
-        console.warn(`[workspaces] failed to remove worktree after create error: ${cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)}`);
-      }
-    }
+    await rollbackOrphanedWorktree(params.isDirect, params.worktreePath, params.repoPath);
 
     return {
       id: params.id,
@@ -459,7 +479,15 @@ export function createWorkspaceCreateService(deps: {
         updatedAt: now,
       };
     } catch (err) {
-      if (err instanceof WorkspaceError) throw err;
+      if (err instanceof WorkspaceError) {
+        // A WorkspaceError raised AFTER the worktree was provisioned (e.g. an
+        // agent-config WorkspaceError, or a workflow-init / move-to-In-Progress
+        // failure inside the DB txn) would otherwise re-throw without removing the
+        // on-disk worktree+branch, leaving an orphan with no backing row (#893).
+        // Compensate first, then surface the original WorkspaceError unchanged.
+        await rollbackOrphanedWorktree(isDirect, worktreePath, repoPath);
+        throw err;
+      }
       // Agent launch is now deferred (setImmediate), so failures there are handled
       // in the background callback and never reach this catch block. Only pre-return
       // failures (worktree setup, DB insert, workflow init) land here.
