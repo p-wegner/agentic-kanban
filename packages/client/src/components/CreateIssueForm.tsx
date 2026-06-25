@@ -5,6 +5,7 @@ import { isHttpUrl } from "../lib/url.js";
 import { showToast } from "./Toast.js";
 import TicketMentionInput from "./TicketMentionInput.js";
 import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
+import { handleImagePaste, mergeDescriptionWithImages } from "../lib/pastedImages.js";
 
 interface Skill {
   id: string;
@@ -22,6 +23,7 @@ interface WorkflowTemplate {
 export interface CreateIssueFormState {
   title: string;
   description: string;
+  pastedImages: string[];
   issueType: CreateIssueRequest["issueType"];
   estimate?: IssueEstimate | "";
   startWorkspace: boolean;
@@ -51,6 +53,7 @@ export function CreateIssueForm({
 }: CreateIssueFormProps) {
   const [title, setTitle] = useState(initialState?.title ?? "");
   const [description, setDescription] = useState(initialState?.description ?? "");
+  const [pastedImages, setPastedImages] = useState<string[]>(initialState?.pastedImages ?? []);
   const [issueType, setIssueType] = useState<CreateIssueRequest["issueType"]>(initialState?.issueType ?? "task");
   const [estimate, setEstimate] = useState<IssueEstimate | "">(initialState?.estimate ?? "");
   const [startWorkspace, setStartWorkspace] = useState(initialState?.startWorkspace ?? false);
@@ -146,7 +149,7 @@ export function CreateIssueForm({
     try {
       await onSubmit({
         title: title.trim(),
-        description: description.trim() || undefined,
+        description: mergeDescriptionWithImages(description, pastedImages) || undefined,
         issueType,
         estimate: estimate || undefined,
         statusId,
@@ -212,12 +215,27 @@ export function CreateIssueForm({
       />
       <TicketMentionInput
         inputRef={descRef}
-        placeholder="Description (optional)"
+        placeholder="Description (optional) — paste screenshots with Ctrl+V"
         value={description}
         onChange={(val) => setDescription(val)}
+        onPaste={(e) => handleImagePaste(e, (dataUrl) => setPastedImages((prev) => [...prev, dataUrl]))}
         rows={2}
         className="w-full text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none overflow-y-hidden dark:bg-gray-900 dark:text-gray-100"
       />
+      {pastedImages.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {pastedImages.map((url, i) => (
+            <div key={i} className="relative group">
+              <img src={url} alt={`screenshot-${i + 1}`} className="h-12 w-auto rounded border border-gray-200 dark:border-gray-700 object-cover" />
+              <button
+                type="button"
+                onClick={() => setPastedImages((prev) => prev.filter((_, j) => j !== i))}
+                className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white rounded-full text-xs leading-none flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+              >×</button>
+            </div>
+          ))}
+        </div>
+      )}
       {issueTemplates.length > 0 && (
         <select
           value=""
@@ -404,7 +422,7 @@ export function CreateIssueForm({
         {onExpand && (
           <button
             type="button"
-            onClick={() => onExpand({ title, description, issueType, estimate, startWorkspace, planMode, skipAutoReview, skillId })}
+            onClick={() => onExpand({ title, description, pastedImages, issueType, estimate, startWorkspace, planMode, skipAutoReview, skillId })}
             className="ml-auto text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 p-1 rounded"
             title="Expand form"
           >
