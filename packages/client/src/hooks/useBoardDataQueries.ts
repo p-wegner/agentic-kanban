@@ -5,6 +5,7 @@ import type { Project, Tag } from "../routes/BoardPage.js";
 
 export const boardQueryKeys = {
   activeProjectPreference: ["preferences", "active-project"] as const,
+  agentQuestions: (projectId: string) => ["projects", projectId, "agent-questions"] as const,
   archivedProjects: ["projects", "archived"] as const,
   availableIssues: (projectId: string) => ["projects", projectId, "available-issues"] as const,
   board: (projectId: string) => ["projects", projectId, "board"] as const,
