@@ -37,7 +37,12 @@ import {
 import { listButlerSessions, getButlerSessionMessages } from "../services/butler-transcripts.service.js";
 import { loadAgentSettings, isMockProfile } from "../services/agent-settings.service.js";
 import type { ProviderName } from "../services/agent-provider.js";
-import { parseStrategyBullseyeConfig, selectProviderFromStrategy } from "../services/strategy-objective.service.js";
+import {
+  parseStrategyBullseyeConfig,
+  selectProviderFromStrategy,
+  applyProviderSelectionToPrefMap,
+} from "../services/strategy-objective.service.js";
+import { resolveEffectiveProviderProfile } from "../services/effective-config.service.js";
 import { getAllPreferences } from "../repositories/preferences.repository.js";
 import { loadCodexLicenseRing, resolveCodexHomeForProfile } from "../services/codex-license-ring.js";
 
@@ -81,6 +86,13 @@ async function appendToSessionHistory(projectId: string, butlerId: string, sessi
  *  Profile is auth/endpoint, shared by ALL of a project's butlers — not per-butler. */
 function butlerProfilePrefKey(projectId: string): string {
   return `butler_profile_${projectId}`;
+}
+
+/** The butler runs via the Claude Agent SDK (claude) or a CLI-spawn codex session.
+ *  Copilot/pi resolve correctly through the shared resolver but are not yet wired as
+ *  butler SDK backends, so they map onto the SDK default (claude) at launch. */
+function butlerSdkBackend(provider: ProviderName): "claude" | "codex" {
+  return provider === "codex" ? "codex" : "claude";
 }
 
 function normalizeModelForBackend(model: string | null | undefined, backend: "claude" | "codex" | "mock"): string {
@@ -208,19 +220,27 @@ export function createButlerRoute(
 
   /** Resolve the Butler's backend/profile.
    *
-   * Priority order (highest first):
-   *  1. Per-butler provider override from the butler definition (`butlerProvider`).
-   *  2. Project's Strategy Bullseye (`board_strategy_<projectId>`) — same source that
-   *     workspace creation uses, so the butler always matches the builder's provider.
-   *  3. Global settings prefs (`provider` / `claude_profile` / `codex_profile`) — the
-   *     legacy fallback when no Bullseye is configured.
+   * Provider resolution funnels through the SHARED resolver
+   * (`resolveEffectiveProviderProfile`) — the single source of truth used by the
+   * workspace builder too. This route no longer hand-rolls its own
+   * butler>Bullseye>settings cascade or hard-narrows to claude|codex, so copilot/pi
+   * are first-class here as well. We layer the butler-specific overrides onto a
+   * prefMap *copy* and let the resolver read a consistent view:
+   *
+   *  1. Per-butler provider override from the butler definition (`butlerProvider`) —
+   *     written onto prefMap as `provider`.
+   *  2. Project's Strategy Bullseye (`board_strategy_<projectId>`) — same source the
+   *     workspace builder uses, mirrored onto prefMap via
+   *     `applyProviderSelectionToPrefMap` (so the butler matches the builder).
+   *  3. Global settings prefs (`provider` / `*_profile`) — the prefMap's own values,
+   *     used by the resolver when neither override above is present.
    *
    * The per-project butler profile override (`butler_profile_<projectId>`) always wins
-   * over the profile derived from the Bullseye / global prefs (it's an explicit user
-   * override for the butler's auth endpoint, independent of which provider is primary).
+   * over the profile the resolver derives (it's an explicit user override for the
+   * butler's auth endpoint, independent of which provider is primary).
    */
-  async function resolveButlerBackend(projectId: string, butlerProvider?: "claude" | "codex"): Promise<{
-    provider: Extract<ProviderName, "claude" | "codex">;
+  async function resolveButlerBackend(projectId: string, butlerProvider?: ProviderName): Promise<{
+    provider: ProviderName;
     selectedProfile: string | undefined;
     globalProfile: string;
     claudeProfile?: string;
@@ -237,41 +257,34 @@ export function createButlerRoute(
     const settings = await loadAgentSettings(database);
     const perProject = await getPreference(butlerProfilePrefKey(projectId), database);
 
-    // Derive provider from Strategy Bullseye when no explicit butler-def override exists.
-    // This mirrors buildAgentConfig() so the butler always runs on the same provider as
-    // the workspace builder (the only authoritative source is the Bullseye).
-    let bullseyeProvider: "claude" | "codex" | null = null;
-    let bullseyeProfile: string | null = null;
-    if (!butlerProvider) {
+    // Layer the butler-def override / Strategy Bullseye selection onto the prefMap so
+    // the shared resolver reads a consistent view. Precedence: butler-def provider >
+    // Bullseye selection > prefMap's own `provider`/`*_profile` (global settings).
+    if (butlerProvider) {
+      prefMap.set("provider", butlerProvider);
+    } else {
       const strategyRaw = prefMap.get(`board_strategy_${projectId}`);
       if (strategyRaw) {
         try {
           const strategyConfig = parseStrategyBullseyeConfig(strategyRaw);
           const selected = selectProviderFromStrategy(strategyConfig);
-          if (selected && (selected.provider === "claude" || selected.provider === "codex")) {
-            bullseyeProvider = selected.provider;
-            bullseyeProfile = selected.profileName || null;
+          if (selected) {
+            applyProviderSelectionToPrefMap(prefMap, selected);
           }
         } catch {
-          // non-fatal: fall through to global default
+          // non-fatal: fall through to global default already on prefMap
         }
       }
     }
 
-    const globalProvider: "claude" | "codex" = settings.provider === "codex" ? "codex" : "claude";
-    // butlerProvider (def override) > bullseyeProvider > globalProvider
-    const provider: "claude" | "codex" = butlerProvider ?? bullseyeProvider ?? globalProvider;
+    const { provider, profileName: resolverProfile } = resolveEffectiveProviderProfile(prefMap);
 
-    const availableProfiles = provider === "codex" ? await preferenceService.listCodexProfiles() : await preferenceService.listClaudeProfiles();
+    const availableProfiles = await preferenceService.listProfilesForProvider(provider);
     const profileOverride = perProject && availableProfiles.includes(perProject) ? perProject : undefined;
 
-    // Profile derived from Bullseye (only used when Bullseye set the provider)
-    const bullseyeProfileResolved = (bullseyeProvider === provider && bullseyeProfile && availableProfiles.includes(bullseyeProfile))
-      ? bullseyeProfile : null;
-
     const globalProfile = settings.profile?.provider === provider ? settings.profile.name : "";
-    // Per-project butler override > Bullseye profile > global profile
-    const selectedProfile = profileOverride || bullseyeProfileResolved || globalProfile || undefined;
+    // Per-project butler override > resolver-derived profile (Bullseye/global) > global profile.
+    const selectedProfile = profileOverride || resolverProfile || globalProfile || undefined;
 
     // `settings.agentCommand`/`agentArgs` are derived under the GLOBAL provider
     // (e.g. Claude's `--dangerously-skip-permissions`). Forwarding them to a butler
@@ -279,7 +292,7 @@ export function createButlerRoute(
     // provider's command/flags — codex rejects `--dangerously-skip-permissions` and
     // exits with code 2. Only forward when the providers match; otherwise let the
     // butler's provider use its own defaults.
-    const matchesGlobalProvider = provider === globalProvider;
+    const matchesGlobalProvider = provider === settings.provider;
 
     // Codex OAuth licenses: a ChatGPT-plan license is a separate CODEX_HOME directory
     // with its own auth.json (an auto-discovered `~/.codex-<name>` dir or a ring entry).
@@ -321,8 +334,9 @@ export function createButlerRoute(
     if (!project) return null;
     const def = await getButlerDefinition(database, butlerId);
     const backend = await resolveButlerBackend(projectId, def?.provider);
+    const sdkBackend = butlerSdkBackend(backend.provider);
     // Model is a property of the (global) butler definition, not a per-project pref.
-    const model = normalizeModelForBackend(def?.model, backend.provider) || undefined;
+    const model = normalizeModelForBackend(def?.model, sdkBackend) || undefined;
     const resumeSessionId = (await getPreference(butlerSessionPrefKey(projectId, butlerId), database)) || undefined;
     const systemPromptAppend = await resolveButlerPrompt(projectId, project.name, project.repoPath);
     const wasActive = getButlerSession(projectId, butlerId).active;
@@ -337,7 +351,7 @@ export function createButlerRoute(
       undefined;
     const effectiveBackend: "claude" | "codex" | "mock" = isMockProfile(rawProfile)
       ? "mock"
-      : backend.provider;
+      : sdkBackend;
     const session = ensureButlerSession({
       projectId,
       butlerId,
@@ -375,7 +389,7 @@ export function createButlerRoute(
     const butlers = defs.map((d) => {
       const st = states.get(d.id);
       // Prefer: active session's backend → per-butler provider → global provider
-      const itemBackend = st?.backend ?? d.provider ?? globalBackend.provider;
+      const itemBackend = st?.backend ?? d.provider ?? butlerSdkBackend(globalBackend.provider);
       return {
         id: d.id,
         name: d.name,
@@ -401,7 +415,7 @@ export function createButlerRoute(
     const persisted = (await getPreference(butlerSessionPrefKey(projectId, butlerId), database)) || null;
     const def = await getButlerDefinition(database, butlerId);
     const backend = await resolveButlerBackend(projectId, def?.provider);
-    const effectiveBackend = state.active ? state.backend : backend.provider;
+    const effectiveBackend = state.active ? state.backend : butlerSdkBackend(backend.provider);
     // Model is sourced from the butler definition (global), profile from the project pref.
     const selectedModel = normalizeModelForBackend(def?.model, effectiveBackend);
     return c.json({
@@ -451,7 +465,7 @@ export function createButlerRoute(
     const butlerId = resolveButlerId(c);
     const def = await getButlerDefinition(database, butlerId);
     const backend = await resolveButlerBackend(projectId, def?.provider);
-    const profiles = backend.provider === "codex" ? await preferenceService.listCodexProfiles() : await preferenceService.listClaudeProfiles();
+    const profiles = await preferenceService.listProfilesForProvider(backend.provider);
     return c.json({ provider: backend.provider, profiles, selected: backend.selectedProfile ?? "", globalDefault: backend.globalProfile });
   });
 
@@ -466,7 +480,7 @@ export function createButlerRoute(
     const def = await getButlerDefinition(database, butlerId);
     const backend = await resolveButlerBackend(projectId, def?.provider);
     const state = getButlerSession(projectId, butlerId);
-    const model = normalizeModelForBackend(body.model, state.active ? state.backend : backend.provider);
+    const model = normalizeModelForBackend(body.model, state.active ? state.backend : butlerSdkBackend(backend.provider));
     try {
       await updateButlerDefinition(database, butlerId, { model });
     } catch (err) {

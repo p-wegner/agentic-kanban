@@ -24,6 +24,7 @@ import { parseCodexLicenseRing, ringProfileNames, discoverCodexHomeProfiles } fr
 import { parseClaudeSubscriptionRing, ringProfileNames as claudeRingProfileNames, discoverClaudeConfigDirProfiles } from "./claude-subscription-ring.js";
 import { isProjectScopedDynamicKey } from "../lib/dynamic-preference-keys.js";
 import { resolveProviderDivergence } from "./project-runtime-config.service.js";
+import type { ProviderName } from "./agent-provider.js";
 
 export const SETTINGS_KEYS = [
   "agent_command", "agent_args", "output_parser", "skip_permissions", "claude_profile",
@@ -221,6 +222,19 @@ export function createPreferenceService({ database }: { database: Database }) {
     return [...new Set(profiles)].sort();
   }
 
+  /** The available profiles for any provider — dispatches to the per-provider lister
+   *  via a provider-keyed record (no `=== "codex"` ladders). Used by the butler and
+   *  any other caller that has a resolved `ProviderName` rather than a fixed provider. */
+  async function listProfilesForProvider(provider: ProviderName): Promise<string[]> {
+    const listers: Record<ProviderName, () => Promise<string[]> | string[]> = {
+      claude: listClaudeProfiles,
+      codex: listCodexProfiles,
+      copilot: listCopilotProfiles,
+      pi: listPiProfiles,
+    };
+    return listers[provider]();
+  }
+
   /**
    * Detect drift between the global provider/profile settings prefs and the
    * project's Strategy Bullseye (the single authoritative source).
@@ -252,7 +266,7 @@ export function createPreferenceService({ database }: { database: Database }) {
     return result;
   }
 
-  return { getActiveProjectId, setActiveProjectId, getSettings, updateSettings, getProviderDivergence, listClaudeProfiles, listCodexProfiles, listCopilotProfiles, listPiProfiles };
+  return { getActiveProjectId, setActiveProjectId, getSettings, updateSettings, getProviderDivergence, listClaudeProfiles, listCodexProfiles, listCopilotProfiles, listPiProfiles, listProfilesForProvider };
 }
 
 export const preferenceService = createPreferenceService({ database: db });
