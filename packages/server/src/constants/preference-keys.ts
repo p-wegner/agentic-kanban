@@ -12,6 +12,13 @@ export const PREF_CLAUDE_SUBSCRIPTION_RING = "claude_subscription_ring";
 export const PREF_CLAUDE_SUBSCRIPTION_ROTATION = "claude_subscription_rotation";
 export const PREF_COPILOT_PROFILE = "copilot_profile";
 export const PREF_PROVIDER = "provider";
+/**
+ * @deprecated #902 — the global, provider-agnostic default model is GONE. A single
+ * cross-provider model id is the #696/#699 footgun (a stale Codex `gpt-5.5` leaking into
+ * a Claude launch). Model is now ONLY provider-scoped (`default_model_<provider>`).
+ * This constant survives solely so the one-time startup migration can READ + DELETE the
+ * legacy key. Do NOT add new reads of it — `effective-config.service.ts` no longer consults it.
+ */
 export const PREF_DEFAULT_MODEL = "default_model";
 export const PREF_DEFAULT_MODEL_CLAUDE = "default_model_claude";
 export const PREF_DEFAULT_MODEL_CODEX = "default_model_codex";
