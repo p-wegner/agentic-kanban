@@ -37,6 +37,7 @@ import { registerAnalyzeDependencies } from "./tools/analyze-dependencies.js";
 import { registerRemoveDependency } from "./tools/remove-dependency.js";
 import { registerCreateIssuesBatch } from "./tools/create-issues-batch.js";
 import { registerUpdateDependenciesBatch } from "./tools/update-dependencies-batch.js";
+import { registerContractCoupledIssues } from "./tools/contract-coupled-issues.js";
 import { registerGetBoardStatus } from "./tools/get-board-status.js";
 import { registerGetIssueSummary } from "./tools/get-issue-summary.js";
 import { registerListAgentSkills } from "./tools/list-agent-skills.js";
@@ -134,6 +135,7 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   remove_dependency: registerRemoveDependency,
   create_issues_batch: registerCreateIssuesBatch,
   update_dependencies_batch: registerUpdateDependenciesBatch,
+  contract_coupled_issues: registerContractCoupledIssues,
   get_board_status: registerGetBoardStatus,
   get_issue_summary: registerGetIssueSummary,
   list_agent_skills: registerListAgentSkills,
