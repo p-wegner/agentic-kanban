@@ -1,118 +1,19 @@
-export interface Settings {
-  agent_command?: string;
-  agent_args?: string;
-  output_parser?: string;
-  skip_permissions?: string;
-  claude_profile?: string;
-  codex_profile?: string;
-  copilot_profile?: string;
-  pi_profile?: string;
-  codex_license_ring?: string;
-  codex_license_rotation?: string;
-  claude_subscription_ring?: string;
-  claude_subscription_rotation?: string;
-  provider?: string;
-  // The global, provider-agnostic `default_model` was retired in #902 — model is now ONLY
-  // provider-scoped, so a cross-provider id is unrepresentable. Use default_model_<provider>.
-  default_model_claude?: string;
-  default_model_codex?: string;
-  default_model_pi?: string;
-  permission_prompt_tool?: string;
-  auto_review?: string;
-  auto_merge?: string;
-  merge_strategy?: string;
-  auto_merge_in_review?: string;
-  review_auto_fix?: string;
-  resume_with_new_model?: string;
-  disabled_mcp_tools?: string;
-  auto_start_followup?: string;
-  dependency_auto_chain?: string;
-  auto_rebase_on_continue?: string;
-  require_manual_approval?: string;
-  skip_preflight?: string;
-  dynamic_column_scaling?: string;
-  persistent_agent?: string;
-  learning_step_after_agent?: string;
-  learning_step_after_review?: string;
-  learning_step_before_merge?: string;
-  auto_monitor?: string;
-  auto_monitor_interval?: string;
-  nudge_auto_start?: string;
-  nudge_wip_limit?: string;
-  monitor_maintenance_window_enabled?: string;
-  monitor_maintenance_window_end?: string;
-  auto_commit_strategy_objective?: string;
-  backlog_stale_days?: string;
-  inprogress_stale_days?: string;
-  backlog_empty_strategy?: string;
-  backlog_empty_skill?: string;
-  backlog_empty_cooldown_min?: string;
-  projects_base_path?: string;
-  plan_auto_continue?: string;
-  visual_verification_mode?: string;
-  after_merge_verify_agent?: string;
-  butler_event_feed?: string;
-  butler_event_feed_min_interval_ms?: string;
-  butler_auto_answer?: string;
-  butler_auto_answer_min_confidence?: string;
-  "harness.codex.plan_auto_continue"?: string;
-  "harness.copilot.plan_auto_continue"?: string;
-  "harness.claude.plan_auto_continue"?: string;
-}
-
-export const DEFAULT_SETTINGS: Settings = {
-  agent_command: "",
-  agent_args: "",
-  output_parser: "minimal",
-  skip_permissions: "true",
-  claude_profile: "",
-  codex_profile: "",
-  copilot_profile: "",
-  pi_profile: "",
-  codex_license_ring: "",
-  codex_license_rotation: "true",
-  claude_subscription_ring: "",
-  claude_subscription_rotation: "true",
-  provider: "claude",
-  default_model_claude: "",
-  default_model_codex: "",
-  default_model_pi: "",
-  permission_prompt_tool: "false",
-  auto_review: "true",
-  auto_merge: "true",
-  merge_strategy: "",
-  auto_merge_in_review: "false",
-  review_auto_fix: "true",
-  resume_with_new_model: "false",
-  disabled_mcp_tools: "",
-  auto_start_followup: "false",
-  dependency_auto_chain: "false",
-  auto_rebase_on_continue: "false",
-  require_manual_approval: "false",
-  skip_preflight: "false",
-  dynamic_column_scaling: "false",
-  persistent_agent: "false",
-  learning_step_after_agent: "false",
-  learning_step_after_review: "false",
-  learning_step_before_merge: "false",
-  auto_monitor: "false",
-  auto_monitor_interval: "4",
-  nudge_auto_start: "false",
-  monitor_maintenance_window_enabled: "false",
-  monitor_maintenance_window_end: "",
-  auto_commit_strategy_objective: "true",
-  backlog_stale_days: "14",
-  inprogress_stale_days: "3",
-  backlog_empty_strategy: "skip",
-  backlog_empty_skill: "architecture-improvement",
-  backlog_empty_cooldown_min: "120",
-  projects_base_path: "",
-  plan_auto_continue: "true",
-  visual_verification_mode: "before_merge",
-  butler_event_feed: "false",
-  butler_event_feed_min_interval_ms: "30000",
-  butler_auto_answer: "false",
-};
+// `Settings`, `DEFAULT_SETTINGS`, and the typed accessors are DERIVED from the single
+// settings registry (`@agentic-kanban/shared/lib/settings-registry`, #903) — the same
+// source the server's SETTINGS_KEYS whitelist derives from. Adding a global setting is
+// now a one-place edit in that registry; a setting referenced here but absent there is a
+// compile error. Re-exported so existing client imports (`from "./settings-shared.js"`,
+// or transitively `SettingsPanel.shared.js`) keep working unchanged.
+export {
+  SETTINGS_REGISTRY,
+  SETTINGS_REGISTRY_KEYS,
+  DEFAULT_SETTINGS,
+  getBool,
+  getNumber,
+  getJson,
+} from "@agentic-kanban/shared/lib/settings-registry";
+export type { Settings, SettingKey, SettingDef, SettingType } from "@agentic-kanban/shared/lib/settings-registry";
+import type { Settings } from "@agentic-kanban/shared/lib/settings-registry";
 
 export type MonitorTunables = {
   activeAgentsTarget: number;
