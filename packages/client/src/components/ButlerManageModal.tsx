@@ -44,14 +44,10 @@ export function ButlerManageModal({ globalBackend, onClose, onChanged }: { globa
   }
 
   async function callDef(path: string, init: { method: string; body?: unknown }) {
-    const res = await fetch(`/api/butler-definitions${path}`, {
+    return apiFetch<unknown>(`/api/butler-definitions${path}`, {
       method: init.method,
-      headers: init.body !== undefined ? { "Content-Type": "application/json" } : undefined,
       body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
     });
-    const data = (await res.json().catch(() => ({}))) as { error?: string };
-    if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
-    return data;
   }
 
   return (
