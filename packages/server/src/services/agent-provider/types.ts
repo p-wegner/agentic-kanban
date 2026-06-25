@@ -86,6 +86,14 @@ export interface AgentProvider {
 
   /** Parse a single stdout line into a provider-neutral event (or undefined if not recognized). */
   parseStreamEvent(line: string): ParsedStreamEvent | undefined;
+
+  /**
+   * Like parseStreamEvent, but records an "unknown event type" metric/log when the
+   * line was VALID JSON the parser did not recognize (arch-review #898 — the silent
+   * swallow behind the recurring "0 tokens" misdiagnosis). Use this on stream hot
+   * paths so a CLI wire-format rename surfaces loudly instead of dropping the event.
+   */
+  parseStreamEventObserved(line: string): ParsedStreamEvent | undefined;
 }
 
 export interface BuildAgentLaunchConfigOptions extends ProviderLaunchOptions {}
