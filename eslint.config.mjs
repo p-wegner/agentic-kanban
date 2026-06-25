@@ -155,6 +155,29 @@ export default tseslint.config(
     },
   },
 
+  // ── Client components: reads must go through the data/query layer ──────────
+  // Raw `fetch(` in a component re-forms the cache split this campaign closed
+  // (#896): each component re-rolls its own request + state instead of a
+  // react-query hook, and new code copies its neighbour. Route reads through a
+  // hook in src/hooks/ (or the typed verb helpers in src/lib/api.ts —
+  // apiFetch/apiPost/apiPut/apiPatch/apiDelete). The few legitimate non-reads
+  // (binary blob downloads, SSE-over-POST that needs a ReadableStream) carry a
+  // per-site `eslint-disable-next-line no-restricted-syntax` with a reason.
+  {
+    files: ["packages/client/src/components/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "CallExpression[callee.name='fetch'], CallExpression[callee.property.name='fetch']",
+          message:
+            "No raw fetch() in components/ — reads must go through a data-layer hook (src/hooks/) or the typed helpers in src/lib/api.ts (apiFetch/apiPost/…). For a legitimate non-read (blob download, SSE-over-POST) add an `eslint-disable-next-line no-restricted-syntax` with a reason.",
+        },
+      ],
+    },
+  },
+
   // ── Tests + config files: NON type-aware ───────────────────────────────────
   // These are deliberately excluded from the build tsconfigs (see client/CLAUDE.md),
   // so projectService can't resolve them — type-aware rules would parse-error. Lint
