@@ -368,10 +368,10 @@ export async function getCoupledEdges(
 export async function getIssuesForContract(
   issueIds: string[],
   database: Database = db,
-): Promise<Array<{ id: string; issueNumber: number; title: string; description: string | null; statusId: string }>> {
+): Promise<Array<{ id: string; issueNumber: number; title: string; description: string | null; statusId: string; projectId: string }>> {
   if (issueIds.length === 0) return [];
   return database
-    .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, description: issues.description, statusId: issues.statusId })
+    .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, description: issues.description, statusId: issues.statusId, projectId: issues.projectId })
     .from(issues)
     .where(inArray(issues.id, issueIds));
 }
