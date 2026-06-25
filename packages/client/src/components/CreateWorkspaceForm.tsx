@@ -24,7 +24,7 @@ import {
   type AgentPreset,
 } from "../lib/agentPresets.js";
 import { buildCreateWorkspaceBody } from "../lib/createWorkspaceBody.js";
-import { defaultModelForProvider, type AgentProvider } from "../lib/settings-shared.js";
+import { defaultModelForProvider } from "../lib/settings-shared.js";
 
 interface Project {
   id: string;
