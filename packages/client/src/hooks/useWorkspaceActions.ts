@@ -21,6 +21,7 @@ type ConflictState = { hasConflicts: boolean; conflictingFiles: string[] } | nul
 type LaunchingFix = { wsId: string; kind: "fix-and-merge" | "resolve" } | null;
 /** Inline merge-error banner state, keyed to the failing workspace. */
 type MergeErrorState = { wsId: string; message: string } | null;
+type ApiError = Error & { status?: number };
 /** Per-workspace session listing — structurally mirrors the page's session rows. */
 interface SessionInfo {
   id: string;
@@ -199,6 +200,21 @@ export function useWorkspaceActions(deps: WorkspaceActionsDeps) {
       await fetchWorkspaces();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Profile update failed");
+    }
+  }
+
+  async function handleResetWorkspaceToIdle(wsId: string) {
+    if (!window.confirm("Reset this blocked workspace to idle? This does not relaunch review automatically.")) return;
+    setActionLoading(true);
+    setError(null);
+    try {
+      await apiPatch(`/api/workspaces/${wsId}`, { status: "idle" });
+      await fetchWorkspaces();
+      onWorkspaceChange?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to reset workspace");
+    } finally {
+      setActionLoading(false);
     }
   }
 
@@ -525,7 +541,13 @@ export function useWorkspaceActions(deps: WorkspaceActionsDeps) {
       setCompletedMessages([]);
       await fetchWorkspaces();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to start review");
+      const message = err instanceof Error ? err.message : "Failed to start review";
+      const status = err instanceof Error ? (err as ApiError).status : undefined;
+      if (status === 409) {
+        setError(`${message}. This workspace is not ready for review. Reset it to idle or relaunch with the current provider, then retry review.`);
+      } else {
+        setError(message);
+      }
     } finally {
       setActionLoading(false);
     }
@@ -612,6 +634,7 @@ export function useWorkspaceActions(deps: WorkspaceActionsDeps) {
     handleOpenTerminal, handleOpenEditor, copyPreviewUrl, handleUpdateBase,
     handleMonitorRunNow, handleAbortRebase, handleResolveConflicts, handleResume,
     handleRestart, handleContinueFromSession, handleAutoBisect, handleReview,
+    handleResetWorkspaceToIdle,
     handleImplementPlan, handleRejectPlan, handleDeleteWorkspace, handleCloseWorkspace,
   };
 }
