@@ -5,7 +5,7 @@ import { withTransaction } from "../db/index.js";
 import type { BoardEvents } from "./board-events.js";
 import type { WebhookIssueStatusPayload } from "@agentic-kanban/shared/lib";
 import { buildIssueStatusPayload } from "@agentic-kanban/shared/lib";
-import type { DependencyType } from "@agentic-kanban/shared/schema";
+import { DEPENDENCY_TYPES, type DependencyType } from "@agentic-kanban/shared/schema";
 import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { isTerminalStatusView, isTerminalStatusName } from "@agentic-kanban/shared";
 import {
@@ -166,7 +166,10 @@ export function validateBatchDependencies(
     if (e.issueIndex === e.dependsOnIndex) {
       fail(`dependencies[${i}]: an issue cannot depend on itself`, i);
     }
-    const type: DependencyType = e.type ?? "depends_on";
+    const type = e.type ?? "depends_on";
+    if (!DEPENDENCY_TYPES.includes(type)) {
+      fail(`dependencies[${i}].type '${type}' is not supported`, i);
+    }
     const key = `${e.issueIndex} ${e.dependsOnIndex} ${type}`;
     if (seen.has(key)) {
       fail(`dependencies[${i}]: duplicate edge (issue ${e.issueIndex} -> ${e.dependsOnIndex}, type ${type})`, i);

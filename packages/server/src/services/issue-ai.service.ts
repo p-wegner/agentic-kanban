@@ -866,7 +866,15 @@ export async function confirmContractComponent(
   if (uniqueMembers.length < 2) {
     throw new Error("a contract needs at least 2 members");
   }
-  const survivor = await repo.getIssueBasics(survivorId, database);
+  const memberRows = await repo.getIssuesForContract(uniqueMembers, database);
+  if (memberRows.length !== uniqueMembers.length) {
+    throw new NotFoundError("Contract member issue not found");
+  }
+  const outOfProject = memberRows.find((m) => m.projectId !== projectId);
+  if (outOfProject) {
+    throw new Error("all contract members must belong to the target project");
+  }
+  const survivor = memberRows.find((m) => m.id === survivorId);
   if (!survivor) throw new NotFoundError("Survivor issue not found");
 
   // Refuse to absorb in-flight work.

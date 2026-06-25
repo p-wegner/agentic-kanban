@@ -49,6 +49,12 @@ describe("validateBatchDependencies", () => {
     ], 2)).toThrow(/duplicate edge/);
   });
 
+  it("rejects an unsupported edge type from JSON input", () => {
+    expect(() => validateBatchDependencies([
+      { issueIndex: 1, dependsOnIndex: 0, type: "not_real" } as any,
+    ], 2)).toThrow(/not supported/);
+  });
+
   it("rejects a directional cycle but allows the same shape as coupled_with", () => {
     // depends_on 0->1 and 1->0 is a cycle...
     expect(() => validateBatchDependencies([

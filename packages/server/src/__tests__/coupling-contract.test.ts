@@ -122,6 +122,27 @@ describe("confirmContractComponent", () => {
     ).rejects.toThrow(/open workspace/);
   });
 
+  it("rejects members from another project without mutating them", async () => {
+    const { db } = createTestDb();
+    const p1 = await seedProject(db);
+    const p2 = await seedProject(db);
+    const a = await insertIssue(db, p1.projectId, p1.backlogId, 1, "Project one survivor");
+    const b = await insertIssue(db, p2.projectId, p2.backlogId, 2, "Project two absorbed");
+
+    await expect(
+      confirmContractComponent(
+        { projectId: p1.projectId, survivorId: a, memberIds: [a, b], mergedTitle: "Merged", mergedDescription: "Merged body" },
+        db as any,
+      ),
+    ).rejects.toThrow(/target project/);
+
+    const survivor = (await db.select().from(schema.issues).where(eq(schema.issues.id, a)))[0];
+    const otherProjectIssue = (await db.select().from(schema.issues).where(eq(schema.issues.id, b)))[0];
+    expect(survivor.title).toBe("Project one survivor");
+    expect(otherProjectIssue.statusId).toBe(p2.backlogId);
+    expect(otherProjectIssue.description).toBe("Project two absorbed body");
+  });
+
   it("rejects a survivor that is not among the members", async () => {
     const { db } = createTestDb();
     const { projectId, backlogId } = await seedProject(db);
