@@ -222,6 +222,23 @@ export function WorkflowFollowUpSection({
           label="Auto-chain unblocked dependencies"
           hint="After an upstream issue merges, start newly unblocked dependent or child issues when WIP capacity is available. Add the no-auto-start tag to opt out individual issues."
         />
+        <div className="pl-5">
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-600 dark:text-gray-400">Coupling overlap threshold</label>
+            <input
+              type="number"
+              min="0"
+              max="1"
+              step="0.05"
+              value={settings.coupling_overlap_threshold ?? "0.5"}
+              onChange={(e) => set("coupling_overlap_threshold")(e.target.value)}
+              className="w-16 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
+            />
+          </div>
+          <p className="mt-1 text-[11px] text-gray-400 dark:text-gray-500 leading-snug">
+            When analyzing dependencies, backlog tickets whose AI-predicted touched files overlap at or above this fraction (0–1) are surfaced as advisory <code>coupled_with</code> suggestions. Advisory only — accepting one creates the coupling edge.
+          </p>
+        </div>
         <Toggle
           checked={settings.auto_rebase_on_continue === "true"}
           onChange={setBool("auto_rebase_on_continue")}

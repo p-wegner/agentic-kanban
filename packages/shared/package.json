@@ -21,6 +21,7 @@
     "./lib/git-exec": { "development": "./src/lib/git-exec.ts", "types": "./dist/lib/git-exec.d.ts", "import": "./dist/lib/git-exec.js", "default": "./src/lib/git-exec.ts" },
     "./lib/dependency-graph": { "development": "./src/lib/dependency-graph.ts", "types": "./dist/lib/dependency-graph.d.ts", "import": "./dist/lib/dependency-graph.js", "default": "./src/lib/dependency-graph.ts" },
     "./lib/dependency-graph.js": { "development": "./src/lib/dependency-graph.ts", "types": "./dist/lib/dependency-graph.d.ts", "import": "./dist/lib/dependency-graph.js", "default": "./src/lib/dependency-graph.ts" },
+    "./lib/coupling-overlap": { "development": "./src/lib/coupling-overlap.ts", "types": "./dist/lib/coupling-overlap.d.ts", "import": "./dist/lib/coupling-overlap.js", "default": "./src/lib/coupling-overlap.ts" },
     "./lib/session-files": { "development": "./src/lib/session-files.ts", "types": "./dist/lib/session-files.d.ts", "import": "./dist/lib/session-files.js", "default": "./src/lib/session-files.ts" },
     "./lib/openspec": { "development": "./src/lib/openspec.ts", "types": "./dist/lib/openspec.d.ts", "import": "./dist/lib/openspec.js", "default": "./src/lib/openspec.ts" },
     "./lib/session-output": { "development": "./src/lib/session-output.ts", "types": "./dist/lib/session-output.d.ts", "import": "./dist/lib/session-output.js", "default": "./src/lib/session-output.ts" },

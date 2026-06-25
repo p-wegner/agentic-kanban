@@ -31,16 +31,33 @@ export function DependencyDisplay({
   const depInputRef = useRef<HTMLInputElement>(null);
   const [analyzingDeps, setAnalyzingDeps] = useState(false);
 
+  // Advisory coupling suggestions (#917): backlog tickets whose AI-predicted touched
+  // files overlap above the configured threshold. Propose-only — accepting creates a
+  // `coupled_with` edge via dependencies/batch; nothing is auto-applied.
+  interface CouplingSuggestion {
+    issueId: string;
+    type: "coupled_with";
+    sharedFiles: string[];
+    overlapScore: number;
+    reason: string;
+  }
+  const [couplingSuggestions, setCouplingSuggestions] = useState<CouplingSuggestion[]>([]);
+  const [acceptingCouple, setAcceptingCouple] = useState<string | null>(null);
+
   async function handleAnalyzeDeps() {
     if (analyzingDeps) return;
     setAnalyzingDeps(true);
     try {
-      const result = await apiPost<{ dependencies: Array<{ id: string; type: string; issueId: string; reason: string }>; total: number }>("/api/issues/analyze-dependencies", { issueId: issue.id, projectId: issue.projectId });
+      const result = await apiPost<{ dependencies: Array<{ id: string; type: string; issueId: string; reason: string }>; couplingSuggestions?: CouplingSuggestion[]; total: number }>("/api/issues/analyze-dependencies", { issueId: issue.id, projectId: issue.projectId });
       // Reload dependencies to show newly created ones
       const deps = await apiFetch<DependencyInfo>(`/api/issues/${issue.id}/dependencies`);
       setDependencies(deps);
+      setCouplingSuggestions(result.couplingSuggestions ?? []);
+      const couplingCount = result.couplingSuggestions?.length ?? 0;
       if (result.total > 0) {
         showToast(`Added ${result.total} dependenc${result.total === 1 ? "y" : "ies"}`, "success");
+      } else if (couplingCount > 0) {
+        showToast(`${couplingCount} coupling suggestion${couplingCount === 1 ? "" : "s"} found`);
       } else {
         showToast("No new dependencies found");
       }
@@ -49,6 +66,37 @@ export function DependencyDisplay({
     } finally {
       setAnalyzingDeps(false);
     }
+  }
+
+  function issueLabel(id: string): string {
+    const match = availableIssues.find((i) => i.id === id);
+    if (!match) return id.slice(0, 8);
+    return `#${match.issueNumber ?? "?"} ${match.title}`;
+  }
+
+  async function acceptCoupling(s: CouplingSuggestion) {
+    if (acceptingCouple) return;
+    setAcceptingCouple(s.issueId);
+    try {
+      // Advisory → applied: create the coupled_with edge via the same batch path the
+      // dependency-analyzer suggestions use.
+      await apiPost("/api/issues/dependencies/batch", {
+        edges: [{ issueId: issue.id, dependsOnId: s.issueId, type: "coupled_with", action: "add" }],
+      });
+      const deps = await apiFetch<DependencyInfo>(`/api/issues/${issue.id}/dependencies`);
+      setDependencies(deps);
+      setCouplingSuggestions((prev) => prev.filter((p) => p.issueId !== s.issueId));
+      onIssueUpdate(issue);
+      showToast("Coupled tickets — edge created", "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to create coupling", "error");
+    } finally {
+      setAcceptingCouple(null);
+    }
+  }
+
+  function dismissCoupling(targetId: string) {
+    setCouplingSuggestions((prev) => prev.filter((p) => p.issueId !== targetId));
   }
 
   return (
@@ -204,6 +252,49 @@ export function DependencyDisplay({
           })()}
         </div>
       ) : null}
+      {couplingSuggestions.length > 0 && (
+        <div className="mt-2 space-y-1.5">
+          <span className="text-xs font-medium text-purple-600 dark:text-purple-400 block">
+            Coupling suggestions
+          </span>
+          {couplingSuggestions.map((s) => (
+            <div
+              key={s.issueId}
+              className="text-[11px] rounded border border-purple-200 dark:border-purple-800/60 bg-purple-50 dark:bg-purple-900/20 px-2 py-1.5"
+            >
+              <div className="text-purple-800 dark:text-purple-200">
+                Strongly coupled with{" "}
+                <button
+                  className="font-medium underline hover:opacity-80"
+                  onClick={() => onNavigateToIssue?.(s.issueId)}
+                  title={issueLabel(s.issueId)}
+                >
+                  {issueLabel(s.issueId)}
+                </button>{" "}
+                — overlap {(s.overlapScore * 100).toFixed(0)}%
+              </div>
+              <div className="text-purple-600 dark:text-purple-300/80 mt-0.5 truncate" title={s.sharedFiles.join(", ")}>
+                Shared: {s.sharedFiles.join(", ")}
+              </div>
+              <div className="flex gap-2 mt-1">
+                <button
+                  onClick={() => void acceptCoupling(s)}
+                  disabled={acceptingCouple === s.issueId}
+                  className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50"
+                >
+                  {acceptingCouple === s.issueId ? "Coupling…" : "Couple"}
+                </button>
+                <button
+                  onClick={() => dismissCoupling(s.issueId)}
+                  className="text-[10px] text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 px-1.5 py-0.5"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       {(() => {
         const existingTargetIds = new Set(
           dependencies.dependencies
