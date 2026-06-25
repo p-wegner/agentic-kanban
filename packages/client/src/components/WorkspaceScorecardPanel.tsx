@@ -18,7 +18,10 @@ export function WorkspaceScorecardPanel({
   return (
         <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 p-3 space-y-2">
           <button
-            onClick={() => setExpandedScorecards((prev) => ({ ...prev, [wsId]: !prev[wsId] }))}
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpandedScorecards((prev) => ({ ...prev, [wsId]: !prev[wsId] }));
+            }}
             className="flex items-center justify-between gap-3 w-full text-left"
           >
             <div className="flex items-center gap-1.5">
