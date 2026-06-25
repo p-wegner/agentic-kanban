@@ -13,7 +13,6 @@ import {
   PREF_CLAUDE_SUBSCRIPTION_ROTATION,
   PREF_CODEX_LICENSE_RING,
   PREF_CODEX_LICENSE_ROTATION,
-  PREF_DEFAULT_MODEL,
   PREF_DEFAULT_MODEL_CLAUDE,
   PREF_DEFAULT_MODEL_CODEX,
   PREF_DEFAULT_MODEL_PI,
@@ -29,7 +28,7 @@ import type { ProviderName } from "./agent-provider.js";
 export const SETTINGS_KEYS = [
   "agent_command", "agent_args", "output_parser", "skip_permissions", "claude_profile",
   "codex_profile", PREF_PI_PROFILE, "copilot_profile", "provider",
-  PREF_DEFAULT_MODEL, PREF_DEFAULT_MODEL_CLAUDE, PREF_DEFAULT_MODEL_CODEX, PREF_DEFAULT_MODEL_PI,
+  PREF_DEFAULT_MODEL_CLAUDE, PREF_DEFAULT_MODEL_CODEX, PREF_DEFAULT_MODEL_PI,
   "mock_agent_profile", "mock_agent_delay_ms",
   "permission_prompt_tool", "auto_review", "auto_merge", "auto_merge_in_review", "resume_with_new_model",
   "review_auto_fix", "disabled_mcp_tools", "auto_start_followup", "require_manual_approval",
