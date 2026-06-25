@@ -33,6 +33,7 @@ import {
   fetchTags,
 } from "../hooks/useBoardDataQueries.js";
 import { invalidateClientSurface, subscribeClientInvalidations } from "../lib/clientInvalidation.js";
+import { useBoardSelectionStore } from "../stores/boardSelectionStore.js";
 import type {
   DependencyInfo,
   IssueWithStatus,
@@ -102,8 +103,13 @@ export function BoardPage() {
     return () => clearTimeout(t);
   }, []);
   const [creatingInColumnId, setCreatingInColumnId] = useState<string | null>(null);
-  const [selectedIssue, setSelectedIssue] = useState<IssueWithStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Selection slice (#905) — moved off BoardPage into the board store. BoardPage
+  // reads the bits it still needs (the reconcile effect, the few handlers below)
+  // via selectors/actions; every other consumer reads the store directly.
+  const selectedIssue = useBoardSelectionStore((s) => s.selectedIssue);
+  const setSelectedIssue = useBoardSelectionStore((s) => s.setSelectedIssue);
+  const setWorkspaceIssue = useBoardSelectionStore((s) => s.setWorkspaceIssue);
   const {
     activeAgentsTarget,
     activeProjectId,
@@ -119,14 +125,10 @@ export function BoardPage() {
     setSwitchingProject,
     switchingProject,
     tagsLoaded,
-  } = useBoardDataController({ setError, setSelectedIssue });
+  } = useBoardDataController({ setError });
   const notifications = useActivityNotifications(activeProjectId);
   const { addBoardEvent: addNotificationBoardEvent, addApprovalEvent: addNotificationApprovalEvent } = notifications;
   const [mutating, setMutating] = useState(false);
-  const [workspaceIssue, setWorkspaceIssue] = useState<IssueWithStatus | null>(null);
-  const [workspaceInitial, setWorkspaceInitial] = useState<WorkspaceInitial>(null);
-  const [workspaceInitialDiff, setWorkspaceInitialDiff] = useState(false);
-  const [workspaceOpenCreate, setWorkspaceOpenCreate] = useState(false);
   // A prompt to seed the butler with when entering its view via "Chat about this
   // ticket" (#838). Cleared once ButlerView has consumed it.
   const [butlerInitialPrompt, setButlerInitialPrompt] = useState<string | null>(null);
@@ -208,7 +210,7 @@ export function BoardPage() {
     if (!selectedIssue) return;
     const result = reconcileSelectedIssue(columns, selectedIssue);
     if (result.changed) setSelectedIssue(result.next);
-  }, [columns, selectedIssue]);
+  }, [columns, selectedIssue, setSelectedIssue]);
   const loadProjects = useCallback(async () => {
     await invalidateClientSurface(queryClient, { surface: "projects" });
     return activeProjectId ?? undefined;
@@ -229,8 +231,6 @@ export function BoardPage() {
     setActiveProjectId,
     setColumns,
     columnsRef,
-    setSelectedIssue,
-    setWorkspaceIssue,
     setSwitchingProject,
     refetchBoard,
     loadProjects,
@@ -271,12 +271,7 @@ export function BoardPage() {
     pendingIssueIds,
     columnsRef,
     refetchBoard,
-    setSelectedIssue,
     setKeyboardCursorIssueId,
-    setWorkspaceIssue,
-    setWorkspaceOpenCreate,
-    setWorkspaceInitialDiff,
-    setWorkspaceInitial,
     setButlerInitialPrompt,
     handleViewModeChange,
   });
@@ -433,7 +428,7 @@ export function BoardPage() {
     [columns, prefs.nudgeWipLimit],
   );
 
-  const { openIssueById, trailControls, ticketTrail } = useBoardNavigation(columns, setSelectedIssue);
+  const { openIssueById, trailControls, ticketTrail } = useBoardNavigation(columns);
 
   const { handleDuplicateIssue, handleMentionClick, toggleGroup, handleCreatedDateDrilldown } = useBoardMiscHandlers({
     selectedIssue, keyboardCursorIssueId, ticketTrail, openIssueById,
@@ -453,7 +448,6 @@ export function BoardPage() {
       keyboardCursorIssueId,
       keyboardCursorIssueIdRef,
       searchQuery,
-      selectedIssue,
       projects,
       activeProjectId,
     },
@@ -463,7 +457,6 @@ export function BoardPage() {
       handleProjectChange,
       setSearchQuery,
       setKeyboardCursorIssueId,
-      setSelectedIssue,
       setFocusMode,
       setExpandedCreatePanel,
       setCreatingInColumnId,
@@ -500,8 +493,7 @@ export function BoardPage() {
   const { handleCreateIssue, handleUpdateIssue, handleDeleteIssue, handleDropOnAgentSlot } = createBoardIssueActions({
     activeProject: activeProject ?? null, activeAgentsTarget, columns, columnsRef, pendingBoardRefreshRef,
     refetchBoard, setColumns, setCreatingInColumnId, setError, setExpandedCreatePanel,
-    setMutating, setPendingIssueIds, setPendingWorkspaceIssueIds, setSelectedIssue,
-    setWorkspaceInitial, setWorkspaceIssue, setWorkspaceOpenCreate,
+    setMutating, setPendingIssueIds, setPendingWorkspaceIssueIds,
   });
   const canStartWorkspace = !!activeProject?.repoPath;
 
@@ -673,17 +665,7 @@ export function BoardPage() {
       }}
       workspace={{
         butlerInitialPrompt,
-        selectedIssue,
         setButlerInitialPrompt,
-        setSelectedIssue,
-        setWorkspaceInitial,
-        setWorkspaceInitialDiff,
-        setWorkspaceIssue,
-        setWorkspaceOpenCreate,
-        workspaceInitial,
-        workspaceInitialDiff,
-        workspaceIssue,
-        workspaceOpenCreate,
       }}
     />
   );

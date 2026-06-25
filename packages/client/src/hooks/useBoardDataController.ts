@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
-import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
+import type { StatusWithIssues } from "@agentic-kanban/shared";
+import { boardSelectionActions } from "../stores/boardSelectionStore.js";
 import {
   useActiveProjectPreferenceQuery,
   useArchivedProjectsQuery,
@@ -13,10 +14,9 @@ import {
 
 interface UseBoardDataControllerParams {
   setError: Dispatch<SetStateAction<string | null>>;
-  setSelectedIssue: Dispatch<SetStateAction<IssueWithStatus | null>>;
 }
 
-export function useBoardDataController({ setError, setSelectedIssue }: UseBoardDataControllerParams) {
+export function useBoardDataController({ setError }: UseBoardDataControllerParams) {
   const [columns, setColumns] = useState<StatusWithIssues[]>([]);
   const columnsRef = useRef<StatusWithIssues[]>([]);
   const [switchingProject, setSwitchingProject] = useState(false);
@@ -72,10 +72,10 @@ export function useBoardDataController({ setError, setSelectedIssue }: UseBoardD
       const issueNumber = parseInt(issueParam, 10);
       if (!isNaN(issueNumber)) {
         const found = board.flatMap((c) => c.issues).find((i) => i.issueNumber === issueNumber);
-        if (found) setSelectedIssue(found);
+        if (found) boardSelectionActions.setSelectedIssue(found);
       }
     }
-  }, [boardQuery.data, setSelectedIssue]);
+  }, [boardQuery.data]);
 
   const loading =
     projectsQuery.isLoading ||
