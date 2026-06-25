@@ -32,8 +32,72 @@ import { parseCopilotEvent } from "./agent-stream/copilot.js";
 import { parsePiEvent } from "./agent-stream/pi.js";
 
 export { createAgentStreamParseContext } from "./agent-stream/shared.js";
+export {
+  recordUnknownAgentEvent,
+  getUnknownEventCounters,
+  resetUnknownEventCounters,
+  setUnknownEventLogger,
+  setUnknownEventClock,
+  type UnknownEventCounter,
+  type UnknownEventLogger,
+} from "./agent-stream/unknown-events.js";
+
+import { recordUnknownAgentEvent } from "./agent-stream/unknown-events.js";
 
 type ParseContext = ReturnType<typeof createAgentStreamParseContext>;
+
+/** Classification of a single agent stream line against a provider's parser. */
+export interface AgentStreamLineClassification {
+  /** False when the line was not valid JSON (non-JSON output is expected noise). */
+  validJson: boolean;
+  /** True when a provider parser produced a usable ParsedStreamEvent. */
+  recognized: boolean;
+  /** The raw `type` field from the wire object, when present (for unknown-event observability). */
+  eventType?: string;
+  /** The parsed event, when recognized. */
+  event?: ParsedStreamEvent;
+}
+
+/**
+ * Parse a line AND classify it: distinguishes "non-JSON noise" from "valid JSON
+ * the parser recognized" from "valid JSON of an UNKNOWN event type" — the last
+ * being the silent-swallow case behind the recurring "0 tokens" misdiagnosis
+ * (arch-review #898). Callers use this to observe wire-format drift; the parse
+ * behavior itself is unchanged.
+ */
+export function classifyAgentStreamLine(
+  provider: AgentStreamProvider,
+  line: string,
+  context: ParseContext = createAgentStreamParseContext(),
+): AgentStreamLineClassification {
+  let obj: Record<string, unknown>;
+  try {
+    obj = JSON.parse(line) as Record<string, unknown>;
+  } catch {
+    return { validJson: false, recognized: false };
+  }
+  const eventType = typeof obj.type === "string" ? obj.type : undefined;
+  const event = parseAgentStreamLine(provider, line, context);
+  return { validJson: true, recognized: event !== undefined, eventType, event };
+}
+
+/**
+ * Parse a line and, when it is valid JSON the parser did NOT recognize, record an
+ * "unknown event type" metric/log before returning undefined. This is the
+ * observable replacement for the bare `parseStreamEvent(line)` swallow at stream
+ * hot paths — a CLI rename now surfaces loudly instead of producing a silent zero.
+ */
+export function parseAgentStreamLineObserved(
+  provider: AgentStreamProvider,
+  line: string,
+  context: ParseContext = createAgentStreamParseContext(),
+): ParsedStreamEvent | undefined {
+  const classification = classifyAgentStreamLine(provider, line, context);
+  if (classification.validJson && !classification.recognized) {
+    recordUnknownAgentEvent(provider, classification.eventType);
+  }
+  return classification.event;
+}
 
 export function parseAgentStreamLine(
   provider: AgentStreamProvider,
@@ -67,6 +131,28 @@ export function parseAgentProviderStreamLine(
   const parsed = parseAgentStreamLine(provider, line, context);
   if (!parsed) return undefined;
   const providerEvent = { ...parsed };
+  delete providerEvent.displayEvents;
+  return hasProviderFields(providerEvent) ? providerEvent : undefined;
+}
+
+/**
+ * Observed variant of parseAgentProviderStreamLine: records an "unknown event
+ * type" metric/log when the line was valid JSON the parser did NOT recognize
+ * (arch-review #898). "Recognized" means the underlying parser produced ANY event
+ * — including one carrying only display events — so a recognized-but-no-provider-
+ * fields line (which this still returns undefined for) is NOT counted as unknown.
+ */
+export function parseAgentProviderStreamLineObserved(
+  provider: AgentStreamProvider,
+  line: string,
+  context: ParseContext = createAgentStreamParseContext(),
+): ParsedStreamEvent | undefined {
+  const classification = classifyAgentStreamLine(provider, line, context);
+  if (classification.validJson && !classification.recognized) {
+    recordUnknownAgentEvent(provider, classification.eventType);
+  }
+  if (!classification.event) return undefined;
+  const providerEvent = { ...classification.event };
   delete providerEvent.displayEvents;
   return hasProviderFields(providerEvent) ? providerEvent : undefined;
 }
