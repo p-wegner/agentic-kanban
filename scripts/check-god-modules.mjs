@@ -43,7 +43,7 @@ const COHESION_MAX_FN_DECLS = 20;
 const COHESION_BASELINE = {
   "packages/shared/src/lib/session-summary.ts": 38,
   "packages/server/src/services/butler-sdk.service.ts": 30,
-  "packages/server/src/services/stack-profile.service.ts": 28,
+  // stack-profile.service.ts decomposed behind a facade barrel (#911) — entry removed.
   "packages/server/src/services/agent.service.ts": 27,
   "packages/server/src/services/insights.service.ts": 23,
   "packages/server/src/services/agent-questions.service.ts": 21,
