@@ -1,5 +1,6 @@
 import { projects, projectStatuses, issues, workspaces, preferences } from "@agentic-kanban/shared/schema";
-import { eq, and, notInArray, sql } from "drizzle-orm";
+import { ACTIVE_WORKSPACE_STATUSES } from "@agentic-kanban/shared/lib/workspace-activity-state";
+import { eq, and, inArray, notInArray, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
@@ -198,6 +199,12 @@ export async function getCrossProjectIssues(
 }
 
 export async function getActiveWorkspaceCounts(database: Database = db) {
+  // Count ONLY workspaces whose agent is genuinely running, using the canonical
+  // allowlist (active/fixing/reviewing/awaiting-plan-approval) — the same SSOT the
+  // board/CLI/monitor derive activity from (see workspace-activity-state.ts). The old
+  // denylist (`NOT IN ('idle','closed')`) over-counted blocked/error/stopped/merged
+  // workspaces, so the project selector's "N active agents" badge showed agents that
+  // were not actually working.
   return database
     .select({
       projectId: issues.projectId,
@@ -205,7 +212,7 @@ export async function getActiveWorkspaceCounts(database: Database = db) {
     })
     .from(workspaces)
     .innerJoin(issues, eq(workspaces.issueId, issues.id))
-    .where(notInArray(workspaces.status, ["idle", "closed"]))
+    .where(inArray(workspaces.status, [...ACTIVE_WORKSPACE_STATUSES]))
     .groupBy(issues.projectId);
 }
 
