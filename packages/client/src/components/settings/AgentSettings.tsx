@@ -51,6 +51,12 @@ export function AgentSettings({ settings, set, setSettings, profiles, codexProfi
                       {" "}Use <span className="font-mono">set-provider-default</span> to sync all sources, or update the Strategy Bullseye in the Workflow tab.
                     </div>
                   )}
+                  {providerDivergence?.hasBullseye && (
+                    <div className="px-3 py-2.5 rounded-md bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 text-xs text-blue-800 dark:text-blue-300">
+                      <span className="font-semibold">This project's provider is set by its Strategy Bullseye</span>{" "}
+                      ({providerDivergence.bullseyeProvider}:{providerDivergence.bullseyeProfile || "default"}). The Agent Profile below is the global fallback used by projects with no Bullseye. To change which provider <em>this</em> project launches, edit the Strategy Bullseye in the Workflow tab — a global change that diverges from it will be rejected.
+                    </div>
+                  )}
                   <Field label="Agent Profile" hint="Selects agent provider and profile. Claude uses ~/.claude/settings_*.json, Codex uses ~/.codex/<name>.config.toml, Copilot uses the CLI default or configured model profile, and Pi uses PI_CODING_AGENT_DIR profile roots.">
                     <select
                       value={settingsProfileValue(settings)}
