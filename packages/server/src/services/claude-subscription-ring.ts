@@ -1,9 +1,26 @@
-import { existsSync, readdirSync, type Dirent } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import type { Database } from "../db/index.js";
-import { getPreference, setPreference } from "../repositories/preferences.repository.js";
 import { PREF_CLAUDE_SUBSCRIPTION_RING, PREF_CLAUDE_PROFILE } from "../constants/preference-keys.js";
+import {
+  type AuthRingConfig,
+  type RotationResult,
+  defaultDir,
+  resolveDir,
+  resolveDirForProfile,
+  discoverProfiles,
+  parseRing,
+  loadRing,
+  findRingEntry as findRingEntryGeneric,
+  ringProfileNames as ringProfileNamesGeneric,
+  makeCooldownKey,
+  pickNext,
+  fallbackCooldownIso,
+  rotateRing,
+  dirHasAuth,
+  listAuthRing,
+  trimmedStringField,
+} from "./auth-rotation-ring.js";
+
+export type { RotationResult };
 
 /**
  * One Claude "subscription" in the rotation ring.
@@ -15,7 +32,7 @@ import { PREF_CLAUDE_SUBSCRIPTION_RING, PREF_CLAUDE_PROFILE } from "../constants
  * So the only lever to swap which subscription login is live is the
  * `CLAUDE_CONFIG_DIR` env var — a subscription is therefore a directory, not a
  * settings profile. This mirrors Codex's CODEX_HOME-based license rotation
- * (see codex-license-ring.ts).
+ * (see codex-license-ring.ts); the shared mechanism lives in auth-rotation-ring.ts.
  *
  * - no `settingsProfile` → OAuth (Max/Pro-plan) subscription. We point
  *   `CLAUDE_CONFIG_DIR` at its dir (explicit `configDir`, else the inferred
@@ -32,11 +49,31 @@ export interface ClaudeSubscriptionEntry {
   settingsProfile?: string;
 }
 
-const CLAUDE_CONFIG_DIR_PREFIX = ".claude-";
+const DEFAULT_COOLDOWN_MS = 5 * 60 * 60 * 1000; // 5h fallback — matches the Claude usage-limit window when resetsAt is absent
+
+const CONFIG: AuthRingConfig<ClaudeSubscriptionEntry> = {
+  dirPrefix: ".claude-",
+  discoverAuthFiles: [".credentials.json", "settings.json"],
+  authFiles: [".credentials.json", "settings.json"],
+  ringPrefKey: PREF_CLAUDE_SUBSCRIPTION_RING,
+  profilePrefKey: PREF_CLAUDE_PROFILE,
+  rotationDisabledPrefKey: "claude_subscription_rotation",
+  cooldownPrefix: "claude_cooldown_",
+  defaultCooldownMs: DEFAULT_COOLDOWN_MS,
+  noun: "subscription",
+  skipProfiles: ["mock"],
+  parseEntry: (rec, profile) => ({
+    profile,
+    configDir: trimmedStringField(rec.configDir),
+    settingsProfile: trimmedStringField(rec.settingsProfile),
+  }),
+  getDir: (entry) => entry.configDir,
+  getApiKeyRef: (entry) => entry.settingsProfile,
+};
 
 /** Inferred CLAUDE_CONFIG_DIR for an OAuth subscription with no explicit override: `~/.claude-<profile>`. */
 export function defaultClaudeConfigDir(profile: string): string {
-  return join(homedir(), `${CLAUDE_CONFIG_DIR_PREFIX}${profile}`);
+  return defaultDir(CONFIG, profile);
 }
 
 /**
@@ -45,8 +82,7 @@ export function defaultClaudeConfigDir(profile: string): string {
  * subscriptions fall back to the inferred default when no explicit `configDir` was set.
  */
 export function resolveClaudeConfigDir(entry: ClaudeSubscriptionEntry): string | undefined {
-  if (entry.settingsProfile) return undefined;
-  return entry.configDir?.trim() || defaultClaudeConfigDir(entry.profile);
+  return resolveDir(CONFIG, entry);
 }
 
 /**
@@ -58,17 +94,7 @@ export function resolveClaudeConfigDir(entry: ClaudeSubscriptionEntry): string |
  * rotation order + cooldowns).
  */
 export function discoverClaudeConfigDirProfiles(): string[] {
-  try {
-    return readdirSync(homedir(), { withFileTypes: true })
-      .filter((d: Dirent) => d.isDirectory() && d.name.startsWith(CLAUDE_CONFIG_DIR_PREFIX) && d.name.length > CLAUDE_CONFIG_DIR_PREFIX.length)
-      .map((d: Dirent) => d.name.slice(CLAUDE_CONFIG_DIR_PREFIX.length))
-      .filter((name: string) => {
-        const dir = join(homedir(), `${CLAUDE_CONFIG_DIR_PREFIX}${name}`);
-        return existsSync(join(dir, ".credentials.json")) || existsSync(join(dir, "settings.json"));
-      });
-  } catch {
-    return [];
-  }
+  return discoverProfiles(CONFIG);
 }
 
 /**
@@ -82,60 +108,28 @@ export function resolveClaudeConfigDirForProfile(
   profileName: string | undefined,
   ring: ClaudeSubscriptionEntry[],
 ): string | undefined {
-  if (!profileName || profileName === "default" || profileName === "mock") return undefined;
-  const entry = findRingEntry(ring, profileName);
-  if (entry) return resolveClaudeConfigDir(entry);
-  const dir = defaultClaudeConfigDir(profileName);
-  return existsSync(dir) ? dir : undefined;
+  return resolveDirForProfile(CONFIG, profileName, ring);
 }
 
-const DEFAULT_COOLDOWN_MS = 5 * 60 * 60 * 1000; // 5h fallback — matches the Claude usage-limit window when resetsAt is absent
-
 export function parseClaudeSubscriptionRing(raw: string | null | undefined): ClaudeSubscriptionEntry[] {
-  if (!raw || !raw.trim()) return [];
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    const ring: ClaudeSubscriptionEntry[] = [];
-    for (const item of parsed) {
-      if (!item || typeof item !== "object") continue;
-      const rec = item as Record<string, unknown>;
-      const profile = typeof rec.profile === "string" ? rec.profile.trim() : "";
-      if (!profile) continue;
-      const configDir = typeof rec.configDir === "string" && rec.configDir.trim() ? rec.configDir.trim() : undefined;
-      const settingsProfile = typeof rec.settingsProfile === "string" && rec.settingsProfile.trim() ? rec.settingsProfile.trim() : undefined;
-      ring.push({ profile, configDir, settingsProfile });
-    }
-    return ring;
-  } catch {
-    return [];
-  }
+  return parseRing(CONFIG, raw);
 }
 
 export async function loadClaudeSubscriptionRing(database: Database): Promise<ClaudeSubscriptionEntry[]> {
-  return parseClaudeSubscriptionRing(await getPreference(PREF_CLAUDE_SUBSCRIPTION_RING, database));
+  return loadRing(CONFIG, database);
 }
 
 export function findRingEntry(ring: ClaudeSubscriptionEntry[], profileName: string | undefined): ClaudeSubscriptionEntry | undefined {
-  if (!profileName || profileName === "default") return undefined;
-  return ring.find((e) => e.profile === profileName);
+  return findRingEntryGeneric(ring, profileName);
 }
 
 /** Profile names contributed by the ring, for surfacing in the Claude profile dropdown. */
 export function ringProfileNames(ring: ClaudeSubscriptionEntry[]): string[] {
-  return ring.map((e) => e.profile).filter(Boolean);
+  return ringProfileNamesGeneric(ring);
 }
 
 export function cooldownKey(profile: string): string {
-  return `claude_cooldown_${profile}`;
-}
-
-/** A subscription is available if it has no cooldown stamp, or the stamp is in the past. */
-function isAvailable(profile: string, prefMap: Map<string, string>, nowMs: number): boolean {
-  const stamp = prefMap.get(cooldownKey(profile));
-  if (!stamp) return true;
-  const until = Date.parse(stamp);
-  return Number.isNaN(until) || until <= nowMs;
+  return makeCooldownKey(CONFIG, profile);
 }
 
 /**
@@ -148,15 +142,7 @@ export function pickNextSubscription(
   prefMap: Map<string, string>,
   now: Date,
 ): ClaudeSubscriptionEntry | undefined {
-  if (ring.length === 0) return undefined;
-  const nowMs = now.getTime();
-  const startIdx = ring.findIndex((e) => e.profile === currentProfile);
-  for (let offset = 1; offset <= ring.length; offset++) {
-    const entry = ring[(startIdx + offset) % ring.length];
-    if (entry.profile === currentProfile) continue;
-    if (isAvailable(entry.profile, prefMap, nowMs)) return entry;
-  }
-  return undefined;
+  return pickNext(CONFIG, ring, currentProfile, prefMap, now);
 }
 
 /** Turn a Claude "resets at" hint (epoch seconds or ISO) into a cooldown-until ISO string. */
@@ -170,14 +156,7 @@ export function cooldownUntilIso(resetsAt: string | number | null | undefined, n
     const parsed = Date.parse(resetsAt);
     if (!Number.isNaN(parsed) && parsed > now.getTime()) return new Date(parsed).toISOString();
   }
-  return new Date(now.getTime() + DEFAULT_COOLDOWN_MS).toISOString();
-}
-
-export interface RotationResult {
-  rotated: boolean;
-  fromProfile: string;
-  toProfile?: string;
-  reason: string;
+  return fallbackCooldownIso(CONFIG, now);
 }
 
 /**
@@ -192,27 +171,7 @@ export async function rotateClaudeSubscription(
   resetsAt: string | number | null | undefined,
   now: Date,
 ): Promise<RotationResult> {
-  const ring = parseClaudeSubscriptionRing(prefMap.get(PREF_CLAUDE_SUBSCRIPTION_RING));
-  if (ring.length < 2) {
-    return { rotated: false, fromProfile: currentProfile, reason: "no ring configured (need >= 2 subscriptions)" };
-  }
-  if (prefMap.get("claude_subscription_rotation") === "false") {
-    return { rotated: false, fromProfile: currentProfile, reason: "rotation disabled" };
-  }
-
-  // Stamp the exhausted subscription so we don't immediately rotate back to it.
-  const until = cooldownUntilIso(resetsAt, now);
-  await setPreference(cooldownKey(currentProfile), until, database);
-  prefMap.set(cooldownKey(currentProfile), until);
-
-  const next = pickNextSubscription(ring, currentProfile, prefMap, now);
-  if (!next) {
-    return { rotated: false, fromProfile: currentProfile, reason: "all subscriptions cooled down" };
-  }
-
-  await setPreference(PREF_CLAUDE_PROFILE, next.profile, database);
-  prefMap.set(PREF_CLAUDE_PROFILE, next.profile);
-  return { rotated: true, fromProfile: currentProfile, toProfile: next.profile, reason: `rotated to ${next.profile} (cooled ${currentProfile} until ${until})` };
+  return rotateRing(CONFIG, database, prefMap, currentProfile, cooldownUntilIso(resetsAt, now), now);
 }
 
 /**
@@ -222,7 +181,7 @@ export async function rotateClaudeSubscription(
  * keychain instead; treat a `settings.json`-only dir as "present" too.)
  */
 export function claudeConfigDirHasAuth(configDir: string): boolean {
-  return existsSync(join(configDir, ".credentials.json")) || existsSync(join(configDir, "settings.json"));
+  return dirHasAuth(CONFIG, configDir);
 }
 
 export interface ClaudeSubscriptionInfo {
@@ -245,28 +204,13 @@ export interface ClaudeSubscriptionInfo {
  * this so a logged-in subscription shows up even when it isn't (yet) in the ring.
  */
 export function listClaudeSubscriptions(ring: ClaudeSubscriptionEntry[]): ClaudeSubscriptionInfo[] {
-  const byProfile = new Map<string, ClaudeSubscriptionInfo>();
-  for (const name of discoverClaudeConfigDirProfiles()) {
-    const dir = defaultClaudeConfigDir(name);
-    byProfile.set(name, {
-      profile: name, mode: "oauth", configDir: dir, settingsProfile: null,
-      loggedIn: claudeConfigDirHasAuth(dir), inRing: false, autoDiscovered: true,
-    });
-  }
-  for (const entry of ring) {
-    const autoDiscovered = byProfile.get(entry.profile)?.autoDiscovered ?? false;
-    if (entry.settingsProfile) {
-      byProfile.set(entry.profile, {
-        profile: entry.profile, mode: "apikey", configDir: null, settingsProfile: entry.settingsProfile,
-        loggedIn: true, inRing: true, autoDiscovered,
-      });
-    } else {
-      const dir = resolveClaudeConfigDir(entry) ?? null;
-      byProfile.set(entry.profile, {
-        profile: entry.profile, mode: "oauth", configDir: dir, settingsProfile: null,
-        loggedIn: dir ? claudeConfigDirHasAuth(dir) : false, inRing: true, autoDiscovered,
-      });
-    }
-  }
-  return [...byProfile.values()].sort((a, b) => a.profile.localeCompare(b.profile));
+  return listAuthRing(CONFIG, ring).map((info) => ({
+    profile: info.profile,
+    mode: info.mode,
+    configDir: info.dir,
+    settingsProfile: info.apiKeyRef,
+    loggedIn: info.loggedIn,
+    inRing: info.inRing,
+    autoDiscovered: info.autoDiscovered,
+  }));
 }
