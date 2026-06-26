@@ -4,6 +4,7 @@ import { setSettings as savePreferences } from "../lib/settingsStore.js";
 import { invalidateClientSurfaceLocal } from "../lib/clientInvalidation.js";
 import { showToast } from "./Toast.js";
 import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
+import { useConfigImportExport } from "../hooks/useConfigImportExport.js";
 import { applyPreflightResult, CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, DEFAULT_SETTINGS, PI_DEFAULT_PROFILE, TABS, uniqueProfiles, type AgentProfileHealth, type McpHealth, type MonitorTunables, type ProjectSettingsState, type Settings, type SettingsPanelProps, type SkillSetting, type Tab, type TagSetting } from "./SettingsPanel.shared.js";
 import { buildMigrationConfig, normalizeConfig, setProviderFillPolicy, clearProviderFillPolicy, settingsKey, type ConcreteProvider } from "../lib/strategy-targets.js";
 import { parseDisabledTools, withToolDisabled } from "../lib/mcp-tool-toggle.js";
@@ -142,78 +143,16 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
     }
   }
 
-  // Config export/import state
-  const [configExporting, setConfigExporting] = useState(false);
-  const [configImporting, setConfigImporting] = useState(false);
-  const [configImportPreview, setConfigImportPreview] = useState<{
-    statusChanges: { toAdd: unknown[]; toUpdate: unknown[] };
-    prefChanges: Record<string, { from: string | undefined; to: string }>;
-    strategyChanged: boolean;
-    pendingFile: File;
-  } | null>(null);
-
-  async function handleConfigExport() {
-    if (!activeProjectId || configExporting) return;
-    setConfigExporting(true);
-    try {
-      // eslint-disable-next-line no-restricted-syntax -- binary download: response is a blob, not a JSON read for the query layer
-      const resp = await fetch(`/api/projects/${activeProjectId}/config/export`);
-      if (!resp.ok) throw new Error(`Export failed: ${resp.status}`);
-      const blob = await resp.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `board-config-${activeProjectId}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      showToast("Config exported", "success");
-    } catch {
-      showToast("Export failed", "error");
-    } finally {
-      setConfigExporting(false);
-    }
-  }
-
-  async function handleConfigImportFile(file: File) {
-    if (!activeProjectId || configImporting) return;
-    setConfigImporting(true);
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const preview = await apiFetch<{
-        statusChanges: { toAdd: unknown[]; toUpdate: unknown[] };
-        prefChanges: Record<string, { from: string | undefined; to: string }>;
-        strategyChanged: boolean;
-      }>(`/api/projects/${activeProjectId}/config/import?dryRun=true`, {
-        method: "POST",
-        body: formData,
-      });
-      setConfigImportPreview({ ...preview, pendingFile: file });
-    } catch {
-      showToast("Could not parse config file", "error");
-    } finally {
-      setConfigImporting(false);
-    }
-  }
-
-  async function handleConfigImportConfirm() {
-    if (!activeProjectId || !configImportPreview) return;
-    setConfigImporting(true);
-    try {
-      const formData = new FormData();
-      formData.append("file", configImportPreview.pendingFile);
-      await apiFetch(`/api/projects/${activeProjectId}/config/import`, {
-        method: "POST",
-        body: formData,
-      });
-      setConfigImportPreview(null);
-      showToast("Config imported successfully", "success");
-    } catch {
-      showToast("Import failed", "error");
-    } finally {
-      setConfigImporting(false);
-    }
-  }
+  // Config export/import flow (state + handlers self-contained in the hook).
+  const {
+    configExporting,
+    configImporting,
+    configImportPreview,
+    setConfigImportPreview,
+    handleConfigExport,
+    handleConfigImportFile,
+    handleConfigImportConfirm,
+  } = useConfigImportExport(activeProjectId);
 
   const disabledTools = parseDisabledTools(settings.disabled_mcp_tools);
   function isToolDisabled(name: string) {
