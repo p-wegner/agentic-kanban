@@ -17,10 +17,10 @@ Produced deterministically by `domain-docs/tools/coverage.py`
 ## Summary
 | Metric | Value |
 |--------|-------|
-| Product source files (non-test, TS/JS) | 1020 |
-| Mapped to a module | 187 (18.3%) |
-| Unmapped | 833 |
-| **Important unmapped, undecided** | **0** |
+| Product source files (non-test, TS/JS) | 1023 (HEAD 29e016dc analysis) |
+| Mapped to a module (14 modules) | 206 (20.2%) |
+| Unmapped | 817 |
+| **Important unmapped, undecided** | **0** (at blast-threshold 120 AND the stricter 100) |
 | **Coverage gate** | **PASS** |
 
 **18% mapped is by design, not by accident.** This was a deliberately core-scoped run.
@@ -30,17 +30,22 @@ check the run silently omitted **104 important files**; the check forced each in
 documented now, queued as a new module, folded into an existing module, or deferred long-tail.
 
 ## What the coverage check caught (the honest answer to "did we miss a module?")
-**Yes — it missed 5 real capabilities.** The biggest, `preferences-config`, has the
-highest-blast-radius files in the whole unmapped set (`preference-keys.ts` 236,
-`effective-config` 212, `strategy-objective` 204). It is now **documented**
-([preferences-config.md](preferences-config.md)) — closing the loop the check exists to force.
-The other four are queued (real, scoped out of *this* pass, not forgotten).
+**Yes — it missed 5 real capabilities.** The two biggest are now **documented**, closing
+the loop the check exists to force:
+- `preferences-config` — highest-blast files in the unmapped set (`preference-keys.ts` 236,
+  `effective-config` 212, `strategy-objective` 204) → [preferences-config.md](preferences-config.md).
+- `project-registration` / stack-profiles — the turnkey multi-stack driver (`project-setup`
+  141, `stack-detector` 139, `stack-profile/*` 135–138) → [project-registration.md](project-registration.md).
+
+The other three (CLI, client app-shell, server bootstrap) remain queued (real, scoped out
+of this pass, not forgotten). All remaining blast≥100 files are folded-in/deferred on the
+record, so the gate passes at the stricter threshold 100 too.
 
 ## Important-unmapped → disposition
 | Group | Example high-blast files | Disposition |
 |-------|--------------------------|-------------|
 | **Preferences & config** | `preference-keys.ts` (236), `effective-config` (212), `strategy-objective` (204), `agent-settings` (191), `start-policy` (184) | ✅ **Documented now** → `preferences-config.md` |
-| **Project registration / stack profiles / scaffold** (turnkey driver) | `stack-detector` (139), `stack-profile/*` (135-138), `project-setup` (141), `project-scaffold`, `project.service` | ⏭ **New module queued** |
+| **Project registration / stack profiles / scaffold** (turnkey driver) | `stack-detector` (139), `stack-profile/*` (135-138), `project-setup` (141), `project-scaffold`, `gradle-detect` | ✅ **Documented now** → `project-registration.md` |
 | **CLI surface** | `cli/commands/*` (`issue.ts` churn 32, …) | ⏭ **New module queued** |
 | **Client app shell & flows** | `SettingsPanel.tsx` (risk 0.79 — #1 hottest), `Layout.tsx` (churn 233), `CreateIssue*`, `CreateWorkspaceForm`, `GraphView`, `DiffViewer` | ⏭ **New module queued** |
 | **Server bootstrap & lifecycle** | `server-start.ts` (churn 373), `startup/*` reconcilers not owned by monitor/review, `process-cleanup` | ⏭ **New module queued** |
