@@ -1,0 +1,128 @@
+{
+  "repo": "agentic-kanban",
+  "analyzed_sha": "2cea8d3e",
+  "generated_from": "code-metrics-out/structure.md (modularity 0.81, entanglement 0.01) + directory reconciliation",
+  "structure_verdict": "Strong modularity (Q=0.81) but Louvain auto-resolution clusters by PACKAGE (C1=687 server files, C2=398 client files), not by capability. So clusters are NOT usable as doc units directly; we sub-divide the giant server/client clusters by sub-capability (directory + domain inference). Most modules are well-formed; a few capabilities (monitor/drive, review/merge) are smeared across services/ + startup/ and get File Topology sections.",
+  "modules": [
+    {
+      "slug": "issues-board",
+      "name": "Issues & Board (kanban core)",
+      "capability_hypothesis": "The kanban substrate: issues/tickets as work units, projects, configurable per-project workflow statuses, columns/swimlanes, tags, and the aggregated board view consumers read.",
+      "files": ["packages/shared/src/schema/issues.ts","packages/shared/src/schema/projects.ts","packages/shared/src/schema/project-statuses.ts","packages/shared/src/schema/tags.ts","packages/shared/src/schema/issue-dependencies.ts","packages/server/src/routes/issues.ts","packages/server/src/routes/projects.ts","packages/server/src/routes/tags.ts","packages/server/src/services/issue.service.ts","packages/server/src/services/board-aggregation.service.ts","packages/server/src/services/board-column.service.ts","packages/server/src/services/board-status.ts","packages/server/src/services/board-status-classifiers.ts","packages/server/src/repositories/issue.repository.ts","packages/server/src/repositories/issue-number.repository.ts","packages/server/src/repositories/board-status.repository.ts","packages/server/src/repositories/project.repository.ts","packages/server/src/lib/issue-summary-projection.ts","packages/server/src/lib/dependency-graph.ts"],
+      "entry_points": ["packages/server/src/routes/issues.ts — REST CRUD for issues/move","packages/server/src/routes/projects.ts — project + status config","packages/server/src/services/board-aggregation.service.ts — the board read model"],
+      "logic_bearing": ["packages/server/src/lib/issue-summary-projection.ts — blast radius 268, the issue read projection","packages/server/src/lib/dependency-graph.ts — blast radius 265, issue dependency graph/cascade","packages/server/src/repositories/issue-number.repository.ts — blast radius 280, per-project issue numbering","packages/server/src/services/board-status-classifiers.ts — status classification policy"],
+      "depends_on": ["workflow-engine","persistence-schema","workspaces"],
+      "structure_note": "well: schema + routes + services + repositories cleanly layered for this aggregate"
+    },
+    {
+      "slug": "workspaces",
+      "name": "Workspaces & Worktrees (the unit of agent work)",
+      "capability_hypothesis": "A workspace is the atomic unit of work: provision an isolated git worktree on a branch, launch an AI agent against a ticket, expose its diff, then merge or delete. Bookkeeping for a live agent process.",
+      "files": ["packages/shared/src/schema/workspaces.ts","packages/server/src/routes/workspaces.ts","packages/server/src/routes/workspace-actions.ts","packages/server/src/services/agent.service.ts","packages/server/src/repositories/workspace.repository.ts","packages/server/src/repositories/workspace-crud.repository.ts","packages/server/src/repositories/workspace-summary.repository.ts","packages/server/src/repositories/workspace-lifecycle-reconcile.repository.ts","packages/server/src/services/followup-workspace.service.ts","packages/server/src/services/dirty-main-checkout.ts","packages/shared/src/lib/workspace-activity-state.ts","packages/shared/src/lib/worktree-symlink-bootstrap.ts"],
+      "entry_points": ["packages/server/src/routes/workspaces.ts — POST creates worktree+launches agent; /turn /diff /merge DELETE","packages/server/src/routes/workspace-actions.ts — review/merge/rebase actions"],
+      "logic_bearing": ["packages/server/src/services/agent.service.ts — subprocess lifecycle, callbacks wrapped try/catch","packages/server/src/repositories/workspace-crud.repository.ts — worktree+record creation","packages/shared/src/lib/workspace-activity-state.ts — what 'active' means"],
+      "depends_on": ["agent-providers","agent-sessions","git-integration","review-merge"],
+      "structure_note": "well, but lifecycle reconcilers live in startup/ — note the split"
+    },
+    {
+      "slug": "agent-providers",
+      "name": "Agent Providers (Claude / Codex / Copilot / Pi)",
+      "capability_hypothesis": "An abstraction over heterogeneous AI coding CLIs: each provider knows how to spawn its CLI, pass profile/model/skills, and parse its output. The seam where the board meets external agent tools.",
+      "files": ["packages/server/src/services/agent-provider/index.ts","packages/server/src/services/agent-provider/types.ts","packages/server/src/services/agent-provider/registry.ts","packages/server/src/services/agent-provider/helpers.ts","packages/server/src/services/agent-provider/claude-provider.ts","packages/server/src/services/agent-provider/codex-provider.ts","packages/server/src/services/agent-provider/copilot-provider.ts","packages/server/src/services/agent-provider/pi-provider.ts","packages/server/src/services/agent-provider.ts","packages/server/src/services/agent-cli-version.service.ts","packages/server/src/services/agent-profile-health.service.ts","packages/server/src/services/claude-login.service.ts","packages/server/src/services/codex-login.service.ts","packages/shared/src/lib/provider-models.ts"],
+      "entry_points": ["packages/server/src/services/agent-provider/registry.ts — provider selection","packages/server/src/services/agent-provider/helpers.ts — external fan-in 3, shared spawn helpers"],
+      "logic_bearing": ["packages/server/src/services/agent-provider/claude-provider.ts — blast radius 291","packages/server/src/services/agent-provider/types.ts — blast radius 303, the provider contract","packages/server/src/services/agent-provider/helpers.ts — blast radius 302"],
+      "depends_on": ["agent-sessions","preferences-config"],
+      "structure_note": "well: C9 cluster, a real bounded context"
+    },
+    {
+      "slug": "agent-sessions",
+      "name": "Agent Sessions & Streaming",
+      "capability_hypothesis": "Captures a running agent's output as a session: stream parsing across provider formats, live WebSocket broadcast to the UI, session exit classification, transcript persistence and stats.",
+      "files": ["packages/server/src/services/session-manager/index.ts","packages/server/src/services/session-manager/broadcast.ts","packages/server/src/services/session-manager/session-lifecycle.ts","packages/server/src/services/session-manager/session-exit-state-machine.ts","packages/server/src/services/session-manager/ws-handler.ts","packages/server/src/services/session-manager/types.ts","packages/server/src/services/board-events.ts","packages/server/src/lib/session-output-reader.ts","packages/shared/src/lib/agent-stream-parser.ts","packages/shared/src/lib/session-output.ts","packages/shared/src/lib/session-summary.ts","packages/server/src/repositories/session.repository.ts","packages/server/src/repositories/session-lifecycle.repository.ts","packages/server/src/routes/sessions.ts","packages/client/src/lib/agent-output-parser.ts"],
+      "entry_points": ["packages/server/src/services/board-events.ts — betweenness 0.077, the live-event hub","packages/server/src/services/session-manager/ws-handler.ts — WebSocket entry","packages/server/src/routes/sessions.ts — session REST"],
+      "logic_bearing": ["packages/server/src/services/session-manager/session-exit-state-machine.ts — exit classification policy","packages/server/src/lib/session-output-reader.ts — blast radius 298","packages/shared/src/lib/agent-stream-parser.ts — provider-agnostic parse"],
+      "depends_on": ["agent-providers","workspaces"],
+      "structure_note": "well: session-manager is a coherent sub-package"
+    },
+    {
+      "slug": "workflow-engine",
+      "name": "Workflow Engine (configurable status graphs)",
+      "capability_hypothesis": "Per-project workflow as data: a directed graph of statuses/nodes with legal transitions, conditions, and node config. Decouples 'what columns exist and how work moves' from code.",
+      "files": ["packages/shared/src/lib/workflow-engine.ts","packages/shared/src/lib/workflow-engine/engine.ts","packages/shared/src/lib/workflow-engine/transitions.ts","packages/shared/src/lib/workflow-engine/conditions.ts","packages/shared/src/lib/workflow-engine/graph-validation.ts","packages/shared/src/lib/workflow-engine/node-config.ts","packages/shared/src/lib/workflow-engine/node-queries.ts","packages/shared/src/lib/workflow-engine/status-resolution.ts","packages/shared/src/lib/workflow-engine/status-sync.ts","packages/shared/src/lib/workflow-engine/templates.ts","packages/shared/src/lib/workflow-engine/types.ts","packages/shared/src/lib/workflow-engine/workspace-init.ts","packages/shared/src/schema/workflows.ts","packages/server/src/routes/workflows.ts","packages/server/src/repositories/workflow.repository.ts"],
+      "entry_points": ["packages/server/src/routes/workflows.ts — betweenness 0.099, workflow REST + transition","packages/shared/src/lib/workflow-engine.ts — the public facade"],
+      "logic_bearing": ["packages/shared/src/lib/workflow-engine/transitions.ts — legal transition rules","packages/shared/src/lib/workflow-engine/conditions.ts — transition guards","packages/shared/src/lib/workflow-engine/graph-validation.ts — graph well-formedness rules"],
+      "depends_on": ["issues-board","persistence-schema"],
+      "structure_note": "well: behind a barrel facade in shared/lib"
+    },
+    {
+      "slug": "monitor-orchestration",
+      "name": "Monitor / Conductor / Autopilot (board orchestration)",
+      "capability_hypothesis": "The control plane that drives tickets to done without a human: per-project start policy, in-process monitor cycle (auto-start/relaunch/refill up to WIP), conductor mode, and drive dashboards.",
+      "files": ["packages/server/src/startup/monitor-cycle.ts","packages/server/src/startup/monitor-cycle-rules.ts","packages/server/src/startup/monitor-cycle-actions.ts","packages/server/src/startup/monitor-eligibility.ts","packages/server/src/startup/monitor-backlog.ts","packages/server/src/startup/monitor-auto-start.ts","packages/server/src/startup/monitor-contract.ts","packages/server/src/startup/monitor-setup.ts","packages/server/src/services/monitor-butler.ts","packages/server/src/services/conductor-control.service.ts","packages/server/src/services/drive.service.ts","packages/server/src/services/drive-preflight.service.ts","packages/server/src/services/drive-obstacles.service.ts","packages/server/src/routes/drive.ts","packages/server/src/routes/board-monitor.ts"],
+      "entry_points": ["packages/server/src/startup/monitor-cycle.ts — the cycle entry","packages/server/src/startup/monitor-setup.ts — wiring/scheduling","packages/server/src/routes/drive.ts — drive control REST"],
+      "logic_bearing": ["packages/server/src/startup/monitor-cycle-rules.ts — start/relaunch/refill decision rules","packages/server/src/startup/monitor-eligibility.ts — what is eligible to auto-start","start-policy resolution (resolveStartPolicy) — manual|monitor|conductor"],
+      "depends_on": ["workspaces","review-merge","preferences-config","issues-board"],
+      "structure_note": "scattered: capability spans services/ (butler, conductor, drive) + startup/ (monitor-*) — File Topology REQUIRED"
+    },
+    {
+      "slug": "review-merge",
+      "name": "Review & Merge (landing work on the default branch)",
+      "capability_hypothesis": "How an agent's branch becomes delivered code: AI code review, merge into the default branch, conflict handling, fix-and-merge, and the reconcilers that keep DB status honest with git reality.",
+      "files": ["packages/server/src/services/merge-queue.service.ts","packages/server/src/services/merge-helpers.service.ts","packages/server/src/services/merge-cleanup.service.ts","packages/server/src/services/foundational-merge.service.ts","packages/server/src/startup/merge-workflow.ts","packages/server/src/startup/merge-strategy.ts","packages/server/src/startup/auto-merge-orchestrator.ts","packages/server/src/startup/stranded-review-reconciler.ts","packages/server/src/startup/done-unmerged-invariant-scanner.ts","packages/server/src/startup/completion-state-reconciler.ts","packages/server/src/repositories/review.repository.ts","packages/server/src/repositories/workspace-merge.repository.ts","packages/server/src/repositories/workspace-merge-execution.repository.ts","packages/server/src/repositories/workspace-merge-prevalidation.repository.ts","packages/shared/src/lib/auto-merge-pref.ts"],
+      "entry_points": ["packages/server/src/startup/auto-merge-orchestrator.ts — auto-merge wiring","packages/server/src/services/merge-queue.service.ts — the merge queue"],
+      "logic_bearing": ["packages/server/src/startup/merge-strategy.ts — merge approach decision","packages/server/src/repositories/workspace-merge-prevalidation.repository.ts — pre-merge guards","packages/server/src/startup/done-unmerged-invariant-scanner.ts — DB-vs-git invariant"],
+      "depends_on": ["workspaces","git-integration","workflow-engine"],
+      "structure_note": "scattered: split across services/ + startup/ reconcilers — File Topology REQUIRED"
+    },
+    {
+      "slug": "butler",
+      "name": "Butler (warm conversational assistant)",
+      "capability_hypothesis": "A per-project, persistent conversational agent the user talks to about the board; backed by the Claude Agent SDK in-process, with its own chat UI, definitions, transcripts, and event feed.",
+      "files": ["packages/server/src/services/butler-sdk.service.ts","packages/server/src/services/butler-definitions.service.ts","packages/server/src/services/butler-transcripts.service.ts","packages/server/src/services/butler-event-feed.ts","packages/server/src/butler/board-guide.ts","packages/server/src/routes/butler.ts","packages/server/src/routes/butler-definitions.ts","packages/shared/src/lib/butler-ticket-prompt.ts","packages/client/src/components/ButlerView.tsx","packages/client/src/components/ButlerViewBody.tsx","packages/client/src/components/ButlerChatParts.tsx","packages/client/src/components/ButlerManageModal.tsx","packages/client/src/lib/butler-format.ts","packages/client/src/lib/butler-event-reducer.ts"],
+      "entry_points": ["packages/server/src/routes/butler.ts — butler REST/ask","packages/client/src/components/ButlerView.tsx — chat UI entry (C7 public API)"],
+      "logic_bearing": ["packages/server/src/services/butler-sdk.service.ts — SDK session mgmt (thinking-signature resume caveat)","packages/client/src/lib/butler-event-reducer.ts — chat event state"],
+      "depends_on": ["agent-providers","issues-board","mcp-server"],
+      "structure_note": "well: C7 cluster (client) + a coherent server butler service set"
+    },
+    {
+      "slug": "git-integration",
+      "name": "Git Integration (worktree / merge / diff service)",
+      "capability_hypothesis": "The single sanctioned seam to git: high-level operations (worktree create, branch sync, conflict detect via merge-tree, working-tree diff incl. untracked) over one spawn adapter.",
+      "files": ["packages/shared/src/lib/git-service.ts","packages/shared/src/lib/git-service/","packages/shared/src/lib/git-exec.ts","packages/shared/src/lib/branch.ts","packages/server/src/services/git.service.ts","packages/server/src/services/git-info.service.ts","packages/mcp-server/src/git-service.ts","packages/server/src/services/diff-stats.service.ts"],
+      "entry_points": ["packages/shared/src/lib/git-service.ts — betweenness 0.083, the high-level API","packages/shared/src/lib/git-exec.ts — the ONLY git spawn site (gitExec/gitExecOrThrow)"],
+      "logic_bearing": ["packages/shared/src/lib/git-service.ts — syncBranchToHead/ensureOnBranch/detectConflicts invariants","packages/shared/src/lib/git-exec.ts — never-throws spawn contract"],
+      "depends_on": ["persistence-schema"],
+      "structure_note": "well: explicit single-source-of-truth design (re-exports are thin)"
+    },
+    {
+      "slug": "mcp-server",
+      "name": "MCP Server (agent-facing tool surface)",
+      "capability_hypothesis": "The Model Context Protocol surface: the tools an AI agent (builder/butler) calls to read/manipulate the board — create/move issues, manage workspaces, query context, manage skills.",
+      "files": ["packages/mcp-server/src/index.ts","packages/mcp-server/src/tools/create-issue.ts","packages/mcp-server/src/tools/update-issue.ts","packages/mcp-server/src/tools/move-issue.ts","packages/mcp-server/src/tools/get-context.ts","packages/mcp-server/src/tools/get-board-status.ts","packages/mcp-server/src/tools/list-issues.ts","packages/mcp-server/src/tools/launch-workspace.ts","packages/mcp-server/src/tools/merge-workspace.ts","packages/mcp-server/src/tools/deps.ts","packages/mcp-server/src/tools/ask-butler.ts","packages/mcp-server/src/tools/create-agent-skill.ts","packages/shared/src/lib/mcp-tool-definitions.ts"],
+      "entry_points": ["packages/mcp-server/src/index.ts — MCP server bootstrap + tool registration","packages/mcp-server/src/tools/update-issue.ts — betweenness 0.074, busiest tool"],
+      "logic_bearing": ["packages/mcp-server/src/tools/get-context.ts — what context an agent receives","packages/mcp-server/src/tools/create-issue.ts — issue creation policy via MCP","packages/shared/src/lib/mcp-tool-definitions.ts — tool schema contract"],
+      "depends_on": ["issues-board","workspaces","butler"],
+      "structure_note": "well: C3 cluster, its own package"
+    },
+    {
+      "slug": "persistence-schema",
+      "name": "Persistence & Schema (data kernel)",
+      "capability_hypothesis": "The shared data foundation: Drizzle schema (the domain's published data language), the DB connection with retry, migration management, and FK-integrity policy.",
+      "files": ["packages/shared/src/schema/index.ts","packages/shared/src/schema/sessions.ts","packages/shared/src/schema/session-messages.ts","packages/shared/src/schema/preferences.ts","packages/server/src/db/index.ts","packages/server/src/db/data-dir.ts","packages/server/src/db/retry.ts","packages/shared/src/lib/fk-actions.ts","packages/shared/src/lib/fk-actions-repair.ts","packages/shared/src/lib/cascade-delete.ts","packages/server/src/__tests__/helpers/migrations.ts"],
+      "entry_points": ["packages/shared/src/schema/index.ts — betweenness 0.140, the schema barrel (3 clusters touch it)","packages/server/src/db/index.ts — blast radius 481, the connection"],
+      "logic_bearing": ["packages/server/src/db/retry.ts — blast radius 483, retry-on-lock policy","packages/shared/src/lib/fk-actions.ts — FK cascade/restrict policy","packages/server/src/db/data-dir.ts — blast radius 527, DB location resolution"],
+      "depends_on": [],
+      "structure_note": "well: it is the shared kernel; flag the schema-as-published-language role"
+    },
+    {
+      "slug": "board-ui",
+      "name": "Board UI (React client)",
+      "capability_hypothesis": "The user-facing board: the kanban view (columns/swimlanes/cards), issue detail panel, workspace panel, and the data-fetching/live-event layer that keeps them in sync.",
+      "files": ["packages/client/src/routes/BoardPage.tsx","packages/client/src/components/BoardKanbanView.tsx","packages/client/src/components/BoardColumn.tsx","packages/client/src/components/BoardColumnCard.tsx","packages/client/src/components/IssueCard.tsx","packages/client/src/components/IssueDetailPanel.tsx","packages/client/src/components/WorkspacePanel.tsx","packages/client/src/components/BoardToolbar.tsx","packages/client/src/lib/api.ts","packages/client/src/lib/useBoardEvents.ts","packages/client/src/lib/issueMoveHelpers.ts","packages/client/src/lib/wipLimits.ts","packages/client/src/lib/boardColumnSort.ts"],
+      "entry_points": ["packages/client/src/routes/BoardPage.tsx — hottest file (718 commits), the board route","packages/client/src/lib/api.ts — betweenness 0.148, the REST client","packages/client/src/lib/useBoardEvents.ts — live-event subscription"],
+      "logic_bearing": ["packages/client/src/lib/issueMoveHelpers.ts — drag/move legality on the client","packages/client/src/lib/wipLimits.ts — WIP-limit policy in the UI","packages/client/src/components/BoardColumn.tsx — top risk file, column rendering+state"],
+      "depends_on": ["issues-board","workspaces","agent-sessions"],
+      "structure_note": "well: C2/C8 clusters; note BoardPage god-route churn"
+    }
+  ]
+}
