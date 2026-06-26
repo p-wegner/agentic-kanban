@@ -54,6 +54,25 @@ note: Ubiquitous language merged from the 12 module docs. Terms are defined AS T
 | **Backlog floor** | Minimum unstarted Todo tickets before the monitor refills the backlog. | monitor-orchestration |
 | **Strategy Bullseye** | A JSON pref that derives monitor tunables + provider routing — the published tuning contract. | monitor-orchestration |
 
+> **Agent roles (operational vocabulary).** `CLAUDE.md`'s "Agent Roles" table names
+> seven roles; the glossary terms above cover the in-product mechanisms but use older
+> names for three of them. Reconciliation:
+> - **Steward** = the in-process *LLM* monitor — **the same thing this glossary calls
+>   "Monitor Butler"** (`monitor_butler_enabled`, fresh SDK session per cycle, reads
+>   `objective.md`, off by default). "Steward" is the role name; "Monitor Butler" is the
+>   mechanism/pref name.
+> - **Sentinel** = the *human-side* watch (interactive Claude + `/loop` + cron) that
+>   polls the **Conductor**'s health and reports one line, recovering only on failure.
+>   Not an in-product mechanism — it's the supervisor role around the loop.
+> - **Smith** = the compounding-engineering session that analyzes past runs
+>   (`fleet-analysis` / `session-inspector` / `learning-step` / `distill-learnings`) to
+>   forge durable improvements (skills, hooks, docs). Also not an in-product mechanism.
+>
+> **Autopilot** (deterministic in-process monitor), **Conductor** (out-of-process
+> `loop.sh` driver), **Monitor Butler**/Steward, **Butler** (warm per-project assistant),
+> and **Builder** (per-ticket worktree implementer) keep their meanings as defined here
+> and in the Butler/UI section.
+
 ## Review & merge
 | Term | Meaning | Context |
 |---|---|---|
