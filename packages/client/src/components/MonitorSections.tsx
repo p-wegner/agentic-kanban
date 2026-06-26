@@ -1,8 +1,19 @@
 import { useEffect, useState } from "react";
+import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { apiFetch, apiPut } from "../lib/api.js";
 import type { OrchestratorStatus } from "../hooks/useOrchestrator.js";
-import { parseCycleLine } from "../lib/monitor-popover.js";
-import type { BoardHealthEvent, ConductorSchedule } from "../lib/monitor-popover.js";
+import { parseCycleLine, isAutodriveStallWarning, START_MODE_LABEL, START_MODE_HINT } from "../lib/monitor-popover.js";
+import type { BoardHealthEvent, ConductorSchedule, MonitorStatus, MonitorAction, ResolvedTunables, StartMode } from "../lib/monitor-popover.js";
+
+const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: string }> = {
+  relaunch:         { label: "Relaunched agent",   color: "text-blue-600" },
+  merge:            { label: "Triggered merge",    color: "text-brand-600 dark:text-brand-400" },
+  nudge:            { label: "Nudged agent",       color: "text-amber-600" },
+  mark_idle:        { label: "Marked idle",        color: "text-gray-500 dark:text-gray-400" },
+  mark_dead:        { label: "Marked dead",        color: "text-red-500" },
+  auto_start:       { label: "Auto-started issue", color: "text-green-600" },
+  generate_tickets: { label: "Generated tickets",  color: "text-violet-600 dark:text-violet-400" },
+};
 
 export function SubToggle({ label, checked, disabled, onChange }: { label: string; checked: boolean; disabled?: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -321,6 +332,505 @@ export function RecentBoardHealthEventsSection({
               )}
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function MonitorHeader({
+  autoMonitor,
+  butlerEnabled,
+  nextRunAt,
+  running,
+  onRunNow,
+  onClose,
+  formatCountdown,
+}: {
+  autoMonitor: boolean;
+  butlerEnabled: boolean;
+  nextRunAt?: string | null;
+  running: boolean;
+  onRunNow: () => void;
+  onClose: () => void;
+  formatCountdown: (isoStr: string) => string;
+}) {
+  return (
+    <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between shrink-0 rounded-t-xl bg-gray-50 dark:bg-gray-950">
+      <div className="flex items-center gap-2">
+        <MonitorStatusDots autoMonitor={autoMonitor} butlerEnabled={butlerEnabled} />
+        <span className="font-semibold text-gray-800 dark:text-gray-200 text-[13px]">Board Monitor</span>
+        {autoMonitor && nextRunAt && (
+          <span className="text-gray-400 dark:text-gray-500 text-[10px] font-mono">in {formatCountdown(nextRunAt)}</span>
+        )}
+      </div>
+      <div className="flex items-center gap-1.5">
+        <button
+          onClick={onRunNow}
+          disabled={running}
+          className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          title="Run monitor cycle now"
+        >
+          {running ? (
+            <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+          ) : (
+            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z"/></svg>
+          )}
+          {running ? "Running" : "Run now"}
+        </button>
+        <button onClick={onClose} className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700" title="Close">
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function AutoMonitorToggleRow({
+  autoMonitor,
+  active,
+  onToggle,
+}: {
+  autoMonitor: boolean;
+  active?: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+      <div className="flex items-center gap-2">
+        <span className="font-medium text-gray-700 dark:text-gray-300">Auto-monitor</span>
+        {autoMonitor && active && (
+          <span className="px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-medium">running</span>
+        )}
+      </div>
+      <button
+        onClick={onToggle}
+        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-1 ${autoMonitor ? "bg-emerald-500" : "bg-gray-200 dark:bg-gray-600"}`}
+        title={autoMonitor ? "Disable auto-monitor" : "Enable auto-monitor"}
+      >
+        <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${autoMonitor ? "translate-x-[1.125rem]" : "translate-x-0.5"}`} />
+      </button>
+    </div>
+  );
+}
+
+export function StartModeSection({
+  projectId,
+  resolvedTunables,
+  tunablesError,
+  orchestrator,
+  startModeSaving,
+  onSelectStartMode,
+  onRetryTunables,
+  onPutSettings,
+  formatAge,
+  formatCountdown,
+}: {
+  projectId: string;
+  resolvedTunables: ResolvedTunables | null;
+  tunablesError: string | null;
+  orchestrator?: OrchestratorStatus | null;
+  startModeSaving: boolean;
+  onSelectStartMode: (m: StartMode) => void;
+  onRetryTunables: () => void;
+  onPutSettings: (patch: Record<string, string>) => void;
+  formatAge: (isoStr: string) => string;
+  formatCountdown: (isoStr: string) => string;
+}) {
+  return (
+    <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="font-medium text-gray-700 dark:text-gray-300">Start Mode</span>
+        {resolvedTunables?.startPolicy && (
+          <span
+            className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${resolvedTunables.startPolicy.source === "start_mode" ? "bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300" : "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400"}`}
+            title={resolvedTunables.startPolicy.source === "start_mode" ? "Set explicitly for this project" : "Derived from legacy auto-monitor / autodrive settings"}
+          >
+            {resolvedTunables.startPolicy.source === "start_mode" ? "Per-project" : "Derived"}
+          </span>
+        )}
+      </div>
+      {tunablesError && !resolvedTunables && (
+        <div className="flex items-center justify-between gap-2 rounded-md bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-2 py-1.5">
+          <span className="text-[10px] text-red-600 dark:text-red-400 leading-snug min-w-0">Couldn't load start policy: {tunablesError}</span>
+          <button onClick={onRetryTunables} className="text-[10px] font-medium text-red-700 dark:text-red-300 hover:underline shrink-0">Retry</button>
+        </div>
+      )}
+      <div className="flex rounded-md border border-gray-200 dark:border-gray-700 overflow-hidden">
+        {(["manual", "monitor", ...(orchestrator?.available ? (["conductor"] as StartMode[]) : [])] as StartMode[]).map((m) => {
+          const active = resolvedTunables?.startPolicy?.mode === m;
+          return (
+            <button
+              key={m}
+              disabled={startModeSaving}
+              onClick={() => onSelectStartMode(m)}
+              title={START_MODE_HINT[m]}
+              className={`flex-1 px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-50 ${active ? "bg-emerald-600 text-white" : "bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"}`}
+            >
+              {START_MODE_LABEL[m]}
+            </button>
+          );
+        })}
+      </div>
+      {resolvedTunables?.startPolicy && (
+        <p className="text-[10px] text-gray-400 dark:text-gray-500 leading-snug">{START_MODE_HINT[resolvedTunables.startPolicy.mode]}</p>
+      )}
+      {resolvedTunables?.startPolicy?.mode === "conductor" && orchestrator?.available && (
+        <div className="flex items-center justify-between rounded-md bg-gray-50 dark:bg-gray-950 px-2 py-1.5">
+          <span className="flex items-center gap-1.5 text-[11px] text-gray-600 dark:text-gray-300">
+            <span className={`w-1.5 h-1.5 rounded-full ${orchestrator.alive ? "bg-emerald-500 animate-pulse" : "bg-gray-300 dark:bg-gray-600"}`} />
+            Loop {orchestrator.alive ? "running" : "stopped"}{orchestrator.iteration != null ? ` · cycle ${orchestrator.iteration}` : ""}
+          </span>
+          {!orchestrator.alive && (
+            <button
+              disabled={startModeSaving}
+              onClick={() => onSelectStartMode("conductor")}
+              className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+            >
+              Start loop
+            </button>
+          )}
+        </div>
+      )}
+      {orchestrator?.available && projectId && (
+        <ConductorCronSection projectId={projectId} formatAge={formatAge} formatCountdown={formatCountdown} />
+      )}
+      {resolvedTunables?.startPolicy?.mode === "monitor" && (
+        <div className="space-y-1.5 pt-0.5">
+          <SubToggle label="Continue chains after merge" checked={resolvedTunables.startPolicy.postMergeCascade} disabled={startModeSaving} onChange={(v) => onPutSettings({ dependency_auto_chain: v ? "true" : "false" })} />
+          <SubToggle label="Refill empty backlog" checked={resolvedTunables.startPolicy.backlogRefill} disabled={startModeSaving} onChange={(v) => onPutSettings({ backlog_empty_strategy: v ? "generate_tickets" : "skip" })} />
+        </div>
+      )}
+      {resolvedTunables?.startPolicy && (
+        <div className="rounded-md bg-gray-50 dark:bg-gray-950 px-2 py-1.5 space-y-1">
+          <div className="text-[9px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">What starts a ticket now</div>
+          <PolicyRow label="Auto-start unblocked todos" on={resolvedTunables.startPolicy.autoStartUnblocked} />
+          <PolicyRow label="Continue chains after merge" on={resolvedTunables.startPolicy.postMergeCascade} />
+          <PolicyRow label="Refill empty backlog" on={resolvedTunables.startPolicy.backlogRefill} />
+          <PolicyRow label="Scheduled (cron) runs" on={resolvedTunables.startPolicy.scheduledRuns} />
+        </div>
+      )}
+      <p className="text-[9px] text-gray-400 dark:text-gray-500 leading-snug">A set Start Mode supersedes the global Auto-monitor toggle for this project.</p>
+    </div>
+  );
+}
+
+export function ActiveAgentsSection({
+  activeWs,
+  onOpenAgent,
+}: {
+  activeWs: IssueWithStatus[];
+  onOpenAgent: (iss: IssueWithStatus) => void;
+}) {
+  if (activeWs.length === 0) return null;
+  return (
+    <div className="border-b border-gray-100 dark:border-gray-800">
+      <div className="px-3 pt-2.5 pb-1 flex items-center gap-1.5">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">Active agents</span>
+        <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-bold">{activeWs.length}</span>
+      </div>
+      <div className="overflow-y-auto" style={{ maxHeight: "11rem" }}>
+        {activeWs.map(iss => (
+          <div
+            key={iss.id}
+            className="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 px-3 py-2 transition-colors border-t border-gray-50 dark:border-gray-800/50 first:border-t-0 group"
+            onClick={() => onOpenAgent(iss)}
+          >
+            <div className="flex items-start gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0 animate-pulse mt-1.5" />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline gap-1 mb-0.5">
+                  <span className="font-semibold text-gray-600 dark:text-gray-400 shrink-0 text-[11px]">#{iss.issueNumber}</span>
+                  <span className="text-gray-700 dark:text-gray-300 truncate text-[11px] font-medium">{iss.title}</span>
+                </div>
+                <p className="text-gray-400 dark:text-gray-500 leading-snug line-clamp-1 text-[10px]">{iss.workspaceSummary!.main!.lastAssistantMessage}</p>
+              </div>
+              <svg className="w-3 h-3 text-gray-300 dark:text-gray-600 group-hover:text-gray-500 dark:group-hover:text-gray-400 shrink-0 mt-1 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/></svg>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function LastRunSection({
+  lastRun,
+  formatAge,
+}: {
+  lastRun: MonitorStatus["lastRun"];
+  formatAge: (isoStr: string) => string;
+}) {
+  return (
+    <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">Last run</div>
+      {lastRun ? (
+        <div className="space-y-1.5">
+          <div className="text-gray-400 dark:text-gray-500 text-[11px]">{formatAge(lastRun.at)}</div>
+          <div className="flex flex-wrap gap-1">
+            {(lastRun.warnings ?? 0) > 0 && (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 font-medium text-[11px]">
+                <span className="w-1 h-1 rounded-full bg-red-400 shrink-0" />{lastRun.warnings} warning{lastRun.warnings === 1 ? "" : "s"}
+              </span>
+            )}
+            {lastRun.relaunched > 0 && (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950 text-blue-700 font-medium text-[11px]">
+                <span className="w-1 h-1 rounded-full bg-blue-400 shrink-0" />{lastRun.relaunched} relaunched
+              </span>
+            )}
+            {lastRun.merged > 0 && (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 font-medium text-[11px]">
+                <span className="w-1 h-1 rounded-full bg-brand-400 shrink-0" />{lastRun.merged} merged
+              </span>
+            )}
+            {lastRun.nudged > 0 && (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950 text-amber-700 font-medium text-[11px]">
+                <span className="w-1 h-1 rounded-full bg-amber-400 shrink-0" />{lastRun.nudged} nudged
+              </span>
+            )}
+            {lastRun.relaunched === 0 && lastRun.merged === 0 && lastRun.nudged === 0 && (lastRun.warnings ?? 0) === 0 && (
+              <span className="text-gray-400 dark:text-gray-500 text-[11px]">No actions needed</span>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="text-gray-400 dark:text-gray-500 text-[11px]">No runs yet this session</div>
+      )}
+    </div>
+  );
+}
+
+export function MonitorWarningsSection({
+  warnings,
+  lastHealthCheckAt,
+  formatAge,
+}: {
+  warnings: NonNullable<MonitorStatus["warnings"]>;
+  lastHealthCheckAt?: string | null;
+  formatAge: (isoStr: string) => string;
+}) {
+  if (warnings.length === 0) return null;
+  return (
+    <div className="px-3 py-2.5 border-b border-red-100 dark:border-red-900/50 bg-red-50/70 dark:bg-red-950/25">
+      <div className="flex items-center justify-between gap-2 mb-1.5">
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-red-700 dark:text-red-300">Monitor warnings</div>
+        {lastHealthCheckAt && (
+          <div className="text-[10px] text-red-500 dark:text-red-400">{formatAge(lastHealthCheckAt)}</div>
+        )}
+      </div>
+      <div className="space-y-2">
+        {warnings.map((warning) => {
+          if (isAutodriveStallWarning(warning)) {
+            return (
+              <div key={`autodrive-${warning.projectId}`} className="text-[11px] text-red-800 dark:text-red-200 leading-snug">
+                <div className="font-semibold">{warning.projectName}: autodrive stalled</div>
+                <div>{warning.message}</div>
+                {warning.issueNumbers.length > 0 && (
+                  <div className="mt-1 font-mono text-[10px] text-red-600 dark:text-red-300 truncate">
+                    {warning.issueNumbers.slice(0, 5).map((n) => `#${n}`).join(", ")}
+                    {warning.issueNumbers.length > 5 ? `, +${warning.issueNumbers.length - 5}` : ""}
+                  </div>
+                )}
+              </div>
+            );
+          }
+          return (
+            <div key={`dirty-${warning.projectId}`} className="text-[11px] text-red-800 dark:text-red-200 leading-snug">
+              <div className="font-semibold">{warning.projectName}: dirty main checkout</div>
+              <div>{warning.fileCount} tracked source change{warning.fileCount === 1 ? "" : "s"} must be committed or reverted.</div>
+              <div className="mt-1 font-mono text-[10px] text-red-600 dark:text-red-300 truncate" title={warning.files.join(", ")}>
+                {warning.files.slice(0, 3).join(", ")}{warning.files.length > 3 ? `, +${warning.files.length - 3}` : ""}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export function ResourceAuditSection({ status }: { status: MonitorStatus }) {
+  if (!status.lastRun?.resources) return null;
+  return (
+    <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1.5">Resource audit</div>
+      <div className="grid grid-cols-3 gap-1.5 mb-2">
+        <div className="rounded-md bg-gray-50 dark:bg-gray-800 px-2 py-1">
+          <div className="text-[10px] text-gray-400 dark:text-gray-500">Processes</div>
+          <div className="font-semibold text-gray-700 dark:text-gray-300">{status.lastRun.resources.processCount}</div>
+        </div>
+        <div className="rounded-md bg-gray-50 dark:bg-gray-800 px-2 py-1">
+          <div className="text-[10px] text-gray-400 dark:text-gray-500">Kept</div>
+          <div className="font-semibold text-gray-700 dark:text-gray-300">{status.lastRun.resources.keptCount}</div>
+        </div>
+        <div className="rounded-md bg-gray-50 dark:bg-gray-800 px-2 py-1">
+          <div className="text-[10px] text-gray-400 dark:text-gray-500">Cleaned</div>
+          <div className={`font-semibold ${status.lastRun.resources.cleanupFailedCount > 0 ? "text-red-600" : "text-gray-700 dark:text-gray-300"}`}>
+            {status.lastRun.resources.cleanedCount}
+          </div>
+        </div>
+      </div>
+      {status.resourceSnapshot && (
+        <div className="space-y-1">
+          {status.resourceSnapshot.cleaned.slice(0, 3).map((item) => (
+            <div key={`cleaned-${item.rootPid}`} className="flex items-center gap-1.5 text-[11px]">
+              <span className={item.action === "cleanup_failed" ? "text-red-600" : "text-emerald-600"}>{item.action === "cleanup_failed" ? "Failed" : "Cleaned"}</span>
+              <span className="font-mono text-gray-500 dark:text-gray-400">PID {item.rootPid}</span>
+              <span className="truncate text-gray-400 dark:text-gray-500">{item.reason}</span>
+            </div>
+          ))}
+          {status.resourceSnapshot.kept.slice(0, 3).map((item) => (
+            <div key={`kept-${item.rootPid}`} className="flex items-center gap-1.5 text-[11px]">
+              <span className="text-gray-500 dark:text-gray-400">Kept</span>
+              <span className="font-mono text-gray-500 dark:text-gray-400">PID {item.rootPid}</span>
+              <span className="truncate text-gray-400 dark:text-gray-500">{item.reason}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function RecentActionsSection({
+  recentActions,
+  columns,
+  formatAge,
+  onSelectAction,
+}: {
+  recentActions: MonitorAction[];
+  columns: StatusWithIssues[];
+  formatAge: (isoStr: string) => string;
+  onSelectAction: (action: MonitorAction, issueNumber?: number | null) => void;
+}) {
+  if (recentActions.length === 0) return null;
+  return (
+    <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1.5">Recent actions</div>
+      <div className="space-y-0.5">
+        {recentActions.map((a, i) => {
+          const meta = ACTION_LABELS[a.action];
+          const issue = columns.flatMap(c => c.issues).find(iss => iss.id === a.issueId);
+          return (
+            <div
+              key={i}
+              className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md px-1.5 -mx-1.5 py-1 transition-colors group"
+              onClick={() => onSelectAction(a, issue?.issueNumber)}
+            >
+              <span className={`${meta.color} font-medium truncate flex-1 text-[11px]`}>{meta.label}</span>
+              {issue && <span className="text-gray-500 dark:text-gray-400 shrink-0 text-[11px]">#{issue.issueNumber}</span>}
+              <span className="text-gray-400 dark:text-gray-500 shrink-0 text-[10px] font-mono">{formatAge(a.at)}</span>
+              <svg className="w-2.5 h-2.5 text-gray-300 dark:text-gray-600 group-hover:text-gray-500 dark:group-hover:text-gray-400 shrink-0 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z" />
+              </svg>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export function EffectiveTargetsSection({ resolvedTunables }: { resolvedTunables: ResolvedTunables }) {
+  return (
+    <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800">
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">Effective targets</div>
+        <span
+          className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${resolvedTunables.source === "strategy" ? "bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300" : "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400"}`}
+          title={resolvedTunables.source === "strategy" ? "Values come from Strategy Bullseye" : "Values come from legacy WIP limit pref"}
+        >
+          {resolvedTunables.source === "strategy" ? "Strategy Bullseye" : "Legacy prefs"}
+        </span>
+      </div>
+      <div className="grid grid-cols-3 gap-1.5">
+        <div className="rounded-md bg-gray-50 dark:bg-gray-800 px-2 py-1">
+          <div className="text-[10px] text-gray-400 dark:text-gray-500">Agents target</div>
+          <div className="font-semibold text-gray-700 dark:text-gray-300">{resolvedTunables.tunables.activeAgentsTarget}</div>
+        </div>
+        <div className="rounded-md bg-gray-50 dark:bg-gray-800 px-2 py-1">
+          <div className="text-[10px] text-gray-400 dark:text-gray-500">Backlog floor</div>
+          <div className="font-semibold text-gray-700 dark:text-gray-300">{resolvedTunables.tunables.backlogFloor}</div>
+        </div>
+        <div className="rounded-md bg-gray-50 dark:bg-gray-800 px-2 py-1">
+          <div className="text-[10px] text-gray-400 dark:text-gray-500">Max starts</div>
+          <div className="font-semibold text-gray-700 dark:text-gray-300">
+            {Number.isFinite(resolvedTunables.tunables.maxNewStartsPerCycle) ? resolvedTunables.tunables.maxNewStartsPerCycle : "∞"}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function MonitorSettingsSection({
+  interval,
+  onIntervalChange,
+  autoMonitor,
+  nudgeAutoStart,
+  onNudgeAutoStartChange,
+  nudgeWipLimit,
+  onNudgeWipLimitChange,
+  resolvedTunables,
+}: {
+  interval: string;
+  onIntervalChange: (v: string) => void;
+  autoMonitor: boolean;
+  nudgeAutoStart: boolean;
+  onNudgeAutoStartChange: (v: boolean) => void;
+  nudgeWipLimit: string;
+  onNudgeWipLimitChange: (v: string) => void;
+  resolvedTunables: ResolvedTunables | null;
+}) {
+  return (
+    <div className="px-3 py-2.5 space-y-2.5 rounded-b-xl">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">Settings</div>
+      <div className="flex items-center gap-2">
+        <label className="text-gray-500 dark:text-gray-400 flex-1 text-[11px]">Check interval</label>
+        <div className="flex items-center gap-1.5">
+          <input
+            type="number"
+            min={1}
+            max={60}
+            value={interval}
+            onChange={(e) => onIntervalChange(e.target.value)}
+            disabled={!autoMonitor}
+            className="w-12 border border-gray-200 dark:border-gray-700 rounded-md px-2 py-1 text-center text-[11px] focus:outline-none focus:ring-1 focus:ring-emerald-400 disabled:opacity-40 disabled:bg-gray-50 dark:disabled:bg-gray-800"
+          />
+          <span className="text-gray-500 dark:text-gray-400 text-[11px]">min</span>
+        </div>
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <span className={`text-gray-600 dark:text-gray-400 text-[11px] ${!autoMonitor ? "opacity-40" : ""}`}>Auto-start unblocked todos</span>
+        <button
+          onClick={() => onNudgeAutoStartChange(!nudgeAutoStart)}
+          disabled={!autoMonitor}
+          className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus:outline-none disabled:opacity-40 ${nudgeAutoStart && autoMonitor ? "bg-emerald-500" : "bg-gray-200 dark:bg-gray-600"}`}
+        >
+          <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${nudgeAutoStart ? "translate-x-[1.125rem]" : "translate-x-0.5"}`} />
+        </button>
+      </div>
+      {nudgeAutoStart && autoMonitor && (
+        <div className="flex flex-col gap-1.5 pl-2.5 border-l-2 border-emerald-200 dark:border-green-800 ml-0.5">
+          <div className="flex items-center gap-2">
+            <label className="text-gray-500 dark:text-gray-400 flex-1 text-[11px]">WIP limit</label>
+            <div className="flex items-center gap-1.5">
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={nudgeWipLimit}
+                onChange={(e) => onNudgeWipLimitChange(e.target.value)}
+                className={`w-12 border rounded-md px-2 py-1 text-center text-[11px] focus:outline-none focus:ring-1 focus:ring-emerald-400 ${resolvedTunables?.source === "strategy" ? "opacity-50 border-gray-200 dark:border-gray-700" : "border-gray-200 dark:border-gray-700"}`}
+              />
+              <span className="text-gray-500 dark:text-gray-400 text-[11px]">in progress</span>
+            </div>
+          </div>
+          {resolvedTunables?.source === "strategy" && (
+            <p className="text-[10px] text-indigo-600 dark:text-indigo-400 leading-snug">
+              Overridden by Strategy Bullseye (effective: {resolvedTunables.tunables.activeAgentsTarget})
+            </p>
+          )}
         </div>
       )}
     </div>
