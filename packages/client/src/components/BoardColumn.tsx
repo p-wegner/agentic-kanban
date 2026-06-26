@@ -6,6 +6,7 @@ import { type ProjectTag, type QuickUpdateCallbacks } from "./IssueCard.js";
 import { BoardColumnCard } from "./BoardColumnCard.js";
 import { evaluateWipLimit } from "../lib/wipLimits.js";
 import { computeDropSortOrder } from "../lib/reorderIssues.js";
+import { computeColumnScrollState } from "../lib/columnScrollState.js";
 import {
   groupByPriority,
   groupByTag,
@@ -158,17 +159,7 @@ export function BoardColumn({
     const el = scrollRef.current;
     if (!el) return;
     const { scrollTop, scrollHeight, clientHeight } = el;
-    const atTop = scrollTop <= 2;
-    const atBottom = scrollTop + clientHeight >= scrollHeight - 2;
-    if (scrollHeight <= clientHeight + 4) {
-      setScrollState("none");
-    } else if (atTop && !atBottom) {
-      setScrollState("top");
-    } else if (atBottom && !atTop) {
-      setScrollState("bottom");
-    } else {
-      setScrollState("middle");
-    }
+    setScrollState(computeColumnScrollState({ scrollTop, scrollHeight, clientHeight }));
   }, []);
 
   function handleDragEnter(e: React.DragEvent) {
