@@ -1,5 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { boardQueryKeys } from "../hooks/useBoardDataQueries.js";
+import { boardQueryKeys } from "./boardQueryKeys.js";
 import { invalidateBundle } from "./issueDetailBundleCache.js";
 import { invalidateSettings } from "./settingsStore.js";
 

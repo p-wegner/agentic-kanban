@@ -16,7 +16,7 @@
  */
 import { apiFetch } from "./api.js";
 import { queryClient } from "./queryClient.js";
-import { boardQueryKeys } from "../hooks/useBoardDataQueries.js";
+import { boardQueryKeys } from "./boardQueryKeys.js";
 import type { PendingQuestionSet } from "../components/AgentQuestionsPanel.js";
 
 /** Short cache window so near-simultaneous pollers share one result. */
