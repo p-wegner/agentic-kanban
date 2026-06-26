@@ -10,20 +10,24 @@ import {
   toolNameFor,
 } from "./shared.js";
 
+function handleClaudeSystemInit(obj: Record<string, unknown>, result: ParsedStreamEvent): void {
+  const sessionId = stringValue(obj.session_id) ?? "";
+  if (sessionId) result.providerSessionId = sessionId;
+  pushDisplay(result, {
+    kind: "init",
+    model: stringValue(obj.model) ?? "unknown",
+    sessionId,
+    cwd: stringValue(obj.cwd) ?? "",
+    tools: getStringArray(obj.tools),
+    mcpServers: Array.isArray(obj.mcp_servers) ? obj.mcp_servers as { name: string; status: string }[] : [],
+    permissionMode: stringValue(obj.permissionMode) ?? "",
+  });
+}
+
 function handleSystemEvent(obj: Record<string, unknown>, result: ParsedStreamEvent): void {
   const subtype = obj.subtype;
   if (subtype === "init") {
-    const sessionId = stringValue(obj.session_id) ?? "";
-    if (sessionId) result.providerSessionId = sessionId;
-    pushDisplay(result, {
-      kind: "init",
-      model: stringValue(obj.model) ?? "unknown",
-      sessionId,
-      cwd: stringValue(obj.cwd) ?? "",
-      tools: getStringArray(obj.tools),
-      mcpServers: Array.isArray(obj.mcp_servers) ? obj.mcp_servers as { name: string; status: string }[] : [],
-      permissionMode: stringValue(obj.permissionMode) ?? "",
-    });
+    handleClaudeSystemInit(obj, result);
   } else if (subtype === "task_started") {
     pushDisplay(result, {
       kind: "task_started",
@@ -48,6 +52,21 @@ function handleSystemEvent(obj: Record<string, unknown>, result: ParsedStreamEve
     if (toolUses) result.liveStats = { model: "", contextTokens: 0, toolUses };
     const text = stringValue(obj.message) ?? stringValue(obj.progress);
     if (text) pushDisplay(result, { kind: "raw", text: `[progress] ${text}` });
+  }
+}
+
+function handleClaudeToolUseBlock(block: Record<string, unknown>, context: ParseContext, result: ParsedStreamEvent): void {
+  const id = stringValue(block.id) ?? "";
+  const name = stringValue(block.name) ?? "unknown";
+  const input = objectValue(block.input);
+  registerToolName(context, id, name);
+  if (!result.toolActivity) result.toolActivity = { name, input, toolUseId: id || undefined };
+  pushDisplay(result, { kind: "tool_use", id, name, input: JSON.stringify(block.input, null, 2), inputParsed: input });
+  if (name === "TodoWrite" && Array.isArray(input.todos)) {
+    result.todos = (input.todos as Array<{ subject: string; status: string }>).map((t) => ({ subject: t.subject, status: t.status }));
+  }
+  if (name === "Agent") {
+    result.liveStats = { ...(result.liveStats ?? { model: "", contextTokens: 0 }), subagentDelta: 1 };
   }
 }
 
@@ -84,18 +103,7 @@ function handleAssistantEvent(
         pushDisplay(result, { kind: "image", mediaType: stringValue(source.media_type) ?? "image/png", data: source.data });
       }
     } else if (blockType === "tool_use") {
-      const id = stringValue(block.id) ?? "";
-      const name = stringValue(block.name) ?? "unknown";
-      const input = objectValue(block.input);
-      registerToolName(context, id, name);
-      if (!result.toolActivity) result.toolActivity = { name, input, toolUseId: id || undefined };
-      pushDisplay(result, { kind: "tool_use", id, name, input: JSON.stringify(block.input, null, 2), inputParsed: input });
-      if (name === "TodoWrite" && Array.isArray(input.todos)) {
-        result.todos = (input.todos as Array<{ subject: string; status: string }>).map((t) => ({ subject: t.subject, status: t.status }));
-      }
-      if (name === "Agent") {
-        result.liveStats = { ...(result.liveStats ?? { model: "", contextTokens: 0 }), subagentDelta: 1 };
-      }
+      handleClaudeToolUseBlock(block, context, result);
     }
   }
   if (textParts.length > 0) result.assistantText = textParts.join("\n");
