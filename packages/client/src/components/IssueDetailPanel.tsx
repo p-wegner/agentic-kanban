@@ -241,6 +241,26 @@ export function IssueDetailPanel({
 
   const { issueType: issueTypeDisplay, issueTypeClassName: badgeColor } = useIssueDisplayData(issue);
 
+  // Panel positioning: fullscreen fills the viewport; modal centers (unless dragged);
+  // sidebar pins to a side (or floats when dragged). Hoisted out of the JSX so the
+  // container element stays readable.
+  const panelPositionClass =
+    panelMode === "fullscreen"
+      ? "inset-0"
+      : panelMode === "modal"
+      ? `w-[min(1200px,96vw)] h-[90vh] rounded-lg border border-gray-200 dark:border-gray-700${dragPos ? "" : " top-[5vh] left-1/2 -translate-x-1/2"}`
+      : sidebarSide === "left"
+      ? "left-0 top-0 h-full border-r border-gray-200 dark:border-gray-700"
+      : "right-0 top-0 h-full border-l border-gray-200 dark:border-gray-700";
+  const panelPositionStyle: React.CSSProperties | undefined =
+    dragPos && panelMode === "modal"
+      ? { position: "fixed", left: dragPos.x, top: dragPos.y, transform: "none" }
+      : panelMode === "sidebar" && dragPos
+      ? { right: "auto", left: dragPos.x, top: dragPos.y, height: "min(90vh, 100vh)", width: `min(${sidebarWidth}px, 100vw)` }
+      : panelMode === "sidebar"
+      ? { width: `min(${sidebarWidth}px, 100vw)` }
+      : undefined;
+
   return (
     <>
       {/* Snap zone indicators shown while dragging */}
@@ -258,24 +278,8 @@ export function IssueDetailPanel({
       {/* Panel */}
       <div
         data-panel
-        className={`fixed bg-surface-raised dark:bg-surface-raised-dark shadow-xl z-50 flex flex-col animate-slide-in-right ${resizing ? "select-none" : ""} ${
-          panelMode === "fullscreen"
-            ? "inset-0"
-            : panelMode === "modal"
-            ? `w-[min(1200px,96vw)] h-[90vh] rounded-lg border border-gray-200 dark:border-gray-700${dragPos ? "" : " top-[5vh] left-1/2 -translate-x-1/2"}`
-            : sidebarSide === "left"
-            ? "left-0 top-0 h-full border-r border-gray-200 dark:border-gray-700"
-            : "right-0 top-0 h-full border-l border-gray-200 dark:border-gray-700"
-        }`}
-        style={
-          dragPos && panelMode === "modal"
-            ? { position: "fixed", left: dragPos.x, top: dragPos.y, transform: "none" }
-            : panelMode === "sidebar" && dragPos
-            ? { right: "auto", left: dragPos.x, top: dragPos.y, height: "min(90vh, 100vh)", width: `min(${sidebarWidth}px, 100vw)` }
-            : panelMode === "sidebar"
-            ? { width: `min(${sidebarWidth}px, 100vw)` }
-            : undefined
-        }
+        className={`fixed bg-surface-raised dark:bg-surface-raised-dark shadow-xl z-50 flex flex-col animate-slide-in-right ${resizing ? "select-none" : ""} ${panelPositionClass}`}
+        style={panelPositionStyle}
       >
         {/* Resize handle — only in sidebar mode, on the panel's inner edge */}
         {panelMode === "sidebar" && (
