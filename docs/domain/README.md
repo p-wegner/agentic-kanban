@@ -1,8 +1,8 @@
 ---
 repo: agentic-kanban
 analyzed_sha: 29e016dc
-modules: 13
-coverage: "core-domain scope; Phase-4a coverage gate PASS (0 important files unmapped-and-undecided, blast-threshold 120) against a HEAD-current code-metrics analysis. 189/1023 source files mapped; remainder explicitly deferred-with-reason — see _coverage.md. Module docs carry their own analyzed_sha (issues-board refreshed to 29e016dc; others at 2cea8d3e, no structural change)."
+modules: 14
+coverage: "core-domain scope; Phase-4a coverage gate PASS at BOTH blast-threshold 120 and the stricter 100 (0 important files unmapped-and-undecided) against a HEAD-current code-metrics analysis. 206/1023 source files mapped; remainder explicitly deferred-with-reason — see _coverage.md. Module docs carry their own analyzed_sha (issues-board + project-registration at 29e016dc; others at 2cea8d3e, no structural change)."
 structure_quality: "Modularity Q=0.81 (strong), entanglement 0.01, 0 module cycles — but Louvain auto-resolution clusters by PACKAGE, so capability boundaries were derived by sub-dividing the giant server/client clusters."
 generator: domain-docs skill (code-metrics → documenter subagents → adversarial review)
 ---
@@ -47,14 +47,16 @@ metrics' package-level clusters were sub-divided into the 12 contexts below.
 | MCP Server | Agent-facing MCP tool surface (hybrid: direct DB + HTTP delegation) | 13 | well | [mcp-server](mcp-server.md) |
 | Persistence & Schema | The shared data kernel; schema as Published Language | 11 | well | [persistence-schema](persistence-schema.md) |
 | Preferences & Config | Settings store + layered resolution (Bullseye→tunables, Start Mode, provider defaults); most drift-prone surface | 15 | **scattered** | [preferences-config](preferences-config.md) |
+| Project Registration & Stack Profiles | Onboard any git repo: detect stack, derive per-stack setup/verify/smoke/scaffold scripts (the turnkey multi-stack driver) | 17 | **scattered** | [project-registration](project-registration.md) |
 | Board UI | React board: optimistic mutations + live-event reconciliation | 13 | well | [board-ui](board-ui.md) |
 
 > **Coverage:** this is a **core-domain** documentation set. A Phase-4a coverage check
 > (`_coverage.md`) maps every product source file to a module or an explicit deferral —
-> it caught 104 important files the first pass had silently omitted, drove the top miss
-> (`preferences-config`) to documentation, and queued 5 further capabilities (project-
-> registration/stack-profiles, CLI, client app-shell, server bootstrap) plus the
-> analytics long-tail. The gate **passes**: nothing important is undocumented-and-undecided.
+> it caught 104 important files the first pass had silently omitted, drove the top two
+> misses (`preferences-config`, then `project-registration`/stack-profiles) to
+> documentation, and queued 3 further capabilities (CLI, client app-shell, server
+> bootstrap) plus the analytics long-tail. The gate **passes at both blast-threshold 120
+> and the stricter 100**: nothing important is undocumented-and-undecided.
 
 ## Context map
 ```mermaid
@@ -74,6 +76,7 @@ flowchart TD
   MCP[MCP Server]
   UI[Board UI]
   PREF[Preferences & Config]
+  REG[Project Registration & Stack Profiles]
 
   IB -- "status co-defined (Shared Kernel)" --> WF
   IB --> PS
@@ -100,6 +103,10 @@ flowchart TD
   PREF -- "Bullseye→tunables+provider routing (Published Language)" --> MON
   PREF -- "provider/profile/model defaults" --> AP
   PREF -- "Start Mode gate" --> MON
+  REG -- "registers projects + statuses" --> IB
+  REG -- "setup_script provisions worktree" --> WS
+  REG -- "verify_script + smoke = merge gate" --> RM
+  REG -- "profile/verify stored as prefs" --> PREF
   classDef kernel fill:#eef,stroke:#669;
 ```
 
@@ -121,6 +128,7 @@ flowchart TD
 | All | Persistence & Schema | Drizzle row types are the internal domain language | Published Language | `shared/src/schema/index.ts` |
 | Git Integration | Persistence & Schema | Rewrites the migration `.sql` + `_journal.json` that ARE the schema's on-disk form | (hard file coupling) | `migration-renumber.ts` |
 | Preferences & Config | Monitor / Agent Providers | Strategy Bullseye fans out to monitor tunables + provider routing; Start Mode gates auto-start; provider/profile/model defaults | Published Language / Customer-Supplier | `strategy-objective.service.ts:490`, `start-policy.service.ts:24` |
+| Project Registration | Workspaces / Review-Merge / Issues | Derived `setup_script` provisions each worktree; `verify_script` + smoke check ARE the auto-merge gate; registration seeds the project + its statuses | Customer-Supplier / Published Language (StackProfile) | `stack-profile/verify-script.ts:27` → `pre-merge-gate.service.ts:56` |
 
 ## DDD assessment
 - **The package boundaries are NOT the bounded contexts.** `server` alone holds at
@@ -161,8 +169,9 @@ flowchart TD
   milestones, showdowns** — a long tail of ~40 additional services/repositories,
   peripheral to the central loop; deferred-with-reason in `_coverage.md`, document on demand.
 
-> Coverage: see [`_coverage.md`](_coverage.md). This is a **core-domain** set (13 modules);
-> the Phase-4a gate verifies no important file is undocumented-and-undecided. 5 further
-> capabilities are queued (project-registration/stack-profiles, CLI, client app-shell,
-> server bootstrap); the analytics/drive long-tail is explicitly deferred. Re-run the
-> `domain-docs` skill with the queued modules added to `_plan.json` to raise coverage.
+> Coverage: see [`_coverage.md`](_coverage.md). This is a **core-domain** set (14 modules);
+> the Phase-4a gate verifies no important file is undocumented-and-undecided (PASS at both
+> blast-threshold 120 and the stricter 100). 3 further capabilities are queued (CLI,
+> client app-shell, server bootstrap); the analytics/drive long-tail is explicitly
+> deferred. Re-run the `domain-docs` skill with the queued modules added to `_plan.json`
+> to raise coverage.

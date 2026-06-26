@@ -465,49 +465,53 @@
         "issues-board"
       ],
       "structure_note": "scattered: one logical setting read from several places; drift hazards documented"
+    },
+    {
+      "slug": "project-registration",
+      "name": "Project Registration & Stack Profiles",
+      "capability_hypothesis": "Onboard an arbitrary git repo as a board project so agents can build in it hands-off: detect the stack, derive per-stack setup/verify/smoke/scaffold scripts, persist a StackProfile, scaffold empty repos. The turnkey multi-stack driver foundation.",
+      "files": [
+        "packages/server/src/services/project-registration.ts",
+        "packages/server/src/services/stack-detector.service.ts",
+        "packages/server/src/services/stack-profile.service.ts",
+        "packages/server/src/services/project-setup.service.ts",
+        "packages/server/src/services/project-scaffold.ts",
+        "packages/server/src/services/gradle-detect.service.ts",
+        "packages/server/src/services/cold-clone-build-check.service.ts",
+        "packages/server/src/services/stack-profile/persistence.ts",
+        "packages/server/src/services/stack-profile/setup-script.ts",
+        "packages/server/src/services/stack-profile/verify-script.ts",
+        "packages/server/src/services/stack-profile/smoke-check.ts",
+        "packages/server/src/services/stack-profile/test-scaffold.ts",
+        "packages/server/src/services/stack-profile/smart-hooks-rules.ts",
+        "packages/server/src/repositories/project-registration.repository.ts",
+        "packages/server/src/repositories/stack-profile.repository.ts",
+        "packages/server/src/repositories/project-setup.repository.ts",
+        "packages/server/src/repositories/project-scaffold.repository.ts"
+      ],
+      "entry_points": [
+        "packages/server/src/services/project-registration.ts:144 \u2014 registerProject (POST /api/projects door)",
+        "packages/server/src/services/stack-profile.service.ts:13 \u2014 profile resolver"
+      ],
+      "logic_bearing": [
+        "packages/server/src/services/stack-detector.service.ts:281 \u2014 marker-file stack detection",
+        "packages/server/src/services/stack-profile/verify-script.ts:27 \u2014 verify gate derivation (consumed by pre-merge-gate)",
+        "packages/server/src/services/project-setup.service.ts \u2014 setup-script derivation"
+      ],
+      "depends_on": [
+        "issues-board",
+        "workspaces",
+        "review-merge",
+        "preferences-config"
+      ],
+      "structure_note": "scattered: services + stack-profile/ subdir + repositories; File Topology present"
     }
   ],
   "coverage_scope": "CORE DOMAIN run: 13 capability modules covering the central agentic-kanban loop. The deferred buckets below are REAL capabilities (identified by the Phase-4a coverage critic) decided as follow-ups, plus genuine long-tail. See _coverage.md for the full important-unmapped disposition table.",
   "deferred": [
     {
-      "path": "packages/server/src/services/stack-profile",
-      "reason": "NEW MODULE queued: project-registration / stack-detection / scaffold (turnkey multi-stack driver)"
-    },
-    {
-      "path": "packages/server/src/services/stack-detector.service.ts",
-      "reason": "NEW MODULE queued: stack detection"
-    },
-    {
-      "path": "packages/server/src/services/gradle-detect.service.ts",
-      "reason": "NEW MODULE queued: stack detection"
-    },
-    {
-      "path": "packages/server/src/services/project-setup",
-      "reason": "NEW MODULE queued: project setup/scaffold"
-    },
-    {
-      "path": "packages/server/src/repositories/project-setup.repository.ts",
-      "reason": "NEW MODULE queued: project setup persistence"
-    },
-    {
-      "path": "packages/server/src/repositories/stack-profile.repository.ts",
-      "reason": "NEW MODULE queued: stack-profile persistence"
-    },
-    {
-      "path": "packages/server/src/repositories/project-scaffold.repository.ts",
-      "reason": "NEW MODULE queued: scaffold persistence"
-    },
-    {
-      "path": "packages/server/src/services/project-scaffold.ts",
-      "reason": "NEW MODULE queued: scaffolding"
-    },
-    {
       "path": "packages/server/src/services/project.service.ts",
       "reason": "NEW MODULE queued: project lifecycle (registration/dedup/board read)"
-    },
-    {
-      "path": "packages/server/src/repositories/project",
-      "reason": "NEW MODULE queued: project repositories"
     },
     {
       "path": "packages/server/src/cli/",
@@ -670,10 +674,6 @@
       "reason": "NEW MODULE queued: project-registration/preflight"
     },
     {
-      "path": "packages/server/src/services/project-registration.ts",
-      "reason": "NEW MODULE queued: project-registration"
-    },
-    {
       "path": "packages/server/src/services/stale-dev-processes.ts",
       "reason": "NEW MODULE queued: server bootstrap / process lifecycle"
     },
@@ -688,6 +688,46 @@
     {
       "path": "packages/desktop",
       "reason": "NON-PRODUCT-DOMAIN: Tauri desktop shell wiring"
+    },
+    {
+      "path": "packages/server/src/services/process-guard.ts",
+      "reason": "NEW MODULE queued: server bootstrap / process lifecycle"
+    },
+    {
+      "path": "packages/server/src/services/process-exec.ts",
+      "reason": "NEW MODULE queued: server bootstrap / process lifecycle"
+    },
+    {
+      "path": "packages/server/src/services/worktree-ports.ts",
+      "reason": "FOLD-IN: workspaces (worktree port allocation)"
+    },
+    {
+      "path": "packages/server/src/services/codex-license-ring.ts",
+      "reason": "FOLD-IN: agent-providers (license/subscription ring \u2014 already described there)"
+    },
+    {
+      "path": "packages/server/src/services/claude-subscription-ring.ts",
+      "reason": "FOLD-IN: agent-providers (license/subscription ring)"
+    },
+    {
+      "path": "packages/server/src/repositories/workspace-code-metrics.repository.ts",
+      "reason": "FOLD-IN: workspaces / quality-analytics (long-tail)"
+    },
+    {
+      "path": "packages/server/src/repositories/phase-artifacts.repository.ts",
+      "reason": "FOLD-IN: workflow-engine (phase artifacts = workflow node outputs)"
+    },
+    {
+      "path": "packages/server/src/services/phase-artifacts.service.ts",
+      "reason": "FOLD-IN: workflow-engine"
+    },
+    {
+      "path": "packages/server/src/lib/session-paths.ts",
+      "reason": "FOLD-IN: agent-sessions (session file paths)"
+    },
+    {
+      "path": "packages/server/src/lib/agent-launch-env.ts",
+      "reason": "FOLD-IN: agent-providers (launch env build)"
     }
   ]
 }
