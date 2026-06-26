@@ -9,6 +9,36 @@ import { applyPreflightResult, CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, D
 import { buildMigrationConfig, normalizeConfig, setProviderFillPolicy, clearProviderFillPolicy, settingsKey, type ConcreteProvider } from "../lib/strategy-targets.js";
 import { parseDisabledTools, withToolDisabled } from "../lib/mcp-tool-toggle.js";
 import type { MonitorAction } from "./MonitorPopover.js";
+
+/** Raw project row shape returned by GET /api/projects, narrowed to the fields the panel reads. */
+type ProjectRow = {
+  id: string;
+  defaultBranch: string | null;
+  setupScript: string | null;
+  setupBlocking: boolean;
+  color: string | null;
+  setupEnabled?: boolean;
+  teardownScript?: string | null;
+  symlinkEnabled?: boolean;
+  symlinkDirs?: string | null;
+  defaultSkillId?: string | null;
+};
+
+/** Map a raw project row + its verify-script pref into the panel's ProjectSettingsState. */
+function buildProjectSettingsState(project: ProjectRow, verifyScript: string): ProjectSettingsState {
+  return {
+    defaultBranch: project.defaultBranch || "",
+    setupScript: project.setupScript || "",
+    setupBlocking: project.setupBlocking !== false,
+    setupEnabled: project.setupEnabled !== false,
+    teardownScript: project.teardownScript || "",
+    verifyScript,
+    color: project.color || null,
+    symlinkEnabled: project.symlinkEnabled === true,
+    symlinkDirs: project.symlinkDirs || "",
+    defaultSkillId: project.defaultSkillId || null,
+  };
+}
 import { AgentSettings } from "./settings/AgentSettings.js";
 import { WorkflowSettings } from "./settings/WorkflowSettings.js";
 import { SkillsSettings } from "./settings/SkillsSettings.js";
@@ -200,23 +230,12 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
             .then((div) => { if (!cancelled) setProviderDivergence(div); })
             .catch(() => { /* non-fatal */ });
 
-          apiFetch<{ id: string; defaultBranch: string | null; setupScript: string | null; setupBlocking: boolean; color: string | null; setupEnabled?: boolean; teardownScript?: string | null; symlinkEnabled?: boolean; symlinkDirs?: string | null; defaultSkillId?: string | null }[]>("/api/projects")
+          apiFetch<ProjectRow[]>("/api/projects")
             .then((projects) => {
               if (cancelled) return;
               const project = projects.find((p) => p.id === activeProjectId);
               if (project) {
-                setProjectSettings({
-                  defaultBranch: project.defaultBranch || "",
-                  setupScript: project.setupScript || "",
-                  setupBlocking: project.setupBlocking !== false,
-                  setupEnabled: project.setupEnabled !== false,
-                  teardownScript: project.teardownScript || "",
-                  verifyScript: (data)[`verify_script_${activeProjectId}`] || "",
-                  color: project.color || null,
-                  symlinkEnabled: project.symlinkEnabled === true,
-                  symlinkDirs: project.symlinkDirs || "",
-                  defaultSkillId: project.defaultSkillId || null,
-                });
+                setProjectSettings(buildProjectSettingsState(project, (data)[`verify_script_${activeProjectId}`] || ""));
               }
             })
             .catch(() => { /* use defaults for project settings */ });
