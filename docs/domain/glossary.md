@@ -1,7 +1,7 @@
 ---
 repo: agentic-kanban
-analyzed_sha: 2cea8d3e
-note: Ubiquitous language merged from the 12 module docs. Terms are defined AS THE CODE USES THEM. Collisions (one word, two meanings) are called out — they are bounded-context smells.
+analyzed_sha: 29e016dc
+note: Ubiquitous language merged from the 15 module docs. Terms are defined AS THE CODE USES THEM. Collisions (one word, two meanings) are called out — they are bounded-context smells.
 ---
 
 # Ubiquitous Language — agentic-kanban
@@ -16,6 +16,8 @@ note: Ubiquitous language merged from the 12 module docs. Terms are defined AS T
 | **Direct workspace** | `isDirect=true`: no worktree — the agent edits the main checkout; merge is a no-op close. Exempt from merge guards. | workspaces, git-integration, review-merge, mcp-server |
 | **Session** | One agent subprocess run against a workspace. | agent-sessions |
 | **Worktree** | An isolated per-ticket, per-agent git checkout. | git-integration, workspaces |
+| **Milestone** | A named, optionally due-dated grouping of issues toward a deliverable (per project) — the sibling of tags. Every issue carries a nullable `milestoneId` FK; unset = no milestone. | issues-board |
+| **Evidence artifact** | Proof-of-work an agent attaches to its workspace/issue (Playwright `.webm` visual proof, screenshot, link, or text) so correctness is observable without re-running it. Rows in `issue_artifacts`; attached via `attach_artifact`. | workspaces |
 
 ## Status & workflow
 | Term | Meaning | Context |
@@ -103,6 +105,32 @@ note: Ubiquitous language merged from the 12 module docs. Terms are defined AS T
 | **Application-level cascade delete** | A hand-coded ordered deletion walk that re-encodes the FK graph in code (can drift from schema). | persistence-schema |
 | **Migration journal** | `_journal.json`, the authoritative migration apply-order. | persistence-schema, git-integration |
 | **gitExec / git-exec adapter** | The single never-throwing git spawn site; returns `{stdout,stderr,code,error}`. | git-integration |
+
+## Project registration & stacks
+| Term | Meaning | Context |
+|---|---|---|
+| **StackProfile / Stack profile** | The single durable descriptor of a repo's tech stack (family, package manager, install/build/test/dev commands, web-ness, ports, test dir/runner). The one Published-Language JSON every downstream harness piece reads. | project-registration |
+| **Marker files** | The on-disk root files (`package.json`, `Cargo.toml`, `go.mod`, `build.gradle`, `pyproject.toml`, …) that rule-based detection keys off to identify a stack. | project-registration |
+| **setup_script** | Monorepo-aware install command run ONCE in a fresh worktree before the first build (`pnpm install -r`, `cargo fetch`, …); persisted to the `setup_script` column and consumed by workspace provisioning. | project-registration, workspaces |
+| **verify_script (merge gate)** | The keystone auto-merge gate command (`testCommand && buildCommand`); a non-zero exit withholds `readyForMerge`. Persisted to `verify_script_<projectId>`, consumed by the pre-merge gate. | project-registration, review-merge |
+| **Smoke check** | A project-agnostic "does it boot and respond/render" check — boot the dev command, poll a health URL, assert HTTP 200 (+ HTML shell for browser UIs). Only for web/service projects. | project-registration, review-merge |
+| **Buildable-from-clean** | Per-package-manager scaffold edits (pnpm `onlyBuiltDependencies`, bun `trustedDependencies`, `packageManager` pin) so a clean clone builds with no manual approval prompts. | project-registration |
+| **profile source** | `"detected"` (rule-based) vs `"llm"` (LLM gap-filled a sparse profile) — provenance/confidence of a StackProfile. | project-registration |
+
+## Codemod factory
+| Term | Meaning | Context |
+|---|---|---|
+| **Codemod** | A repo-wide structural transform — concretely the body of a per-file transform function operating on a ts-morph `SourceFile`, not a script or regex. A saved codemod is persisted as an `agent_skills` row with `type='codemod'`. | codemods |
+| **Transform code** | The raw JS/TS string the LLM emits from the user's intent, compiled into an `AsyncFunction(sourceFile)` — the unit of execution. | codemods |
+| **Preview→apply gate** | The safety contract: preview is a pure dry-run (diffs every file in memory, writes nothing); apply is the only step that mutates the repo, and only for user-selected, in-repo paths. | codemods |
+| **CODEMOD_FILE_LIMIT** | Hard ceiling (100) of TS files above which a preview refuses to run without explicit `overrideLimit` confirmation — the blast-radius guard. | codemods |
+
+## Preferences & configuration
+| Term | Meaning | Context |
+|---|---|---|
+| **Effective model / resolveEffectiveModel** | The model actually launched after dropping any model id that doesn't belong to the resolved provider's family (a mismatched `--model` kills the launch; provider-scoped `default_model_<provider>` only). | preferences-config |
+| **Provider divergence** | Drift between the global `provider`/`*_profile` prefs and what the active project's Strategy Bullseye would select; now an enforced write-time guard (422), not just a banner. | preferences-config |
+| **Harness setting** | A per-agent-harness behavior knob (`harness.<harness>.<setting>`) that means different things per provider; resolved scoped → legacy-flat → per-harness default. | preferences-config |
 
 ---
 

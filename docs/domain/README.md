@@ -2,7 +2,7 @@
 repo: agentic-kanban
 analyzed_sha: 29e016dc
 modules: 15
-coverage: "core-domain scope; Phase-4a coverage gate PASS at BOTH blast-threshold 120 and the stricter 100 against a HEAD-current code-metrics analysis. Phase-4 verification is a repeatable multi-strategy harness (S1–S11) with a findings ledger (_verification-log.md); 5 rounds run, last 2 still finding new gaps (not converged — S8–S10 remain). Module docs carry their own analyzed_sha (issues-board/project-registration/codemods at 29e016dc; others at 2cea8d3e)."
+coverage: "core-domain scope; Phase-4a coverage gate PASS at BOTH blast-threshold 120 and the stricter 100. Phase-4 verification is a repeatable multi-strategy harness (S1–S11 + persona overlays) with a findings ledger (_verification-log.md); 7 rounds run — structural/behavioral/historical/empirical/drift/density lenses converged, persona overlays (Round 7) still productive (onboarding/ops-runbook/security gaps). See _verification-log.md. Module docs carry their own analyzed_sha (issues-board/project-registration/codemods at 29e016dc; others at 2cea8d3e)."
 structure_quality: "Modularity Q=0.81 (strong), entanglement 0.01, 0 module cycles — but Louvain auto-resolution clusters by PACKAGE, so capability boundaries were derived by sub-dividing the giant server/client clusters."
 generator: domain-docs skill (code-metrics → documenter subagents → adversarial review)
 ---
@@ -20,6 +20,12 @@ human in it. Everything is reverse-engineered from code here; each doc carries
 These docs are **capability modules**, not packages. The TS monorepo's packages
 (`server`, `client`, `shared`, `mcp-server`) each host several capabilities; the
 metrics' package-level clusters were sub-divided into the 15 contexts below.
+
+> **Beyond these docs.** This is a **domain/business** documentation set — what the
+> system does and why. For everything operational, go elsewhere: build / run / test →
+> [`CLAUDE.md`](../../CLAUDE.md) + [`.llm/workflows.md`](../../.llm/workflows.md);
+> product requirements → [`docs/prd/`](../prd/); architecture decisions →
+> [`docs/decisions/`](../decisions/); raw code-health metrics → `code-metrics-out/`.
 
 ## Start here (system entry points)
 | Entry point | Kind | Leads to | `file:line` |
@@ -196,6 +202,26 @@ flowchart TD
 - **Quality metrics / analytics, drive-obstacles, voice-capture, scheduled-runs,
   milestones, showdowns** — a long tail of ~40 additional services/repositories,
   peripheral to the central loop; deferred-with-reason in `_coverage.md`, document on demand.
+- **REST trust boundary** — the local REST API mounts `cors()` with no origin allowlist
+  (`server-start.ts:65`, `app.use("/api/*", cors())`), so every response carries
+  `Access-Control-Allow-Origin: *`. This is a *distinct, broader* exposure than the
+  documented process-level "MCP/REST run unauthenticated on localhost": the wildcard
+  makes the unauthenticated surface reachable **cross-origin from any browser tab** the
+  user has open (a confused-deputy path), not just from local processes. By default the
+  server binds loopback (`server-start.ts:125`, `hostname || process.env.KANBAN_HOST ||
+  "127.0.0.1"`), but `KANBAN_HOST` can rebind it to any interface — widening the boundary
+  further. Documented here as a known trust boundary; **tightening `cors()` to a
+  localhost-origin allowlist is a recommended code follow-up** (the doc states the
+  boundary, the code fix is tracked separately).
+
+### Operations: incident → recovery
+The module docs above carry the *prevention* guards; this is the *triage* table for the
+recurrent local-server outages. It points into the owning module doc — go there for detail.
+
+| Symptom | Likely cause | Recover |
+|---|---|---|
+| Server won't boot after a migration/merge | Conflict markers committed into a startup file → esbuild crash (#598-600, [git-integration](git-integration.md)); OR migration-number / journal collision (#791-style renumber, [git-integration](git-integration.md); journal apply-order, [persistence-schema](persistence-schema.md)); OR a tracked file missing on disk after a hard sync (#692, [git-integration](git-integration.md)) | Grep startup files for `^<<<<<<<`; check the drizzle `_journal.json` apply order; `git status` for missing/deleted tracked files |
+| "DB seems locked" | **DB side** (expected, transient): the in-memory **15-min one-merge-per-repo lock** ([review-merge](review-merge.md), `MERGE_LOCK_STALE_MS`) and `SQLITE_BUSY`/WAL contention auto-retried by `withDbRetry` ([persistence-schema](persistence-schema.md)) — *not* a corrupt DB. **Git side**: a stale on-disk `.git/index.lock` in the main checkout/worktree blocking git ops ([git-integration](git-integration.md)) | Never delete `kanban.db`; for true migration/lock/WAL trouble use `pnpm db:repair` (db-doctor — never deletes). For a stale `.git/index.lock`, remove the lock file and verify `git status` is clean |
 
 > Coverage: see [`_coverage.md`](_coverage.md). This is a **core-domain** set (14 modules);
 > the Phase-4a gate verifies no important file is undocumented-and-undecided (PASS at both
