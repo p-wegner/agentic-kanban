@@ -56,6 +56,7 @@ The module owns **no tables of its own** — it is a *projection of capability* 
 | **Async rejections are caught and logged to stderr; the process stays up** | A stray drizzle rejection would crash stdio → the agent's client reports "server not connected" and *every* board op fails. Resilience mirrors the main server | `index.ts:246` |
 | **stderr only for logs, never stdout** | stdout is the JSON-RPC stream; any stray write corrupts the protocol | `index.ts:236`, `index.ts:245` |
 | **Status-change mutations fire the project's outbound webhook (best-effort)** | The board is an event source; external systems subscribe to issue transitions regardless of whether a human or agent caused them | `update-issue.ts:70`, `move-issue.ts:92` |
+| **The outbound webhook URL is validated LOOPBACK-ONLY — the only egress boundary** | The URL comes from the attacker-influenceable `outbound_webhook_url_<projectId>` pref; `validateWebhookUrl` rejects any non-http(s) scheme and any host except `localhost`/`127.0.0.1`/`::1`, so a malicious pref can't turn a status change into an SSRF/exfiltration probe of arbitrary hosts | `shared/src/lib/outbound-webhook.ts:44-59` |
 
 ## Key workflows / use cases
 
