@@ -7,6 +7,8 @@ description: Set the board's default agent provider+profile (and optional model)
 
 **Why this exists.** "Provider default" used to live in four independent places that silently drifted, causing a multi-cycle board stall (objective.md said `claude:anth`, the Bullseye said `codex`, and a stale `default_model=gpt-5.5` codex id was passed to `claude.exe`, killing every launch). This skill makes the **Strategy Bullseye pref (`board_strategy_<projectId>`) the single source of truth** and locks the outliers to it — one command, nothing drifts.
 
+> **Per-project provider is now a first-class UI control (#925).** For just *one* project's provider, a human can use Settings → Agent → **"Provider for this project"** — it writes the same single `fill` policy onto that project's Bullseye (`PROVIDER_DEFAULT_POLICY_ID`), never the global pref, so it can't trip the divergence guard and needs no reconciliation. **This skill is still the way to set the GLOBAL default** (the cross-cutting sinks below: the `provider`/`claude_profile` settings mirror used by butler/review/UI, and the global `default_model`), and the way to change a provider default programmatically/headlessly. When a human asks "switch *this* project's provider", point them at the UI control; when they ask to change the board-wide default or you must do it from a script, run this skill.
+
 ## The four sources and how they relate
 
 | # | Source (key/file) | Consumer | SoT role |
