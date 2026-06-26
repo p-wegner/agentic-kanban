@@ -1,5 +1,12 @@
 # Domain-Docs Coverage Audit (standalone, Mode B)
 
+> **RESOLVED (2026-06-26, HEAD `29e016dc`):** code-metrics was re-run on HEAD (1688 files);
+> `issue-dependency.service.ts` + `issue-error.ts` were folded into `issues-board` (files 19→21)
+> and the dependency-guard citations re-anchored to the new sub-service; `_plan.json`
+> `analyzed_sha` → `29e016dc`. The two drift items below are fixed. Gate still PASS at
+> blast-threshold 120. (The fresh churn window also surfaced a few more blast-100–120 fold-in
+> candidates — phase-artifacts, session-paths, agent-launch-env — left for a follow-up pass.)
+
 - **Run:** 2026-06-26 ~20:51 +0200
 - **HEAD:** `ac7043a4`
 - **Plan:** `docs/domain/_plan.json` (`analyzed_sha: 2cea8d3e` — STALE, see Drift §)

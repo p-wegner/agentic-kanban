@@ -1,8 +1,8 @@
 ---
 repo: agentic-kanban
-analyzed_sha: 2cea8d3e
+analyzed_sha: 29e016dc
 modules: 13
-coverage: "core-domain scope; Phase-4a coverage gate PASS (0 important files unmapped-and-undecided). 187/1020 source files mapped; remainder explicitly deferred-with-reason — see _coverage.md."
+coverage: "core-domain scope; Phase-4a coverage gate PASS (0 important files unmapped-and-undecided, blast-threshold 120) against a HEAD-current code-metrics analysis. 189/1023 source files mapped; remainder explicitly deferred-with-reason — see _coverage.md. Module docs carry their own analyzed_sha (issues-board refreshed to 29e016dc; others at 2cea8d3e, no structural change)."
 structure_quality: "Modularity Q=0.81 (strong), entanglement 0.01, 0 module cycles — but Louvain auto-resolution clusters by PACKAGE, so capability boundaries were derived by sub-dividing the giant server/client clusters."
 generator: domain-docs skill (code-metrics → documenter subagents → adversarial review)
 ---
@@ -35,7 +35,7 @@ metrics' package-level clusters were sub-divided into the 12 contexts below.
 ## Bounded contexts (modules)
 | Module | Capability | Files | Structure | Doc |
 |---|---|---|---|---|
-| Issues & Board | Kanban core: tickets, projects, configurable statuses/columns, tags, dependency edges, board read model | 19 | well | [issues-board](issues-board.md) |
+| Issues & Board | Kanban core: tickets, projects, configurable statuses/columns, tags, dependency edges, board read model | 21 | well | [issues-board](issues-board.md) |
 | Workspaces & Worktrees | The atomic unit of agent work: worktree + branch + agent run → merge/close | 12 | well | [workspaces](workspaces.md) |
 | Agent Providers | Anti-corruption seam over 4 heterogeneous AI coding CLIs | 13 | well | [agent-providers](agent-providers.md) |
 | Agent Sessions & Streaming | Capture/stream/classify a running agent's output; the feedback channel | 15 | well | [agent-sessions](agent-sessions.md) |

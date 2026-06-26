@@ -2,11 +2,11 @@
 module: issues-board
 name: Issues & Board (kanban core)
 capability: The work-unit substrate — issues/tickets, projects, per-project workflow statuses, tags, dependency edges, and the aggregated board views every consumer reads.
-files: 18
+files: 20
 source_paths:
   - packages/shared/src/schema/{issues,projects,project-statuses,tags,issue-dependencies}.ts
   - packages/server/src/routes/{issues,projects,tags}.ts
-  - packages/server/src/services/{issue.service,board-aggregation.service,board-column.service,board-status,board-status-classifiers}.ts
+  - packages/server/src/services/{issue.service,issue-dependency.service,issue-error,board-aggregation.service,board-column.service,board-status,board-status-classifiers}.ts
   - packages/server/src/repositories/{issue,issue-number,board-status,project}.repository.ts
   - packages/server/src/lib/{issue-summary-projection,dependency-graph}.ts
   - packages/shared/src/lib/{dependency-graph,board-status-classifiers,status-view}.ts
@@ -14,7 +14,7 @@ entry_points:
   - packages/server/src/routes/issues.ts:64 — API (issue CRUD, batch, dependencies, contract, archive)
   - packages/server/src/routes/projects.ts:289 — API (the board read model GET /:id/board)
   - packages/server/src/services/board-status.ts:64 — read model (assembled board status for server + MCP)
-analyzed_sha: 2cea8d3e
+analyzed_sha: 29e016dc
 depends_on: [workflow-engine, persistence-schema, workspaces]
 structure: well-formed
 ---
@@ -59,9 +59,9 @@ The module owns five tables: `issues`, `projects`, `project_statuses`, `tags`/`i
 | `issueNumber` is allocated `MAX(issue_number)+1` per project, retried up to 3× on the unique-index collision. | Human-friendly stable numbering; parallel creates race on the same next number, so the unique index + retry is the concurrency guard (single source of truth, was copy-pasted & drifted). | `issue-number.repository.ts:65`, `issue.service.ts:78`, `schema/issues.ts:43` |
 | A non-terminal → terminal move (Done/Cancelled) is BLOCKED while the issue has an open, non-direct, unmerged workspace. | Marking Done while a branch is still open silently strands the branch ("silent merge loss", AK-535). The guard runs BEFORE the write so a blocked move is a no-op. | `issue.service.ts:524`, `:609` (bulk) |
 | Transitioning INTO a terminal status closes any still-open workspace for the issue. | Otherwise the monitor keeps relaunching the now-pointless idle workspace every cycle (#776). Only fires on the non-terminal→terminal edge (re-saving a Done issue is a no-op). | `issue.service.ts:551` |
-| Adding a directional dependency (`depends_on`/`blocked_by`/`parent_of`/`child_of`) that would create a cycle is rejected. | A dependency loop corrupts the board's ordering/blocking logic; cycle detection is correctness-critical and centralized so server, MCP, and batch paths can't drift. | `issue.service.ts:678`, `dependency-graph.ts:64`, `board-column.service.ts:77` |
+| Adding a directional dependency (`depends_on`/`blocked_by`/`parent_of`/`child_of`) that would create a cycle is rejected (single-add → `CONFLICT`; batch → indexed error). | A dependency loop corrupts the board's ordering/blocking logic; cycle detection is correctness-critical and centralized so server, MCP, and batch paths can't drift. | `issue-dependency.service.ts:134` (single), `:256-259` (batch), `dependency-graph.ts:64`, `board-column.service.ts:77` |
 | Symmetric edges (`related_to`/`duplicates`/`coupled_with`) never participate in cycle checks; stored `(from,to)` order is meaningless. | They model undirected affinity, not ordering, so a "loop" is not a contradiction. | `schema/issue-dependencies.ts:33`, `issue.service.ts:173` |
-| An issue cannot depend on itself; a dependency cannot cross projects; a duplicate edge `(issue,dependsOn,type)` is rejected. | Self/cross-project/duplicate edges are nonsensical for a per-project backlog; enforced both in code and by a DB unique index. | `issue.service.ts:660,674`, `schema/issue-dependencies.ts:46` |
+| An issue cannot depend on itself; the dependency type must be one of the 7 valid types; a dependency cannot cross projects; a duplicate edge `(issue,dependsOn,type)` is rejected. | Self/invalid-type/cross-project/duplicate edges are nonsensical for a per-project backlog; enforced in the dependency sub-service (typed `IssueError` with HTTP-ish codes) and by a DB unique index. | `issue-dependency.service.ts:114` (self), `:120` (type), `:128` (cross-project), `:159` (duplicate), `schema/issue-dependencies.ts:46` |
 | An issue is "blocked" iff it has a `depends_on`/`blocked_by` edge to an unresolved issue; an absent blocker counts as blocking. "Resolved" = `isResolvedDependencyStatusView` (`status-view.ts:58-60`), i.e. the blocker's status is in `LEGACY_RESOLVED_DEPENDENCY_STATUS_NAMES = {Done, AI Reviewed, Cancelled}` (`status-view.ts:2`) — a WIDER set than terminal, so an AI-Reviewed blocker already unblocks dependents. | Blocked issues must not be auto-started by the monitor; a missing blocker is treated conservatively as still-blocking. | `board-column.service.ts:39-43`, `status-view.ts:58-60` |
 | Bulk update/contract refuse to operate across more than one project. | The board is per-project; a cross-project batch has no coherent meaning and would corrupt counts. | `issue.service.ts:596,878` |
 | Contraction requires the supplied `issueIds` to EXACTLY equal the lead's `coupled_with` connected component, with no open workspaces. | Partial contraction would orphan edges or drop in-flight work; the component must be whole and quiescent before collapse. | `issue.service.ts:891,898,907` |
@@ -125,7 +125,8 @@ Trigger: `POST /api/issues/contract-coupled` (`routes/issues.ts:204`). `planCont
 
 | File / function | What decision/logic it holds | `file:line` |
 |-----------------|------------------------------|-------------|
-| `issue.service.ts` (`updateIssue`, `createIssuesBatch`, `contractCoupledIssues`, `validateBatchDependencies`) | The terminal-move guard, workspace auto-close, per-issue-number retry, same-transaction edge seeding, contraction orchestration — the bulk of the write-side business rules. | `issue.service.ts:484,367,851,182` |
+| `issue.service.ts` (`updateIssue`, `createIssuesBatch`, `contractCoupledIssues`) | The terminal-move guard, workspace auto-close, per-issue-number retry, same-transaction edge seeding, contraction orchestration — the bulk of the write-side business rules. It instantiates the dependency sub-service (`:204`) and delegates all edge ops to it. | `issue.service.ts:484,367,851,204` |
+| `issue-dependency.service.ts` (`createIssueDependencyService`, `validateBatchDependencies`) + `issue-error.ts` | The dependency-edge command core (extracted from `issue.service`): `addDependency` runs the full guard ladder (self → valid-type → cross-project → cycle via `reaches()` → duplicate), `updateDependenciesBatch` validates a whole edge set, `validateBatchDependencies` validates create-time edges. Failures are typed `IssueError`s carrying a status code (`BAD_REQUEST`/`NOT_FOUND`/`CONFLICT`) so route + MCP map them uniformly. Max CC 22 — the cycle/guard knot. | `issue-dependency.service.ts:102,34`, `issue-error.ts:8` |
 | `dependency-graph.ts` (shared) | Cycle detection (`wouldCreateCycle`/`hasPath`), `coupled_with` component resolution, and `planContraction` edge-inheritance — correctness-critical, centralized so 3 call sites can't drift. | `dependency-graph.ts:64,88,143` |
 | `board-status.ts` (`getBoardStatus`, `selectMainWorkspace`) | How an issue's *effective* column is derived (workspace node > issue status), and how the whole board overview is assembled and totaled. | `board-status.ts:45,64` |
 | `board-status-classifiers.ts` (shared) | The policy for "needs attention" (closed-in-review / stale-in-review / idle-awaiting) and "pending auto-merge" — one definition for human and agent. | `board-status-classifiers.ts:31,64` |
