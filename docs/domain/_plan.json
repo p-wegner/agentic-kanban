@@ -29,7 +29,9 @@
         "packages/server/src/lib/issue-summary-projection.ts",
         "packages/server/src/lib/dependency-graph.ts",
         "packages/server/src/services/issue-dependency.service.ts",
-        "packages/server/src/services/issue-error.ts"
+        "packages/server/src/services/issue-error.ts",
+        "packages/shared/src/schema/milestones.ts",
+        "packages/server/src/routes/milestones.ts"
       ],
       "entry_points": [
         "packages/server/src/routes/issues.ts \u2014 REST CRUD for issues/move",
@@ -102,7 +104,12 @@
         "packages/server/src/services/agent-profile-health.service.ts",
         "packages/server/src/services/claude-login.service.ts",
         "packages/server/src/services/codex-login.service.ts",
-        "packages/shared/src/lib/provider-models.ts"
+        "packages/shared/src/lib/provider-models.ts",
+        "packages/server/src/services/auth-rotation-ring.ts",
+        "packages/server/src/services/codex-license-ring.ts",
+        "packages/server/src/services/claude-subscription-ring.ts",
+        "packages/server/src/startup/exit-workflow.ts",
+        "packages/server/src/startup/rate-limit-exit-decision.ts"
       ],
       "entry_points": [
         "packages/server/src/services/agent-provider/registry.ts \u2014 provider selection",
@@ -723,14 +730,6 @@
     {
       "path": "packages/server/src/services/worktree-ports.ts",
       "reason": "FOLD-IN: workspaces (worktree port allocation)"
-    },
-    {
-      "path": "packages/server/src/services/codex-license-ring.ts",
-      "reason": "FOLD-IN: agent-providers (license/subscription ring \u2014 already described there)"
-    },
-    {
-      "path": "packages/server/src/services/claude-subscription-ring.ts",
-      "reason": "FOLD-IN: agent-providers (license/subscription ring)"
     },
     {
       "path": "packages/server/src/repositories/workspace-code-metrics.repository.ts",
