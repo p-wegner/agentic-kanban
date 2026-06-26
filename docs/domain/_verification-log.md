@@ -51,4 +51,11 @@ Fresh lenses (behavioral + consistency families), deduped against Rounds 1–3. 
 - `drift:providersessionid-doc-lag` (S7 corroboration) — agent-providers.md + workspaces.md stated `claudeSessionId` as the real column; it's `providerSessionId` (schema:14) → both fixed.
 Credibility: scenarios 1,2,4,5,6,7 traced clean; doc set otherwise internally consistent (dual terminal-status sets, two dep-readiness predicates, the three "mode" vocabularies all described consistently).
 
-Strategies used so far: **S1, S2, S3, S4, S5, S6, S7**. Not yet run: **S8** (run-the-system/empirical), **S9** (drift since analyzed_sha), **S10** (invariant-density), and persona overlays. Round 4 was NOT dry → not converged; next run should use S8–S10 + a persona before declaring the structural lenses dry.
+## Round 5 — S11 git-history / commit-prefix requirement mining  ·  sha 29e016dc
+Mined `feat`/recurring-`fix` scope clusters + multi-commit `#N` tickets; deduped against Rounds 1–4. **NOT dry — 2 new findings:**
+- `missing:codemod-factory` (HIGH) — AI repo-wide structural codemod capability (`codemod.service.ts` 412 LOC + `routes/codemods.ts` 5 endpoints + `CodemodPanel.tsx`), with a VERIFIED security invariant (apply confines writes to repoPath via `isInside`, `codemod.service.ts:358`/guard `:331-337`; a `fix(codemods)` commit closed a path-traversal hole). Missed by S1 file-coverage because it's a low-blast-radius LEAF feature, not a hub — exactly S11's unique catch. → documented as new module **codemods.md** (15th).
+- `missing:workspace-artifacts` (MEDIUM) — evidence artifacts (`.webm` visual proof) via `attach_artifact` MCP tool + Artifacts tab; `issue_artifacts` table was only in cascade lists. → folded into **workspaces.md** + **mcp-server.md** tool catalog.
+Credibility: the big clusters (monitor×32, butler×16, workspace/teardown, git fixes×8, strategy×7, board) are all already covered; correctly filtered chore/docs/refactor/test noise + known-deferred (drive-obstacles, analytics, stack-profile→project-registration, codex-ring→rate-limit-rotation).
+S11 insight: git-history mining catches **built-but-undocumented leaf features** (low fan-in, so blast-radius coverage under-weights them) and **recurring-incident invariants** — orthogonal to PRD (S3) and current-code (S1/S2).
+
+Strategies used so far: **S1–S7, S11**. Not yet run: **S8** (run-the-system/empirical), **S9** (drift), **S10** (invariant-density), persona overlays. Rounds 4 & 5 both NOT dry → not converged; keep going with S8–S10 next.

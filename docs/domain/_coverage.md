@@ -18,7 +18,7 @@ Produced deterministically by `domain-docs/tools/coverage.py`
 | Metric | Value |
 |--------|-------|
 | Product source files (non-test, TS/JS) | 1023 (HEAD 29e016dc analysis) |
-| Mapped to a module (14 modules) | 206 (20.2%) |
+| Mapped to a module (15 modules) | 209 (20.4%) — incl. Codemod Factory (added via S11 git-history mining, Round 5) |
 | Unmapped | 817 |
 | **Important unmapped, undecided** | **0** (at blast-threshold 120 AND the stricter 100) |
 | **Coverage gate** | **PASS** |

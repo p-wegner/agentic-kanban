@@ -1,8 +1,8 @@
 ---
 repo: agentic-kanban
 analyzed_sha: 29e016dc
-modules: 14
-coverage: "core-domain scope; Phase-4a coverage gate PASS at BOTH blast-threshold 120 and the stricter 100 (0 important files unmapped-and-undecided) against a HEAD-current code-metrics analysis. 206/1023 source files mapped; remainder explicitly deferred-with-reason — see _coverage.md. Module docs carry their own analyzed_sha (issues-board + project-registration at 29e016dc; others at 2cea8d3e, no structural change)."
+modules: 15
+coverage: "core-domain scope; Phase-4a coverage gate PASS at BOTH blast-threshold 120 and the stricter 100 against a HEAD-current code-metrics analysis. Phase-4 verification is a repeatable multi-strategy harness (S1–S11) with a findings ledger (_verification-log.md); 5 rounds run, last 2 still finding new gaps (not converged — S8–S10 remain). Module docs carry their own analyzed_sha (issues-board/project-registration/codemods at 29e016dc; others at 2cea8d3e)."
 structure_quality: "Modularity Q=0.81 (strong), entanglement 0.01, 0 module cycles — but Louvain auto-resolution clusters by PACKAGE, so capability boundaries were derived by sub-dividing the giant server/client clusters."
 generator: domain-docs skill (code-metrics → documenter subagents → adversarial review)
 ---
@@ -19,7 +19,7 @@ human in it. Everything is reverse-engineered from code here; each doc carries
 
 These docs are **capability modules**, not packages. The TS monorepo's packages
 (`server`, `client`, `shared`, `mcp-server`) each host several capabilities; the
-metrics' package-level clusters were sub-divided into the 14 contexts below.
+metrics' package-level clusters were sub-divided into the 15 contexts below.
 
 ## Start here (system entry points)
 | Entry point | Kind | Leads to | `file:line` |
@@ -49,6 +49,7 @@ metrics' package-level clusters were sub-divided into the 14 contexts below.
 | Preferences & Config | Settings store + layered resolution (Bullseye→tunables, Start Mode, provider defaults); most drift-prone surface | 15 | **scattered** | [preferences-config](preferences-config.md) |
 | Project Registration & Stack Profiles | Onboard any git repo: detect stack, derive per-stack setup/verify/smoke/scaffold scripts (the turnkey multi-stack driver) | 17 | **scattered** | [project-registration](project-registration.md) |
 | Board UI | React board: optimistic mutations + live-event reconciliation | 13 | well | [board-ui](board-ui.md) |
+| Codemod Factory | AI repo-wide structural codemods (ts-morph) with preview→apply + write-confinement to repoPath | 3 | well | [codemods](codemods.md) |
 
 > **Coverage:** this is a **core-domain** documentation set. A Phase-4a coverage check
 > (`_coverage.md`) maps every product source file to a module or an explicit deferral —
@@ -107,6 +108,8 @@ flowchart TD
   REG -- "setup_script provisions worktree" --> WS
   REG -- "verify_script + smoke = merge gate" --> RM
   REG -- "profile/verify stored as prefs" --> PREF
+  CM[Codemod Factory] -- "LLM authors transform" --> AP
+  CM -- "saved as agent_skill type=codemod" --> IB
   classDef kernel fill:#eef,stroke:#669;
 ```
 
