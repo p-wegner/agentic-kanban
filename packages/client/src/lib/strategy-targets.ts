@@ -204,6 +204,90 @@ export function makeAgentBrief(config: StrategyConfig, issues: IssueWithStatus[]
   ].join("\n");
 }
 
+/**
+ * Stable id for the single `fill` policy the first-class per-project provider
+ * picker (Settings → Agent) writes. Carrying a dedicated id lets the simple
+ * control round-trip with the advanced Provider-policies editor: the simple
+ * control owns exactly this one entry and leaves any hand-authored throttle /
+ * fallback policies untouched. (#925)
+ */
+export const PROVIDER_DEFAULT_POLICY_ID = "provider-default";
+
+export type ConcreteProvider = "claude" | "codex" | "copilot" | "pi";
+
+/**
+ * Read the effective provider+profile a config's provider policies would select,
+ * mirroring the server's `selectProviderFromStrategy` priority order
+ * (fill → throttle → fallback-only). Returns null when no policies are configured
+ * (the caller falls back to the global Settings provider). Kept in lockstep with
+ * `selectProviderFromStrategy` in strategy-objective.service.ts so the Settings
+ * picker shows exactly what a workspace launch would use.
+ */
+export function selectProviderFromPolicies(
+  policies: ProviderProfilePolicy[],
+): { provider: ConcreteProvider; profileName: string } | null {
+  if (policies.length === 0) return null;
+  const byMode = (mode: ProviderPolicyMode) => policies.find((p) => p.mode === mode);
+  const chosen = byMode("fill") ?? byMode("throttle") ?? byMode("fallback-only");
+  if (!chosen) return null;
+  return { provider: chosen.provider, profileName: chosen.profileName };
+}
+
+/**
+ * Produce a config whose effective provider is `provider`/`profileName`, written
+ * as the single simple-control `fill` policy (`PROVIDER_DEFAULT_POLICY_ID`).
+ *
+ * - Replaces any existing simple-control policy in place (preserving order).
+ * - Removes any OTHER `fill` policy so the picked provider is unambiguously the
+ *   one `selectProviderFromStrategy` returns — throttle / fallback policies are
+ *   left intact for advanced multi-provider quota strategies.
+ * - This is what makes per-project provider selection "first-class": the write
+ *   targets `board_strategy_<projectId>`, never the global `provider` pref, so the
+ *   write-time divergence guard (#903) never fires.
+ */
+export function setProviderFillPolicy(
+  config: StrategyConfig,
+  provider: ConcreteProvider,
+  profileName: string,
+): StrategyConfig {
+  const label = `${provider}${profileName ? `:${profileName}` : ""}`;
+  const fillPolicy: ProviderProfilePolicy = {
+    id: PROVIDER_DEFAULT_POLICY_ID,
+    provider,
+    profileName,
+    label,
+    mode: "fill",
+    headroomPct: 20,
+    notes: "Per-project provider default (Settings → Agent).",
+    quotaProviderId: "",
+  };
+  const others = config.providerPolicies.filter(
+    (p) => p.id !== PROVIDER_DEFAULT_POLICY_ID && p.mode !== "fill",
+  );
+  const hadSimplePolicy = config.providerPolicies.some((p) => p.id === PROVIDER_DEFAULT_POLICY_ID);
+  // Keep the simple policy where it already sat (so re-selecting doesn't reorder
+  // the advanced list); otherwise prepend it as the top-priority fill entry.
+  const next = hadSimplePolicy
+    ? config.providerPolicies
+        .filter((p) => p.id === PROVIDER_DEFAULT_POLICY_ID || p.mode !== "fill")
+        .map((p) => (p.id === PROVIDER_DEFAULT_POLICY_ID ? fillPolicy : p))
+    : [fillPolicy, ...others];
+  return { ...config, providerPolicies: next };
+}
+
+/**
+ * Remove the simple-control `fill` policy so the project no longer pins a
+ * provider via the Bullseye and inherits the global Settings default. Leaves any
+ * hand-authored throttle / fallback policies in place. Used by the "Use global
+ * default" option of the first-class per-project provider control. (#925)
+ */
+export function clearProviderFillPolicy(config: StrategyConfig): StrategyConfig {
+  return {
+    ...config,
+    providerPolicies: config.providerPolicies.filter((p) => p.id !== PROVIDER_DEFAULT_POLICY_ID),
+  };
+}
+
 export function presetMatchesConfig(preset: MonitorPolicyPreset, config: StrategyConfig): boolean {
   return (
     preset.activeAgentsTarget === config.activeAgentsTarget &&
