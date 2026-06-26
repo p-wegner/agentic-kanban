@@ -199,8 +199,15 @@ export function BoardPage() {
   useEffect(() => subscribeClientInvalidations((event) => {
     if (event.surface !== "workspace" && event.surface !== "board" && event.surface !== "issue-detail") return;
     if (!activeProjectId || event.projectId !== activeProjectId) return;
+    // Workspace/board live events change which agents are running, which drives the
+    // project selector's "active agents" badge (activeWorkspaceCount). That count rides
+    // on the projects query, which is otherwise only refreshed on explicit project-mgmt
+    // actions — so without this it stays stale (showing agents after they've stopped).
+    if (event.surface === "workspace" || event.surface === "board") {
+      void queryClient.invalidateQueries({ queryKey: boardQueryKeys.projects });
+    }
     scheduleRefetch();
-  }), [activeProjectId, scheduleRefetch]);
+  }), [activeProjectId, scheduleRefetch, queryClient]);
   const tickerEntries = useAgentLiveTicker(columns, sessionActivity, panels.showLiveActivityTicker);
 
   // Keep selectedIssue in sync with board data (F6 stale data fix). The pure

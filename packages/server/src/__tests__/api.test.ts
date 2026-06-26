@@ -83,7 +83,7 @@ describe("Projects API", () => {
     expect(typeof body[0].activeWorkspaceCount).toBe("number");
   });
 
-  it("GET /api/projects counts active (non-idle/closed) workspaces per project", async () => {
+  it("GET /api/projects counts only genuinely-running workspaces per project", async () => {
     const countProjectId = await createProjectDirectly(database, { name: "Active Agents", repoPath: "/tmp/active-agents" });
     const statusId = await createStatusDirectly(database, countProjectId, "In Progress", 0);
 
@@ -111,16 +111,25 @@ describe("Projects API", () => {
       });
     }
 
-    // Two active (running, resolving conflicts), plus idle/closed which must not count.
+    // Genuinely-running agents: active, fixing (conflict resolution), reviewing,
+    // awaiting-plan-approval — these count toward the "active agents" badge.
     await seedWorkspace("active");
     await seedWorkspace("fixing");
+    await seedWorkspace("reviewing");
+    await seedWorkspace("awaiting-plan-approval");
+    // Not running — must NOT count. The old denylist (NOT IN idle/closed) wrongly
+    // counted blocked/error/stopped/merged as "active agents".
     await seedWorkspace("idle");
     await seedWorkspace("closed");
+    await seedWorkspace("error");
+    await seedWorkspace("blocked");
+    await seedWorkspace("stopped");
+    await seedWorkspace("merged");
 
     const body = await (await app.request("/api/projects")).json() as any[];
     const project = body.find((p) => p.id === countProjectId);
     expect(project).toBeDefined();
-    expect(project.activeWorkspaceCount).toBe(2);
+    expect(project.activeWorkspaceCount).toBe(4);
   });
 
   it("archive hides a project from the default list and unarchive restores it", async () => {
