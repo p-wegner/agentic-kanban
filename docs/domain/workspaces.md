@@ -53,6 +53,7 @@ What consumes it: the board UI (renders a per-issue `workspaceSummary`), the mon
 | Plan mode | Workspace runs the agent to produce a *plan* awaiting human approval before implementing (`planMode`, `pendingPlanPath`). | `schema:17,24` |
 | Setup / symlink run | Per-worktree dependency bootstrap telemetry (`latestSetup*`, `latestSymlink*`) — did `pnpm install` / junctioning succeed. | `schema:65-80` |
 | Follow-up auto-start | After a merge, unblocked dependents get a workspace created + agent launched automatically. | `followup-workspace.service.ts:27` |
+| Evidence artifact | Proof-of-work an agent attaches to its workspace/issue — a Playwright `.webm` "visual proof" that a change actually works, a screenshot, a link, or text — so the work's correctness is *observable* without re-running it. Rows in `issue_artifacts`. | `schema/issue-artifacts.ts:6` |
 
 ## Domain model & invariants
 
@@ -79,6 +80,7 @@ The `workspaces` table is the entity; `workspace-activity-state.ts` holds the *r
 | A merged "active" status flip is only emitted as `workspace_merged` after the agent actually launches. | The board's live event reflects real state transitions, not intent. | `followup-workspace.service.ts:109-112` |
 | "Dirty main checkout" = uncommitted *tracked* `.ts/.tsx/.sql` changes under `packages/**`. | Any uncommitted tracked change in main blocks auto-merge; this surfaces it as an operator warning before automation stalls. | `dirty-main-checkout.ts:6-10,33-62` |
 | The spawn-layer hang watchdog kills an agent after 15 min of *zero output*, resetting on every event. | A provider deadlocked on a prompt/network/stdin used to be invisible until the ~30-min monitor cycle; this catches genuine silence directly. | `agent.service.ts:34,248-284,545-560` |
+| A workspace (and its issue) accumulates **evidence artifacts** — agents attach proof-of-work (`.webm` visual proof, screenshots, links, text) via the `attach_artifact` MCP tool; an artifact is keyed to its workspace and *also* tied to that workspace's issue. | The product treats "did the change actually work" as something the agent must *demonstrate*, not merely assert: artifacts make correctness reviewable in the UI and let a `requested-visual-proof` workspace be checked. Workspace-scoped proof is still issue-scoped so it survives the workspace being closed/merged. Surfaced in a dedicated workspace **Artifacts** tab (a highlighted "Visual Proof" band). | `attach-artifact.ts:32-78`, `session-artifacts.repository.ts:29`, client `WorkspaceArtifactsView.tsx`, `WorkspaceViewTabs.tsx:83` |
 
 ## Key workflows / use cases
 

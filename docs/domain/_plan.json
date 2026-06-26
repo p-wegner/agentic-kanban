@@ -505,6 +505,29 @@
         "preferences-config"
       ],
       "structure_note": "scattered: services + stack-profile/ subdir + repositories; File Topology present"
+    },
+    {
+      "slug": "codemods",
+      "name": "Codemod Factory",
+      "capability_hypothesis": "Author + run AI-generated repo-wide structural codemods (ts-morph) behind a preview\u2192apply gate; saved codemods persist on agent_skills(type=codemod). Apply confines writes to repoPath (verified path-traversal guard).",
+      "files": [
+        "packages/server/src/services/codemod.service.ts",
+        "packages/server/src/routes/codemods.ts",
+        "packages/client/src/components/CodemodPanel.tsx"
+      ],
+      "entry_points": [
+        "packages/server/src/routes/codemods.ts:23 \u2014 POST /preview",
+        "packages/server/src/routes/codemods.ts:68 \u2014 POST /apply (repoPath security boundary)"
+      ],
+      "logic_bearing": [
+        "packages/server/src/services/codemod.service.ts:358 \u2014 isInside write-confinement guard",
+        "packages/server/src/services/codemod.service.ts:244 \u2014 CODEMOD_FILE_LIMIT preview cap"
+      ],
+      "depends_on": [
+        "agent-providers",
+        "issues-board"
+      ],
+      "structure_note": "well: service + routes + client panel; persistence overloaded on agent_skills"
     }
   ],
   "coverage_scope": "CORE DOMAIN run: 13 capability modules covering the central agentic-kanban loop. The deferred buckets below are REAL capabilities (identified by the Phase-4a coverage critic) decided as follow-ups, plus genuine long-tail. See _coverage.md for the full important-unmapped disposition table.",
