@@ -5,7 +5,7 @@ import { invalidateClientSurfaceLocal } from "../lib/clientInvalidation.js";
 import { showToast } from "./Toast.js";
 import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
 import { applyPreflightResult, CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, DEFAULT_SETTINGS, PI_DEFAULT_PROFILE, TABS, uniqueProfiles, type AgentProfileHealth, type McpHealth, type MonitorTunables, type ProjectSettingsState, type Settings, type SettingsPanelProps, type SkillSetting, type Tab, type TagSetting } from "./SettingsPanel.shared.js";
-import { buildMigrationConfig } from "../lib/strategy-targets.js";
+import { buildMigrationConfig, normalizeConfig, setProviderFillPolicy, clearProviderFillPolicy, settingsKey, type ConcreteProvider } from "../lib/strategy-targets.js";
 import { parseDisabledTools, withToolDisabled } from "../lib/mcp-tool-toggle.js";
 import type { MonitorAction } from "./MonitorPopover.js";
 import { AgentSettings } from "./settings/AgentSettings.js";
@@ -94,14 +94,50 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
   const [migratingToStrategy, setMigratingToStrategy] = useState(false);
 
   // Provider divergence: global settings prefs vs the project's Strategy Bullseye
-  const [providerDivergence, setProviderDivergence] = useState<{
+  type ProviderDivergence = {
     hasBullseye: boolean;
     bullseyeProvider: string | null;
     bullseyeProfile: string | null;
     settingsProvider: string | null;
     settingsProfile: string | null;
     diverged: boolean;
-  } | null>(null);
+  };
+  const [providerDivergence, setProviderDivergence] = useState<ProviderDivergence | null>(null);
+  const [savingProjectProvider, setSavingProjectProvider] = useState(false);
+
+  async function refetchProviderDivergence() {
+    if (!activeProjectId) return;
+    try {
+      const div = await apiFetch<ProviderDivergence>(`/api/preferences/provider-divergence?projectId=${activeProjectId}`);
+      setProviderDivergence(div);
+    } catch { /* non-fatal */ }
+  }
+
+  // First-class per-project provider control (#925): persist the selection as a
+  // single Strategy-Bullseye `fill` policy on board_strategy_<projectId>, NOT the
+  // global provider pref — so the write never trips the divergence guard and the
+  // simple control round-trips with the advanced Provider-policies editor.
+  async function handleProjectProviderChange(provider: ConcreteProvider | null, profileName: string) {
+    if (!activeProjectId || savingProjectProvider) return;
+    setSavingProjectProvider(true);
+    try {
+      const key = settingsKey(activeProjectId);
+      const rawCurrent = settings[key];
+      const currentConfig = normalizeConfig(rawCurrent ? JSON.parse(rawCurrent) : null);
+      const nextConfig = provider
+        ? setProviderFillPolicy(currentConfig, provider, profileName)
+        : clearProviderFillPolicy(currentConfig);
+      const serialized = JSON.stringify(nextConfig);
+      await savePreferences({ [key]: serialized });
+      setSettings((s) => ({ ...s, [key]: serialized }));
+      await refetchProviderDivergence();
+      showToast(provider ? "Project provider updated" : "Project now uses the global default provider", "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to update project provider", "error");
+    } finally {
+      setSavingProjectProvider(false);
+    }
+  }
 
   // Config export/import state
   const [configExporting, setConfigExporting] = useState(false);
@@ -469,6 +505,8 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
                   onProfilePreflight={handleProfilePreflight}
                   activeProjectId={activeProjectId}
                   providerDivergence={providerDivergence}
+                  onProjectProviderChange={handleProjectProviderChange}
+                  savingProjectProvider={savingProjectProvider}
                 />
               )}
 

@@ -1,6 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import { CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, PI_DEFAULT_PROFILE, CapabilityMatrixTable, Field, defaultHarnessLabel, defaultModelForProvider, defaultModelKeyForProvider, formatHealthTime, profileOptionLabel, providerDisplayName, settingsProfileValue, statusClasses, type AgentProfileHealth, type AgentProvider, type Settings, type SettingsTextSetter } from "../SettingsPanel.shared.js";
+import type { ConcreteProvider } from "../../lib/strategy-targets.js";
 import { CodexLicenseRingEditor } from "./CodexLicenseRingEditor.js";
 import { ClaudeSubscriptionRingEditor } from "./ClaudeSubscriptionRingEditor.js";
 import { AgentPresetsEditor } from "./AgentPresetsEditor.js";
@@ -27,11 +28,51 @@ type AgentSettingsProps = {
   onProfilePreflight: (profile: AgentProfileHealth) => void;
   activeProjectId?: string | null;
   providerDivergence?: ProviderDivergence | null;
+  /**
+   * Persist the active project's provider as a single Strategy-Bullseye `fill`
+   * policy (writes `board_strategy_<projectId>`, NOT the global pref) — the
+   * first-class per-project provider control (#925). Only wired when a project
+   * is active; the parent re-reads divergence after the write.
+   */
+  onProjectProviderChange?: (provider: ConcreteProvider | null, profileName: string) => void;
+  savingProjectProvider?: boolean;
 };
 
-export function AgentSettings({ settings, set, setSettings, profiles, codexProfiles, copilotProfiles, piProfiles, profileHealth, preflightingProfileId, onProfilePreflight: handleProfilePreflight, activeProjectId, providerDivergence }: AgentSettingsProps) {
+function projectProviderSelectValue(provider: string | null, profileName: string | null): string {
+  if (!provider) return "";
+  return profileName ? `${provider}:${profileName}` : `${provider}:`;
+}
+
+export function AgentSettings({ settings, set, setSettings, profiles, codexProfiles, copilotProfiles, piProfiles, profileHealth, preflightingProfileId, onProfilePreflight: handleProfilePreflight, activeProjectId, providerDivergence, onProjectProviderChange, savingProjectProvider }: AgentSettingsProps) {
   const selectedProvider = ((settings.provider || "claude") as AgentProvider);
   const selectedModelKey = defaultModelKeyForProvider(selectedProvider);
+
+  // First-class per-project provider control. When a project is active, this
+  // writes the project's Strategy Bullseye (single fill policy) instead of the
+  // global pref, so changing it never trips the divergence guard and gives a
+  // per-project provider "for free". The value reflects the project's pinned
+  // provider (whatever the Bullseye selects today — mirrors
+  // `selectProviderFromStrategy`); empty ("Use global default") when the project
+  // has no Bullseye-selected provider, so the user sees it's inheriting the
+  // global Agent Profile below.
+  const projectProviderValue = providerDivergence?.bullseyeProvider
+    ? projectProviderSelectValue(providerDivergence.bullseyeProvider, providerDivergence.bullseyeProfile)
+    : "";
+
+  function handleProjectProviderChange(val: string): void {
+    if (!onProjectProviderChange) return;
+    if (val === "") {
+      // "Use global default" — clear the project's pinned provider.
+      onProjectProviderChange(null, "");
+      return;
+    }
+    const [prov, name] = val.split(":");
+    const provider = (prov === "codex" || prov === "copilot" || prov === "pi" ? prov : "claude") as ConcreteProvider;
+    const defaultProfile = provider === "codex" ? CODEX_DEFAULT_PROFILE : provider === "copilot" ? COPILOT_DEFAULT_PROFILE : provider === "pi" ? PI_DEFAULT_PROFILE : "";
+    const profileName = !name || name === defaultProfile ? "" : name;
+    onProjectProviderChange(provider, profileName);
+  }
+
   return (
 <>
                   <Field label="Agent Command" hint="Binary name or path. Leave empty for default (claude). Examples: claude, claude-glm, /usr/local/bin/claude">
@@ -43,7 +84,15 @@ export function AgentSettings({ settings, set, setSettings, profiles, codexProfi
                       className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500"
                     />
                   </Field>
-                  {providerDivergence?.diverged && (
+                  {/*
+                    Divergence is EXPECTED-by-design once the first-class per-project
+                    provider control is in play: it intentionally sets a per-project
+                    provider via the Bullseye while the global fallback stays put. The
+                    amber "divergence detected / use set-provider-default" warning only
+                    applies when there's no first-class control to reconcile it — i.e.
+                    no active project. (#925)
+                  */}
+                  {providerDivergence?.diverged && !(activeProjectId && onProjectProviderChange) && (
                     <div className="px-3 py-2.5 rounded-md bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 text-xs text-amber-800 dark:text-amber-300">
                       <span className="font-semibold">Provider divergence detected.</span>{" "}
                       The Strategy Bullseye controls workspace and butler launches ({providerDivergence.bullseyeProvider}:{providerDivergence.bullseyeProfile || "default"}), but the global Agent Profile here is set to{" "}
@@ -51,13 +100,47 @@ export function AgentSettings({ settings, set, setSettings, profiles, codexProfi
                       {" "}Use <span className="font-mono">set-provider-default</span> to sync all sources, or update the Strategy Bullseye in the Workflow tab.
                     </div>
                   )}
-                  {providerDivergence?.hasBullseye && (
-                    <div className="px-3 py-2.5 rounded-md bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 text-xs text-blue-800 dark:text-blue-300">
-                      <span className="font-semibold">This project's provider is set by its Strategy Bullseye</span>{" "}
-                      ({providerDivergence.bullseyeProvider}:{providerDivergence.bullseyeProfile || "default"}). The Agent Profile below is the global fallback used by projects with no Bullseye. To change which provider <em>this</em> project launches, edit the Strategy Bullseye in the Workflow tab — a global change that diverges from it will be rejected.
-                    </div>
+                  {activeProjectId && onProjectProviderChange && (
+                    <Field
+                      label="Provider for this project"
+                      hint="Sets the provider this project's workspaces launch with. Saved to the project's Strategy Bullseye (a single 'fill' policy), so it takes effect immediately and round-trips with the Provider policies editor in the Workflow tab — no divergence with the global default."
+                    >
+                      <select
+                        value={projectProviderValue}
+                        disabled={savingProjectProvider}
+                        onChange={(e) => handleProjectProviderChange(e.target.value)}
+                        className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
+                      >
+                        <option value="">Use global default ({defaultHarnessLabel(settings)})</option>
+                        <optgroup label="Claude">
+                          {profiles.map((p) => (
+                            <option key={`pp-claude:${p}`} value={`claude:${p}`}>{profileOptionLabel("claude", p)}</option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="Codex">
+                          {codexProfiles.map((p) => (
+                            <option key={`pp-codex:${p}`} value={`codex:${p}`}>{profileOptionLabel("codex", p)}</option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="Copilot">
+                          {copilotProfiles.map((p) => (
+                            <option key={`pp-copilot:${p}`} value={`copilot:${p}`}>{profileOptionLabel("copilot", p)}</option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="Pi">
+                          {piProfiles.map((p) => (
+                            <option key={`pp-pi:${p}`} value={`pi:${p}`}>{profileOptionLabel("pi", p)}</option>
+                          ))}
+                        </optgroup>
+                      </select>
+                      {providerDivergence?.hasBullseye && (
+                        <p className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+                          Currently launches <span className="font-mono">{providerDivergence.bullseyeProvider}:{providerDivergence.bullseyeProfile || "default"}</span> for this project, from its Strategy Bullseye. The Agent Profile below is the global fallback for projects with no Bullseye.
+                        </p>
+                      )}
+                    </Field>
                   )}
-                  <Field label="Agent Profile" hint="Selects agent provider and profile. Claude uses ~/.claude/settings_*.json, Codex uses ~/.codex/<name>.config.toml, Copilot uses the CLI default or configured model profile, and Pi uses PI_CODING_AGENT_DIR profile roots.">
+                  <Field label={activeProjectId ? "Agent Profile (global fallback)" : "Agent Profile"} hint="Selects agent provider and profile. Claude uses ~/.claude/settings_*.json, Codex uses ~/.codex/<name>.config.toml, Copilot uses the CLI default or configured model profile, and Pi uses PI_CODING_AGENT_DIR profile roots.">
                     <select
                       value={settingsProfileValue(settings)}
                       onChange={(e) => {
