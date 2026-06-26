@@ -73,7 +73,12 @@ worktree agents all streaming output into one file).
 The module owns the **entire relational graph**. The reference spine is:
 `projects → issues → workspaces → sessions → session_messages`, with issues also
 hanging tags, dependencies, artifacts, comments, time-entries, showdowns, and
-milestones. Below are the *rules* the kernel enforces (not the field list).
+milestones, and workspaces also hanging `diff_comments` (inline review comments on a
+workspace diff — file path, old/new line, side, body, `resolvedAt`; `packages/shared/src/schema/diff-comments.ts:5`).
+The diff-review UI that consumes that table (DiffViewer + inline comments) is a queued
+board-ui surface (see `_coverage.md`), but the **table itself is part of this data kernel**
+and is one of the workspace-subtree children the cascade walk deletes (`cascade-delete.ts:131`).
+Below are the *rules* the kernel enforces (not the field list).
 
 | Invariant / rule / policy | Why (business reason, inferred) | Enforced at |
 |---------------------------|----------------------------------|-------------|
@@ -89,6 +94,7 @@ milestones. Below are the *rules* the kernel enforces (not the field list).
 | **A migration runs only if it has a journal entry; order is the journal's `when`, not the filename.** | `drizzle-kit` silently skips un-journaled `.sql` files and applies by journal order; a later migration with an earlier timestamp runs first and `ALTER`s a not-yet-created table. The test helper reads the journal, never a hardcoded list. | `packages/server/src/__tests__/helpers/migrations.ts:16` |
 | **Issue numbers are unique per project** (not globally). | `#N` is the human handle for a ticket *within a project*; a unique index on `(project_id, issue_number)` lets two projects both have a `#1`. | `packages/shared/src/schema/issues.ts:43` |
 | **The DB file is resolved by existence, defaulting to `~/.agentic-kanban`.** | A worktree has no checked-out `kanban.db`, so a worktree dev-server falls through to the home dir — a *different* database, hence no lock contention with the main board (this is a feature, not a bug; see Risks). | `packages/server/src/db/data-dir.ts:9`, `:15` |
+| **`kanban.db` is never deleted/reset/truncated; individual records are removed only via MCP/API (the cascade walk above).** A `validate-command-safety.js` PreToolUse hook hard-blocks destructive DB commands (`db:reset`, `rm`/`Remove-Item`/truncate/redirect over the file, any path form). | The file IS the entire product state (no other store, no network DB to restore from); a single wipe is unrecoverable. The hook is the enforcement half of the sanctity rule — when it fires, stop and ask; never weaken or route around it. Lock/WAL/migration problems use the `db-doctor` skill (`pnpm db:repair`), which never deletes. | project `CLAUDE.md` (Hard Constraints); hook `.claude/hooks/validate-command-safety.js` |
 
 ## Key workflows / use cases
 

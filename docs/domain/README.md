@@ -19,7 +19,7 @@ human in it. Everything is reverse-engineered from code here; each doc carries
 
 These docs are **capability modules**, not packages. The TS monorepo's packages
 (`server`, `client`, `shared`, `mcp-server`) each host several capabilities; the
-metrics' package-level clusters were sub-divided into the 12 contexts below.
+metrics' package-level clusters were sub-divided into the 14 contexts below.
 
 ## Start here (system entry points)
 | Entry point | Kind | Leads to | `file:line` |
@@ -160,9 +160,34 @@ flowchart TD
   ([preferences-config](preferences-config.md)): the most-coupled untyped surface in the
   system (flat key/value prefs), where CLAUDE.md's drift incidents (provider-default
   fan-out, stale `default_model`) are reverse-engineered into named rules.
-- **Error handling** (`server/src/errors/index.ts`, blast 294) — centralized
-  typed-domain-error mapping; routes don't hand-roll try/catch + message matching. A
-  wiring kernel, not a domain context (deferred in `_coverage.md`).
+- **Typed-error contract** (`server/src/errors/index.ts`, blast 294) — an `AppError`
+  base (carries `statusCode` + machine `code`) with the concrete domain errors:
+  `NotFoundError` (404 `NOT_FOUND`), `ValidationError` (400 `VALIDATION_ERROR`),
+  `ConflictError` (409 `CONFLICT`), `ForbiddenError` (403 `FORBIDDEN`), and
+  `AiOperationError` (500 `AI_ERROR`) — the last is how an LLM / agent-CLI failure
+  surfaces as a typed HTTP error rather than a bare 500. Routes map these centrally and
+  must NOT hand-roll `try/catch + message.includes`. A wiring kernel, not a domain
+  context (deferred in `_coverage.md`).
+- **Dependency-pinning by blast radius** (decision
+  [`009`](../decisions/009-dependency-pinning-by-blast-radius.md)) — deps are
+  exact-pinned iff a silent minor could change runtime behavior *without* failing at
+  build/test time: the **correctness-critical core** (`@libsql/client`, `drizzle-orm` /
+  `drizzle-kit`, `@modelcontextprotocol/sdk`, the Claude agent SDK
+  `@anthropic-ai/claude-agent-sdk`) and the **transport / IPC surface** (`hono` + its
+  node adapters, `zod`, every `@tauri-apps/*`). UI / build tooling (`react`, `vite`,
+  `tailwindcss`, `eslint`, `typescript`, `tsx`) floats with `^` because a bad minor
+  there fails loudly. `engines.node` is pinned. The axis is blast radius, not
+  familiarity. Enforced by `packages/shared/__tests__/dependency-pinning.test.ts` (runs
+  in `test:mine` → `pnpm check`); upgrade = bump the exact version + lockfile in one
+  reviewable commit.
+- **Process crash-resilience** (`startup/process-handlers.ts`, `services/agent.service.ts`)
+  — the long-lived local server is hardened so a crashy agent never takes it down:
+  `uncaughtException` / `unhandledRejection` are caught and logged (transient network
+  errors during hot-reload are swallowed as `[warn]`; a true fatal like port-in-use logs
+  `[fatal]` and exits), and every agent-subprocess callback (output-watcher,
+  hang-watchdog, exit) runs inside its own `try/catch` so a thrown callback is logged,
+  not propagated. The full server-bootstrap module is queued for documentation (see
+  `_coverage.md`).
 - **Wire DTO layer** (`shared/src/types/api.ts`) — the API/wire types, separate from the
   Drizzle row types that are the internal Published Language (see persistence-schema).
 - **Quality metrics / analytics, drive-obstacles, voice-capture, scheduled-runs,

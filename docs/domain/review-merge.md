@@ -6,7 +6,7 @@ files: 24
 source_paths:
   - packages/server/src/services/{merge-queue,merge-helpers,merge-cleanup,foundational-merge,workspace-merge,workspace-merge-prevalidation,pre-merge-gate,review}.service.ts
   - packages/server/src/services/workspace-internals.ts
-  - packages/server/src/startup/{auto-merge-orchestrator,merge-strategy,merge-workflow,exit-workflow,route-setup,stranded-review-reconciler,done-unmerged-invariant-scanner,completion-state-reconciler}.ts
+  - packages/server/src/startup/{auto-merge-orchestrator,merge-strategy,merge-workflow,exit-workflow,route-setup,stranded-review-reconciler,done-unmerged-invariant-scanner,completion-state-reconciler,ancestor-branch-reconciler,zombie-fix-session-reconciler}.ts
   - packages/server/src/repositories/{review,workspace-merge,workspace-merge-execution,workspace-merge-prevalidation,merge-queue}.repository.ts
   - packages/server/src/routes/workspace-actions.ts
   - packages/shared/src/lib/auto-merge-pref.ts
@@ -69,6 +69,8 @@ Consumers: the in-process board monitor and the auto-merge orchestrator (schedul
 | **Verify/smoke pre-merge gate is the actual merge enforcer.** A configured `verify_script_<id>` exiting non-zero, or a web (`isWeb`) project's boot/render smoke check failing, FAILS the merge; a CONFIGURED gate that can't run (no worktree) fails closed. Neither configured → no-op pass. | The diff-only LLM review can't catch build/test/boot regressions; this is the only gate that can BLOCK a merge for unverified/un-rendered code. **Wired only into the review-exit and monitor paths** (see Risks) — `runWorkspacePreMergeValidation` does NOT call it (OpenSpec + migration renumber only). | `pre-merge-gate.service.ts:47` (`runPreMergeGate`, self-described "single source of truth for the gate", #821); invoked from `exit-workflow.ts:536` + `monitor-cycle.ts:247,323` |
 | **Review/fix runs on the workspace's OWN provider+profile**, not the global default. | The global default may have rotated (e.g. a different Codex OAuth license); reviewing on it 401s/uses wrong creds. | `review.service.ts:68`, `exit-workflow.ts:818` |
 | **`mergedAt` makes cleanup idempotent.** Issue→Done reconciliation no-ops once already Done; workspace-close failure after merge does NOT roll back Done. | A dropped HTTP response mustn't double-transition or strand Done-with-branch-on-master (#668). | `merge-cleanup.service.ts:64`, `:91`, `:147` |
+| **Review-exit on a 0-commit branch must NOT approve** (#629). If a review session exits but the branch has no committed changes (re-verified via `hasCommittedChanges`), `readyForMerge` stays false, the workspace stays idle / In Review, and `workspace_ready_for_merge` is NOT broadcast. | A branch reset/rebased to equal base by the time review exits would otherwise approve empty work — merging nothing or stranding the ticket. The flag is the merge engine's permission slip, so it must reflect real committed work. | re-verify `exit-workflow.ts:718` (`hasCommittedChanges` `:164`); withhold + log `:720`; set flag + broadcast only PAST the guard `:724`–`:725` |
+| **Already-merged reconcile is a no-op, never a merge** (#583/#492). When the branch tip is already an ancestor of base, `/merge` returns HTTP 200 `{merged:false, reconciled:true, baseBranch, baseHeadShaBefore/After}`, creates NO merge commit (`mergeBranch` not called), transitions the issue to Done, and closes the stale reviewing workspace + running review session. **But a branch with 0 unique commits (`branchSha===baseSha` / `countUniqueCommits===0`) must NOT reconcile-as-Done** — it is kept In Review (`reconciled:false`) as a false-positive guard. | The monitor repeatedly re-`/merge`s already-landed zero-commit workspaces; creating a merge commit or flipping an empty branch to Done is silent-merge-loss. | reconcile no-op `workspace-merge-prevalidation.service.ts:252`; 0-commit guard `keepCleanAncestorInReview :263`; `reconcile` vs `clean-ancestor` classified by `resolveMergeState` `workspace-internals.ts:159` |
 
 ## Key workflows / use cases
 
@@ -106,6 +108,8 @@ Trigger: a merge throws a conflict and the caller chooses recovery (`POST /:id/f
 - **completion-state-reconciler** (`:54`): a workspace stuck `active`/`reviewing`/`fixing`/`blocked` whose session is really dead (PID gone, committed work) or hung >30 min → reset to idle so the normal flow proceeds.
 - **stranded-review-reconciler** (`:43`): idle, In Review, not ready, has commits, no session, no prior review → relaunch review (or mark ready if auto_review off).
 - **done-unmerged-invariant-scanner** (`:109`): Done/AI-Reviewed but `mergedAt` null and branch not on base → flag (telemetry) + safe forward-only auto-merge.
+- **ancestor-branch-reconciler** (`ancestor-branch-reconciler.ts:50`): In-Review work (and idle + `readyForMerge` In-Progress work, e.g. after a dropped merge response) whose branch tip is already an ancestor of base but `mergedAt` is null → close workspace + move issue to Done. Guards: NEVER reaps an **active In-Progress** workspace (`:115`, may have uncommitted work); NEVER auto-Dones a **0-unique-commit** branch even when "trivially an ancestor" (`:136`, #581/#585 incident — a freshly-launched `branchSha===baseSha` ws or one whose base advanced past an empty branch); skips closed/direct/`mergedAt`/terminal-status (`:101`–`:104`); idempotent. Disable via `reconciler_ancestor_branch_enabled` pref (`:59`).
+- **zombie-fix-session-reconciler** (`zombie-fix-session-reconciler.ts:37`, #596): a `fixing`/`reviewing` workspace whose `fix-and-merge`/`review` session is still `running` but has a dead/absent PID, 0 output messages, and started past the 60s grace window → stop the session, reset workspace to idle, broadcast `workspace_idle`+`issue_updated`. Skips: within grace (`:60`), has output (`:108`), PID alive (`:99`), workspace not in fixing/reviewing (`:125`), triggerType ∉ {fix-and-merge, review} (`:81`). Disable via `reconciler_zombie_fix_enabled` pref (`:40`).
 
 ## Entry points
 
@@ -163,6 +167,8 @@ Trigger: a merge throws a conflict and the caller chooses recovery (`POST /:id/f
 | Reconciler: stuck active/blocked workspaces | `startup/completion-state-reconciler.ts` | startup |
 | Reconciler: stranded In-Review work | `startup/stranded-review-reconciler.ts` | startup |
 | Invariant scanner: Done-but-unmerged (silent merge loss) | `startup/done-unmerged-invariant-scanner.ts` | startup |
+| Reconciler: branch-tip-is-ancestor but issue non-terminal (#581/#585) | `startup/ancestor-branch-reconciler.ts` (`reconcileAncestorBranchWorkspaces`); scheduled `startup-tasks.ts:502` + 5-min interval | startup |
+| Reconciler: zombie fix/review sessions (dead PID + 0 msgs + past 60s grace) | `startup/zombie-fix-session-reconciler.ts` (`reconcileZombieFixSessions`, `startZombieFixSessionReconciler:184`) | startup |
 
 ## Risks, gaps & open questions
 
