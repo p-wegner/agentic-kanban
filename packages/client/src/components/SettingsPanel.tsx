@@ -401,8 +401,12 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
       invalidateClientSurfaceLocal({ surface: "settings" });
       showToast("Settings saved", "success");
       onClose();
-    } catch {
-      showToast("Failed to save settings", "error");
+    } catch (err) {
+      // Surface the server's actual reason (apiFetch throws with the 422 `error`
+      // body as the message) instead of a generic toast. The divergence guard
+      // (#903) explains how to fix it ("change it via the Strategy Bullseye");
+      // swallowing that left users with an unactionable "Failed to save".
+      showToast(err instanceof Error ? err.message : "Failed to save settings", "error");
     } finally {
       setSaving(false);
     }
