@@ -1,7 +1,8 @@
 ---
 repo: agentic-kanban
 analyzed_sha: 2cea8d3e
-modules: 12
+modules: 13
+coverage: "core-domain scope; Phase-4a coverage gate PASS (0 important files unmapped-and-undecided). 187/1020 source files mapped; remainder explicitly deferred-with-reason — see _coverage.md."
 structure_quality: "Modularity Q=0.81 (strong), entanglement 0.01, 0 module cycles — but Louvain auto-resolution clusters by PACKAGE, so capability boundaries were derived by sub-dividing the giant server/client clusters."
 generator: domain-docs skill (code-metrics → documenter subagents → adversarial review)
 ---
@@ -45,7 +46,15 @@ metrics' package-level clusters were sub-divided into the 12 contexts below.
 | Git Integration | The single sanctioned git seam over one spawn adapter | 18 | well | [git-integration](git-integration.md) |
 | MCP Server | Agent-facing MCP tool surface (hybrid: direct DB + HTTP delegation) | 13 | well | [mcp-server](mcp-server.md) |
 | Persistence & Schema | The shared data kernel; schema as Published Language | 11 | well | [persistence-schema](persistence-schema.md) |
+| Preferences & Config | Settings store + layered resolution (Bullseye→tunables, Start Mode, provider defaults); most drift-prone surface | 15 | **scattered** | [preferences-config](preferences-config.md) |
 | Board UI | React board: optimistic mutations + live-event reconciliation | 13 | well | [board-ui](board-ui.md) |
+
+> **Coverage:** this is a **core-domain** documentation set. A Phase-4a coverage check
+> (`_coverage.md`) maps every product source file to a module or an explicit deferral —
+> it caught 104 important files the first pass had silently omitted, drove the top miss
+> (`preferences-config`) to documentation, and queued 5 further capabilities (project-
+> registration/stack-profiles, CLI, client app-shell, server bootstrap) plus the
+> analytics long-tail. The gate **passes**: nothing important is undocumented-and-undecided.
 
 ## Context map
 ```mermaid
@@ -64,6 +73,7 @@ flowchart TD
   BUT[Butler]
   MCP[MCP Server]
   UI[Board UI]
+  PREF[Preferences & Config]
 
   IB -- "status co-defined (Shared Kernel)" --> WF
   IB --> PS
@@ -87,6 +97,9 @@ flowchart TD
   UI -- "REST + Conformist on move legality" --> IB
   UI -- "live telemetry (Published Language/WS)" --> AS
   GIT -. "rewrites migration sql+journal" .-> PS
+  PREF -- "Bullseye→tunables+provider routing (Published Language)" --> MON
+  PREF -- "provider/profile/model defaults" --> AP
+  PREF -- "Start Mode gate" --> MON
   classDef kernel fill:#eef,stroke:#669;
 ```
 
@@ -107,6 +120,7 @@ flowchart TD
 | MCP Server | Workspaces | Anything touching git/sessions/locks delegated to REST over HTTP | Customer-Supplier | `tools/merge-workspace.ts` |
 | All | Persistence & Schema | Drizzle row types are the internal domain language | Published Language | `shared/src/schema/index.ts` |
 | Git Integration | Persistence & Schema | Rewrites the migration `.sql` + `_journal.json` that ARE the schema's on-disk form | (hard file coupling) | `migration-renumber.ts` |
+| Preferences & Config | Monitor / Agent Providers | Strategy Bullseye fans out to monitor tunables + provider routing; Start Mode gates auto-start; provider/profile/model defaults | Published Language / Customer-Supplier | `strategy-objective.service.ts:490`, `start-policy.service.ts:24` |
 
 ## DDD assessment
 - **The package boundaries are NOT the bounded contexts.** `server` alone holds at
@@ -134,17 +148,21 @@ flowchart TD
   FK walk is the cost: it re-encodes the FK graph in code and can silently drift.
 
 ## Cross-cutting concerns
-- **Preferences / config** — referenced by nearly every context (provider defaults,
-  monitor tunables, auto-merge flags, disabled MCP tools) but **not yet a documented
-  module**. It is the most-coupled untyped surface in the system (flat key/value prefs);
-  CLAUDE.md records repeated drift incidents (provider default fan-out, stale
-  `default_model`). A future doc-run should add a `preferences-config` module.
+- **Preferences / config** — now its own documented context
+  ([preferences-config](preferences-config.md)): the most-coupled untyped surface in the
+  system (flat key/value prefs), where CLAUDE.md's drift incidents (provider-default
+  fan-out, stale `default_model`) are reverse-engineered into named rules.
+- **Error handling** (`server/src/errors/index.ts`, blast 294) — centralized
+  typed-domain-error mapping; routes don't hand-roll try/catch + message matching. A
+  wiring kernel, not a domain context (deferred in `_coverage.md`).
+- **Wire DTO layer** (`shared/src/types/api.ts`) — the API/wire types, separate from the
+  Drizzle row types that are the internal Published Language (see persistence-schema).
 - **Quality metrics / analytics, drive-obstacles, voice-capture, scheduled-runs,
-  milestones, showdowns** — a long tail of ~40 additional services/repositories not in
-  this core set. They are real but peripheral to the central loop; document on demand.
-- **Error handling** (`server/src/errors`) — centralized typed-domain-error mapping;
-  routes do not hand-roll try/catch + message matching.
+  milestones, showdowns** — a long tail of ~40 additional services/repositories,
+  peripheral to the central loop; deferred-with-reason in `_coverage.md`, document on demand.
 
-> Coverage note: this run documented the **12 core-domain contexts** (≈170 files).
-> The repo has 1685 files; the analytics/drive long tail is intentionally out of scope
-> for this pass. Re-run the `domain-docs` skill with an expanded plan to cover it.
+> Coverage: see [`_coverage.md`](_coverage.md). This is a **core-domain** set (13 modules);
+> the Phase-4a gate verifies no important file is undocumented-and-undecided. 5 further
+> capabilities are queued (project-registration/stack-profiles, CLI, client app-shell,
+> server bootstrap); the analytics/drive long-tail is explicitly deferred. Re-run the
+> `domain-docs` skill with the queued modules added to `_plan.json` to raise coverage.
