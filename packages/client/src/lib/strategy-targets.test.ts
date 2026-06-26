@@ -12,7 +12,12 @@ import {
   DEFAULT_CONFIG,
   BUILTIN_PRESETS,
   buildMigrationConfig,
+  selectProviderFromPolicies,
+  setProviderFillPolicy,
+  clearProviderFillPolicy,
+  PROVIDER_DEFAULT_POLICY_ID,
   type StrategySegment,
+  type ProviderProfilePolicy,
 } from "./strategy-targets.js";
 
 describe("buildMigrationConfig", () => {
@@ -138,6 +143,104 @@ describe("presetMatchesConfig", () => {
     expect(presetMatchesConfig(balanced, DEFAULT_CONFIG)).toBe(true);
     const bugBash = BUILTIN_PRESETS.find((p) => p.id === "bug-bash")!;
     expect(presetMatchesConfig(bugBash, DEFAULT_CONFIG)).toBe(false);
+  });
+});
+
+function mkPolicy(partial: Partial<ProviderProfilePolicy>): ProviderProfilePolicy {
+  return {
+    id: "p",
+    provider: "claude",
+    profileName: "",
+    label: "Claude",
+    mode: "throttle",
+    headroomPct: 20,
+    notes: "",
+    quotaProviderId: "",
+    ...partial,
+  };
+}
+
+describe("selectProviderFromPolicies", () => {
+  it("returns null when no policies (caller uses global default)", () => {
+    expect(selectProviderFromPolicies([])).toBeNull();
+  });
+
+  it("prefers fill over throttle over fallback-only (mirrors server)", () => {
+    const policies = [
+      mkPolicy({ id: "fb", provider: "copilot", mode: "fallback-only" }),
+      mkPolicy({ id: "th", provider: "codex", mode: "throttle" }),
+      mkPolicy({ id: "fl", provider: "claude", profileName: "work", mode: "fill" }),
+    ];
+    expect(selectProviderFromPolicies(policies)).toEqual({ provider: "claude", profileName: "work" });
+  });
+
+  it("falls through to throttle then fallback when no fill exists", () => {
+    expect(selectProviderFromPolicies([mkPolicy({ provider: "codex", mode: "throttle" })])).toEqual({ provider: "codex", profileName: "" });
+    expect(selectProviderFromPolicies([mkPolicy({ provider: "pi", mode: "fallback-only" })])).toEqual({ provider: "pi", profileName: "" });
+  });
+});
+
+describe("setProviderFillPolicy", () => {
+  it("writes a single fill policy with the stable simple-control id", () => {
+    const next = setProviderFillPolicy(DEFAULT_CONFIG, "codex", "default");
+    const fills = next.providerPolicies.filter((p) => p.mode === "fill");
+    expect(fills).toHaveLength(1);
+    expect(fills[0].id).toBe(PROVIDER_DEFAULT_POLICY_ID);
+    expect(fills[0]).toMatchObject({ provider: "codex", profileName: "default" });
+    // Round-trips: reading it back yields what we set.
+    expect(selectProviderFromPolicies(next.providerPolicies)).toEqual({ provider: "codex", profileName: "default" });
+  });
+
+  it("replaces the existing simple-control policy in place (no reorder)", () => {
+    const seeded = setProviderFillPolicy(
+      { ...DEFAULT_CONFIG, providerPolicies: [mkPolicy({ id: "th", provider: "codex", mode: "throttle" })] },
+      "claude",
+      "",
+    );
+    // simple fill prepended ahead of the throttle policy
+    expect(seeded.providerPolicies.map((p) => p.id)).toEqual([PROVIDER_DEFAULT_POLICY_ID, "th"]);
+    const changed = setProviderFillPolicy(seeded, "pi", "local");
+    expect(changed.providerPolicies.map((p) => p.id)).toEqual([PROVIDER_DEFAULT_POLICY_ID, "th"]);
+    expect(changed.providerPolicies[0]).toMatchObject({ provider: "pi", profileName: "local", mode: "fill" });
+  });
+
+  it("preserves throttle/fallback policies but drops other fill policies", () => {
+    const next = setProviderFillPolicy(
+      {
+        ...DEFAULT_CONFIG,
+        providerPolicies: [
+          mkPolicy({ id: "other-fill", provider: "codex", mode: "fill" }),
+          mkPolicy({ id: "th", provider: "copilot", mode: "throttle" }),
+        ],
+      },
+      "claude",
+      "work",
+    );
+    const ids = next.providerPolicies.map((p) => p.id);
+    expect(ids).toContain(PROVIDER_DEFAULT_POLICY_ID);
+    expect(ids).toContain("th");
+    expect(ids).not.toContain("other-fill");
+    // The picked provider is unambiguously selected.
+    expect(selectProviderFromPolicies(next.providerPolicies)).toEqual({ provider: "claude", profileName: "work" });
+  });
+});
+
+describe("clearProviderFillPolicy", () => {
+  it("removes the simple-control policy and keeps the rest", () => {
+    const seeded = setProviderFillPolicy(
+      { ...DEFAULT_CONFIG, providerPolicies: [mkPolicy({ id: "th", provider: "codex", mode: "throttle" })] },
+      "claude",
+      "",
+    );
+    const cleared = clearProviderFillPolicy(seeded);
+    expect(cleared.providerPolicies.map((p) => p.id)).toEqual(["th"]);
+    // No fill policy → selection falls through to the remaining throttle policy.
+    expect(selectProviderFromPolicies(cleared.providerPolicies)).toEqual({ provider: "codex", profileName: "" });
+  });
+
+  it("is a no-op when there is no simple-control policy", () => {
+    const cfg = { ...DEFAULT_CONFIG, providerPolicies: [mkPolicy({ id: "th", mode: "throttle" })] };
+    expect(clearProviderFillPolicy(cfg).providerPolicies).toEqual(cfg.providerPolicies);
   });
 });
 
