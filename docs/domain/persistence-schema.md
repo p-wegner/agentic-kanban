@@ -9,6 +9,8 @@ source_paths:
   - packages/shared/src/lib/fk-actions-repair.ts
   - packages/shared/src/lib/cascade-delete.ts
   - packages/server/src/db/**
+  - packages/server/src/startup/backup-scheduler.ts
+  - packages/server/src/scripts/db-restore.ts
   - packages/shared/drizzle/**
   - packages/server/src/__tests__/helpers/migrations.ts
 entry_points:
@@ -94,7 +96,8 @@ Below are the *rules* the kernel enforces (not the field list).
 | **A migration runs only if it has a journal entry; order is the journal's `when`, not the filename.** | `drizzle-kit` silently skips un-journaled `.sql` files and applies by journal order; a later migration with an earlier timestamp runs first and `ALTER`s a not-yet-created table. The test helper reads the journal, never a hardcoded list. | `packages/server/src/__tests__/helpers/migrations.ts:16` |
 | **Issue numbers are unique per project** (not globally). | `#N` is the human handle for a ticket *within a project*; a unique index on `(project_id, issue_number)` lets two projects both have a `#1`. | `packages/shared/src/schema/issues.ts:43` |
 | **The DB file is resolved by existence, defaulting to `~/.agentic-kanban`.** | A worktree has no checked-out `kanban.db`, so a worktree dev-server falls through to the home dir — a *different* database, hence no lock contention with the main board (this is a feature, not a bug; see Risks). | `packages/server/src/db/data-dir.ts:9`, `:15` |
-| **`kanban.db` is never deleted/reset/truncated; individual records are removed only via MCP/API (the cascade walk above).** A `validate-command-safety.js` PreToolUse hook hard-blocks destructive DB commands (`db:reset`, `rm`/`Remove-Item`/truncate/redirect over the file, any path form). | The file IS the entire product state (no other store, no network DB to restore from); a single wipe is unrecoverable. The hook is the enforcement half of the sanctity rule — when it fires, stop and ask; never weaken or route around it. Lock/WAL/migration problems use the `db-doctor` skill (`pnpm db:repair`), which never deletes. | project `CLAUDE.md` (Hard Constraints); hook `.claude/hooks/validate-command-safety.js` |
+| **`kanban.db` is never deleted/reset/truncated; individual records are removed only via MCP/API (the cascade walk above).** A `validate-command-safety.js` PreToolUse hook hard-blocks destructive DB commands (`db:reset`, `rm`/`Remove-Item`/truncate/redirect over the file, any path form). | The file IS the entire *live* product state, and there is no network/off-machine copy — so it must never be casually wiped. A wipe is, however, **recoverable**: a verified rotating backup subsystem (see Lifecycle & recovery) keeps up to 5 local snapshots and `pnpm db:restore` rebuilds from the latest good one (local-only — gone if the disk is). The hook is the enforcement half of the sanctity rule — when it fires, stop and ask; never weaken or route around it. Lock/WAL/migration problems use the `db-doctor` skill (`pnpm db:repair`), which never deletes. | project `CLAUDE.md` (Hard Constraints); hook `.claude/hooks/validate-command-safety.js` |
+| **A backup is verified before it is accepted, and refused if it looks empty-when-live-is-not.** Every snapshot must pass `PRAGMA integrity_check == "ok"` AND a row-count guard: a backup reporting 0 issues (or 0 projects) while the live DB has any is rejected as corrupt/empty rather than rotated in. | A silently-empty "backup" is worse than none — it rotates a good copy out and is the trap that caused a past silent data loss. Verification turns a backup into a *promise* of restorability; the tmp→verify→promote→atomic-rename sequence means a half-written or unverifiable snapshot never becomes a retained backup. | `packages/server/src/db/backup.ts:190` (`verifyBackup`), `:197`, `:202`, `:337` |
 
 ## Key workflows / use cases
 
@@ -148,6 +151,41 @@ diff against schema → for each drifted table, rebuild it (new table with corre
 clauses, copy rows, drop, rename, replay user indexes) inside its own transaction with
 a `foreign_key_check` gate. `dryRun` reports without rebuilding
 (`packages/shared/src/lib/fk-actions-repair.ts:152`).
+
+### 5. Backup, rotation & restore (the recovery subsystem)
+`db/backup.ts` is the single source of truth for snapshots and the reason a wipe is
+*recoverable* (locally). `createBackup(reason)` (`backup.ts:310`) writes a
+WAL-consistent, defragmented single-file snapshot via SQLite `VACUUM INTO` — no
+`-wal`/`-shm` sidecars, no mid-write/mid-migration tear — then **verifies before
+accepting**: `verifyBackup` runs `PRAGMA integrity_check` and an
+"empty-when-live-is-not" row-count guard (refuses a 0-issue/0-project backup when the
+live DB has rows) (`backup.ts:190`). Writes are atomic: `VACUUM INTO` to `*.db.tmp` →
+verify → `copyFileSync` to `*.db.promote` → `renameSync` (with retry, for Windows lock
+races) to the final `kanban-<stamp>-<reason>.db` (`backup.ts:331`–`:339`).
+
+**Triggers** (the `reason` tag): pre-migration (`startup/startup-tasks.ts:149`),
+pre-merge (`startup/merge-workflow.ts:168`), shutdown — after a WAL checkpoint, bounded
+to 5s so it can't hang exit (`startup/process-handlers.ts:18`, `:24`), periodic
+(`startup/backup-scheduler.ts`: one ~60s post-boot, then every `backup_interval_min`
+minutes, default 30; 0 disables), pre-repair (`scripts/db-repair.ts:123`), and
+pre-restore (`scripts/db-restore.ts:135`).
+
+**Rotation & retention:** `pruneBackups(KEEP_LAST)` keeps the 5 most recent verified
+`kanban-*.db` files (`KEEP_LAST=5`, `backup.ts:26`), never pruning to zero, behind a
+hard total-size cap (`BACKUP_DIR_MAX_BYTES`, default 5 GB, override
+`AGENTIC_KANBAN_BACKUP_MAX_BYTES`; `backup.ts:35`, `enforceSizeCap` `:280`). It also
+reaps interrupted-write scratch (`*.db.tmp`/`*.db.promote` + journal sidecars) via
+`pruneScratchArtifacts` (`backup.ts:220`) — both before each write and during prune.
+That reaper exists because un-reaped scratch from a low-disk failure once accumulated
+without bound, filled `C:`, and took the dev server down (then made every subsequent
+backup fail and leak *more* scratch — a runaway).
+
+**Restore:** `scripts/db-restore.ts` (`pnpm db:restore`) lists backups with their
+verification status (no arg), or restores a chosen / `--latest` snapshot: it
+re-verifies the source, refuses if the live DB is locked (server still running), takes
+a `pre-restore` backup of the current DB, then atomically replaces `kanban.db` and
+clears stale `-wal`/`-shm` sidecars. Local-only: there is no off-machine copy, so the
+guarantee is "survive a wipe / corruption", not "survive losing the disk".
 
 ## Entry points
 
