@@ -124,6 +124,18 @@ export function buildRawDisplayEvents(messages: AgentOutputMessage[]): DisplayEv
     .filter((e) => e.kind === "raw" && e.text.length > 0);
 }
 
+/** Format a `bisect` message's raw display text (best-effort JSON parse). */
+function buildBisectEventText(data: string | null | undefined): string {
+  try {
+    const parsed = JSON.parse(data || "{}") as { breakingCommitSha?: string; message?: string; failingTestName?: string; status?: string };
+    if (!parsed.breakingCommitSha) return `Auto-bisect result: ${parsed.status ?? "finished"}`;
+    const failingLine = parsed.failingTestName ? `\nFailing test: ${parsed.failingTestName}` : "";
+    return `Auto-bisect result: ${parsed.breakingCommitSha} ${parsed.message ?? ""}${failingLine}`;
+  } catch {
+    return data || "Auto-bisect result";
+  }
+}
+
 /**
  * Convert agent output to display events. With parseOutput==="false" the output
  * is shown verbatim (raw lines); otherwise it is run through the provider parser,
@@ -145,17 +157,7 @@ export function buildDisplayEventsFromMessages(
       continue;
     }
     if (msg.type === "bisect") {
-      try {
-        const parsed = JSON.parse(msg.data || "{}") as { breakingCommitSha?: string; message?: string; failingTestName?: string; status?: string };
-        events.push({
-          kind: "raw",
-          text: parsed.breakingCommitSha
-            ? `Auto-bisect result: ${parsed.breakingCommitSha} ${parsed.message ?? ""}${parsed.failingTestName ? `\nFailing test: ${parsed.failingTestName}` : ""}`
-            : `Auto-bisect result: ${parsed.status ?? "finished"}`,
-        });
-      } catch {
-        events.push({ kind: "raw", text: msg.data || "Auto-bisect result" });
-      }
+      events.push({ kind: "raw", text: buildBisectEventText(msg.data) });
       continue;
     }
     if (msg.type === "stderr") {
