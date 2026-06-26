@@ -206,12 +206,12 @@ flowchart TD
   `Access-Control-Allow-Origin: *` over the unauthenticated surface — reachable
   **cross-origin from any browser tab** the user had open (a confused-deputy path,
   distinct from the process-level "MCP/REST run unauthenticated on localhost"). **FIXED:**
-  `cors({ origin: corsOrigin })` (`server-start.ts:66`) now reflects only trusted local UI
+  `cors({ origin: corsOrigin })` (`server-start.ts:69`) now reflects only trusted local UI
   origins — loopback (`localhost`/`127.0.0.1`/`::1`, any port) and the Tauri webview
   (`tauri://localhost`, `*.tauri.localhost`); any other origin gets **no**
   `Access-Control-Allow-Origin`, so a browser blocks the cross-origin read. Policy +
   rationale in `packages/server/src/lib/cors-origin.ts` (unit-tested: `cors-origin.test.ts`).
-  The server still binds loopback by default (`server-start.ts:125`); `KANBAN_HOST` can
+  The server still binds loopback by default (`server-start.ts:129`); `KANBAN_HOST` can
   rebind it to another interface (remote/Tailscale access is served same-origin, so it
   needs no CORS entry).
 
