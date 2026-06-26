@@ -87,107 +87,145 @@ export function useBoardKeyboardShortcuts(
       },
     ];
 
-    function handleKeyDown(e: KeyboardEvent) {
+    // Each handler returns true when it consumed the event (the dispatch loop
+    // stops). Order matters and mirrors the original linear if-chain exactly.
+    // The simple, uniform single-key shortcuts live in `simpleBindings`; only
+    // these stateful / multi-branch bindings need a bespoke handler.
+    function tryCommandPalette(e: KeyboardEvent): boolean {
       if (e.key === "k" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         e.stopPropagation();
         actions.panels.setShowCommandPalette(true);
-        return;
+        return true;
       }
-      if (e.key === "/" && !e.ctrlKey && !e.metaKey) {
-        if (isTextEntryTarget(e.target)) return;
-        e.preventDefault();
-        const input = document.getElementById("search-input") as HTMLInputElement | null;
-        if (input) {
-          input.focus();
-          requestAnimationFrame(() => {
-            if (input.value === "/") {
-              input.value = "";
-              actions.setSearchQuery("");
-            }
-          });
-        }
-      }
-      if (e.key === "Escape") {
-        if (actions.panels.closeTopPanel()) return;
-        const selStore = useBoardSelectionStore.getState();
-        if (selStore.selectedIssue) { selStore.setSelectedIssue(null); return; }
-        if (state.keyboardCursorIssueIdRef.current) { actions.setKeyboardCursorIssueId(null); return; }
-        if (state.searchQuery) {
-          actions.setSearchQuery("");
-          document.getElementById("search-input")?.blur();
-        }
-      }
+      return false;
+    }
 
+    function trySearchFocus(e: KeyboardEvent): boolean {
+      if (!(e.key === "/" && !e.ctrlKey && !e.metaKey)) return false;
+      if (isTextEntryTarget(e.target)) return true;
+      e.preventDefault();
+      const input = document.getElementById("search-input") as HTMLInputElement | null;
+      if (input) {
+        input.focus();
+        requestAnimationFrame(() => {
+          if (input.value === "/") {
+            input.value = "";
+            actions.setSearchQuery("");
+          }
+        });
+      }
+      return true;
+    }
+
+    function tryEscape(e: KeyboardEvent): boolean {
+      if (e.key !== "Escape") return false;
+      if (actions.panels.closeTopPanel()) return true;
+      const selStore = useBoardSelectionStore.getState();
+      if (selStore.selectedIssue) { selStore.setSelectedIssue(null); return true; }
+      if (state.keyboardCursorIssueIdRef.current) { actions.setKeyboardCursorIssueId(null); return true; }
+      if (state.searchQuery) {
+        actions.setSearchQuery("");
+        document.getElementById("search-input")?.blur();
+      }
+      return true;
+    }
+
+    function tryNavigation(e: KeyboardEvent): boolean {
       const isArrowKey = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key);
       const isVimNavKey = ["j", "k", "h", "l"].includes(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey;
       const vimNavActive = isVimNavKey && state.keyboardCursorIssueIdRef.current !== null;
-      if ((isArrowKey && !e.ctrlKey && !e.metaKey && !e.altKey) || vimNavActive) {
-        if (isTextEntryTarget(e.target)) return;
-        const navColumns = state.viewMode === "kanban" ? [...state.activeColumns, ...(state.archiveExpanded ? state.archiveColumns : [])] : [];
-        if (navColumns.length === 0) return;
-        e.preventDefault();
-        const targetId = computeNavTarget(navColumns, state.keyboardCursorIssueIdRef.current, e.key as NavKey);
-        if (targetId) actions.setKeyboardCursorIssueId(targetId);
-        return;
-      }
+      if (!((isArrowKey && !e.ctrlKey && !e.metaKey && !e.altKey) || vimNavActive)) return false;
+      if (isTextEntryTarget(e.target)) return true;
+      const navColumns = state.viewMode === "kanban" ? [...state.activeColumns, ...(state.archiveExpanded ? state.archiveColumns : [])] : [];
+      if (navColumns.length === 0) return true;
+      e.preventDefault();
+      const targetId = computeNavTarget(navColumns, state.keyboardCursorIssueIdRef.current, e.key as NavKey);
+      if (targetId) actions.setKeyboardCursorIssueId(targetId);
+      return true;
+    }
 
-      if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (isTextEntryTarget(e.target)) return;
-        const cursorId = state.keyboardCursorIssueIdRef.current;
-        if (!cursorId) return;
-        const issue = state.columnsRef.current.flatMap((c) => c.issues).find((i) => i.id === cursorId);
-        if (issue) {
-          e.preventDefault();
-          actions.handleIssueClick(issue);
+    function tryEnter(e: KeyboardEvent): boolean {
+      if (!(e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.altKey)) return false;
+      if (isTextEntryTarget(e.target)) return true;
+      const cursorId = state.keyboardCursorIssueIdRef.current;
+      if (!cursorId) return true;
+      const issue = state.columnsRef.current.flatMap((c) => c.issues).find((i) => i.id === cursorId);
+      if (issue) {
+        e.preventDefault();
+        actions.handleIssueClick(issue);
+      }
+      return true;
+    }
+
+    function tryGChord(e: KeyboardEvent): boolean {
+      if (!(e.key === "g" && !e.ctrlKey && !e.metaKey && !e.altKey)) return false;
+      if (isTextEntryTarget(e.target)) return true;
+      e.preventDefault();
+      pendingGRef = true;
+      if (pendingGTimerRef) clearTimeout(pendingGTimerRef);
+      pendingGTimerRef = setTimeout(() => {
+        if (pendingGRef) {
+          pendingGRef = false;
+          actions.handleViewModeChange("graph");
         }
-        return;
-      }
+      }, 400);
+      return true;
+    }
 
-      if (e.key === "g" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (isTextEntryTarget(e.target)) return;
-        e.preventDefault();
-        pendingGRef = true;
-        if (pendingGTimerRef) clearTimeout(pendingGTimerRef);
-        pendingGTimerRef = setTimeout(() => {
-          if (pendingGRef) {
-            pendingGRef = false;
-            actions.handleViewModeChange("graph");
-          }
-        }, 400);
-        return;
+    function trySChord(e: KeyboardEvent): boolean {
+      if (!(e.key === "s" && pendingGRef && !e.ctrlKey && !e.metaKey && !e.altKey)) return false;
+      pendingGRef = false;
+      if (pendingGTimerRef) {
+        clearTimeout(pendingGTimerRef);
+        pendingGTimerRef = null;
       }
+      e.preventDefault();
+      actions.panels.setShowSettings(true);
+      return true;
+    }
 
-      if (e.key === "s" && pendingGRef && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        pendingGRef = false;
-        if (pendingGTimerRef) {
-          clearTimeout(pendingGTimerRef);
-          pendingGTimerRef = null;
-        }
-        e.preventDefault();
-        actions.panels.setShowSettings(true);
-        return;
-      }
-
+    function trySimpleBindings(e: KeyboardEvent): boolean {
       for (const binding of simpleBindings) {
         if (binding.match(e)) {
-          if (isTextEntryTarget(e.target)) return;
+          if (isTextEntryTarget(e.target)) return true;
           e.preventDefault();
           binding.run(e);
-          return;
+          return true;
         }
       }
+      return false;
+    }
 
-      if ((e.key === "c" || e.key === "w") && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (isTextEntryTarget(e.target)) return;
-        e.preventDefault();
-        const col = state.activeColumns[0] ?? state.filteredColumns[0] ?? state.columns[0];
-        if (!col) return;
-        if (e.key === "w") {
-          actions.setExpandedCreatePanel({ statusId: col.id, statusName: col.name, state: { startWorkspace: true } });
-        } else {
-          actions.setCreatingInColumnId(col.id);
-        }
+    function tryCreate(e: KeyboardEvent): boolean {
+      if (!((e.key === "c" || e.key === "w") && !e.ctrlKey && !e.metaKey && !e.altKey)) return false;
+      if (isTextEntryTarget(e.target)) return true;
+      e.preventDefault();
+      const col = state.activeColumns[0] ?? state.filteredColumns[0] ?? state.columns[0];
+      if (!col) return true;
+      if (e.key === "w") {
+        actions.setExpandedCreatePanel({ statusId: col.id, statusName: col.name, state: { startWorkspace: true } });
+      } else {
+        actions.setCreatingInColumnId(col.id);
+      }
+      return true;
+    }
+
+    const keyHandlers = [
+      tryCommandPalette,
+      trySearchFocus,
+      tryEscape,
+      tryNavigation,
+      tryEnter,
+      tryGChord,
+      trySChord,
+      trySimpleBindings,
+      tryCreate,
+    ];
+
+    function handleKeyDown(e: KeyboardEvent) {
+      for (const handler of keyHandlers) {
+        if (handler(e)) return;
       }
     }
 
