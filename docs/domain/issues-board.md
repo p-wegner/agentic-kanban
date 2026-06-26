@@ -1,11 +1,11 @@
 ---
 module: issues-board
 name: Issues & Board (kanban core)
-capability: The work-unit substrate — issues/tickets, projects, per-project workflow statuses, tags, dependency edges, and the aggregated board views every consumer reads.
-files: 20
+capability: The work-unit substrate — issues/tickets, projects, per-project workflow statuses, tags, milestones, dependency edges, and the aggregated board views every consumer reads.
+files: 22
 source_paths:
-  - packages/shared/src/schema/{issues,projects,project-statuses,tags,issue-dependencies}.ts
-  - packages/server/src/routes/{issues,projects,tags}.ts
+  - packages/shared/src/schema/{issues,projects,project-statuses,tags,milestones,issue-dependencies}.ts
+  - packages/server/src/routes/{issues,projects,tags,milestones}.ts
   - packages/server/src/services/{issue.service,issue-dependency.service,issue-error,board-aggregation.service,board-column.service,board-status,board-status-classifiers}.ts
   - packages/server/src/repositories/{issue,issue-number,board-status,project}.repository.ts
   - packages/server/src/lib/{issue-summary-projection,dependency-graph}.ts
@@ -41,12 +41,13 @@ Two design commitments shape it. First, the **board status is a derived view, no
 | `currentNodeId` | The workflow-graph node the issue sits on; the board status is *derived* from it when a workflow template applies (`null` = legacy status-only flow). | `schema/issues.ts:29` |
 | Dependency edge | A typed relation between two issues. 7 types; only `depends_on`/`blocked_by` block; `parent_of`/`child_of` express hierarchy; `related_to`/`duplicates`/`coupled_with` are symmetric peers. | `schema/issue-dependencies.ts:5` |
 | `coupled_with` | Symmetric edge: two issues touch the same code and are best built together. Basis for "contraction" (collapsing a coupled set into one ticket). | `schema/issue-dependencies.ts:33` |
-| Contraction | Collapsing a connected `coupled_with` component onto one *lead* issue; the lead absorbs the set's external sequential edges, members become `duplicates` of the lead and go terminal. The documented INVERSE of epic decomposition. | `dependency-graph.ts:143`, `issue.service.ts:851` |
+| Contraction | Collapsing a connected `coupled_with` component onto one *lead* issue; the lead absorbs the set's external sequential edges, members become `duplicates` of the lead and go terminal. The documented INVERSE of epic decomposition. | `dependency-graph.ts:143`, `issue.service.ts:582` |
 | Board status (read model) | The assembled per-issue overview (effective status, workspace, diff, attention/merge classification) served to the UI and MCP. | `board-status.ts:64` |
 | Attention bucket | A flag that an In-Review issue is stuck (closed workspace / no diff / zero diff) and needs a human. | `board-status-classifiers.ts:31` |
 | Merge state bucket | A flag that an idle In-Review workspace is queued for auto-merge. | `board-status-classifiers.ts:64` |
 | `skipAutoReview` | Per-issue opt-out of the automatic review gate before merge. | `schema/issues.ts:19` |
-| Drive | A record tying a parent/meta issue to an auto-decomposed batch of children (created alongside a batch). | `issue.service.ts:472` |
+| Drive | A record tying a parent/meta issue to an auto-decomposed batch of children (created alongside a batch). | `issue.service.ts:400` |
+| Milestone | A named, optionally due-dated grouping of issues toward a deliverable (per project) — the sibling of tags for collecting work. Every issue carries a nullable `milestoneId` FK; unset = no milestone. | `schema/milestones.ts:6`, `schema/issues.ts:35` |
 
 ## Domain model & invariants
 
@@ -54,17 +55,18 @@ The module owns five tables: `issues`, `projects`, `project_statuses`, `tags`/`i
 
 | Invariant / rule / policy | Why (business reason, inferred) | Enforced at |
 |---------------------------|----------------------------------|-------------|
-| An issue must have a non-empty `title`. | A titleless work unit is meaningless to the board, the agent prompt, and the monitor — rejected at the boundary so no half-formed unit enters. | `routes/issues.ts:284`, `issue.service.ts:388` |
+| An issue must have a non-empty `title`. | A titleless work unit is meaningless to the board, the agent prompt, and the monitor — rejected at the boundary so no half-formed unit enters. | `routes/issues.ts:284`, `issue.service.ts:315` |
 | Every issue belongs to exactly one project and one status (both FK-required). | An issue with no project has no repo to act on; no status has no column to render. | `schema/issues.ts:14-15` |
-| `issueNumber` is allocated `MAX(issue_number)+1` per project, retried up to 3× on the unique-index collision. | Human-friendly stable numbering; parallel creates race on the same next number, so the unique index + retry is the concurrency guard (single source of truth, was copy-pasted & drifted). | `issue-number.repository.ts:65`, `issue.service.ts:78`, `schema/issues.ts:43` |
-| A non-terminal → terminal move (Done/Cancelled) is BLOCKED while the issue has an open, non-direct, unmerged workspace. | Marking Done while a branch is still open silently strands the branch ("silent merge loss", AK-535). The guard runs BEFORE the write so a blocked move is a no-op. | `issue.service.ts:524`, `:609` (bulk) |
-| Transitioning INTO a terminal status closes any still-open workspace for the issue. | Otherwise the monitor keeps relaunching the now-pointless idle workspace every cycle (#776). Only fires on the non-terminal→terminal edge (re-saving a Done issue is a no-op). | `issue.service.ts:551` |
+| `issueNumber` is allocated `MAX(issue_number)+1` per project, retried up to 3× on the unique-index collision. | Human-friendly stable numbering; parallel creates race on the same next number, so the unique index + retry is the concurrency guard (single source of truth, was copy-pasted & drifted). | `issue-number.repository.ts:65`, `issue.service.ts:328`, `schema/issues.ts:43` |
+| A non-terminal → terminal move (Done/Cancelled) is BLOCKED while the issue has an open, non-direct, unmerged workspace. | Marking Done while a branch is still open silently strands the branch ("silent merge loss", AK-535). The guard runs BEFORE the write so a blocked move is a no-op. | `issue.service.ts:451`, `:538` (bulk) |
+| Transitioning INTO a terminal status closes any still-open workspace for the issue. | Otherwise the monitor keeps relaunching the now-pointless idle workspace every cycle (#776). Only fires on the non-terminal→terminal edge (re-saving a Done issue is a no-op). | `issue.service.ts:478` |
 | Adding a directional dependency (`depends_on`/`blocked_by`/`parent_of`/`child_of`) that would create a cycle is rejected (single-add → `CONFLICT`; batch → indexed error). | A dependency loop corrupts the board's ordering/blocking logic; cycle detection is correctness-critical and centralized so server, MCP, and batch paths can't drift. | `issue-dependency.service.ts:134` (single), `:256-259` (batch), `dependency-graph.ts:64`, `board-column.service.ts:77` |
-| Symmetric edges (`related_to`/`duplicates`/`coupled_with`) never participate in cycle checks; stored `(from,to)` order is meaningless. | They model undirected affinity, not ordering, so a "loop" is not a contradiction. | `schema/issue-dependencies.ts:33`, `issue.service.ts:173` |
+| Symmetric edges (`related_to`/`duplicates`/`coupled_with`) never participate in cycle checks; stored `(from,to)` order is meaningless. | They model undirected affinity, not ordering, so a "loop" is not a contradiction. | `schema/issue-dependencies.ts:33` (`SYMMETRIC_DEPENDENCY_TYPES`), `issue-dependency.service.ts:24` (cycle-relevant types exclude the symmetric peers) |
 | An issue cannot depend on itself; the dependency type must be one of the 7 valid types; a dependency cannot cross projects; a duplicate edge `(issue,dependsOn,type)` is rejected. | Self/invalid-type/cross-project/duplicate edges are nonsensical for a per-project backlog; enforced in the dependency sub-service (typed `IssueError` with HTTP-ish codes) and by a DB unique index. | `issue-dependency.service.ts:114` (self), `:120` (type), `:128` (cross-project), `:159` (duplicate), `schema/issue-dependencies.ts:46` |
 | An issue is "blocked" iff it has a `depends_on`/`blocked_by` edge to an unresolved issue; an absent blocker counts as blocking. "Resolved" = `isResolvedDependencyStatusView` (`status-view.ts:58-60`), i.e. the blocker's status is in `LEGACY_RESOLVED_DEPENDENCY_STATUS_NAMES = {Done, AI Reviewed, Cancelled}` (`status-view.ts:2`) — a WIDER set than terminal, so an AI-Reviewed blocker already unblocks dependents. | Blocked issues must not be auto-started by the monitor; a missing blocker is treated conservatively as still-blocking. | `board-column.service.ts:39-43`, `status-view.ts:58-60` |
-| Bulk update/contract refuse to operate across more than one project. | The board is per-project; a cross-project batch has no coherent meaning and would corrupt counts. | `issue.service.ts:596,878` |
-| Contraction requires the supplied `issueIds` to EXACTLY equal the lead's `coupled_with` connected component, with no open workspaces. | Partial contraction would orphan edges or drop in-flight work; the component must be whole and quiescent before collapse. | `issue.service.ts:891,898,907` |
+| Bulk update/contract refuse to operate across more than one project. | The board is per-project; a cross-project batch has no coherent meaning and would corrupt counts. | `issue.service.ts:524,610` |
+| Contraction requires the supplied `issueIds` to EXACTLY equal the lead's `coupled_with` connected component, with no open workspaces. | Partial contraction would orphan edges or drop in-flight work; the component must be whole and quiescent before collapse. | `issue.service.ts:621,629,639` |
+| Contraction requires the project to have a `Cancelled` or `Done` status; it resolves the absorb target as `Cancelled` (preferred) `?? Done` and REJECTS (`BAD_REQUEST`, "Project must have a Cancelled or Done status to absorb issues") if neither exists. Absorbed non-lead members are moved to that resolved terminal status. | A contraction must land its absorbed members in a real terminal column; without one there is nowhere coherent to retire them, so the whole operation is refused rather than leaving them mid-flow. | `issue.service.ts:652-657`, `:680` |
 | `externalUrl` must be absent or a well-formed http(s) URL (no `javascript:`/`data:`). | The URL is opened in a new browser tab; rejecting other schemes prevents smuggling executable payloads. | `issue.service.ts:114` |
 | `getBoardStatus` (server board status + MCP) excludes Done/Cancelled issues unless `includeClosed`. | The board is a view of *active* work; closed issues are history, not the working set. Takes ONLY `includeClosed` (no `includeArchived` param); filters on the narrow `{Done, Cancelled}` set. | `board-status.ts:34-38,98` |
 | `GET /:id/board` → `projectService.getBoard` excludes the Archived column unless `includeArchived`. | A separate read model with its own flag — takes ONLY `includeArchived` (no `includeClosed`); the query string toggles whether the Archived column is returned. | `routes/projects.ts:291,315` |
@@ -89,7 +91,7 @@ stateDiagram-v2
   note right of InReview
     BLOCKED transition to Done/Cancelled
     while an open unmerged workspace exists
-    (issue.service.ts:524)
+    (issue.service.ts:451)
   end note
 ```
 
@@ -99,10 +101,10 @@ The legal column set is per-project and reorderable; the diagram shows the seede
 Trigger: `getBoardStatus` (server board endpoint, MCP `get_board_status`). Steps (`board-status.ts:64`): resolve project (active-project pref if none given) → load statuses + terminal set → load issues (LEFT JOIN workflow node) → filter terminal unless `includeClosed` → load workspaces, sessions, workflow-node statuses → for each issue pick the main workspace by status priority then recency → assemble entry → enrich with diff stats / last output / conflict cache (60s TTL) → **classify** `mergeState` then `attention` purely. Outcome: a `BoardStatusResponse` with per-issue overview + totals. Failure: unknown project → `NotFoundError`; per-issue enrichment failures degrade that field.
 
 ### Batch create with declared coupling
-Trigger: `POST /api/issues/batch` (`routes/issues.ts:157`). The generating agent (Butler/REST) can DECLARE dependency edges by 0-based index alongside the issues; edges are validated (range, no self, no dup, no directional cycle) and inserted in the SAME transaction as the issues (`issue.service.ts:395,442`). Outcome: the monitor can never observe a coupled/blocked ticket before its edge exists (#765/#918). Optional `parentIssueId` wires `child_of` and `driveTarget` creates a Drive.
+Trigger: `POST /api/issues/batch` (`routes/issues.ts:157`). The generating agent (Butler/REST) can DECLARE dependency edges by 0-based index alongside the issues; edges are validated (range, no self, no dup, no directional cycle) and inserted in the SAME transaction as the issues (`issue.service.ts:322,369`). Outcome: the monitor can never observe a coupled/blocked ticket before its edge exists (#765/#918). Optional `parentIssueId` wires `child_of` and `driveTarget` creates a Drive.
 
 ### Contraction (inverse of decomposition)
-Trigger: `POST /api/issues/contract-coupled` (`routes/issues.ts:204`). `planContraction` (`dependency-graph.ts:143`) computes the atomic edge mutations: repoint every external `depends_on`/`blocked_by` edge touching a non-lead member onto the lead (dedup, no self-edges), drop the internal `coupled_with` edges. Then members become `duplicates` of the lead, get a "Absorbed into #N" pointer appended, and are moved to Cancelled/Done (`issue.service.ts:928-950`). Outcome: a coupled set collapses into one buildable ticket without dangling edges.
+Trigger: `POST /api/issues/contract-coupled` (`routes/issues.ts:204`). `planContraction` (`dependency-graph.ts:143`) computes the atomic edge mutations: repoint every external `depends_on`/`blocked_by` edge touching a non-lead member onto the lead (dedup, no self-edges), drop the internal `coupled_with` edges. Then members become `duplicates` of the lead, get a "Absorbed into #N" pointer appended, and are moved to the resolved terminal status (`Cancelled` preferred, else `Done`) (`issue.service.ts:659-681`). Outcome: a coupled set collapses into one buildable ticket without dangling edges.
 
 ## Entry points
 
@@ -119,13 +121,14 @@ Trigger: `POST /api/issues/contract-coupled` (`routes/issues.ts:204`). `planCont
 | `GET/POST/PATCH/DELETE /api/projects/:id/statuses` | API | Configure the per-project workflow columns. | `routes/projects.ts:167-198` |
 | `POST /api/projects`, `/create`, `PATCH/DELETE /:id`, archive/unarchive | API | Register/create/update/archive a managed repo. | `routes/projects.ts:80-141` |
 | `GET/POST/PATCH/DELETE /api/tags`, `/tags/merge` | API | Manage tags + merge duplicates. | `routes/tags.ts:11-47` |
+| `GET/POST/PUT/DELETE /api/projects/:id/milestones`, `/milestones/summary` | API | Group issues toward a deliverable: list / progress summary / create / rename+re-date / delete. | `routes/milestones.ts:11-51` |
 | `getBoardStatus(...)` | function (server + MCP) | Assemble the classified board overview. | `board-status.ts:64` |
 
 ## Logic-bearing code (where the real decisions live)
 
 | File / function | What decision/logic it holds | `file:line` |
 |-----------------|------------------------------|-------------|
-| `issue.service.ts` (`updateIssue`, `createIssuesBatch`, `contractCoupledIssues`) | The terminal-move guard, workspace auto-close, per-issue-number retry, same-transaction edge seeding, contraction orchestration — the bulk of the write-side business rules. It instantiates the dependency sub-service (`:204`) and delegates all edge ops to it. | `issue.service.ts:484,367,851,204` |
+| `issue.service.ts` (`updateIssue`, `createIssuesBatch`, `contractCoupledIssues`) | The terminal-move guard, workspace auto-close, per-issue-number retry, same-transaction edge seeding, contraction orchestration — the bulk of the write-side business rules. It instantiates the dependency sub-service (`:204`) and delegates all edge ops to it. | `issue.service.ts:484,367,582,204` |
 | `issue-dependency.service.ts` (`createIssueDependencyService`, `validateBatchDependencies`) + `issue-error.ts` | The dependency-edge command core (extracted from `issue.service`): `addDependency` runs the full guard ladder (self → valid-type → cross-project → cycle via `reaches()` → duplicate), `updateDependenciesBatch` validates a whole edge set, `validateBatchDependencies` validates create-time edges. Failures are typed `IssueError`s carrying a status code (`BAD_REQUEST`/`NOT_FOUND`/`CONFLICT`) so route + MCP map them uniformly. Max CC 22 — the cycle/guard knot. | `issue-dependency.service.ts:102,34`, `issue-error.ts:8` |
 | `dependency-graph.ts` (shared) | Cycle detection (`wouldCreateCycle`/`hasPath`), `coupled_with` component resolution, and `planContraction` edge-inheritance — correctness-critical, centralized so 3 call sites can't drift. | `dependency-graph.ts:64,88,143` |
 | `board-status.ts` (`getBoardStatus`, `selectMainWorkspace`) | How an issue's *effective* column is derived (workspace node > issue status), and how the whole board overview is assembled and totaled. | `board-status.ts:45,64` |
@@ -137,9 +140,9 @@ Trigger: `POST /api/issues/contract-coupled` (`routes/issues.ts:204`). `planCont
 
 ## Dependencies & bounded-context relationships
 
-- **workflow-engine** (Shared Kernel / Customer-Supplier): issue status is co-defined with the workflow graph. The module calls `syncCurrentNodeToStatus` on every status write (`issue.service.ts:341,538`) and derives effective status from `workflowNodes.statusName` (`board-status.ts:122`). `currentNodeId`/`workflowTemplateId` on the issue row are the join points. This module is the *supplier* of the issue/status rows the workflow engine moves.
+- **workflow-engine** (Shared Kernel / Customer-Supplier): issue status is co-defined with the workflow graph. The module calls `syncCurrentNodeToStatus` on every status write (`issue.service.ts:465,557`) and derives effective status from `workflowNodes.statusName` (`board-status.ts:122`). `currentNodeId`/`workflowTemplateId` on the issue row are the join points. This module is the *supplier* of the issue/status rows the workflow engine moves.
 - **persistence-schema** (Shared Kernel): owns the `issues`/`projects`/`project_statuses`/`tags`/`issue_dependencies` tables; internal type = Drizzle `$inferSelect`; wire DTOs are the published language to the client.
-- **workspaces** (Customer-Supplier, this module is supplier-of-issues / consumer-of-workspace-state): the board read model reads workspace status, diff cache, conflict cache, sessions to compute the per-issue overview (`board-status.ts:114`, `issue.repository.ts:454`). The terminal-move guard depends on `findOpenUnmergedWorkspace` (`issue.service.ts:526`). Note the deliberate avoidance of importing the workspace service to dodge an import cycle — status writes do a direct DB close instead (`issue.service.ts:548`).
+- **workspaces** (Customer-Supplier, this module is supplier-of-issues / consumer-of-workspace-state): the board read model reads workspace status, diff cache, conflict cache, sessions to compute the per-issue overview (`board-status.ts:114`, `issue.repository.ts:454`). The terminal-move guard depends on `findOpenUnmergedWorkspace` (`issue.service.ts:452`). Note the deliberate avoidance of importing the workspace service to dodge an import cycle — status writes do a direct DB close instead (`issue.service.ts:487`).
 - **Hidden / co-change couplings**: `board-aggregation.service.ts` is a thin facade re-exporting `workspace-summary`, `session-stats`, `board-column`, `diff-stats` sub-services (`board-aggregation.service.ts:1`) — import the sub-services directly. The MCP server keeps a *mirror* allocator (`db-utils.ts#nextIssueNumber`) and consumes the same shared `dependency-graph`/`board-status-classifiers` leaves; these are co-change points enforced by gate tests (`issue-number-single-source.test.ts`, the classifier centralization comment at `board-status-classifiers.ts:9`).
 - **Downstream consumers**: the React board, the in-process monitor/Conductor (reads blocked-map + attention buckets to decide auto-starts), analytics routes (burndown/CFD/throughput/lead-time all read issue create/status-change timestamps), and the Butler.
 
@@ -161,7 +164,7 @@ _Brief — structure is well-formed (layered routes → services → repositorie
 
 - **Two issue-create paths with subtly different semantics.** `issue.service.createIssue` (REST/MCP, resolves workflow template + currentNode) and `issue.repository.createIssueWithNextNumber`/`createSubIssueWithParentLink` (CLI, deliberately skip workflow resolution) both allocate numbers but only the latter pair note they are "NOT a transaction" for the MAX-read+insert (`issue.repository.ts:711,776`). The 3× retry papers over the race; under heavy parallel CLI creates a number could still collide after 3 tries → `CONFLICT`. **Inferred, unverified**: whether 3 attempts is empirically sufficient.
 - **Terminal-status detection is partly string-based.** `terminalStatusIds` is built by matching status names `"Done"`/`"Cancelled"` (`board-status.ts:91`); a project that renames or localizes these columns would lose terminal semantics. The workflow-node path (`isTerminalStatusView`) is more robust but the legacy fallback is name-coupled. Likely intentional given the seeded defaults, but a real constraint on custom workflows.
-- **`archiveDoneIssues` requires a status literally named "Archived"** (`issue.service.ts:1162`) and Done detection via `getDoneStatusIds` — same naming coupling; a project without an "Archived" column gets a `NOT_FOUND`.
+- **`archiveDoneIssues` requires a status literally named "Archived"** (`issue.service.ts:888`) and Done detection via `getDoneStatusIds` — same naming coupling; a project without an "Archived" column gets a `NOT_FOUND`.
 - **Attention classifier only covers In-Review.** `classifyBoardStatusIssueAttention` returns a bucket only for `statusName === "In Review"` (`board-status-classifiers.ts:34`); a stuck In-Progress issue (e.g. dead agent) is not surfaced here — that detection lives elsewhere (workspace risk / monitor). Worth knowing the board's "attention" flag is review-stage-only.
 - **`board-aggregation.service.ts` is a facade only** — the header tells callers to import sub-services directly (`board-aggregation.service.ts:1`). It is named as an entry point but holds no logic; the real board read model is `board-status.ts` + `project.service.getBoard` (the latter outside this module's file set).
-- **Cross-project guard relies on row-count equality**, not explicit per-row checks, in a few places (`issue.service.ts:591` bulk-update: `rows.length !== new Set(ids).size`). Correct, but a deleted-mid-request issue surfaces as a generic NOT_FOUND rather than naming the missing id.
+- **Cross-project guard relies on row-count equality**, not explicit per-row checks, in a few places (`issue.service.ts:518` bulk-update: `rows.length !== new Set(ids).size`). Correct, but a deleted-mid-request issue surfaces as a generic NOT_FOUND rather than naming the missing id.
