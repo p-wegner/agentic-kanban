@@ -30,6 +30,57 @@ function handleCodexUsageLimit(obj: Record<string, unknown>, result: ParsedStrea
   }
 }
 
+function handleCodexCommandExecution(
+  item: Record<string, unknown>,
+  type: unknown,
+  result: ParsedStreamEvent,
+  id: string,
+  context: ParseContext,
+): void {
+  const command = stringValue(item.command) ?? "";
+  if ((type === "item.started" || item.status === "in_progress") && command) {
+    result.toolActivity = { name: "shell", input: { command }, toolUseId: id || undefined };
+    registerToolName(context, id, "shell_command");
+    pushDisplay(result, { kind: "tool_use", id, name: "shell_command", input: command, inputParsed: { command } });
+  }
+  if (type === "item.completed" || item.status === "completed") {
+    const output = stringValue(item.aggregated_output) ?? "";
+    result.toolResult = { toolUseId: id };
+    if (output) {
+      pushDisplay(result, {
+        kind: "tool_result",
+        toolName: "shell_command",
+        toolUseId: id,
+        output,
+        isError: item.exit_code !== null && item.exit_code !== 0,
+      });
+    }
+  }
+}
+
+function handleCodexMcpToolCall(
+  item: Record<string, unknown>,
+  type: unknown,
+  result: ParsedStreamEvent,
+  id: string,
+  context: ParseContext,
+): void {
+  const name = stringValue(item.name) ?? "mcp_tool";
+  const args = objectValue(item.args);
+  if ((type === "item.started" || item.status === "in_progress")) {
+    result.toolActivity = { name, input: args, toolUseId: id || undefined };
+    registerToolName(context, id, name);
+    pushDisplay(result, { kind: "tool_use", id, name, input: JSON.stringify(args, null, 2), inputParsed: args });
+  }
+  if (type === "item.completed" || item.status === "completed") {
+    const resultText = stringValue(item.result);
+    result.toolResult = { toolUseId: id, ...(resultText ? { agentResultText: resultText } : {}) };
+    if (resultText) {
+      pushDisplay(result, { kind: "tool_result", toolName: name, toolUseId: id, output: resultText, isError: false });
+    }
+  }
+}
+
 function handleCodexItem(obj: Record<string, unknown>, context: ParseContext, result: ParsedStreamEvent): void {
   const type = obj.type;
   const item = objectValue(obj.item);
@@ -45,40 +96,9 @@ function handleCodexItem(obj: Record<string, unknown>, context: ParseContext, re
     const text = stringValue(item.text);
     if (text) pushDisplay(result, { kind: "thinking", text });
   } else if (itemType === "command_execution") {
-    const command = stringValue(item.command) ?? "";
-    if ((type === "item.started" || item.status === "in_progress") && command) {
-      result.toolActivity = { name: "shell", input: { command }, toolUseId: id || undefined };
-      registerToolName(context, id, "shell_command");
-      pushDisplay(result, { kind: "tool_use", id, name: "shell_command", input: command, inputParsed: { command } });
-    }
-    if (type === "item.completed" || item.status === "completed") {
-      const output = stringValue(item.aggregated_output) ?? "";
-      result.toolResult = { toolUseId: id };
-      if (output) {
-        pushDisplay(result, {
-          kind: "tool_result",
-          toolName: "shell_command",
-          toolUseId: id,
-          output,
-          isError: item.exit_code !== null && item.exit_code !== 0,
-        });
-      }
-    }
+    handleCodexCommandExecution(item, type, result, id, context);
   } else if (itemType === "mcp_tool_call") {
-    const name = stringValue(item.name) ?? "mcp_tool";
-    const args = objectValue(item.args);
-    if ((type === "item.started" || item.status === "in_progress")) {
-      result.toolActivity = { name, input: args, toolUseId: id || undefined };
-      registerToolName(context, id, name);
-      pushDisplay(result, { kind: "tool_use", id, name, input: JSON.stringify(args, null, 2), inputParsed: args });
-    }
-    if (type === "item.completed" || item.status === "completed") {
-      const resultText = stringValue(item.result);
-      result.toolResult = { toolUseId: id, ...(resultText ? { agentResultText: resultText } : {}) };
-      if (resultText) {
-        pushDisplay(result, { kind: "tool_result", toolName: name, toolUseId: id, output: resultText, isError: false });
-      }
-    }
+    handleCodexMcpToolCall(item, type, result, id, context);
   } else if (itemType === "file_change") {
     const path = stringValue(item.path) ?? "";
     pushDisplay(result, { kind: "tool_use", id, name: "file_change", input: path, inputParsed: { path } });
