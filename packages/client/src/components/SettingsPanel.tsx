@@ -122,7 +122,10 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
     setSavingProjectProvider(true);
     try {
       const key = settingsKey(activeProjectId);
-      const rawCurrent = settings[key];
+      // `board_strategy_<projectId>` is a dynamic per-project key, not a static
+      // member of the Settings type — index it the same way the verify_script_<id>
+      // save path does.
+      const rawCurrent = settings[key as keyof Settings];
       const currentConfig = normalizeConfig(rawCurrent ? JSON.parse(rawCurrent) : null);
       const nextConfig = provider
         ? setProviderFillPolicy(currentConfig, provider, profileName)
