@@ -2,7 +2,7 @@
 module: agent-providers
 name: Agent Providers (Claude / Codex / Copilot / Pi)
 capability: A provider-neutral seam that lets the board drive heterogeneous AI coding CLIs — building each one's spawn command/flags/env, validating its auth and version, and parsing its output into one event model.
-files: 13
+files: 18
 source_paths:
   - packages/server/src/services/agent-provider/
   - packages/server/src/services/agent-provider.ts
@@ -10,6 +10,11 @@ source_paths:
   - packages/server/src/services/agent-profile-health.service.ts
   - packages/server/src/services/claude-login.service.ts
   - packages/server/src/services/codex-login.service.ts
+  - packages/server/src/startup/exit-workflow.ts
+  - packages/server/src/startup/rate-limit-exit-decision.ts
+  - packages/server/src/services/codex-license-ring.ts
+  - packages/server/src/services/claude-subscription-ring.ts
+  - packages/server/src/services/auth-rotation-ring.ts
   - packages/shared/src/lib/provider-models.ts
 entry_points:
   - packages/server/src/services/agent-provider/registry.ts:33 — buildAgentLaunchConfig (the spawn-config factory; called from agent.service.ts launch path)
@@ -63,7 +68,7 @@ external tools.
 | AgentLaunchConfig | The provider-neutral spawn recipe: `command`, `args`, `useShell`, `env`, plus stdin-handling hints. The module's primary output. | `agent-provider/types.ts:18` |
 | One-shot text mode (`oneShotText`) | A non-interactive, non-streaming launch for internal AI utility calls (issue enhancement, voice capture, stack detection) that only need the model's final plain-text answer. | `agent-provider/types.ts:59` |
 | Plan mode (`planMode`) | A read-only "produce an implementation plan, change nothing" launch. Each provider enforces it differently (flag vs prompt-prefix vs denied tools). | `claude-provider.ts:113`, `codex-provider.ts:73`, `copilot-provider.ts:90` |
-| Provider session id | The CLI's own resume handle (Claude `--resume`, Codex `resume`, Pi `--session`); stored in the legacy `sessions.claudeSessionId` column for all providers. | `agent-provider/types.ts:36`, server CLAUDE.md "Session resume chain" |
+| Provider session id | The CLI's own resume handle (Claude `--resume`, Codex `resume`, Pi `--session`); stored in the `sessions.providerSessionId` column for all providers (the slot was historically named after Claude). | `agent-provider/types.ts:36`, `shared/src/schema/sessions.ts:14`, read at `session-manager/session-lifecycle.ts:273-287` |
 | Preflight | A pre-launch verdict (`ok`/`warning`/`error`) over a (provider, profile): auth present? binary on PATH? flags buildable? version in range? | `agent-profile-health.service.ts:187` |
 | License ring / subscription ring | A rotation set of OAuth credential *directories* (Codex `CODEX_HOME`, Claude `CLAUDE_CONFIG_DIR`) — auth is a directory with `auth.json`/`.credentials.json`, not just an env var. | `agent-profile-health.service.ts:203`, `:207` |
 | Custom endpoint profile | A Claude profile whose `settings.json` sets `ANTHROPIC_BASE_URL` (e.g. z.ai/glm) — routes to a non-Anthropic endpoint, so `--model` must be suppressed. | `helpers.ts:132` |
@@ -94,6 +99,9 @@ plus its inferred reason.
 | OAuth login spawns a REAL, visible terminal window (`windowsHide:false`). | The OAuth callback server needs a foreground process; a hidden/background spawn tears the callback down and cancels login. | `claude-login.service.ts:20-31`, `codex-login.service.ts:19-29` |
 | A VALID-JSON-but-unrecognized stream line is logged loudly via `parseStreamEventObserved`. | A silent swallow caused the recurring "0 tokens" misdiagnosis (#898); a CLI wire-format rename must surface, not drop events. | `types.ts:90-96` |
 | `provider-exit-behavior` is deliberately NOT re-exported from the barrel. | It transitively pulls the DB/`node:fs` layer; barrel re-export would drag that graph into client-reachable consumers and break node:fs-mocking tests. | `agent-provider/index.ts:9-15` |
+| On a usage/rate-limit session exit, the exhausted profile is COOLED and the provider's credential ring rotated to the next usable profile *before* any relaunch decision. | A profile's quota is exhausted, not its work — rotating to a fresh credential keeps the ticket moving instead of stalling the board; cooling prevents immediately re-picking the dead account. | `exit-workflow.ts:382-387,293-305`, ring services `{codex-license,claude-subscription,auth-rotation}-ring.ts` |
+| A worktree is auto-relaunched on the new profile ONLY if the ring actually rotated to a fresh profile AND the exited session was a *builder* (`isBuilderSession`); review / fix-and-merge / learning sessions are NOT relaunched. | Only a builder owns in-progress worktree work to continue; the special sessions inherit the switched pref and are recovered by their own reconcilers, so relaunching them would double-run. | `rate-limit-exit-decision.ts:27-33,56-62`, `exit-workflow.ts:306-326` |
+| If rotation did not occur (no fresh profile) or the session is non-builder, the workspace is left in the `blocked` terminal with a human-readable reason — never silently relaunched. | A blocked workspace must be a visible, explained dead-end (the #696–699 / #779 rotation-outage class), not an invisible no-op. | `exit-workflow.ts:333-339`, `rate-limit-exit-decision.ts:64-74` |
 
 ## Key workflows / use cases
 
@@ -169,6 +177,42 @@ env, returning the equivalent manual command for a UI copy-button. Fire-and-forg
 launch failure is non-fatal because the manual command always works
 (`codex-login.service.ts:15-39`, `claude-login.service.ts:16-40`).
 
+### 5. Rate-limit rotation-and-resume (credential-ring engine)
+
+Trigger: a session exits and its persisted stats carry a provider usage-limit
+signature (`isCodexUsageLimitStats` / `isClaudeUsageLimitStats`). The session-exit
+dispatcher matches a `USAGE_LIMIT_PROVIDERS` config and routes to the shared
+`handleUsageLimitExit` (`exit-workflow.ts:382-387`) — one implementation
+parameterized over what differs between Codex (license) and Claude (subscription).
+
+That handler (1) reads the retry-after hint, (2) calls the provider's ring
+`rotate(…)` (`rotateCodexLicense` / `rotateClaudeSubscription`, both thin wrappers
+over the generic `auth-rotation-ring.ts` core), which **stamps a cooldown on the
+exhausted profile and switches the active-profile pref to the next usable one**,
+and (3) asks the pure `decideRateLimitExit(rotation, isBuilderSession(…))` for the
+verdict. Only when the ring *actually rotated* to a fresh profile AND the exited
+session is a builder does it set the workspace `active` and relaunch the SAME
+worktree on the new profile with a `buildRotationContinuationPrompt`
+(`exit-workflow.ts:192-208`) that tells the agent its partial work is already there.
+Otherwise — no fresh profile, or a review/fix/learning session — the workspace is
+set to `blocked` with `formatRateLimitBlockedReason` and left for a manual relaunch.
+
+```mermaid
+stateDiagram-v2
+    [*] --> RateLimitExit: stats match usage-limit signature
+    RateLimitExit --> Rotate: cool exhausted profile + switch pref
+    Rotate --> Decide: decideRateLimitExit(rotation, builder)
+    Decide --> Relaunch: rotated to fresh profile AND builder session
+    Decide --> Blocked: no fresh profile OR non-builder session
+    Relaunch --> [*]: worktree resumes on new profile (continuation prompt)
+    Blocked --> [*]: manual relaunch only (no auto-recovery)
+```
+
+The pure decision core lives in `rate-limit-exit-decision.ts` so the
+builder-vs-special and relaunch-vs-block calls are table-testable in isolation from
+the DB reads, ring rotation, and board broadcasts (the #696–699 / #779 outage class
+was two drifting inline copies of exactly this logic).
+
 ## Entry points
 
 | Entry point | Kind | What it lets a caller do | `file:line` |
@@ -240,6 +284,7 @@ Structure is well-formed (the C9 bounded context), so only a brief map:
 | CLI version probe & range policy | `agent-cli-version.service.ts` | service |
 | Profile preflight / health dashboard | `agent-profile-health.service.ts` | service |
 | OAuth login bootstrap | `{claude,codex}-login.service.ts` | service |
+| Rate-limit rotation-and-resume engine | `startup/exit-workflow.ts` (`handleUsageLimitExit`) + pure `startup/rate-limit-exit-decision.ts`, over the credential rings `services/{codex-license,claude-subscription}-ring.ts` (generic core `auth-rotation-ring.ts`) | startup / service |
 | Model option lists + mismatch guard | `shared/src/lib/provider-models.ts` | shared (pure) |
 
 ## Risks, gaps & open questions
@@ -258,9 +303,25 @@ Structure is well-formed (the C9 bounded context), so only a brief map:
   branch (e.g. `claude-provider.ts:74-82`). These are the test-double's contract, not a
   real CLI's; they are documented here only so a maintainer doesn't mistake them for real
   provider flags.
-- **Provider session id stored in `claudeSessionId` for ALL providers** (`types.ts:36`,
-  server CLAUDE.md). A deliberate cross-provider overloading of a legacy column — correct
-  per the documented decision, but a naming trap for newcomers.
+- **Provider session id stored in `sessions.providerSessionId` for ALL providers**
+  (`types.ts:36`, `shared/src/schema/sessions.ts:14`, read at
+  `session-manager/session-lifecycle.ts:273-287`). One shared resume-id slot across
+  providers — the slot was historically named after Claude (server CLAUDE.md's "Session
+  resume chain" prose still calls it `claudeSessionId`), but the actual schema column is
+  `provider_session_id`. Correct per the documented decision; the stale prose name is the
+  only trap for newcomers.
+- **A rate-limit `blocked` workspace is NOT auto-resumed on a rotated profile.** When
+  rotation can't rotate (every profile cooling) or the exited session was non-builder, the
+  workspace is left `blocked` (`exit-workflow.ts:333-339`) and `formatRateLimitBlockedReason`
+  states the monitor will not relaunch it. The in-process monitor explicitly *skips* blocked
+  workspaces ("Needs attention", `monitor-cycle.ts:446-448`), so nothing picks the ticket
+  back up on the new credential — resuming the work is a **manual** relaunch. The only
+  automatic exits from `blocked` are unrelated to rotation: the completion-state reconciler
+  nudges a blocked workspace to `idle` *only if its last session committed changes*
+  (`completion-state-reconciler.ts:105-114`, the #712 silent-`propose_transition` path), and
+  the terminal reaper *closes* a blocked workspace whose branch already landed
+  (`terminal-workspace-reaper.ts:10`). Neither relaunches on the rotated profile. *Verified
+  against the blocked-state write + all `blocked`-status readers.*
 - **Pi auth env list breadth** (`PI_API_KEY_ENV_KEYS`, `agent-profile-health.service.ts:53-61`)
   is a heuristic — presence of any one key is treated as "auth configured", which can pass
   preflight even if the key is for a provider Pi isn't routing to. *Inferred, unverified.*
