@@ -202,17 +202,18 @@ flowchart TD
 - **Quality metrics / analytics, drive-obstacles, voice-capture, scheduled-runs,
   milestones, showdowns** — a long tail of ~40 additional services/repositories,
   peripheral to the central loop; deferred-with-reason in `_coverage.md`, document on demand.
-- **REST trust boundary** — the local REST API mounts `cors()` with no origin allowlist
-  (`server-start.ts:65`, `app.use("/api/*", cors())`), so every response carries
-  `Access-Control-Allow-Origin: *`. This is a *distinct, broader* exposure than the
-  documented process-level "MCP/REST run unauthenticated on localhost": the wildcard
-  makes the unauthenticated surface reachable **cross-origin from any browser tab** the
-  user has open (a confused-deputy path), not just from local processes. By default the
-  server binds loopback (`server-start.ts:125`, `hostname || process.env.KANBAN_HOST ||
-  "127.0.0.1"`), but `KANBAN_HOST` can rebind it to any interface — widening the boundary
-  further. Documented here as a known trust boundary; **tightening `cors()` to a
-  localhost-origin allowlist is a recommended code follow-up** (the doc states the
-  boundary, the code fix is tracked separately).
+- **REST trust boundary** — the local REST API previously mounted bare `cors()`, emitting
+  `Access-Control-Allow-Origin: *` over the unauthenticated surface — reachable
+  **cross-origin from any browser tab** the user had open (a confused-deputy path,
+  distinct from the process-level "MCP/REST run unauthenticated on localhost"). **FIXED:**
+  `cors({ origin: corsOrigin })` (`server-start.ts:66`) now reflects only trusted local UI
+  origins — loopback (`localhost`/`127.0.0.1`/`::1`, any port) and the Tauri webview
+  (`tauri://localhost`, `*.tauri.localhost`); any other origin gets **no**
+  `Access-Control-Allow-Origin`, so a browser blocks the cross-origin read. Policy +
+  rationale in `packages/server/src/lib/cors-origin.ts` (unit-tested: `cors-origin.test.ts`).
+  The server still binds loopback by default (`server-start.ts:125`); `KANBAN_HOST` can
+  rebind it to another interface (remote/Tailscale access is served same-origin, so it
+  needs no CORS entry).
 
 ### Operations: incident → recovery
 The module docs above carry the *prevention* guards; this is the *triage* table for the
