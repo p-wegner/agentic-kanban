@@ -1,8 +1,9 @@
 ---
 repo: agentic-kanban
-analyzed_sha: 2cea8d3e
+analyzed_sha: 29e016dc
 gate: PASS
 scope: core-domain (13 modules); remaining capabilities explicitly deferred with reasons
+note: "Re-run against a HEAD-current code-metrics analysis (1688 files). issue-dependency.service.ts + issue-error.ts (extracted post-original-analysis) folded into issues-board; the dependency-guard citations were re-anchored from the old issue.service.ts lines to the new sub-service. Tooling roots (scripts/, .claude/) and packages/desktop deferred as non-product. Gate PASS at blast-threshold 120."
 ---
 
 # Coverage & completeness report (Phase 4a)

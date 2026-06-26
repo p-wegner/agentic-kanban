@@ -1,6 +1,6 @@
 {
   "repo": "agentic-kanban",
-  "analyzed_sha": "2cea8d3e",
+  "analyzed_sha": "29e016dc",
   "generated_from": "code-metrics-out/structure.md (modularity 0.81, entanglement 0.01) + directory reconciliation",
   "structure_verdict": "Strong modularity (Q=0.81) but Louvain auto-resolution clusters by PACKAGE (C1=687 server files, C2=398 client files), not by capability. So clusters are NOT usable as doc units directly; we sub-divide the giant server/client clusters by sub-capability (directory + domain inference). Most modules are well-formed; a few capabilities (monitor/drive, review/merge) are smeared across services/ + startup/ and get File Topology sections.",
   "modules": [
@@ -27,7 +27,9 @@
         "packages/server/src/repositories/board-status.repository.ts",
         "packages/server/src/repositories/project.repository.ts",
         "packages/server/src/lib/issue-summary-projection.ts",
-        "packages/server/src/lib/dependency-graph.ts"
+        "packages/server/src/lib/dependency-graph.ts",
+        "packages/server/src/services/issue-dependency.service.ts",
+        "packages/server/src/services/issue-error.ts"
       ],
       "entry_points": [
         "packages/server/src/routes/issues.ts \u2014 REST CRUD for issues/move",
@@ -666,6 +668,26 @@
     {
       "path": "packages/server/src/services/preflight-check.ts",
       "reason": "NEW MODULE queued: project-registration/preflight"
+    },
+    {
+      "path": "packages/server/src/services/project-registration.ts",
+      "reason": "NEW MODULE queued: project-registration"
+    },
+    {
+      "path": "packages/server/src/services/stale-dev-processes.ts",
+      "reason": "NEW MODULE queued: server bootstrap / process lifecycle"
+    },
+    {
+      "path": "scripts/",
+      "reason": "NON-PRODUCT: root dev/build/board-monitor tooling (ops, not domain)"
+    },
+    {
+      "path": ".claude/",
+      "reason": "NON-PRODUCT: agent hooks/skills tooling (ops, not domain)"
+    },
+    {
+      "path": "packages/desktop",
+      "reason": "NON-PRODUCT-DOMAIN: Tauri desktop shell wiring"
     }
   ]
 }
