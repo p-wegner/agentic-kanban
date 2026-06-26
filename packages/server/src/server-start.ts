@@ -4,6 +4,7 @@ import { serve } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { corsOrigin } from "./lib/cors-origin.js";
 import { db } from "./db/index.js";
 import * as agentService from "./services/agent.service.js";
 import { createBoardEvents } from "./services/board-events.js";
@@ -62,7 +63,10 @@ export async function startServer(port?: number, hostname?: string) {
   replaceStartupTimerCleanup(cleanupCallbacks);
 
   const app = new Hono();
-  app.use("/api/*", cors());
+  // Reflect only trusted local UI origins, never `*` — the wildcard let any
+  // visited website read this unauthenticated local API (confused-deputy). See
+  // lib/cors-origin.ts.
+  app.use("/api/*", cors({ origin: corsOrigin }));
   app.use("/api/*", slowRequestLogger);
   // Gzip for large buffered JSON GET responses (board ~172KB, issues ~1MB,
   // monitor-status ~60KB) — ~85% wire reduction for remote (Tailscale) access.
