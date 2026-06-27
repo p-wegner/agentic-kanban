@@ -876,6 +876,610 @@
       ]
     },
     {
+      "slug": "issues-board",
+      "name": "Issues & Board (kanban core)",
+      "business_purpose": "The work-unit substrate of the whole product: projects (managed git repos), issues/tickets (units of AI coding work), configurable per-project workflow statuses, tags, milestones and typed dependency edges — plus the aggregated, classified board read model that humans (React board) and agents (MCP get_board_status) both observe. Every other capability moves issues across the board or reads its state.",
+      "confidence": "high",
+      "source_paths": [
+        "packages/server/src/services/issue.service.ts",
+        "packages/server/src/services/issue-dependency.service.ts",
+        "packages/server/src/services/board-status.ts",
+        "packages/server/src/services/board-column.service.ts",
+        "packages/shared/src/lib/board-status-classifiers.ts",
+        "packages/shared/src/lib/dependency-graph.ts",
+        "packages/shared/src/lib/status-view.ts",
+        "packages/server/src/repositories/issue-number.repository.ts",
+        "packages/server/src/repositories/issue.repository.ts",
+        "packages/server/src/repositories/project.repository.ts",
+        "packages/server/src/routes/issues.ts",
+        "packages/server/src/routes/projects.ts",
+        "packages/server/src/routes/tags.ts",
+        "packages/server/src/routes/milestones.ts"
+      ],
+      "actors": [
+        {
+          "name": "operator",
+          "kind": "human",
+          "notes": "single local user driving the React board / REST"
+        },
+        {
+          "name": "agent",
+          "kind": "automation",
+          "notes": "Butler / MCP / batch-generating agent creating issues + declaring coupling edges by index"
+        },
+        {
+          "name": "monitor",
+          "kind": "automation",
+          "notes": "in-process monitor / Conductor reading the board read model (blocked map, attention buckets) to decide auto-starts and auto-merges"
+        }
+      ],
+      "entry_points": [
+        {
+          "kind": "api",
+          "ref": "POST /api/issues",
+          "observable": "creates one issue (title required); allocates per-project issueNumber=MAX+1; 201 with issueNumber"
+        },
+        {
+          "kind": "api",
+          "ref": "POST /api/issues/batch",
+          "observable": "atomically creates N issues + declared dependency edges (by index) + optional parentIssueId child_of + driveTarget Drive; 201 or 400-with-index, persists nothing on failure"
+        },
+        {
+          "kind": "api",
+          "ref": "GET /api/issues?projectId=(&slim=1&statusName=)",
+          "observable": "lists a project's issues; slim omits description; statusName filters"
+        },
+        {
+          "kind": "api",
+          "ref": "PATCH /api/issues/:id, PATCH /api/issues/bulk",
+          "observable": "updates fields/status; terminal-move guard applies; bulk is atomic"
+        },
+        {
+          "kind": "api",
+          "ref": "POST/DELETE /api/issues/:id/dependencies, /dependencies/batch",
+          "observable": "add/remove typed edges; cycle/self/dup/cross-project checked"
+        },
+        {
+          "kind": "api",
+          "ref": "POST /api/issues/contract, /contract-coupled, /contract/confirm",
+          "observable": "propose/apply contraction of a coupled component onto a lead"
+        },
+        {
+          "kind": "api",
+          "ref": "POST /api/issues/archive-done",
+          "observable": "moves Done issues older than N days to Archived; {archived:n}"
+        },
+        {
+          "kind": "api",
+          "ref": "GET /api/projects/:id/board (?includeArchived)",
+          "observable": "board read model columns+nested issues; ETag/304 conditional-GET fast path"
+        },
+        {
+          "kind": "api",
+          "ref": "GET/POST/PATCH/DELETE /api/projects/:id/statuses",
+          "observable": "configure per-project workflow columns; delete blocked while issues linked"
+        },
+        {
+          "kind": "api",
+          "ref": "GET/POST/PATCH/DELETE /api/tags, POST /api/tags/merge",
+          "observable": "manage tags + merge duplicates; builtin tags protected (403)"
+        },
+        {
+          "kind": "api",
+          "ref": "GET/POST/PUT/DELETE /api/projects/:id/milestones, /milestones/summary",
+          "observable": "group issues; progress+burndown summary"
+        },
+        {
+          "kind": "function/mcp",
+          "ref": "getBoardStatus(...) / MCP get_board_status",
+          "observable": "assembled classified board overview (effective status, attention, mergeState, totals)"
+        }
+      ],
+      "behaviors": [
+        {
+          "id": "issues-board.create.issue",
+          "statement": "Creating an issue requires a non-empty title and allocates a per-project sequential issueNumber (MAX+1), independent across projects and reused after the max is deleted",
+          "actor": "operator",
+          "preconditions": [
+            "project exists with at least one status"
+          ],
+          "observable_outcome": "201 with issueNumber starting at 1 and incrementing per project; whitespace/empty title -> 400; missing projectId/statusId -> 400",
+          "evidence": [
+            "packages/server/src/repositories/issue-number.repository.ts:65",
+            "packages/server/src/services/issue.service.ts:315",
+            "packages/server/src/routes/issues.ts:284"
+          ],
+          "dimensions": [
+            "api",
+            "capability",
+            "boundary",
+            "error",
+            "concurrency"
+          ],
+          "risk": "high",
+          "confidence": "high"
+        },
+        {
+          "id": "issues-board.create.batch",
+          "statement": "Batch-create atomically inserts N issues with consecutive numbers plus optional parent_of edges and a Drive record, rolling back entirely (persisting nothing) on any validation failure",
+          "actor": "agent",
+          "preconditions": [
+            "project with statuses"
+          ],
+          "observable_outcome": "201 with N issues + consecutive issueNumbers; parentIssueId wires child_of edges; driveTarget+parent creates active Drive (no Drive without parent); a bad item -> 400 {index} and zero rows persisted",
+          "evidence": [
+            "packages/server/src/services/issue.service.ts:367",
+            "packages/server/src/routes/issues.ts:157"
+          ],
+          "dimensions": [
+            "api",
+            "workflow",
+            "state-transition",
+            "error"
+          ],
+          "risk": "high",
+          "confidence": "high"
+        },
+        {
+          "id": "issues-board.declare.dependencies",
+          "statement": "A typed dependency edge can be added singly (POST /:id/dependencies, defaults depends_on) or declared by 0-based index in a batch create/edge batch; symmetric types (related_to/coupled_with) carry no ordering",
+          "actor": "agent",
+          "preconditions": [
+            "target issues exist in same project"
+          ],
+          "observable_outcome": "201 with {id,type}; batch returns {added,skipped}; idempotent re-add skipped; related_to reverse edge allowed",
+          "evidence": [
+            "packages/server/src/services/issue-dependency.service.ts:102",
+            "packages/server/src/services/issue.service.ts (validateBatchDependencies)"
+          ],
+          "dimensions": [
+            "api",
+            "capability",
+            "boundary"
+          ],
+          "risk": "medium",
+          "confidence": "high"
+        },
+        {
+          "id": "issues-board.reject.dependencyCycle",
+          "statement": "Adding a directional edge (depends_on/blocked_by/parent_of/child_of) that would close a cycle is rejected; symmetric pairs are exempt; rollback leaves edges unchanged",
+          "actor": "agent",
+          "preconditions": [
+            "existing edge chain"
+          ],
+          "observable_outcome": "single add -> 409 'cycle'; batch -> 400 'cycle' with no edges persisted; transitive A->B->C + C->A also rejected; coupled_with mutual pair accepted",
+          "evidence": [
+            "packages/server/src/services/issue-dependency.service.ts:134",
+            "packages/shared/src/lib/dependency-graph.ts:64"
+          ],
+          "dimensions": [
+            "error",
+            "boundary",
+            "state-transition"
+          ],
+          "risk": "high",
+          "confidence": "high"
+        },
+        {
+          "id": "issues-board.reject.dependencyInvalid",
+          "statement": "Self-edges, unsupported edge types, cross-project edges, and duplicate (issue,dependsOn,type) edges are rejected with typed errors",
+          "actor": "agent",
+          "preconditions": [
+            "issues exist"
+          ],
+          "observable_outcome": "self -> 400 'itself'; duplicate -> 409 'already exists'; same pair different type allowed; bad type/cross-project -> 400",
+          "evidence": [
+            "packages/server/src/services/issue-dependency.service.ts:114",
+            "packages/server/src/services/issue-dependency.service.ts:159"
+          ],
+          "dimensions": [
+            "error",
+            "boundary"
+          ],
+          "risk": "medium",
+          "confidence": "high"
+        },
+        {
+          "id": "issues-board.remove.dependency",
+          "statement": "Deleting a dependency edge removes it so it no longer appears in the issue's dependency list",
+          "actor": "operator",
+          "preconditions": [
+            "edge exists"
+          ],
+          "observable_outcome": "DELETE -> 200 {success:true}; subsequent GET /dependencies omits it",
+          "evidence": [
+            "packages/server/src/routes/issues.ts:181"
+          ],
+          "dimensions": [
+            "api"
+          ],
+          "risk": "low",
+          "confidence": "high"
+        },
+        {
+          "id": "issues-board.guard.terminalMove",
+          "statement": "Moving an issue to a terminal status (Done/Cancelled) is BLOCKED while it has an open, non-direct, unmerged workspace (AK-535 silent-merge-loss guard); the block is a no-op and the bulk path is atomic",
+          "actor": "operator",
+          "preconditions": [
+            "issue has an open non-direct workspace"
+          ],
+          "observable_outcome": "updateIssue/updateIssuesBulk reject with code CONFLICT; status unchanged; workspace not auto-closed; closed/merged or direct or no workspace -> move allowed",
+          "evidence": [
+            "packages/server/src/services/issue.service.ts:451",
+            "packages/server/src/services/issue.service.ts:538"
+          ],
+          "dimensions": [
+            "error",
+            "state-transition",
+            "risk",
+            "regression"
+          ],
+          "risk": "high",
+          "confidence": "high"
+        },
+        {
+          "id": "issues-board.close.workspaceOnTerminal",
+          "statement": "Transitioning into a terminal status closes any still-open (direct) workspace so the monitor stops relaunching it; non-terminal moves and already-closed workspaces are untouched (mergedAt preserved)",
+          "actor": "operator",
+          "preconditions": [
+            "issue moving non-terminal -> terminal"
+          ],
+          "observable_outcome": "open direct workspace -> status 'closed'; non-terminal change leaves workspace idle; already-closed workspace keeps status+mergedAt",
+          "evidence": [
+            "packages/server/src/services/issue.service.ts:478"
+          ],
+          "dimensions": [
+            "state-transition",
+            "regression"
+          ],
+          "risk": "medium",
+          "confidence": "high"
+        },
+        {
+          "id": "issues-board.validate.externalUrl",
+          "statement": "An issue's externalUrl must be absent or a well-formed http(s) URL; non-http schemes (javascript:/data:) are rejected to prevent smuggling executable payloads into a new-tab link",
+          "actor": "operator",
+          "preconditions": [
+            "create/update issue with externalUrl"
+          ],
+          "observable_outcome": "valid https persists and round-trips; javascript: -> rejected (4xx); empty/null clears it",
+          "evidence": [
+            "packages/server/src/services/issue.service.ts:114"
+          ],
+          "dimensions": [
+            "error",
+            "boundary",
+            "regression"
+          ],
+          "risk": "medium",
+          "confidence": "high"
+        },
+        {
+          "id": "issues-board.contract.coupled",
+          "statement": "Contraction collapses a connected coupled_with component onto one lead: external sequential edges are repointed onto the lead (deduped, no self-edges), internal coupling dropped, members become duplicates of the lead and move to the resolved terminal status (Cancelled preferred, else Done)",
+          "actor": "agent",
+          "preconditions": [
+            "issueIds exactly equal the lead's coupled_with component; no open workspaces; project has a Cancelled or Done status"
+          ],
+          "observable_outcome": "200 with rewired edges + members absorbed (description 'Absorbed into #N', status Cancelled); partial selection -> 400 'exactly match'; cross-project -> 400 'across projects'; would-be-cycle -> 400 'cycle' with full rollback",
+          "evidence": [
+            "packages/shared/src/lib/dependency-graph.ts:143",
+            "packages/server/src/services/issue.service.ts:582",
+            "packages/server/src/services/issue.service.ts:652"
+          ],
+          "dimensions": [
+            "workflow",
+            "state-transition",
+            "error"
+          ],
+          "risk": "high",
+          "confidence": "high"
+        },
+        {
+          "id": "issues-board.derive.boardStatus",
+          "statement": "getBoardStatus assembles each issue's EFFECTIVE column from its most-relevant workspace's workflow node (falling back to the issue's own statusId), computes totals, and excludes Done/Cancelled unless includeClosed",
+          "actor": "monitor",
+          "preconditions": [
+            "project resolvable (active-project pref if none)"
+          ],
+          "observable_outcome": "issues carry derived statusName (workspace node wins over stale issue status), diffStats, lastAgentMessage, totals.inProgress/activeWorkspaces/runningSessions; unknown project -> NotFoundError",
+          "evidence": [
+            "packages/server/src/services/board-status.ts:45",
+            "packages/server/src/services/board-status.ts:64"
+          ],
+          "dimensions": [
+            "capability",
+            "workflow",
+            "state-transition"
+          ],
+          "risk": "high",
+          "confidence": "high"
+        },
+        {
+          "id": "issues-board.classify.boardBuckets",
+          "statement": "An In-Review issue is purely classified into an attention bucket (closed-in-review / stale-in-review / idle-awaiting) or a pending_merge bucket (when auto-merge + auto-merge-in-review are enabled and a real diff exists) — one shared policy for human and agent",
+          "actor": "monitor",
+          "preconditions": [
+            "issue in In Review with a workspace"
+          ],
+          "observable_outcome": "zero-diff not-ready -> attention idle-awaiting; null diff -> stale-in-review; closed workspace -> closed-in-review; idle+real diff+auto-merge -> mergeState pending_merge (attention null); ready-for-merge -> no flags",
+          "evidence": [
+            "packages/shared/src/lib/board-status-classifiers.ts:31",
+            "packages/shared/src/lib/board-status-classifiers.ts:64"
+          ],
+          "dimensions": [
+            "capability",
+            "state-transition",
+            "config"
+          ],
+          "risk": "high",
+          "confidence": "high"
+        },
+        {
+          "id": "issues-board.read.boardColumns",
+          "statement": "GET /:id/board returns columns whose counts/placements reflect every mutation (PATCH status, workspace merge, workspace delete), with a memoized ETag conditional-GET fast path that serves 304 without recompute until a board-changed broadcast bumps the generation",
+          "actor": "operator",
+          "preconditions": [
+            "project with statuses+issues"
+          ],
+          "observable_outcome": "PATCH status moves issue between columns and updates counts; merge broadcast moves to Done; workspace delete removes workspaceSummary; matching If-None-Match -> 304 with no rebuild; a mutation broadcast or >60s or different includeArchived shape forces a full compute",
+          "evidence": [
+            "packages/server/src/routes/projects.ts:291",
+            "packages/server/src/services/board-aggregation.service.ts:1"
+          ],
+          "dimensions": [
+            "api",
+            "navigation",
+            "regression",
+            "config"
+          ],
+          "risk": "high",
+          "confidence": "high"
+        },
+        {
+          "id": "issues-board.compute.blockedMap",
+          "statement": "An issue is blocked iff it has a depends_on/blocked_by edge to a not-yet-resolved blocker; 'resolved' uses the WIDER {Done, AI Reviewed, Cancelled} set, but a blocker only truly unblocks once it has also landed on base (mergedAt / isDirect / no workspace); fan-in dependents stay blocked until ALL blockers land",
+          "actor": "monitor",
+          "preconditions": [
+            "issues with directional edges"
+          ],
+          "observable_outcome": "monitor selects a Todo issue only when every blocker is resolved+landed; AI-Reviewed blocker counts resolved; a missing blocker is conservatively still-blocking; cycle members are not selected",
+          "evidence": [
+            "packages/server/src/services/board-column.service.ts:39",
+            "packages/shared/src/lib/status-view.ts:58",
+            "packages/shared/src/lib/status-view.ts:98"
+          ],
+          "dimensions": [
+            "capability",
+            "state-transition",
+            "boundary"
+          ],
+          "risk": "high",
+          "confidence": "high"
+        },
+        {
+          "id": "issues-board.archive.done",
+          "statement": "archive-done moves issues that are Done and whose statusChangedAt is strictly older than N days into the Archived column",
+          "actor": "operator",
+          "preconditions": [
+            "project has Done and Archived statuses"
+          ],
+          "observable_outcome": "issues strictly older than the cutoff move to Archived (boundary: exactly-at-cutoff stays Done); {archived:n}; invalid olderThanDays -> 400",
+          "evidence": [
+            "packages/server/src/services/issue.service.ts:888",
+            "packages/server/src/routes/issues.ts:229"
+          ],
+          "dimensions": [
+            "api",
+            "boundary",
+            "error"
+          ],
+          "risk": "medium",
+          "confidence": "high"
+        },
+        {
+          "id": "issues-board.list.issues",
+          "statement": "Listing returns a project's issues with their per-project issueNumbers; the slim variant omits descriptions and statusName filters to one column",
+          "actor": "operator",
+          "preconditions": [
+            "projectId provided"
+          ],
+          "observable_outcome": "GET without projectId -> 400; with projectId -> issues array; statusName=Nope -> []; slim omits description (~60% payload)",
+          "evidence": [
+            "packages/server/src/routes/issues.ts:64"
+          ],
+          "dimensions": [
+            "api",
+            "navigation"
+          ],
+          "risk": "low",
+          "confidence": "high"
+        },
+        {
+          "id": "issues-board.config.statuses",
+          "statement": "Per-project workflow columns are CRUD-configurable; a status that still has linked issues cannot be deleted (would leave issues dangling with no fallback column)",
+          "actor": "operator",
+          "preconditions": [
+            "project exists"
+          ],
+          "observable_outcome": "GET lists >=5 default statuses; POST creates a new column; DELETE of a status with linked issues -> 409 (no orphaned issues)",
+          "evidence": [
+            "packages/server/src/routes/projects.ts:167",
+            "packages/server/src/repositories/project.repository.ts:224"
+          ],
+          "dimensions": [
+            "api",
+            "error",
+            "state-transition"
+          ],
+          "risk": "medium",
+          "confidence": "high"
+        },
+        {
+          "id": "issues-board.manage.tags",
+          "statement": "Tags are CRUD-managed and duplicates can be merged; built-in tags are protected (cannot be deleted/renamed/merged away) and deleting a tag detaches it from issues without deleting the issues",
+          "actor": "operator",
+          "preconditions": [
+            "project / tags exist"
+          ],
+          "observable_outcome": "duplicate name -> 409; builtin delete/rename/merge -> 403; deleting a tag removes its issue associations only; non-builtin tags delete/rename normally",
+          "evidence": [
+            "packages/server/src/routes/tags.ts:11"
+          ],
+          "dimensions": [
+            "api",
+            "error"
+          ],
+          "risk": "low",
+          "confidence": "high"
+        },
+        {
+          "id": "issues-board.summarize.milestones",
+          "statement": "Milestones group issues toward a deliverable; the summary aggregates per-milestone totals (total/open/closed/progressPercent) and a server-computed burndown series",
+          "actor": "operator",
+          "preconditions": [
+            "project with milestones+issues"
+          ],
+          "observable_outcome": "summary returns per-milestone counts, progressPercent, and burndown of requested length; empty milestone reports zeros with a full-length burndown",
+          "evidence": [
+            "packages/server/src/routes/milestones.ts:11"
+          ],
+          "dimensions": [
+            "api",
+            "capability"
+          ],
+          "risk": "low",
+          "confidence": "high"
+        },
+        {
+          "id": "issues-board.seed.defaultStatuses",
+          "statement": "Project registration seeds a fixed canonical 7-status workflow (Backlog at sortOrder -1, Todo as the single default landing column, plus In Progress/In Review/AI Reviewed/Done/Cancelled)",
+          "actor": "operator",
+          "preconditions": [
+            "new/bare project"
+          ],
+          "observable_outcome": "initializeProjectStatuses produces exactly the 7 canonical names, no duplicates, Backlog sortOrder -1, exactly one default (Todo)",
+          "evidence": [
+            "packages/server/src/repositories/issue.repository.ts:41"
+          ],
+          "dimensions": [
+            "capability",
+            "regression"
+          ],
+          "risk": "medium",
+          "confidence": "high"
+        }
+      ],
+      "permissions": [
+        {
+          "actor": "operator",
+          "behavior": "*",
+          "allowed": true,
+          "notes": "single-user local app — no RBAC; the only enforced 'permission'-like rules are builtin-tag protection (403) and the status-delete-with-issues guard (409), both modeled as error-handling, not roles"
+        }
+      ],
+      "state_model": {
+        "states": [
+          "Backlog",
+          "Todo",
+          "In Progress",
+          "In Review",
+          "AI Reviewed",
+          "Done",
+          "Cancelled",
+          "Archived"
+        ],
+        "notes": "Per-project, reorderable; the diagram is the seeded default. Effective state is DERIVED from the most-relevant workspace's workflow node, with the issue's statusId as fallback.",
+        "transitions": [
+          {
+            "from": "In Progress",
+            "to": "In Review",
+            "trigger": "agent done / review requested",
+            "behavior": "issues-board.derive.boardStatus"
+          },
+          {
+            "from": "In Review",
+            "to": "Done",
+            "trigger": "merge / auto-merge-in-review",
+            "behavior": "issues-board.classify.boardBuckets"
+          },
+          {
+            "from": "*non-terminal*",
+            "to": "Done|Cancelled",
+            "trigger": "terminal move (BLOCKED while open non-direct unmerged workspace)",
+            "behavior": "issues-board.guard.terminalMove"
+          },
+          {
+            "from": "Done",
+            "to": "Archived",
+            "trigger": "archive-done older than N days",
+            "behavior": "issues-board.archive.done"
+          }
+        ]
+      },
+      "error_states": [
+        {
+          "id": "issues-board.err.titleRequired",
+          "statement": "empty/whitespace title -> 400",
+          "evidence": "routes/issues.ts:284"
+        },
+        {
+          "id": "issues-board.err.dependencyCycle",
+          "statement": "directional cycle -> 409 (single) / 400 (batch)",
+          "evidence": "issue-dependency.service.ts:134"
+        },
+        {
+          "id": "issues-board.err.dependencyDuplicate",
+          "statement": "duplicate edge -> 409 'already exists'",
+          "evidence": "issue-dependency.service.ts:159"
+        },
+        {
+          "id": "issues-board.err.terminalMoveBlocked",
+          "statement": "terminal move with open non-direct workspace -> CONFLICT",
+          "evidence": "issue.service.ts:451"
+        },
+        {
+          "id": "issues-board.err.externalUrlScheme",
+          "statement": "non-http(s) externalUrl rejected",
+          "evidence": "issue.service.ts:114"
+        },
+        {
+          "id": "issues-board.err.contractTerminalStatusMissing",
+          "statement": "contraction with no Cancelled/Done status -> BAD_REQUEST",
+          "evidence": "issue.service.ts:652"
+        },
+        {
+          "id": "issues-board.err.statusDeleteInUse",
+          "statement": "delete a status with linked issues -> 409",
+          "evidence": "project.repository.ts:224"
+        },
+        {
+          "id": "issues-board.err.builtinTagProtected",
+          "statement": "delete/rename/merge-away a builtin tag -> 403",
+          "evidence": "routes/tags.ts"
+        }
+      ],
+      "external_integrations": [
+        "git CLI (diff/conflict cache feeding board read model)",
+        "workspaces capability (workspace status/diff/sessions)",
+        "workflow-engine (currentNodeId ↔ statusId sync)"
+      ],
+      "unknowns": [
+        {
+          "question": "Is the 3x issueNumber-allocation retry empirically sufficient under heavy parallel CLI creates?",
+          "why_unknown": "no concurrency test forces a real collision; behavior asserted only sequentially"
+        },
+        {
+          "question": "Does the contraction-requires-terminal-status BAD_REQUEST path have a test?",
+          "why_unknown": "happy/partial/cross-project/cycle paths are tested; the 'no Cancelled/Done status' rejection was not observed in the candidate set"
+        },
+        {
+          "question": "Is the rename/localize-Done risk (string-coupled terminalStatusIds) reachable in practice?",
+          "why_unknown": "domain doc flags it; no test renames Done to confirm the legacy fallback loses terminal semantics"
+        }
+      ]
+    },
+    {
       "business_purpose": "The anti-corruption seam between the board's uniform 'launch an agent on this ticket' notion and four mutually-incompatible third-party coding CLIs (Anthropic claude, OpenAI codex, GitHub copilot, pi). It translates provider-neutral launch options into a concrete spawn {command,args,env}, normalizes each CLI's stdout into one ParsedStreamEvent model, validates that a chosen provider+profile can actually launch (auth/binary/version preflight), bootstraps OAuth logins, and rotates credential rings on rate-limit exhaustion. Without it the board could track tickets but spawn no agent.",
       "confidence": "high",
       "source_paths": [
@@ -1348,7 +1952,9 @@
           "question": "Is the visible-terminal OAuth login spawn actually observed end-to-end?",
           "why_unknown": "no test spawns the login services; verified only by code reading (windowsHide:false)."
         }
-      ]
+      ],
+      "slug": "agent-providers",
+      "name": "agent-providers"
     },
     {
       "business_purpose": "Turns a launched coding-agent subprocess's opaque provider stream into a first-class, observable domain object: live-streams what the agent is doing, classifies HOW the run ended (stopped / usage-limit / launch-failure / completed), persists a transcript + cost/friction stats, and emits the exit verdict that drives the workspace's next state and the autonomous monitor loop. It is the feedback channel of the whole agentic system.",
@@ -1957,7 +2563,9 @@
           "question": "Are GET /api/sessions/:id/stats and /summary endpoint response shapes asserted at the HTTP layer (vs the pure parser)?",
           "why_unknown": "parser tested directly; endpoint contract not observed in candidate tests"
         }
-      ]
+      ],
+      "slug": "agent-sessions",
+      "name": "agent-sessions"
     },
     {
       "business_purpose": "The product surface of agentic-kanban: the single screen a local operator uses to watch and steer a fleet of AI coding agents. It renders the kanban board (columns = workflow statuses, cards = tickets), lets the user create/move/edit/delete tickets by drag or keyboard, opens issue-detail and workspace/diff panels, exposes a command palette and keyboard shortcuts, and reflects live agent activity (which ticket an agent works, review/merge state, approvals) in real time without manual refresh. It is a mostly-thin optimistic projection of server truth with a few client-local UX policies (WIP visual tint, drop-position arithmetic, archive-confirm gate, column partitioning).",
@@ -2593,7 +3201,9 @@
           "question": "Is keyboard card navigation (cursor move + focus) covered end-to-end in the running UI?",
           "why_unknown": "boardKeyboardNav.test.ts covers the pure computeNavTarget function only; no e2e drives the actual focus/cursor"
         }
-      ]
+      ],
+      "slug": "board-ui",
+      "name": "board-ui"
     },
     {
       "business_purpose": "The board's conversational front door: a warm, per-project Claude/Codex assistant the solo operator talks to in natural language to ask about the board/codebase/past work and to KICK OFF worker agents, without dropping into MCP/CLI/REST. Unlike fire-and-forget Builders, it keeps one live in-process LLM session per (project, butler) so conversation context survives across turns AND server restarts (persisted resume id).",
@@ -3216,7 +3826,9 @@
           "question": "Does the recommender path (service-fallback prompt) really diverge in observable behaviour from the chat path?",
           "why_unknown": "documented as a real split but no behavioural assertion anywhere"
         }
-      ]
+      ],
+      "slug": "butler",
+      "name": "butler"
     },
     {
       "business_purpose": "The Codemod Factory lets the single local operator state a repo-wide structural refactor in plain English, have an LLM compile it into a precise ts-morph AST transform, see a per-file diff across the whole project as a dry-run, then apply only the chosen files behind a hard write-confinement boundary. It is the board's only mechanism for human-gated, project-wide mechanical edits that bypass the per-ticket agent/worktree pipeline. The design's whole point is a trustworthy preview->apply gate over a destructive, blast-radius operation (rewrite every TS file) with the safety interlocks visible.",
@@ -3547,7 +4159,9 @@
           "question": "Is the 500-line per-file diff cap (preview truncated, apply writes full content) observable/asserted anywhere?",
           "why_unknown": "no test exercises a >500-line file; cosmetic/trust gap flagged in domain doc, unverified"
         }
-      ]
+      ],
+      "slug": "codemods",
+      "name": "codemods"
     },
     {
       "business_purpose": "The single sanctioned seam to git for a board that runs many AI agents in parallel against one real repository: give each agent an isolated worktree to commit in, inspect that work (diff incl. untracked), decide read-only whether it can land (conflict detection via merge-tree), and land it safely (plumbing merge / rebase / migration-renumber) without ever corrupting the human's checkout, losing committed work, or committing conflict markers. Every documented invariant is a real production incident encoded as a guard.",
@@ -4123,611 +4737,9 @@
           "question": "Is the append-resolve concatenation ORDER (target-tail then feature-tail) ever wrong for an order-sensitive appended file?",
           "why_unknown": "order is chosen as 'deterministic' not semantic; only order-insensitive smoke-test appends are tested"
         }
-      ]
-    },
-    {
-      "slug": "issues-board",
-      "name": "Issues & Board (kanban core)",
-      "business_purpose": "The work-unit substrate of the whole product: projects (managed git repos), issues/tickets (units of AI coding work), configurable per-project workflow statuses, tags, milestones and typed dependency edges — plus the aggregated, classified board read model that humans (React board) and agents (MCP get_board_status) both observe. Every other capability moves issues across the board or reads its state.",
-      "confidence": "high",
-      "source_paths": [
-        "packages/server/src/services/issue.service.ts",
-        "packages/server/src/services/issue-dependency.service.ts",
-        "packages/server/src/services/board-status.ts",
-        "packages/server/src/services/board-column.service.ts",
-        "packages/shared/src/lib/board-status-classifiers.ts",
-        "packages/shared/src/lib/dependency-graph.ts",
-        "packages/shared/src/lib/status-view.ts",
-        "packages/server/src/repositories/issue-number.repository.ts",
-        "packages/server/src/repositories/issue.repository.ts",
-        "packages/server/src/repositories/project.repository.ts",
-        "packages/server/src/routes/issues.ts",
-        "packages/server/src/routes/projects.ts",
-        "packages/server/src/routes/tags.ts",
-        "packages/server/src/routes/milestones.ts"
       ],
-      "actors": [
-        {
-          "name": "operator",
-          "kind": "human",
-          "notes": "single local user driving the React board / REST"
-        },
-        {
-          "name": "agent",
-          "kind": "automation",
-          "notes": "Butler / MCP / batch-generating agent creating issues + declaring coupling edges by index"
-        },
-        {
-          "name": "monitor",
-          "kind": "automation",
-          "notes": "in-process monitor / Conductor reading the board read model (blocked map, attention buckets) to decide auto-starts and auto-merges"
-        }
-      ],
-      "entry_points": [
-        {
-          "kind": "api",
-          "ref": "POST /api/issues",
-          "observable": "creates one issue (title required); allocates per-project issueNumber=MAX+1; 201 with issueNumber"
-        },
-        {
-          "kind": "api",
-          "ref": "POST /api/issues/batch",
-          "observable": "atomically creates N issues + declared dependency edges (by index) + optional parentIssueId child_of + driveTarget Drive; 201 or 400-with-index, persists nothing on failure"
-        },
-        {
-          "kind": "api",
-          "ref": "GET /api/issues?projectId=(&slim=1&statusName=)",
-          "observable": "lists a project's issues; slim omits description; statusName filters"
-        },
-        {
-          "kind": "api",
-          "ref": "PATCH /api/issues/:id, PATCH /api/issues/bulk",
-          "observable": "updates fields/status; terminal-move guard applies; bulk is atomic"
-        },
-        {
-          "kind": "api",
-          "ref": "POST/DELETE /api/issues/:id/dependencies, /dependencies/batch",
-          "observable": "add/remove typed edges; cycle/self/dup/cross-project checked"
-        },
-        {
-          "kind": "api",
-          "ref": "POST /api/issues/contract, /contract-coupled, /contract/confirm",
-          "observable": "propose/apply contraction of a coupled component onto a lead"
-        },
-        {
-          "kind": "api",
-          "ref": "POST /api/issues/archive-done",
-          "observable": "moves Done issues older than N days to Archived; {archived:n}"
-        },
-        {
-          "kind": "api",
-          "ref": "GET /api/projects/:id/board (?includeArchived)",
-          "observable": "board read model columns+nested issues; ETag/304 conditional-GET fast path"
-        },
-        {
-          "kind": "api",
-          "ref": "GET/POST/PATCH/DELETE /api/projects/:id/statuses",
-          "observable": "configure per-project workflow columns; delete blocked while issues linked"
-        },
-        {
-          "kind": "api",
-          "ref": "GET/POST/PATCH/DELETE /api/tags, POST /api/tags/merge",
-          "observable": "manage tags + merge duplicates; builtin tags protected (403)"
-        },
-        {
-          "kind": "api",
-          "ref": "GET/POST/PUT/DELETE /api/projects/:id/milestones, /milestones/summary",
-          "observable": "group issues; progress+burndown summary"
-        },
-        {
-          "kind": "function/mcp",
-          "ref": "getBoardStatus(...) / MCP get_board_status",
-          "observable": "assembled classified board overview (effective status, attention, mergeState, totals)"
-        }
-      ],
-      "behaviors": [
-        {
-          "id": "issues-board.create.issue",
-          "statement": "Creating an issue requires a non-empty title and allocates a per-project sequential issueNumber (MAX+1), independent across projects and reused after the max is deleted",
-          "actor": "operator",
-          "preconditions": [
-            "project exists with at least one status"
-          ],
-          "observable_outcome": "201 with issueNumber starting at 1 and incrementing per project; whitespace/empty title -> 400; missing projectId/statusId -> 400",
-          "evidence": [
-            "packages/server/src/repositories/issue-number.repository.ts:65",
-            "packages/server/src/services/issue.service.ts:315",
-            "packages/server/src/routes/issues.ts:284"
-          ],
-          "dimensions": [
-            "api",
-            "capability",
-            "boundary",
-            "error",
-            "concurrency"
-          ],
-          "risk": "high",
-          "confidence": "high"
-        },
-        {
-          "id": "issues-board.create.batch",
-          "statement": "Batch-create atomically inserts N issues with consecutive numbers plus optional parent_of edges and a Drive record, rolling back entirely (persisting nothing) on any validation failure",
-          "actor": "agent",
-          "preconditions": [
-            "project with statuses"
-          ],
-          "observable_outcome": "201 with N issues + consecutive issueNumbers; parentIssueId wires child_of edges; driveTarget+parent creates active Drive (no Drive without parent); a bad item -> 400 {index} and zero rows persisted",
-          "evidence": [
-            "packages/server/src/services/issue.service.ts:367",
-            "packages/server/src/routes/issues.ts:157"
-          ],
-          "dimensions": [
-            "api",
-            "workflow",
-            "state-transition",
-            "error"
-          ],
-          "risk": "high",
-          "confidence": "high"
-        },
-        {
-          "id": "issues-board.declare.dependencies",
-          "statement": "A typed dependency edge can be added singly (POST /:id/dependencies, defaults depends_on) or declared by 0-based index in a batch create/edge batch; symmetric types (related_to/coupled_with) carry no ordering",
-          "actor": "agent",
-          "preconditions": [
-            "target issues exist in same project"
-          ],
-          "observable_outcome": "201 with {id,type}; batch returns {added,skipped}; idempotent re-add skipped; related_to reverse edge allowed",
-          "evidence": [
-            "packages/server/src/services/issue-dependency.service.ts:102",
-            "packages/server/src/services/issue.service.ts (validateBatchDependencies)"
-          ],
-          "dimensions": [
-            "api",
-            "capability",
-            "boundary"
-          ],
-          "risk": "medium",
-          "confidence": "high"
-        },
-        {
-          "id": "issues-board.reject.dependencyCycle",
-          "statement": "Adding a directional edge (depends_on/blocked_by/parent_of/child_of) that would close a cycle is rejected; symmetric pairs are exempt; rollback leaves edges unchanged",
-          "actor": "agent",
-          "preconditions": [
-            "existing edge chain"
-          ],
-          "observable_outcome": "single add -> 409 'cycle'; batch -> 400 'cycle' with no edges persisted; transitive A->B->C + C->A also rejected; coupled_with mutual pair accepted",
-          "evidence": [
-            "packages/server/src/services/issue-dependency.service.ts:134",
-            "packages/shared/src/lib/dependency-graph.ts:64"
-          ],
-          "dimensions": [
-            "error",
-            "boundary",
-            "state-transition"
-          ],
-          "risk": "high",
-          "confidence": "high"
-        },
-        {
-          "id": "issues-board.reject.dependencyInvalid",
-          "statement": "Self-edges, unsupported edge types, cross-project edges, and duplicate (issue,dependsOn,type) edges are rejected with typed errors",
-          "actor": "agent",
-          "preconditions": [
-            "issues exist"
-          ],
-          "observable_outcome": "self -> 400 'itself'; duplicate -> 409 'already exists'; same pair different type allowed; bad type/cross-project -> 400",
-          "evidence": [
-            "packages/server/src/services/issue-dependency.service.ts:114",
-            "packages/server/src/services/issue-dependency.service.ts:159"
-          ],
-          "dimensions": [
-            "error",
-            "boundary"
-          ],
-          "risk": "medium",
-          "confidence": "high"
-        },
-        {
-          "id": "issues-board.remove.dependency",
-          "statement": "Deleting a dependency edge removes it so it no longer appears in the issue's dependency list",
-          "actor": "operator",
-          "preconditions": [
-            "edge exists"
-          ],
-          "observable_outcome": "DELETE -> 200 {success:true}; subsequent GET /dependencies omits it",
-          "evidence": [
-            "packages/server/src/routes/issues.ts:181"
-          ],
-          "dimensions": [
-            "api"
-          ],
-          "risk": "low",
-          "confidence": "high"
-        },
-        {
-          "id": "issues-board.guard.terminalMove",
-          "statement": "Moving an issue to a terminal status (Done/Cancelled) is BLOCKED while it has an open, non-direct, unmerged workspace (AK-535 silent-merge-loss guard); the block is a no-op and the bulk path is atomic",
-          "actor": "operator",
-          "preconditions": [
-            "issue has an open non-direct workspace"
-          ],
-          "observable_outcome": "updateIssue/updateIssuesBulk reject with code CONFLICT; status unchanged; workspace not auto-closed; closed/merged or direct or no workspace -> move allowed",
-          "evidence": [
-            "packages/server/src/services/issue.service.ts:451",
-            "packages/server/src/services/issue.service.ts:538"
-          ],
-          "dimensions": [
-            "error",
-            "state-transition",
-            "risk",
-            "regression"
-          ],
-          "risk": "high",
-          "confidence": "high"
-        },
-        {
-          "id": "issues-board.close.workspaceOnTerminal",
-          "statement": "Transitioning into a terminal status closes any still-open (direct) workspace so the monitor stops relaunching it; non-terminal moves and already-closed workspaces are untouched (mergedAt preserved)",
-          "actor": "operator",
-          "preconditions": [
-            "issue moving non-terminal -> terminal"
-          ],
-          "observable_outcome": "open direct workspace -> status 'closed'; non-terminal change leaves workspace idle; already-closed workspace keeps status+mergedAt",
-          "evidence": [
-            "packages/server/src/services/issue.service.ts:478"
-          ],
-          "dimensions": [
-            "state-transition",
-            "regression"
-          ],
-          "risk": "medium",
-          "confidence": "high"
-        },
-        {
-          "id": "issues-board.validate.externalUrl",
-          "statement": "An issue's externalUrl must be absent or a well-formed http(s) URL; non-http schemes (javascript:/data:) are rejected to prevent smuggling executable payloads into a new-tab link",
-          "actor": "operator",
-          "preconditions": [
-            "create/update issue with externalUrl"
-          ],
-          "observable_outcome": "valid https persists and round-trips; javascript: -> rejected (4xx); empty/null clears it",
-          "evidence": [
-            "packages/server/src/services/issue.service.ts:114"
-          ],
-          "dimensions": [
-            "error",
-            "boundary",
-            "regression"
-          ],
-          "risk": "medium",
-          "confidence": "high"
-        },
-        {
-          "id": "issues-board.contract.coupled",
-          "statement": "Contraction collapses a connected coupled_with component onto one lead: external sequential edges are repointed onto the lead (deduped, no self-edges), internal coupling dropped, members become duplicates of the lead and move to the resolved terminal status (Cancelled preferred, else Done)",
-          "actor": "agent",
-          "preconditions": [
-            "issueIds exactly equal the lead's coupled_with component; no open workspaces; project has a Cancelled or Done status"
-          ],
-          "observable_outcome": "200 with rewired edges + members absorbed (description 'Absorbed into #N', status Cancelled); partial selection -> 400 'exactly match'; cross-project -> 400 'across projects'; would-be-cycle -> 400 'cycle' with full rollback",
-          "evidence": [
-            "packages/shared/src/lib/dependency-graph.ts:143",
-            "packages/server/src/services/issue.service.ts:582",
-            "packages/server/src/services/issue.service.ts:652"
-          ],
-          "dimensions": [
-            "workflow",
-            "state-transition",
-            "error"
-          ],
-          "risk": "high",
-          "confidence": "high"
-        },
-        {
-          "id": "issues-board.derive.boardStatus",
-          "statement": "getBoardStatus assembles each issue's EFFECTIVE column from its most-relevant workspace's workflow node (falling back to the issue's own statusId), computes totals, and excludes Done/Cancelled unless includeClosed",
-          "actor": "monitor",
-          "preconditions": [
-            "project resolvable (active-project pref if none)"
-          ],
-          "observable_outcome": "issues carry derived statusName (workspace node wins over stale issue status), diffStats, lastAgentMessage, totals.inProgress/activeWorkspaces/runningSessions; unknown project -> NotFoundError",
-          "evidence": [
-            "packages/server/src/services/board-status.ts:45",
-            "packages/server/src/services/board-status.ts:64"
-          ],
-          "dimensions": [
-            "capability",
-            "workflow",
-            "state-transition"
-          ],
-          "risk": "high",
-          "confidence": "high"
-        },
-        {
-          "id": "issues-board.classify.boardBuckets",
-          "statement": "An In-Review issue is purely classified into an attention bucket (closed-in-review / stale-in-review / idle-awaiting) or a pending_merge bucket (when auto-merge + auto-merge-in-review are enabled and a real diff exists) — one shared policy for human and agent",
-          "actor": "monitor",
-          "preconditions": [
-            "issue in In Review with a workspace"
-          ],
-          "observable_outcome": "zero-diff not-ready -> attention idle-awaiting; null diff -> stale-in-review; closed workspace -> closed-in-review; idle+real diff+auto-merge -> mergeState pending_merge (attention null); ready-for-merge -> no flags",
-          "evidence": [
-            "packages/shared/src/lib/board-status-classifiers.ts:31",
-            "packages/shared/src/lib/board-status-classifiers.ts:64"
-          ],
-          "dimensions": [
-            "capability",
-            "state-transition",
-            "config"
-          ],
-          "risk": "high",
-          "confidence": "high"
-        },
-        {
-          "id": "issues-board.read.boardColumns",
-          "statement": "GET /:id/board returns columns whose counts/placements reflect every mutation (PATCH status, workspace merge, workspace delete), with a memoized ETag conditional-GET fast path that serves 304 without recompute until a board-changed broadcast bumps the generation",
-          "actor": "operator",
-          "preconditions": [
-            "project with statuses+issues"
-          ],
-          "observable_outcome": "PATCH status moves issue between columns and updates counts; merge broadcast moves to Done; workspace delete removes workspaceSummary; matching If-None-Match -> 304 with no rebuild; a mutation broadcast or >60s or different includeArchived shape forces a full compute",
-          "evidence": [
-            "packages/server/src/routes/projects.ts:291",
-            "packages/server/src/services/board-aggregation.service.ts:1"
-          ],
-          "dimensions": [
-            "api",
-            "navigation",
-            "regression",
-            "config"
-          ],
-          "risk": "high",
-          "confidence": "high"
-        },
-        {
-          "id": "issues-board.compute.blockedMap",
-          "statement": "An issue is blocked iff it has a depends_on/blocked_by edge to a not-yet-resolved blocker; 'resolved' uses the WIDER {Done, AI Reviewed, Cancelled} set, but a blocker only truly unblocks once it has also landed on base (mergedAt / isDirect / no workspace); fan-in dependents stay blocked until ALL blockers land",
-          "actor": "monitor",
-          "preconditions": [
-            "issues with directional edges"
-          ],
-          "observable_outcome": "monitor selects a Todo issue only when every blocker is resolved+landed; AI-Reviewed blocker counts resolved; a missing blocker is conservatively still-blocking; cycle members are not selected",
-          "evidence": [
-            "packages/server/src/services/board-column.service.ts:39",
-            "packages/shared/src/lib/status-view.ts:58",
-            "packages/shared/src/lib/status-view.ts:98"
-          ],
-          "dimensions": [
-            "capability",
-            "state-transition",
-            "boundary"
-          ],
-          "risk": "high",
-          "confidence": "high"
-        },
-        {
-          "id": "issues-board.archive.done",
-          "statement": "archive-done moves issues that are Done and whose statusChangedAt is strictly older than N days into the Archived column",
-          "actor": "operator",
-          "preconditions": [
-            "project has Done and Archived statuses"
-          ],
-          "observable_outcome": "issues strictly older than the cutoff move to Archived (boundary: exactly-at-cutoff stays Done); {archived:n}; invalid olderThanDays -> 400",
-          "evidence": [
-            "packages/server/src/services/issue.service.ts:888",
-            "packages/server/src/routes/issues.ts:229"
-          ],
-          "dimensions": [
-            "api",
-            "boundary",
-            "error"
-          ],
-          "risk": "medium",
-          "confidence": "high"
-        },
-        {
-          "id": "issues-board.list.issues",
-          "statement": "Listing returns a project's issues with their per-project issueNumbers; the slim variant omits descriptions and statusName filters to one column",
-          "actor": "operator",
-          "preconditions": [
-            "projectId provided"
-          ],
-          "observable_outcome": "GET without projectId -> 400; with projectId -> issues array; statusName=Nope -> []; slim omits description (~60% payload)",
-          "evidence": [
-            "packages/server/src/routes/issues.ts:64"
-          ],
-          "dimensions": [
-            "api",
-            "navigation"
-          ],
-          "risk": "low",
-          "confidence": "high"
-        },
-        {
-          "id": "issues-board.config.statuses",
-          "statement": "Per-project workflow columns are CRUD-configurable; a status that still has linked issues cannot be deleted (would leave issues dangling with no fallback column)",
-          "actor": "operator",
-          "preconditions": [
-            "project exists"
-          ],
-          "observable_outcome": "GET lists >=5 default statuses; POST creates a new column; DELETE of a status with linked issues -> 409 (no orphaned issues)",
-          "evidence": [
-            "packages/server/src/routes/projects.ts:167",
-            "packages/server/src/repositories/project.repository.ts:224"
-          ],
-          "dimensions": [
-            "api",
-            "error",
-            "state-transition"
-          ],
-          "risk": "medium",
-          "confidence": "high"
-        },
-        {
-          "id": "issues-board.manage.tags",
-          "statement": "Tags are CRUD-managed and duplicates can be merged; built-in tags are protected (cannot be deleted/renamed/merged away) and deleting a tag detaches it from issues without deleting the issues",
-          "actor": "operator",
-          "preconditions": [
-            "project / tags exist"
-          ],
-          "observable_outcome": "duplicate name -> 409; builtin delete/rename/merge -> 403; deleting a tag removes its issue associations only; non-builtin tags delete/rename normally",
-          "evidence": [
-            "packages/server/src/routes/tags.ts:11"
-          ],
-          "dimensions": [
-            "api",
-            "error"
-          ],
-          "risk": "low",
-          "confidence": "high"
-        },
-        {
-          "id": "issues-board.summarize.milestones",
-          "statement": "Milestones group issues toward a deliverable; the summary aggregates per-milestone totals (total/open/closed/progressPercent) and a server-computed burndown series",
-          "actor": "operator",
-          "preconditions": [
-            "project with milestones+issues"
-          ],
-          "observable_outcome": "summary returns per-milestone counts, progressPercent, and burndown of requested length; empty milestone reports zeros with a full-length burndown",
-          "evidence": [
-            "packages/server/src/routes/milestones.ts:11"
-          ],
-          "dimensions": [
-            "api",
-            "capability"
-          ],
-          "risk": "low",
-          "confidence": "high"
-        },
-        {
-          "id": "issues-board.seed.defaultStatuses",
-          "statement": "Project registration seeds a fixed canonical 7-status workflow (Backlog at sortOrder -1, Todo as the single default landing column, plus In Progress/In Review/AI Reviewed/Done/Cancelled)",
-          "actor": "operator",
-          "preconditions": [
-            "new/bare project"
-          ],
-          "observable_outcome": "initializeProjectStatuses produces exactly the 7 canonical names, no duplicates, Backlog sortOrder -1, exactly one default (Todo)",
-          "evidence": [
-            "packages/server/src/repositories/issue.repository.ts:41"
-          ],
-          "dimensions": [
-            "capability",
-            "regression"
-          ],
-          "risk": "medium",
-          "confidence": "high"
-        }
-      ],
-      "permissions": [
-        {
-          "actor": "operator",
-          "behavior": "*",
-          "allowed": true,
-          "notes": "single-user local app — no RBAC; the only enforced 'permission'-like rules are builtin-tag protection (403) and the status-delete-with-issues guard (409), both modeled as error-handling, not roles"
-        }
-      ],
-      "state_model": {
-        "states": [
-          "Backlog",
-          "Todo",
-          "In Progress",
-          "In Review",
-          "AI Reviewed",
-          "Done",
-          "Cancelled",
-          "Archived"
-        ],
-        "notes": "Per-project, reorderable; the diagram is the seeded default. Effective state is DERIVED from the most-relevant workspace's workflow node, with the issue's statusId as fallback.",
-        "transitions": [
-          {
-            "from": "In Progress",
-            "to": "In Review",
-            "trigger": "agent done / review requested",
-            "behavior": "issues-board.derive.boardStatus"
-          },
-          {
-            "from": "In Review",
-            "to": "Done",
-            "trigger": "merge / auto-merge-in-review",
-            "behavior": "issues-board.classify.boardBuckets"
-          },
-          {
-            "from": "*non-terminal*",
-            "to": "Done|Cancelled",
-            "trigger": "terminal move (BLOCKED while open non-direct unmerged workspace)",
-            "behavior": "issues-board.guard.terminalMove"
-          },
-          {
-            "from": "Done",
-            "to": "Archived",
-            "trigger": "archive-done older than N days",
-            "behavior": "issues-board.archive.done"
-          }
-        ]
-      },
-      "error_states": [
-        {
-          "id": "issues-board.err.titleRequired",
-          "statement": "empty/whitespace title -> 400",
-          "evidence": "routes/issues.ts:284"
-        },
-        {
-          "id": "issues-board.err.dependencyCycle",
-          "statement": "directional cycle -> 409 (single) / 400 (batch)",
-          "evidence": "issue-dependency.service.ts:134"
-        },
-        {
-          "id": "issues-board.err.dependencyDuplicate",
-          "statement": "duplicate edge -> 409 'already exists'",
-          "evidence": "issue-dependency.service.ts:159"
-        },
-        {
-          "id": "issues-board.err.terminalMoveBlocked",
-          "statement": "terminal move with open non-direct workspace -> CONFLICT",
-          "evidence": "issue.service.ts:451"
-        },
-        {
-          "id": "issues-board.err.externalUrlScheme",
-          "statement": "non-http(s) externalUrl rejected",
-          "evidence": "issue.service.ts:114"
-        },
-        {
-          "id": "issues-board.err.contractTerminalStatusMissing",
-          "statement": "contraction with no Cancelled/Done status -> BAD_REQUEST",
-          "evidence": "issue.service.ts:652"
-        },
-        {
-          "id": "issues-board.err.statusDeleteInUse",
-          "statement": "delete a status with linked issues -> 409",
-          "evidence": "project.repository.ts:224"
-        },
-        {
-          "id": "issues-board.err.builtinTagProtected",
-          "statement": "delete/rename/merge-away a builtin tag -> 403",
-          "evidence": "routes/tags.ts"
-        }
-      ],
-      "external_integrations": [
-        "git CLI (diff/conflict cache feeding board read model)",
-        "workspaces capability (workspace status/diff/sessions)",
-        "workflow-engine (currentNodeId ↔ statusId sync)"
-      ],
-      "unknowns": [
-        {
-          "question": "Is the 3x issueNumber-allocation retry empirically sufficient under heavy parallel CLI creates?",
-          "why_unknown": "no concurrency test forces a real collision; behavior asserted only sequentially"
-        },
-        {
-          "question": "Does the contraction-requires-terminal-status BAD_REQUEST path have a test?",
-          "why_unknown": "happy/partial/cross-project/cycle paths are tested; the 'no Cancelled/Done status' rejection was not observed in the candidate set"
-        },
-        {
-          "question": "Is the rename/localize-Done risk (string-coupled terminalStatusIds) reachable in practice?",
-          "why_unknown": "domain doc flags it; no test renames Done to confirm the legacy fallback loses terminal semantics"
-        }
-      ]
+      "slug": "git-integration",
+      "name": "git-integration"
     },
     {
       "business_purpose": "The machine-facing front door of the board: an AI coding agent (Builder in a worktree, the Conductor monitor, a Smith analysis session) speaks Model Context Protocol over stdio and gets the same board operations a human gets in the UI/REST — file/move issues, spin up/merge/relaunch workspaces, query 'what are my agents doing', manage agent-skills, capture evidence — as named, typed tools, so the autonomous loop can manage its own work without a human or hand-rolled HTTP. The module owns no tables; its value is the policies it enforces at the agent boundary (active-project resolution, terminal-status merge-loss guard, workflow-edge legality, delegate-don't-reimplement for dangerous ops).",
@@ -5280,7 +5292,9 @@
           "question": "Is async-rejection resilience (process stays up after a handler throws) observable without spawning the real stdio server?",
           "why_unknown": "Only the spawned mcp-tools.test.ts exercises the live process and it never injects a throwing handler."
         }
-      ]
+      ],
+      "slug": "mcp-server",
+      "name": "mcp-server"
     },
     {
       "business_purpose": "The board's control plane: the machinery that drives kanban tickets toward merged code with no human in the loop. It decides PER PROJECT how work auto-starts (the Start Mode gate), relaunches/merges/nudges in-flight work up to a WIP target, pulls the next dependency-ready ticket on a merge, and refills a starved backlog — while guaranteeing two mechanisms never double-start the same ticket into conflicting worktrees.",
@@ -5861,7 +5875,9 @@
           "question": "Are the hard-coded relaunch/merge caps (2) ever Bullseye-tunable like maxNewStartsPerCycle?",
           "why_unknown": "two cap regimes coexist; only maxNewStarts comes from tunables (monitor-cycle.ts:36-37)."
         }
-      ]
+      ],
+      "slug": "monitor-orchestration",
+      "name": "monitor-orchestration"
     },
     {
       "business_purpose": "The single physical truth of the product: one SQLite file (kanban.db) holding every project, issue, workspace, session, message and preference. As a Published Language the Drizzle schema is the shared data vocabulary every package imports; as a runtime kernel it provides the connection, the busy-retry policy under heavy concurrent agent writes, migration management, FK-integrity (cascade/drift/repair), application-level cascade deletion, and a verified rotating-backup recovery subsystem. Its correctness guarantees are what keep the board from silently corrupting when many parallel worktree agents stream output into one file.",
@@ -6355,7 +6371,9 @@
           "question": "Does any test enumerate the schema FK graph to prove the hand-coded cascade walk covers every child table?",
           "why_unknown": "domain doc flags this residual gap — foreign_key_check only catches violations among seeded tables, so a never-seeded new child table escapes both walk and test"
         }
-      ]
+      ],
+      "slug": "persistence-schema",
+      "name": "persistence-schema"
     },
     {
       "business_purpose": "The board's settings substrate: a flat (key,value) preference store plus the layered resolution that turns those strings into effective board behaviour — which agent provider/profile/model launches a workspace, whether and how aggressively a project auto-starts work, how the monitor balances feature-vs-bugfix, and what board config is portable. Its reason to exist is that one logical setting is rarely one row, so it is the layered resolver that collapses scattered inputs (Strategy Bullseye, global prefs, per-workspace override, legacy flags) into one effective answer every consumer agrees on. Also the system's most drift-prone surface, so several invariants exist purely to fail loudly instead of silently dropping/diverging.",
@@ -6829,7 +6847,9 @@
           "question": "Does the objective.md auto-commit on a Bullseye save behave correctly through the PUT route (commit scoping, conductor vs non-conductor path)?",
           "why_unknown": "service-level writeStrategyObjective/commitObjectiveFile are unit-tested, but the route-level updateStrategyObjectives wiring is not exercised end-to-end"
         }
-      ]
+      ],
+      "slug": "preferences-config",
+      "name": "preferences-config"
     },
     {
       "business_purpose": "Onboard any git repo as a board project and reverse-engineer enough of its tech stack to drive it hands-off: create the project row + canonical statuses + non-null default branch + default skill, then derive every per-stack script the agent harness needs (install/setup, the merge-gate verify command, a boot-and-respond smoke check, edit-time feedback rules, a runnable green test scaffold, and clean-build/.gitignore hardening). This is the foundation that lets the board drive Node, Rust, Go, Python and JVM (Gradle/Kotlin/KMP/Spring/Ktor) repos, not just its own monorepo.",
@@ -7333,7 +7353,9 @@
           "question": "Is profile staleness ever auto-invalidated when a repo changes stack?",
           "why_unknown": "domain doc flags it inferred/unverified; only ?refresh=true recompute observed"
         }
-      ]
+      ],
+      "slug": "project-registration",
+      "name": "project-registration"
     },
     {
       "business_purpose": "The delivery boundary of the board: turns an AI builder's throwaway worktree branch into code on the project's default branch — AI code-review approval gate, gated auto-merge, conflict/fix-and-merge recovery, and a fleet of reconcilers that keep DB status honest with git reality. Exists to protect two invariants: 'a ticket is Done iff its code is reachable from the default branch' and 'nothing merges that wasn't approved (or explicitly allowed to skip approval)'.",
@@ -7965,7 +7987,9 @@
           "question": "Live behaviour not exercised — env was READ-ONLY (no merges/agent spawns), so all statuses are from code+tests not running-app observation.",
           "why_unknown": "subagent constraint: GET-only against the dev server"
         }
-      ]
+      ],
+      "slug": "review-merge",
+      "name": "review-merge"
     },
     {
       "business_purpose": "Turns a kanban board's lifecycle into per-project DATA: a directed graph of stages (nodes) and legal moves (edges) with data-driven guards, attached agent skills, and cycle budgets — so 'what columns exist and how work moves' is configuration, not code. The same graph is simultaneously the board's column model, the AI agent's state machine, and the auto-routing policy. The legacy fixed board is just one built-in template (Simple Ticket).",
@@ -8487,7 +8511,9 @@
           "question": "diff_touches glob boundary behavior (no brace/negation, '?'/'**' edge cases) — is the hand-rolled matcher's failure mode (silent manual/no-match) intended?",
           "why_unknown": "only happy-path globs asserted in tests"
         }
-      ]
+      ],
+      "slug": "workflow-engine",
+      "name": "workflow-engine"
     }
   ]
 }

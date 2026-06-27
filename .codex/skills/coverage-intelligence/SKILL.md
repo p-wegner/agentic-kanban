@@ -20,8 +20,17 @@ requirements→behaviours; the orchestrator scores and ranks.
 
 Reads the shared model (**`references/verification-model.md`** — the canonical schema, owned
 here). Consumes `docs/verification/_behavior-model.json` (from `behavior-discovery`). Writes
-`_coverage.json`, `_coverage-matrix.md`, `_gaps.md`, `_priorities.md`. Re-running **updates**
-the model incrementally.
+`_coverage.json`, `_coverage-matrix.md`, `_gaps.md`, `_priorities.md`, and the living
+**`_testplan.md`**. Re-running **updates** the model incrementally.
+
+### This skill is the "planner" (cf. Playwright Agents)
+The three skills mirror Playwright's planner → generator → healer: **planner** = behavior-discovery
++ this skill, whose human-trackable output is `_testplan.md` (one scenario per observable
+behaviour, `[x]`/`[~]`/`[ ]` derived from coverage status); **generator** = `e2e-test-author`,
+which implements gaps top-down from the plan; **healer** = `e2e-test-author` re-run +
+`flaky-test-triage`, which keeps the suite green. Unlike a hand-maintained plan, `_testplan.md`
+is *generated from the model*, so its checkboxes can never drift from reality — re-render after
+any coverage change and the ticks update themselves.
 
 ---
 
@@ -78,10 +87,16 @@ status on every behaviour and requirement:
 exist. `documented-missing` = requirement with no implementing behaviour — **verify against
 code before asserting**, then escalate as a likely bug or dead requirement.)
 
-## Phase 3 — Score dimensions + compute the matrix
-Fill `_coverage.json.summary`: per-dimension and per-capability roll-ups. Render
-`_coverage-matrix.md` (capability × dimension grid, each cell covered/partial/uncovered with
-counts) and `_gaps.md` (the five buckets, each gap with its rationale and missing dimensions).
+## Phase 3 — Score dimensions + render the views
+Fill `_coverage.json.summary`: per-dimension and per-capability roll-ups. Then render the
+human views deterministically with the bundled tools (never hand-write them — they regenerate):
+- `node <skill>/tools/assemble.mjs <verification-dir>` — merge `capabilities/<slug>.json` (the
+  fan-out output) into `_behavior-model.json` + `_coverage.json` and roll up totals.
+- `node <skill>/tools/render.mjs <verification-dir>` — `_coverage-matrix.md` (capability × status
+  grid + weakest dimensions), `_gaps.md` (five buckets, grouped by capability), `_priorities.md`
+  (every capability's `top_gaps`, ranked P-band then ROI).
+- `node <skill>/tools/testplan.mjs <verification-dir>` — `_testplan.md`, the living planner output:
+  one scenario per behaviour (`given`/`then` from the behaviour model), tick derived from coverage.
 The dimension catalog and what "covered" means for each is in `references/coverage-dimensions.md`.
 
 ## Phase 4 — Prioritize by ROI (the test author's work-list)
@@ -132,3 +147,7 @@ behaviour faster than it covered it — that's signal, log it.
 | `references/prioritization.md` | Phase 4 — the ROI model + P0–P5 rubric |
 | `references/historical-signals.md` | Phase 4 — churn + bug-history → regression premium |
 | `tools/test-inventory.mjs` | Phase 0 — deterministic existing-test scanner |
+| `tools/candidates.mjs` | Phase 1 — per-capability candidate-test sets (source-import ∪ api-path ∪ keyword) |
+| `tools/assemble.mjs` | Phase 3 — merge per-capability files → `_behavior-model.json` + `_coverage.json` |
+| `tools/render.mjs` | Phase 3 — regenerate `_coverage-matrix.md` / `_gaps.md` / `_priorities.md` |
+| `tools/testplan.mjs` | Phase 3 — regenerate the living `_testplan.md` (planner output; ticks derived from coverage) |
