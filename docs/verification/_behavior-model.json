@@ -1,0 +1,382 @@
+{
+  "schema": "verification-model/behavior@1",
+  "analyzed_sha": "0a954ccd",
+  "evidence_sources": ["domain-docs", "source", "tests", "ui-exploration"],
+  "ui_exploration_note": "Live server probed READ-ONLY at http://127.0.0.1:3001 — GET /api/health returned status:ok; GET /api/workspaces (no projectId) returned HTTP 400, confirming the project/issue-scoping guard. No workspaces were created, mutated, or agents spawned.",
+  "capabilities": [
+    {
+      "slug": "workspaces",
+      "name": "Workspaces & Worktrees",
+      "business_purpose": "A workspace is the atomic unit of agentic work: it binds one ticket to one isolated place an AI agent can write code (a dedicated git branch in a dedicated worktree, or the main checkout for a 'direct' workspace) plus the bookkeeping that lets the board observe the agent, surface its diff, and decide whether the work is mergeable. It exists so an autonomous agent's blast radius is contained, observable, and reversible. The DB row outlives the process and retains forensic state (launch errors, merged SHAs, cleanup warnings) so finished/crashed/abandoned work is still reasoned about.",
+      "confidence": "high",
+      "source_paths": [
+        "packages/server/src/routes/workspaces.ts",
+        "packages/server/src/routes/workspace-actions.ts",
+        "packages/server/src/services/workspace-create.service.ts",
+        "packages/server/src/services/workspace-provision.service.ts",
+        "packages/server/src/services/agent.service.ts",
+        "packages/server/src/services/followup-workspace.service.ts",
+        "packages/shared/src/schema/workspaces.ts",
+        "packages/shared/src/lib/workspace-activity-state.ts"
+      ],
+      "actors": [
+        { "name": "operator", "kind": "human", "notes": "the single local user, driving via the React UI (New Workspace, View Diff, Merge, chat) — this is single-user local-first, no RBAC" },
+        { "name": "monitor", "kind": "automation", "notes": "in-process deterministic monitor / out-of-process Conductor — auto-starts unblocked backlog up to WIP, auto-reviews/auto-merges, and triggers the post-merge cascade; gated by per-project Start Mode" },
+        { "name": "butler", "kind": "automation", "notes": "warm per-project Claude assistant; creates workspaces via the same POST /api/workspaces one-step flow" },
+        { "name": "agent-subprocess", "kind": "agent", "notes": "the launched AI coding agent (Claude/Codex/Copilot/Pi) that edits code inside the worktree; its writes are confined by a PreToolUse cross-worktree-write gate" },
+        { "name": "cli-mcp-caller", "kind": "external", "notes": "pnpm cli / MCP tools driving the same REST surface (e.g. workspace resume)" }
+      ],
+      "entry_points": [
+        { "kind": "api", "ref": "POST /api/workspaces", "observable": "creates DB record + (unless direct) provisions an isolated worktree, moves issue to In Progress, auto-launches the agent subprocess; returns 201 with the workspace record (even on launch failure, with an error field)" },
+        { "kind": "api", "ref": "POST /api/workspaces/preview", "observable": "dry-run launch config (resolved branch/base/provider/ports, plan-mode default, blockedBy, warnings) with NO side effects" },
+        { "kind": "api", "ref": "GET /api/workspaces?projectId=|issueId=", "observable": "slim scoped workspace list (status/provider/model/mergedAt); 400 when neither scope given" },
+        { "kind": "api", "ref": "GET/PATCH/DELETE /api/workspaces/:id", "observable": "read details / patch status / cascade-delete sessions+messages" },
+        { "kind": "api", "ref": "POST /api/workspaces/:id/turn", "observable": "send a follow-up message (content field); 201 resumed or ok; 400 when content missing" },
+        { "kind": "api", "ref": "GET /api/workspaces/:id/diff", "observable": "ETag-cached working-tree diff vs base (200 + ETag, 304 on matching If-None-Match)" },
+        { "kind": "api", "ref": "POST /api/workspaces/:id/merge", "observable": "lands the branch onto base, sets mergedAt/mergedHeadSha, moves issue to Done; deduped against concurrent calls; 409 on conflict/not-approved/dirty-main/already-merged" },
+        { "kind": "api", "ref": "POST /api/workspaces/:id/fix-and-merge | /update-base | /resolve-conflicts | /conflicts", "observable": "conflict path: spawn a fixing agent / rebase onto base / resolve+land / report conflict files" },
+        { "kind": "api", "ref": "POST /api/workspaces/:id/launch | /stop | /quarantine", "observable": "(re)launch agent (201) / stop running session / stop+move issue back to In Progress" },
+        { "kind": "api", "ref": "GET /api/workspaces/:id/plan, POST /:id/implement-plan, POST /:id/reject-plan", "observable": "plan-mode gate: read the pending plan, approve it to start implementation (201), or reject with feedback (201, 400 if feedback missing)" },
+        { "kind": "event", "ref": "autoStartFollowups()", "observable": "post-merge cascade: dependents whose blockers are now all Done get a worktree + launched agent automatically" },
+        { "kind": "api", "ref": "GET /api/workspaces/stale-worktrees | /cleanup-warnings, DELETE /:id/stale-worktree, POST /:id/retry-cleanup", "observable": "operator hygiene: list/remove orphaned worktree dirs and retry failed post-merge cleanup" },
+        { "kind": "ui", "ref": "New Workspace / launch preview (IssueDetailPanel, WorkspacePanel)", "observable": "operator creates a workspace, sees resolved branch/base/provider and warnings before launch" },
+        { "kind": "cli", "ref": "pnpm cli -- workspace resume <N>", "observable": "relaunches the agent for issue N's workspace" }
+      ],
+      "behaviors": [
+        {
+          "id": "workspaces.create.launch",
+          "statement": "Creating a workspace provisions an isolated worktree on a fresh branch, injects ticket context, moves the issue to In Progress, and auto-launches the agent in one step",
+          "actor": "operator",
+          "preconditions": ["issue exists", "project/repo registered", "no open direct workspace already on the issue"],
+          "observable_outcome": "HTTP 201 with the workspace record; issue moves to In Progress; an agent session starts; GET /:id/diff becomes reachable",
+          "evidence": ["packages/server/src/routes/workspaces.ts:214", "packages/server/src/services/workspace-create.service.ts:343", "packages/server/src/__tests__/api.test.ts:263"],
+          "dimensions": ["workflow", "capability", "api", "state-transition"],
+          "risk": "high",
+          "confidence": "high"
+        },
+        {
+          "id": "workspaces.create.missing-issue",
+          "statement": "A create request without an issueId is rejected at the boundary — no half-formed work unit may enter the system",
+          "actor": "operator",
+          "preconditions": [],
+          "observable_outcome": "HTTP 400, no workspace row created",
+          "evidence": ["packages/server/src/routes/workspaces.ts:210", "packages/server/src/__tests__/api.test.ts:264"],
+          "dimensions": ["error", "api", "boundary"],
+          "risk": "low",
+          "confidence": "high"
+        },
+        {
+          "id": "workspaces.create.launch-failure-persists",
+          "statement": "A worktree-provisioning or agent-launch failure still persists the workspace row with an error/latestLaunchError field instead of dropping it, so the failure is visible and recoverable",
+          "actor": "operator",
+          "preconditions": ["create attempted", "provisioning or launch fails (e.g. stale safety preflight, worktree create error)"],
+          "observable_outcome": "Response carries the workspace record plus an error field; workspace later shows as failed/idle; orphaned worktree is rolled back on a DB-txn failure",
+          "evidence": ["packages/server/src/services/workspace-create.service.ts:415", "packages/server/src/__tests__/workspace-create-harden.test.ts:786", "packages/server/src/__tests__/workspace-create-worktree-rollback.test.ts:813"],
+          "dimensions": ["error", "workflow", "boundary"],
+          "risk": "high",
+          "confidence": "high"
+        },
+        {
+          "id": "workspaces.create.one-direct-per-issue",
+          "statement": "Creation refuses a second open direct workspace for an issue, because two would both edit the shared main checkout and collide",
+          "actor": "operator",
+          "preconditions": ["an existing non-closed direct workspace on the same issue"],
+          "observable_outcome": "create is blocked (error surfaced), no second direct workspace row appears",
+          "evidence": ["packages/server/src/services/workspace-create.service.ts:378", "packages/server/src/__tests__/workspace-create-harden.test.ts:788"],
+          "dimensions": ["error", "boundary", "capability"],
+          "risk": "medium",
+          "confidence": "high"
+        },
+        {
+          "id": "workspaces.create.plan-mode-default",
+          "statement": "Plan mode auto-enables for a high/critical-priority issue when the caller did not set it explicitly — a cost gate that surfaces an expensive misunderstanding as an approvable plan before tokens are burned; explicit caller intent still wins",
+          "actor": "operator",
+          "preconditions": ["issue priority is high/critical", "caller omitted planMode"],
+          "observable_outcome": "preview/create resolves planMode=true; an explicit planMode=false is honored even for high priority",
+          "evidence": ["packages/server/src/services/workspace-create.service.ts:380", "packages/server/src/__tests__/launch-preview.test.ts:433"],
+          "dimensions": ["workflow", "capability", "config"],
+          "risk": "medium",
+          "confidence": "high"
+        },
+        {
+          "id": "workspaces.preview.dry-run",
+          "statement": "Preview returns the fully-resolved launch config (branch, base, provider/profile/model, derived dev ports, plan-mode default, blockedBy, collision/missing-profile/no-base warnings) as a read-only dry run with no side effects",
+          "actor": "operator",
+          "preconditions": ["valid issueId"],
+          "observable_outcome": "HTTP 200 with the resolved config; no workspace is created; 400 when issueId missing",
+          "evidence": ["packages/server/src/routes/workspaces.ts:105", "packages/server/src/__tests__/launch-preview.test.ts:429"],
+          "dimensions": ["api", "workflow", "config"],
+          "risk": "low",
+          "confidence": "high"
+        },
+        {
+          "id": "workspaces.list.scoped",
+          "statement": "The workspace list is always project- or issue-scoped; an unscoped request is rejected rather than returning the whole table",
+          "actor": "cli-mcp-caller",
+          "preconditions": [],
+          "observable_outcome": "GET with ?projectId= or ?issueId= returns 200 with the slim scoped list (model column included); without either returns HTTP 400 (confirmed live)",
+          "evidence": ["packages/server/src/routes/workspaces.ts:156", "packages/server/src/__tests__/project-scoped-workspace-list.test.ts:529", "packages/server/src/__tests__/issue-scoped-workspace-list.test.ts:414"],
+          "dimensions": ["api", "boundary"],
+          "risk": "low",
+          "confidence": "high"
+        },
+        {
+          "id": "workspaces.turn.followup",
+          "statement": "A follow-up turn re-engages the agent on an existing workspace by sending a content message, resuming the provider session",
+          "actor": "operator",
+          "preconditions": ["workspace exists", "prior session completed/idle"],
+          "observable_outcome": "201 with resumed:true + sessionId (or ok:true when delivered to a live session); a new agent run starts against the same worktree",
+          "evidence": ["packages/server/src/routes/workspace-actions.ts:52", "packages/e2e/tests/ui/workspace-chat.test.ts:106"],
+          "dimensions": ["workflow", "api", "state-transition"],
+          "risk": "medium",
+          "confidence": "high"
+        },
+        {
+          "id": "workspaces.turn.missing-content",
+          "statement": "A turn request with no content field is rejected",
+          "actor": "operator",
+          "preconditions": ["workspace exists"],
+          "observable_outcome": "HTTP 400 {error: 'content is required'}, no session started",
+          "evidence": ["packages/server/src/routes/workspace-actions.ts:55"],
+          "dimensions": ["error", "api"],
+          "risk": "low",
+          "confidence": "high"
+        },
+        {
+          "id": "workspaces.diff.etag-cached",
+          "statement": "The working-tree diff (including untracked files) is exposed and conditionally cached, so an unchanged diff is a cheap 304 and a changed diff invalidates to a new ETag",
+          "actor": "operator",
+          "preconditions": ["workspace has a worktree (or is direct → diff vs HEAD)"],
+          "observable_outcome": "200 with ETag + diff body; 304 on matching If-None-Match; new ETag after the diff changes",
+          "evidence": ["packages/server/src/routes/workspace-actions.ts:110", "packages/server/src/__tests__/workspace-diff-etag.test.ts:871"],
+          "dimensions": ["api", "boundary"],
+          "risk": "medium",
+          "confidence": "high"
+        },
+        {
+          "id": "workspaces.merge.land",
+          "statement": "Merging lands the feature branch onto the base, stamps mergedAt + mergedHeadSha (which survive branch deletion), closes the workspace, and moves the issue to Done — terminal and irreversible",
+          "actor": "operator",
+          "preconditions": ["workspace ready for merge (or auto_merge_in_review bypass)", "no conflicts", "main checkout clean"],
+          "observable_outcome": "200 with merged:true + baseBranch/SHAs; board reflects Done immediately; concurrent merge calls are deduplicated to one promise",
+          "evidence": ["packages/server/src/routes/workspace-actions.ts:126", "packages/server/src/__tests__/workspace-merge-service.test.ts:1017", "packages/server/src/__tests__/workspace-lifecycle-status-transitions.test.ts:953"],
+          "dimensions": ["workflow", "api", "state-transition"],
+          "risk": "high",
+          "confidence": "high"
+        },
+        {
+          "id": "workspaces.merge.conflict",
+          "statement": "A merge whose branch conflicts is refused with a structured 409 (reason=conflict + conflictFiles), the readyForMerge flag is cleared, the base is NOT advanced, and the server stays healthy",
+          "actor": "operator",
+          "preconditions": ["branch conflicts with base (read-only merge-tree detection)"],
+          "observable_outcome": "HTTP 409 with {mergeReason:'conflict', conflictFiles}; base branch unchanged; workspace stays open; health endpoint still responsive",
+          "evidence": ["packages/server/src/__tests__/merge-error-reporting.test.ts:469", "packages/server/src/__tests__/merge-conflict-server-health.test.ts:456"],
+          "dimensions": ["error", "api", "state-transition"],
+          "risk": "high",
+          "confidence": "high"
+        },
+        {
+          "id": "workspaces.merge.not-approved",
+          "statement": "A merge of a workspace that is not ready for merge is refused unless an auto-merge-in-review bypass is active",
+          "actor": "monitor",
+          "preconditions": ["readyForMerge=false", "auto_merge_in_review not enabled"],
+          "observable_outcome": "HTTP 409 with mergeReason=not_approved; base unchanged",
+          "evidence": ["packages/server/src/__tests__/merge-error-reporting.test.ts:472", "packages/server/src/__tests__/workspace-merge-service.test.ts:1060"],
+          "dimensions": ["error", "permission", "api"],
+          "risk": "medium",
+          "confidence": "high"
+        },
+        {
+          "id": "workspaces.merge.dirty-main-blocked",
+          "statement": "A merge is refused when the main checkout has uncommitted tracked source changes, because landing into a dirty main would otherwise stall automation",
+          "actor": "monitor",
+          "preconditions": ["uncommitted tracked .ts/.tsx/.sql changes under packages/** in the main checkout"],
+          "observable_outcome": "HTTP 409 with mergeReason=dirty_main; no git merge performed",
+          "evidence": ["packages/server/src/services/dirty-main-checkout.ts:33", "packages/server/src/__tests__/merge-error-reporting.test.ts:473"],
+          "dimensions": ["error", "api", "config"],
+          "risk": "medium",
+          "confidence": "high"
+        },
+        {
+          "id": "workspaces.merge.already-merged-reconcile",
+          "statement": "A retry whose branch is already an ancestor of base (e.g. a dropped response after the real merge) reconciles to Done without double-merging — idempotent, git-verified, and guarded against silent-merge-loss when the mergedAt flag is stale",
+          "actor": "monitor",
+          "preconditions": ["branch tip already an ancestor of base OR mergedAt already set AND git-verified ancestor"],
+          "observable_outcome": "200 reconciled:true, mergeBranch NOT called; issue moved to Done; a stale mergedAt with a non-ancestor branch does NOT short-circuit",
+          "evidence": ["packages/server/src/__tests__/workspace-merge-flap.test.ts:999", "packages/server/src/__tests__/workspace-already-merged.test.ts:737", "packages/server/src/__tests__/workspace-merge-service.test.ts:1037"],
+          "dimensions": ["state-transition", "error", "regression"],
+          "risk": "high",
+          "confidence": "high"
+        },
+        {
+          "id": "workspaces.fix-and-merge.resolve",
+          "statement": "Fix-and-merge spawns a conflict-resolving 'fixing' agent that counts as active capacity, then re-attempts the landing; stale zero-output fixing zombies are force-recovered before retrying",
+          "actor": "monitor",
+          "preconditions": ["merge found conflicts", "fix-and-merge invoked"],
+          "observable_outcome": "a fixing session starts (consumes a WIP slot); on success the branch lands and the issue moves to Done",
+          "evidence": ["packages/server/src/routes/workspace-actions.ts:184", "packages/server/src/__tests__/workspace-merge-service.test.ts:1030", "packages/shared/src/lib/workspace-activity-state.ts:107"],
+          "dimensions": ["workflow", "state-transition", "api"],
+          "risk": "high",
+          "confidence": "medium"
+        },
+        {
+          "id": "workspaces.plan.approve-reject",
+          "statement": "A plan-mode workspace produces a plan and awaits human approval; the agent writes no implementation code until the plan is approved, and a rejection re-runs planning with feedback",
+          "actor": "operator",
+          "preconditions": ["workspace launched in plan mode", "pendingPlanPath written"],
+          "observable_outcome": "GET /:id/plan returns the plan; POST /:id/implement-plan (201) starts implementation; POST /:id/reject-plan with feedback (201) re-plans; reject without feedback → 400",
+          "evidence": ["packages/server/src/routes/workspace-actions.ts:75", "packages/server/src/routes/workspace-actions.ts:88", "packages/shared/src/schema/workspaces.ts:24"],
+          "dimensions": ["workflow", "state-transition", "api", "error"],
+          "risk": "medium",
+          "confidence": "medium"
+        },
+        {
+          "id": "workspaces.stop.strand-recovery",
+          "statement": "Stopping a workspace halts its running session and resets an active/reviewing workspace to idle (stranded-session recovery); quarantine additionally moves the issue back to In Progress",
+          "actor": "operator",
+          "preconditions": ["workspace has a running or stranded session"],
+          "observable_outcome": "running session stopped; workspace status → idle; quarantine also moves the issue to In Progress; safe (no-op) when nothing is running",
+          "evidence": ["packages/server/src/routes/workspace-actions.ts:62", "packages/server/src/routes/workspace-actions.ts:69", "packages/server/src/__tests__/workspace-lifecycle-status-transitions.test.ts:962"],
+          "dimensions": ["workflow", "state-transition", "api"],
+          "risk": "medium",
+          "confidence": "high"
+        },
+        {
+          "id": "workspaces.delete.cascade",
+          "statement": "Deleting a workspace cascade-removes its sessions and messages and detaches its summary from the issue",
+          "actor": "operator",
+          "preconditions": ["workspace exists"],
+          "observable_outcome": "workspace + all FK children deleted; the issue's workspaceSummary disappears from the board",
+          "evidence": ["packages/server/src/routes/workspaces.ts:238", "packages/server/src/__tests__/api.test.ts:276", "packages/server/src/__tests__/board-column-count-invariant.test.ts:352"],
+          "dimensions": ["workflow", "api", "state-transition"],
+          "risk": "medium",
+          "confidence": "high"
+        },
+        {
+          "id": "workspaces.lifecycle.exit-classification",
+          "statement": "When the agent process exits the run is classified by observed output: a ≤1s / zero-token / explicit-launchFailure run is 'failed' (relaunchable), a clean exit with committed changes flips the workspace to reviewing and moves the issue to In Review, and the exit-before-output drain prevents misclassifying a fast real run as a zero-output launch failure",
+          "actor": "agent-subprocess",
+          "preconditions": ["an agent session was launched and the process exits"],
+          "observable_outcome": "workspace/session status reflects failed vs idle vs reviewing; on clean exit with a diff the issue is In Review and an auto-review session launches",
+          "evidence": ["packages/shared/src/lib/workspace-activity-state.ts:53", "packages/server/src/services/agent.service.ts:357", "packages/server/src/__tests__/workspace-lifecycle-status-transitions.test.ts:949"],
+          "dimensions": ["state-transition", "workflow", "regression"],
+          "risk": "high",
+          "confidence": "high"
+        },
+        {
+          "id": "workspaces.lifecycle.hang-watchdog",
+          "statement": "An agent that produces zero output for 15 minutes is killed by a spawn-layer watchdog (reset on every output event), turning an invisible provider deadlock into an observable exit",
+          "actor": "agent-subprocess",
+          "preconditions": ["agent running", "no stdout/stderr for the watchdog interval"],
+          "observable_outcome": "the agent process is killed and the session transitions to a stopped/failed state",
+          "evidence": ["packages/server/src/services/agent.service.ts:34", "packages/server/src/services/agent.service.ts:248"],
+          "dimensions": ["error", "state-transition"],
+          "risk": "medium",
+          "confidence": "medium"
+        },
+        {
+          "id": "workspaces.lifecycle.reattach-survives-reload",
+          "statement": "A detached agent survives a server hot-reload: on restart, sessions with a live PID are reattached (output watcher resumes from the last byte offset) and dead-PID sessions are marked stopped with their workspaces reset to idle",
+          "actor": "monitor",
+          "preconditions": ["agent spawned detached + unref", "server process restarts (tsx hot-reload / SIGTERM)"],
+          "observable_outcome": "surviving agents keep streaming after restart; crashed ones are reconciled to idle; not killed on SIGTERM, only on SIGINT",
+          "evidence": ["packages/server/src/services/agent.service.ts:509", "packages/server/CLAUDE.md (Agent process survival)"],
+          "dimensions": ["state-transition", "regression"],
+          "risk": "high",
+          "confidence": "medium"
+        },
+        {
+          "id": "workspaces.cascade.post-merge-followups",
+          "statement": "On merge, dependents whose blocking deps are now ALL Done get a worktree created and an agent launched automatically — the dependency DAG drives new work — but only when the project has a defaultBranch, the dependent has no in-flight workspace, and Start Mode permits it",
+          "actor": "monitor",
+          "preconditions": ["a workspace just merged", "dependents exist with all blockers Done", "project has defaultBranch", "no non-closed workspace already on the dependent"],
+          "observable_outcome": "new workspaces appear + agents launch for the unblocked dependents; a workspace_merged event is emitted only after the agent actually launches; skipped when no defaultBranch or dependent already in flight",
+          "evidence": ["packages/server/src/services/followup-workspace.service.ts:27", "packages/server/src/services/followup-workspace.service.ts:44", "packages/server/src/services/followup-workspace.service.ts:55"],
+          "dimensions": ["workflow", "state-transition", "capability"],
+          "risk": "high",
+          "confidence": "medium"
+        },
+        {
+          "id": "workspaces.direct.no-worktree",
+          "statement": "A direct workspace operates in the project's main checkout with no worktree (null baseBranch), trading isolation for immediacy; its merge is a no-op close and its diff is computed against HEAD plus untracked files",
+          "actor": "operator",
+          "preconditions": ["create with isDirect=true"],
+          "observable_outcome": "no worktree dir; workingDir = repoPath; diff vs HEAD; merge just closes the workspace; setup script skipped",
+          "evidence": ["packages/shared/src/schema/workspaces.ts:12", "packages/server/src/__tests__/api.test.ts:266", "packages/server/src/__tests__/workspace-diff-stats.test.ts:885"],
+          "dimensions": ["capability", "boundary", "workflow"],
+          "risk": "medium",
+          "confidence": "high"
+        },
+        {
+          "id": "workspaces.provision.symlink-traversal-guard",
+          "statement": "Per-worktree dependency bootstrap validates symlink target names against path traversal and absolute paths before creating any link, so autonomous setup cannot write outside the worktree",
+          "actor": "agent-subprocess",
+          "preconditions": ["worktree setup requests node_modules symlinking"],
+          "observable_outcome": "traversal/absolute link names are rejected; a node_modules request expands to each packages/*/node_modules under the strict pnpm linker",
+          "evidence": ["packages/shared/src/lib/worktree-symlink-bootstrap.ts:17", "packages/shared/src/lib/worktree-symlink-bootstrap.ts:57"],
+          "dimensions": ["boundary", "error", "config"],
+          "risk": "medium",
+          "confidence": "high"
+        },
+        {
+          "id": "workspaces.hygiene.stale-worktree-cleanup",
+          "statement": "Operators can find orphaned worktree directories and retry failed post-merge cleanup, with path-safety guards that reject removal of anything outside the managed .worktrees/ dir",
+          "actor": "operator",
+          "preconditions": ["orphaned worktree dir or a workspace with a cleanupWarning exists"],
+          "observable_outcome": "stale list/cleanup-warnings returned; removal succeeds for safe paths; 400 for unsafe path / traversal / not-closed workspace / repo root",
+          "evidence": ["packages/server/src/routes/workspaces.ts:89", "packages/server/src/__tests__/stale-worktree-cleanup.test.ts:621", "packages/server/src/__tests__/cleanup-warnings.test.ts:363"],
+          "dimensions": ["error", "api", "boundary"],
+          "risk": "low",
+          "confidence": "high"
+        }
+      ],
+      "permissions": [
+        { "actor": "operator", "behavior": "workspaces.create.launch", "allowed": true, "notes": "single-user local-first — the operator can drive every entry point; there is no role/permission matrix in this product" },
+        { "actor": "monitor", "behavior": "workspaces.cascade.post-merge-followups", "allowed": "gated", "notes": "auto-start paths are gated by per-project Start Mode (manual|monitor|conductor) via resolveStartPolicy, NOT by user permissions — a manual project must not cascade/auto-start" },
+        { "actor": "agent-subprocess", "behavior": "writes-confined-to-own-worktree", "allowed": "enforced", "notes": "a hard PreToolUse gate (prevent-cross-worktree-writes.js) blocks writes resolving into the main checkout or another worktree; this is the runtime containment boundary, not an RBAC role" }
+      ],
+      "state_model": {
+        "states": ["created", "active", "reviewing", "fixing", "awaiting-plan-approval", "blocked", "idle", "in-review-idle", "failed", "merged", "closed"],
+        "notes": "The stored `status` column (free text, default 'active') and the DERIVED activity state are two vocabularies: 'merged' (closed+mergedAt), 'in-review-idle' (idle In Review with a cached non-empty diff), and 'failed' (launch-failure heuristic) are DERIVED by deriveWorkspaceActivityState, not stored. 'Active capacity' (consumes a WIP slot) = active|fixing|reviewing|awaiting-plan-approval, but the monitor auto-start gate uses a SEPARATE 3-state list that omits awaiting-plan-approval — the two do not agree.",
+        "transitions": [
+          { "from": "created", "to": "active", "trigger": "POST /api/workspaces auto-launches the agent", "behavior": "workspaces.create.launch" },
+          { "from": "created", "to": "awaiting-plan-approval", "trigger": "plan-mode workspace produces a plan", "behavior": "workspaces.plan.approve-reject" },
+          { "from": "awaiting-plan-approval", "to": "active", "trigger": "POST /:id/implement-plan", "behavior": "workspaces.plan.approve-reject" },
+          { "from": "active", "to": "failed", "trigger": "agent exits ≤1s / 0 tokens / launchFailure flag", "behavior": "workspaces.lifecycle.exit-classification" },
+          { "from": "active", "to": "reviewing", "trigger": "agent exits 0 with committed changes → issue In Review + auto-review launches", "behavior": "workspaces.lifecycle.exit-classification" },
+          { "from": "active", "to": "idle", "trigger": "POST /:id/stop or stranded-session recovery", "behavior": "workspaces.stop.strand-recovery" },
+          { "from": "reviewing", "to": "in-review-idle", "trigger": "review session idles with a cached non-empty diff", "behavior": "workspaces.lifecycle.exit-classification" },
+          { "from": "reviewing", "to": "merged", "trigger": "POST /:id/merge succeeds → issue Done, mergedAt stamped", "behavior": "workspaces.merge.land" },
+          { "from": "reviewing", "to": "reviewing", "trigger": "POST /:id/merge with conflict → 409, stays open", "behavior": "workspaces.merge.conflict" },
+          { "from": "reviewing", "to": "fixing", "trigger": "POST /:id/fix-and-merge spawns a conflict-resolver", "behavior": "workspaces.fix-and-merge.resolve" },
+          { "from": "fixing", "to": "merged", "trigger": "fix-and-merge lands the branch", "behavior": "workspaces.fix-and-merge.resolve" },
+          { "from": "active", "to": "closed", "trigger": "DELETE (cascade) or issue moved to a terminal status", "behavior": "workspaces.delete.cascade" }
+        ]
+      },
+      "error_states": [
+        { "id": "workspaces.create.missing-issue", "statement": "create without issueId → 400", "evidence": "packages/server/src/routes/workspaces.ts:210" },
+        { "id": "workspaces.list.unscoped", "statement": "GET /api/workspaces without projectId|issueId → 400 (confirmed live)", "evidence": "packages/server/src/routes/workspaces.ts:156" },
+        { "id": "workspaces.turn.missing-content", "statement": "POST /:id/turn without content → 400", "evidence": "packages/server/src/routes/workspace-actions.ts:55" },
+        { "id": "workspaces.plan.reject-no-feedback", "statement": "POST /:id/reject-plan without feedback → 400", "evidence": "packages/server/src/routes/workspace-actions.ts:91" },
+        { "id": "workspaces.merge.conflict", "statement": "merge with conflicting branch → 409 {mergeReason:'conflict', conflictFiles}, base not advanced, server stays healthy", "evidence": "packages/server/src/__tests__/merge-error-reporting.test.ts:469" },
+        { "id": "workspaces.merge.not-approved", "statement": "merge when readyForMerge=false and no auto-merge bypass → 409 mergeReason=not_approved", "evidence": "packages/server/src/__tests__/merge-error-reporting.test.ts:472" },
+        { "id": "workspaces.merge.dirty-main", "statement": "merge with a dirty main checkout → 409 mergeReason=dirty_main", "evidence": "packages/server/src/__tests__/merge-error-reporting.test.ts:473" },
+        { "id": "workspaces.merge.already-merged", "statement": "merge of an already-merged workspace → 409 reason=already_merged (or reconcile to Done on retry)", "evidence": "packages/server/src/__tests__/merge-error-reporting.test.ts:471" },
+        { "id": "workspaces.merge.stale-build", "statement": "mergeWorkspace WorkspaceError for a stale server build → 503 reason=server_build_stale", "evidence": "packages/server/src/__tests__/merge-error-reporting.test.ts:475" },
+        { "id": "workspaces.get.not-found", "statement": "GET /api/workspaces/:id for a missing workspace → 404", "evidence": "packages/server/src/__tests__/api.test.ts:269" },
+        { "id": "workspaces.patch.invalid-status", "statement": "PATCH /api/workspaces/:id with an invalid status → rejected", "evidence": "packages/server/src/__tests__/api.test.ts:275" },
+        { "id": "workspaces.cleanup.unsafe-path", "statement": "stale-worktree/cleanup removal of a path outside .worktrees/ (or traversal/repo-root) → 400", "evidence": "packages/server/src/__tests__/stale-worktree-cleanup.test.ts:629" },
+        { "id": "workspaces.lifecycle.launch-failed", "statement": "agent run ≤1s / 0 tokens / explicit launchFailure → classified failed (not idle), relaunchable, provider stderr surfaced", "evidence": "packages/shared/src/lib/workspace-activity-state.ts:53" }
+      ],
+      "external_integrations": ["git CLI (via shared git-exec adapter)", "agent subprocess (Claude/Codex/Copilot/Pi)", "filesystem worktree directories", "pnpm (per-worktree dependency setup script)"],
+      "unknowns": [
+        { "question": "Is the plan-mode gate (implement-plan / reject-plan) reachable and asserted end-to-end from the running UI, or only via the API?", "why_unknown": "no plan-mode UI E2E test in the candidate set; not exercised live (would require spawning an agent, which was out of bounds)" },
+        { "question": "Exact HTTP status of the one-open-direct-per-issue guard (4xx code vs error-in-201-body) at the route boundary.", "why_unknown": "the hardening test asserts the block but the precise status code was not confirmed; not probed live to avoid mutation" },
+        { "question": "Does the post-merge cascade (autoStartFollowups) get blocked correctly under Start Mode='manual' in practice, or only by the documented gating?", "why_unknown": "gating lives upstream in resolveStartPolicy (separate capability); not exercised here and no cascade test in the candidate set" },
+        { "question": "Is the 15-min hang-watchdog timeout per-provider tunable, and does a legitimately long silent step get wrongly killed?", "why_unknown": "heuristic noted in domain doc as overridable via env but not per-provider; not testable without a long-running real agent" },
+        { "question": "Whether merge of a direct workspace truly no-ops vs closes with any side effects, observed live.", "why_unknown": "asserted in unit tests (resolveMergeState direct-close) but not driven through a live merge to avoid mutation" },
+        { "question": "The full legal set of stored `status` values — schema declares `status` as free text default 'active', not an enum.", "why_unknown": "no enum in schema; the de facto set is the union of the activity-state switch branches, inferred not declared (schema/workspaces.ts:19)" }
+      ]
+    }
+  ]
+}

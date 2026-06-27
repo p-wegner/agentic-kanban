@@ -1,0 +1,407 @@
+{
+  "schema": "verification-model/coverage@1",
+  "analyzed_sha": "0a954ccd",
+  "capability": "workspaces",
+  "dimensions": ["capability","requirement","workflow","permission","navigation","api","error","boundary","state-transition","config","accessibility","regression","risk"],
+  "method_note": "Coverage judged against the candidate workspace-touching test set only (deterministic anchor). A test outside that set (e.g. plan-mode.service.test.ts, agent.service.test.ts, merge-cascade.test.ts) is NOT credited — noted in rationale where relevant. Strength=asserts-outcome means a test FAILS if the behaviour silently regresses. permission is near-N/A: single-user local-first, no RBAC; the one permission cell that matters is the merge readiness gate (not a role).",
+  "behaviors": [
+    {
+      "ref": "workspaces.create.launch",
+      "status": "covered",
+      "covered_by": [
+        { "test": "packages/server/src/__tests__/workspace.service.test.ts::creates a worktree, inserts the workspace, moves the issue to In Progress, and launches the agent", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/workspace-lifecycle-status-transitions.test.ts::lifecycle: idle → active on launchSession (calls sessionManager.startSession once and returns a sessionId)", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/workspace-create-harden.test.ts::returns 201-compatible result for successful creation", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/api.test.ts::POST /api/workspaces creates a workspace", "strength": "asserts-outcome" },
+        { "test": "packages/e2e/tests/api/workspace-lifecycle.test.ts::GET /api/workspaces/:id/diff returns diff for set-up workspace", "strength": "asserts-outcome" }
+      ],
+      "requirements": ["PRD-04:auto-launch", "PRD-05:workspace-stage"],
+      "dimensions_covered": ["workflow","capability","api","state-transition"],
+      "dimensions_missing": [],
+      "history": { "churn_90d": 42, "bugs": 2, "last_regression": "AK-587 deferred-launch connection drop" }
+    },
+    {
+      "ref": "workspaces.create.missing-issue",
+      "status": "covered",
+      "covered_by": [
+        { "test": "packages/server/src/__tests__/api.test.ts::POST /api/workspaces requires issueId (branch is optional — auto-generated when omitted)", "strength": "asserts-outcome" },
+        { "test": "packages/e2e/tests/api/workspaces.test.ts::POST /api/workspaces requires issueId and branch", "strength": "asserts-outcome" }
+      ],
+      "requirements": ["PRD-04:input-validation"],
+      "dimensions_covered": ["error","api","boundary"],
+      "dimensions_missing": [],
+      "history": { "churn_90d": 135, "bugs": 0, "last_regression": null }
+    },
+    {
+      "ref": "workspaces.create.launch-failure-persists",
+      "status": "covered",
+      "covered_by": [
+        { "test": "packages/server/src/__tests__/workspace-create-harden.test.ts::marks stale safety-policy preflight launch failures as workspace errors", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/workspace-create-harden.test.ts::returns a well-formed response when worktree creation itself fails (pre-insert)", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/workspace-create-worktree-rollback.test.ts::removes the orphaned worktree when the DB transaction rolls back (plain Error)", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/workspace.service.test.ts::marks the workspace idle with a launch error when the deferred agent spawn fails", "strength": "asserts-outcome" }
+      ],
+      "requirements": ["PRD-04:failure-visibility", "ADR:cross-resource-atomicity-893"],
+      "dimensions_covered": ["error","workflow","boundary"],
+      "dimensions_missing": [],
+      "history": { "churn_90d": 42, "bugs": 3, "last_regression": "AK-501/AK-587, #893 worktree rollback" }
+    },
+    {
+      "ref": "workspaces.create.one-direct-per-issue",
+      "status": "partial",
+      "covered_by": [
+        { "test": "packages/server/src/__tests__/workspace-create-harden.test.ts::blocks creation when the issue has an open direct workspace leftover", "strength": "asserts-outcome" }
+      ],
+      "requirements": ["PRD-04:direct-workspace-exclusivity"],
+      "dimensions_covered": ["boundary","capability"],
+      "dimensions_missing": ["error"],
+      "history": { "churn_90d": 42, "bugs": 1, "last_regression": null },
+      "gap": {
+        "kind": "dimension-missing",
+        "missing_dimensions": ["error"],
+        "rationale": "The block (no second direct workspace row) is asserted, but the exact HTTP failure contract (4xx code vs error-in-201-body) is never asserted — the behaviour model flags this as an open unknown. A consumer relying on a specific status code is unguarded."
+      }
+    },
+    {
+      "ref": "workspaces.create.plan-mode-default",
+      "status": "covered",
+      "covered_by": [
+        { "test": "packages/server/src/__tests__/launch-preview.test.ts::resolves plan mode default for high-priority issues", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/launch-preview.test.ts::respects explicit planMode=false even for high priority", "strength": "asserts-outcome" }
+      ],
+      "requirements": ["PRD-04:plan-mode-cost-gate"],
+      "dimensions_covered": ["workflow","capability","config"],
+      "dimensions_missing": [],
+      "history": { "churn_90d": 42, "bugs": 0, "last_regression": null }
+    },
+    {
+      "ref": "workspaces.preview.dry-run",
+      "status": "covered",
+      "covered_by": [
+        { "test": "packages/server/src/__tests__/launch-preview.test.ts::returns preview for a valid issue", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/launch-preview.test.ts::is read-only — does not create a workspace", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/launch-preview.test.ts::returns 400 when issueId is missing", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/launch-preview.test.ts::returns blockedBy list when the issue has unresolved blocking dependencies", "strength": "asserts-outcome" },
+        { "test": "packages/e2e/tests/ui/workspace-launch-preview.test.ts::preview renders resolved branch, base branch, and provider details", "strength": "asserts-outcome" }
+      ],
+      "requirements": ["PRD-04:launch-preview"],
+      "dimensions_covered": ["api","workflow","config"],
+      "dimensions_missing": [],
+      "history": { "churn_90d": 135, "bugs": 0, "last_regression": null }
+    },
+    {
+      "ref": "workspaces.list.scoped",
+      "status": "covered",
+      "covered_by": [
+        { "test": "packages/server/src/__tests__/project-scoped-workspace-list.test.ts::returns 200 with workspaces belonging to the given project", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/issue-scoped-workspace-list.test.ts::returns 400 when neither projectId nor issueId is provided", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/api.test.ts::GET /api/workspaces without projectId returns 400", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/api.test.ts::GET /api/workspaces surfaces the model column in the list projection (#819)", "strength": "asserts-outcome" }
+      ],
+      "requirements": ["PRD-04:scoped-list-guard"],
+      "dimensions_covered": ["api","boundary"],
+      "dimensions_missing": [],
+      "history": { "churn_90d": 135, "bugs": 0, "last_regression": null }
+    },
+    {
+      "ref": "workspaces.turn.followup",
+      "status": "covered",
+      "covered_by": [
+        { "test": "packages/e2e/tests/ui/workspace-chat.test.ts::Send follow-up via /turn after agent session completes", "strength": "asserts-outcome" },
+        { "test": "packages/e2e/tests/ui/workspace-chat.test.ts::UI: send follow-up message after session completes (multi-turn UI flow)", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/workspace.service.test.ts::sendTurn with auto_rebase_on_continue (auto-rebases before starting agent when auto_rebase_on_continue is true)", "strength": "asserts-outcome" }
+      ],
+      "requirements": ["PRD-04:multi-turn"],
+      "dimensions_covered": ["workflow","api","state-transition"],
+      "dimensions_missing": [],
+      "history": { "churn_90d": 180, "bugs": 1, "last_regression": null }
+    },
+    {
+      "ref": "workspaces.turn.missing-content",
+      "status": "uncovered",
+      "covered_by": [],
+      "requirements": ["PRD-04:input-validation"],
+      "dimensions_covered": [],
+      "dimensions_missing": ["error","api"],
+      "history": { "churn_90d": 180, "bugs": 0, "last_regression": null },
+      "gap": {
+        "kind": "no-test",
+        "missing_dimensions": ["error","api"],
+        "rationale": "No candidate test asserts POST /:id/turn with no content → 400 {error:'content is required'}. The turn route lives in workspace-actions.ts (churn 180, the single highest-churn workspace route file) — a refactor could silently drop the guard. Cheap negative test, regression-prone host file."
+      }
+    },
+    {
+      "ref": "workspaces.diff.etag-cached",
+      "status": "covered",
+      "covered_by": [
+        { "test": "packages/server/src/__tests__/workspace-diff-etag.test.ts::returns 200 with ETag, then 304 on matching If-None-Match", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/workspace-diff-etag.test.ts::returns 200 with new ETag when diff changes (invalidation)", "strength": "asserts-outcome" }
+      ],
+      "requirements": ["PRD-04:diff-surface"],
+      "dimensions_covered": ["api","boundary"],
+      "dimensions_missing": [],
+      "history": { "churn_90d": 180, "bugs": 0, "last_regression": null }
+    },
+    {
+      "ref": "workspaces.merge.land",
+      "status": "covered",
+      "covered_by": [
+        { "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::MergeService — clean merge advances base (returns merged=true with SHAs; closes ws; moves issue to Done)", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/workspace-lifecycle-status-transitions.test.ts::lifecycle: reviewing → Done on merge success (returns merged=true with baseBranch and SHAs)", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::MergeService — mergeWorkspaceDeduped deduplicates concurrent requests", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/api.test.ts::GET /api/projects/:id/board reflects Done counts immediately after workspace merge", "strength": "asserts-outcome" },
+        { "test": "packages/e2e/tests/ui/workspace.test.ts::Merge button merges and workspace status changes", "strength": "asserts-outcome" }
+      ],
+      "requirements": ["PRD-04:merge-land", "PRD-05:merge-stage"],
+      "dimensions_covered": ["workflow","api","state-transition"],
+      "dimensions_missing": [],
+      "history": { "churn_90d": 67, "bugs": 4, "last_regression": "#820 git-verified mergedAt; #588 ancestry invariant" }
+    },
+    {
+      "ref": "workspaces.merge.conflict",
+      "status": "covered",
+      "covered_by": [
+        { "test": "packages/server/src/__tests__/merge-error-reporting.test.ts::reason=conflict with conflictFiles when detectConflicts finds conflicts", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/merge-conflict-server-health.test.ts::returns 409 and does NOT advance master when the branch conflicts", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/merge-conflict-server-health.test.ts::server health endpoint remains responsive after a failed conflicting merge", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::MergeService — conflict-ready clears readyForMerge and throws", "strength": "asserts-outcome" }
+      ],
+      "requirements": ["PRD-04:conflict-refusal"],
+      "dimensions_covered": ["error","api","state-transition"],
+      "dimensions_missing": [],
+      "history": { "churn_90d": 67, "bugs": 2, "last_regression": "#600/#598 conflict-marker server crash" }
+    },
+    {
+      "ref": "workspaces.merge.not-approved",
+      "status": "covered",
+      "covered_by": [
+        { "test": "packages/server/src/__tests__/merge-error-reporting.test.ts::reason=not_approved when workspace is not ready for merge", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::resolveMergeState — auto_merge_in_review bypasses readyForMerge gate (not-approved when readyForMerge=false and autoMergeInReview=false)", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::proceeds past the readyForMerge gate when autoMergeInReview=true and readyForMerge=false", "strength": "asserts-outcome" }
+      ],
+      "requirements": ["PRD-04:merge-readiness-gate"],
+      "dimensions_covered": ["error","permission","api"],
+      "dimensions_missing": [],
+      "history": { "churn_90d": 67, "bugs": 1, "last_regression": null }
+    },
+    {
+      "ref": "workspaces.merge.dirty-main-blocked",
+      "status": "covered",
+      "covered_by": [
+        { "test": "packages/server/src/__tests__/merge-error-reporting.test.ts::reason=dirty_main when main checkout has uncommitted changes", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::resolveMergeState — error-skip (dirty main checkout) returns error-skip when main checkout has uncommitted tracked changes", "strength": "asserts-outcome" }
+      ],
+      "requirements": ["PRD-04:dirty-main-guard"],
+      "dimensions_covered": ["error","api","config"],
+      "dimensions_missing": [],
+      "history": { "churn_90d": 67, "bugs": 1, "last_regression": "dirty-main lock churn 8e44e2af" }
+    },
+    {
+      "ref": "workspaces.merge.already-merged-reconcile",
+      "status": "covered",
+      "covered_by": [
+        { "test": "packages/server/src/__tests__/workspace-merge-flap.test.ts::reconciles to Done when branch is already an ancestor and mergedAt is null", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/workspace-already-merged.test.ts::doMerge ancestry check ((a) already-merged branch tip => success, no 409; (b) truly conflicting => still 409)", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::does NOT short-circuit to already-merged when mergedAt is set but the branch is NOT an ancestor (stale flag — silent-merge-loss guard)", "strength": "asserts-outcome" }
+      ],
+      "requirements": ["PRD-04:idempotent-merge", "ADR:silent-merge-loss-820"],
+      "dimensions_covered": ["state-transition","error","regression"],
+      "dimensions_missing": [],
+      "history": { "churn_90d": 67, "bugs": 3, "last_regression": "#820 stale-mergedAt; merge-flap dropped-response" }
+    },
+    {
+      "ref": "workspaces.fix-and-merge.resolve",
+      "status": "covered",
+      "covered_by": [
+        { "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::MergeService — merge from fixing status moves issue to Done", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::force-stops a stale zero-output fix-and-merge session before retrying merge", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/workspace.service.test.ts::fixAndMerge with HEAD guard (syncs and rebases the branch before launching fix-and-merge)", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/workspace-activity-state.test.ts::fixing workspace => fixing, counts as capacity", "strength": "asserts-outcome" }
+      ],
+      "requirements": ["PRD-04:fix-and-merge"],
+      "dimensions_covered": ["workflow","state-transition","api"],
+      "dimensions_missing": [],
+      "history": { "churn_90d": 67, "bugs": 2, "last_regression": "stranded fix-and-merge zombie recovery" }
+    },
+    {
+      "ref": "workspaces.plan.approve-reject",
+      "status": "uncovered",
+      "covered_by": [],
+      "requirements": ["PRD-04:plan-mode-gate"],
+      "dimensions_covered": [],
+      "dimensions_missing": ["workflow","state-transition","api","error"],
+      "history": { "churn_90d": 180, "bugs": 1, "last_regression": "AK-924 plan-mode strand" },
+      "gap": {
+        "kind": "no-test",
+        "missing_dimensions": ["workflow","state-transition","api","error"],
+        "rationale": "No candidate test exercises the plan-gate HTTP surface: GET /:id/plan, POST /:id/implement-plan (201 → starts implementation), POST /:id/reject-plan with feedback (201 → re-plans), reject without feedback → 400. plan-mode.service.test.ts exists OUT of the candidate set (service logic only) and is not credited; the route gate that prevents an agent from writing code before approval is unverified end-to-end. AK-924 (plan-mode strand) is a recent regression in this exact area."
+      }
+    },
+    {
+      "ref": "workspaces.stop.strand-recovery",
+      "status": "partial",
+      "covered_by": [
+        { "test": "packages/server/src/__tests__/workspace-lifecycle-status-transitions.test.ts::lifecycle: stranded-session recovery via stopWorkspace (resets active workspace to idle)", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/workspace-lifecycle-status-transitions.test.ts::resets reviewing workspace to idle (stranded review recovery)", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/workspace-lifecycle-status-transitions.test.ts::stopWorkspace is safe when there are no running sessions (already stranded idle)", "strength": "asserts-outcome" },
+        { "test": "packages/e2e/tests/api/workspace-lifecycle.test.ts::POST /api/workspaces/:id/stop returns successfully", "strength": "touches-only" }
+      ],
+      "requirements": ["PRD-04:strand-recovery"],
+      "dimensions_covered": ["workflow","api"],
+      "dimensions_missing": ["state-transition"],
+      "history": { "churn_90d": 180, "bugs": 1, "last_regression": null },
+      "gap": {
+        "kind": "outcome-not-asserted",
+        "missing_dimensions": ["state-transition"],
+        "rationale": "Stop→idle reset is well covered. The quarantine sub-behaviour (POST /:id/quarantine additionally moves the issue BACK to In Progress) has no asserting test in the candidate set — the issue-status side of the transition is unverified."
+      }
+    },
+    {
+      "ref": "workspaces.delete.cascade",
+      "status": "covered",
+      "covered_by": [
+        { "test": "packages/server/src/__tests__/api.test.ts::DELETE /api/workspaces/:id deletes all workspace FK children", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/board-column-count-invariant.test.ts::removes workspaceSummary from issue after workspace is deleted via HTTP", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/board-cache-workspace-lifecycle-invalidation.test.ts::refreshes /api/projects/:id/board immediately after direct workspace create and delete", "strength": "asserts-outcome" }
+      ],
+      "requirements": ["PRD-04:cascade-delete"],
+      "dimensions_covered": ["workflow","api","state-transition"],
+      "dimensions_missing": [],
+      "history": { "churn_90d": 135, "bugs": 0, "last_regression": null }
+    },
+    {
+      "ref": "workspaces.lifecycle.exit-classification",
+      "status": "covered",
+      "covered_by": [
+        { "test": "packages/server/src/__tests__/workspace-activity-state.test.ts::deriveWorkspaceActivityState (zero-output/1s failed launch => failed; reviewing => active; idle In Review with committed diff => in-review-idle)", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/workspace-lifecycle-status-transitions.test.ts::lifecycle: active → reviewing on agent exit-0 with committed changes (launches the auto-review session)", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/workspace-lifecycle-status-transitions.test.ts::leaves issue In Progress when agent exits with non-zero code", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/workspace-launch-failures.test.ts::flags a fast non-zero-exit session as session-error, NOT zero-output (no duration heuristic)", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/active-stopped-workspace-enters-review.test.ts::active-stopped workspace with committed diff enters review (#678)", "strength": "asserts-outcome" }
+      ],
+      "requirements": ["PRD-04:exit-classification", "ADR:exit-workflow-678"],
+      "dimensions_covered": ["state-transition","workflow","regression"],
+      "dimensions_missing": [],
+      "history": { "churn_90d": 91, "bugs": 4, "last_regression": "#678 exit-before-output drain; #779 stderr surfacing" }
+    },
+    {
+      "ref": "workspaces.lifecycle.hang-watchdog",
+      "status": "uncovered",
+      "covered_by": [],
+      "requirements": ["PRD-04:hang-watchdog"],
+      "dimensions_covered": [],
+      "dimensions_missing": ["error","state-transition"],
+      "history": { "churn_90d": 91, "bugs": 1, "last_regression": null },
+      "gap": {
+        "kind": "no-test",
+        "missing_dimensions": ["error","state-transition"],
+        "rationale": "No candidate test asserts that a zero-output-for-15-min agent is killed by the spawn-layer watchdog (reset on each output event). Implemented in agent.service.ts (churn 91 — the highest-churn workspace service file). agent.service.test.ts is outside the candidate set and not credited. Testable with fake timers; exec cost is moderate (must simulate the silent-stream timeout)."
+      }
+    },
+    {
+      "ref": "workspaces.lifecycle.reattach-survives-reload",
+      "status": "uncovered",
+      "covered_by": [],
+      "requirements": ["PRD-04:agent-process-survival", "ADR:server-resilience"],
+      "dimensions_covered": [],
+      "dimensions_missing": ["state-transition","regression"],
+      "history": { "churn_90d": 91, "bugs": 2, "last_regression": "ancestor-reconciler reaped fresh ws on hot-reload" },
+      "gap": {
+        "kind": "no-test",
+        "missing_dimensions": ["state-transition","regression"],
+        "rationale": "No candidate test asserts the restart-reattach invariant: live-PID sessions reattach + resume the output watcher from the last byte offset, dead-PID sessions are marked stopped and their workspaces reset to idle, agents are not killed on SIGTERM. High blast radius (whole-fleet survival), high churn host (agent.service.ts:509). Exec cost is high — requires simulating a server restart with a detached/unref'd PID."
+      }
+    },
+    {
+      "ref": "workspaces.cascade.post-merge-followups",
+      "status": "uncovered",
+      "covered_by": [],
+      "requirements": ["ADR-008:start-mode", "PRD-04:dependency-cascade"],
+      "dimensions_covered": [],
+      "dimensions_missing": ["workflow","state-transition","capability"],
+      "history": { "churn_90d": 14, "bugs": 2, "last_regression": "post-merge cascade leaked past manual Start Mode" },
+      "gap": {
+        "kind": "no-test",
+        "missing_dimensions": ["workflow","state-transition","capability"],
+        "rationale": "No candidate test exercises autoStartFollowups: on merge, dependents whose blockers are now ALL Done get a worktree + launched agent, gated by defaultBranch presence, no-in-flight-workspace, and Start Mode. merge-cascade.test.ts and auto-start-followup-setting.test.ts exist OUTSIDE the candidate set and are not credited here. This is the engine of hands-off autonomy and has a real prior regression (cascade leaking past a manual Start-Mode kill-switch). Testable at the API level (merge → assert dependent workspace appears) — no real agent needed if launch is mockable."
+      }
+    },
+    {
+      "ref": "workspaces.direct.no-worktree",
+      "status": "covered",
+      "covered_by": [
+        { "test": "packages/server/src/__tests__/api.test.ts::POST /api/workspaces skips setup script for direct workspaces", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/workspace-diff-stats.test.ts::uses HEAD for direct workspace diff stats", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::resolveMergeState — direct-close (returns direct-close for isDirect workspaces)", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/close-workspace-on-terminal-issue.test.ts::closes a still-open DIRECT workspace when the issue moves to Done", "strength": "asserts-outcome" }
+      ],
+      "requirements": ["PRD-04:direct-workspace"],
+      "dimensions_covered": ["capability","boundary","workflow"],
+      "dimensions_missing": [],
+      "history": { "churn_90d": 65, "bugs": 1, "last_regression": null }
+    },
+    {
+      "ref": "workspaces.provision.symlink-traversal-guard",
+      "status": "covered",
+      "covered_by": [
+        { "test": "packages/server/src/__tests__/worktree-symlink-bootstrap.test.ts::isValidDirName (rejects path traversal attempts; rejects paths with separators)", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/worktree-symlink-bootstrap.test.ts::parseSymlinkDirs (filters out invalid directory names (path traversal); ignores traversal/absolute patterns)", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/worktree-symlink-bootstrap.test.ts::discoverWorkspaceNodeModules (expands a packages/* glob to each package)", "strength": "asserts-outcome" }
+      ],
+      "requirements": ["PRD-06:worktree-write-containment"],
+      "dimensions_covered": ["boundary","error","config"],
+      "dimensions_missing": [],
+      "history": { "churn_90d": 2, "bugs": 0, "last_regression": null }
+    },
+    {
+      "ref": "workspaces.hygiene.stale-worktree-cleanup",
+      "status": "covered",
+      "covered_by": [
+        { "test": "packages/server/src/__tests__/stale-worktree-cleanup.test.ts::DELETE /api/workspaces/:id/stale-worktree (returns 400 with error for unsafe path; traversal attack with .. is rejected; repo root itself is rejected)", "strength": "asserts-outcome" },
+        { "test": "packages/server/src/__tests__/cleanup-warnings.test.ts::POST /api/workspaces/:id/retry-cleanup (returns 400 when workspace is not closed; returns success when retry succeeds)", "strength": "asserts-outcome" },
+        { "test": "packages/e2e/tests/ui/worktrees-panel.test.ts::bulk clean confirm dialog appears and orphaned directory removed after confirmation", "strength": "asserts-outcome" }
+      ],
+      "requirements": ["PRD-04:operator-hygiene"],
+      "dimensions_covered": ["error","api","boundary"],
+      "dimensions_missing": [],
+      "history": { "churn_90d": 3, "bugs": 1, "last_regression": "#780 nested node_modules junction; #154 EBUSY" }
+    }
+  ],
+  "requirements": [
+    { "id": "PRD-04:auto-launch", "source": "docs/prd/04-agent-integration.md", "status": "covered", "behaviors": ["workspaces.create.launch"], "tests": ["packages/server/src/__tests__/workspace.service.test.ts"] },
+    { "id": "PRD-04:plan-mode-gate", "source": "docs/prd/04-agent-integration.md", "status": "uncovered", "behaviors": ["workspaces.plan.approve-reject"], "tests": [] },
+    { "id": "ADR-008:start-mode", "source": "docs/decisions/008-start-mode.md", "status": "partial", "behaviors": ["workspaces.cascade.post-merge-followups"], "tests": [] },
+    { "id": "PRD-04:agent-process-survival", "source": "packages/server/CLAUDE.md", "status": "uncovered", "behaviors": ["workspaces.lifecycle.reattach-survives-reload"], "tests": [] },
+    { "id": "PRD-04:merge-land", "source": "docs/prd/04-agent-integration.md", "status": "covered", "behaviors": ["workspaces.merge.land","workspaces.merge.conflict","workspaces.merge.already-merged-reconcile"], "tests": ["packages/server/src/__tests__/workspace-merge-service.test.ts"] }
+  ],
+  "summary": {
+    "by_dimension": {
+      "capability": { "covered": 4, "partial": 0, "uncovered": 1 },
+      "workflow": { "covered": 11, "partial": 0, "uncovered": 2 },
+      "api": { "covered": 14, "partial": 0, "uncovered": 2 },
+      "error": { "covered": 7, "partial": 1, "uncovered": 3 },
+      "boundary": { "covered": 8, "partial": 0, "uncovered": 0 },
+      "state-transition": { "covered": 8, "partial": 1, "uncovered": 4 },
+      "config": { "covered": 4, "partial": 0, "uncovered": 0 },
+      "permission": { "covered": 1, "partial": 0, "uncovered": 0, "note": "near-N/A — single-user local-first, no RBAC; only the merge-readiness gate is a meaningful 'permission' cell" },
+      "regression": { "covered": 2, "partial": 0, "uncovered": 1 },
+      "navigation": { "note": "N/A for this capability — route/nav coverage belongs to the UI-navigation capability" },
+      "accessibility": { "note": "N/A — headless/API-first capability; a11y tracked at the component capability level" }
+    },
+    "by_capability": {
+      "workspaces": {
+        "score": 0.76,
+        "behaviors_total": 26,
+        "covered": 19,
+        "partial": 2,
+        "uncovered": 5,
+        "undocumented_implemented": 0,
+        "documented_missing": 0,
+        "uncovered_high_risk": 2,
+        "score_note": "(covered 19 + 0.5*partial 2) / 26 = 0.77; rounded to 0.76 to reflect that 2 of the 5 uncovered are HIGH-risk (reattach-survives-reload, cascade.post-merge-followups). The covered set is the high-value merge/create/lifecycle happy + error paths; the gaps cluster in runtime-lifecycle behaviours that are hard to test (watchdog, reattach, dependency cascade) plus two cheap missing negatives."
+      }
+    },
+    "systematically_weak_dimensions": ["state-transition", "error"],
+    "weak_dimension_note": "state-transition is the weakest column (4 uncovered + 1 partial) — every gap is a runtime lifecycle edge: plan approve/reject, hang-watchdog kill, restart-reattach, post-merge cascade, quarantine→In Progress. error is second-weakest, driven by two un-asserted negatives (turn-missing-content, one-direct exact status) and the watchdog. permission is correctly near-empty (single-user)."
+  }
+}
