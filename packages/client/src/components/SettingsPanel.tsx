@@ -5,10 +5,13 @@ import { invalidateClientSurfaceLocal } from "../lib/clientInvalidation.js";
 import { showToast } from "./Toast.js";
 import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
 import { useConfigImportExport } from "../hooks/useConfigImportExport.js";
-import { applyPreflightResult, CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, DEFAULT_SETTINGS, PI_DEFAULT_PROFILE, TABS, uniqueProfiles, type AgentProfileHealth, type McpHealth, type MonitorTunables, type ProjectSettingsState, type Settings, type SettingsPanelProps, type SkillSetting, type Tab, type TagSetting } from "./SettingsPanel.shared.js";
-import { buildMigrationConfig, normalizeConfig, setProviderFillPolicy, clearProviderFillPolicy, settingsKey, type ConcreteProvider } from "../lib/strategy-targets.js";
+import { applyPreflightResult, CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, DEFAULT_SETTINGS, PI_DEFAULT_PROFILE, TABS, uniqueProfiles, type AgentProfileHealth, type McpHealth, type ProjectSettingsState, type Settings, type SettingsPanelProps, type Tab } from "./SettingsPanel.shared.js";
+import { normalizeConfig, setProviderFillPolicy, clearProviderFillPolicy, settingsKey, type ConcreteProvider } from "../lib/strategy-targets.js";
 import { parseDisabledTools, withToolDisabled } from "../lib/mcp-tool-toggle.js";
-import type { MonitorAction } from "./MonitorPopover.js";
+import { useTagsEditor } from "../hooks/useTagsEditor.js";
+import { useTemplateEditorState } from "../hooks/useTemplateEditorState.js";
+import { useSkillsManager } from "../hooks/useSkillsManager.js";
+import { useMonitorControls } from "../hooks/useMonitorControls.js";
 
 /** Raw project row shape returned by GET /api/projects, narrowed to the fields the panel reads. */
 type ProjectRow = {
@@ -82,47 +85,50 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
   const [generatingTeardown, setGeneratingTeardown] = useState(false);
   const [generatingVerify, setGeneratingVerify] = useState(false);
 
-  // Skills state
-  const [skills, setSkills] = useState<SkillSetting[]>([]);
-  const [editingSkill, setEditingSkill] = useState<string | null>(null);
-  const [newSkill, setNewSkill] = useState<{ name: string; description: string; prompt: string; model: string } | null>(null);
-  const [installedSkills, setInstalledSkills] = useState<Record<string, boolean>>({});
-  const [installingSkill, setInstallingSkill] = useState<string | null>(null);
+  // Skills state (editing + install) — owned by useSkillsManager; `skills` is
+  // also read by the Workflow/Project tabs and hydrated by the bootstrap below.
+  const {
+    skills, setSkills,
+    editingSkill, setEditingSkill,
+    newSkill, setNewSkill,
+    installedSkills, setInstalledSkills,
+    installingSkill, setInstallingSkill,
+  } = useSkillsManager();
 
-  // Tags state
-  const [tagsList, setTagsList] = useState<TagSetting[]>([]);
-  const [editingTag, setEditingTag] = useState<string | null>(null);
-  const [editTagName, setEditTagName] = useState("");
-  const [editTagColor, setEditTagColor] = useState("");
-  const [newTagName, setNewTagName] = useState("");
-  const [newTagColor, setNewTagColor] = useState("#6B7280");
-  const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
-  const [mergeTargetId, setMergeTargetId] = useState<string>("");
-  const [mergingTags, setMergingTags] = useState(false);
+  // Tags tab editing state
+  const {
+    tagsList, setTagsList,
+    editingTag, setEditingTag,
+    editTagName, setEditTagName,
+    editTagColor, setEditTagColor,
+    newTagName, setNewTagName,
+    newTagColor, setNewTagColor,
+    selectedTagIds, setSelectedTagIds,
+    mergeTargetId, setMergeTargetId,
+    mergingTags, setMergingTags,
+  } = useTagsEditor();
 
-  // Issue templates state
+  // Issue templates state (data from useIssueTemplates; editor fields from useTemplateEditorState)
   const { customTemplates, templates: allIssueTemplates, MAX_TEMPLATES, add: addTemplate, update: updateTemplate, remove: removeTemplate } = useIssueTemplates();
-  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
-  const [editTemplateName, setEditTemplateName] = useState("");
-  const [editTemplateBody, setEditTemplateBody] = useState("");
-  const [newTemplateName, setNewTemplateName] = useState("");
-  const [newTemplateBody, setNewTemplateBody] = useState("");
+  const {
+    editingTemplateId, setEditingTemplateId,
+    editTemplateName, setEditTemplateName,
+    editTemplateBody, setEditTemplateBody,
+    newTemplateName, setNewTemplateName,
+    newTemplateBody, setNewTemplateBody,
+  } = useTemplateEditorState();
 
-  // Scheduled runs state
-  const [monitorRunning, setMonitorRunning] = useState(false);
-  const [monitorStatus, setMonitorStatus] = useState<{
-    enabled: boolean;
-    intervalMin: number;
-    active: boolean;
-    lastRun: string | null;
-    nextRunAt: string | null;
-    recentActions: MonitorAction[];
-    maintenanceActive?: boolean;
-    maintenanceEnd?: string | null;
-  } | null>(null);
-
-  const [monitorTunables, setMonitorTunables] = useState<{ tunables: MonitorTunables; source: "strategy" | "prefs" } | null>(null);
-  const [migratingToStrategy, setMigratingToStrategy] = useState(false);
+  // Scheduled-monitor controls (status, tunables, run-now, migrate-to-strategy)
+  const {
+    monitorRunning,
+    monitorStatus,
+    monitorTunables,
+    migratingToStrategy,
+    fetchMonitorStatus,
+    fetchMonitorTunables,
+    handleMigrateToStrategy,
+    handleMonitorRunNow,
+  } = useMonitorControls(activeProjectId, settings.nudge_wip_limit);
 
   // Provider divergence: global settings prefs vs the project's Strategy Bullseye
   type ProviderDivergence = {
@@ -291,51 +297,6 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
-
-  async function fetchMonitorStatus() {
-    try {
-      const s = await apiFetch<NonNullable<typeof monitorStatus>>("/api/internal/monitor-status");
-      setMonitorStatus(s);
-    } catch { /* non-fatal */ }
-  }
-
-  async function fetchMonitorTunables() {
-    if (!activeProjectId) return;
-    try {
-      const result = await apiFetch<{ tunables: MonitorTunables; source: "strategy" | "prefs" }>(
-        `/api/projects/${activeProjectId}/monitor-tunables`,
-      );
-      setMonitorTunables(result);
-    } catch { /* non-fatal */ }
-  }
-
-  async function handleMigrateToStrategy() {
-    if (!activeProjectId || migratingToStrategy) return;
-    setMigratingToStrategy(true);
-    try {
-      const strategyConfig = buildMigrationConfig(settings.nudge_wip_limit);
-      await savePreferences({ [`board_strategy_${activeProjectId}`]: JSON.stringify(strategyConfig) });
-      showToast("Migrated to Strategy Bullseye", "success");
-      await fetchMonitorTunables();
-    } catch {
-      showToast("Migration failed", "error");
-    } finally {
-      setMigratingToStrategy(false);
-    }
-  }
-
-  async function handleMonitorRunNow() {
-    setMonitorRunning(true);
-    try {
-      await apiPost("/api/internal/monitor-run");
-      showToast("Monitor cycle triggered", "success");
-      setTimeout(fetchMonitorStatus, 1500);
-    } catch {
-      showToast("Failed to trigger monitor", "error");
-    } finally {
-      setMonitorRunning(false);
-    }
-  }
 
   async function handleProfilePreflight(profile: AgentProfileHealth) {
     setPreflightingProfileId(profile.id);
