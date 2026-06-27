@@ -25,6 +25,22 @@
       "status_after": "covered",
       "tests_passing": "2/2 (2 consecutive stable runs)",
       "followups_filed": ["workspaces.cascade.partial-blockers-no-start (multi-blocker every-guard)"]
+    },
+    {
+      "date": "2026-06-27",
+      "batch": "wave-1 (6 top-backlog gaps, parallel generator + 1-refuter-each adversarial pass)",
+      "review_mode": "adversarial-refute (1 reviewer per test; 4 of 5 new tests returned needs-fix and were fixed before landing)",
+      "results": [
+        { "gap": "project-registration.resolve.defaultBranch", "priority": "P0", "test_file": "packages/server/src/__tests__/registration-resolve-default-branch.test.ts", "dimensions": ["regression","error-handling","boundary"], "verdict": "sound-after-fix", "fix": "added detached-HEAD boundary case (the true #772 null-persist path); both mutation checks verified", "status_after": "covered" },
+        { "gap": "mcp-server.govern.disabled-tools", "priority": "P0", "test_file": "packages/mcp-server/src/__tests__/disabled-tools.test.ts", "dimensions": ["permission","config","api"], "verdict": "sound-after-fix", "fix": "strengthened call-refused assertion to the unregistered-tool signature (vs live missing-row isError); single-process spawn + await-exit teardown", "status_after": "covered" },
+        { "gap": "preferences-config.resolve.start-policy", "priority": "P1", "test_file": "packages/server/src/services/start-policy.service.test.ts", "dimensions": ["config","state-transition","risk"], "verdict": "false-gap", "fix": "already fully covered (manual/conductor/legacy branches asserted); candidate filter hadn't credited the colocated test. Added @covers tag only — no new test (scope discipline)", "status_after": "covered" },
+        { "gap": "agent-providers.strip.profileEnv", "priority": "P1", "test_file": "packages/server/src/__tests__/build-spawn-env-strip.test.ts", "dimensions": ["config","security"], "verdict": "sound-after-fix", "fix": "dropped error-handling dim (was credited to a DEAD branch, helpers.ts:161-163, confirmed by mutation); strip-loop guard mutation-verified. Product findings -> ticket #927", "status_after": "covered" },
+        { "gap": "persistence-schema.cascade.delete-issue", "priority": "P1", "test_file": "packages/server/src/__tests__/issue-cascade-completeness.repo.test.ts", "dimensions": ["completeness-vs-unseeded-table"], "verdict": "sound", "fix": "none — FK-graph-enumeration design (future-proof). Node-26 :memory: bug confirmed real -> file-backed test DB workaround -> ticket #928", "status_after": "covered" },
+        { "gap": "workflow-engine.advance.mcpProposeTransition", "priority": "P1", "test_file": "packages/mcp-server/src/__tests__/tools/propose-transition.test.ts", "dimensions": ["api","workflow","state-transition"], "verdict": "sound-after-fix", "fix": "mocked notifyWorkflowAdvanced (was firing a REAL fetch to :3001 during tests); structural assertions over engine copy; unambiguous skip-closed tie-break", "status_after": "covered" }
+      ],
+      "tests_passing": "server 10/10 + mcp-server 8/8 (18 cases, 5 files)",
+      "product_tickets_filed": ["#926 disabled_mcp_tools no trim/case (security)", "#927 buildSpawnEnv dead branch + CLAUDE_CODE_ env bleed (security)", "#928 Node26 libsql :memory: cascade suite baseline-red"],
+      "followups_logged": ["workflow-engine maxVisits/terminal via MCP", "cascade-delete: set-null referrer + cascade-FK-table-in-fresh-DB sub-cases"]
     }
   ]
 }

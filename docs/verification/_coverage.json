@@ -1238,28 +1238,24 @@
     },
     {
       "ref": "agent-providers.strip.profileEnv",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/server/src/__tests__/agent-provider.test.ts::skips --model for profiles with a custom ANTHROPIC_BASE_URL (e.g. z.ai)",
           "strength": "touches-only"
+        },
+        {
+          "test": "packages/server/src/__tests__/build-spawn-env-strip.test.ts",
+          "strength": "asserts-outcome"
         }
       ],
       "dimensions_covered": [
-        "config"
+        "config",
+        "security"
       ],
-      "dimensions_missing": [
-        "boundary",
-        "error-handling"
-      ],
-      "gap": {
-        "kind": "outcome-not-asserted",
-        "missing_dimensions": [
-          "boundary",
-          "error-handling"
-        ],
-        "rationale": "buildSpawnEnv stripping the server's own ANTHROPIC_* vars (cross-profile credential-bleed guard, helpers.ts:119) and the delete-ANTHROPIC_API_KEY-when-AUTH_TOKEN-present rule (helpers.ts:161) are security-relevant but not directly asserted; only the downstream --model suppression is tested. A test should seed a polluted process.env and assert the spawn env is clean."
-      }
+      "dimensions_missing": [],
+      "gap": null,
+      "note": "Closed by e2e-test-author 2026-06-27 (adversarially reviewed). build-spawn-env-strip.test.ts"
     },
     {
       "ref": "agent-sessions.launch.session",
@@ -4708,28 +4704,26 @@
     },
     {
       "ref": "mcp-server.govern.disabled-tools",
-      "status": "uncovered",
-      "covered_by": [],
-      "dimensions_covered": [],
-      "dimensions_missing": [
+      "status": "covered",
+      "covered_by": [
+        {
+          "test": "packages/mcp-server/src/__tests__/disabled-tools.test.ts",
+          "strength": "asserts-outcome"
+        }
+      ],
+      "dimensions_covered": [
         "permission",
         "config",
         "api"
       ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": null,
         "bugs": 0,
         "last_regression": null
       },
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": [
-          "permission",
-          "config",
-          "api"
-        ],
-        "rationale": "The disabled_mcp_tools registration gate (index.ts:198) — the ONLY authority knob on the surface — is untested. No test asserts that a listed tool is absent from tools/list and uncallable. Client-side toggle UI tests (mcp-tool-toggle.test.ts) cover the pref editor, not the server gate."
-      }
+      "gap": null,
+      "note": "Closed by e2e-test-author 2026-06-27 (adversarially reviewed). disabled-tools.test.ts"
     },
     {
       "ref": "mcp-server.fire.webhook",
@@ -5431,28 +5425,26 @@
         {
           "test": "packages/server/src/__tests__/issue-cascade-and-dep.repo.test.ts::deletes an issue with no children",
           "strength": "asserts-outcome"
+        },
+        {
+          "test": "packages/server/src/__tests__/issue-cascade-completeness.repo.test.ts",
+          "strength": "asserts-outcome"
         }
       ],
       "dimensions_covered": [
         "state-transition",
         "boundary",
         "regression",
-        "risk"
-      ],
-      "dimensions_missing": [
+        "risk",
         "completeness-vs-unseeded-table"
       ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": "medium",
         "bugs": "#858 issue delete omitted issue-scoped children"
       },
-      "gap": {
-        "kind": "dimension-missing",
-        "missing_dimensions": [
-          "completeness-vs-unseeded-table"
-        ],
-        "rationale": "Test seeds every KNOWN child table and asserts foreign_key_check clean, so it catches under-deletion of seeded tables. It does NOT enumerate the schema FK graph, so a NEW child table referencing issues that nobody adds to the walk (and nobody seeds in the test) escapes both. Strong coverage of today's graph; structurally cannot catch tomorrow's drift."
-      }
+      "gap": null,
+      "note": "Closed by e2e-test-author 2026-06-27 (adversarially reviewed). issue-cascade-completeness.repo.test.ts"
     },
     {
       "ref": "persistence-schema.cascade.delete-workspace",
@@ -5906,7 +5898,7 @@
     },
     {
       "ref": "preferences-config.resolve.start-policy",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/server/src/__tests__/project-runtime-config.test.ts::resolves provider, model, start policy, and drive semantics in one typed snapshot",
@@ -5915,23 +5907,20 @@
         {
           "test": "packages/server/src/__tests__/project-runtime-config.test.ts::writes only project-scoped kill-switch prefs when disabling Drive",
           "strength": "touches-only"
+        },
+        {
+          "test": "packages/server/src/services/start-policy.service.test.ts",
+          "strength": "asserts-outcome"
         }
       ],
       "dimensions_covered": [
-        "config"
-      ],
-      "dimensions_missing": [
+        "config",
         "state-transition",
         "risk"
       ],
-      "gap": {
-        "kind": "outcome-not-asserted",
-        "missing_dimensions": [
-          "state-transition",
-          "risk"
-        ],
-        "rationale": "Only the mode='monitor' StartPolicy is asserted (via resolveProjectRuntimeConfig). The kill-switch semantics that justify this module's existence (decision 008) — manual → all four capability booleans false, conductor → in-process auto-start all false but scheduledRuns true, and the legacy-derivation branch (board_autodrive / auto_monitor+nudge_auto_start) with source='derived' — are NOT directly asserted by any test. buildDriveRuntimePreferencePatch tests the disable PATCH but not resolveStartPolicy's resulting booleans."
-      }
+      "dimensions_missing": [],
+      "gap": null,
+      "note": "Closed by e2e-test-author 2026-06-27 (adversarially reviewed). start-policy.service.test.ts"
     },
     {
       "ref": "preferences-config.resolve.monitor-tunables",
@@ -6272,28 +6261,26 @@
     },
     {
       "ref": "project-registration.resolve.defaultBranch",
-      "status": "uncovered",
-      "covered_by": [],
-      "dimensions_covered": [],
-      "dimensions_missing": [
+      "status": "covered",
+      "covered_by": [
+        {
+          "test": "packages/server/src/__tests__/registration-resolve-default-branch.test.ts",
+          "strength": "asserts-outcome"
+        }
+      ],
+      "dimensions_covered": [
         "regression",
         "error-handling",
         "boundary"
       ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": null,
         "bugs": 1,
         "last_regression": "#772"
       },
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": [
-          "regression",
-          "error-handling",
-          "boundary"
-        ],
-        "rationale": "the #772 never-null-branch guarantee (fallback to checked-out branch on a non-main/master repo) has no asserting test; a regression would silently re-create undriveable projects. PATCH defaultBranch-validation is a different path"
-      }
+      "gap": null,
+      "note": "Closed by e2e-test-author 2026-06-27 (adversarially reviewed). registration-resolve-default-branch.test.ts"
     },
     {
       "ref": "project-registration.seed.statuses",
@@ -7770,23 +7757,21 @@
     },
     {
       "ref": "workflow-engine.advance.mcpProposeTransition",
-      "status": "uncovered",
-      "covered_by": [],
-      "dimensions_covered": [],
-      "dimensions_missing": [
+      "status": "covered",
+      "covered_by": [
+        {
+          "test": "packages/mcp-server/src/__tests__/tools/propose-transition.test.ts",
+          "strength": "asserts-outcome"
+        }
+      ],
+      "dimensions_covered": [
         "api",
         "workflow",
         "state-transition"
       ],
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": [
-          "api",
-          "workflow",
-          "state-transition"
-        ],
-        "rationale": "the agent's PRIMARY entry point to advance the workflow has no test in packages/mcp-server; only the REST /transition path (same engine) is tested. The MCP tool's workspace-resolution + result-shaping wrapper around proposeTransition is unverified"
-      }
+      "dimensions_missing": [],
+      "gap": null,
+      "note": "Closed by e2e-test-author 2026-06-27 (adversarially reviewed). propose-transition.test.ts"
     }
   ],
   "requirements": [
@@ -7957,12 +7942,12 @@
         ]
       },
       "agent-providers": {
-        "covered": 13,
-        "partial": 2,
+        "covered": 14,
+        "partial": 1,
         "uncovered": 1,
         "undocumented_implemented": 0,
         "documented_missing": 0,
-        "score": 0.875,
+        "score": 0.906,
         "by_dimension": {
           "config": {
             "covered": 12,
@@ -8022,16 +8007,6 @@
           "config (env-stripping under a polluted process env)"
         ],
         "top_gaps": [
-          {
-            "ref": "agent-providers.strip.profileEnv",
-            "priority": "high",
-            "roi": "high",
-            "dimensions_to_add": [
-              "boundary",
-              "error-handling"
-            ],
-            "rationale": "Security-relevant cross-profile credential-bleed guard (strip server ANTHROPIC_* before applying a profile + delete API_KEY when AUTH_TOKEN present) is untested; a leak would silently authenticate an agent with the wrong account. Cheap unit test: pollute process.env, build a profile launch, assert the spawn env is clean. High blast radius, low exec cost."
-          },
           {
             "ref": "agent-providers.login.oauthBootstrap",
             "priority": "medium",
@@ -8745,12 +8720,12 @@
         ]
       },
       "mcp-server": {
-        "covered": 11,
-        "partial": 2,
-        "uncovered": 5,
+        "covered": 13,
+        "partial": 3,
+        "uncovered": 4,
         "undocumented_implemented": 0,
         "documented_missing": 0,
-        "score": 0.63,
+        "score": 0.725,
         "by_dimension": {
           "api": {
             "covered": 9,
@@ -8820,17 +8795,6 @@
               "workflow"
             ],
             "rationale": "A core, reachable mutation guard (WORKFLOW_TRANSITION_INVALID) with zero coverage on a board that supports configurable workflow graphs. Cheap to test at the registrar level (seed a workflow node, attempt an illegal jump, assert the code + valid-next-stages list). Sits right beside the well-covered terminal guard — symmetry gap."
-          },
-          {
-            "ref": "mcp-server.govern.disabled-tools",
-            "priority": "P0",
-            "roi": 4,
-            "dimensions_to_add": [
-              "permission",
-              "config",
-              "api"
-            ],
-            "rationale": "The single authority/governance knob of an unauthenticated surface, completely untested. If the gate silently breaks, an 'disabled' tool stays callable — a permission regression with no failing test. Assert that a tool in disabled_mcp_tools is absent from tools/list and uncallable."
           },
           {
             "ref": "mcp-server.create.agent-skill",
@@ -8964,7 +8928,7 @@
         "uncovered": 1,
         "undocumented_implemented": 0,
         "documented_missing": 0,
-        "score": 0.88,
+        "score": 0.9,
         "by_dimension": {
           "migration-correctness": {
             "covered": 5,
@@ -9025,15 +8989,6 @@
         ],
         "top_gaps": [
           {
-            "ref": "persistence-schema.cascade.delete-issue",
-            "priority": "P1",
-            "roi": 6,
-            "dimensions_to_add": [
-              "completeness-vs-unseeded-table"
-            ],
-            "rationale": "Highest-value structural gap: deletion completeness depends on a hand-coded walk that the schema cannot enforce. A test that enumerates the schema's FK graph (every table referencing issues/workspaces) and asserts each is handled by the walk would catch the exact silent-orphan/FK-fail regression the current seed-based test cannot (a future unseeded child table). Core never-corrupt guarantee; medium churn around child tables. impact 5 x regression 3 / (exec 1.5 + maint 1) = 6.0"
-          },
-          {
             "ref": "persistence-schema.enforce.unique-issue-number",
             "priority": "P4",
             "roi": 4.5,
@@ -9055,12 +9010,12 @@
         ]
       },
       "preferences-config": {
-        "covered": 13,
-        "partial": 2,
+        "covered": 15,
+        "partial": 1,
         "uncovered": 0,
         "undocumented_implemented": 0,
         "documented_missing": 0,
-        "score": 0.87,
+        "score": 0.969,
         "by_dimension": {
           "config": {
             "covered": 10,
@@ -9116,16 +9071,6 @@
         ],
         "top_gaps": [
           {
-            "ref": "preferences-config.resolve.start-policy",
-            "priority": "P1",
-            "roi": 6,
-            "dimensions_to_add": [
-              "state-transition",
-              "risk"
-            ],
-            "rationale": "The Start Mode kill-switch is this module's keystone (decision 008) and a documented multi-cycle-stall hazard, yet only mode='monitor' is asserted. Add direct resolveStartPolicy assertions: manual → autoStartUnblocked/postMergeCascade/backlogRefill/scheduledRuns all false; conductor → in-process all false but scheduledRuns true; derived branch yields mode+source='derived' from legacy board_autodrive / auto_monitor+nudge_auto_start. Pure-function test, near-zero exec/maint cost, high blast radius."
-          },
-          {
             "ref": "preferences-config.error.guard-fails-open",
             "priority": "P4",
             "roi": 4,
@@ -9148,12 +9093,12 @@
         ]
       },
       "project-registration": {
-        "covered": 10,
+        "covered": 11,
         "partial": 2,
-        "uncovered": 5,
+        "uncovered": 4,
         "undocumented_implemented": 0,
         "documented_missing": 0,
-        "score": 0.62,
+        "score": 0.706,
         "by_dimension": {
           "config": {
             "covered": 8,
@@ -9207,17 +9152,6 @@
           "state-transition"
         ],
         "top_gaps": [
-          {
-            "ref": "project-registration.resolve.defaultBranch",
-            "priority": "P0",
-            "roi": 6.4,
-            "dimensions_to_add": [
-              "regression",
-              "error-handling",
-              "boundary"
-            ],
-            "rationale": "The #772 never-null-defaultBranch guarantee is the line between a driveable project and a silently-undriveable one, yet no test asserts it. High blast radius (every downstream workspace/monitor start) + a real past regression. Register a repo on a non-main/master branch and assert defaultBranch is non-null and POST /api/workspaces does not 400."
-          },
           {
             "ref": "project-registration.dedup.sameGitRoot",
             "priority": "P1",
@@ -9366,12 +9300,12 @@
         ]
       },
       "workflow-engine": {
-        "covered": 11,
+        "covered": 12,
         "partial": 4,
-        "uncovered": 1,
+        "uncovered": 0,
         "undocumented_implemented": 0,
         "documented_missing": 0,
-        "score": 0.81,
+        "score": 0.875,
         "by_dimension": {
           "state-transition": {
             "covered": 8,
@@ -9426,17 +9360,6 @@
         ],
         "top_gaps": [
           {
-            "ref": "workflow-engine.advance.mcpProposeTransition",
-            "priority": "P1",
-            "roi": 5.3,
-            "dimensions_to_add": [
-              "api",
-              "workflow",
-              "state-transition"
-            ],
-            "rationale": "Highest blast radius unverified path: the agent advances every multi-stage ticket through this MCP tool, yet no test exercises it (only the parallel REST route). A regression in workspace-resolution or result shaping would silently strand agent-driven workflows. impact 5 x regression 3 / (exec 1 + maint 2.5) = 5.3"
-          },
-          {
             "ref": "workflow-engine.validate.graph",
             "priority": "P4",
             "roi": 4,
@@ -9473,14 +9396,14 @@
     ],
     "weak_dimension_note": "state-transition is the weakest column (4 uncovered + 1 partial) — every gap is a runtime lifecycle edge: plan approve/reject, hang-watchdog kill, restart-reattach, post-merge cascade, quarantine→In Progress. error is second-weakest, driven by two un-asserted negatives (turn-missing-content, one-direct exact status) and the watchdog. permission is correctly near-empty (single-user).",
     "totals": {
-      "covered": 210,
-      "partial": 37,
-      "uncovered": 26,
+      "covered": 215,
+      "partial": 35,
+      "uncovered": 23,
       "undocumented_implemented": 0,
       "documented_missing": 0,
       "behaviors": 273,
       "capabilities": 15,
-      "overall_score": 0.837
+      "overall_score": 0.852
     }
   }
 }

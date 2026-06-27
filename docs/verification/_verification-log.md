@@ -86,6 +86,28 @@ each anchored on its deterministic candidate-test set and writing its own
   guard untested (agent-providers); cascade-walk can't catch a future unseeded child table
   (persistence-schema); divergence guard may fail-open on malformed Bullseye JSON (preferences).
 
+## 2026-06-27 — e2e-test-author wave 1: closed 6 top-backlog gaps
+
+Ran the generator over the 6 highest-ROI, deterministic-to-test gaps (parallel author subagents),
+then a 1-refuter-each adversarial pass. **4 of 5 new tests returned needs-fix** and were fixed
+before landing — the refute pass again earned its keep.
+
+- **New tests (all green, 18 cases / 5 files):** registration-resolve-default-branch (P0),
+  disabled-tools (P0), build-spawn-env-strip (P1), issue-cascade-completeness.repo (P1),
+  propose-transition (P1). `preferences-config.resolve.start-policy` was a **false gap** (already
+  fully covered; candidate filter hadn't credited the colocated test) — added `@covers` tag only.
+- **Coverage: 0.837 → 0.852** (covered 210→215, partial 37→35, uncovered 26→23). Backlog 59→53.
+- **Defects the refuters caught (representative):** registration over-declared dims and never built
+  the real #772 null path (added detached-HEAD case); disabled-tools "call refused" was a
+  false-confidence smoke check (random-UUID isError ≠ gate-refusal); env-strip credited a DEAD
+  branch (helpers.ts:161-163); propose-transition fired a REAL fetch to :3001 mid-test.
+- **3 product bugs filed (board #926/#927/#928):** MCP disabled-tools no trim/case (security);
+  buildSpawnEnv dead branch + CLAUDE_CODE_ credential bleed (security); Node-26 libsql `:memory:`
+  loses tables across `db.transaction()` (server cascade suite baseline-red — independently
+  reproduced). These are the pipeline doing its real job: surfacing product issues, not just tests.
+- **Follow-up gaps logged** (not yet authored): workflow-engine maxVisits/terminal via the MCP
+  wrapper; cascade-delete set-null-referrer + cascade-FK-table-in-fresh-DB sub-cases.
+
 ### Still open
 - **Phase 2 requirements-mapping NOT yet run** for any capability — so the `documented-missing`
   / `undocumented-implemented` buckets are empty by *omission of the pass*, not by verified

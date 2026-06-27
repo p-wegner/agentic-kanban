@@ -2,34 +2,32 @@
 
 Every behaviour that is not `covered`, grouped by capability. `partial` = touched/some-dimensions; `uncovered` = no asserting test. Lead with the five-way taxonomy counts.
 
-**Totals:** 210 covered · 37 partial · 26 uncovered · 0 undocumented-implemented · 0 documented-missing.
+**Totals:** 215 covered · 35 partial · 23 uncovered · 0 undocumented-implemented · 0 documented-missing.
 
-## project-registration (10/17 covered)
+## project-registration (11/17 covered)
 
 - **[uncovered]** `project-registration.register.idempotent` _(missing: workflow, boundary, error-handling)_ — the UI test fulfills a MOCK 409; no server-level test proves registering the same git root (or a subdirectory of it) returns the existing project with created=false and no second row
-- **[uncovered]** `project-registration.resolve.defaultBranch` _(missing: regression, error-handling, boundary)_ — the #772 never-null-branch guarantee (fallback to checked-out branch on a non-main/master repo) has no asserting test; a regression would silently re-create undriveable projects. PATCH defaultBranch-validation is a different path
 - **[uncovered]** `project-registration.dedup.sameGitRoot` _(missing: workflow, state-transition, regression)_ — deduplicateProjects is vi.mock'd to a no-op in every test that imports it (startup-tasks/reconcile/issue-transition); the actual merge (move issues/skills/repos, status remap by name, active-project redirect, repoPath fixup) is never exerci
 - **[uncovered]** `project-registration.repair.backfill` _(missing: workflow, regression, config)_ — repairProjectRegistration's idempotent backfill (seed statuses if none, set branch if null, populate profile/verify/setup if unset) has no direct test; its no-clobber/idempotency on a partial project is unverified
 - **[uncovered]** `project-registration.enrich.llmGapFill` _(missing: config, error-handling, risk)_ — enrichWithLlm/parseLlmJson and the sparse-profile gate have no test; neither the 'rules win, LLM fills only nulls' merge rule nor the shell-exec trust boundary (an LLM testCommand becoming the executed verify gate) is asserted
 - **[partial]** `project-registration.register.create` _(missing: workflow)_ — e2e asserts 201+{id,name,repoPath} but not the registration consequences as a journey (statuses seeded, branch non-null, skill attached) on the freshly-created project; UI test mocks the API so it only proves the modal flow
 - **[partial]** `project-registration.seed.statuses` _(missing: workflow)_ — statuses are asserted on the long-lived E2E fixture project, not as a freshly-registered project's seeding consequence; the Backlog(-1) lane specifically is not asserted to exist
 
-## mcp-server (11/18 covered)
-
-- **[uncovered]** `mcp-server.move.issue.workflow-edge` _(missing: error, state-transition, workflow)_ — WORKFLOW_TRANSITION_INVALID (move-issue.ts:56) — refusing an illegal workflow-graph jump and returning the valid next stages — has no test. terminal-done-guard covers only the terminal guard, not edge legality. Configurable workflow graphs 
-- **[uncovered]** `mcp-server.create.agent-skill` _(missing: error, boundary, permission)_ — No test exercises create_agent_skill. The path-traversal guard (names with '/','\','..' become .claude/skills/<name>/SKILL.md filesystem paths) and per-scope uniqueness (create-agent-skill.ts:19,26) are a security-relevant rejection path wi
-- **[uncovered]** `mcp-server.govern.disabled-tools` _(missing: permission, config, api)_ — The disabled_mcp_tools registration gate (index.ts:198) — the ONLY authority knob on the surface — is untested. No test asserts that a listed tool is absent from tools/list and uncallable. Client-side toggle UI tests (mcp-tool-toggle.test.t
-- **[uncovered]** `mcp-server.fire.webhook` _(missing: error, config, risk)_ — No MCP test fires the outbound webhook on a status change, nor asserts the loopback-only egress validation (outbound-webhook.ts:44) that is the one SSRF boundary against a malicious outbound_webhook_url_<projectId> pref. Security-relevant a
-- **[uncovered]** `mcp-server.resilience.stay-up` _(missing: error, risk, regression)_ — The async-rejection-swallow / stdout-purity resilience policy (index.ts:236,246) — a stray rejection must not drop the stdio connection or corrupt the JSON-RPC stream — has no test. High blast radius (a crash makes every board op fail for t
-- **[partial]** `mcp-server.orient.context` _(missing: boundary)_ — activeWorkspaces count is asserted with a single project; the suspected cross-project bleed (count not scoped by projectId, get-context.ts:35) is never asserted in a multi-project board.
-- **[partial]** `mcp-server.merge.workspace.delegate` _(missing: api, risk)_ — Only the pre-fetch fast-fail errors are asserted. The success path — that a valid merge_workspace actually POSTs /api/workspaces/:id/merge and passes the server's result (incl. 409 lock / 503 verify-fail / conflict) back through — is never 
-- **[partial]** `mcp-server.launch.workspace` _(missing: api)_ — relaunch's WORKSPACE_NOT_IDLE and missing/closed errors are asserted; the actual delegation to REST /launch and its passthrough result are not. launch_workspace success path untested.
-
 ## codemods (6/9 covered)
 
 - **[uncovered]** `codemods.preview.limit-guard` _(missing: boundary, error-handling, config)_ — The >100-TS-file blast-radius guard and its overrideLimit override path are never exercised. This is the module's scale safety interlock and has no test at either the block or the override-and-proceed edge.
 - **[partial]** `codemods.preview.generate` _(missing: workflow, capability)_ — Test uses a deliberate no-op intent, accepts BOTH 200 and 500 (500 = AI unavailable in CI), and only shape-checks the body when 200. It never asserts that a real transform is compiled or that an actual code change is diffed -- a broken tran
 - **[partial]** `codemods.get.byid` _(missing: api)_ — Only the 404-unknown-id branch is asserted. The success path (GET /:id returning an existing saved codemod's body) is never directly fetched/asserted -- the save test verifies presence via the list endpoint, not via GET /:id.
+
+## mcp-server (13/20 covered)
+
+- **[uncovered]** `mcp-server.move.issue.workflow-edge` _(missing: error, state-transition, workflow)_ — WORKFLOW_TRANSITION_INVALID (move-issue.ts:56) — refusing an illegal workflow-graph jump and returning the valid next stages — has no test. terminal-done-guard covers only the terminal guard, not edge legality. Configurable workflow graphs 
+- **[uncovered]** `mcp-server.create.agent-skill` _(missing: error, boundary, permission)_ — No test exercises create_agent_skill. The path-traversal guard (names with '/','\','..' become .claude/skills/<name>/SKILL.md filesystem paths) and per-scope uniqueness (create-agent-skill.ts:19,26) are a security-relevant rejection path wi
+- **[uncovered]** `mcp-server.fire.webhook` _(missing: error, config, risk)_ — No MCP test fires the outbound webhook on a status change, nor asserts the loopback-only egress validation (outbound-webhook.ts:44) that is the one SSRF boundary against a malicious outbound_webhook_url_<projectId> pref. Security-relevant a
+- **[uncovered]** `mcp-server.resilience.stay-up` _(missing: error, risk, regression)_ — The async-rejection-swallow / stdout-purity resilience policy (index.ts:236,246) — a stray rejection must not drop the stdio connection or corrupt the JSON-RPC stream — has no test. High blast radius (a crash makes every board op fail for t
+- **[partial]** `mcp-server.orient.context` _(missing: boundary)_ — activeWorkspaces count is asserted with a single project; the suspected cross-project bleed (count not scoped by projectId, get-context.ts:35) is never asserted in a multi-project board.
+- **[partial]** `mcp-server.merge.workspace.delegate` _(missing: api, risk)_ — Only the pre-fetch fast-fail errors are asserted. The success path — that a valid merge_workspace actually POSTs /api/workspaces/:id/merge and passes the server's result (incl. 409 lock / 503 verify-fail / conflict) back through — is never 
+- **[partial]** `mcp-server.launch.workspace` _(missing: api)_ — relaunch's WORKSPACE_NOT_IDLE and missing/closed errors are asserted; the actual delegation to REST /launch and its passthrough result are not. launch_workspace success path untested.
 
 ## agent-sessions (12/19 covered)
 
@@ -58,14 +56,6 @@ Every behaviour that is not `covered`, grouped by capability. `partial` = touche
 - **[partial]** `board-ui.wip.visualLimit` _(missing: feature)_ — The classifier logic (incl. boundary coercion of zero/garbage) is fully unit-tested, but the user-visible outcome — the column header rendering its red 'over' tint — is asserted by no test. The visual policy itself is unverified.
 - **[partial]** `board-ui.shortcuts.keyboardNav` _(missing: accessibility)_ — The pure cursor-target arithmetic is fully unit-tested, but no e2e drives arrow/vim keys against the rendered board to assert the focused card actually moves (the keyboard-operability a11y outcome). The unit test would pass even if the keyd
 
-## workflow-engine (11/16 covered)
-
-- **[uncovered]** `workflow-engine.advance.mcpProposeTransition` _(missing: api, workflow, state-transition)_ — the agent's PRIMARY entry point to advance the workflow has no test in packages/mcp-server; only the REST /transition path (same engine) is tested. The MCP tool's workspace-resolution + result-shaping wrapper around proposeTransition is unv
-- **[partial]** `workflow-engine.autoroute.condition` _(missing: boundary)_ — single-fire (auto Fix) and zero-fire (specify-a-target) are asserted, but the 'multiple edges fired -> refuse ambiguous' branch (transitions.ts:111) is never exercised
-- **[partial]** `workflow-engine.evaluate.condition` _(missing: boundary)_ — core fire/block/manual verdicts asserted incl. one diff_touches glob, but glob boundary cases (single '*' not crossing '/', '?', '**/' collapse, unsupported brace/negation -> silent no-match) and agent_score/custom_js->manual are not assert
-- **[partial]** `workflow-engine.validate.graph` _(missing: error-handling, boundary)_ — disconnect/dup-id/cycle/loop-exempt asserted, but the start-count!=1, missing-end, orphan-inbound, dead-end-outbound, and parallel fork<->join pairing rejection rules (graph-validation.ts:39-124) have no asserting test
-- **[partial]** `workflow-engine.crud.template` _(missing: boundary)_ — full CRUD + builtin-immutability + import/export covered, but the empty-node draft create affordance (templates.ts:125 skips validation when nodes.length===0, resolving to a null start) is not asserted
-
 ## workspaces (20/26 covered)
 
 - **[uncovered]** `workspaces.turn.missing-content` _(missing: error, api)_ — No candidate test asserts POST /:id/turn with no content → 400 {error:'content is required'}. The turn route lives in workspace-actions.ts (churn 180, the single highest-churn workspace route file) — a refactor could silently drop the guard
@@ -87,21 +77,22 @@ Every behaviour that is not `covered`, grouped by capability. `partial` = touche
 - **[partial]** `review-merge.reconcile.stranded-review` _(missing: workflow, state-transition)_ — The ONLY asserted path is the disable/no-op guard (#582). The reconciler's core honesty-restoration outcome — that a genuinely stranded idle/In-Review/not-ready workspace with commits gets a review relaunched (or is marked ready when auto_r
 - **[partial]** `review-merge.foundational.sync-merge` _(missing: workflow)_ — isFoundationalBlocker eligibility classification is thoroughly covered, but the actual observable consequence — that an eligible foundational blocker is merged SYNCHRONOUSLY so a dependent isn't cut from an empty pre-merge base — is not ass
 
-## preferences-config (13/15 covered)
+## workflow-engine (12/16 covered)
 
-- **[partial]** `preferences-config.resolve.start-policy` _(missing: state-transition, risk)_ — Only the mode='monitor' StartPolicy is asserted (via resolveProjectRuntimeConfig). The kill-switch semantics that justify this module's existence (decision 008) — manual → all four capability booleans false, conductor → in-process auto-star
-- **[partial]** `preferences-config.read.quota-usage` _(missing: api, error)_ — No test exercises the GET /api/preferences/quota-usage route or its 503 graceful-degradation path. The quota selection LOGIC (isPolicyBlockedByQuota) is well covered, but the HTTP endpoint contract (200 shape vs 503 on external outage) is u
-
-## agent-providers (13/16 covered)
-
-- **[uncovered]** `agent-providers.login.oauthBootstrap` _(missing: workflow, error-handling, config)_ — No test exercises claude-login.service.ts / codex-login.service.ts. The load-bearing invariant (windowsHide:false so the OAuth callback survives) and the non-fatal-failure / returned-manual-command contract are entirely unverified. Hard to 
-- **[partial]** `agent-providers.preflight.profileHealth` _(missing: state-transition)_ — failure-override-to-error and missing-config-error are asserted, but the version-probe-cached-once-per-(provider,command) optimization and the full ok→warning→error verdict folding across license-ring vs config-file auth validation are not 
-- **[partial]** `agent-providers.strip.profileEnv` _(missing: boundary, error-handling)_ — buildSpawnEnv stripping the server's own ANTHROPIC_* vars (cross-profile credential-bleed guard, helpers.ts:119) and the delete-ANTHROPIC_API_KEY-when-AUTH_TOKEN-present rule (helpers.ts:161) are security-relevant but not directly asserted;
+- **[partial]** `workflow-engine.autoroute.condition` _(missing: boundary)_ — single-fire (auto Fix) and zero-fire (specify-a-target) are asserted, but the 'multiple edges fired -> refuse ambiguous' branch (transitions.ts:111) is never exercised
+- **[partial]** `workflow-engine.evaluate.condition` _(missing: boundary)_ — core fire/block/manual verdicts asserted incl. one diff_touches glob, but glob boundary cases (single '*' not crossing '/', '?', '**/' collapse, unsupported brace/negation -> silent no-match) and agent_score/custom_js->manual are not assert
+- **[partial]** `workflow-engine.validate.graph` _(missing: error-handling, boundary)_ — disconnect/dup-id/cycle/loop-exempt asserted, but the start-count!=1, missing-end, orphan-inbound, dead-end-outbound, and parallel fork<->join pairing rejection rules (graph-validation.ts:39-124) have no asserting test
+- **[partial]** `workflow-engine.crud.template` _(missing: boundary)_ — full CRUD + builtin-immutability + import/export covered, but the empty-node draft create affordance (templates.ts:125 skips validation when nodes.length===0, resolving to a null start) is not asserted
 
 ## persistence-schema (13/15 covered)
 
 - **[uncovered]** `persistence-schema.resolve.db-location` _(missing: config, boundary, risk)_ — No test imports data-dir.ts. The existence-based resolution and the env-override precedence (DB_URL/AGENTIC_KANBAN_DIR -> local checkout -> ~/.agentic-kanban) are unasserted, despite being the mechanism behind the worktree-runs-against-a-di
 - **[partial]** `persistence-schema.enforce.unique-issue-number` _(missing: error-handling)_ — Allocation logic (MAX+1, per-project scope) is asserted, but the DB-level uniqueness GUARANTEE — that a duplicate (project_id, issue_number) insert is rejected by idx_issues_project_id_issue_number — is never exercised. A concurrent double-
+
+## agent-providers (14/16 covered)
+
+- **[uncovered]** `agent-providers.login.oauthBootstrap` _(missing: workflow, error-handling, config)_ — No test exercises claude-login.service.ts / codex-login.service.ts. The load-bearing invariant (windowsHide:false so the OAuth callback survives) and the non-fatal-failure / returned-manual-command contract are entirely unverified. Hard to 
+- **[partial]** `agent-providers.preflight.profileHealth` _(missing: state-transition)_ — failure-override-to-error and missing-config-error are asserted, but the version-probe-cached-once-per-(provider,command) optimization and the full ok→warning→error verdict folding across license-ring vs config-file auth validation are not 
 
 ## git-integration (16/18 covered)
 
@@ -111,4 +102,8 @@ Every behaviour that is not `covered`, grouped by capability. `partial` = touche
 ## issues-board (18/19 covered)
 
 - **[partial]** `issues-board.config.statuses` _(missing: error, state-transition)_ — the key invariant — DELETE of a status with linked issues must return 409 (project.repository.ts:224) so issues are never orphaned — has no asserting test in the candidate set; only GET/POST happy paths are exercised
+
+## preferences-config (15/16 covered)
+
+- **[partial]** `preferences-config.read.quota-usage` _(missing: api, error)_ — No test exercises the GET /api/preferences/quota-usage route or its 503 graceful-degradation path. The quota selection LOGIC (isPolicyBlockedByQuota) is well covered, but the HTTP endpoint contract (200 shape vs 503 on external outage) is u
 

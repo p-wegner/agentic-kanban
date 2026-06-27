@@ -18,30 +18,87 @@
       "packages/shared/src/lib/settings-registry.ts"
     ],
     "actors": [
-      { "name": "operator", "kind": "human", "notes": "single local user via the Settings/Strategy UI" },
-      { "name": "monitor", "kind": "automation", "notes": "in-process monitor + Conductor consume resolveStartPolicy / resolveMonitorTunables / selectProviderFromStrategy" },
-      { "name": "workspace-creator", "kind": "automation", "notes": "POST /api/workspaces resolves provider/profile/model via the resolver chain" },
-      { "name": "config-import", "kind": "automation", "notes": "import route calls updateSettings directly" }
+      {
+        "name": "operator",
+        "kind": "human",
+        "notes": "single local user via the Settings/Strategy UI"
+      },
+      {
+        "name": "monitor",
+        "kind": "automation",
+        "notes": "in-process monitor + Conductor consume resolveStartPolicy / resolveMonitorTunables / selectProviderFromStrategy"
+      },
+      {
+        "name": "workspace-creator",
+        "kind": "automation",
+        "notes": "POST /api/workspaces resolves provider/profile/model via the resolver chain"
+      },
+      {
+        "name": "config-import",
+        "kind": "automation",
+        "notes": "import route calls updateSettings directly"
+      }
     ],
     "entry_points": [
-      { "kind": "api", "ref": "PUT /api/preferences/settings", "observable": "persists allowed keys (200 ok+applied) or rejects loudly (422) on unknown key or provider divergence; nothing persisted on divergence" },
-      { "kind": "api", "ref": "GET /api/preferences/settings & /settings-bootstrap", "observable": "returns only whitelisted/dynamic prefs; bootstrap returns settings+profiles+skills+tags in one round trip" },
-      { "kind": "api", "ref": "GET/PUT /api/preferences/active-project", "observable": "reads/sets the active project id the divergence guard scopes against; stores arbitrary id without validation" },
-      { "kind": "api", "ref": "GET /api/preferences/{claude,codex,copilot,pi}-profiles", "observable": "enumerates selectable credential profiles per provider" },
-      { "kind": "api", "ref": "GET /api/preferences/provider-divergence?projectId=", "observable": "reports global-pref vs Bullseye drift (passive banner)" },
-      { "kind": "api", "ref": "GET /api/preferences/quota-usage", "observable": "live quota from tampermonkey-direct :8742; 503 when unavailable" },
-      { "kind": "api", "ref": "GET/POST /api/projects/:id/config/{export,import}", "observable": "exports portable board config (statuses+Bullseye+3 safe workflow prefs); imports with dryRun preview + non-fatal droppedKeys" },
-      { "kind": "internal", "ref": "resolveProviderConfig / resolveEffectiveModel / resolveStartPolicy / resolveMonitorTunables", "observable": "pure resolvers consumed by workspace creation and monitors" }
+      {
+        "kind": "api",
+        "ref": "PUT /api/preferences/settings",
+        "observable": "persists allowed keys (200 ok+applied) or rejects loudly (422) on unknown key or provider divergence; nothing persisted on divergence"
+      },
+      {
+        "kind": "api",
+        "ref": "GET /api/preferences/settings & /settings-bootstrap",
+        "observable": "returns only whitelisted/dynamic prefs; bootstrap returns settings+profiles+skills+tags in one round trip"
+      },
+      {
+        "kind": "api",
+        "ref": "GET/PUT /api/preferences/active-project",
+        "observable": "reads/sets the active project id the divergence guard scopes against; stores arbitrary id without validation"
+      },
+      {
+        "kind": "api",
+        "ref": "GET /api/preferences/{claude,codex,copilot,pi}-profiles",
+        "observable": "enumerates selectable credential profiles per provider"
+      },
+      {
+        "kind": "api",
+        "ref": "GET /api/preferences/provider-divergence?projectId=",
+        "observable": "reports global-pref vs Bullseye drift (passive banner)"
+      },
+      {
+        "kind": "api",
+        "ref": "GET /api/preferences/quota-usage",
+        "observable": "live quota from tampermonkey-direct :8742; 503 when unavailable"
+      },
+      {
+        "kind": "api",
+        "ref": "GET/POST /api/projects/:id/config/{export,import}",
+        "observable": "exports portable board config (statuses+Bullseye+3 safe workflow prefs); imports with dryRun preview + non-fatal droppedKeys"
+      },
+      {
+        "kind": "internal",
+        "ref": "resolveProviderConfig / resolveEffectiveModel / resolveStartPolicy / resolveMonitorTunables",
+        "observable": "pure resolvers consumed by workspace creation and monitors"
+      }
     ],
     "behaviors": [
       {
         "id": "preferences-config.write.settings",
         "statement": "A settings write persists every whitelisted (registry or dynamic) key and reports the applied set",
         "actor": "operator",
-        "preconditions": ["key is in SETTINGS_KEYS or matches a recognized dynamic prefix"],
+        "preconditions": [
+          "key is in SETTINGS_KEYS or matches a recognized dynamic prefix"
+        ],
         "observable_outcome": "200 {ok:true, applied:[...]}; a later GET returns the saved value; upserts overwrite",
-        "evidence": ["packages/server/src/routes/preferences.ts:80", "packages/server/src/services/preference.service.ts:110"],
-        "dimensions": ["api", "config", "workflow"],
+        "evidence": [
+          "packages/server/src/routes/preferences.ts:80",
+          "packages/server/src/services/preference.service.ts:110"
+        ],
+        "dimensions": [
+          "api",
+          "config",
+          "workflow"
+        ],
         "risk": "medium",
         "confidence": "high"
       },
@@ -49,10 +106,19 @@
         "id": "preferences-config.reject.unknown-key",
         "statement": "An un-whitelisted key is rejected LOUDLY (422 + droppedKeys) rather than silently dropped; valid keys in the same write still apply",
         "actor": "operator",
-        "preconditions": ["body contains a key not in SETTINGS_KEYS and not a recognized dynamic key"],
+        "preconditions": [
+          "body contains a key not in SETTINGS_KEYS and not a recognized dynamic key"
+        ],
         "observable_outcome": "422 {ok:false, droppedKeys, applied}; the dropped key is NOT persisted, the valid key IS",
-        "evidence": ["packages/server/src/services/preference.service.ts:118", "packages/server/src/routes/preferences.ts:100"],
-        "dimensions": ["error", "api", "boundary"],
+        "evidence": [
+          "packages/server/src/services/preference.service.ts:118",
+          "packages/server/src/routes/preferences.ts:100"
+        ],
+        "dimensions": [
+          "error",
+          "api",
+          "boundary"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -60,10 +126,22 @@
         "id": "preferences-config.reject.provider-divergence",
         "statement": "A provider/profile write that would put global prefs out of sync with the active project's Bullseye is rejected (422) with nothing persisted — the enforced divergence invariant",
         "actor": "operator",
-        "preconditions": ["active project has a Bullseye", "write touches provider or *_profile and would diverge"],
+        "preconditions": [
+          "active project has a Bullseye",
+          "write touches provider or *_profile and would diverge"
+        ],
         "observable_outcome": "422 {ok:false, divergence:{bullseyeProvider, settingsProvider,...}}; provider/profile prefs unchanged in DB",
-        "evidence": ["packages/server/src/services/preference.service.ts:138", "packages/server/src/routes/preferences.ts:86"],
-        "dimensions": ["error", "config", "api", "regression", "risk"],
+        "evidence": [
+          "packages/server/src/services/preference.service.ts:138",
+          "packages/server/src/routes/preferences.ts:86"
+        ],
+        "dimensions": [
+          "error",
+          "config",
+          "api",
+          "regression",
+          "risk"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -71,10 +149,19 @@
         "id": "preferences-config.guard.skip-untouched",
         "statement": "The divergence guard fires ONLY when the write touches a provider/profile key, and is a no-op when the active project has no Bullseye",
         "actor": "operator",
-        "preconditions": ["a pre-existing untouched drift exists, OR no Bullseye configured"],
+        "preconditions": [
+          "a pre-existing untouched drift exists, OR no Bullseye configured"
+        ],
         "observable_outcome": "an unrelated toggle save returns 200 despite drift; a provider write with no Bullseye returns 200 and persists",
-        "evidence": ["packages/server/src/services/preference.service.ts:141", "packages/server/src/services/preference.service.ts:144"],
-        "dimensions": ["config", "error", "boundary"],
+        "evidence": [
+          "packages/server/src/services/preference.service.ts:141",
+          "packages/server/src/services/preference.service.ts:144"
+        ],
+        "dimensions": [
+          "config",
+          "error",
+          "boundary"
+        ],
         "risk": "medium",
         "confidence": "high"
       },
@@ -82,10 +169,19 @@
         "id": "preferences-config.resolve.provider-precedence",
         "statement": "Provider/profile is resolved by a fixed precedence: explicit per-workspace override > legacy claudeProfile > Strategy Bullseye selection > global settings pref",
         "actor": "workspace-creator",
-        "preconditions": ["a workspace launch resolves its provider config from prefs"],
+        "preconditions": [
+          "a workspace launch resolves its provider config from prefs"
+        ],
         "observable_outcome": "resolved {provider, profileName} follows precedence; an unknown provider string narrows to claude",
-        "evidence": ["packages/server/src/services/provider-config-resolution.ts:57", "packages/server/src/services/project-runtime-config.service.ts:164"],
-        "dimensions": ["config", "capability", "risk"],
+        "evidence": [
+          "packages/server/src/services/provider-config-resolution.ts:57",
+          "packages/server/src/services/project-runtime-config.service.ts:164"
+        ],
+        "dimensions": [
+          "config",
+          "capability",
+          "risk"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -93,10 +189,19 @@
         "id": "preferences-config.resolve.model-provider-scoped",
         "statement": "Model is provider-scoped only: the retired global default_model is never read, and a model not belonging to the resolved provider is dropped to the provider default",
         "actor": "workspace-creator",
-        "preconditions": ["prefs may carry a stale global default_model and/or provider-scoped default_model_<provider>"],
+        "preconditions": [
+          "prefs may carry a stale global default_model and/or provider-scoped default_model_<provider>"
+        ],
         "observable_outcome": "only default_model_<provider> (or requestedModel) drives the model; global default_model has no effect; mismatch → undefined (provider default)",
-        "evidence": ["packages/server/src/services/effective-config.service.ts:62", "packages/server/src/services/effective-config.service.ts:86"],
-        "dimensions": ["config", "regression", "risk"],
+        "evidence": [
+          "packages/server/src/services/effective-config.service.ts:62",
+          "packages/server/src/services/effective-config.service.ts:86"
+        ],
+        "dimensions": [
+          "config",
+          "regression",
+          "risk"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -104,10 +209,19 @@
         "id": "preferences-config.resolve.start-policy",
         "statement": "Start Mode is the single auto-start kill-switch: manual stops ALL auto-start, conductor forces in-process auto-start off, monitor enables it; an unset mode is derived from legacy flags (conductor never derived)",
         "actor": "monitor",
-        "preconditions": ["start_mode_<id> set, or legacy board_autodrive_<id>/auto_monitor+nudge_auto_start present"],
+        "preconditions": [
+          "start_mode_<id> set, or legacy board_autodrive_<id>/auto_monitor+nudge_auto_start present"
+        ],
         "observable_outcome": "StartPolicy exposes autoStartUnblocked/postMergeCascade/backlogRefill/scheduledRuns booleans + source; manual → all false, conductor → all in-process false (scheduledRuns true)",
-        "evidence": ["packages/server/src/services/start-policy.service.ts:57", "packages/server/src/services/start-policy.service.ts:77"],
-        "dimensions": ["config", "state-transition", "risk"],
+        "evidence": [
+          "packages/server/src/services/start-policy.service.ts:57",
+          "packages/server/src/services/start-policy.service.ts:77"
+        ],
+        "dimensions": [
+          "config",
+          "state-transition",
+          "risk"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -115,10 +229,18 @@
         "id": "preferences-config.resolve.monitor-tunables",
         "statement": "A saved Strategy Bullseye derives the monitor's effective dials (active-agents target, backlog floor, max-new-starts, refill focus); bugfix-heavy weights yield bugfix-only refill; malformed/absent Bullseye falls back to legacy nudge prefs",
         "actor": "monitor",
-        "preconditions": ["board_strategy_<id> JSON present (valid, malformed, or absent)"],
+        "preconditions": [
+          "board_strategy_<id> JSON present (valid, malformed, or absent)"
+        ],
         "observable_outcome": "resolveMonitorTunables returns {tunables, source:'strategy'|'prefs'}; malformed JSON silently falls through to legacy with source='prefs'",
-        "evidence": ["packages/server/src/services/strategy-objective.service.ts:192", "packages/server/src/services/strategy-objective.service.ts:398"],
-        "dimensions": ["config", "error"],
+        "evidence": [
+          "packages/server/src/services/strategy-objective.service.ts:192",
+          "packages/server/src/services/strategy-objective.service.ts:398"
+        ],
+        "dimensions": [
+          "config",
+          "error"
+        ],
         "risk": "medium",
         "confidence": "high"
       },
@@ -126,10 +248,20 @@
         "id": "preferences-config.select.provider-strategy",
         "statement": "Bullseye provider routing picks fill > throttle > fallback-only, skipping any policy blocked by live quota, and degrades gracefully (static order) when quota telemetry is missing",
         "actor": "monitor",
-        "preconditions": ["Bullseye providerPolicies configured", "optional live quota"],
+        "preconditions": [
+          "Bullseye providerPolicies configured",
+          "optional live quota"
+        ],
         "observable_outcome": "selectProviderFromStrategy returns the highest-priority non-quota-blocked policy; null when only fallback-only and allowFallback false; quota=null → ignores quota",
-        "evidence": ["packages/server/src/services/strategy-objective.service.ts:490", "packages/server/src/services/strategy-objective.service.ts:453"],
-        "dimensions": ["config", "error", "risk"],
+        "evidence": [
+          "packages/server/src/services/strategy-objective.service.ts:490",
+          "packages/server/src/services/strategy-objective.service.ts:453"
+        ],
+        "dimensions": [
+          "config",
+          "error",
+          "risk"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -137,10 +269,16 @@
         "id": "preferences-config.resolve.harness-setting",
         "statement": "A per-harness behavior knob resolves scoped (harness.<h>.<key>) > legacy flat key > per-harness default, treating empty scoped values as unset",
         "actor": "workspace-creator",
-        "preconditions": ["harness-scoped and/or legacy flat pref present"],
+        "preconditions": [
+          "harness-scoped and/or legacy flat pref present"
+        ],
         "observable_outcome": "getHarnessBoolSetting returns the scoped value when set, else legacy, else the harness default",
-        "evidence": ["packages/server/src/services/harness-settings.ts:47"],
-        "dimensions": ["config"],
+        "evidence": [
+          "packages/server/src/services/harness-settings.ts:47"
+        ],
+        "dimensions": [
+          "config"
+        ],
         "risk": "low",
         "confidence": "high"
       },
@@ -148,10 +286,17 @@
         "id": "preferences-config.append.claude-skip-perms",
         "statement": "The Claude-specific --dangerously-skip-permissions flag is appended only for the Claude provider; other providers' args are left untouched",
         "actor": "workspace-creator",
-        "preconditions": ["skip_permissions pref true"],
+        "preconditions": [
+          "skip_permissions pref true"
+        ],
         "observable_outcome": "Claude agentArgs gain the flag; Copilot/Codex/Pi do not",
-        "evidence": ["packages/server/src/services/agent-settings.service.ts:93"],
-        "dimensions": ["config", "feature"],
+        "evidence": [
+          "packages/server/src/services/agent-settings.service.ts:93"
+        ],
+        "dimensions": [
+          "config",
+          "feature"
+        ],
         "risk": "medium",
         "confidence": "high"
       },
@@ -161,8 +306,14 @@
         "actor": "operator",
         "preconditions": [],
         "observable_outcome": "PUT echoes and persists projectId (incl. null/fake ids); GET returns it as both projectId and value",
-        "evidence": ["packages/server/src/routes/preferences.ts:31", "packages/server/src/routes/preferences.ts:37"],
-        "dimensions": ["api", "workflow"],
+        "evidence": [
+          "packages/server/src/routes/preferences.ts:31",
+          "packages/server/src/routes/preferences.ts:37"
+        ],
+        "dimensions": [
+          "api",
+          "workflow"
+        ],
         "risk": "low",
         "confidence": "high"
       },
@@ -170,10 +321,20 @@
         "id": "preferences-config.export-import.config",
         "statement": "Board config export bundles statuses + Bullseye + the 3 safe workflow prefs and omits secrets/profiles; import validates shape, supports dryRun preview, drops disallowed keys non-fatally, and round-trips onto a fresh project",
         "actor": "operator",
-        "preconditions": ["project exists with statuses/prefs"],
+        "preconditions": [
+          "project exists with statuses/prefs"
+        ],
         "observable_outcome": "export JSON excludes provider/claude_profile; import 400 on bad shape, dryRun returns statusChanges without applying, evil keys ignored, round-trip reproduces statuses+strategy",
-        "evidence": ["packages/server/src/routes/config-export-import.ts:9", "packages/server/src/routes/config-export-import.ts:241"],
-        "dimensions": ["api", "workflow", "boundary", "error"],
+        "evidence": [
+          "packages/server/src/routes/config-export-import.ts:9",
+          "packages/server/src/routes/config-export-import.ts:241"
+        ],
+        "dimensions": [
+          "api",
+          "workflow",
+          "boundary",
+          "error"
+        ],
         "risk": "medium",
         "confidence": "high"
       },
@@ -183,8 +344,14 @@
         "actor": "operator",
         "preconditions": [],
         "observable_outcome": "GET returns {hasBullseye, bullseye*, settings*, diverged}; diverged=true on provider or profile mismatch, false when they agree or no Bullseye",
-        "evidence": ["packages/server/src/routes/preferences.ts:225", "packages/server/src/services/project-runtime-config.service.ts:182"],
-        "dimensions": ["api", "config"],
+        "evidence": [
+          "packages/server/src/routes/preferences.ts:225",
+          "packages/server/src/services/project-runtime-config.service.ts:182"
+        ],
+        "dimensions": [
+          "api",
+          "config"
+        ],
         "risk": "medium",
         "confidence": "high"
       },
@@ -192,10 +359,18 @@
         "id": "preferences-config.recognize.dynamic-key",
         "statement": "Per-project/freeform dynamic keys are recognized by prefix (project-scoped requires a hex/UUID suffix; freeform requires any non-empty suffix), so unknowable project ids are accepted while garbage is rejected",
         "actor": "operator",
-        "preconditions": ["write/read of a <prefix>_<suffix> key"],
+        "preconditions": [
+          "write/read of a <prefix>_<suffix> key"
+        ],
         "observable_outcome": "valid project-scoped keys persist and read back; non-hex/empty suffixes are rejected; board_strategy_<id> is handled separately",
-        "evidence": ["packages/server/src/lib/dynamic-preference-keys.ts:63", "packages/server/src/services/preference.service.ts:43"],
-        "dimensions": ["boundary", "config"],
+        "evidence": [
+          "packages/server/src/lib/dynamic-preference-keys.ts:63",
+          "packages/server/src/services/preference.service.ts:43"
+        ],
+        "dimensions": [
+          "boundary",
+          "config"
+        ],
         "risk": "medium",
         "confidence": "high"
       },
@@ -205,35 +380,98 @@
         "actor": "operator",
         "preconditions": [],
         "observable_outcome": "GET returns quota data (200) or {error, providers:[]} with 503 when the external endpoint is down",
-        "evidence": ["packages/server/src/routes/preferences.ts:234", "packages/server/src/services/quota-usage.service.ts:102"],
-        "dimensions": ["api", "error"],
+        "evidence": [
+          "packages/server/src/routes/preferences.ts:234",
+          "packages/server/src/services/quota-usage.service.ts:102"
+        ],
+        "dimensions": [
+          "api",
+          "error"
+        ],
         "risk": "low",
         "confidence": "high"
       }
     ],
     "permissions": [
-      { "actor": "operator", "behavior": "preferences-config.write.settings", "allowed": true, "notes": "single-user local app — no RBAC; permission dimension is N/A" }
+      {
+        "actor": "operator",
+        "behavior": "preferences-config.write.settings",
+        "allowed": true,
+        "notes": "single-user local app — no RBAC; permission dimension is N/A"
+      }
     ],
     "state_model": {
-      "states": ["manual", "monitor", "conductor"],
+      "states": [
+        "manual",
+        "monitor",
+        "conductor"
+      ],
       "transitions": [
-        { "from": "*", "to": "manual", "trigger": "Drive off / start_mode=manual", "behavior": "preferences-config.resolve.start-policy" },
-        { "from": "*", "to": "monitor", "trigger": "Drive on / start_mode=monitor or derived from legacy flags", "behavior": "preferences-config.resolve.start-policy" },
-        { "from": "*", "to": "conductor", "trigger": "explicitly set start_mode=conductor (never derived)", "behavior": "preferences-config.resolve.start-policy" }
+        {
+          "from": "*",
+          "to": "manual",
+          "trigger": "Drive off / start_mode=manual",
+          "behavior": "preferences-config.resolve.start-policy"
+        },
+        {
+          "from": "*",
+          "to": "monitor",
+          "trigger": "Drive on / start_mode=monitor or derived from legacy flags",
+          "behavior": "preferences-config.resolve.start-policy"
+        },
+        {
+          "from": "*",
+          "to": "conductor",
+          "trigger": "explicitly set start_mode=conductor (never derived)",
+          "behavior": "preferences-config.resolve.start-policy"
+        }
       ]
     },
     "error_states": [
-      { "id": "preferences-config.error.unknown-key", "statement": "PUT settings with an un-whitelisted key returns 422 + droppedKeys (valid keys still applied)", "evidence": "packages/server/src/routes/preferences.ts:100" },
-      { "id": "preferences-config.error.divergence-reject", "statement": "PUT settings with a diverging provider/profile returns 422 + divergence, nothing persisted", "evidence": "packages/server/src/routes/preferences.ts:86" },
-      { "id": "preferences-config.error.import-bad-shape", "statement": "config import with an invalid shape returns 400", "evidence": "packages/server/src/routes/config-export-import.ts:145" },
-      { "id": "preferences-config.error.quota-unavailable", "statement": "quota-usage returns 503 when the external telemetry source is down", "evidence": "packages/server/src/routes/preferences.ts:234" },
-      { "id": "preferences-config.hazard.guard-fails-open", "statement": "INFERRED hazard: the write-time divergence guard fails OPEN on malformed Bullseye JSON (resolveProviderDivergence catches parse error → diverged:false), silently allowing the write it should block", "evidence": "packages/server/src/services/project-runtime-config.service.ts:203" }
+      {
+        "id": "preferences-config.error.unknown-key",
+        "statement": "PUT settings with an un-whitelisted key returns 422 + droppedKeys (valid keys still applied)",
+        "evidence": "packages/server/src/routes/preferences.ts:100"
+      },
+      {
+        "id": "preferences-config.error.divergence-reject",
+        "statement": "PUT settings with a diverging provider/profile returns 422 + divergence, nothing persisted",
+        "evidence": "packages/server/src/routes/preferences.ts:86"
+      },
+      {
+        "id": "preferences-config.error.import-bad-shape",
+        "statement": "config import with an invalid shape returns 400",
+        "evidence": "packages/server/src/routes/config-export-import.ts:145"
+      },
+      {
+        "id": "preferences-config.error.quota-unavailable",
+        "statement": "quota-usage returns 503 when the external telemetry source is down",
+        "evidence": "packages/server/src/routes/preferences.ts:234"
+      },
+      {
+        "id": "preferences-config.hazard.guard-fails-open",
+        "statement": "INFERRED hazard: the write-time divergence guard fails OPEN on malformed Bullseye JSON (resolveProviderDivergence catches parse error → diverged:false), silently allowing the write it should block",
+        "evidence": "packages/server/src/services/project-runtime-config.service.ts:203"
+      }
     ],
-    "external_integrations": ["tampermonkey-direct :8742 (live quota telemetry, injectable QuotaUsageProvider)", "filesystem credential profiles (~/.claude, ~/.codex, ~/.codex-<name>, ~/.pi-<name>)", "git CLI (objective.md auto-commit on Bullseye save)"],
+    "external_integrations": [
+      "tampermonkey-direct :8742 (live quota telemetry, injectable QuotaUsageProvider)",
+      "filesystem credential profiles (~/.claude, ~/.codex, ~/.codex-<name>, ~/.pi-<name>)",
+      "git CLI (objective.md auto-commit on Bullseye save)"
+    ],
     "unknowns": [
-      { "question": "Do the manual/conductor branches of resolveStartPolicy actually gate every auto-start path (post-merge cascade, backlog refill, crons) at runtime?", "why_unknown": "the kill-switch claim is a monitor-orchestration concern; only the resolver's boolean outputs are observable here, and the manual/conductor branches are not directly asserted by any test" },
-      { "question": "Is the guard-fails-open-on-malformed-Bullseye hazard reachable from a real hand-edit, and does it actually let a diverging write through?", "why_unknown": "no test exercises malformed-Bullseye + provider write; inferred from source try/catch returning diverged:false" },
-      { "question": "Does the objective.md auto-commit on a Bullseye save behave correctly through the PUT route (commit scoping, conductor vs non-conductor path)?", "why_unknown": "service-level writeStrategyObjective/commitObjectiveFile are unit-tested, but the route-level updateStrategyObjectives wiring is not exercised end-to-end" }
+      {
+        "question": "Do the manual/conductor branches of resolveStartPolicy actually gate every auto-start path (post-merge cascade, backlog refill, crons) at runtime?",
+        "why_unknown": "the kill-switch claim is a monitor-orchestration concern; only the resolver's boolean outputs are observable here, and the manual/conductor branches are not directly asserted by any test"
+      },
+      {
+        "question": "Is the guard-fails-open-on-malformed-Bullseye hazard reachable from a real hand-edit, and does it actually let a diverging write through?",
+        "why_unknown": "no test exercises malformed-Bullseye + provider write; inferred from source try/catch returning diverged:false"
+      },
+      {
+        "question": "Does the objective.md auto-commit on a Bullseye save behave correctly through the PUT route (commit scoping, conductor vs non-conductor path)?",
+        "why_unknown": "service-level writeStrategyObjective/commitObjectiveFile are unit-tested, but the route-level updateStrategyObjectives wiring is not exercised end-to-end"
+      }
     ]
   },
   "coverage": {
@@ -242,242 +480,542 @@
         "ref": "preferences-config.write.settings",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/preferences.test.ts::PUT /api/preferences/settings returns 200 + applied keys when all keys are valid", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/preferences.test.ts::GET /api/preferences/settings returns saved values", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/preferences.test.ts::PUT /api/preferences/settings upserts existing values", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/preferences.test.ts::PUT /api/preferences/settings returns 200 + applied keys when all keys are valid",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/preferences.test.ts::GET /api/preferences/settings returns saved values",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/preferences.test.ts::PUT /api/preferences/settings upserts existing values",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["api", "config", "workflow"],
+        "dimensions_covered": [
+          "api",
+          "config",
+          "workflow"
+        ],
         "dimensions_missing": [],
-        "history": { "churn_90d": null, "bugs": 0 }
+        "history": {
+          "churn_90d": null,
+          "bugs": 0
+        }
       },
       {
         "ref": "preferences-config.reject.unknown-key",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/preferences.test.ts::PUT /api/preferences/settings rejects disallowed keys loudly (422) but persists the valid ones", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/dynamic-preference-keys.test.ts::accepts the card-aging board prefixes (#904)", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/preferences.test.ts::PUT /api/preferences/settings rejects disallowed keys loudly (422) but persists the valid ones",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/dynamic-preference-keys.test.ts::accepts the card-aging board prefixes (#904)",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["error", "api", "boundary"],
+        "dimensions_covered": [
+          "error",
+          "api",
+          "boundary"
+        ],
         "dimensions_missing": [],
-        "history": { "churn_90d": null, "bugs": 2, "last_regression": "#874/#904 silent-drop regressions" }
+        "history": {
+          "churn_90d": null,
+          "bugs": 2,
+          "last_regression": "#874/#904 silent-drop regressions"
+        }
       },
       {
         "ref": "preferences-config.reject.provider-divergence",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/settings-divergence-guard.test.ts::rejects a provider write that would diverge from the active project's Bullseye", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/settings-divergence-guard.test.ts::rejects a profile write that would diverge (same provider, different profile)", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/settings-divergence-guard.test.ts::allows a provider write that AGREES with the Bullseye", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/settings-divergence-guard.test.ts::rejects a provider write that would diverge from the active project's Bullseye",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/settings-divergence-guard.test.ts::rejects a profile write that would diverge (same provider, different profile)",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/settings-divergence-guard.test.ts::allows a provider write that AGREES with the Bullseye",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["error", "config", "api", "regression", "risk"],
+        "dimensions_covered": [
+          "error",
+          "config",
+          "api",
+          "regression",
+          "risk"
+        ],
         "dimensions_missing": [],
-        "history": { "churn_90d": null, "bugs": 0, "last_regression": "#903" }
+        "history": {
+          "churn_90d": null,
+          "bugs": 0,
+          "last_regression": "#903"
+        }
       },
       {
         "ref": "preferences-config.guard.skip-untouched",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/settings-divergence-guard.test.ts::allows an UNRELATED settings write even when a pre-existing untouched drift exists", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/settings-divergence-guard.test.ts::allows a provider write when there is no Bullseye for the active project", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/settings-divergence-guard.test.ts::allows an UNRELATED settings write even when a pre-existing untouched drift exists",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/settings-divergence-guard.test.ts::allows a provider write when there is no Bullseye for the active project",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["config", "error", "boundary"],
+        "dimensions_covered": [
+          "config",
+          "error",
+          "boundary"
+        ],
         "dimensions_missing": [],
-        "history": { "churn_90d": null, "bugs": 0 }
+        "history": {
+          "churn_90d": null,
+          "bugs": 0
+        }
       },
       {
         "ref": "preferences-config.resolve.provider-precedence",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/provider-config-resolution.test.ts::explicit profileOverride.provider=codex forces codex regardless of prefs", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/provider-config-resolution.test.ts::profileOverride takes precedence over legacy claudeProfile", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/provider-config-resolution.test.ts::strategy selection is applied when there is no override", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/project-runtime-config.test.ts::uses strategy before workspace fallback, and workspace fallback before settings", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/agent-settings.test.ts::falls back to Claude for unknown provider values", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/provider-config-resolution.test.ts::explicit profileOverride.provider=codex forces codex regardless of prefs",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/provider-config-resolution.test.ts::profileOverride takes precedence over legacy claudeProfile",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/provider-config-resolution.test.ts::strategy selection is applied when there is no override",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/project-runtime-config.test.ts::uses strategy before workspace fallback, and workspace fallback before settings",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/agent-settings.test.ts::falls back to Claude for unknown provider values",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["config", "capability", "risk"],
+        "dimensions_covered": [
+          "config",
+          "capability",
+          "risk"
+        ],
         "dimensions_missing": [],
-        "history": { "churn_90d": null, "bugs": 0, "last_regression": "#703/#706" }
+        "history": {
+          "churn_90d": null,
+          "bugs": 0,
+          "last_regression": "#703/#706"
+        }
       },
       {
         "ref": "preferences-config.resolve.model-provider-scoped",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/no-global-default-model.test.ts::a value in the global default_model key is IGNORED — only provider-scoped keys win", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/no-global-default-model.test.ts::the resolver source does NOT read the global default_model key", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/provider-config-resolution.test.ts::a stale global default_model never leaks into a launch — it is unrepresentable now (#902/#696)", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/provider-config-resolution.test.ts::keeps provider-specific model defaults isolated across providers", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/no-global-default-model.test.ts::a value in the global default_model key is IGNORED — only provider-scoped keys win",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/no-global-default-model.test.ts::the resolver source does NOT read the global default_model key",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/provider-config-resolution.test.ts::a stale global default_model never leaks into a launch — it is unrepresentable now (#902/#696)",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/provider-config-resolution.test.ts::keeps provider-specific model defaults isolated across providers",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["config", "regression", "risk"],
+        "dimensions_covered": [
+          "config",
+          "regression",
+          "risk"
+        ],
         "dimensions_missing": [],
-        "history": { "churn_90d": null, "bugs": 3, "last_regression": "#696/#699/#902" }
+        "history": {
+          "churn_90d": null,
+          "bugs": 3,
+          "last_regression": "#696/#699/#902"
+        }
       },
       {
         "ref": "preferences-config.resolve.start-policy",
-        "status": "partial",
+        "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/project-runtime-config.test.ts::resolves provider, model, start policy, and drive semantics in one typed snapshot", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/project-runtime-config.test.ts::writes only project-scoped kill-switch prefs when disabling Drive", "strength": "touches-only" }
+          {
+            "test": "packages/server/src/__tests__/project-runtime-config.test.ts::resolves provider, model, start policy, and drive semantics in one typed snapshot",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/project-runtime-config.test.ts::writes only project-scoped kill-switch prefs when disabling Drive",
+            "strength": "touches-only"
+          },
+          {
+            "test": "packages/server/src/services/start-policy.service.test.ts",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["config"],
-        "dimensions_missing": ["state-transition", "risk"],
-        "gap": {
-          "kind": "outcome-not-asserted",
-          "missing_dimensions": ["state-transition", "risk"],
-          "rationale": "Only the mode='monitor' StartPolicy is asserted (via resolveProjectRuntimeConfig). The kill-switch semantics that justify this module's existence (decision 008) — manual → all four capability booleans false, conductor → in-process auto-start all false but scheduledRuns true, and the legacy-derivation branch (board_autodrive / auto_monitor+nudge_auto_start) with source='derived' — are NOT directly asserted by any test. buildDriveRuntimePreferencePatch tests the disable PATCH but not resolveStartPolicy's resulting booleans."
-        }
+        "dimensions_covered": [
+          "config",
+          "state-transition",
+          "risk"
+        ],
+        "dimensions_missing": [],
+        "gap": null,
+        "note": "Closed by e2e-test-author 2026-06-27 (adversarially reviewed). start-policy.service.test.ts"
       },
       {
         "ref": "preferences-config.resolve.monitor-tunables",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/strategy-objective.service.test.ts::derives tunables from a saved Strategy Bullseye", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/strategy-objective.service.test.ts::falls back to staggered legacy nudge prefs when no strategy exists", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/strategy-objective.service.test.ts::falls back to legacy prefs when the strategy JSON is malformed", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/strategy-objective.service.test.ts::maps bugfix-heavy bullseye weights to bugfix-only refill focus", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/strategy-objective.service.test.ts::derives tunables from a saved Strategy Bullseye",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/strategy-objective.service.test.ts::falls back to staggered legacy nudge prefs when no strategy exists",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/strategy-objective.service.test.ts::falls back to legacy prefs when the strategy JSON is malformed",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/strategy-objective.service.test.ts::maps bugfix-heavy bullseye weights to bugfix-only refill focus",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["config", "error"],
+        "dimensions_covered": [
+          "config",
+          "error"
+        ],
         "dimensions_missing": [],
-        "history": { "churn_90d": null, "bugs": 0, "last_regression": "#802" }
+        "history": {
+          "churn_90d": null,
+          "bugs": 0,
+          "last_regression": "#802"
+        }
       },
       {
         "ref": "preferences-config.select.provider-strategy",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/strategy-objective.test.ts::prefers fill over throttle", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/strategy-objective.test.ts::skips fill policy when quota is exhausted, falls back to throttle", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/strategy-objective.test.ts::returns throttle when quota data is absent (graceful degradation)", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/strategy-objective.test.ts::fill: blocked at 100%", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/strategy-objective.test.ts::prefers fill over throttle",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/strategy-objective.test.ts::skips fill policy when quota is exhausted, falls back to throttle",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/strategy-objective.test.ts::returns throttle when quota data is absent (graceful degradation)",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/strategy-objective.test.ts::fill: blocked at 100%",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["config", "error", "risk"],
+        "dimensions_covered": [
+          "config",
+          "error",
+          "risk"
+        ],
         "dimensions_missing": [],
-        "history": { "churn_90d": null, "bugs": 0, "last_regression": "#818" }
+        "history": {
+          "churn_90d": null,
+          "bugs": 0,
+          "last_regression": "#818"
+        }
       },
       {
         "ref": "preferences-config.resolve.harness-setting",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/harness-settings.test.ts::scoped key takes precedence over legacy and default", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/harness-settings.test.ts::legacy key is consulted when scoped key is absent", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/harness-settings.test.ts::ignores empty-string scoped values and falls through to legacy/default", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/harness-settings.test.ts::scoped key takes precedence over legacy and default",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/harness-settings.test.ts::legacy key is consulted when scoped key is absent",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/harness-settings.test.ts::ignores empty-string scoped values and falls through to legacy/default",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["config"],
+        "dimensions_covered": [
+          "config"
+        ],
         "dimensions_missing": [],
-        "history": { "churn_90d": null, "bugs": 0 }
+        "history": {
+          "churn_90d": null,
+          "bugs": 0
+        }
       },
       {
         "ref": "preferences-config.append.claude-skip-perms",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/agent-settings.test.ts::still appends Claude skip-permissions flag for Claude", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/agent-settings.test.ts::does not append Claude skip-permissions flag for Copilot", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/agent-settings.test.ts::still appends Claude skip-permissions flag for Claude",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/agent-settings.test.ts::does not append Claude skip-permissions flag for Copilot",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["config", "feature"],
+        "dimensions_covered": [
+          "config",
+          "feature"
+        ],
         "dimensions_missing": [],
-        "history": { "churn_90d": null, "bugs": 0 }
+        "history": {
+          "churn_90d": null,
+          "bugs": 0
+        }
       },
       {
         "ref": "preferences-config.set.active-project",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/preferences.test.ts::PUT /api/preferences/active-project sets active project", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/preferences.test.ts::PUT upserts the active-project preference", "strength": "asserts-outcome" },
-          { "test": "packages/e2e/tests/api/preferences.test.ts::PUT /api/preferences/active-project with invalid ID still stores it", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/preferences.test.ts::PUT /api/preferences/active-project sets active project",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/preferences.test.ts::PUT upserts the active-project preference",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/e2e/tests/api/preferences.test.ts::PUT /api/preferences/active-project with invalid ID still stores it",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["api", "workflow"],
+        "dimensions_covered": [
+          "api",
+          "workflow"
+        ],
         "dimensions_missing": [],
-        "history": { "churn_90d": null, "bugs": 0 }
+        "history": {
+          "churn_90d": null,
+          "bugs": 0
+        }
       },
       {
         "ref": "preferences-config.export-import.config",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/config-export-import.test.ts::export does not include secret or profile keys", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/config-export-import.test.ts::round-trip: export then import on a fresh project reproduces statuses and strategy", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/config-export-import.test.ts::dryRun=true returns preview without applying changes", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/config-export-import.test.ts::import rejects invalid shape", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/config-export-import.test.ts::import ignores disallowed preference keys", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/config-export-import.test.ts::export does not include secret or profile keys",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/config-export-import.test.ts::round-trip: export then import on a fresh project reproduces statuses and strategy",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/config-export-import.test.ts::dryRun=true returns preview without applying changes",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/config-export-import.test.ts::import rejects invalid shape",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/config-export-import.test.ts::import ignores disallowed preference keys",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["api", "workflow", "boundary", "error"],
+        "dimensions_covered": [
+          "api",
+          "workflow",
+          "boundary",
+          "error"
+        ],
         "dimensions_missing": [],
-        "history": { "churn_90d": null, "bugs": 0 }
+        "history": {
+          "churn_90d": null,
+          "bugs": 0
+        }
       },
       {
         "ref": "preferences-config.detect.divergence-banner",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/provider-divergence.test.ts::returns diverged=true when global provider differs from Bullseye", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/provider-divergence.test.ts::returns diverged=true when provider matches but profile differs", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/provider-divergence.test.ts::returns diverged=false when Bullseye and global prefs agree (claude:anth)", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/provider-divergence.test.ts::returns hasBullseye=false for a project with no Bullseye", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/provider-divergence.test.ts::returns diverged=true when global provider differs from Bullseye",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/provider-divergence.test.ts::returns diverged=true when provider matches but profile differs",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/provider-divergence.test.ts::returns diverged=false when Bullseye and global prefs agree (claude:anth)",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/provider-divergence.test.ts::returns hasBullseye=false for a project with no Bullseye",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["api", "config"],
+        "dimensions_covered": [
+          "api",
+          "config"
+        ],
         "dimensions_missing": [],
-        "history": { "churn_90d": null, "bugs": 0, "last_regression": "#706" }
+        "history": {
+          "churn_90d": null,
+          "bugs": 0,
+          "last_regression": "#706"
+        }
       },
       {
         "ref": "preferences-config.recognize.dynamic-key",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/dynamic-preference-keys.test.ts::accepts every project-scoped prefix with a valid project-id suffix", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/dynamic-preference-keys.test.ts::rejects a project-scoped prefix with a non-hex suffix", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/preferences.test.ts::PUT /api/preferences/settings stores project-scoped board saved views", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/dynamic-preference-keys.test.ts::accepts every project-scoped prefix with a valid project-id suffix",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/dynamic-preference-keys.test.ts::rejects a project-scoped prefix with a non-hex suffix",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/preferences.test.ts::PUT /api/preferences/settings stores project-scoped board saved views",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["boundary", "config"],
+        "dimensions_covered": [
+          "boundary",
+          "config"
+        ],
         "dimensions_missing": [],
-        "history": { "churn_90d": null, "bugs": 1, "last_regression": "#904" }
+        "history": {
+          "churn_90d": null,
+          "bugs": 1,
+          "last_regression": "#904"
+        }
       },
       {
         "ref": "preferences-config.read.quota-usage",
         "status": "partial",
         "covered_by": [],
         "dimensions_covered": [],
-        "dimensions_missing": ["api", "error"],
+        "dimensions_missing": [
+          "api",
+          "error"
+        ],
         "gap": {
           "kind": "no-test",
-          "missing_dimensions": ["api", "error"],
+          "missing_dimensions": [
+            "api",
+            "error"
+          ],
           "rationale": "No test exercises the GET /api/preferences/quota-usage route or its 503 graceful-degradation path. The quota selection LOGIC (isPolicyBlockedByQuota) is well covered, but the HTTP endpoint contract (200 shape vs 503 on external outage) is unverified. Confirmed live: the endpoint returns 503 when tampermonkey-direct :8742 is down."
         }
       }
     ],
     "summary": {
-      "covered": 13,
-      "partial": 2,
+      "covered": 15,
+      "partial": 1,
       "uncovered": 0,
       "undocumented_implemented": 0,
       "documented_missing": 0,
-      "score": 0.87,
+      "score": 0.969,
       "by_dimension": {
-        "config": { "covered": 10, "partial": 1, "uncovered": 0 },
-        "error": { "covered": 6, "partial": 1, "uncovered": 0 },
-        "api": { "covered": 5, "partial": 1, "uncovered": 0 },
-        "boundary": { "covered": 4, "partial": 0, "uncovered": 0 },
-        "regression": { "covered": 3, "partial": 0, "uncovered": 0 },
-        "risk": { "covered": 4, "partial": 1, "uncovered": 0 },
-        "state-transition": { "covered": 0, "partial": 1, "uncovered": 0 },
-        "workflow": { "covered": 4, "partial": 0, "uncovered": 0 },
-        "permission": { "covered": 0, "partial": 0, "uncovered": 0, "na": "single-user local app, no RBAC" }
-      },
-      "weak_dimensions": ["state-transition", "api(quota-endpoint)", "risk(start-policy kill-switch)"],
-      "top_gaps": [
-        {
-          "ref": "preferences-config.resolve.start-policy",
-          "priority": "P1",
-          "roi": 6.0,
-          "dimensions_to_add": ["state-transition", "risk"],
-          "rationale": "The Start Mode kill-switch is this module's keystone (decision 008) and a documented multi-cycle-stall hazard, yet only mode='monitor' is asserted. Add direct resolveStartPolicy assertions: manual → autoStartUnblocked/postMergeCascade/backlogRefill/scheduledRuns all false; conductor → in-process all false but scheduledRuns true; derived branch yields mode+source='derived' from legacy board_autodrive / auto_monitor+nudge_auto_start. Pure-function test, near-zero exec/maint cost, high blast radius."
+        "config": {
+          "covered": 10,
+          "partial": 1,
+          "uncovered": 0
         },
+        "error": {
+          "covered": 6,
+          "partial": 1,
+          "uncovered": 0
+        },
+        "api": {
+          "covered": 5,
+          "partial": 1,
+          "uncovered": 0
+        },
+        "boundary": {
+          "covered": 4,
+          "partial": 0,
+          "uncovered": 0
+        },
+        "regression": {
+          "covered": 3,
+          "partial": 0,
+          "uncovered": 0
+        },
+        "risk": {
+          "covered": 4,
+          "partial": 1,
+          "uncovered": 0
+        },
+        "state-transition": {
+          "covered": 0,
+          "partial": 1,
+          "uncovered": 0
+        },
+        "workflow": {
+          "covered": 4,
+          "partial": 0,
+          "uncovered": 0
+        },
+        "permission": {
+          "covered": 0,
+          "partial": 0,
+          "uncovered": 0,
+          "na": "single-user local app, no RBAC"
+        }
+      },
+      "weak_dimensions": [
+        "state-transition",
+        "api(quota-endpoint)",
+        "risk(start-policy kill-switch)"
+      ],
+      "top_gaps": [
         {
           "ref": "preferences-config.error.guard-fails-open",
           "priority": "P4",
-          "roi": 4.0,
-          "dimensions_to_add": ["error", "regression"],
+          "roi": 4,
+          "dimensions_to_add": [
+            "error",
+            "regression"
+          ],
           "rationale": "Inferred hazard: the write-time divergence guard fails OPEN on malformed Bullseye JSON (resolveProviderDivergence try/catch → diverged:false), silently permitting a provider/profile write the #903 invariant was meant to block. Add a negative test: active project with a corrupt board_strategy_<id> + a diverging provider write → currently 200 (drift persists). Either pins the current (surprising) behaviour or escalates it as a real defect — verify before asserting."
         },
         {
           "ref": "preferences-config.read.quota-usage",
           "priority": "P2",
-          "roi": 3.0,
-          "dimensions_to_add": ["api", "error"],
+          "roi": 3,
+          "dimensions_to_add": [
+            "api",
+            "error"
+          ],
           "rationale": "GET /api/preferences/quota-usage endpoint contract is untested (200 shape vs 503 on external :8742 outage). Inject a stub QuotaUsageProvider that throws → assert 503 + {providers:[]}; and one returning data → assert 200 shape. The provider is injectable, so this is cheap and stable; the live probe already confirms 503 on outage."
         }
       ]
