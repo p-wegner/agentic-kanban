@@ -8,6 +8,7 @@ function prefs(entries: Record<string, string>): Map<string, string> {
   return new Map(Object.entries(entries));
 }
 
+// @covers preferences-config.resolve.start-policy [config,state-transition,risk]
 describe("resolveStartPolicy", () => {
   describe("explicit start_mode wins", () => {
     it("manual ⇒ NOTHING auto-starts even with the legacy opt-in flags ON (incident regression-lock)", () => {
