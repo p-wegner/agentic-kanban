@@ -276,6 +276,99 @@ test.describe("post-merge follow-up cascade: dependent issue gets a workspace + 
       .toBe("In Progress");
   });
 
+  test("dependent with MULTIPLE blockers does NOT auto-start until EVERY blocker is Done (every-guard)", async ({
+    request,
+  }) => {
+    // @covers workspaces.cascade.partial-blockers-no-start [state-transition,error]
+    test.setTimeout(120_000);
+
+    // Arrange: two blockers B1 + B2 and a dependent D that depends_on BOTH.
+    const blocker1Id = await createIssue(request, `Multi-blocker B1 ${suffix}`);
+    createdIssueIds.push(blocker1Id);
+    const blocker2Id = await createIssue(request, `Multi-blocker B2 ${suffix}`);
+    createdIssueIds.push(blocker2Id);
+    const dependentId = await createIssue(request, `Multi-blocker dependent ${suffix}`);
+    createdIssueIds.push(dependentId);
+    await addDependency(request, dependentId, blocker1Id);
+    await addDependency(request, dependentId, blocker2Id);
+
+    // Pre-condition: capture D's pre-merge status and assert it has no workspace yet.
+    const preStatus = (await getIssue(request, dependentId)).statusName;
+    expect(nonClosed(await listWorkspaces(request, dependentId))).toHaveLength(0);
+
+    // Act 1: commit + merge ONLY B1 (B1 -> Done; B2 stays open).
+    const b1Ws = await createWorkspace(request, blocker1Id, `feature/multi-blocker-b1-${suffix}`);
+    commitMarker(b1Ws.workingDir, `b1-${suffix}`);
+    const merge1 = await mergeWorkspace(request, b1Ws.id, "B1");
+    expect(merge1.status(), `merge B1 -> ${merge1.status()}`).toBeLessThan(400);
+
+    // Anchor: wait for B1 to actually reach Done so the async post-merge cascade decision
+    // for D has been given its chance to run (same wait the hasActive negative test uses).
+    await expect
+      .poll(async () => (await getIssue(request, blocker1Id)).statusName, {
+        timeout: 30_000,
+        message: "B1 must reach Done so the cascade decision executes",
+      })
+      .toBe("Done");
+
+    // Precondition the every() guard hinges on: B2 is STILL not terminal.
+    expect(
+      (await getIssue(request, blocker2Id)).statusName,
+      "B2 must remain un-merged for the partial-blocker case",
+    ).not.toBe("Done");
+
+    // Assert (the every-guard): over a window comfortably longer than the cascade latency
+    // observed in the single-blocker positive test, D NEVER gains a workspace and NEVER leaves
+    // its pre-merge status. allResolved = depRows.every(isTerminalStatusIdView) is FALSE while
+    // B2 is open, so autoStartFollowups continues past D without starting it.
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      expect(
+        nonClosed(await listWorkspaces(request, dependentId)).length,
+        "dependent with an unresolved blocker must NOT auto-start a workspace",
+      ).toBe(0);
+      expect(
+        (await getIssue(request, dependentId)).statusName,
+        "dependent must stay in its pre-merge status while any blocker is open",
+      ).toBe(preStatus);
+      await new Promise((r) => setTimeout(r, 1_000));
+    }
+
+    // Act 2: resolve the LAST blocker — commit + merge B2 (B2 -> Done).
+    const b2Ws = await createWorkspace(request, blocker2Id, `feature/multi-blocker-b2-${suffix}`);
+    commitMarker(b2Ws.workingDir, `b2-${suffix}`);
+    const merge2 = await mergeWorkspace(request, b2Ws.id, "B2");
+    expect(merge2.status(), `merge B2 -> ${merge2.status()}`).toBeLessThan(400);
+
+    // Assert (guard releases on the LAST blocker): with EVERY blocker now Done, D finally
+    // auto-starts — a workspace appears and D moves to In Progress.
+    let autoWorkspaceId: string | undefined;
+    await expect
+      .poll(
+        async () => {
+          const open = nonClosed(await listWorkspaces(request, dependentId));
+          if (open.length > 0) autoWorkspaceId = open[0].id;
+          return open.length;
+        },
+        { timeout: 30_000, message: "dependent must auto-start once its LAST blocker is Done" },
+      )
+      .toBeGreaterThan(0);
+
+    if (autoWorkspaceId && !createdWorkspaceIds.includes(autoWorkspaceId)) {
+      createdWorkspaceIds.push(autoWorkspaceId);
+    }
+    if (autoWorkspaceId) {
+      await request.post(`${SERVER_URL}/api/workspaces/${autoWorkspaceId}/stop`).catch(() => {});
+    }
+
+    await expect
+      .poll(async () => (await getIssue(request, dependentId)).statusName, {
+        timeout: 15_000,
+        message: "dependent must transition to In Progress once fully unblocked",
+      })
+      .toBe("In Progress");
+  });
+
   test("dependent that already has an active workspace does NOT get a second one (hasActive skip)", async ({
     request,
   }) => {
