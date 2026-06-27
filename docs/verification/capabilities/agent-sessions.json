@@ -1091,23 +1091,20 @@
       },
       {
         "ref": "agent-sessions.resume.provider-id",
-        "status": "uncovered",
-        "covered_by": [],
-        "dimensions_covered": [],
-        "dimensions_missing": [
-          "workflow",
-          "regression",
-          "config"
+        "status": "covered",
+        "covered_by": [
+          {
+            "test": "packages/server/src/__tests__/agent-session-resume-provider-id.test.ts",
+            "strength": "asserts-outcome"
+          }
         ],
-        "gap": {
-          "kind": "no-test",
-          "missing_dimensions": [
-            "workflow",
-            "regression",
-            "config"
-          ],
-          "rationale": "no test asserts that the Claude session_id / Pi session header is captured from init events into sessions.providerSessionId, nor that relaunch passes --resume/--session to continue the conversation; apply-stream-event explicitly mocks the persistence path away. This is the resume chain that all multi-turn/relaunch flows depend on"
-        }
+        "dimensions_covered": [
+          "workflow",
+          "regression"
+        ],
+        "dimensions_missing": [],
+        "gap": null,
+        "note": "Closed by e2e-test-author wave-3 2026-06-27 (adversarially reviewed). agent-session-resume-provider-id.test.ts"
       },
       {
         "ref": "agent-sessions.persist.prune",
@@ -1151,12 +1148,12 @@
       }
     ],
     "summary": {
-      "covered": 14,
+      "covered": 15,
       "partial": 5,
-      "uncovered": 1,
+      "uncovered": 0,
       "undocumented_implemented": 0,
       "documented_missing": 0,
-      "score": 0.825,
+      "score": 0.875,
       "by_dimension": {
         "state-transition": {
           "covered": 8,
@@ -1214,16 +1211,6 @@
         "workflow (provider-resume relaunch + multi-turn follow-up end-to-end gaps)"
       ],
       "top_gaps": [
-        {
-          "ref": "agent-sessions.resume.provider-id",
-          "priority": "P1",
-          "roi": 5,
-          "dimensions_to_add": [
-            "workflow",
-            "regression"
-          ],
-          "rationale": "Entirely uncovered yet load-bearing: provider session-id capture (Claude session_id / Pi header) + --resume relaunch underpins every multi-turn and relaunch flow. A silent break strands resume into fresh sessions and loses context. High business impact (4) × high regression likelihood (4, session-lifecycle is top-churn) over low exec/maint cost."
-        },
         {
           "ref": "agent-sessions.reattach.recover",
           "priority": "P1",

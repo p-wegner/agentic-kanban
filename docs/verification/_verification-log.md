@@ -128,6 +128,32 @@ before landing — the refute pass again earned its keep.
 0.837 → 0.868.** The pattern holds: every wave the adversarial reviewers convert a few "green"
 tests into real fixes and surface ~1 product bug the happy-path tests assumed away.
 
+## 2026-06-27 — e2e-test-author wave 3: closed 6 more gaps (server/integration cluster)
+
+6 more gaps (parallel) + 1-refuter-each: **3 sound, 3 needs-fix** (all fixed before landing).
+New tests: stranded-review-reconciler-relaunch, agent-session-resume-provider-id,
+merge-verify-gate-path-coverage, create-agent-skill, butler-event-feed-injection,
+git-prepare-for-review.
+
+- **Coverage: 0.868 → 0.883** (covered 221→226, partial 32→30, uncovered 20→17). Backlog 47→41.
+- **TWO more product bugs filed:** #930 (manual `/merge` + merge-queue BYPASS the verify/smoke
+  pre-merge gate — independently code-traced; can land unverified code) and #931 (create_agent_skill
+  name guard is strictly weaker than the downstream materialization guard — `.`/empty/`C:` slip
+  through). Both pinned by `it.fails` markers that assert the DESIRED behaviour and self-flip when
+  the bug is fixed — so the eventual fix turns a test green, and a marker-less change-detector
+  never blocks it.
+- Refuters also de-overfit assertions (butler summary copy; positional indices), corrected
+  dimension claims (dropped `api`, relabeled `permission`→`security`, trimmed a mocked-away
+  `state-transition`), and earned dims by adding real cases (butler cross-project isolation +
+  exception-swallow).
+- Doc-drift finding: `packages/server/CLAUDE.md` "Session resume chain" says Pi's id is in the
+  legacy `claudeSessionId` column — it's actually `providerSessionId`. Worth a one-line doc fix.
+
+**Running total across waves 1+2+3: 18 gaps closed, 6 product bugs surfaced (#926–931),
+score 0.837 → 0.883 (77% → 83%).** Every wave the adversarial reviewers convert several "green"
+tests into real fixes and surface ~2 genuine product bugs the happy-path tests assumed away —
+the strongest evidence that the refute step belongs in the skill, not as an optional add-on.
+
 ### Still open
 - **Phase 2 requirements-mapping NOT yet run** for any capability — so the `documented-missing`
   / `undocumented-implemented` buckets are empty by *omission of the pass*, not by verified

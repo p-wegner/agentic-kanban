@@ -57,6 +57,22 @@
       "tests_passing": "server 28/28 + mcp-server 2/2 (30 cases, 6 files)",
       "product_tickets_filed": ["#929 deduplicateProjects loses/orphans the dup's children beyond the 4 reassigned tables (data loss)"],
       "followups_logged": ["move_issue terminal-node any-target", "repair: no-clobber of a DIFFERING user override", "codemods >100-file limit-guard + HTTP route", "butler busy-clears-after-completion", "session-launch covered the model-drop guard; other launch guards already covered"]
+    },
+    {
+      "date": "2026-06-27",
+      "batch": "wave-3 (6 server/integration gaps, parallel generator + 1-refuter-each adversarial pass)",
+      "review_mode": "adversarial-refute (1 reviewer per test; 3 sound / 3 needs-fix, all fixed before landing)",
+      "results": [
+        { "gap": "review-merge.reconcile.stranded-review", "priority": "P1", "test_file": "packages/server/src/__tests__/stranded-review-reconciler-relaunch.test.ts", "dimensions": ["workflow","config"], "verdict": "sound", "note": "state-transition dim trimmed (the reviewing flip is inside the mocked startManualReview)", "status_after": "covered" },
+        { "gap": "agent-sessions.resume.provider-id", "priority": "P1", "test_file": "packages/server/src/__tests__/agent-session-resume-provider-id.test.ts", "dimensions": ["workflow","regression"], "verdict": "sound", "note": "capture+resume for Claude & Pi; doc drift found — providerSessionId column, not legacy claudeSessionId", "status_after": "covered" },
+        { "gap": "review-merge.gate.verify-smoke", "priority": "P1", "test_file": "packages/server/src/__tests__/merge-verify-gate-path-coverage.test.ts", "dimensions": ["error-handling","config","risk"], "verdict": "sound-after-fix", "fix": "converted the bypass-pinning tests to it.fails markers asserting the DESIRED gated behaviour (self-flip when #930 fixed); dropped api dim. PRODUCT BUG -> #930 (manual /merge bypasses the verify gate)", "status_after": "covered" },
+        { "gap": "mcp-server.create.agent-skill", "priority": "P1", "test_file": "packages/mcp-server/src/__tests__/tools/create-agent-skill.test.ts", "dimensions": ["security","error","boundary"], "verdict": "sound-after-fix", "fix": "added it.fails cases for the create-vs-materialization guard divergence (./empty/C:); relabeled permission->security; per-test DB reset. PRODUCT BUG -> #931 (create guard weaker than materialization guard)", "status_after": "covered" },
+        { "gap": "butler.feed.systemEvents", "priority": "P1", "test_file": "packages/server/src/__tests__/butler-event-feed-injection.test.ts", "dimensions": ["capability","config","concurrency","error-handling"], "verdict": "sound-after-fix", "fix": "de-overfit burst summary to semantic tokens; added two-project isolation (earns concurrency) + throwing-collaborator swallow (earns error-handling)", "status_after": "covered", "committed": "4a8f08d7" },
+        { "gap": "git-integration.rebase.prepare-review", "priority": "P1", "test_file": "packages/server/src/__tests__/git-prepare-for-review.test.ts", "dimensions": ["workflow","error-handling","regression"], "verdict": "sound", "note": "local-vs-origin base choice + conflict-list return with clean abort (real temp git repos)", "status_after": "covered" }
+      ],
+      "tests_passing": "server 5 files (incl. it.fails markers) + mcp-server 1 file; all green (expected-fails = known-gap markers for #930/#931)",
+      "product_tickets_filed": ["#930 manual /merge bypasses the verify/smoke gate", "#931 create_agent_skill guard weaker than materialization guard"],
+      "followups_logged": ["stranded-review: commits-ahead=0 + running-session skip", "resume: executor-mismatch guard drops --resume across provider switch; Codex/Copilot resume", "rebaseOntoBase (inverse semantics: origin-default, leaves rebase in-progress)"]
     }
   ]
 }

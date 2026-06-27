@@ -1083,29 +1083,26 @@
       },
       {
         "ref": "butler.feed.systemEvents",
-        "status": "uncovered",
-        "covered_by": [],
-        "dimensions_covered": [],
-        "dimensions_missing": [
+        "status": "covered",
+        "covered_by": [
+          {
+            "test": "packages/server/src/__tests__/butler-event-feed-injection.test.ts",
+            "strength": "asserts-outcome"
+          }
+        ],
+        "dimensions_covered": [
           "capability",
           "config",
           "concurrency",
           "error-handling"
         ],
+        "dimensions_missing": [],
         "history": {
           "churn_90d": null,
           "bugs": 0
         },
-        "gap": {
-          "kind": "no-test",
-          "missing_dimensions": [
-            "capability",
-            "config",
-            "concurrency",
-            "error-handling"
-          ],
-          "rationale": "no test exercises emitButlerSystemEvent's injection path. usage-limit-rotation-exit.test.ts imports butler-event-feed but tests builder license-rotation relaunch, NOT event injection. The 30s rate-limit, burst-collapse-to-summary, default-only routing, and drop-when-cold behaviours are entirely unverified"
-        }
+        "gap": null,
+        "note": "Closed by e2e-test-author wave-3 2026-06-27 (adversarially reviewed). butler-event-feed-injection.test.ts"
       },
       {
         "ref": "butler.history.access",
@@ -1164,12 +1161,12 @@
       }
     ],
     "summary": {
-      "covered": 15,
+      "covered": 16,
       "partial": 3,
-      "uncovered": 1,
+      "uncovered": 0,
       "undocumented_implemented": 0,
       "documented_missing": 0,
-      "score": 0.868,
+      "score": 0.921,
       "by_dimension": {
         "capability": {
           "covered": 6,
@@ -1235,18 +1232,6 @@
         "config (event-feed)"
       ],
       "top_gaps": [
-        {
-          "ref": "butler.feed.systemEvents",
-          "priority": "P1",
-          "roi": 4,
-          "dimensions_to_add": [
-            "capability",
-            "config",
-            "concurrency",
-            "error-handling"
-          ],
-          "rationale": "The entire board-event → butler injection pipeline (AK-75) is unverified — no test touches emitButlerSystemEvent. Asserting that a warm default butler receives a [system event] turn, that bursts collapse to one summary within the 30s window, that named butlers DON'T receive it, and that a cold session drops the event would lock four documented invariants at once. Medium exec/maint cost (in-process service test)."
-        },
         {
           "ref": "butler.history.access",
           "priority": "P4",

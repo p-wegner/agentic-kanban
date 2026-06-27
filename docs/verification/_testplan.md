@@ -4,9 +4,9 @@
 > behaviour; the tick is derived from `_coverage.json` (`testplan.mjs`). Regenerate after
 > tests land and ticks update themselves — the plan can't drift from reality.
 
-**Progress: 221/273 scenarios covered (81%)** · 32 partial · 20 to author
+**Progress: 226/273 scenarios covered (83%)** · 30 partial · 17 to author
 
-`[████████████████░░░░]`
+`[█████████████████░░░]`
 
 Pipeline roles (cf. Playwright Agents): **planner** = behavior-discovery + coverage-intelligence (this plan) · **generator** = e2e-test-author (implements gaps top-down) · **healer** = e2e-test-author re-run + flaky-test-triage (keeps the suite green).
 
@@ -17,18 +17,18 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 | Capability | Covered | Plan |
 |---|--:|---|
 | [agent-providers](#agent-providers) | 14/16 | `[█████████░]` |
-| [agent-sessions](#agent-sessions) | 14/20 | `[███████░░░]` |
+| [agent-sessions](#agent-sessions) | 15/20 | `[████████░░]` |
 | [board-ui](#board-ui) | 18/24 | `[████████░░]` |
-| [butler](#butler) | 15/19 | `[████████░░]` |
+| [butler](#butler) | 16/19 | `[████████░░]` |
 | [codemods](#codemods) | 7/9 | `[████████░░]` |
-| [git-integration](#git-integration) | 16/18 | `[█████████░]` |
+| [git-integration](#git-integration) | 17/18 | `[█████████░]` |
 | [issues-board](#issues-board) | 19/20 | `[██████████]` |
-| [mcp-server](#mcp-server) | 14/20 | `[███████░░░]` |
+| [mcp-server](#mcp-server) | 15/20 | `[████████░░]` |
 | [monitor-orchestration](#monitor-orchestration) | 16/19 | `[████████░░]` |
 | [persistence-schema](#persistence-schema) | 13/15 | `[█████████░]` |
 | [preferences-config](#preferences-config) | 15/16 | `[█████████░]` |
 | [project-registration](#project-registration) | 13/17 | `[████████░░]` |
-| [review-merge](#review-merge) | 15/18 | `[████████░░]` |
+| [review-merge](#review-merge) | 16/18 | `[█████████░]` |
 | [workflow-engine](#workflow-engine) | 12/16 | `[████████░░]` |
 | [workspaces](#workspaces) | 20/26 | `[████████░░]` |
 
@@ -107,13 +107,8 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 
 ## agent-sessions
 
-**agent-sessions** — 14/20 covered `[███████░░░]`
+**agent-sessions** — 15/20 covered `[████████░░]`
 
-- [ ] ⬜ **P1** `agent-sessions.resume.provider-id` — The provider's own resume token (Claude session_id from system/init, Pi session header) is captured from the stream and stored, then passed as --resume / --session on relaunch so the conversation continues
-  - _given_ operator
-  - _then_ sessions.providerSessionId persisted; a relaunch spawns with --resume <id> and the agent continues the prior conversation
-  - _add dimensions_ workflow, regression, config
-  - _gap_ no test asserts that the Claude session_id / Pi session header is captured from init events into sessions.providerSessionId, nor that relaunch passes --resume/--session to continue the conversation; apply-stream-event ex
 - [~] ⚠️ **P2** `agent-sessions.persist.split-batch` — stdout is persisted only to the on-disk .out file while non-stdout events are batched (50 rows / 250ms) into session_messages and flushed on exit; a FK failure from a racing workspace cleanup is swallowed
   - _given_ agent-subprocess
   - _then_ stdout produces zero DB rows; a 50-event non-stdout batch flushes as one insert; remaining buffer flushed at exit; FK-violation insert does not surface as an error
@@ -187,6 +182,10 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
   - _given_ operator
   - _then_ summary lists files/commands/toolUsePatterns(count,failedCount)/model/rateLimit for each provider format
   - _asserted by_ `session-summary.test.ts::extracts file operations and commands`, `session-summary.test.ts::extracts Codex exec --json streaming session act`, `session-summary.test.ts::extracts Copilot JSONL session activity`, `session-summary.test.ts::records Codex command errors and turn failures`
+- [x] ✅ `agent-sessions.resume.provider-id` — The provider's own resume token (Claude session_id from system/init, Pi session header) is captured from the stream and stored, then passed as --resume / --session on relaunch so the conversation continues
+  - _given_ operator
+  - _then_ sessions.providerSessionId persisted; a relaunch spawns with --resume <id> and the agent continues the prior conversation
+  - _asserted by_ `agent-session-resume-provider-id.test.ts`
 - [x] ✅ `agent-sessions.persist.prune` — A background pruner bounds DB growth: it deletes session_messages for workspaces merged/closed >3 days ago and caps each still-active session at 2000 rows, dropping the oldest excess
   - _given_ monitor
   - _then_ messages for stale merged workspaces removed; per-session rows capped at MAX_MESSAGES_PER_ACTIVE_SESSION
@@ -305,13 +304,8 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 
 ## butler
 
-**butler** — 15/19 covered `[████████░░]`
+**butler** — 16/19 covered `[████████░░]`
 
-- [ ] ⬜ **P1** `butler.feed.systemEvents` — Board events (merge failures, agent crashes, stuck workspaces) are injected as [system event] turns into the warm DEFAULT butler only, rate-limited to 1 turn / 30s / project with bursts collapsed to a summary line; dropped silently if no session is warm
-  - _given_ board-event-feed
-  - _then_ a [system event] turn appears in the default butler's transcript; named butlers never receive it; ≥2 events in 30s collapse to one 'Nx kind' summary; cold session → event dropped
-  - _add dimensions_ capability, config, concurrency, error-handling
-  - _gap_ no test exercises emitButlerSystemEvent's injection path. usage-limit-rotation-exit.test.ts imports butler-event-feed but tests builder license-rotation relaunch, NOT event injection. The 30s rate-limit, burst-collapse-t
 - [~] ⚠️ **P2** `butler.interrupt.inflight` — Interrupting cancels the IN-FLIGHT turn (query.interrupt) while keeping the session warm
   - _given_ operator
   - _then_ in-flight stream stops; GET /butler still active:true; next turn accepted
@@ -383,6 +377,10 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
   - _given_ operator
   - _then_ GET /commands returns the merged deduped command list; client parse/filter/apply transform the input correctly
   - _asserted by_ `butler-slash-commands.test.ts::filterCommands filters case-insensitively and ca`, `butler-slash-commands.test.ts::applyCommandToInput replaces a trailing slash to`
+- [x] ✅ `butler.feed.systemEvents` — Board events (merge failures, agent crashes, stuck workspaces) are injected as [system event] turns into the warm DEFAULT butler only, rate-limited to 1 turn / 30s / project with bursts collapsed to a summary line; dropped silently if no session is warm
+  - _given_ board-event-feed
+  - _then_ a [system event] turn appears in the default butler's transcript; named butlers never receive it; ≥2 events in 30s collapse to one 'Nx kind' summary; cold session → event dropped
+  - _asserted by_ `butler-event-feed-injection.test.ts`
 - [x] ✅ `butler.ticketChat.prompt` — The 'Chat about this ticket' retrospective builds an opening prompt referencing the ticket by number (or title), its spec questions, type/status, and a truncated description
   - _given_ operator
   - _then_ the generated prompt contains the #number, retrospective questions, metadata, and a truncated description (omitted when empty)
@@ -433,18 +431,13 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 
 ## git-integration
 
-**git-integration** — 16/18 covered `[█████████░]`
+**git-integration** — 17/18 covered `[█████████░]`
 
 - [~] ⚠️ **P3** `git-integration.diff.working-tree` — Diffing a branch/worktree surfaces its changes vs base including UNTRACKED files (hand-synthesized diff headers), and a direct workspace diffs via git diff HEAD; diff-stat ref semantics match the board (worktree→base, direct→HEAD)
   - _given_ mcp-agent
   - _then_ getWorkingTreeDiff output contains 'diff --git', 'new file mode', and the untracked file's added lines; getDiffShortstat called with the right (path, base) per workspace kind
   - _add dimensions_ boundary
   - _gap_ untracked-diff synthesis edge cases untested: binary/unreadable file (header-only) and trailing-newline off-by-one. Display-grade only; domain doc flags it as not apply-grade.
-- [~] ⚠️ **P1** `git-integration.rebase.prepare-review` — Preparing a branch for review rebases onto the LOCAL base branch (not origin/*), first committing any leftover uncommitted worktree changes instead of bailing on a dirty tree, aborting a stale rebase, fetching best-effort, and on conflict collecting --diff-filter=U files then aborting to leave the tree clean
-  - _given_ server-services
-  - _then_ rebaseOntoBase succeeds on a dirty tree and leaves status clean; (untested) rebases onto local master ahead of origin and returns the conflicting-file list on conflict without leaving a half-rebase
-  - _add dimensions_ workflow, error-handling
-  - _gap_ only the dirty-tree leftover-commit path is asserted. The local-base preference (rebase onto local master ahead of a stale origin), abort-stale-rebase, and the on-conflict --diff-filter=U file-list return are never exerc
 - [x] ✅ `git-integration.create.worktree` — Creating a workspace provisions an isolated worktree checked out on its own branch cut from the requested base, with a guaranteed non-detached HEAD; an existing healthy worktree for the same branch is reused (same path returned), not duplicated
   - _given_ server-services
   - _then_ worktree directory exists with the base branch's files; createWorktree returns the path; a second call for the same branch returns the same path
@@ -509,6 +502,10 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
   - _given_ server-services
   - _then_ exact branch strings, e.g. feature/ak-3-fix-the-big-bug; 80-char / 40-char truncation enforced
   - _asserted by_ `branch.test.ts::sanitizeBranchName (6 cases incl. 80-char trunca`, `branch.test.ts::suggestBranchName (8 cases incl. 40-char slug tr`
+- [x] ✅ `git-integration.rebase.prepare-review` — Preparing a branch for review rebases onto the LOCAL base branch (not origin/*), first committing any leftover uncommitted worktree changes instead of bailing on a dirty tree, aborting a stale rebase, fetching best-effort, and on conflict collecting --diff-filter=U files then aborting to leave the tree clean
+  - _given_ server-services
+  - _then_ rebaseOntoBase succeeds on a dirty tree and leaves status clean; (untested) rebases onto local master ahead of origin and returns the conflicting-file list on conflict without leaving a half-rebase
+  - _asserted by_ `git.service.test.ts::rebaseOntoBase commits leftover worktree changes`, `git-prepare-for-review.test.ts`
 
 ## issues-board
 
@@ -598,13 +595,8 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 
 ## mcp-server
 
-**mcp-server** — 14/20 covered `[███████░░░]`
+**mcp-server** — 15/20 covered `[████████░░]`
 
-- [ ] ⬜ **P1** `mcp-server.create.agent-skill` — create_agent_skill rejects names containing '/', '\' or '..' (they become filesystem paths) and enforces per-scope uniqueness before writing SKILL.md
-  - _given_ ai-agent
-  - _then_ path-traversal/illegal name → validation error, no skill written; duplicate name in scope → rejected; valid → skill persisted
-  - _add dimensions_ error, boundary, permission
-  - _gap_ No test exercises create_agent_skill. The path-traversal guard (names with '/','\','..' become .claude/skills/<name>/SKILL.md filesystem paths) and per-scope uniqueness (create-agent-skill.ts:19,26) are a security-releva
 - [ ] ⬜ **P1** `mcp-server.fire.webhook` — A status-change mutation (move_issue/update_issue) fires the project's outbound webhook best-effort, but only after the URL is validated loopback-only (the single egress boundary against a malicious pref)
   - _given_ ai-agent
   - _then_ valid loopback URL → POST issue-status payload; non-loopback/non-http(s) host → not fired; mutation succeeds regardless of webhook outcome
@@ -682,6 +674,10 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
   - _given_ ai-agent
   - _then_ advertised ⊆ registered (no phantom tool like the old mark_ready_for_merge) AND registered ⊆ advertised; mark_ready_for_merge present; no blank descriptions
   - _asserted by_ `mcp-tools.test.ts::the MCP_TOOL_DEFINITIONS catalog and the runtime`
+- [x] ✅ `mcp-server.create.agent-skill` — create_agent_skill rejects names containing '/', '\' or '..' (they become filesystem paths) and enforces per-scope uniqueness before writing SKILL.md
+  - _given_ ai-agent
+  - _then_ path-traversal/illegal name → validation error, no skill written; duplicate name in scope → rejected; valid → skill persisted
+  - _asserted by_ `create-agent-skill.test.ts`
 - [x] ✅ `mcp-server.govern.disabled-tools` — A tool whose name is in the disabled_mcp_tools preference is never registered, so it does not appear in tools/list and cannot be called for that session
   - _given_ settings-operator
   - _then_ the disabled tool is absent from tools/list; calling it returns method-not-found
@@ -987,18 +983,13 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 
 ## review-merge
 
-**review-merge** — 15/18 covered `[████████░░]`
+**review-merge** — 16/18 covered `[█████████░]`
 
 - [~] ⚠️ **P1** `review-merge.recover.fix-and-merge` — A failed/conflicting merge can be recovered by relaunching an agent in the worktree (status → fixing); on resolver exit the merge is re-attempted, the workspace stays retryable if the branch didn't land, or closes if it did; stale zero-output fix sessions are force-recovered
   - _given_ fix-agent
   - _then_ workspace status fixing; resolver exit without landing → workspace kept open+idle (retryable); resolver exit having landed → workspace closed, issue Done; zero-output zombie fix session force-stopped before retry
   - _add dimensions_ api
   - _gap_ Resolver-exit recovery and zombie-fix recovery are well asserted, but the POST /api/workspaces/:id/fix-and-merge endpoint itself — that it transitions the workspace to status=fixing and relaunches the fix agent in the wo
-- [~] ⚠️ **P1** `review-merge.reconcile.stranded-review` — Work stranded idle/In-Review/not-ready with commits and no review session is recovered by relaunching review (or marked ready when auto_review is off); the reconciler no-ops when disabled
-  - _given_ reconcilers
-  - _then_ a review session is (re)launched and the workspace leaves the stranded state; zero mutations when disabled via dep or DB pref
-  - _add dimensions_ workflow, state-transition
-  - _gap_ The ONLY asserted path is the disable/no-op guard (#582). The reconciler's core honesty-restoration outcome — that a genuinely stranded idle/In-Review/not-ready workspace with commits gets a review relaunched (or is mark
 - [~] ⚠️ **P2** `review-merge.foundational.sync-merge` — A no-own-dependency ticket with >=1 open dependent is classified as a foundational blocker eligible for synchronous merge, so dependents aren't cut from an empty pre-merge base
   - _given_ auto-merge-orchestrator
   - _then_ isFoundationalBlocker true only when an open dependent exists AND own deps are Done; false for leaf tickets, unresolved-own-dep tickets, terminal-only dependents, non-blocking relations
@@ -1060,10 +1051,14 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
   - _given_ reconcilers
   - _then_ reconcileMergedIssue moves In-Review→Done, no-ops when already Done, preserves statusChangedAt; issue stays Done even when workspace close DB write fails; ancestor-branch reconciler closes ancestor In-Review ws and Dones it without a merge commit
   - _asserted by_ `reconcile-merged-issue.test.ts::is idempotent: calling twice is safe and does no`, `merge-cleanup.service.test.ts::keeps issue Done when workspace close fails (#66`, `merge-atomic-done-transition.test.ts::issue is Done even when workspace close DB write`, `issue-transition-on-interrupted-merge.test.ts::issue ends up Done via ancestor-branch reconcile`, `reconcile-silently-merged.test.ts::closes a workspace that has mergedAt set but sta`
+- [x] ✅ `review-merge.reconcile.stranded-review` — Work stranded idle/In-Review/not-ready with commits and no review session is recovered by relaunching review (or marked ready when auto_review is off); the reconciler no-ops when disabled
+  - _given_ reconcilers
+  - _then_ a review session is (re)launched and the workspace leaves the stranded state; zero mutations when disabled via dep or DB pref
+  - _asserted by_ `stranded-review-reconciler.test.ts::performs zero mutations when disabled via deps.e`, `stranded-review-reconciler.test.ts::performs zero mutations when disabled via DB pre`, `stranded-review-reconciler-relaunch.test.ts`
 - [x] ✅ `review-merge.gate.verify-smoke` — A configured verify/smoke pre-merge gate FAILS the merge when verify_script exits non-zero or a web project's boot/render smoke check fails; a configured gate that can't run (no worktree) fails closed; neither configured is a no-op pass
   - _given_ in-process-monitor
   - _then_ merge withheld on non-zero verify / failed smoke / missing-worktree-when-configured; passes when verify exits 0 and smoke renders; runs verify THEN smoke when both set
-  - _asserted by_ `pre-merge-gate.service.test.ts::FAILS (withholds merge) when verify_script exits`, `pre-merge-gate.service.test.ts::fail-closed: verify_script configured but NO wor`, `pre-merge-gate.service.test.ts::runs the smoke check for a web project and FAILS`, `monitor-merge-gate.test.ts::true when a verify_script is configured`
+  - _asserted by_ `pre-merge-gate.service.test.ts::FAILS (withholds merge) when verify_script exits`, `pre-merge-gate.service.test.ts::fail-closed: verify_script configured but NO wor`, `pre-merge-gate.service.test.ts::runs the smoke check for a web project and FAILS`, `monitor-merge-gate.test.ts::true when a verify_script is configured`, `merge-verify-gate-path-coverage.test.ts`
 
 ## workflow-engine
 

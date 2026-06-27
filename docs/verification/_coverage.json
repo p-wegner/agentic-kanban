@@ -1737,23 +1737,20 @@
     },
     {
       "ref": "agent-sessions.resume.provider-id",
-      "status": "uncovered",
-      "covered_by": [],
-      "dimensions_covered": [],
-      "dimensions_missing": [
-        "workflow",
-        "regression",
-        "config"
+      "status": "covered",
+      "covered_by": [
+        {
+          "test": "packages/server/src/__tests__/agent-session-resume-provider-id.test.ts",
+          "strength": "asserts-outcome"
+        }
       ],
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": [
-          "workflow",
-          "regression",
-          "config"
-        ],
-        "rationale": "no test asserts that the Claude session_id / Pi session header is captured from init events into sessions.providerSessionId, nor that relaunch passes --resume/--session to continue the conversation; apply-stream-event explicitly mocks the persistence path away. This is the resume chain that all multi-turn/relaunch flows depend on"
-      }
+      "dimensions_covered": [
+        "workflow",
+        "regression"
+      ],
+      "dimensions_missing": [],
+      "gap": null,
+      "note": "Closed by e2e-test-author wave-3 2026-06-27 (adversarially reviewed). agent-session-resume-provider-id.test.ts"
     },
     {
       "ref": "agent-sessions.persist.prune",
@@ -2911,29 +2908,26 @@
     },
     {
       "ref": "butler.feed.systemEvents",
-      "status": "uncovered",
-      "covered_by": [],
-      "dimensions_covered": [],
-      "dimensions_missing": [
+      "status": "covered",
+      "covered_by": [
+        {
+          "test": "packages/server/src/__tests__/butler-event-feed-injection.test.ts",
+          "strength": "asserts-outcome"
+        }
+      ],
+      "dimensions_covered": [
         "capability",
         "config",
         "concurrency",
         "error-handling"
       ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": null,
         "bugs": 0
       },
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": [
-          "capability",
-          "config",
-          "concurrency",
-          "error-handling"
-        ],
-        "rationale": "no test exercises emitButlerSystemEvent's injection path. usage-limit-rotation-exit.test.ts imports butler-event-feed but tests builder license-rotation relaunch, NOT event injection. The 30s rate-limit, burst-collapse-to-summary, default-only routing, and drop-when-cold behaviours are entirely unverified"
-      }
+      "gap": null,
+      "note": "Closed by e2e-test-author wave-3 2026-06-27 (adversarially reviewed). butler-event-feed-injection.test.ts"
     },
     {
       "ref": "butler.history.access",
@@ -3703,31 +3697,28 @@
     },
     {
       "ref": "git-integration.rebase.prepare-review",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/server/src/__tests__/git.service.test.ts::rebaseOntoBase commits leftover worktree changes instead of failing on a dirty tree",
           "strength": "asserts-outcome"
+        },
+        {
+          "test": "packages/server/src/__tests__/git-prepare-for-review.test.ts",
+          "strength": "asserts-outcome"
         }
       ],
       "dimensions_covered": [
-        "regression"
-      ],
-      "dimensions_missing": [
+        "regression",
         "workflow",
         "error-handling"
       ],
+      "dimensions_missing": [],
       "history": {
         "bugs": 1
       },
-      "gap": {
-        "kind": "dimension-missing",
-        "missing_dimensions": [
-          "workflow",
-          "error-handling"
-        ],
-        "rationale": "only the dirty-tree leftover-commit path is asserted. The local-base preference (rebase onto local master ahead of a stale origin), abort-stale-rebase, and the on-conflict --diff-filter=U file-list return are never exercised end-to-end — a regression there would silently route or strand a review."
-      }
+      "gap": null,
+      "note": "Closed by e2e-test-author wave-3 2026-06-27 (adversarially reviewed). git-prepare-for-review.test.ts"
     },
     {
       "ref": "issues-board.create.issue",
@@ -4667,28 +4658,26 @@
     },
     {
       "ref": "mcp-server.create.agent-skill",
-      "status": "uncovered",
-      "covered_by": [],
-      "dimensions_covered": [],
-      "dimensions_missing": [
-        "error",
-        "boundary",
-        "permission"
+      "status": "covered",
+      "covered_by": [
+        {
+          "test": "packages/mcp-server/src/__tests__/tools/create-agent-skill.test.ts",
+          "strength": "asserts-outcome"
+        }
       ],
+      "dimensions_covered": [
+        "security",
+        "error",
+        "boundary"
+      ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": null,
         "bugs": 0,
         "last_regression": null
       },
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": [
-          "error",
-          "boundary",
-          "permission"
-        ],
-        "rationale": "No test exercises create_agent_skill. The path-traversal guard (names with '/','\\','..' become .claude/skills/<name>/SKILL.md filesystem paths) and per-scope uniqueness (create-agent-skill.ts:19,26) are a security-relevant rejection path with zero coverage."
-      }
+      "gap": null,
+      "note": "Closed by e2e-test-author wave-3 2026-06-27 (adversarially reviewed). create-agent-skill.test.ts"
     },
     {
       "ref": "mcp-server.govern.disabled-tools",
@@ -7190,7 +7179,7 @@
     },
     {
       "ref": "review-merge.reconcile.stranded-review",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/server/src/__tests__/stranded-review-reconciler.test.ts::performs zero mutations when disabled via deps.enabled=false",
@@ -7199,26 +7188,22 @@
         {
           "test": "packages/server/src/__tests__/stranded-review-reconciler.test.ts::performs zero mutations when disabled via DB preference",
           "strength": "touches-only"
+        },
+        {
+          "test": "packages/server/src/__tests__/stranded-review-reconciler-relaunch.test.ts",
+          "strength": "asserts-outcome"
         }
       ],
       "requirements": [
         "#582"
       ],
       "dimensions_covered": [
-        "config"
+        "config",
+        "workflow"
       ],
-      "dimensions_missing": [
-        "workflow",
-        "state-transition"
-      ],
-      "gap": {
-        "kind": "outcome-not-asserted",
-        "missing_dimensions": [
-          "workflow",
-          "state-transition"
-        ],
-        "rationale": "The ONLY asserted path is the disable/no-op guard (#582). The reconciler's core honesty-restoration outcome — that a genuinely stranded idle/In-Review/not-ready workspace with commits gets a review relaunched (or is marked ready when auto_review is off) — is never asserted. A regression that stopped relaunching reviews would pass the existing suite."
-      }
+      "dimensions_missing": [],
+      "gap": null,
+      "note": "Closed by e2e-test-author wave-3 2026-06-27 (adversarially reviewed). stranded-review-reconciler-relaunch.test.ts"
     },
     {
       "ref": "review-merge.gate.verify-smoke",
@@ -7239,6 +7224,10 @@
         {
           "test": "packages/server/src/__tests__/monitor-merge-gate.test.ts::true when a verify_script is configured",
           "strength": "asserts-outcome"
+        },
+        {
+          "test": "packages/server/src/__tests__/merge-verify-gate-path-coverage.test.ts",
+          "strength": "asserts-outcome"
         }
       ],
       "requirements": [
@@ -7250,13 +7239,8 @@
         "risk"
       ],
       "dimensions_missing": [],
-      "gap": {
-        "kind": "dimension-missing",
-        "missing_dimensions": [
-          "api"
-        ],
-        "rationale": "The gate LOGIC is well covered, but NO test asserts that the manual/orchestrator merge body (POST /:id/merge → runWorkspacePreMergeValidation) does NOT invoke runPreMergeGate — the documented hole where a hand-merge can land build/test/boot-unverified code. Status kept 'covered' for the implemented gate; flagged as a behaviour-level escalation in unknowns, not a test-coverage downgrade."
-      }
+      "gap": null,
+      "note": "Closed by e2e-test-author wave-3 2026-06-27 (adversarially reviewed). merge-verify-gate-path-coverage.test.ts"
     },
     {
       "ref": "review-merge.foundational.sync-merge",
@@ -8016,12 +8000,12 @@
         ]
       },
       "agent-sessions": {
-        "covered": 14,
+        "covered": 15,
         "partial": 5,
-        "uncovered": 1,
+        "uncovered": 0,
         "undocumented_implemented": 0,
         "documented_missing": 0,
-        "score": 0.825,
+        "score": 0.875,
         "by_dimension": {
           "state-transition": {
             "covered": 8,
@@ -8079,16 +8063,6 @@
           "workflow (provider-resume relaunch + multi-turn follow-up end-to-end gaps)"
         ],
         "top_gaps": [
-          {
-            "ref": "agent-sessions.resume.provider-id",
-            "priority": "P1",
-            "roi": 5,
-            "dimensions_to_add": [
-              "workflow",
-              "regression"
-            ],
-            "rationale": "Entirely uncovered yet load-bearing: provider session-id capture (Claude session_id / Pi header) + --resume relaunch underpins every multi-turn and relaunch flow. A silent break strands resume into fresh sessions and loses context. High business impact (4) × high regression likelihood (4, session-lifecycle is top-churn) over low exec/maint cost."
-          },
           {
             "ref": "agent-sessions.reattach.recover",
             "priority": "P1",
@@ -8262,12 +8236,12 @@
         "cut_line": "Emitted P1–P3. Below the line (not emitted): board-ui.move.dependencyPreview (P2, dependency-impact preview untested) and palette workspace-action failure-path error handling (P4) — real but lower ROI than the rollback/archive/realtime trio."
       },
       "butler": {
-        "covered": 15,
+        "covered": 16,
         "partial": 3,
-        "uncovered": 1,
+        "uncovered": 0,
         "undocumented_implemented": 0,
         "documented_missing": 0,
-        "score": 0.868,
+        "score": 0.921,
         "by_dimension": {
           "capability": {
             "covered": 6,
@@ -8333,18 +8307,6 @@
           "config (event-feed)"
         ],
         "top_gaps": [
-          {
-            "ref": "butler.feed.systemEvents",
-            "priority": "P1",
-            "roi": 4,
-            "dimensions_to_add": [
-              "capability",
-              "config",
-              "concurrency",
-              "error-handling"
-            ],
-            "rationale": "The entire board-event → butler injection pipeline (AK-75) is unverified — no test touches emitButlerSystemEvent. Asserting that a warm default butler receives a [system event] turn, that bursts collapse to one summary within the 30s window, that named butlers DON'T receive it, and that a cold session drops the event would lock four documented invariants at once. Medium exec/maint cost (in-process service test)."
-          },
           {
             "ref": "butler.history.access",
             "priority": "P4",
@@ -8459,12 +8421,12 @@
         ]
       },
       "git-integration": {
-        "covered": 16,
-        "partial": 2,
+        "covered": 17,
+        "partial": 1,
         "uncovered": 0,
         "undocumented_implemented": 0,
         "documented_missing": 0,
-        "score": 0.94,
+        "score": 0.972,
         "by_dimension": {
           "workflow": {
             "covered": 3,
@@ -8535,16 +8497,6 @@
           "workflow (rebase/review path)"
         ],
         "top_gaps": [
-          {
-            "ref": "git-integration.rebase.prepare-review",
-            "priority": "P1",
-            "roi": 4,
-            "dimensions_to_add": [
-              "workflow",
-              "error-handling"
-            ],
-            "rationale": "prepareForReview is the rebase step on the build→review→merge critical path and churns; only its dirty-tree leftover-commit branch is asserted. The local-vs-origin base choice (rebasing onto a stale origin replays local history and conflicts spuriously) and the on-conflict file-list return are unverified — a regression silently strands reviews. impact 4 x regression 4 / (exec 2 + maint 2). Build a temp-repo integration test: local master ahead of origin + a true conflict, assert it rebases onto LOCAL base and returns the --diff-filter=U file list with a clean tree afterward."
-          },
           {
             "ref": "git-integration.diff.working-tree",
             "priority": "P3",
@@ -8676,12 +8628,12 @@
         ]
       },
       "mcp-server": {
-        "covered": 14,
+        "covered": 15,
         "partial": 3,
-        "uncovered": 3,
+        "uncovered": 2,
         "undocumented_implemented": 0,
         "documented_missing": 0,
-        "score": 0.775,
+        "score": 0.825,
         "by_dimension": {
           "api": {
             "covered": 9,
@@ -8741,17 +8693,6 @@
           "config(security egress)"
         ],
         "top_gaps": [
-          {
-            "ref": "mcp-server.create.agent-skill",
-            "priority": "P1",
-            "roi": 3.5,
-            "dimensions_to_add": [
-              "error",
-              "boundary",
-              "permission"
-            ],
-            "rationale": "Path-traversal rejection (names → filesystem paths) is security-relevant and untested. Negative-input test is cheap and high-value: assert '../x', 'a/b', 'a\\\\b' rejected with no SKILL.md written, and per-scope duplicate rejected."
-          },
           {
             "ref": "mcp-server.fire.webhook",
             "priority": "P1",
@@ -9121,12 +9062,12 @@
         ]
       },
       "review-merge": {
-        "covered": 15,
-        "partial": 3,
+        "covered": 16,
+        "partial": 2,
         "uncovered": 0,
         "undocumented_implemented": 0,
         "documented_missing": 0,
-        "score": 0.86,
+        "score": 0.944,
         "by_dimension": {
           "api": {
             "covered": 6,
@@ -9185,16 +9126,6 @@
         ],
         "top_gaps": [
           {
-            "ref": "review-merge.reconcile.stranded-review",
-            "priority": "P1",
-            "roi": 5.3,
-            "dimensions_to_add": [
-              "workflow",
-              "state-transition"
-            ],
-            "rationale": "Highest-value gap: the stranded-review reconciler is a core honesty restorer, but only its disable/no-op path is tested. A regression that stops relaunching reviews for genuinely stranded work would pass the whole suite, silently stranding In-Review tickets forever. Seed a stranded workspace (idle, In Review, not ready, has commits, no session, no prior review) and assert a review session is relaunched (or readyForMerge set when auto_review off)."
-          },
-          {
             "ref": "review-merge.recover.fix-and-merge",
             "priority": "P1",
             "roi": 4,
@@ -9202,15 +9133,6 @@
               "api"
             ],
             "rationale": "Conflict recovery is high-churn and high-blast-radius. Resolver-exit recovery is covered, but the POST /:id/fix-and-merge entry point itself (status→fixing + agent relaunch in worktree) is never driven end-to-end. An endpoint-level regression (e.g. not setting fixing, not launching) would be invisible."
-          },
-          {
-            "ref": "review-merge.gate.verify-smoke",
-            "priority": "P1",
-            "roi": 4.5,
-            "dimensions_to_add": [
-              "api"
-            ],
-            "rationale": "Documented safety hole (domain doc Risks): the manual/orchestrator merge path (runWorkspacePreMergeValidation) does NOT run runPreMergeGate, so a hand-merge can land build/test/boot-unverified code. No test pins which paths gate vs don't. Add a test asserting the gate IS invoked on the paths that should gate and document/escalate the manual-merge bypass — a real behaviour gap, not just a test gap."
           },
           {
             "ref": "review-merge.foundational.sync-merge",
@@ -9320,14 +9242,14 @@
     ],
     "weak_dimension_note": "state-transition is the weakest column (4 uncovered + 1 partial) — every gap is a runtime lifecycle edge: plan approve/reject, hang-watchdog kill, restart-reattach, post-merge cascade, quarantine→In Progress. error is second-weakest, driven by two un-asserted negatives (turn-missing-content, one-direct exact status) and the watchdog. permission is correctly near-empty (single-user).",
     "totals": {
-      "covered": 221,
-      "partial": 32,
-      "uncovered": 20,
+      "covered": 226,
+      "partial": 30,
+      "uncovered": 17,
       "undocumented_implemented": 0,
       "documented_missing": 0,
       "behaviors": 273,
       "capabilities": 15,
-      "overall_score": 0.868
+      "overall_score": 0.883
     }
   }
 }
