@@ -93,10 +93,13 @@ Distinct from S10 (counts guard *density*) and S8 (probes *behavior*): S12 extra
 magic constant in the docs (caps, timeouts, intervals, ports, retry counts, thresholds, row/file/enum
 counts, LOC, percentages) and verifies each against the code's source-of-truth `file:line`. Fanned out
 3 agents over the 15 module docs. **~87 constants checked → NOT dry, 2 STALE (both mcp-server.md), both fixed:**
-- `stale-count:mcp-tool-total` — doc said "~95 tools" (×3: lines 25/98-style/136) and anchored "~95" at
-  `mcp-tool-definitions.ts:23` (the category array, not the tool list). Real: **90** tool defs
-  (`mcp-tool-definitions.ts:40` onward), ~92 registrars. → corrected to "90 tools", anchors split
-  (defs `:40`, `McpToolCategory` union `:1-15`).
+- `stale-count:mcp-tool-total` — "~95" appeared ×3: line 25 ("~95 tools", wrongly anchored at
+  `mcp-tool-definitions.ts:23` = the category array, not the tool list), line 136 ("~95 tools"), and
+  line 98 ("~95 tool names" on the `TOOL_REGISTRARS` row — missed in the first fix pass because a
+  `"95 tools"` grep doesn't match `"95 tool names"`; caught on ledger re-verify). Real: **90** tool defs
+  (`mcp-tool-definitions.ts:40` onward), **91** registrars (`index.ts:104` map). → 25/136 → "90 tools"
+  with anchors split (defs `:40`, `McpToolCategory` union `:1-15`); line 98 → "91 tool names → registrars
+  (vs 90 published defs)".
 - `stale-list:mcp-category-enum` — inline category list enumerated only **13** of 14 (missing **`tags`**),
   while the "14 categories" count itself was correct. → added `tags` to the list.
 Everything else verified clean: agent-providers (6), persistence-schema (7), agent-sessions (7),

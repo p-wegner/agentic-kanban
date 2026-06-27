@@ -95,7 +95,7 @@ Trigger: process start (`main()`, `index.ts:216`). Steps: read `disabled_mcp_too
 | Entry point | Kind | What it lets a caller do | `file:line` |
 |-------------|------|--------------------------|-------------|
 | `main()` over `StdioServerTransport` | process/JSON-RPC | Speak MCP over stdio; this is the only transport | `index.ts:216`, `index.ts:234` |
-| `TOOL_REGISTRARS` map | registration table | The authoritative list of ~95 tool names → registrars | `index.ts:104` |
+| `TOOL_REGISTRARS` map | registration table | The authoritative list of 91 tool names → registrars (vs 90 published defs — one registrar lacks a catalog entry) | `index.ts:104` |
 | `MCP_TOOL_DEFINITIONS` | published catalog (shared) | The wire contract describing every tool to the UI/governance layer (name, description, category) | `mcp-tool-definitions.ts:40` |
 | `get_context` | tool | Orient: project info, issue counts by status, active workspace count | `get-context.ts:7` |
 | `update_issue` / `move_issue` | tool | The busiest mutation door — edit fields and walk the workflow | `update-issue.ts:8`, `move-issue.ts:9` |
