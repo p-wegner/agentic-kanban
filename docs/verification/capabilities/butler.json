@@ -13,38 +13,130 @@
       "packages/shared/src/lib/butler-ticket-prompt.ts"
     ],
     "actors": [
-      { "name": "operator", "kind": "human", "notes": "single local user, via ButlerView chat tab (UI)" },
-      { "name": "cli-mcp-caller", "kind": "external", "notes": "separate processes (pnpm cli butler ask, MCP ask_butler) that cannot read the in-memory SSE stream — use the synchronous /ask primitive" },
-      { "name": "board-event-feed", "kind": "automation", "notes": "merge/exit/monitor/approval/workspace-crud emitters inject [system event] turns into the DEFAULT butler" },
-      { "name": "agent-questions-recommender", "kind": "automation", "notes": "non-route caller that warms+uses the default butler on the service-fallback prompt to produce answer recommendations" }
+      {
+        "name": "operator",
+        "kind": "human",
+        "notes": "single local user, via ButlerView chat tab (UI)"
+      },
+      {
+        "name": "cli-mcp-caller",
+        "kind": "external",
+        "notes": "separate processes (pnpm cli butler ask, MCP ask_butler) that cannot read the in-memory SSE stream — use the synchronous /ask primitive"
+      },
+      {
+        "name": "board-event-feed",
+        "kind": "automation",
+        "notes": "merge/exit/monitor/approval/workspace-crud emitters inject [system event] turns into the DEFAULT butler"
+      },
+      {
+        "name": "agent-questions-recommender",
+        "kind": "automation",
+        "notes": "non-route caller that warms+uses the default butler on the service-fallback prompt to produce answer recommendations"
+      }
     ],
     "entry_points": [
-      { "kind": "api", "ref": "POST /api/projects/:id/butler/ensure", "observable": "starts the warm session if cold; 201 + {active:true, sessionId}" },
-      { "kind": "api", "ref": "POST /api/projects/:id/butler/message", "observable": "pushes a turn into the warm session; streamed via SSE; 409 if busy" },
-      { "kind": "api", "ref": "POST /api/projects/:id/butler/ask", "observable": "synchronous turn (CLI/MCP); buffers text, resolves on result/error or 120s timeout" },
-      { "kind": "api", "ref": "GET /api/projects/:id/butler/stream", "observable": "SSE of ButlerEvents with heartbeats" },
-      { "kind": "api", "ref": "POST /api/projects/:id/butler/interrupt", "observable": "cancels in-flight turn, session stays warm" },
-      { "kind": "api", "ref": "DELETE /api/projects/:id/butler", "observable": "stop session + forget resume + clear transcript; state goes inactive" },
-      { "kind": "api", "ref": "POST /api/projects/:id/butler/model", "observable": "live setModel control req (context preserved)" },
-      { "kind": "api", "ref": "POST /api/projects/:id/butler/profile", "observable": "switch auth profile → RESTART session (forget resume)" },
-      { "kind": "api", "ref": "GET|PUT /api/projects/:id/butler/skill", "observable": "read/upsert project-scoped butler behavior prompt override" },
-      { "kind": "api", "ref": "GET /api/projects/:id/butler | /butlers", "observable": "per-butler runtime state | switcher state for all defined butlers" },
-      { "kind": "api", "ref": "GET /api/projects/:id/butler/sessions | /sessions/:sid/messages | /messages | /profiles | /commands", "observable": "history (capped 50), past-session transcript (allowlisted), current transcript, profiles, slash-command autocomplete" },
-      { "kind": "api", "ref": "GET|POST|PUT|DELETE /api/butler-definitions", "observable": "global named-butler persona CRUD, capped at MAX_BUTLERS=4" },
-      { "kind": "ui", "ref": "ButlerView (/butler tab)", "observable": "tabbed chat, voice, history, customize, manage-butlers modal" },
-      { "kind": "event", "ref": "emitButlerSystemEvent (butler-event-feed.ts:97)", "observable": "board events injected as [system event] turns into the warm default session, rate-limited 1/30s" },
-      { "kind": "cli", "ref": "pnpm cli -- butler ask/list/ensure/stop/interrupt/model/profile/state/skill", "observable": "thin HTTP client over the /butler routes" },
-      { "kind": "mcp", "ref": "ask_butler / butler_state / butler_interrupt / butler_set_model / butler_set_profile", "observable": "thin HTTP wrappers over the same routes" }
+      {
+        "kind": "api",
+        "ref": "POST /api/projects/:id/butler/ensure",
+        "observable": "starts the warm session if cold; 201 + {active:true, sessionId}"
+      },
+      {
+        "kind": "api",
+        "ref": "POST /api/projects/:id/butler/message",
+        "observable": "pushes a turn into the warm session; streamed via SSE; 409 if busy"
+      },
+      {
+        "kind": "api",
+        "ref": "POST /api/projects/:id/butler/ask",
+        "observable": "synchronous turn (CLI/MCP); buffers text, resolves on result/error or 120s timeout"
+      },
+      {
+        "kind": "api",
+        "ref": "GET /api/projects/:id/butler/stream",
+        "observable": "SSE of ButlerEvents with heartbeats"
+      },
+      {
+        "kind": "api",
+        "ref": "POST /api/projects/:id/butler/interrupt",
+        "observable": "cancels in-flight turn, session stays warm"
+      },
+      {
+        "kind": "api",
+        "ref": "DELETE /api/projects/:id/butler",
+        "observable": "stop session + forget resume + clear transcript; state goes inactive"
+      },
+      {
+        "kind": "api",
+        "ref": "POST /api/projects/:id/butler/model",
+        "observable": "live setModel control req (context preserved)"
+      },
+      {
+        "kind": "api",
+        "ref": "POST /api/projects/:id/butler/profile",
+        "observable": "switch auth profile → RESTART session (forget resume)"
+      },
+      {
+        "kind": "api",
+        "ref": "GET|PUT /api/projects/:id/butler/skill",
+        "observable": "read/upsert project-scoped butler behavior prompt override"
+      },
+      {
+        "kind": "api",
+        "ref": "GET /api/projects/:id/butler | /butlers",
+        "observable": "per-butler runtime state | switcher state for all defined butlers"
+      },
+      {
+        "kind": "api",
+        "ref": "GET /api/projects/:id/butler/sessions | /sessions/:sid/messages | /messages | /profiles | /commands",
+        "observable": "history (capped 50), past-session transcript (allowlisted), current transcript, profiles, slash-command autocomplete"
+      },
+      {
+        "kind": "api",
+        "ref": "GET|POST|PUT|DELETE /api/butler-definitions",
+        "observable": "global named-butler persona CRUD, capped at MAX_BUTLERS=4"
+      },
+      {
+        "kind": "ui",
+        "ref": "ButlerView (/butler tab)",
+        "observable": "tabbed chat, voice, history, customize, manage-butlers modal"
+      },
+      {
+        "kind": "event",
+        "ref": "emitButlerSystemEvent (butler-event-feed.ts:97)",
+        "observable": "board events injected as [system event] turns into the warm default session, rate-limited 1/30s"
+      },
+      {
+        "kind": "cli",
+        "ref": "pnpm cli -- butler ask/list/ensure/stop/interrupt/model/profile/state/skill",
+        "observable": "thin HTTP client over the /butler routes"
+      },
+      {
+        "kind": "mcp",
+        "ref": "ask_butler / butler_state / butler_interrupt / butler_set_model / butler_set_profile",
+        "observable": "thin HTTP wrappers over the same routes"
+      }
     ],
     "behaviors": [
       {
         "id": "butler.ensure.warm",
         "statement": "Starting the butler provisions a warm in-process LLM session for the (project, butler); a second ensure returns the existing session (no context fork)",
         "actor": "operator",
-        "preconditions": ["project exists", "a profile is resolvable"],
+        "preconditions": [
+          "project exists",
+          "a profile is resolvable"
+        ],
         "observable_outcome": "POST /ensure returns 201 {active:true, sessionId}; GET /butler then shows active:true; cold session starts WITHOUT a resume when no id persisted",
-        "evidence": ["routes/butler.ts:541", "butler-sdk.service.ts:314-315", "butler-provider.test.ts:208"],
-        "dimensions": ["capability", "workflow", "api", "state-transition"],
+        "evidence": [
+          "routes/butler.ts:541",
+          "butler-sdk.service.ts:314-315",
+          "butler-provider.test.ts:208"
+        ],
+        "dimensions": [
+          "capability",
+          "workflow",
+          "api",
+          "state-transition"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -52,10 +144,21 @@
         "id": "butler.converse.turn",
         "statement": "Sending a message pushes a turn into the warm session and streams an assistant reply back (token deltas + tool cards) over SSE",
         "actor": "operator",
-        "preconditions": ["warm session", "session not busy"],
+        "preconditions": [
+          "warm session",
+          "session not busy"
+        ],
         "observable_outcome": "user bubble appears, mock/assistant reply streams into chat; /message accepted; reply text returned",
-        "evidence": ["routes/butler.ts:555", "butler-sdk.service.ts:707", "butler.test.ts:263"],
-        "dimensions": ["capability", "workflow", "api"],
+        "evidence": [
+          "routes/butler.ts:555",
+          "butler-sdk.service.ts:707",
+          "butler.test.ts:263"
+        ],
+        "dimensions": [
+          "capability",
+          "workflow",
+          "api"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -63,10 +166,19 @@
         "id": "butler.ask.sync",
         "statement": "A synchronous /ask turn lets a separate process (CLI/MCP) get a buffered answer without reading the in-memory SSE stream",
         "actor": "cli-mcp-caller",
-        "preconditions": ["project exists"],
+        "preconditions": [
+          "project exists"
+        ],
         "observable_outcome": "POST /ask returns {isError:false, text} containing the assistant reply; resolves on result/error or 120s timeout",
-        "evidence": ["routes/butler.ts:574-616", "butler.test.ts:78", "butler-tools.test.ts:25"],
-        "dimensions": ["api", "workflow"],
+        "evidence": [
+          "routes/butler.ts:574-616",
+          "butler.test.ts:78",
+          "butler-tools.test.ts:25"
+        ],
+        "dimensions": [
+          "api",
+          "workflow"
+        ],
         "risk": "medium",
         "confidence": "high"
       },
@@ -74,10 +186,21 @@
         "id": "butler.persist.context",
         "statement": "Conversation context persists across turns: the transcript accumulates user+assistant messages and multiple turns keep prior history",
         "actor": "operator",
-        "preconditions": ["warm session", "≥1 prior turn"],
+        "preconditions": [
+          "warm session",
+          "≥1 prior turn"
+        ],
         "observable_outcome": "GET /messages returns ordered user+assistant messages; two turns yield 4 messages with both prompts present",
-        "evidence": ["butler-sdk.service.ts:761", "butler.test.ts:90", "butler.test.ts:366"],
-        "dimensions": ["capability", "workflow", "state-transition"],
+        "evidence": [
+          "butler-sdk.service.ts:761",
+          "butler.test.ts:90",
+          "butler.test.ts:366"
+        ],
+        "dimensions": [
+          "capability",
+          "workflow",
+          "state-transition"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -85,10 +208,20 @@
         "id": "butler.clear.context",
         "statement": "Clearing context (DELETE /butler) stops the session, forgets the resume id, and empties the transcript — the mechanism for 'new session' / applying an edited skill",
         "actor": "operator",
-        "preconditions": ["a session exists"],
+        "preconditions": [
+          "a session exists"
+        ],
         "observable_outcome": "GET /butler shows active:false; GET /messages returns []; UI shows 'Butler is ready.' placeholder",
-        "evidence": ["routes/butler.ts:673-683", "butler.test.ts:106", "butler.test.ts:281"],
-        "dimensions": ["state-transition", "api", "workflow"],
+        "evidence": [
+          "routes/butler.ts:673-683",
+          "butler.test.ts:106",
+          "butler.test.ts:281"
+        ],
+        "dimensions": [
+          "state-transition",
+          "api",
+          "workflow"
+        ],
         "risk": "medium",
         "confidence": "high"
       },
@@ -96,10 +229,19 @@
         "id": "butler.interrupt.inflight",
         "statement": "Interrupting cancels the IN-FLIGHT turn (query.interrupt) while keeping the session warm",
         "actor": "operator",
-        "preconditions": ["a turn is actively streaming"],
+        "preconditions": [
+          "a turn is actively streaming"
+        ],
         "observable_outcome": "in-flight stream stops; GET /butler still active:true; next turn accepted",
-        "evidence": ["routes/butler.ts:549", "butler-sdk.service.ts:31"],
-        "dimensions": ["state-transition", "api", "concurrency"],
+        "evidence": [
+          "routes/butler.ts:549",
+          "butler-sdk.service.ts:31"
+        ],
+        "dimensions": [
+          "state-transition",
+          "api",
+          "concurrency"
+        ],
         "risk": "medium",
         "confidence": "medium"
       },
@@ -107,10 +249,20 @@
         "id": "butler.switch.model",
         "statement": "Switching model applies live via the SDK setModel control request and PRESERVES conversation context (no restart); the model lives on the global butler definition",
         "actor": "operator",
-        "preconditions": ["warm claude session"],
+        "preconditions": [
+          "warm claude session"
+        ],
         "observable_outcome": "POST /model → {ok, model, applied:true}; SDK setModel called with the alias; GET /butler reflects new model; sessionId unchanged",
-        "evidence": ["butler-sdk.service.ts:221", "routes/butler.ts:476", "butler-provider.test.ts:255"],
-        "dimensions": ["state-transition", "config", "api"],
+        "evidence": [
+          "butler-sdk.service.ts:221",
+          "routes/butler.ts:476",
+          "butler-provider.test.ts:255"
+        ],
+        "dimensions": [
+          "state-transition",
+          "config",
+          "api"
+        ],
         "risk": "medium",
         "confidence": "high"
       },
@@ -118,10 +270,21 @@
         "id": "butler.switch.profile",
         "statement": "Switching profile (auth endpoint) RESTARTS the session and forgets the old resume id — a different endpoint cannot resume the same transcript",
         "actor": "operator",
-        "preconditions": ["warm session", "different profile selected"],
+        "preconditions": [
+          "warm session",
+          "different profile selected"
+        ],
         "observable_outcome": "POST /profile → {ok, profile, active:true}; a fresh SDK query starts WITHOUT resume; persisted session-id pref now tracks the new session",
-        "evidence": ["routes/butler.ts:497-505", "butler-provider.test.ts:290", "butler-sdk-resume-regression.test.ts:211"],
-        "dimensions": ["state-transition", "config", "api"],
+        "evidence": [
+          "routes/butler.ts:497-505",
+          "butler-provider.test.ts:290",
+          "butler-sdk-resume-regression.test.ts:211"
+        ],
+        "dimensions": [
+          "state-transition",
+          "config",
+          "api"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -129,10 +292,19 @@
         "id": "butler.resume.persisted",
         "statement": "A persisted SDK session id is replayed as resume on next ensure, so the butler survives a server restart with its conversation intact",
         "actor": "operator",
-        "preconditions": ["a session id persisted to butler_session_<projectId>"],
+        "preconditions": [
+          "a session id persisted to butler_session_<projectId>"
+        ],
         "observable_outcome": "cold GET /butler reports the persisted sessionId; ensure passes options.resume = that id instead of starting a new conversation",
-        "evidence": ["routes/butler.ts:370", "butler-provider.test.ts:232"],
-        "dimensions": ["state-transition", "regression", "api"],
+        "evidence": [
+          "routes/butler.ts:370",
+          "butler-provider.test.ts:232"
+        ],
+        "dimensions": [
+          "state-transition",
+          "regression",
+          "api"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -140,10 +312,20 @@
         "id": "butler.recover.staleResume",
         "statement": "A dead/unresumable session (Anthropic invalid-thinking-signature 400, or codex 'no rollout found') is recovered: drop the resume, start fresh, and re-send the in-flight turn so the user's message is not lost",
         "actor": "operator",
-        "preconditions": ["a persisted-but-dead resume id"],
+        "preconditions": [
+          "a persisted-but-dead resume id"
+        ],
         "observable_outcome": "first query throws → second query starts WITHOUT resume; session adopts the fresh id; turn succeeds; no error bubble; genuine (non-stale) failures still surface and do NOT retry",
-        "evidence": ["butler-sdk.service.ts:692", "butler-sdk-resume-regression.test.ts:163", "butler-codex-resume-recovery.test.ts:86"],
-        "dimensions": ["error-handling", "regression", "state-transition"],
+        "evidence": [
+          "butler-sdk.service.ts:692",
+          "butler-sdk-resume-regression.test.ts:163",
+          "butler-codex-resume-recovery.test.ts:86"
+        ],
+        "dimensions": [
+          "error-handling",
+          "regression",
+          "state-transition"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -151,10 +333,20 @@
         "id": "butler.reject.busy",
         "statement": "A turn is rejected while the butler is busy — a single in-flight turn per session, no concurrent streams into one context",
         "actor": "operator",
-        "preconditions": ["a turn already in flight"],
+        "preconditions": [
+          "a turn already in flight"
+        ],
         "observable_outcome": "POST /message returns 409 (HTTP); at the service layer sendButlerTurn returns false for the second concurrent turn",
-        "evidence": ["routes/butler.ts:567", "butler-sdk.service.ts:768", "butler-provider.test.ts:336"],
-        "dimensions": ["error-handling", "concurrency", "api"],
+        "evidence": [
+          "routes/butler.ts:567",
+          "butler-sdk.service.ts:768",
+          "butler-provider.test.ts:336"
+        ],
+        "dimensions": [
+          "error-handling",
+          "concurrency",
+          "api"
+        ],
         "risk": "medium",
         "confidence": "high"
       },
@@ -162,10 +354,21 @@
         "id": "butler.manage.definitions",
         "statement": "Named butler personas are GLOBAL (shared across projects), CRUD-managed and capped at MAX_BUTLERS=4; the 'default' butler can be renamed/re-modelled but never deleted (it holds back-compat pref keys)",
         "actor": "operator",
-        "preconditions": ["none for list; <4 defs to create"],
+        "preconditions": [
+          "none for list; <4 defs to create"
+        ],
         "observable_outcome": "POST creates (201) and appears in list; PUT renames; DELETE removes a named one; default always present; a 5th create is refused; deleting default is refused",
-        "evidence": ["routes/butler-definitions.ts:17", "butler-definitions.service.ts:28", "butler-definitions.service.ts:116", "butler.test.ts:174"],
-        "dimensions": ["capability", "api", "boundary"],
+        "evidence": [
+          "routes/butler-definitions.ts:17",
+          "butler-definitions.service.ts:28",
+          "butler-definitions.service.ts:116",
+          "butler.test.ts:174"
+        ],
+        "dimensions": [
+          "capability",
+          "api",
+          "boundary"
+        ],
         "risk": "medium",
         "confidence": "high"
       },
@@ -173,10 +376,20 @@
         "id": "butler.select.backend",
         "statement": "The butler resolves its backend (claude SDK / codex CLI / mock) via the shared provider cascade; a codex license-profile butler launches under its own CODEX_HOME with --profile dropped",
         "actor": "operator",
-        "preconditions": ["provider/profile prefs set"],
+        "preconditions": [
+          "provider/profile prefs set"
+        ],
         "observable_outcome": "GET /butler reports backend matching the provider; GET /profiles lists provider profiles + selected; a codex license butler spawns with CODEX_HOME=licenseDir and no --profile; claude model aliases not applied to a codex butler",
-        "evidence": ["routes/butler.ts:242", "butler-provider.test.ts:147", "butler-codex-home.test.ts:91"],
-        "dimensions": ["config", "api", "state-transition"],
+        "evidence": [
+          "routes/butler.ts:242",
+          "butler-provider.test.ts:147",
+          "butler-codex-home.test.ts:91"
+        ],
+        "dimensions": [
+          "config",
+          "api",
+          "state-transition"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -184,10 +397,21 @@
         "id": "butler.customize.skill",
         "statement": "A project-scoped butler behavior prompt override can be set and retrieved; it wins over the global default and is scoped per project (no leak); deleting reverts to the global",
         "actor": "operator",
-        "preconditions": ["project exists"],
+        "preconditions": [
+          "project exists"
+        ],
         "observable_outcome": "PUT /skill stores prompt; GET /skill returns it with isOverride:true; another project keeps its own; empty PUT reverts to global default",
-        "evidence": ["routes/butler.ts:519", "routes/butler.ts:529", "butler-skill-repository.test.ts", "butler.test.ts:146"],
-        "dimensions": ["config", "api", "feature"],
+        "evidence": [
+          "routes/butler.ts:519",
+          "routes/butler.ts:529",
+          "butler-skill-repository.test.ts",
+          "butler.test.ts:146"
+        ],
+        "dimensions": [
+          "config",
+          "api",
+          "feature"
+        ],
         "risk": "medium",
         "confidence": "high"
       },
@@ -195,10 +419,18 @@
         "id": "butler.render.stream",
         "statement": "The pure client reducer folds the SSE ButlerEvent stream into chat bubbles + collapsible tool cards deterministically (dedupes user echoes, accumulates assistant deltas, settles tool results, never double-renders streamed text)",
         "actor": "operator",
-        "preconditions": ["an SSE event stream"],
+        "preconditions": [
+          "an SSE event stream"
+        ],
         "observable_outcome": "given a sequence of events the chat state contains the expected bubbles/tool cards; input state is never mutated",
-        "evidence": ["butler-event-reducer.ts:117", "butler-event-reducer.test.ts"],
-        "dimensions": ["capability", "workflow"],
+        "evidence": [
+          "butler-event-reducer.ts:117",
+          "butler-event-reducer.test.ts"
+        ],
+        "dimensions": [
+          "capability",
+          "workflow"
+        ],
         "risk": "medium",
         "confidence": "high"
       },
@@ -206,10 +438,18 @@
         "id": "butler.slash.commands",
         "statement": "Slash-command autocomplete: typing '/' offers commands merged from the live SDK supportedCommands and the repo's own .claude/skills, parsed/filtered/applied client-side",
         "actor": "operator",
-        "preconditions": ["chat input focused"],
+        "preconditions": [
+          "chat input focused"
+        ],
         "observable_outcome": "GET /commands returns the merged deduped command list; client parse/filter/apply transform the input correctly",
-        "evidence": ["routes/butler.ts:440", "butler-slash-commands.test.ts"],
-        "dimensions": ["feature", "navigation"],
+        "evidence": [
+          "routes/butler.ts:440",
+          "butler-slash-commands.test.ts"
+        ],
+        "dimensions": [
+          "feature",
+          "navigation"
+        ],
         "risk": "low",
         "confidence": "high"
       },
@@ -217,10 +457,22 @@
         "id": "butler.feed.systemEvents",
         "statement": "Board events (merge failures, agent crashes, stuck workspaces) are injected as [system event] turns into the warm DEFAULT butler only, rate-limited to 1 turn / 30s / project with bursts collapsed to a summary line; dropped silently if no session is warm",
         "actor": "board-event-feed",
-        "preconditions": ["event feed enabled", "default butler session warm"],
+        "preconditions": [
+          "event feed enabled",
+          "default butler session warm"
+        ],
         "observable_outcome": "a [system event] turn appears in the default butler's transcript; named butlers never receive it; ≥2 events in 30s collapse to one 'Nx kind' summary; cold session → event dropped",
-        "evidence": ["butler-event-feed.ts:97", "butler-event-feed.ts:33", "butler-event-feed.ts:63"],
-        "dimensions": ["capability", "config", "concurrency", "error-handling"],
+        "evidence": [
+          "butler-event-feed.ts:97",
+          "butler-event-feed.ts:33",
+          "butler-event-feed.ts:63"
+        ],
+        "dimensions": [
+          "capability",
+          "config",
+          "concurrency",
+          "error-handling"
+        ],
         "risk": "medium",
         "confidence": "medium"
       },
@@ -228,10 +480,20 @@
         "id": "butler.history.access",
         "statement": "Past-session history is browsable (capped at 50 ids, most-recent-first) and a past session's transcript is readable ONLY if its id is allowlisted to this project's tracked ids (security boundary)",
         "actor": "operator",
-        "preconditions": ["tracked session ids exist"],
+        "preconditions": [
+          "tracked session ids exist"
+        ],
         "observable_outcome": "GET /sessions returns the capped list; GET /sessions/:sid/messages returns the transcript for an own id but REFUSES a session id belonging to another project",
-        "evidence": ["routes/butler.ts:641", "routes/butler.ts:657", "routes/butler.ts:664-667"],
-        "dimensions": ["permission", "api", "boundary"],
+        "evidence": [
+          "routes/butler.ts:641",
+          "routes/butler.ts:657",
+          "routes/butler.ts:664-667"
+        ],
+        "dimensions": [
+          "permission",
+          "api",
+          "boundary"
+        ],
         "risk": "medium",
         "confidence": "medium"
       },
@@ -239,41 +501,126 @@
         "id": "butler.ticketChat.prompt",
         "statement": "The 'Chat about this ticket' retrospective builds an opening prompt referencing the ticket by number (or title), its spec questions, type/status, and a truncated description",
         "actor": "operator",
-        "preconditions": ["an issue exists"],
+        "preconditions": [
+          "an issue exists"
+        ],
         "observable_outcome": "the generated prompt contains the #number, retrospective questions, metadata, and a truncated description (omitted when empty)",
-        "evidence": ["butler-ticket-prompt.ts", "butler-ticket-prompt.test.ts"],
-        "dimensions": ["feature", "workflow"],
+        "evidence": [
+          "butler-ticket-prompt.ts",
+          "butler-ticket-prompt.test.ts"
+        ],
+        "dimensions": [
+          "feature",
+          "workflow"
+        ],
         "risk": "low",
         "confidence": "high"
       }
     ],
     "permissions": [
-      { "actor": "operator", "behavior": "all", "allowed": true, "notes": "single-user local app — no RBAC; permission axis is near-trivial EXCEPT the cross-project session-transcript allowlist (butler.history.access), which is a real security boundary worth a deny test" }
+      {
+        "actor": "operator",
+        "behavior": "all",
+        "allowed": true,
+        "notes": "single-user local app — no RBAC; permission axis is near-trivial EXCEPT the cross-project session-transcript allowlist (butler.history.access), which is a real security boundary worth a deny test"
+      }
     ],
     "state_model": {
-      "states": ["cold", "warm", "busy", "restarting"],
+      "states": [
+        "cold",
+        "warm",
+        "busy",
+        "restarting"
+      ],
       "transitions": [
-        { "from": "cold", "to": "warm", "trigger": "POST /ensure or first /message", "behavior": "butler.ensure.warm" },
-        { "from": "warm", "to": "busy", "trigger": "turn in flight", "behavior": "butler.converse.turn" },
-        { "from": "busy", "to": "warm", "trigger": "result / interrupt", "behavior": "butler.interrupt.inflight" },
-        { "from": "warm", "to": "warm", "trigger": "POST /model (setModel, context kept)", "behavior": "butler.switch.model" },
-        { "from": "warm", "to": "restarting", "trigger": "POST /profile (auth endpoint changed)", "behavior": "butler.switch.profile" },
-        { "from": "warm", "to": "cold", "trigger": "DELETE /butler", "behavior": "butler.clear.context" }
+        {
+          "from": "cold",
+          "to": "warm",
+          "trigger": "POST /ensure or first /message",
+          "behavior": "butler.ensure.warm"
+        },
+        {
+          "from": "warm",
+          "to": "busy",
+          "trigger": "turn in flight",
+          "behavior": "butler.converse.turn"
+        },
+        {
+          "from": "busy",
+          "to": "warm",
+          "trigger": "result / interrupt",
+          "behavior": "butler.interrupt.inflight"
+        },
+        {
+          "from": "warm",
+          "to": "warm",
+          "trigger": "POST /model (setModel, context kept)",
+          "behavior": "butler.switch.model"
+        },
+        {
+          "from": "warm",
+          "to": "restarting",
+          "trigger": "POST /profile (auth endpoint changed)",
+          "behavior": "butler.switch.profile"
+        },
+        {
+          "from": "warm",
+          "to": "cold",
+          "trigger": "DELETE /butler",
+          "behavior": "butler.clear.context"
+        }
       ]
     },
     "error_states": [
-      { "id": "butler.reject.busy", "statement": "follow-up turn while busy returns 409", "evidence": "routes/butler.ts:567" },
-      { "id": "butler.recover.staleResume", "statement": "invalid-thinking-signature/no-rollout resume recovered to a fresh session; genuine failures surfaced and not retried", "evidence": "butler-sdk.service.ts:692" },
-      { "id": "butler.ask.timeout", "statement": "synchronous /ask resolves with an error after a 120s timeout", "evidence": "routes/butler.ts:574-616" },
-      { "id": "butler.history.denied", "statement": "reading a past-session transcript for a session id not allowlisted to this project is refused", "evidence": "routes/butler.ts:664-667" }
+      {
+        "id": "butler.reject.busy",
+        "statement": "follow-up turn while busy returns 409",
+        "evidence": "routes/butler.ts:567"
+      },
+      {
+        "id": "butler.recover.staleResume",
+        "statement": "invalid-thinking-signature/no-rollout resume recovered to a fresh session; genuine failures surfaced and not retried",
+        "evidence": "butler-sdk.service.ts:692"
+      },
+      {
+        "id": "butler.ask.timeout",
+        "statement": "synchronous /ask resolves with an error after a 120s timeout",
+        "evidence": "routes/butler.ts:574-616"
+      },
+      {
+        "id": "butler.history.denied",
+        "statement": "reading a past-session transcript for a session id not allowlisted to this project is refused",
+        "evidence": "routes/butler.ts:664-667"
+      }
     ],
-    "external_integrations": ["@anthropic-ai/claude-agent-sdk (in-process)", "codex CLI subprocess + CODEX_HOME license ring", "agentic-kanban MCP server (board truth)", "preferences repository", "~/.claude/projects JSONL (transcript reading)"],
+    "external_integrations": [
+      "@anthropic-ai/claude-agent-sdk (in-process)",
+      "codex CLI subprocess + CODEX_HOME license ring",
+      "agentic-kanban MCP server (board truth)",
+      "preferences repository",
+      "~/.claude/projects JSONL (transcript reading)"
+    ],
     "unknowns": [
-      { "question": "Does POST /message actually return HTTP 409 (vs 200 + ignore) when the session is busy? Only the service-layer boolean is asserted in tests; the HTTP status was not exercised live (read-only, no mutation allowed).", "why_unknown": "not asserted by any test; not probed live to avoid spawning a session" },
-      { "question": "Is the MAX_BUTLERS=4 cap actually enforced with a refusal on the 5th create, and is deleting 'default' refused?", "why_unknown": "no test creates a 5th or deletes default; not probed live" },
-      { "question": "Does the event feed's 30s rate-limit / burst-collapse and default-only routing behave as documented at runtime?", "why_unknown": "no test imports/exercises emitButlerSystemEvent's injection path; usage-limit-rotation-exit only imports the module for an unrelated builder-rotation test" },
-      { "question": "Does the cross-project session-transcript allowlist actually reject a foreign id (403/404)?", "why_unknown": "no negative-path test; not probed live" },
-      { "question": "Does the recommender path (service-fallback prompt) really diverge in observable behaviour from the chat path?", "why_unknown": "documented as a real split but no behavioural assertion anywhere" }
+      {
+        "question": "Does POST /message actually return HTTP 409 (vs 200 + ignore) when the session is busy? Only the service-layer boolean is asserted in tests; the HTTP status was not exercised live (read-only, no mutation allowed).",
+        "why_unknown": "not asserted by any test; not probed live to avoid spawning a session"
+      },
+      {
+        "question": "Is the MAX_BUTLERS=4 cap actually enforced with a refusal on the 5th create, and is deleting 'default' refused?",
+        "why_unknown": "no test creates a 5th or deletes default; not probed live"
+      },
+      {
+        "question": "Does the event feed's 30s rate-limit / burst-collapse and default-only routing behave as documented at runtime?",
+        "why_unknown": "no test imports/exercises emitButlerSystemEvent's injection path; usage-limit-rotation-exit only imports the module for an unrelated builder-rotation test"
+      },
+      {
+        "question": "Does the cross-project session-transcript allowlist actually reject a foreign id (403/404)?",
+        "why_unknown": "no negative-path test; not probed live"
+      },
+      {
+        "question": "Does the recommender path (service-fallback prompt) really diverge in observable behaviour from the chat path?",
+        "why_unknown": "documented as a real split but no behavioural assertion anywhere"
+      }
     ]
   },
   "coverage": {
@@ -282,278 +629,651 @@
         "ref": "butler.ensure.warm",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/e2e/tests/ui/butler.test.ts::POST /butler/ensure starts a mock session", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/butler-provider.test.ts::starts cold Butler sessions fresh when no resume id is persisted", "strength": "asserts-outcome" }
+          {
+            "test": "packages/e2e/tests/ui/butler.test.ts::POST /butler/ensure starts a mock session",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/butler-provider.test.ts::starts cold Butler sessions fresh when no resume id is persisted",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["capability", "api", "state-transition", "workflow"],
+        "dimensions_covered": [
+          "capability",
+          "api",
+          "state-transition",
+          "workflow"
+        ],
         "dimensions_missing": [],
-        "history": { "churn_90d": null, "bugs": 0 }
+        "history": {
+          "churn_90d": null,
+          "bugs": 0
+        }
       },
       {
         "ref": "butler.converse.turn",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/e2e/tests/ui/butler.test.ts::sends a message and shows mock response in chat", "strength": "asserts-outcome" },
-          { "test": "packages/e2e/tests/ui/butler.test.ts::Start Butler button starts a mock session and reveals chat UI", "strength": "asserts-outcome" }
+          {
+            "test": "packages/e2e/tests/ui/butler.test.ts::sends a message and shows mock response in chat",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/e2e/tests/ui/butler.test.ts::Start Butler button starts a mock session and reveals chat UI",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["capability", "workflow", "api"],
-        "dimensions_missing": ["error-handling"],
-        "history": { "churn_90d": null, "bugs": 0 },
-        "gap": { "kind": "dimension-missing", "missing_dimensions": ["error-handling"], "rationale": "happy-path streamed reply asserted under the MOCK backend only; real-provider streaming and mid-turn errors not asserted" }
+        "dimensions_covered": [
+          "capability",
+          "workflow",
+          "api"
+        ],
+        "dimensions_missing": [
+          "error-handling"
+        ],
+        "history": {
+          "churn_90d": null,
+          "bugs": 0
+        },
+        "gap": {
+          "kind": "dimension-missing",
+          "missing_dimensions": [
+            "error-handling"
+          ],
+          "rationale": "happy-path streamed reply asserted under the MOCK backend only; real-provider streaming and mid-turn errors not asserted"
+        }
       },
       {
         "ref": "butler.ask.sync",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/e2e/tests/ui/butler.test.ts::POST /butler/ask returns a mock response", "strength": "asserts-outcome" },
-          { "test": "packages/mcp-server/src/__tests__/tools/butler-tools.test.ts::butler_state GETs the butler endpoint and returns the JSON", "strength": "asserts-outcome" }
+          {
+            "test": "packages/e2e/tests/ui/butler.test.ts::POST /butler/ask returns a mock response",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/mcp-server/src/__tests__/tools/butler-tools.test.ts::butler_state GETs the butler endpoint and returns the JSON",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["api", "workflow"],
-        "dimensions_missing": ["error-handling"],
-        "history": { "churn_90d": null, "bugs": 0 },
-        "gap": { "kind": "dimension-missing", "missing_dimensions": ["error-handling"], "rationale": "success path asserted; the 120s-timeout error resolution path is never exercised" }
+        "dimensions_covered": [
+          "api",
+          "workflow"
+        ],
+        "dimensions_missing": [
+          "error-handling"
+        ],
+        "history": {
+          "churn_90d": null,
+          "bugs": 0
+        },
+        "gap": {
+          "kind": "dimension-missing",
+          "missing_dimensions": [
+            "error-handling"
+          ],
+          "rationale": "success path asserted; the 120s-timeout error resolution path is never exercised"
+        }
       },
       {
         "ref": "butler.persist.context",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/e2e/tests/ui/butler.test.ts::GET /butler/messages returns transcript after ask", "strength": "asserts-outcome" },
-          { "test": "packages/e2e/tests/ui/butler.test.ts::multiple turns maintain conversation history", "strength": "asserts-outcome" }
+          {
+            "test": "packages/e2e/tests/ui/butler.test.ts::GET /butler/messages returns transcript after ask",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/e2e/tests/ui/butler.test.ts::multiple turns maintain conversation history",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["capability", "workflow", "state-transition"],
+        "dimensions_covered": [
+          "capability",
+          "workflow",
+          "state-transition"
+        ],
         "dimensions_missing": [],
-        "history": { "churn_90d": null, "bugs": 0 }
+        "history": {
+          "churn_90d": null,
+          "bugs": 0
+        }
       },
       {
         "ref": "butler.clear.context",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/e2e/tests/ui/butler.test.ts::DELETE /butler clears session and transcript", "strength": "asserts-outcome" },
-          { "test": "packages/e2e/tests/ui/butler.test.ts::Clear context button resets the chat", "strength": "asserts-outcome" }
+          {
+            "test": "packages/e2e/tests/ui/butler.test.ts::DELETE /butler clears session and transcript",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/e2e/tests/ui/butler.test.ts::Clear context button resets the chat",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["state-transition", "api", "workflow"],
+        "dimensions_covered": [
+          "state-transition",
+          "api",
+          "workflow"
+        ],
         "dimensions_missing": [],
-        "history": { "churn_90d": null, "bugs": 0 }
+        "history": {
+          "churn_90d": null,
+          "bugs": 0
+        }
       },
       {
         "ref": "butler.interrupt.inflight",
         "status": "partial",
         "covered_by": [
-          { "test": "packages/e2e/tests/ui/butler.test.ts::POST /butler/interrupt stops in-flight turn gracefully", "strength": "touches-only" },
-          { "test": "packages/mcp-server/src/__tests__/tools/butler-tools.test.ts::butler_interrupt POSTs /interrupt and returns the JSON", "strength": "touches-only" }
+          {
+            "test": "packages/e2e/tests/ui/butler.test.ts::POST /butler/interrupt stops in-flight turn gracefully",
+            "strength": "touches-only"
+          },
+          {
+            "test": "packages/mcp-server/src/__tests__/tools/butler-tools.test.ts::butler_interrupt POSTs /interrupt and returns the JSON",
+            "strength": "touches-only"
+          }
         ],
         "dimensions_covered": [],
-        "dimensions_missing": ["state-transition", "concurrency", "api"],
-        "history": { "churn_90d": null, "bugs": 0 },
-        "gap": { "kind": "outcome-not-asserted", "missing_dimensions": ["state-transition", "concurrency"], "rationale": "the e2e test interrupts with NO active turn and only asserts res.ok(); the MCP test only checks request shape. The real behaviour — cancelling an IN-FLIGHT stream while keeping the session warm and accepting a subsequent turn — is never asserted" }
+        "dimensions_missing": [
+          "state-transition",
+          "concurrency",
+          "api"
+        ],
+        "history": {
+          "churn_90d": null,
+          "bugs": 0
+        },
+        "gap": {
+          "kind": "outcome-not-asserted",
+          "missing_dimensions": [
+            "state-transition",
+            "concurrency"
+          ],
+          "rationale": "the e2e test interrupts with NO active turn and only asserts res.ok(); the MCP test only checks request shape. The real behaviour — cancelling an IN-FLIGHT stream while keeping the session warm and accepting a subsequent turn — is never asserted"
+        }
       },
       {
         "ref": "butler.switch.model",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/butler-provider.test.ts::keeps displayed and running model/profile selections consistent across switches", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/butler-provider.test.ts::keeps displayed and running model/profile selections consistent across switches",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["state-transition", "config", "api"],
+        "dimensions_covered": [
+          "state-transition",
+          "config",
+          "api"
+        ],
         "dimensions_missing": [],
-        "history": { "churn_90d": null, "bugs": 0 }
+        "history": {
+          "churn_90d": null,
+          "bugs": 0
+        }
       },
       {
         "ref": "butler.switch.profile",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/butler-provider.test.ts::keeps displayed and running model/profile selections consistent across switches", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/butler-sdk-resume-regression.test.ts::forces a fresh session start when profile changes mid-session", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/butler-provider.test.ts::keeps displayed and running model/profile selections consistent across switches",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/butler-sdk-resume-regression.test.ts::forces a fresh session start when profile changes mid-session",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["state-transition", "config", "api"],
+        "dimensions_covered": [
+          "state-transition",
+          "config",
+          "api"
+        ],
         "dimensions_missing": [],
-        "history": { "churn_90d": null, "bugs": 0 }
+        "history": {
+          "churn_90d": null,
+          "bugs": 0
+        }
       },
       {
         "ref": "butler.resume.persisted",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/butler-provider.test.ts::resumes a persisted Butler session id instead of creating a new conversation", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/butler-provider.test.ts::resumes a persisted Butler session id instead of creating a new conversation",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["state-transition", "regression", "api"],
+        "dimensions_covered": [
+          "state-transition",
+          "regression",
+          "api"
+        ],
         "dimensions_missing": [],
-        "history": { "churn_90d": null, "bugs": 0 }
+        "history": {
+          "churn_90d": null,
+          "bugs": 0
+        }
       },
       {
         "ref": "butler.recover.staleResume",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/butler-sdk-resume-regression.test.ts::recovers from 'Invalid signature in thinking block' on resume by starting a fresh session", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/butler-sdk-resume-regression.test.ts::accepts a turn on the fresh session after signature-error recovery", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/butler-codex-resume-recovery.test.ts::drops a dead resume id and retries the turn on a fresh thread", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/butler-codex-resume-recovery.test.ts::surfaces a non-resume failure as an error (no infinite retry)", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/butler-loop-classify.test.ts::resume-reset on invalid thinking signature (only when resuming)", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/butler-sdk-resume-regression.test.ts::recovers from 'Invalid signature in thinking block' on resume by starting a fresh session",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/butler-sdk-resume-regression.test.ts::accepts a turn on the fresh session after signature-error recovery",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/butler-codex-resume-recovery.test.ts::drops a dead resume id and retries the turn on a fresh thread",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/butler-codex-resume-recovery.test.ts::surfaces a non-resume failure as an error (no infinite retry)",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/butler-loop-classify.test.ts::resume-reset on invalid thinking signature (only when resuming)",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["error-handling", "regression", "state-transition"],
+        "dimensions_covered": [
+          "error-handling",
+          "regression",
+          "state-transition"
+        ],
         "dimensions_missing": [],
-        "history": { "churn_90d": null, "bugs": 1, "last_regression": "#710 / #829 stale-resume failures" }
+        "history": {
+          "churn_90d": null,
+          "bugs": 1,
+          "last_regression": "#710 / #829 stale-resume failures"
+        }
       },
       {
         "ref": "butler.reject.busy",
-        "status": "partial",
+        "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/butler-provider.test.ts::rejects overlapping Codex Butler turns instead of enqueueing ambiguous prompts", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/butler-provider.test.ts::rejects overlapping Codex Butler turns instead of enqueueing ambiguous prompts",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/butler-message-busy-409.test.ts",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["concurrency"],
-        "dimensions_missing": ["error-handling", "api"],
-        "history": { "churn_90d": null, "bugs": 0 },
-        "gap": { "kind": "dimension-missing", "missing_dimensions": ["error-handling", "api"], "rationale": "only the service-layer sendButlerTurn=false is asserted; the HTTP-level 409 on POST /message while busy is never asserted by any test" }
+        "dimensions_covered": [
+          "concurrency",
+          "error",
+          "api"
+        ],
+        "dimensions_missing": [],
+        "history": {
+          "churn_90d": null,
+          "bugs": 0
+        },
+        "gap": null,
+        "note": "Closed by e2e-test-author wave-2 2026-06-27 (adversarially reviewed). butler-message-busy-409.test.ts"
       },
       {
         "ref": "butler.manage.definitions",
         "status": "partial",
         "covered_by": [
-          { "test": "packages/e2e/tests/ui/butler.test.ts::POST then DELETE /api/butler-definitions creates and removes named butler", "strength": "asserts-outcome" },
-          { "test": "packages/e2e/tests/ui/butler.test.ts::PUT /api/butler-definitions/:id updates butler name", "strength": "asserts-outcome" },
-          { "test": "packages/e2e/tests/ui/butler.test.ts::GET /api/butler-definitions lists definitions including default", "strength": "asserts-outcome" }
+          {
+            "test": "packages/e2e/tests/ui/butler.test.ts::POST then DELETE /api/butler-definitions creates and removes named butler",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/e2e/tests/ui/butler.test.ts::PUT /api/butler-definitions/:id updates butler name",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/e2e/tests/ui/butler.test.ts::GET /api/butler-definitions lists definitions including default",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["capability", "api"],
-        "dimensions_missing": ["boundary"],
-        "history": { "churn_90d": null, "bugs": 0 },
-        "gap": { "kind": "dimension-missing", "missing_dimensions": ["boundary"], "rationale": "CRUD happy paths asserted, but the two invariants — MAX_BUTLERS=4 cap refusing a 5th create, and 'default' being un-deletable — are never asserted" }
+        "dimensions_covered": [
+          "capability",
+          "api"
+        ],
+        "dimensions_missing": [
+          "boundary"
+        ],
+        "history": {
+          "churn_90d": null,
+          "bugs": 0
+        },
+        "gap": {
+          "kind": "dimension-missing",
+          "missing_dimensions": [
+            "boundary"
+          ],
+          "rationale": "CRUD happy paths asserted, but the two invariants — MAX_BUTLERS=4 cap refusing a 5th create, and 'default' being un-deletable — are never asserted"
+        }
       },
       {
         "ref": "butler.select.backend",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/butler-provider.test.ts::uses Codex profiles and starts a logical Codex Butler when provider is Codex", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/butler-provider.test.ts::does not apply saved Claude model aliases to a Codex Butler", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/butler-codex-home.test.ts::launches a license-profile butler under its CODEX_HOME and drops --profile", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/butler-codex-home.test.ts::does NOT override CODEX_HOME for a codex butler on the default profile", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/butler-provider.test.ts::uses Codex profiles and starts a logical Codex Butler when provider is Codex",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/butler-provider.test.ts::does not apply saved Claude model aliases to a Codex Butler",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/butler-codex-home.test.ts::launches a license-profile butler under its CODEX_HOME and drops --profile",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/butler-codex-home.test.ts::does NOT override CODEX_HOME for a codex butler on the default profile",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["config", "api", "state-transition"],
+        "dimensions_covered": [
+          "config",
+          "api",
+          "state-transition"
+        ],
         "dimensions_missing": [],
-        "history": { "churn_90d": null, "bugs": 1, "last_regression": "#829 codex CODEX_HOME" }
+        "history": {
+          "churn_90d": null,
+          "bugs": 1,
+          "last_regression": "#829 codex CODEX_HOME"
+        }
       },
       {
         "ref": "butler.customize.skill",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/e2e/tests/ui/butler.test.ts::PUT /butler/skill sets and GET retrieves project-scoped prompt override", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/butler-skill-repository.test.ts::a project override wins over the global", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/butler-skill-repository.test.ts::override is scoped per project (one project's override does not leak to another)", "strength": "asserts-outcome" }
+          {
+            "test": "packages/e2e/tests/ui/butler.test.ts::PUT /butler/skill sets and GET retrieves project-scoped prompt override",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/butler-skill-repository.test.ts::a project override wins over the global",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/butler-skill-repository.test.ts::override is scoped per project (one project's override does not leak to another)",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["config", "api", "feature"],
+        "dimensions_covered": [
+          "config",
+          "api",
+          "feature"
+        ],
         "dimensions_missing": [],
-        "history": { "churn_90d": null, "bugs": 0 }
+        "history": {
+          "churn_90d": null,
+          "bugs": 0
+        }
       },
       {
         "ref": "butler.render.stream",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/client/src/lib/butler-event-reducer.test.ts::reduceButlerEvent — streamed assistant text accumulates deltas", "strength": "asserts-outcome" },
-          { "test": "packages/client/src/lib/butler-event-reducer.test.ts::tool-result settles the matching pending tool by id", "strength": "asserts-outcome" },
-          { "test": "packages/client/src/lib/butler-event-reducer.test.ts::result does NOT duplicate text already streamed (textSeen=true)", "strength": "asserts-outcome" },
-          { "test": "packages/client/src/lib/butler-event-reducer.test.ts::never mutates the input state or buffer", "strength": "asserts-outcome" }
+          {
+            "test": "packages/client/src/lib/butler-event-reducer.test.ts::reduceButlerEvent — streamed assistant text accumulates deltas",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/client/src/lib/butler-event-reducer.test.ts::tool-result settles the matching pending tool by id",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/client/src/lib/butler-event-reducer.test.ts::result does NOT duplicate text already streamed (textSeen=true)",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/client/src/lib/butler-event-reducer.test.ts::never mutates the input state or buffer",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["capability", "workflow"],
+        "dimensions_covered": [
+          "capability",
+          "workflow"
+        ],
         "dimensions_missing": [],
-        "history": { "churn_90d": null, "bugs": 0 }
+        "history": {
+          "churn_90d": null,
+          "bugs": 0
+        }
       },
       {
         "ref": "butler.slash.commands",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/client/src/lib/butler-slash-commands.test.ts::filterCommands filters case-insensitively and caps at 8", "strength": "asserts-outcome" },
-          { "test": "packages/client/src/lib/butler-slash-commands.test.ts::applyCommandToInput replaces a trailing slash token", "strength": "asserts-outcome" }
+          {
+            "test": "packages/client/src/lib/butler-slash-commands.test.ts::filterCommands filters case-insensitively and caps at 8",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/client/src/lib/butler-slash-commands.test.ts::applyCommandToInput replaces a trailing slash token",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["feature"],
-        "dimensions_missing": ["navigation"],
-        "history": { "churn_90d": null, "bugs": 0 },
-        "gap": { "kind": "dimension-missing", "missing_dimensions": ["navigation"], "rationale": "client parse/filter/apply asserted, but the server-side merge of live SDK supportedCommands with scanned .claude/skills (GET /commands) is not asserted by a test" }
+        "dimensions_covered": [
+          "feature"
+        ],
+        "dimensions_missing": [
+          "navigation"
+        ],
+        "history": {
+          "churn_90d": null,
+          "bugs": 0
+        },
+        "gap": {
+          "kind": "dimension-missing",
+          "missing_dimensions": [
+            "navigation"
+          ],
+          "rationale": "client parse/filter/apply asserted, but the server-side merge of live SDK supportedCommands with scanned .claude/skills (GET /commands) is not asserted by a test"
+        }
       },
       {
         "ref": "butler.feed.systemEvents",
         "status": "uncovered",
         "covered_by": [],
         "dimensions_covered": [],
-        "dimensions_missing": ["capability", "config", "concurrency", "error-handling"],
-        "history": { "churn_90d": null, "bugs": 0 },
-        "gap": { "kind": "no-test", "missing_dimensions": ["capability", "config", "concurrency", "error-handling"], "rationale": "no test exercises emitButlerSystemEvent's injection path. usage-limit-rotation-exit.test.ts imports butler-event-feed but tests builder license-rotation relaunch, NOT event injection. The 30s rate-limit, burst-collapse-to-summary, default-only routing, and drop-when-cold behaviours are entirely unverified" }
+        "dimensions_missing": [
+          "capability",
+          "config",
+          "concurrency",
+          "error-handling"
+        ],
+        "history": {
+          "churn_90d": null,
+          "bugs": 0
+        },
+        "gap": {
+          "kind": "no-test",
+          "missing_dimensions": [
+            "capability",
+            "config",
+            "concurrency",
+            "error-handling"
+          ],
+          "rationale": "no test exercises emitButlerSystemEvent's injection path. usage-limit-rotation-exit.test.ts imports butler-event-feed but tests builder license-rotation relaunch, NOT event injection. The 30s rate-limit, burst-collapse-to-summary, default-only routing, and drop-when-cold behaviours are entirely unverified"
+        }
       },
       {
         "ref": "butler.history.access",
         "status": "partial",
         "covered_by": [
-          { "test": "packages/e2e/tests/ui/butler.test.ts::GET /butler/sessions returns empty list when no tracked sessions", "strength": "touches-only" },
-          { "test": "packages/e2e/tests/ui/butler.test.ts::History panel opens and shows no sessions for a fresh mock session", "strength": "touches-only" }
+          {
+            "test": "packages/e2e/tests/ui/butler.test.ts::GET /butler/sessions returns empty list when no tracked sessions",
+            "strength": "touches-only"
+          },
+          {
+            "test": "packages/e2e/tests/ui/butler.test.ts::History panel opens and shows no sessions for a fresh mock session",
+            "strength": "touches-only"
+          }
         ],
         "dimensions_covered": [],
-        "dimensions_missing": ["permission", "boundary", "api"],
-        "history": { "churn_90d": null, "bugs": 0 },
-        "gap": { "kind": "outcome-not-asserted", "missing_dimensions": ["permission", "boundary"], "rationale": "the sessions list is only checked for being an array; the 50-id cap is never asserted, and the SECURITY allowlist (a foreign project's session id must be refused on /sessions/:sid/messages) has no negative-path test" }
+        "dimensions_missing": [
+          "permission",
+          "boundary",
+          "api"
+        ],
+        "history": {
+          "churn_90d": null,
+          "bugs": 0
+        },
+        "gap": {
+          "kind": "outcome-not-asserted",
+          "missing_dimensions": [
+            "permission",
+            "boundary"
+          ],
+          "rationale": "the sessions list is only checked for being an array; the 50-id cap is never asserted, and the SECURITY allowlist (a foreign project's session id must be refused on /sessions/:sid/messages) has no negative-path test"
+        }
       },
       {
         "ref": "butler.ticketChat.prompt",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/shared/__tests__/butler-ticket-prompt.test.ts::references the ticket by number when available", "strength": "asserts-outcome" },
-          { "test": "packages/shared/__tests__/butler-ticket-prompt.test.ts::includes the description but truncates a very long one", "strength": "asserts-outcome" }
+          {
+            "test": "packages/shared/__tests__/butler-ticket-prompt.test.ts::references the ticket by number when available",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/shared/__tests__/butler-ticket-prompt.test.ts::includes the description but truncates a very long one",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["feature", "workflow"],
+        "dimensions_covered": [
+          "feature",
+          "workflow"
+        ],
         "dimensions_missing": [],
-        "history": { "churn_90d": null, "bugs": 0 }
+        "history": {
+          "churn_90d": null,
+          "bugs": 0
+        }
       }
     ],
     "summary": {
-      "covered": 12,
-      "partial": 4,
+      "covered": 15,
+      "partial": 3,
       "uncovered": 1,
       "undocumented_implemented": 0,
       "documented_missing": 0,
-      "score": 0.74,
+      "score": 0.868,
       "by_dimension": {
-        "capability": { "covered": 6, "partial": 1, "uncovered": 1 },
-        "api": { "covered": 9, "partial": 4, "uncovered": 1 },
-        "state-transition": { "covered": 7, "partial": 1, "uncovered": 0 },
-        "config": { "covered": 4, "partial": 0, "uncovered": 1 },
-        "error-handling": { "covered": 1, "partial": 3, "uncovered": 1 },
-        "concurrency": { "covered": 1, "partial": 2, "uncovered": 1 },
-        "permission": { "covered": 0, "partial": 1, "uncovered": 0 },
-        "boundary": { "covered": 0, "partial": 2, "uncovered": 0 },
-        "regression": { "covered": 2, "partial": 0, "uncovered": 0 },
-        "workflow": { "covered": 7, "partial": 0, "uncovered": 0 },
-        "feature": { "covered": 3, "partial": 0, "uncovered": 0 }
+        "capability": {
+          "covered": 6,
+          "partial": 1,
+          "uncovered": 1
+        },
+        "api": {
+          "covered": 9,
+          "partial": 4,
+          "uncovered": 1
+        },
+        "state-transition": {
+          "covered": 7,
+          "partial": 1,
+          "uncovered": 0
+        },
+        "config": {
+          "covered": 4,
+          "partial": 0,
+          "uncovered": 1
+        },
+        "error-handling": {
+          "covered": 1,
+          "partial": 3,
+          "uncovered": 1
+        },
+        "concurrency": {
+          "covered": 1,
+          "partial": 2,
+          "uncovered": 1
+        },
+        "permission": {
+          "covered": 0,
+          "partial": 1,
+          "uncovered": 0
+        },
+        "boundary": {
+          "covered": 0,
+          "partial": 2,
+          "uncovered": 0
+        },
+        "regression": {
+          "covered": 2,
+          "partial": 0,
+          "uncovered": 0
+        },
+        "workflow": {
+          "covered": 7,
+          "partial": 0,
+          "uncovered": 0
+        },
+        "feature": {
+          "covered": 3,
+          "partial": 0,
+          "uncovered": 0
+        }
       },
-      "weak_dimensions": ["error-handling (HTTP-level)", "concurrency", "permission/security", "boundary", "config (event-feed)"],
+      "weak_dimensions": [
+        "error-handling (HTTP-level)",
+        "concurrency",
+        "permission/security",
+        "boundary",
+        "config (event-feed)"
+      ],
       "top_gaps": [
         {
           "ref": "butler.feed.systemEvents",
           "priority": "P1",
-          "roi": 4.0,
-          "dimensions_to_add": ["capability", "config", "concurrency", "error-handling"],
+          "roi": 4,
+          "dimensions_to_add": [
+            "capability",
+            "config",
+            "concurrency",
+            "error-handling"
+          ],
           "rationale": "The entire board-event → butler injection pipeline (AK-75) is unverified — no test touches emitButlerSystemEvent. Asserting that a warm default butler receives a [system event] turn, that bursts collapse to one summary within the 30s window, that named butlers DON'T receive it, and that a cold session drops the event would lock four documented invariants at once. Medium exec/maint cost (in-process service test)."
-        },
-        {
-          "ref": "butler.reject.busy",
-          "priority": "P1",
-          "roi": 4.0,
-          "dimensions_to_add": ["error-handling", "api"],
-          "rationale": "The single-in-flight-turn invariant is only asserted at the service-boolean layer; the HTTP 409 on POST /message while busy — the contract the UI and CLI/MCP depend on — is never asserted. A concurrency-sensitive route that should fail closed. Cheap to add via the test-app route harness."
         },
         {
           "ref": "butler.history.access",
           "priority": "P4",
-          "roi": 3.0,
-          "dimensions_to_add": ["permission", "boundary"],
+          "roi": 3,
+          "dimensions_to_add": [
+            "permission",
+            "boundary"
+          ],
           "rationale": "Security boundary: a past-session transcript must be readable ONLY for ids allowlisted to this project (routes/butler.ts:664-667). The deny path (foreign project's session id → refused) has no test, and the 50-id history cap is unasserted. Negative-path test, low maintenance."
         },
         {
           "ref": "butler.interrupt.inflight",
           "priority": "P2",
           "roi": 2.5,
-          "dimensions_to_add": ["state-transition", "concurrency"],
+          "dimensions_to_add": [
+            "state-transition",
+            "concurrency"
+          ],
           "rationale": "Existing tests interrupt with no active turn (touches-only). Need a test that starts a streaming turn, interrupts mid-flight, and asserts the stream stops AND the session stays warm and accepts a follow-up — the actual behaviour users rely on."
         },
         {
           "ref": "butler.manage.definitions",
           "priority": "P3",
-          "roi": 2.0,
-          "dimensions_to_add": ["boundary"],
+          "roi": 2,
+          "dimensions_to_add": [
+            "boundary"
+          ],
           "rationale": "Assert the two persona invariants: a 5th create is refused (MAX_BUTLERS=4) and deleting 'default' is refused. Cheap API-level boundary tests guarding documented rules."
         }
       ]

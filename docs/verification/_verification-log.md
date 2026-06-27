@@ -108,6 +108,26 @@ before landing — the refute pass again earned its keep.
 - **Follow-up gaps logged** (not yet authored): workflow-engine maxVisits/terminal via the MCP
   wrapper; cascade-delete set-null-referrer + cascade-FK-table-in-fresh-DB sub-cases.
 
+## 2026-06-27 — e2e-test-author wave 2: closed 6 more gaps (cheap-deterministic cluster)
+
+6 more gaps authored (parallel) + 1-refuter-each adversarial pass: **4 sound, 2 needs-fix**
+(both fixed before landing). 30 new test cases / 6 files, all green; no product code touched.
+
+- **New tests:** move-issue-workflow-edge, registration-repair-backfill, project-dedup-same-git-root,
+  butler-message-busy-409, codemod-preview-generate, session-lifecycle (cross-provider model-drop block).
+- **Coverage: 0.852 → 0.868** (covered 215→221, partial 35→32, uncovered 23→20). Backlog 53→47.
+- **The refute pass again paid for itself:** caught a brittle positional `launchArgs[15]` assertion,
+  an over-claimed `api` dimension, and — biggest — that the dedup test green-lit "no orphans" only
+  because it seeded the 4 tables dedup happens to handle.
+- **Product bug #929 filed:** `deduplicateProjects` silently deletes (cascade children: milestones,
+  drives) / orphans (non-cascade: workflow_templates, quality_metrics, …) the duplicate project's
+  rows beyond the 4 it reassigns, and a name-mismatched status leaves a dangling `status_id`. Data
+  loss on a startup migration — the dedup test now documents its scope and points at #929.
+
+**Running total across waves 1+2: 12 gaps closed, 4 product bugs surfaced (#926–929), score
+0.837 → 0.868.** The pattern holds: every wave the adversarial reviewers convert a few "green"
+tests into real fixes and surface ~1 product bug the happy-path tests assumed away.
+
 ### Still open
 - **Phase 2 requirements-mapping NOT yet run** for any capability — so the `documented-missing`
   / `undocumented-implemented` buckets are empty by *omission of the pass*, not by verified

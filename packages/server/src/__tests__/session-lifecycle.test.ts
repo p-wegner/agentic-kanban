@@ -619,4 +619,118 @@ describe("session-lifecycle", () => {
     const rowsAfterSecondStop = await db.select().from(sessions).where(eq(sessions.id, sessionId));
     expect(rowsAfterSecondStop[0].status).toBe("stopped");
   });
+
+  // @covers agent-sessions.launch.safety-guards [config,regression,boundary]
+  //
+  // The cross-provider stored-model DROP guard (session-lifecycle.ts:205 via
+  // modelBelongsToProvider, provider-models.ts:45-66). A Codex model id (gpt-5.5) baked onto a
+  // Claude workspace must NOT be forwarded as `--model gpt-5.5` to the claude binary — that is
+  // the #698/#696 multi-cycle stall (claude.exe dies in ~5s with an invalid-model error). The
+  // neighbouring guards (spark refusal, codex default gpt-5.5, preflight block) are already
+  // asserted above; only this DROP was previously covered just indirectly via its downstream
+  // launch-failure. These assert the classifier guard at the source.
+  //
+  // The guard SILENTLY DROPS the model (no throw) so this is not error-handling. Assertions are
+  // de-brittled: source-of-truth is `stats.launch.resolvedModel` (the recorded launch decision);
+  // the launch-arg check uses membership (`toContain`/`not.toContain`) rather than a positional
+  // index into the 18-arg launch() call, which a harmless reorder would otherwise break for the
+  // wrong reason.
+  describe("cross-provider stored-model drop", () => {
+    it("drops a Codex model id stored on a Claude workspace instead of passing --model", async () => {
+      const workspaceId = await seedWorkspace(db);
+      // Bake a cross-provider model onto the (claude) workspace — the #698/#696 leftover.
+      await db.update(workspaces).set({ model: "gpt-5.5" }).where(eq(workspaces.id, workspaceId));
+      const { service: agentService } = createFakeAgentService();
+
+      const lifecycle = createSessionLifecycle(createSessionState(), undefined, vi.fn(), { db, agentService, preflight: okPreflight() });
+      // Default provider = claude (no provider/model passed on the call).
+      const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it" });
+
+      // The launch must NOT receive the cross-provider model as any launch arg.
+      const launchArgs = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(launchArgs).not.toContain("gpt-5.5");
+
+      // Launch diagnostics record the stored model but resolve it to null (dropped) — source of truth.
+      const rows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
+      const stats = JSON.parse(rows[0].stats!);
+      expect(stats.launch.workspaceModel).toBe("gpt-5.5");
+      expect(stats.launch.resolvedModel).toBeNull();
+    });
+
+    it("keeps a same-provider stored model (opus on a Claude workspace) and forwards it", async () => {
+      const workspaceId = await seedWorkspace(db);
+      await db.update(workspaces).set({ model: "opus" }).where(eq(workspaces.id, workspaceId));
+      const { service: agentService } = createFakeAgentService();
+
+      const lifecycle = createSessionLifecycle(createSessionState(), undefined, vi.fn(), { db, agentService, preflight: okPreflight() });
+      const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it" });
+
+      // A model that belongs to the launch provider is preserved (the guard must not over-strip).
+      const launchArgs = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(launchArgs).toContain("opus");
+
+      const rows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
+      const stats = JSON.parse(rows[0].stats!);
+      expect(stats.launch.workspaceModel).toBe("opus");
+      expect(stats.launch.resolvedModel).toBe("opus");
+    });
+
+    it("lets a per-call model override the dropped cross-provider workspace model", async () => {
+      const workspaceId = await seedWorkspace(db);
+      await db.update(workspaces).set({ model: "gpt-5.5" }).where(eq(workspaces.id, workspaceId));
+      const { service: agentService } = createFakeAgentService();
+
+      const lifecycle = createSessionLifecycle(createSessionState(), undefined, vi.fn(), { db, agentService, preflight: okPreflight() });
+      // Explicit per-call (claude-valid) model wins; the stored cross-provider id is irrelevant.
+      const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it", model: "sonnet" });
+
+      const launchArgs = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(launchArgs).toContain("sonnet");
+
+      const rows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
+      const stats = JSON.parse(rows[0].stats!);
+      expect(stats.launch.resolvedModel).toBe("sonnet");
+      expect(stats.launch.requestedModel).toBe("sonnet");
+    });
+
+    // Boundary: the classifier (provider-models.ts:50,54) PASSES THROUGH unknown/custom ids it
+    // can't attribute to a provider family — it must only strip ids it KNOWS belong elsewhere.
+    // A custom model (e.g. a z.ai/glm profile model) on a Claude workspace must survive.
+    it("preserves an unknown/custom model id on a Claude workspace (only KNOWN cross-provider ids drop)", async () => {
+      const workspaceId = await seedWorkspace(db);
+      await db.update(workspaces).set({ model: "glm-4.6" }).where(eq(workspaces.id, workspaceId));
+      const { service: agentService } = createFakeAgentService();
+
+      const lifecycle = createSessionLifecycle(createSessionState(), undefined, vi.fn(), { db, agentService, preflight: okPreflight() });
+      const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it" });
+
+      const launchArgs = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(launchArgs).toContain("glm-4.6");
+
+      const rows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
+      const stats = JSON.parse(rows[0].stats!);
+      expect(stats.launch.resolvedModel).toBe("glm-4.6");
+    });
+
+    // Boundary, reverse direction (provider-models.ts:57-59): a Claude tier id (opus) baked onto
+    // a CODEX workspace must likewise be dropped. Uses a non-builder trigger so the codex
+    // builder default-model substitution doesn't mask the drop.
+    it("drops a Claude model id stored on a Codex workspace", async () => {
+      const workspaceId = await seedWorkspace(db);
+      await db.update(workspaces).set({ provider: "codex", model: "opus" }).where(eq(workspaces.id, workspaceId));
+      const { service: agentService } = createFakeAgentService();
+
+      const lifecycle = createSessionLifecycle(createSessionState(), undefined, vi.fn(), { db, agentService, preflight: okPreflight() });
+      // triggerType "review" => non-builder, so the no-model codex default (gpt-5.5) is NOT applied.
+      const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it", provider: "codex", triggerType: "review" });
+
+      const launchArgs = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(launchArgs).not.toContain("opus");
+
+      const rows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
+      const stats = JSON.parse(rows[0].stats!);
+      expect(stats.launch.workspaceModel).toBe("opus");
+      expect(stats.launch.resolvedModel).toBeNull();
+    });
+  });
 });

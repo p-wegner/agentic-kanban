@@ -766,28 +766,26 @@
       },
       {
         "ref": "mcp-server.move.issue.workflow-edge",
-        "status": "uncovered",
-        "covered_by": [],
-        "dimensions_covered": [],
-        "dimensions_missing": [
-          "error",
-          "state-transition",
-          "workflow"
+        "status": "covered",
+        "covered_by": [
+          {
+            "test": "packages/mcp-server/src/__tests__/tools/move-issue-workflow-edge.test.ts",
+            "strength": "asserts-outcome"
+          }
         ],
+        "dimensions_covered": [
+          "workflow",
+          "state-transition",
+          "error"
+        ],
+        "dimensions_missing": [],
         "history": {
           "churn_90d": null,
           "bugs": 0,
           "last_regression": null
         },
-        "gap": {
-          "kind": "no-test",
-          "missing_dimensions": [
-            "error",
-            "state-transition",
-            "workflow"
-          ],
-          "rationale": "WORKFLOW_TRANSITION_INVALID (move-issue.ts:56) — refusing an illegal workflow-graph jump and returning the valid next stages — has no test. terminal-done-guard covers only the terminal guard, not edge legality. Configurable workflow graphs make this a real, reachable path."
-        }
+        "gap": null,
+        "note": "Closed by e2e-test-author wave-2 2026-06-27 (adversarially reviewed). move-issue-workflow-edge.test.ts"
       },
       {
         "ref": "mcp-server.merge.workspace.delegate",
@@ -1117,12 +1115,12 @@
       }
     ],
     "summary": {
-      "covered": 13,
+      "covered": 14,
       "partial": 3,
-      "uncovered": 4,
+      "uncovered": 3,
       "undocumented_implemented": 0,
       "documented_missing": 0,
-      "score": 0.725,
+      "score": 0.775,
       "by_dimension": {
         "api": {
           "covered": 9,
@@ -1182,17 +1180,6 @@
         "config(security egress)"
       ],
       "top_gaps": [
-        {
-          "ref": "mcp-server.move.issue.workflow-edge",
-          "priority": "P1",
-          "roi": 4.5,
-          "dimensions_to_add": [
-            "error",
-            "state-transition",
-            "workflow"
-          ],
-          "rationale": "A core, reachable mutation guard (WORKFLOW_TRANSITION_INVALID) with zero coverage on a board that supports configurable workflow graphs. Cheap to test at the registrar level (seed a workflow node, attempt an illegal jump, assert the code + valid-next-stages list). Sits right beside the well-covered terminal guard — symmetry gap."
-        },
         {
           "ref": "mcp-server.create.agent-skill",
           "priority": "P1",
