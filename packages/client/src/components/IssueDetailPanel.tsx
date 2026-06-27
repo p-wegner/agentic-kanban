@@ -8,6 +8,7 @@ import { usePanelLayout } from "../hooks/usePanelLayout.js";
 import { useIssueEditForm } from "../hooks/useIssueEditForm.js";
 import { useIssueDetailData } from "../hooks/useIssueDetailData.js";
 import { useIssueInlineEdit } from "../hooks/useIssueInlineEdit.js";
+import { useIssueDetailUiState } from "../hooks/useIssueDetailUiState.js";
 import { useIssueActions } from "../hooks/useIssueActions.js";
 import { IssueSecondaryDetails } from "./IssueSecondaryDetails.js";
 import { IssueMetadataGrid } from "./IssueMetadataGrid.js";
@@ -138,17 +139,21 @@ export function IssueDetailPanel({
     setPanelMode,
     setSidebarSide,
   });
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [togglingVisualVerify, setTogglingVisualVerify] = useState(false);
-  const [duplicating, setDuplicating] = useState(false);
-  const [moveToDonePending, setMoveToDonePending] = useState<MoveToDonePending | null>(null);
-  const [dependencyImpactPending, setDependencyImpactPending] = useState<DependencyImpactPending | null>(null);
-  const [showDecomposeModal, setShowDecomposeModal] = useState(false);
-  const [showShowdownDialog, setShowShowdownDialog] = useState(false);
-  const [showCompareAttempts, setShowCompareAttempts] = useState(false);
-  const [newNoteBody, setNewNoteBody] = useState("");
-  const [submittingNote, setSubmittingNote] = useState(false);
-  const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null);
+  // Panel-local UI/action/dialog flags — owned by useIssueDetailUiState; the
+  // setters are threaded into useIssueActions below, which drives most transitions.
+  const {
+    confirmDelete, setConfirmDelete,
+    togglingVisualVerify, setTogglingVisualVerify,
+    duplicating, setDuplicating,
+    moveToDonePending, setMoveToDonePending,
+    dependencyImpactPending, setDependencyImpactPending,
+    showDecomposeModal, setShowDecomposeModal,
+    showShowdownDialog, setShowShowdownDialog,
+    showCompareAttempts, setShowCompareAttempts,
+    newNoteBody, setNewNoteBody,
+    submittingNote, setSubmittingNote,
+    deletingCommentId, setDeletingCommentId,
+  } = useIssueDetailUiState();
 
   // Inline edit state (independent of the full edit form)
   const {
