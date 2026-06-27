@@ -85,3 +85,34 @@ Persona (the-AI-agent-itself) — **near-dry, 1 new finding, fixed:**
 - `agent-contract:cross-worktree-write-confinement` — the `prevent-cross-worktree-writes.js` + `require-read-before-write.js` PreToolUse HARD GATES (the runtime enforcement of workspaces.md's "blast radius is contained" promise) were documented only in CLAUDE.md, so a Builder treats a block as a bug and tries to route around it → added an "agent operating rule" invariant to **workspaces.md** mirroring the DB-safety-gate precedent (persistence-schema). Credibility: the agent contract is otherwise covered exceptionally well (hard constraints, create→launch, exit signals, gates, recovery all present).
 
 **Convergence status (after R8):** Persona productivity has dropped sharply (R7 = 9 findings across 3 personas → R8 = 1 finding). All families (structural/behavioral/historical/empirical/drift/density/persona) have been sampled; the 4 personas (new-hire/SRE/security/the-agent) are exhausted. **Effectively converged** — remaining work is purely CADENCE: re-run S9 (drift) + S8 (run-the-system) whenever code lands, since those track a moving target; the discovery lenses have gone dry. A future "verify again" with no intervening code change should be expected to be DRY (the correct terminal state), unless a new lens is invented.
+
+## Round 9 — S12 (NEW lens) quantitative constant-claims audit + S9 drift  ·  HEAD 676af1a2
+S9: no code commit since R8 (only the R8 doc commit) → drift trivially dry, as predicted.
+Invented a fresh lens to avoid a vacuous "dry" re-run: **S12 — quantitative constant-claims audit.**
+Distinct from S10 (counts guard *density*) and S8 (probes *behavior*): S12 extracts every concrete
+magic constant in the docs (caps, timeouts, intervals, ports, retry counts, thresholds, row/file/enum
+counts, LOC, percentages) and verifies each against the code's source-of-truth `file:line`. Fanned out
+3 agents over the 15 module docs. **~87 constants checked → NOT dry, 2 STALE (both mcp-server.md), both fixed:**
+- `stale-count:mcp-tool-total` — doc said "~95 tools" (×3: lines 25/98-style/136) and anchored "~95" at
+  `mcp-tool-definitions.ts:23` (the category array, not the tool list). Real: **90** tool defs
+  (`mcp-tool-definitions.ts:40` onward), ~92 registrars. → corrected to "90 tools", anchors split
+  (defs `:40`, `McpToolCategory` union `:1-15`).
+- `stale-list:mcp-category-enum` — inline category list enumerated only **13** of 14 (missing **`tags`**),
+  while the "14 categories" count itself was correct. → added `tags` to the list.
+Everything else verified clean: agent-providers (6), persistence-schema (7), agent-sessions (7),
+monitor-orchestration (11), review-merge (7), butler (7), workflow-engine (6), project-registration (2),
+codemods (4), workspaces (5), preferences-config (6), git-integration (4), issues-board (5), board-ui (7,
+incl. live `git log --follow BoardPage.tsx` = 718 confirmed). Adjacent non-doc finding (not fixed, out of
+scope): `loop.sh:26` *code comment* says `MONITOR_SLEEP` 900s but the real default is 1800s — a stale
+in-code comment, the doc is right.
+Keys: `stale-count:mcp-tool-total` `stale-list:mcp-category-enum` (both fixed).
+
+S12 insight: a dedicated *constant-claims* lens catches numeric drift that S10's density-counting and
+S8's behavior-probing both structurally miss — magic numbers/counts that are individually accurate-looking
+but rounded-stale. Two stale counts survived 8 prior rounds because every earlier lens read constants as
+*evidence*, never as *claims to be refuted*. This is the productive frontier on a re-run with no code change.
+
+**Convergence status (after R9):** S1–S12 + 4 personas all run. S12 was productive (2 fixes) — confirming
+that inventing a fresh lens, not re-running an exhausted one, is the correct response to a "verify again"
+with no code change. The constant-claims frontier is now swept; a future re-run should re-invent again or
+declare dry. Cadence lenses (S9 drift, S8 run-the-system) remain the standing re-run whenever code lands.

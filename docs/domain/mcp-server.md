@@ -22,7 +22,7 @@ This is the board's **machine-facing front door**. A human uses the React UI and
 
 It exists because the product's core loop is autonomous: the Conductor and Builder agents must manipulate the board programmatically. MCP is the published language they share with the board. If this module vanished, every agent-driven workflow (auto-start, dependency cascades, self-review, autonomous epic "drives") would lose its control plane — the board would degrade to a manual, human-clicks-buttons tool. The CLAUDE.md tool-precedence rule "**MCP → CLI → REST**" makes this the *preferred* integration path, not a fallback.
 
-The catalog is large (~95 tools across 14 categories — `mcp-tool-definitions.ts:23`) and deliberately mirrors the human featureset: the design intent, stated repeatedly in tool comments, is that **an agent over MCP must never get a weaker or staler operation than a human over the UI** (`merge-workspace.ts:14`, `get-board-status.ts:8`).
+The catalog is large (90 tools across 14 categories — defs at `mcp-tool-definitions.ts:40`, the `McpToolCategory` union at `:1-15`) and deliberately mirrors the human featureset: the design intent, stated repeatedly in tool comments, is that **an agent over MCP must never get a weaker or staler operation than a human over the UI** (`merge-workspace.ts:14`, `get-board-status.ts:8`).
 
 > Provider note: MCP itself is provider-neutral — Claude Code, Codex, and Copilot agents all consume this surface. The one Claude-specific coupling is the Butler tool family (`ask_butler` et al.), which fronts a warm Claude Agent-SDK assistant (`ask-butler.ts:15`).
 
@@ -32,7 +32,7 @@ The catalog is large (~95 tools across 14 categories — `mcp-tool-definitions.t
 | Tool | One MCP-callable board operation; a Zod-typed schema + async handler registered on the server | `index.ts:104`, every `tools/*.ts` |
 | Registrar | `register<Name>(server, deps?)` function that installs one tool; the unit of the catalog | `index.ts:104` |
 | Active project | The project a tool operates on when no `projectId` is passed — resolved from the `activeProjectId` preference | `db-utils.ts:109` |
-| Tool category | UI/governance grouping (board, issues, workspaces, sessions, review, dependencies, workflow, skills, specs, drives, projects, settings, butler) | `mcp-tool-definitions.ts:1` |
+| Tool category | UI/governance grouping (board, issues, workspaces, sessions, tags, review, dependencies, workflow, skills, specs, drives, projects, settings, butler) | `mcp-tool-definitions.ts:1-15` |
 | Disabled tool | A tool name listed in the `disabled_mcp_tools` preference; skipped at registration so it never appears to agents | `index.ts:198` |
 | Direct workspace | `isDirect=true` — commits straight to master, has no branch to merge; exempt from merge guards | `db-utils.ts:168` |
 | Terminal status | Done/Cancelled — the statuses whose entry is guarded against stranding an unmerged branch | `update-issue.ts:42`, shared `isTerminalStatusName` |
@@ -133,4 +133,4 @@ One package, flat tool catalog. `index.ts` = registry/bootstrap. `tools/*.ts` = 
 - **`notifyBoard` and webhooks are fire-and-forget.** A mutation succeeds even if the UI ping or outbound webhook silently fails (`notify.ts:13`, `update-issue.ts:77`). Acceptable (polling/back-fill catches up) but means webhook delivery is best-effort, not guaranteed — external consumers must not treat absence of a webhook as absence of a transition. *(verified from code; delivery semantics inferred.)*
 - **DB-path resolution can pick the wrong board.** `resolveDbPath` prefers the monorepo dev DB over the published one (`db.ts:19`); the comment documents a real past incident (butler #45) where a spawned MCP server read the stale published DB. The current order fixes the dev case but the precedence is a fragile, environment-sensitive heuristic. *(verified — comment + code.)*
 - **`get_context` counts active workspaces globally, not per-project.** The workspace count query filters only by `status = "active"` with no `projectId` predicate (`get-context.ts:35`), while issue counts are project-scoped. In a multi-project board the `activeWorkspaces` number bleeds across projects. *(verified from code — likely a latent bug, flagged.)*
-- **Catalog size vs. agent context budget.** ~95 tools is a large surface to advertise to every agent; the `disabled_mcp_tools` gate exists, but there is no per-role default trimming. *(inferred.)*
+- **Catalog size vs. agent context budget.** 90 tools is a large surface to advertise to every agent; the `disabled_mcp_tools` gate exists, but there is no per-role default trimming. *(inferred.)*
