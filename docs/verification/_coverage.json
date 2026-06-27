@@ -314,17 +314,17 @@
     },
     {
       "ref": "workspaces.cascade.post-merge-followups",
-      "status": "uncovered",
-      "covered_by": [],
-      "requirements": ["ADR-008:start-mode", "PRD-04:dependency-cascade"],
-      "dimensions_covered": [],
-      "dimensions_missing": ["workflow","state-transition","capability"],
+      "status": "covered",
+      "covered_by": [
+        { "test": "packages/e2e/tests/api/workspace-cascade-followup.test.ts::merging a blocker auto-creates a workspace for the unblocked dependent and moves it to In Progress", "strength": "asserts-outcome" },
+        { "test": "packages/e2e/tests/api/workspace-cascade-followup.test.ts::dependent that already has an active workspace does NOT get a second one (hasActive skip)", "strength": "asserts-outcome" }
+      ],
+      "requirements": ["PRD-04:dependency-cascade"],
+      "dimensions_covered": ["workflow","state-transition","capability"],
+      "dimensions_missing": [],
       "history": { "churn_90d": 14, "bugs": 2, "last_regression": "post-merge cascade leaked past manual Start Mode" },
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": ["workflow","state-transition","capability"],
-        "rationale": "No candidate test exercises autoStartFollowups: on merge, dependents whose blockers are now ALL Done get a worktree + launched agent, gated by defaultBranch presence, no-in-flight-workspace, and Start Mode. merge-cascade.test.ts and auto-start-followup-setting.test.ts exist OUTSIDE the candidate set and are not credited here. This is the engine of hands-off autonomy and has a real prior regression (cascade leaking past a manual Start-Mode kill-switch). Testable at the API level (merge → assert dependent workspace appears) — no real agent needed if launch is mockable."
-      }
+      "gap": null,
+      "note": "Covered by e2e-test-author run 2026-06-27 (P0). The test PINS start_mode=manual + dependency_auto_chain=false to isolate this followup path (gated by the auto_start_followup pref) from the SEPARATE maybeAutoStartUnblockedDependency path that produces an identical outcome — a dual-path confound caught by adversarial review. CORRECTION to the model: the gate is the auto_start_followup pref, NOT Start Mode (the requirements ref ADR-008:start-mode was wrong for this behaviour and is dropped). The multi-blocker partial-resolution boundary (every-guard) is NOT covered here — tracked as the new gap workspaces.cascade.partial-blockers-no-start in _priorities.md."
     },
     {
       "ref": "workspaces.direct.no-worktree",
@@ -390,15 +390,15 @@
     },
     "by_capability": {
       "workspaces": {
-        "score": 0.76,
+        "score": 0.81,
         "behaviors_total": 26,
-        "covered": 19,
+        "covered": 20,
         "partial": 2,
-        "uncovered": 5,
+        "uncovered": 4,
         "undocumented_implemented": 0,
         "documented_missing": 0,
-        "uncovered_high_risk": 2,
-        "score_note": "(covered 19 + 0.5*partial 2) / 26 = 0.77; rounded to 0.76 to reflect that 2 of the 5 uncovered are HIGH-risk (reattach-survives-reload, cascade.post-merge-followups). The covered set is the high-value merge/create/lifecycle happy + error paths; the gaps cluster in runtime-lifecycle behaviours that are hard to test (watchdog, reattach, dependency cascade) plus two cheap missing negatives."
+        "uncovered_high_risk": 1,
+        "score_note": "(covered 20 + 0.5*partial 2) / 26 = 0.808. Updated 2026-06-27: e2e-test-author closed the P0 cascade.post-merge-followups gap (was the highest-risk uncovered), leaving reattach-survives-reload as the sole HIGH-risk uncovered. Remaining gaps cluster in hard-to-test runtime-lifecycle behaviours (watchdog, reattach) plus the new multi-blocker cascade boundary."
       }
     },
     "systematically_weak_dimensions": ["state-transition", "error"],

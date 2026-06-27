@@ -1,0 +1,30 @@
+{
+  "schema": "verification-model/authored@1",
+  "runs": [
+    {
+      "sha": "0a954ccd",
+      "date": "2026-06-27",
+      "gap": "workspaces.cascade.post-merge-followups",
+      "priority": "P0",
+      "test_file": "packages/e2e/tests/api/workspace-cascade-followup.test.ts",
+      "declares_dimensions": ["workflow", "state-transition", "capability"],
+      "review": {
+        "mode": "adversarial-refute",
+        "reviewers": 3,
+        "first_pass_verdicts": ["needs-fix", "needs-fix", "needs-fix"],
+        "consensus_defect": "Did not isolate the followup cascade from a second observationally-identical post-merge path (autoStartUnblockedDependencyIssue); green attributable only by accident of default manual Start Mode.",
+        "fixes_applied": [
+          "pin start_mode=manual + dependency_auto_chain=false in beforeAll, restore in afterAll (isolation)",
+          "retry merge POST on 409/5xx (single per-repo merge lock)",
+          "harden pref restore behind didReadPrefs gate, per-key try/catch",
+          "document global-pref cross-file coupling + test.describe.configure serial"
+        ],
+        "final_verdict": "sound",
+        "would_catch_regression": true
+      },
+      "status_after": "covered",
+      "tests_passing": "2/2 (2 consecutive stable runs)",
+      "followups_filed": ["workspaces.cascade.partial-blockers-no-start (multi-blocker every-guard)"]
+    }
+  ]
+}

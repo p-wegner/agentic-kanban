@@ -33,6 +33,35 @@ source-import** matches. Re-verified: workspaces candidate set 12 → 29 files. 
 a non-dry re-run with the source-matched set may downgrade them to dimension top-ups. Their
 `_priorities.md` rows already carry a "verify out-of-candidate tests first" note.
 
+## 2026-06-27 — e2e-test-author run (top gap: P0 cascade.post-merge-followups)
+
+Exercised the third skill end-to-end against the #1 backlog gap. Phase 1 verified the gap is
+genuinely uncovered at BOTH e2e and server levels (`merge-cascade.test.ts` only asserts board-
+responsiveness + branches-reach-master; `workspace-merge-subservices.test.ts` only covers
+conflict/cleanup). Authored `packages/e2e/tests/api/workspace-cascade-followup.test.ts` (green),
+then ran the **adversarial refute pass** (3 independent reviewers, P0 quorum).
+
+**Adversarial pass earned its keep** — all 3 returned `needs-fix` on a real correctness defect
+the author missed: the test did not ISOLATE the followup cascade from a SECOND, observationally-
+identical post-merge path. Fixes applied (test-only): pin `start_mode`=manual +
+`dependency_auto_chain`=false to exclude the other path, retry merge on 409 (per-repo merge lock),
+harden pref restore, document the global-pref cross-file coupling + serial mode. Re-reviewed the
+isolation fix.
+
+### Model corrections folded back (from the review)
+- The post-merge follow-up cascade gate is the **`auto_start_followup` pref**, NOT Start Mode
+  (the behaviour-model `workspaces.cascade.post-merge-followups` `preconditions` said "Start Mode
+  permits auto-start" — that's the gate for the OTHER path).
+- There are **TWO** post-merge auto-start mechanisms, run back-to-back
+  (`workspace-merge-cleanup.service.ts:70-71`): `maybeAutoStartFollowups` (gated by
+  `auto_start_followup`) and `maybeAutoStartUnblockedDependency` /
+  `autoStartUnblockedDependencyIssue` (gated by `resolveStartPolicy().postMergeCascade` =
+  monitor-mode + `dependency_auto_chain`). The model treated this as one behaviour — it is two,
+  with different gates and different WIP/fan-out semantics. `_behavior-model.json` should split
+  `workspaces.cascade.*` into `.followups` and `.unblocked-dependency`. Filed.
+- New gap added to `_priorities.md`: `workspaces.cascade.partial-blockers-no-start` (the
+  multi-blocker `every`-guard, invisible to the single-blocker P0 test).
+
 ### Still open
 - Run discovery + coverage for the remaining 14 capabilities (fan-out, per the skills).
 - Re-map `workspaces` with the source-matched candidate set; reconcile the 3 suspect uncovereds.
