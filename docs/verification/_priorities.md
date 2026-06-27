@@ -89,3 +89,15 @@ Analyzed SHA `0a954ccd`. ROI = (business_impact × regression_value) / (exec_cos
 
 ### Inline P5 candidate (regression-lock, not authored above)
 `state-vocabulary disagreement`: `ACTIVE_WORKSPACE_STATUSES` (active|fixing|reviewing|awaiting-plan-approval) vs the monitor auto-start gate's 3-state list that omits `awaiting-plan-approval`. If these are meant to converge, add a P5 lock asserting the intended set before a refactor silently aligns them. Not emitted as a gap row because today's divergence is by-design and already partly asserted by `workspace-activity-state.test.ts`.
+
+---
+
+### [P1 · ROI 4.0] workspaces.cascade.partial-blockers-no-start — dependent with MULTIPLE blockers, only SOME Done, must NOT auto-start (NEW — from adversarial review of the P0 cascade test)
+- capability: workspaces · dimensions to add: state-transition, error (negative)
+- actor: monitor · preconditions: dependent D depends_on B1 AND B2; merge only B1 (B1→Done, B2 still open); `auto_start_followup`="true"
+- entry point: post-merge cascade → `autoStartFollowups` allResolved guard (followup-workspace.service.ts:57 `every(... isTerminalStatusIdView ...)`)
+- observable outcome: NO workspace is created for D and D's status is unchanged, because not every blocker is Done
+- suggested assertions: after merging B1, poll a window > observed cascade latency → D has zero non-closed workspaces and is still in its pre-merge status; then merge B2 → D NOW auto-starts (proves the guard releases on the last blocker, not earlier)
+- factors: impact 4 (a `.every`→`.some` regression would prematurely launch agents on still-blocked work) · regression 3 (followup churn) · exec 2 · maint 2 → ROI (4×3)/(2+2)=3.0
+- evidence: followup-workspace.service.ts:50-58 ; raised by all 3 adversarial reviewers as the highest-value case the single-blocker P0 test cannot distinguish (`.every` vs `.some` invisible with one blocker)
+- ISOLATION NOTE: same dual-path caveat as the P0 test — pin `start_mode`=manual + `dependency_auto_chain`=false so only the followup path can fire.
