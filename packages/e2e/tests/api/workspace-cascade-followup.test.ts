@@ -206,6 +206,10 @@ test.describe("post-merge follow-up cascade: dependent issue gets a workspace + 
   });
 
   test.afterAll(async ({ request }) => {
+    // Cleanup deletes every workspace (worktree removal is slow on Windows) + issue created
+    // across all tests in this serial suite; the default 30s hook timeout is too tight once
+    // the multi-blocker test adds three more issues/workspaces, so widen it.
+    test.setTimeout(120_000);
     for (const id of createdWorkspaceIds) {
       await request.delete(`${SERVER_URL}/api/workspaces/${id}`).catch(() => {});
     }
