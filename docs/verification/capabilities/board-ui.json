@@ -706,24 +706,23 @@
       },
       {
         "ref": "board-ui.move.archiveConfirm",
-        "status": "uncovered",
-        "covered_by": [],
-        "dimensions_covered": [],
-        "dimensions_missing": [
+        "status": "covered",
+        "covered_by": [
+          {
+            "test": "packages/e2e/tests/ui/board-move-archive-confirm.test.ts",
+            "strength": "asserts-outcome"
+          }
+        ],
+        "dimensions_covered": [
           "workflow",
           "error-handling",
-          "state-transition",
+          "state-transition"
+        ],
+        "dimensions_missing": [
           "risk"
         ],
-        "gap": {
-          "kind": "no-test",
-          "missing_dimensions": [
-            "workflow",
-            "error-handling",
-            "state-transition"
-          ],
-          "rationale": "No e2e moves a ticket WITH a live workspace into Done/Cancelled to exercise the confirm dialog (block on cancel, commit on confirm). ai-reviewed-column tests move issues to terminal statuses but without a live workspace, so the gate never fires. High blast radius (risks discarding in-flight agent work)."
-        }
+        "gap": null,
+        "note": "Closed by e2e-test-author 2026-06-27. Seeds an issue + a live (mock-agent, non-closed) workspace, drags the card onto the Done archive drop zone: asserts the 'Move to Done' confirm dialog blocks the move, Cancel is a server-verified no-op (issue stays in its original column), and only on confirm ('Delete workspace & move to Done') does the issue land in Done. board-move-archive-confirm.test.ts"
       },
       {
         "ref": "board-ui.move.rollback",
