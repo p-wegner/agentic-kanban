@@ -10,15 +10,14 @@ import { evaluateCondition } from "@agentic-kanban/shared/lib/workflow-engine";
  *   - `*`  → `[^/]*`   (a single path segment; does NOT cross `/`)
  *   - `**` → `.*`      (crosses `/`; a trailing `/` after `**` is collapsed)
  *   - `?`  → `[^/]`    (exactly one non-slash char)
- *   - the regex metacharacters `\ ^ $ . | + ( ) [ ] { }` are ESCAPED to literals
- *   - every other char (including `!`, `,`) is emitted literally
+ *   - `{a,b,c}` → `(a|b|c)` brace alternation (each alternative glob-translated)
+ *   - a single leading `!` → anchored negative lookahead (exclusion)
+ *   - the regex metacharacters `\ ^ $ . | + ( ) [ ]` are ESCAPED to literals
  *
- * Consequences these tests pin (some are latent product bugs, flagged inline):
+ * Consequences these tests pin:
  *   - `*` silently fails to match across directory boundaries.
- *   - brace alternation `{a,b}` is treated LITERALLY → never matches the way a
- *     user expects (LATENT BUG: silent no-match → "block").
- *   - leading `!` negation is treated LITERALLY, not as exclusion
- *     (LATENT BUG: silent no-match → "block").
+ *   - brace alternation `{a,b}` expands to alternation (matches either branch).
+ *   - leading `!` excludes (path matches iff it does NOT match the rest).
  *
  * These are characterization assertions: they pin CURRENT behaviour so the
  * matcher's real semantics are nailed down. evaluateCondition maps a matcher
@@ -94,42 +93,49 @@ describe("workflow-engine diff_touches glob matcher — boundary semantics", () 
       expected: "block",
       mutation: "If `?` were `[^/]*` (greedy), `ab` would match → fire. Pinning block guards single-char semantics.",
     },
-    // ---- brace alternation is LITERAL (LATENT BUG) ----------------------
+    // ---- brace alternation expands to `(a|b)` ---------------------------
     {
-      name: "brace alternation `{a,b}` is treated LITERALLY, not as alternation (LATENT BUG)",
+      name: "brace alternation `{server,client}` matches the server branch",
       pattern: "packages/{server,client}/**",
       diffFiles: ["packages/server/src/x.ts"],
-      expected: "block",
-      mutation:
-        "`{` `}` are escaped to literals, so the pattern only matches a path literally containing `{server,client}`. " +
-        "If brace expansion were implemented this would become fire. Characterization: pinned to current block. " +
-        "BUG: a user expecting `{server,client}` alternation gets a silent no-match.",
-    },
-    {
-      name: "brace pattern matches only the LITERAL braces text",
-      pattern: "packages/{server,client}/x.ts",
-      diffFiles: ["packages/{server,client}/x.ts"],
       expected: "fire",
       mutation:
-        "Confirms braces compile to literal characters (not metacharacters). If they became alternation this literal path would no longer match → block.",
+        "`{server,client}` expands to `(server|client)`, so a server path matches. " +
+        "If braces were escaped to literals again this would block.",
     },
-    // ---- negation `!` is LITERAL (LATENT BUG) ---------------------------
     {
-      name: "leading `!` negation is treated LITERALLY, not as exclusion (LATENT BUG)",
+      name: "brace alternation `{server,client}` also matches the client branch",
+      pattern: "packages/{server,client}/**",
+      diffFiles: ["packages/client/y.ts"],
+      expected: "fire",
+      mutation: "The second alternative `client` must match too. Drop alternation and this blocks.",
+    },
+    {
+      name: "brace alternation does NOT match a path outside the alternatives",
+      pattern: "packages/{server,client}/**",
+      diffFiles: ["packages/shared/x.ts"],
+      expected: "block",
+      mutation:
+        "`shared` is not one of `(server|client)`, so it must block. If alternation were widened (e.g. matched any segment) this would fire.",
+    },
+    // ---- leading `!` is exclusion (negative lookahead) ------------------
+    {
+      name: "leading `!` excludes — a non-server file matches the exclusion",
+      pattern: "!packages/server/**",
+      diffFiles: ["packages/client/x.ts"],
+      expected: "fire",
+      mutation:
+        "`!foo/**` compiles to `^(?!foo/.*$).*$`, so a path NOT under `packages/server` matches → fire. " +
+        "If `!` were literal again this would block.",
+    },
+    {
+      name: "leading `!` excludes — a server file does NOT match the exclusion",
       pattern: "!packages/server/**",
       diffFiles: ["packages/server/src/x.ts"],
       expected: "block",
       mutation:
-        "`!` is emitted literally, producing `^!packages/server/.*$`, which a path without a leading `!` cannot match. " +
-        "If `!` meant 'exclude', a non-server file would fire and a server file would block — different verdict entirely. " +
-        "Characterization: pinned to current block. BUG: negation is silently unsupported.",
-    },
-    {
-      name: "literal `!` only matches a path that literally starts with `!`",
-      pattern: "!keep/*",
-      diffFiles: ["!keep/a.ts"],
-      expected: "fire",
-      mutation: "Proves `!` is a literal char. If `!` became a negation operator this would invert → block.",
+        "The negative lookahead rejects paths under `packages/server`, so a server file blocks. " +
+        "If `!` were literal this server path could never match the leading-`!` literal and would also block — but for the wrong reason; the lookahead is the real exclusion semantics.",
     },
     // ---- full-anchor behaviour ------------------------------------------
     {

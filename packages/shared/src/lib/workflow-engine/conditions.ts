@@ -21,8 +21,16 @@ function parseCondition(condition: string): { base: string; arg: string | null }
   return { base: condition.slice(0, idx), arg: condition.slice(idx + 1) };
 }
 
-/** Minimal glob → RegExp supporting `**`, `*`, and `?`. */
-function globToRegExp(glob: string): RegExp {
+/**
+ * Translate a glob body to a regex fragment (no anchoring), supporting:
+ *   - `**` → `.*` (crosses `/`; trailing `/` after `**` collapsed)
+ *   - `*`  → `[^/]*` (single segment, does NOT cross `/`)
+ *   - `?`  → `[^/]`
+ *   - `{a,b,c}` → `(a|b|c)`, each alternative itself glob-translated; nesting
+ *     supported, top-level commas separate alternatives, `{}` → `()`
+ *   - regex metacharacters `\ ^ $ . | + ( ) [ ] { }` escaped to literals
+ */
+function globBodyToRegExp(glob: string): string {
   let re = "";
   for (let i = 0; i < glob.length; i++) {
     const c = glob[i];
@@ -36,13 +44,56 @@ function globToRegExp(glob: string): RegExp {
       }
     } else if (c === "?") {
       re += "[^/]";
-    } else if ("\\^$.|+()[]{}".includes(c)) {
+    } else if (c === "{") {
+      // Find the matching close brace (track nesting), split top-level commas.
+      let depth = 1;
+      let j = i + 1;
+      const alts: string[] = [];
+      let cur = "";
+      for (; j < glob.length && depth > 0; j++) {
+        const cj = glob[j];
+        if (cj === "{") {
+          depth++;
+          cur += cj;
+        } else if (cj === "}") {
+          depth--;
+          if (depth === 0) break;
+          cur += cj;
+        } else if (cj === "," && depth === 1) {
+          alts.push(cur);
+          cur = "";
+        } else {
+          cur += cj;
+        }
+      }
+      if (depth !== 0) {
+        // Unbalanced brace — treat the `{` literally (no matching close found).
+        re += "\\{";
+      } else {
+        alts.push(cur);
+        re += `(${alts.map(globBodyToRegExp).join("|")})`;
+        i = j; // advance past the matching `}`
+      }
+    } else if ("\\^$.|+()[]}".includes(c)) {
       re += `\\${c}`;
     } else {
       re += c;
     }
   }
-  return new RegExp(`^${re}$`);
+  return re;
+}
+
+/**
+ * Minimal glob → RegExp supporting `**`, `*`, `?`, `{a,b}` brace alternation,
+ * and a single leading `!` negation (the path matches iff it does NOT match the
+ * rest of the pattern, e.g. `!foo/**` → `^(?!foo/.*$).*$`).
+ */
+function globToRegExp(glob: string): RegExp {
+  if (glob.startsWith("!")) {
+    const body = globBodyToRegExp(glob.slice(1));
+    return new RegExp(`^(?!${body}$).*$`);
+  }
+  return new RegExp(`^${globBodyToRegExp(glob)}$`);
 }
 
 /**

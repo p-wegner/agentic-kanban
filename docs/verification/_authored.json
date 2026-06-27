@@ -558,6 +558,38 @@
         "quota-usage: 200 with a per-provider degraded status entry (partial degradation)",
         "preexisting test-infra: second real createWorkspace fails on in-memory test DB ('Failed query') \u2014 related to #928"
       ]
+    },
+    {
+      "date": "2026-06-27",
+      "batch": "product-bug fixes for the 3 tickets surfaced by waves 6-10 (fixed directly on master)",
+      "fixes": [
+        {
+          "ticket": "#940",
+          "file": "packages/shared/src/lib/workflow-engine/conditions.ts",
+          "fix": "globToRegExp now supports brace alternation {a,b}->(a|b) (recursive, nesting-aware) and leading-! negation via anchored negative lookahead; existing * / ** / ? / anchoring preserved",
+          "test": "workflow-engine-matcher-boundary.test.ts flipped from LATENT-BUG characterization to fixed-behaviour assertions",
+          "suites_green": "matcher-boundary 18/18, workflow-engine 34/35(1 pre-existing skip), workflow.service 24/24, autoroute, validate-graph"
+        },
+        {
+          "ticket": "#941",
+          "file": "packages/server/src/services/{codex,claude}-login.service.ts",
+          "fix": "wrapped fire-and-forget spawn in try/catch (both win32+posix sites) so a SYNCHRONOUS spawn throw is non-fatal and the manual command is still returned; windowsHide:false etc preserved",
+          "test": "oauth-login-bootstrap.test.ts: added sync-throw non-fatal case per service; restored @covers [workflow, error-handling, config]",
+          "coverage": "agent-providers.login.oauthBootstrap partial->COVERED (error-handling now earned)"
+        },
+        {
+          "ticket": "#942",
+          "file": "packages/shared/src/lib/git-service/diff.ts",
+          "fix": "getUntrackedDiffEntries now NUL-sniffs the first ~8000 bytes; binary untracked file -> header-only 'Binary files differ' entry instead of a lossy +content hunk; text path unchanged",
+          "test": "git-untracked-diff-boundary.test.ts binary case flipped to assert header-only/no-crash",
+          "suites_green": "boundary 3/3, git.service+diff-stats 20/20, git-service.integration 12/12"
+        }
+      ],
+      "coverage_after": "272 covered / 2 partial / 0 uncovered",
+      "remaining_partial": [
+        "agent-sessions.persist.split-batch (concurrency=simulated)",
+        "monitor-orchestration.guard.re-entrancy-and-maintenance (state-transition not asserted)"
+      ]
     }
   ]
 }

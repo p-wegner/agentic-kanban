@@ -20,20 +20,30 @@ export function spawnCodexLogin(codexHome: string): { command: string } {
     // `start "title" cmd /k ...` opens a new console that stays open after login
     // so the user can read the result. windowsHide:false to actually show it.
     const inner = `set "CODEX_HOME=${home}" && codex login`;
-    spawn(`start "Codex Login" cmd /k "${inner}"`, {
-      shell: true,
-      detached: true,
-      windowsHide: false,
-      stdio: "ignore",
-    }).unref();
+    // Fire-and-forget; a synchronous spawn throw (e.g. ENOENT/bad shell) must stay
+    // NON-FATAL — the manual command below is still returned for the UI copy button.
+    try {
+      spawn(`start "Codex Login" cmd /k "${inner}"`, {
+        shell: true,
+        detached: true,
+        windowsHide: false,
+        stdio: "ignore",
+      }).unref();
+    } catch (err) {
+      console.warn("[codex-login] failed to launch login terminal (non-fatal):", err);
+    }
     return { command: `$env:CODEX_HOME='${home}'; codex login` };
   }
 
   // macOS / Linux: best-effort open of the user's terminal emulator.
   const manual = `CODEX_HOME='${home}' codex login`;
-  spawn("sh", ["-c", `x-terminal-emulator -e ${JSON.stringify(manual)} || open -a Terminal`], {
-    detached: true,
-    stdio: "ignore",
-  }).unref();
+  try {
+    spawn("sh", ["-c", `x-terminal-emulator -e ${JSON.stringify(manual)} || open -a Terminal`], {
+      detached: true,
+      stdio: "ignore",
+    }).unref();
+  } catch (err) {
+    console.warn("[codex-login] failed to launch login terminal (non-fatal):", err);
+  }
   return { command: manual };
 }

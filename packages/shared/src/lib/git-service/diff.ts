@@ -10,7 +10,24 @@ async function getUntrackedDiffEntries(workdirPath: string): Promise<string> {
   const entries: string[] = [];
   for (const f of untrackedFiles.trim().split("\n").filter(Boolean)) {
     try {
-      const content = await readFile(join(workdirPath, ...f.split("/")), "utf-8");
+      const buf = await readFile(join(workdirPath, ...f.split("/")));
+      // Binary detection (git's heuristic): a NUL byte in the first ~8000 bytes
+      // ⇒ binary. utf-8 decode is lossy (not failing) on binary, so without this
+      // check a binary file would be emitted with a garbage `+content` hunk.
+      const sniffLen = Math.min(buf.length, 8000);
+      let isBinary = false;
+      for (let i = 0; i < sniffLen; i++) {
+        if (buf[i] === 0) { isBinary = true; break; }
+      }
+      if (isBinary) {
+        entries.push([
+          `diff --git a/${f} b/${f}`,
+          `new file mode 100644`,
+          `Binary files /dev/null and b/${f} differ`,
+        ].join("\n"));
+        continue;
+      }
+      const content = buf.toString("utf-8");
       const lines = content.split("\n");
       if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
       entries.push([
@@ -149,4 +166,4 @@ export async function getChangedFilesBetween(
   } catch {
     return [];
   }
-}
+}
