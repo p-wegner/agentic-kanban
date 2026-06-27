@@ -21,20 +21,30 @@ export function spawnClaudeLogin(configDir: string): { command: string } {
     // `start "title" cmd /k ...` opens a new console that stays open after login
     // so the user can read the result. windowsHide:false to actually show it.
     const inner = `set "CLAUDE_CONFIG_DIR=${dir}" && claude /login`;
-    spawn(`start "Claude Login" cmd /k "${inner}"`, {
-      shell: true,
-      detached: true,
-      windowsHide: false,
-      stdio: "ignore",
-    }).unref();
+    // Fire-and-forget; a synchronous spawn throw (e.g. ENOENT/bad shell) must stay
+    // NON-FATAL — the manual command below is still returned for the UI copy button.
+    try {
+      spawn(`start "Claude Login" cmd /k "${inner}"`, {
+        shell: true,
+        detached: true,
+        windowsHide: false,
+        stdio: "ignore",
+      }).unref();
+    } catch (err) {
+      console.warn("[claude-login] failed to launch login terminal (non-fatal):", err);
+    }
     return { command: `$env:CLAUDE_CONFIG_DIR='${dir}'; claude /login` };
   }
 
   // macOS / Linux: best-effort open of the user's terminal emulator.
   const manual = `CLAUDE_CONFIG_DIR='${dir}' claude /login`;
-  spawn("sh", ["-c", `x-terminal-emulator -e ${JSON.stringify(manual)} || open -a Terminal`], {
-    detached: true,
-    stdio: "ignore",
-  }).unref();
+  try {
+    spawn("sh", ["-c", `x-terminal-emulator -e ${JSON.stringify(manual)} || open -a Terminal`], {
+      detached: true,
+      stdio: "ignore",
+    }).unref();
+  } catch (err) {
+    console.warn("[claude-login] failed to launch login terminal (non-fatal):", err);
+  }
   return { command: manual };
 }

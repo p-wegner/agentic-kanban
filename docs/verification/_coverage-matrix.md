@@ -3,7 +3,7 @@
 Generated from `_coverage.json` (`render.mjs`). **NOT line coverage** — a behaviour is
 "covered" only when a test asserts its observable outcome across its risk-relevant dimensions.
 
-**Overall: 0.916 — 271 covered · 3 partial · 0 uncovered across 274 behaviours in 15 capabilities.**
+**Overall: 0.916 — 272 covered · 2 partial · 0 uncovered across 274 behaviours in 15 capabilities.**
 
 | Capability | Score | Covered | Partial | Uncovered | Weakest dimensions |
 |---|--:|--:|--:|--:|---|

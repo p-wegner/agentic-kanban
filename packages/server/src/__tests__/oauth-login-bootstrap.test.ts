@@ -1,4 +1,4 @@
-// @covers agent-providers.login.oauthBootstrap [workflow, config]
+// @covers agent-providers.login.oauthBootstrap [workflow, error-handling, config]
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 /**
@@ -16,20 +16,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  * We mock the spawn seam (node:child_process) and the dir-create seam (node:fs)
  * so nothing real is spawned and no real dir is created.
  *
- * NOTE on error-handling (intentionally NOT claimed in @covers): the product does
- * NOT wrap spawn in a try/catch. The non-fatal property is achieved only by
- * FIRE-AND-FORGET — the launch is `spawn(...).unref()` with no awaiting and no
- * 'error' listener, so an (async) failure to pop the terminal is ignored and the
- * manual command is returned regardless. A *synchronous* spawn throw, however, IS
- * currently FATAL (there is no catch) — that real failure path is uncovered and is
- * the basis for a product-hardening ticket. We therefore claim only [workflow, config]
- * and assert the observable contract (manual command returned + unref) without pinning
- * the current no-hardening shape, so adding a catch/'error' listener would not break
- * this test.
+ * NOTE on error-handling (now honestly claimed in @covers): the non-fatal property
+ * has two layers. (1) FIRE-AND-FORGET — the launch is `spawn(...).unref()` with no
+ * awaiting, so an (async) failure to pop the terminal is ignored and the manual
+ * command is returned regardless. (2) The spawn call is wrapped in a try/catch
+ * (#941), so a *synchronous* spawn throw (e.g. ENOENT / bad shell) is also caught,
+ * logged as a non-fatal warning, and the manual command is STILL returned — it is no
+ * longer fatal. Both the fire-and-forget and the sync-throw paths are asserted below.
  *
  * Mutation checks:
  *  - flip windowsHide to true   -> the windowsHide:false assertion goes RED.
  *  - drop the manual-command return / make it depend on spawn -> non-fatal tests RED.
+ *  - remove the try/catch around spawn -> the sync-throw tests go RED (function throws).
  */
 
 const spawnMock = vi.fn();
@@ -142,5 +140,37 @@ describe("oauth-login-bootstrap (windows visible-terminal spawn)", () => {
     expect(result.command).toContain("claude /login");
     expect(result.command).toContain(dir);
     expect(proc.unref).toHaveBeenCalled();
+  });
+
+  it("non-fatal (sync throw): a synchronous spawn throw is caught and the manual command is STILL returned (codex)", () => {
+    // ENOENT / bad shell etc. throw synchronously from spawn(). The try/catch (#941)
+    // must swallow it so the function does NOT throw and still returns the copy command.
+    spawnMock.mockImplementation(() => {
+      throw new Error("spawn cmd ENOENT");
+    });
+    const home = "C:\\creds\\codex-license-E";
+
+    let result: { command: string } | undefined;
+    expect(() => {
+      result = spawnCodexLogin(home);
+    }).not.toThrow();
+
+    expect(result?.command).toContain("codex login");
+    expect(result?.command).toContain(home);
+  });
+
+  it("non-fatal (sync throw): a synchronous spawn throw is caught and the manual command is STILL returned (claude)", () => {
+    spawnMock.mockImplementation(() => {
+      throw new Error("spawn cmd ENOENT");
+    });
+    const dir = "C:\\creds\\claude-sub-F";
+
+    let result: { command: string } | undefined;
+    expect(() => {
+      result = spawnClaudeLogin(dir);
+    }).not.toThrow();
+
+    expect(result?.command).toContain("claude /login");
+    expect(result?.command).toContain(dir);
   });
 });

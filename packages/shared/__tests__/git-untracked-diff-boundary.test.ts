@@ -90,12 +90,18 @@ describe("getUntrackedDiffEntries boundary cases", () => {
     expect(section).toContain("diff --git a/asset.bin b/asset.bin");
     expect(section).toContain("new file mode 100644");
 
-    // CHARACTERIZATION (not the brief's guess): `readFile(path, "utf-8")` does NOT
-    // throw on binary/NUL bytes — utf-8 decode is lossy, not failing — so the
-    // header-only catch branch is NOT taken. The file is emitted WITH a content
-    // hunk (one line here, since the bytes contain no 0x0a). i.e. there is no real
-    // binary detection; binary bytes get rendered as `+` content. Pin that here.
-    expect(section).toContain("@@ -0,0 +1,1 @@");
+    // FIXED behaviour: the synthesis now sniffs for a NUL byte and emits a
+    // HEADER-ONLY entry for binary files (git-style "Binary files ... differ"),
+    // NOT a `+content` hunk of garbage replacement chars.
+    const normalizedSection = lf(section);
+    // No content hunk header and no `+` content lines for the binary file.
+    expect(normalizedSection).not.toContain("@@ -0,0 +1");
+    const plusLines = normalizedSection
+      .split("\n")
+      .filter((l) => l.startsWith("+") && !l.startsWith("+++"));
+    expect(plusLines).toEqual([]);
+    // git-style binary marker present.
+    expect(normalizedSection.toLowerCase()).toContain("binary");
     expect(lf(diff)).not.toContain("<<<<<<<");
   }, 30000);
 

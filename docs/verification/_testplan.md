@@ -4,7 +4,7 @@
 > behaviour; the tick is derived from `_coverage.json` (`testplan.mjs`). Regenerate after
 > tests land and ticks update themselves — the plan can't drift from reality.
 
-**Progress: 271/274 scenarios covered (99%)** · 3 partial · 0 to author
+**Progress: 272/274 scenarios covered (99%)** · 2 partial · 0 to author
 
 `[████████████████████]`
 
@@ -16,7 +16,7 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 
 | Capability | Covered | Plan |
 |---|--:|---|
-| [agent-providers](#agent-providers) | 15/16 | `[█████████░]` |
+| [agent-providers](#agent-providers) | 16/16 | `[██████████]` |
 | [agent-sessions](#agent-sessions) | 19/20 | `[██████████]` |
 | [board-ui](#board-ui) | 24/24 | `[██████████]` |
 | [butler](#butler) | 19/19 | `[██████████]` |
@@ -36,13 +36,8 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 
 ## agent-providers
 
-**agent-providers** — 15/16 covered `[█████████░]`
+**agent-providers** — 16/16 covered `[██████████]`
 
-- [~] ⚠️ **medium** `agent-providers.login.oauthBootstrap` — Picking a Codex license / Claude subscription with no auth on disk creates the credential dir and pops a REAL visible terminal (windowsHide:false) running codex login / claude /login with the right CODEX_HOME/CLAUDE_CONFIG_DIR; failure is non-fatal because the equivalent manual command is returned for a copy-button
-  - _given_ operator
-  - _then_ a foreground terminal opens for the OAuth callback server; the manual command string is returned; a hidden/background spawn would tear down the callback
-  - _add dimensions_ error-handling
-  - _gap_ No test exercises claude-login.service.ts / codex-login.service.ts. The load-bearing invariant (windowsHide:false so the OAuth callback survives) and the non-fatal-failure / returned-manual-command contract are entirely 
 - [x] ✅ `agent-providers.build.launch` — buildAgentLaunchConfig dispatches by ProviderName to the matching adapter and returns a ready-to-spawn {command,args,env} plus stdin-delivery hints
   - _given_ agent-sessions
   - _then_ config.command/args/env reflect the provider's invocation grammar; claude-code routes to claude; unknown provider throws in registry but narrows to claude at narrowProviderName
@@ -99,6 +94,10 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
   - _given_ monitor
   - _then_ ring picks next non-cooled license/subscription, switches the active-profile pref, builder resumes same worktree with a continuation prompt; non-builder or no-fresh-profile → blocked, never silently relaunched
   - _asserted by_ `rate-limit-exit-decision.test.ts::relaunches only when rotated to a fresh profile `, `usage-limit-rotation-exit.test.ts::rotates a Codex license and relaunches the build`, `usage-limit-rotation-exit.test.ts::leaves the workspace blocked (no relaunch) when `, `codex-license-ring.test.ts::pickNextLicense rotates to the next entry in rin`
+- [x] ✅ `agent-providers.login.oauthBootstrap` — Picking a Codex license / Claude subscription with no auth on disk creates the credential dir and pops a REAL visible terminal (windowsHide:false) running codex login / claude /login with the right CODEX_HOME/CLAUDE_CONFIG_DIR; failure is non-fatal because the equivalent manual command is returned for a copy-button
+  - _given_ operator
+  - _then_ a foreground terminal opens for the OAuth callback server; the manual command string is returned; a hidden/background spawn would tear down the callback
+  - _asserted by_ `oauth-login-bootstrap.test.ts::(authored wave6-10 @covers)`
 - [x] ✅ `agent-providers.strip.profileEnv` — Before a profile is applied, the server's own profile-owned ANTHROPIC_* env vars are stripped from the spawn env to prevent cross-profile credential bleed, and if a Claude profile sets ANTHROPIC_AUTH_TOKEN but no key, ANTHROPIC_API_KEY is deleted so the profile's auth wins cleanly
   - _given_ agent-sessions
   - _then_ the spawn env contains no leaked server ANTHROPIC_* vars; token+key conflict is resolved by dropping the key

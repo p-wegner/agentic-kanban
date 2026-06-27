@@ -1194,7 +1194,7 @@
     },
     {
       "ref": "agent-providers.login.oauthBootstrap",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/server/src/__tests__/oauth-login-bootstrap.test.ts::(authored wave6-10 @covers)",
@@ -1203,18 +1203,10 @@
       ],
       "dimensions_covered": [
         "config",
+        "error-handling",
         "workflow"
       ],
-      "dimensions_missing": [
-        "error-handling"
-      ],
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": [
-          "error-handling"
-        ],
-        "rationale": "No test exercises claude-login.service.ts / codex-login.service.ts. The load-bearing invariant (windowsHide:false so the OAuth callback survives) and the non-fatal-failure / returned-manual-command contract are entirely unverified. Hard to e2e (real terminal) but the command-construction and env (CODEX_HOME/CLAUDE_CONFIG_DIR) and the spawn options object are unit-testable with a mocked spawn."
-      }
+      "dimensions_missing": []
     },
     {
       "ref": "agent-providers.strip.profileEnv",
@@ -7807,19 +7799,7 @@
           "state-transition (full preflight verdict folding)",
           "config (env-stripping under a polluted process env)"
         ],
-        "top_gaps": [
-          {
-            "ref": "agent-providers.login.oauthBootstrap",
-            "priority": "medium",
-            "roi": "medium",
-            "dimensions_to_add": [
-              "workflow",
-              "error-handling",
-              "config"
-            ],
-            "rationale": "Zero coverage of the OAuth login bootstrap. The windowsHide:false invariant (callback server must run foreground) and the non-fatal-failure + returned-manual-command behavior are unverified. Unit-testable with a mocked spawn asserting the command/args/env (CODEX_HOME/CLAUDE_CONFIG_DIR) and spawn options; full terminal e2e is impractical."
-          }
-        ]
+        "top_gaps": []
       },
       "agent-sessions": {
         "covered": 17,
@@ -8733,8 +8713,8 @@
     ],
     "weak_dimension_note": "state-transition is the weakest column (4 uncovered + 1 partial) \u00e2\u20ac\u201d every gap is a runtime lifecycle edge: plan approve/reject, hang-watchdog kill, restart-reattach, post-merge cascade, quarantine\u00e2\u2020\u2019In Progress. error is second-weakest, driven by two un-asserted negatives (turn-missing-content, one-direct exact status) and the watchdog. permission is correctly near-empty (single-user).",
     "totals": {
-      "covered": 271,
-      "partial": 3,
+      "covered": 272,
+      "partial": 2,
       "uncovered": 0,
       "undocumented_implemented": 0,
       "documented_missing": 0,
