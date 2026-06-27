@@ -25,6 +25,7 @@ import { WorkspaceEmptyState } from "./WorkspaceEmptyState.js";
 import { WorkspacePanelHeader } from "./WorkspacePanelHeader.js";
 import { useWorkspaceGithubHandoff } from "../hooks/useWorkspaceGithubHandoff.js";
 import { useWorkspaceActions } from "../hooks/useWorkspaceActions.js";
+import { useWorkspacePlanReview } from "../hooks/useWorkspacePlanReview.js";
 import { invalidateClientSurface } from "../lib/clientInvalidation.js";
 import {
   fetchLatestCommits,
@@ -111,11 +112,16 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
 
   const [latestCommits, setLatestCommits] = useState<Record<string, { sha: string; message: string } | null>>({});
   const { githubDrafts, setGithubDrafts, handleGenerateGithubDraft, handleCopyGithubDraft, handleExportHandoffBundle } = useWorkspaceGithubHandoff({ setActionLoading, setError, onWorkspaceChange: invalidateWorkspaceSurface });
-  const [planContent, setPlanContent] = useState<Record<string, string | null>>({});
-  const [planEditMode, setPlanEditMode] = useState<Record<string, boolean>>({});
-  const [planEditText, setPlanEditText] = useState<Record<string, string>>({});
-  const [rejectMode, setRejectMode] = useState<Record<string, boolean>>({});
-  const [rejectFeedback, setRejectFeedback] = useState<Record<string, string>>({});
+  // Per-workspace plan-review inline-edit state (plan contents + implement/reject
+  // toggles + draft text) — owned by useWorkspacePlanReview; setPlanContent is
+  // hydrated by fetchWorkspaces, the rest threaded into useWorkspaceActions.
+  const {
+    planContent, setPlanContent,
+    planEditMode, setPlanEditMode,
+    planEditText, setPlanEditText,
+    rejectMode, setRejectMode,
+    rejectFeedback, setRejectFeedback,
+  } = useWorkspacePlanReview();
   const initialSessionAppliedRef = useRef(false);
   // Guards against finalizing the same session more than once: the WS may push
   // trailing `messages` updates after the terminal `exit`, each re-running the
