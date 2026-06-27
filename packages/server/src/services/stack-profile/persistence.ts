@@ -152,6 +152,39 @@ export async function saveStackProfile(
   }
 }
 
+/** The empty profile used as the merge base when a project has no persisted
+ *  profile yet but the user is overriding fields from the UI. */
+function emptyManualStackProfile(): StackProfile {
+  return {
+    stack: null, packageManager: null, isMonorepo: false, workspaces: [],
+    installCommand: null, buildCommand: null, testCommand: null, quickTestCommand: null,
+    lintCommand: null, typecheckCommand: null, devCommand: null, isWeb: false,
+    devHealthUrl: null, devPort: null, testDir: null, testRunner: null,
+    source: "manual", detectedMarkers: [], updatedAt: new Date().toISOString(),
+  };
+}
+
+/** Apply a partial UI override onto the existing (or empty) profile and persist it
+ *  as `source: "manual"` so a later auto-detect won't silently clobber it. Returns
+ *  the merged profile. Owns the default StackProfile shape so route handlers don't
+ *  have to enumerate every field. */
+export async function saveManualStackProfile(
+  projectId: string,
+  partial: Partial<StackProfile>,
+  database: Database,
+  repoPath?: string,
+): Promise<StackProfile> {
+  const existing = (await getStackProfile(projectId, database)) ?? emptyManualStackProfile();
+  const merged: StackProfile = {
+    ...existing,
+    ...partial,
+    source: "manual",
+    updatedAt: new Date().toISOString(),
+  };
+  await saveStackProfile(projectId, merged, database, repoPath);
+  return merged;
+}
+
 /** Read a project's persisted stack profile, or null if none has been computed. */
 export async function getStackProfile(
   projectId: string,
