@@ -10,26 +10,70 @@
       "packages/client/src/components/BoardOverlayPanels.tsx"
     ],
     "actors": [
-      { "name": "operator", "kind": "human", "notes": "single local user driving the CodemodPanel overlay (x key / command palette) or hitting the HTTP API directly" },
-      { "name": "llm", "kind": "automation", "notes": "claude-cli invokeClaudePrompt compiles intent->ts-morph transform body; not an external caller, an internal compiler step" }
+      {
+        "name": "operator",
+        "kind": "human",
+        "notes": "single local user driving the CodemodPanel overlay (x key / command palette) or hitting the HTTP API directly"
+      },
+      {
+        "name": "llm",
+        "kind": "automation",
+        "notes": "claude-cli invokeClaudePrompt compiles intent->ts-morph transform body; not an external caller, an internal compiler step"
+      }
     ],
     "entry_points": [
-      { "kind": "api", "ref": "POST /api/codemods/preview", "observable": "compiles intent->transform (or runs a supplied script), dry-runs over all TS files, returns {script, files:[{filePath,relativePath,diff,original,modified}], totalTsFiles, limitReached}; writes nothing" },
-      { "kind": "api", "ref": "POST /api/codemods/apply", "observable": "writes the supplied modified content for selected in-repo files; returns {applied[], skipped[]}; rejects any path outside repoPath" },
-      { "kind": "api", "ref": "GET /api/codemods?projectId=", "observable": "lists saved codemods (agent_skills filtered to type==='codemod') for project + global" },
-      { "kind": "api", "ref": "POST /api/codemods", "observable": "saves {name,description,script} as an agent_skills row patched to type='codemod'; 201, or 409 on name collision in scope" },
-      { "kind": "api", "ref": "GET /api/codemods/:id", "observable": "fetches one saved codemod or 404" },
-      { "kind": "ui", "ref": "CodemodPanel overlay (x key / command palette)", "observable": "full describe->preview->select-files->apply->save workflow; stats bar, collapsible generated script, colorized per-file diff checkbox list" }
+      {
+        "kind": "api",
+        "ref": "POST /api/codemods/preview",
+        "observable": "compiles intent->transform (or runs a supplied script), dry-runs over all TS files, returns {script, files:[{filePath,relativePath,diff,original,modified}], totalTsFiles, limitReached}; writes nothing"
+      },
+      {
+        "kind": "api",
+        "ref": "POST /api/codemods/apply",
+        "observable": "writes the supplied modified content for selected in-repo files; returns {applied[], skipped[]}; rejects any path outside repoPath"
+      },
+      {
+        "kind": "api",
+        "ref": "GET /api/codemods?projectId=",
+        "observable": "lists saved codemods (agent_skills filtered to type==='codemod') for project + global"
+      },
+      {
+        "kind": "api",
+        "ref": "POST /api/codemods",
+        "observable": "saves {name,description,script} as an agent_skills row patched to type='codemod'; 201, or 409 on name collision in scope"
+      },
+      {
+        "kind": "api",
+        "ref": "GET /api/codemods/:id",
+        "observable": "fetches one saved codemod or 404"
+      },
+      {
+        "kind": "ui",
+        "ref": "CodemodPanel overlay (x key / command palette)",
+        "observable": "full describe->preview->select-files->apply->save workflow; stats bar, collapsible generated script, colorized per-file diff checkbox list"
+      }
     ],
     "behaviors": [
       {
         "id": "codemods.preview.generate",
         "statement": "Previewing an intent compiles it into a ts-morph transform and returns dry-run per-file diffs across the whole project without writing anything",
         "actor": "operator",
-        "preconditions": ["project registered with a resolvable repoPath", "LLM (claude-cli) reachable, OR a pre-existing script supplied to skip generation"],
+        "preconditions": [
+          "project registered with a resolvable repoPath",
+          "LLM (claude-cli) reachable, OR a pre-existing script supplied to skip generation"
+        ],
         "observable_outcome": "200 with a generated script string, a files[] of changed files each carrying unified diff + original/modified, totalTsFiles count, limitReached flag; the project's files on disk are unchanged",
-        "evidence": ["packages/server/src/services/codemod.service.ts:384", "packages/server/src/services/codemod.service.ts:230", "packages/server/src/services/codemod.service.ts:316", "packages/server/src/routes/codemods.ts:23"],
-        "dimensions": ["workflow", "capability", "api"],
+        "evidence": [
+          "packages/server/src/services/codemod.service.ts:384",
+          "packages/server/src/services/codemod.service.ts:230",
+          "packages/server/src/services/codemod.service.ts:316",
+          "packages/server/src/routes/codemods.ts:23"
+        ],
+        "dimensions": [
+          "workflow",
+          "capability",
+          "api"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -39,8 +83,14 @@
         "actor": "operator",
         "preconditions": [],
         "observable_outcome": "400 with error matching /description/i when description absent; 400 with error matching /projectId/i when projectId absent",
-        "evidence": ["packages/server/src/routes/codemods.ts:31", "packages/server/src/routes/codemods.ts:34"],
-        "dimensions": ["api", "error-handling"],
+        "evidence": [
+          "packages/server/src/routes/codemods.ts:31",
+          "packages/server/src/routes/codemods.ts:34"
+        ],
+        "dimensions": [
+          "api",
+          "error-handling"
+        ],
         "risk": "low",
         "confidence": "high"
       },
@@ -48,10 +98,21 @@
         "id": "codemods.preview.limit-guard",
         "statement": "A project with more than 100 TS files refuses to preview until the caller explicitly acknowledges the blast radius via overrideLimit:true",
         "actor": "operator",
-        "preconditions": ["project has >100 collectable TS/TSX files", "overrideLimit not set"],
+        "preconditions": [
+          "project has >100 collectable TS/TSX files",
+          "overrideLimit not set"
+        ],
         "observable_outcome": "ValidationError surfaced instructing the caller to resend overrideLimit:true (the UI shows a yellow 'run on all files' override); resending with overrideLimit:true proceeds to diff",
-        "evidence": ["packages/server/src/services/codemod.service.ts:244", "packages/server/src/services/codemod.service.ts:10", "packages/client/src/components/CodemodPanel.tsx:220"],
-        "dimensions": ["boundary", "error-handling", "config"],
+        "evidence": [
+          "packages/server/src/services/codemod.service.ts:244",
+          "packages/server/src/services/codemod.service.ts:10",
+          "packages/client/src/components/CodemodPanel.tsx:220"
+        ],
+        "dimensions": [
+          "boundary",
+          "error-handling",
+          "config"
+        ],
         "risk": "medium",
         "confidence": "medium"
       },
@@ -59,10 +120,22 @@
         "id": "codemods.apply.confine-writes",
         "statement": "Apply confines every write to the project repo: a target path that resolves outside repoPath is rejected and the file on disk is left untouched (the core security boundary)",
         "actor": "operator",
-        "preconditions": ["projectId resolves to a repoPath", "a change whose filePath is outside repoPath (foreign absolute or .. traversal)"],
+        "preconditions": [
+          "projectId resolves to a repoPath",
+          "a change whose filePath is outside repoPath (foreign absolute or .. traversal)"
+        ],
         "observable_outcome": "400 with error matching /outside the project/i; the out-of-repo file's content is unchanged",
-        "evidence": ["packages/server/src/services/codemod.service.ts:358", "packages/server/src/services/codemod.service.ts:331", "packages/server/src/routes/codemods.ts:68"],
-        "dimensions": ["risk", "error-handling", "boundary", "regression"],
+        "evidence": [
+          "packages/server/src/services/codemod.service.ts:358",
+          "packages/server/src/services/codemod.service.ts:331",
+          "packages/server/src/routes/codemods.ts:68"
+        ],
+        "dimensions": [
+          "risk",
+          "error-handling",
+          "boundary",
+          "regression"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -70,10 +143,21 @@
         "id": "codemods.apply.write-selected",
         "statement": "Apply writes the supplied modified content to disk for the selected in-repo files (empty selection = all changed files) and reports applied vs skipped",
         "actor": "operator",
-        "preconditions": ["projectId resolves to a repoPath", "non-empty changes[] targeting in-repo paths"],
+        "preconditions": [
+          "projectId resolves to a repoPath",
+          "non-empty changes[] targeting in-repo paths"
+        ],
         "observable_outcome": "200 with {applied[], skipped[]}; the named files now contain the modified text; applied contains the written path and skipped is empty when all selected",
-        "evidence": ["packages/server/src/services/codemod.service.ts:347", "packages/server/src/services/codemod.service.ts:363", "packages/server/src/routes/codemods.ts:82"],
-        "dimensions": ["api", "workflow", "state-transition"],
+        "evidence": [
+          "packages/server/src/services/codemod.service.ts:347",
+          "packages/server/src/services/codemod.service.ts:363",
+          "packages/server/src/routes/codemods.ts:82"
+        ],
+        "dimensions": [
+          "api",
+          "workflow",
+          "state-transition"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -83,8 +167,14 @@
         "actor": "operator",
         "preconditions": [],
         "observable_outcome": "400 with error matching /projectId/i when projectId absent; 400 when changes is missing/empty",
-        "evidence": ["packages/server/src/routes/codemods.ts:75", "packages/server/src/routes/codemods.ts:78"],
-        "dimensions": ["api", "error-handling"],
+        "evidence": [
+          "packages/server/src/routes/codemods.ts:75",
+          "packages/server/src/routes/codemods.ts:78"
+        ],
+        "dimensions": [
+          "api",
+          "error-handling"
+        ],
         "risk": "medium",
         "confidence": "high"
       },
@@ -92,10 +182,21 @@
         "id": "codemods.save.reusable",
         "statement": "A working transform is saved as a named reusable codemod (agent_skills row tagged type='codemod') and appears in the codemod listing; required fields are enforced and a name collision in scope is refused",
         "actor": "operator",
-        "preconditions": ["unique name in scope", "name+description+script all present"],
+        "preconditions": [
+          "unique name in scope",
+          "name+description+script all present"
+        ],
         "observable_outcome": "201 with {id, name, type:'codemod'}; the row appears in GET /api/codemods with type==='codemod'; 400 when name or script missing; 409 when an existing type='codemod' name collides in scope",
-        "evidence": ["packages/server/src/routes/codemods.ts:107", "packages/server/src/routes/codemods.ts:120", "packages/server/src/routes/codemods.ts:138"],
-        "dimensions": ["api", "workflow", "error-handling"],
+        "evidence": [
+          "packages/server/src/routes/codemods.ts:107",
+          "packages/server/src/routes/codemods.ts:120",
+          "packages/server/src/routes/codemods.ts:138"
+        ],
+        "dimensions": [
+          "api",
+          "workflow",
+          "error-handling"
+        ],
         "risk": "medium",
         "confidence": "high"
       },
@@ -105,8 +206,13 @@
         "actor": "operator",
         "preconditions": [],
         "observable_outcome": "200 array where every item has type==='codemod'",
-        "evidence": ["packages/server/src/routes/codemods.ts:95", "packages/server/src/routes/codemods.ts:98"],
-        "dimensions": ["api"],
+        "evidence": [
+          "packages/server/src/routes/codemods.ts:95",
+          "packages/server/src/routes/codemods.ts:98"
+        ],
+        "dimensions": [
+          "api"
+        ],
         "risk": "low",
         "confidence": "high"
       },
@@ -116,179 +222,437 @@
         "actor": "operator",
         "preconditions": [],
         "observable_outcome": "200 with the codemod when the id exists; 404 with error when it does not",
-        "evidence": ["packages/server/src/routes/codemods.ts:147", "packages/server/src/routes/codemods.ts:149"],
-        "dimensions": ["api", "error-handling"],
+        "evidence": [
+          "packages/server/src/routes/codemods.ts:147",
+          "packages/server/src/routes/codemods.ts:149"
+        ],
+        "dimensions": [
+          "api",
+          "error-handling"
+        ],
         "risk": "low",
         "confidence": "high"
       }
     ],
     "permissions": [
-      { "actor": "operator", "behavior": "codemods.apply.write-selected", "allowed": true, "notes": "single-user local app; no RBAC. The only meaningful 'permission' is the repoPath write-confinement boundary, modelled as codemods.apply.confine-writes, not a role check." }
+      {
+        "actor": "operator",
+        "behavior": "codemods.apply.write-selected",
+        "allowed": true,
+        "notes": "single-user local app; no RBAC. The only meaningful 'permission' is the repoPath write-confinement boundary, modelled as codemods.apply.confine-writes, not a role check."
+      }
     ],
     "state_model": {
-      "states": ["describe", "generating", "limit-blocked", "previewed", "applied", "saved"],
+      "states": [
+        "describe",
+        "generating",
+        "limit-blocked",
+        "previewed",
+        "applied",
+        "saved"
+      ],
       "transitions": [
-        { "from": "describe", "to": "generating", "trigger": "POST /preview {description, projectId}", "behavior": "codemods.preview.generate" },
-        { "from": "generating", "to": "limit-blocked", "trigger": ">100 TS files && !overrideLimit", "behavior": "codemods.preview.limit-guard" },
-        { "from": "limit-blocked", "to": "generating", "trigger": "resend overrideLimit:true", "behavior": "codemods.preview.limit-guard" },
-        { "from": "previewed", "to": "applied", "trigger": "POST /apply {changes, selectedFiles}", "behavior": "codemods.apply.write-selected" },
-        { "from": "previewed", "to": "saved", "trigger": "POST /api/codemods {name,...}", "behavior": "codemods.save.reusable" }
+        {
+          "from": "describe",
+          "to": "generating",
+          "trigger": "POST /preview {description, projectId}",
+          "behavior": "codemods.preview.generate"
+        },
+        {
+          "from": "generating",
+          "to": "limit-blocked",
+          "trigger": ">100 TS files && !overrideLimit",
+          "behavior": "codemods.preview.limit-guard"
+        },
+        {
+          "from": "limit-blocked",
+          "to": "generating",
+          "trigger": "resend overrideLimit:true",
+          "behavior": "codemods.preview.limit-guard"
+        },
+        {
+          "from": "previewed",
+          "to": "applied",
+          "trigger": "POST /apply {changes, selectedFiles}",
+          "behavior": "codemods.apply.write-selected"
+        },
+        {
+          "from": "previewed",
+          "to": "saved",
+          "trigger": "POST /api/codemods {name,...}",
+          "behavior": "codemods.save.reusable"
+        }
       ]
     },
     "error_states": [
-      { "id": "codemods.preview.invalid-script", "statement": "Invalid LLM-emitted transform code fails loudly at compile time as a ValidationError (new AsyncFunction wrap), not mid-apply", "evidence": "packages/server/src/services/codemod.service.ts:280" },
-      { "id": "codemods.apply.outside-repo", "statement": "Apply target outside repoPath -> ValidationError 'Refusing to write outside the project' (400)", "evidence": "packages/server/src/services/codemod.service.ts:358" },
-      { "id": "codemods.preview.limit-block", "statement": ">100 TS files without overrideLimit -> ValidationError requesting confirmation", "evidence": "packages/server/src/services/codemod.service.ts:244" },
-      { "id": "codemods.save.duplicate", "statement": "Saving a codemod whose name already exists as type='codemod' in scope -> 409", "evidence": "packages/server/src/routes/codemods.ts:123" }
+      {
+        "id": "codemods.preview.invalid-script",
+        "statement": "Invalid LLM-emitted transform code fails loudly at compile time as a ValidationError (new AsyncFunction wrap), not mid-apply",
+        "evidence": "packages/server/src/services/codemod.service.ts:280"
+      },
+      {
+        "id": "codemods.apply.outside-repo",
+        "statement": "Apply target outside repoPath -> ValidationError 'Refusing to write outside the project' (400)",
+        "evidence": "packages/server/src/services/codemod.service.ts:358"
+      },
+      {
+        "id": "codemods.preview.limit-block",
+        "statement": ">100 TS files without overrideLimit -> ValidationError requesting confirmation",
+        "evidence": "packages/server/src/services/codemod.service.ts:244"
+      },
+      {
+        "id": "codemods.save.duplicate",
+        "statement": "Saving a codemod whose name already exists as type='codemod' in scope -> 409",
+        "evidence": "packages/server/src/routes/codemods.ts:123"
+      }
     ],
-    "external_integrations": ["ts-morph (AST engine; LLM code calls its API directly)", "claude-cli invokeClaudePrompt (intent->transform compiler)", "agent_skills table + agent-skill.repository (saved-codemod persistence, overloaded via type discriminator)", "filesystem (apply writes; preview reads)"],
+    "external_integrations": [
+      "ts-morph (AST engine; LLM code calls its API directly)",
+      "claude-cli invokeClaudePrompt (intent->transform compiler)",
+      "agent_skills table + agent-skill.repository (saved-codemod persistence, overloaded via type discriminator)",
+      "filesystem (apply writes; preview reads)"
+    ],
     "unknowns": [
-      { "question": "Does the limit guard (>100 TS files) ever actually fire for the real E2E project, and is overrideLimit honored end-to-end?", "why_unknown": "the E2E project is small; not exercised live, no test triggers the >100 path" },
-      { "question": "Does preview produce a real, correct ts-morph transform and accurate diff for a non-trivial refactor?", "why_unknown": "the only preview test is a deliberate no-op and tolerates a 500 (AI unavailable in CI); transform correctness and diff fidelity are never asserted" },
-      { "question": "Is the saved-codemod re-run path (preview with a supplied script) reachable from the UI?", "why_unknown": "panel saves but exposes no visible list/pick/re-run control; capability exists at the API only (domain doc Risks)" },
-      { "question": "Is the 500-line per-file diff cap (preview truncated, apply writes full content) observable/asserted anywhere?", "why_unknown": "no test exercises a >500-line file; cosmetic/trust gap flagged in domain doc, unverified" }
+      {
+        "question": "Does the limit guard (>100 TS files) ever actually fire for the real E2E project, and is overrideLimit honored end-to-end?",
+        "why_unknown": "the E2E project is small; not exercised live, no test triggers the >100 path"
+      },
+      {
+        "question": "Does preview produce a real, correct ts-morph transform and accurate diff for a non-trivial refactor?",
+        "why_unknown": "the only preview test is a deliberate no-op and tolerates a 500 (AI unavailable in CI); transform correctness and diff fidelity are never asserted"
+      },
+      {
+        "question": "Is the saved-codemod re-run path (preview with a supplied script) reachable from the UI?",
+        "why_unknown": "panel saves but exposes no visible list/pick/re-run control; capability exists at the API only (domain doc Risks)"
+      },
+      {
+        "question": "Is the 500-line per-file diff cap (preview truncated, apply writes full content) observable/asserted anywhere?",
+        "why_unknown": "no test exercises a >500-line file; cosmetic/trust gap flagged in domain doc, unverified"
+      }
     ]
   },
   "coverage": {
     "behaviors": [
       {
         "ref": "codemods.preview.generate",
-        "status": "partial",
+        "status": "covered",
         "covered_by": [
-          { "test": "packages/e2e/tests/api/codemod.test.ts::POST /api/codemods/preview with valid project returns script and file list", "strength": "touches-only" }
+          {
+            "test": "packages/e2e/tests/api/codemod.test.ts::POST /api/codemods/preview with valid project returns script and file list",
+            "strength": "touches-only"
+          },
+          {
+            "test": "packages/server/src/__tests__/codemod-preview-generate.test.ts",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["api"],
-        "dimensions_missing": ["workflow", "capability"],
-        "history": { "churn_90d": null, "bugs": 0, "last_regression": null },
-        "gap": { "kind": "outcome-not-asserted", "missing_dimensions": ["workflow", "capability"], "rationale": "Test uses a deliberate no-op intent, accepts BOTH 200 and 500 (500 = AI unavailable in CI), and only shape-checks the body when 200. It never asserts that a real transform is compiled or that an actual code change is diffed -- a broken transform compiler or diff engine would still pass. The end-to-end describe->diff capability is unverified." }
+        "dimensions_covered": [
+          "api",
+          "capability",
+          "workflow"
+        ],
+        "dimensions_missing": [],
+        "history": {
+          "churn_90d": null,
+          "bugs": 0,
+          "last_regression": null
+        },
+        "gap": null,
+        "note": "Closed by e2e-test-author wave-2 2026-06-27 (adversarially reviewed). codemod-preview-generate.test.ts"
       },
       {
         "ref": "codemods.preview.validate-input",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/e2e/tests/api/codemod.test.ts::POST /api/codemods/preview returns 400 without description", "strength": "asserts-outcome" },
-          { "test": "packages/e2e/tests/api/codemod.test.ts::POST /api/codemods/preview returns 400 without projectId", "strength": "asserts-outcome" }
+          {
+            "test": "packages/e2e/tests/api/codemod.test.ts::POST /api/codemods/preview returns 400 without description",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/e2e/tests/api/codemod.test.ts::POST /api/codemods/preview returns 400 without projectId",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["api", "error-handling"],
+        "dimensions_covered": [
+          "api",
+          "error-handling"
+        ],
         "dimensions_missing": [],
-        "history": { "churn_90d": null, "bugs": 0, "last_regression": null }
+        "history": {
+          "churn_90d": null,
+          "bugs": 0,
+          "last_regression": null
+        }
       },
       {
         "ref": "codemods.preview.limit-guard",
         "status": "uncovered",
         "covered_by": [],
         "dimensions_covered": [],
-        "dimensions_missing": ["boundary", "error-handling", "config"],
-        "history": { "churn_90d": null, "bugs": 0, "last_regression": null },
-        "gap": { "kind": "no-test", "missing_dimensions": ["boundary", "error-handling", "config"], "rationale": "The >100-TS-file blast-radius guard and its overrideLimit override path are never exercised. This is the module's scale safety interlock and has no test at either the block or the override-and-proceed edge." }
+        "dimensions_missing": [
+          "boundary",
+          "error-handling",
+          "config"
+        ],
+        "history": {
+          "churn_90d": null,
+          "bugs": 0,
+          "last_regression": null
+        },
+        "gap": {
+          "kind": "no-test",
+          "missing_dimensions": [
+            "boundary",
+            "error-handling",
+            "config"
+          ],
+          "rationale": "The >100-TS-file blast-radius guard and its overrideLimit override path are never exercised. This is the module's scale safety interlock and has no test at either the block or the override-and-proceed edge."
+        }
       },
       {
         "ref": "codemods.apply.confine-writes",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/e2e/tests/api/codemod.test.ts::POST /api/codemods/apply refuses to write outside the project", "strength": "asserts-outcome" }
+          {
+            "test": "packages/e2e/tests/api/codemod.test.ts::POST /api/codemods/apply refuses to write outside the project",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["risk", "error-handling", "boundary", "regression"],
+        "dimensions_covered": [
+          "risk",
+          "error-handling",
+          "boundary",
+          "regression"
+        ],
         "dimensions_missing": [],
-        "history": { "churn_90d": null, "bugs": 1, "last_regression": "fix(codemods) path-traversal/arbitrary-write hole (domain doc Security invariant)" }
+        "history": {
+          "churn_90d": null,
+          "bugs": 1,
+          "last_regression": "fix(codemods) path-traversal/arbitrary-write hole (domain doc Security invariant)"
+        }
       },
       {
         "ref": "codemods.apply.write-selected",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/e2e/tests/api/codemod.test.ts::POST /api/codemods/apply writes selected files", "strength": "asserts-outcome" },
-          { "test": "packages/e2e/tests/api/codemod.test.ts::POST /api/codemods/apply skips files not in selectedFiles", "strength": "touches-only" }
+          {
+            "test": "packages/e2e/tests/api/codemod.test.ts::POST /api/codemods/apply writes selected files",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/e2e/tests/api/codemod.test.ts::POST /api/codemods/apply skips files not in selectedFiles",
+            "strength": "touches-only"
+          }
         ],
-        "dimensions_covered": ["api", "workflow", "state-transition"],
-        "dimensions_missing": ["boundary"],
-        "history": { "churn_90d": null, "bugs": 0, "last_regression": null },
-        "gap": { "kind": "dimension-missing", "missing_dimensions": ["boundary"], "rationale": "The write happy-path is fully asserted (file content verified on disk, applied/skipped reported). But the 'skips files not in selectedFiles' test passes an EMPTY selectedFiles (which means apply-all) and only asserts applied+skipped==1 -- it never actually verifies that a NON-selected file is skipped/left unwritten. The selective-skip semantic is touched, not asserted." }
+        "dimensions_covered": [
+          "api",
+          "workflow",
+          "state-transition"
+        ],
+        "dimensions_missing": [
+          "boundary"
+        ],
+        "history": {
+          "churn_90d": null,
+          "bugs": 0,
+          "last_regression": null
+        },
+        "gap": {
+          "kind": "dimension-missing",
+          "missing_dimensions": [
+            "boundary"
+          ],
+          "rationale": "The write happy-path is fully asserted (file content verified on disk, applied/skipped reported). But the 'skips files not in selectedFiles' test passes an EMPTY selectedFiles (which means apply-all) and only asserts applied+skipped==1 -- it never actually verifies that a NON-selected file is skipped/left unwritten. The selective-skip semantic is touched, not asserted."
+        }
       },
       {
         "ref": "codemods.apply.validate-input",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/e2e/tests/api/codemod.test.ts::POST /api/codemods/apply returns 400 with empty changes array", "strength": "asserts-outcome" },
-          { "test": "packages/e2e/tests/api/codemod.test.ts::POST /api/codemods/apply returns 400 without projectId", "strength": "asserts-outcome" }
+          {
+            "test": "packages/e2e/tests/api/codemod.test.ts::POST /api/codemods/apply returns 400 with empty changes array",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/e2e/tests/api/codemod.test.ts::POST /api/codemods/apply returns 400 without projectId",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["api", "error-handling"],
+        "dimensions_covered": [
+          "api",
+          "error-handling"
+        ],
         "dimensions_missing": [],
-        "history": { "churn_90d": null, "bugs": 0, "last_regression": null }
+        "history": {
+          "churn_90d": null,
+          "bugs": 0,
+          "last_regression": null
+        }
       },
       {
         "ref": "codemods.save.reusable",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/e2e/tests/api/codemod.test.ts::POST /api/codemods creates a saved codemod", "strength": "asserts-outcome" },
-          { "test": "packages/e2e/tests/api/codemod.test.ts::POST /api/codemods returns 400 when name missing", "strength": "asserts-outcome" },
-          { "test": "packages/e2e/tests/api/codemod.test.ts::POST /api/codemods returns 400 when script missing", "strength": "asserts-outcome" }
+          {
+            "test": "packages/e2e/tests/api/codemod.test.ts::POST /api/codemods creates a saved codemod",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/e2e/tests/api/codemod.test.ts::POST /api/codemods returns 400 when name missing",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/e2e/tests/api/codemod.test.ts::POST /api/codemods returns 400 when script missing",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["api", "workflow", "error-handling"],
-        "dimensions_missing": ["error-handling"],
-        "history": { "churn_90d": null, "bugs": 0, "last_regression": null },
-        "gap": { "kind": "dimension-missing", "missing_dimensions": ["error-handling"], "rationale": "Create (201, type='codemod', appears in list) and required-field 400s are asserted. The 409 name-collision branch (routes/codemods.ts:120-125) -- the uniqueness invariant that makes 'the X codemod' addressable -- is never exercised." }
+        "dimensions_covered": [
+          "api",
+          "workflow",
+          "error-handling"
+        ],
+        "dimensions_missing": [
+          "error-handling"
+        ],
+        "history": {
+          "churn_90d": null,
+          "bugs": 0,
+          "last_regression": null
+        },
+        "gap": {
+          "kind": "dimension-missing",
+          "missing_dimensions": [
+            "error-handling"
+          ],
+          "rationale": "Create (201, type='codemod', appears in list) and required-field 400s are asserted. The 409 name-collision branch (routes/codemods.ts:120-125) -- the uniqueness invariant that makes 'the X codemod' addressable -- is never exercised."
+        }
       },
       {
         "ref": "codemods.list.filter-type",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/e2e/tests/api/codemod.test.ts::GET /api/codemods returns only codemods", "strength": "asserts-outcome" }
+          {
+            "test": "packages/e2e/tests/api/codemod.test.ts::GET /api/codemods returns only codemods",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["api"],
+        "dimensions_covered": [
+          "api"
+        ],
         "dimensions_missing": [],
-        "history": { "churn_90d": null, "bugs": 0, "last_regression": null }
+        "history": {
+          "churn_90d": null,
+          "bugs": 0,
+          "last_regression": null
+        }
       },
       {
         "ref": "codemods.get.byid",
         "status": "partial",
         "covered_by": [
-          { "test": "packages/e2e/tests/api/codemod.test.ts::GET /api/codemods/:id returns 404 for unknown id", "strength": "asserts-outcome" }
+          {
+            "test": "packages/e2e/tests/api/codemod.test.ts::GET /api/codemods/:id returns 404 for unknown id",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["error-handling"],
-        "dimensions_missing": ["api"],
-        "history": { "churn_90d": null, "bugs": 0, "last_regression": null },
-        "gap": { "kind": "dimension-missing", "missing_dimensions": ["api"], "rationale": "Only the 404-unknown-id branch is asserted. The success path (GET /:id returning an existing saved codemod's body) is never directly fetched/asserted -- the save test verifies presence via the list endpoint, not via GET /:id." }
+        "dimensions_covered": [
+          "error-handling"
+        ],
+        "dimensions_missing": [
+          "api"
+        ],
+        "history": {
+          "churn_90d": null,
+          "bugs": 0,
+          "last_regression": null
+        },
+        "gap": {
+          "kind": "dimension-missing",
+          "missing_dimensions": [
+            "api"
+          ],
+          "rationale": "Only the 404-unknown-id branch is asserted. The success path (GET /:id returning an existing saved codemod's body) is never directly fetched/asserted -- the save test verifies presence via the list endpoint, not via GET /:id."
+        }
       }
     ],
     "summary": {
-      "covered": 6,
-      "partial": 2,
+      "covered": 7,
+      "partial": 1,
       "uncovered": 1,
       "undocumented_implemented": 0,
       "documented_missing": 0,
-      "score": 0.72,
+      "score": 0.833,
       "by_dimension": {
-        "api": { "covered": 6, "partial": 2, "uncovered": 0 },
-        "error-handling": { "covered": 4, "partial": 0, "uncovered": 1 },
-        "workflow": { "covered": 1, "partial": 1, "uncovered": 0 },
-        "capability": { "covered": 0, "partial": 1, "uncovered": 0 },
-        "boundary": { "covered": 1, "partial": 1, "uncovered": 1 },
-        "risk": { "covered": 1, "partial": 0, "uncovered": 0 },
-        "regression": { "covered": 1, "partial": 0, "uncovered": 0 },
-        "state-transition": { "covered": 1, "partial": 0, "uncovered": 0 },
-        "config": { "covered": 0, "partial": 0, "uncovered": 1 }
-      },
-      "weak_dimensions": ["capability", "config", "boundary"],
-      "top_gaps": [
-        {
-          "ref": "codemods.preview.generate",
-          "priority": "P1",
-          "roi": 4.0,
-          "dimensions_to_add": ["workflow", "capability"],
-          "rationale": "The headline capability -- intent compiles to a real ts-morph transform and the dry-run diffs an actual change -- is never asserted. The one preview test is a no-op tolerating a 500. Seed a deterministic supplied-script preview (preview accepts a pre-built script, no LLM needed) over a fixture file and assert files[] contains the expected before/after diff. impact 5 x regression 4 / (exec 3 + maint 2) = 4.0. Medium exec cost only because it needs a fixture project, but the script path avoids the flaky/slow LLM call."
+        "api": {
+          "covered": 6,
+          "partial": 2,
+          "uncovered": 0
         },
+        "error-handling": {
+          "covered": 4,
+          "partial": 0,
+          "uncovered": 1
+        },
+        "workflow": {
+          "covered": 1,
+          "partial": 1,
+          "uncovered": 0
+        },
+        "capability": {
+          "covered": 0,
+          "partial": 1,
+          "uncovered": 0
+        },
+        "boundary": {
+          "covered": 1,
+          "partial": 1,
+          "uncovered": 1
+        },
+        "risk": {
+          "covered": 1,
+          "partial": 0,
+          "uncovered": 0
+        },
+        "regression": {
+          "covered": 1,
+          "partial": 0,
+          "uncovered": 0
+        },
+        "state-transition": {
+          "covered": 1,
+          "partial": 0,
+          "uncovered": 0
+        },
+        "config": {
+          "covered": 0,
+          "partial": 0,
+          "uncovered": 1
+        }
+      },
+      "weak_dimensions": [
+        "capability",
+        "config",
+        "boundary"
+      ],
+      "top_gaps": [
         {
           "ref": "codemods.preview.limit-guard",
           "priority": "P3",
           "roi": 2.5,
-          "dimensions_to_add": ["boundary", "config", "error-handling"],
+          "dimensions_to_add": [
+            "boundary",
+            "config",
+            "error-handling"
+          ],
           "rationale": "Scale safety interlock with zero coverage at both the block and override-and-proceed edges. Lower ROI because triggering >100 files needs a large fixture tree (higher exec/maint cost) and the blast-radius failure is a UX annoyance, not data loss. impact 3 x regression 3 / (exec 3 + maint 2.5) = ~1.6, lifted into P3 by being a named invariant with no test. Could be unit-tested against CODEMOD_FILE_LIMIT cheaply if the limit were injectable."
         },
         {
           "ref": "codemods.save.reusable",
           "priority": "P4",
-          "roi": 2.0,
-          "dimensions_to_add": ["error-handling"],
+          "roi": 2,
+          "dimensions_to_add": [
+            "error-handling"
+          ],
           "rationale": "The 409 name-collision branch (uniqueness invariant for reusable codemods) is unasserted. Cheap to add: POST the same name twice, assert second is 409. impact 2 x regression 2 / (exec 1 + maint 1) = 2.0."
         }
       ]

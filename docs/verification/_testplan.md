@@ -4,7 +4,7 @@
 > behaviour; the tick is derived from `_coverage.json` (`testplan.mjs`). Regenerate after
 > tests land and ticks update themselves — the plan can't drift from reality.
 
-**Progress: 215/273 scenarios covered (79%)** · 35 partial · 23 to author
+**Progress: 221/273 scenarios covered (81%)** · 32 partial · 20 to author
 
 `[████████████████░░░░]`
 
@@ -17,17 +17,17 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 | Capability | Covered | Plan |
 |---|--:|---|
 | [agent-providers](#agent-providers) | 14/16 | `[█████████░]` |
-| [agent-sessions](#agent-sessions) | 13/20 | `[███████░░░]` |
+| [agent-sessions](#agent-sessions) | 14/20 | `[███████░░░]` |
 | [board-ui](#board-ui) | 18/24 | `[████████░░]` |
-| [butler](#butler) | 14/19 | `[███████░░░]` |
-| [codemods](#codemods) | 6/9 | `[███████░░░]` |
+| [butler](#butler) | 15/19 | `[████████░░]` |
+| [codemods](#codemods) | 7/9 | `[████████░░]` |
 | [git-integration](#git-integration) | 16/18 | `[█████████░]` |
 | [issues-board](#issues-board) | 19/20 | `[██████████]` |
-| [mcp-server](#mcp-server) | 13/20 | `[███████░░░]` |
+| [mcp-server](#mcp-server) | 14/20 | `[███████░░░]` |
 | [monitor-orchestration](#monitor-orchestration) | 16/19 | `[████████░░]` |
 | [persistence-schema](#persistence-schema) | 13/15 | `[█████████░]` |
 | [preferences-config](#preferences-config) | 15/16 | `[█████████░]` |
-| [project-registration](#project-registration) | 11/17 | `[██████░░░░]` |
+| [project-registration](#project-registration) | 13/17 | `[████████░░]` |
 | [review-merge](#review-merge) | 15/18 | `[████████░░]` |
 | [workflow-engine](#workflow-engine) | 12/16 | `[████████░░]` |
 | [workspaces](#workspaces) | 20/26 | `[████████░░]` |
@@ -107,18 +107,13 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 
 ## agent-sessions
 
-**agent-sessions** — 13/20 covered `[███████░░░]`
+**agent-sessions** — 14/20 covered `[███████░░░]`
 
 - [ ] ⬜ **P1** `agent-sessions.resume.provider-id` — The provider's own resume token (Claude session_id from system/init, Pi session header) is captured from the stream and stored, then passed as --resume / --session on relaunch so the conversation continues
   - _given_ operator
   - _then_ sessions.providerSessionId persisted; a relaunch spawns with --resume <id> and the agent continues the prior conversation
   - _add dimensions_ workflow, regression, config
   - _gap_ no test asserts that the Claude session_id / Pi session header is captured from init events into sessions.providerSessionId, nor that relaunch passes --resume/--session to continue the conversation; apply-stream-event ex
-- [~] ⚠️ **P1** `agent-sessions.launch.safety-guards` — Launch is gated by safety policy: a Codex builder refuses the gpt-5.3-codex-spark model, an absent model defaults to gpt-5.5, a cross-provider stored model is dropped, and a failed workspace preflight blocks the spawn
-  - _given_ operator
-  - _then_ spark launch rejected (CONFLICT/UNSAFE_CODEX_MODEL, no session row); default resolvedModel=gpt-5.5 in launch stats; cross-provider model not passed as --model; stale-safety preflight throws CONFLICT/STALE_SAFETY_POLICY with no launch
-  - _add dimensions_ config, regression
-  - _gap_ spark refusal, default gpt-5.5, and preflight-block are asserted; the cross-provider-model DROP (a stored gpt-5.5 stripped from a Claude launch — the #698/#696 multi-cycle stall) is NOT directly asserted, only its downst
 - [~] ⚠️ **P2** `agent-sessions.persist.split-batch` — stdout is persisted only to the on-disk .out file while non-stdout events are batched (50 rows / 250ms) into session_messages and flushed on exit; a FK failure from a racing workspace cleanup is swallowed
   - _given_ agent-subprocess
   - _then_ stdout produces zero DB rows; a 50-event non-stdout batch flushes as one insert; remaining buffer flushed at exit; FK-violation insert does not surface as an error
@@ -148,6 +143,10 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
   - _given_ operator
   - _then_ sessions row status=running, workspaceId set, skillId/skillName snapshotted; agent launched with workingDir
   - _asserted by_ `session-lifecycle.test.ts::startSession inserts a running session row and l`, `session-lifecycle.test.ts::records the workspace's skill (id + snapshotted `
+- [x] ✅ `agent-sessions.launch.safety-guards` — Launch is gated by safety policy: a Codex builder refuses the gpt-5.3-codex-spark model, an absent model defaults to gpt-5.5, a cross-provider stored model is dropped, and a failed workspace preflight blocks the spawn
+  - _given_ operator
+  - _then_ spark launch rejected (CONFLICT/UNSAFE_CODEX_MODEL, no session row); default resolvedModel=gpt-5.5 in launch stats; cross-provider model not passed as --model; stale-safety preflight throws CONFLICT/STALE_SAFETY_POLICY with no launch
+  - _asserted by_ `session-lifecycle.test.ts::blocks Codex builder launches that resolve to gp`, `session-lifecycle.test.ts::launches Codex builders with a safe explicit mod`, `session-lifecycle.test.ts::blocks launch before spawning when workspace saf`, `session-lifecycle.test.ts`
 - [x] ✅ `agent-sessions.classify.exit-verdict` — The pure exit classifier returns a verdict by strict priority stopped > usage-limit > launch-failure > completed, with a 10s launch-failure window splitting zero-output vs non-zero-error fast exits
   - _given_ agent-subprocess
   - _then_ classifySessionExit phase + effectiveExitCode/errorText match the priority and window rules at the boundary
@@ -306,7 +305,7 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 
 ## butler
 
-**butler** — 14/19 covered `[███████░░░]`
+**butler** — 15/19 covered `[████████░░]`
 
 - [ ] ⬜ **P1** `butler.feed.systemEvents` — Board events (merge failures, agent crashes, stuck workspaces) are injected as [system event] turns into the warm DEFAULT butler only, rate-limited to 1 turn / 30s / project with bursts collapsed to a summary line; dropped silently if no session is warm
   - _given_ board-event-feed
@@ -318,11 +317,6 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
   - _then_ in-flight stream stops; GET /butler still active:true; next turn accepted
   - _add dimensions_ state-transition, concurrency, api
   - _gap_ the e2e test interrupts with NO active turn and only asserts res.ok(); the MCP test only checks request shape. The real behaviour — cancelling an IN-FLIGHT stream while keeping the session warm and accepting a subsequent
-- [~] ⚠️ **P1** `butler.reject.busy` — A turn is rejected while the butler is busy — a single in-flight turn per session, no concurrent streams into one context
-  - _given_ operator
-  - _then_ POST /message returns 409 (HTTP); at the service layer sendButlerTurn returns false for the second concurrent turn
-  - _add dimensions_ error-handling, api
-  - _gap_ only the service-layer sendButlerTurn=false is asserted; the HTTP-level 409 on POST /message while busy is never asserted by any test
 - [~] ⚠️ **P3** `butler.manage.definitions` — Named butler personas are GLOBAL (shared across projects), CRUD-managed and capped at MAX_BUTLERS=4; the 'default' butler can be renamed/re-modelled but never deleted (it holds back-compat pref keys)
   - _given_ operator
   - _then_ POST creates (201) and appears in list; PUT renames; DELETE removes a named one; default always present; a 5th create is refused; deleting default is refused
@@ -369,6 +363,10 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
   - _given_ operator
   - _then_ first query throws → second query starts WITHOUT resume; session adopts the fresh id; turn succeeds; no error bubble; genuine (non-stale) failures still surface and do NOT retry
   - _asserted by_ `butler-sdk-resume-regression.test.ts::recovers from 'Invalid signature in thinking blo`, `butler-sdk-resume-regression.test.ts::accepts a turn on the fresh session after signat`, `butler-codex-resume-recovery.test.ts::drops a dead resume id and retries the turn on a`, `butler-codex-resume-recovery.test.ts::surfaces a non-resume failure as an error (no in`, `butler-loop-classify.test.ts::resume-reset on invalid thinking signature (only`
+- [x] ✅ `butler.reject.busy` — A turn is rejected while the butler is busy — a single in-flight turn per session, no concurrent streams into one context
+  - _given_ operator
+  - _then_ POST /message returns 409 (HTTP); at the service layer sendButlerTurn returns false for the second concurrent turn
+  - _asserted by_ `butler-provider.test.ts::rejects overlapping Codex Butler turns instead o`, `butler-message-busy-409.test.ts`
 - [x] ✅ `butler.select.backend` — The butler resolves its backend (claude SDK / codex CLI / mock) via the shared provider cascade; a codex license-profile butler launches under its own CODEX_HOME with --profile dropped
   - _given_ operator
   - _then_ GET /butler reports backend matching the provider; GET /profiles lists provider profiles + selected; a codex license butler spawns with CODEX_HOME=licenseDir and no --profile; claude model aliases not applied to a codex butler
@@ -392,23 +390,22 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 
 ## codemods
 
-**codemods** — 6/9 covered `[███████░░░]`
+**codemods** — 7/9 covered `[████████░░]`
 
 - [ ] ⬜ **P3** `codemods.preview.limit-guard` — A project with more than 100 TS files refuses to preview until the caller explicitly acknowledges the blast radius via overrideLimit:true
   - _given_ operator
   - _then_ ValidationError surfaced instructing the caller to resend overrideLimit:true (the UI shows a yellow 'run on all files' override); resending with overrideLimit:true proceeds to diff
   - _add dimensions_ boundary, error-handling, config
   - _gap_ The >100-TS-file blast-radius guard and its overrideLimit override path are never exercised. This is the module's scale safety interlock and has no test at either the block or the override-and-proceed edge.
-- [~] ⚠️ **P1** `codemods.preview.generate` — Previewing an intent compiles it into a ts-morph transform and returns dry-run per-file diffs across the whole project without writing anything
-  - _given_ operator
-  - _then_ 200 with a generated script string, a files[] of changed files each carrying unified diff + original/modified, totalTsFiles count, limitReached flag; the project's files on disk are unchanged
-  - _add dimensions_ workflow, capability
-  - _gap_ Test uses a deliberate no-op intent, accepts BOTH 200 and 500 (500 = AI unavailable in CI), and only shape-checks the body when 200. It never asserts that a real transform is compiled or that an actual code change is dif
 - [~] ⚠️ `codemods.get.byid` — Fetching a saved codemod by id returns it, or 404 for an unknown id
   - _given_ operator
   - _then_ 200 with the codemod when the id exists; 404 with error when it does not
   - _add dimensions_ api
   - _gap_ Only the 404-unknown-id branch is asserted. The success path (GET /:id returning an existing saved codemod's body) is never directly fetched/asserted -- the save test verifies presence via the list endpoint, not via GET 
+- [x] ✅ `codemods.preview.generate` — Previewing an intent compiles it into a ts-morph transform and returns dry-run per-file diffs across the whole project without writing anything
+  - _given_ operator
+  - _then_ 200 with a generated script string, a files[] of changed files each carrying unified diff + original/modified, totalTsFiles count, limitReached flag; the project's files on disk are unchanged
+  - _asserted by_ `codemod.test.ts::POST /api/codemods/preview with valid project re`, `codemod-preview-generate.test.ts`
 - [x] ✅ `codemods.preview.validate-input` — Preview refuses without the two required inputs (description and projectId), returning a 400 that names the missing field
   - _given_ operator
   - _then_ 400 with error matching /description/i when description absent; 400 with error matching /projectId/i when projectId absent
@@ -601,13 +598,8 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 
 ## mcp-server
 
-**mcp-server** — 13/20 covered `[███████░░░]`
+**mcp-server** — 14/20 covered `[███████░░░]`
 
-- [ ] ⬜ **P1** `mcp-server.move.issue.workflow-edge` — A workflow-driven issue may only move along a legal outgoing edge of its current node; an illegal jump is refused with the valid next stages and a pointer to propose_transition
-  - _given_ ai-agent
-  - _then_ illegal target → code WORKFLOW_TRANSITION_INVALID with the list of valid next stages; legal target proceeds
-  - _add dimensions_ error, state-transition, workflow
-  - _gap_ WORKFLOW_TRANSITION_INVALID (move-issue.ts:56) — refusing an illegal workflow-graph jump and returning the valid next stages — has no test. terminal-done-guard covers only the terminal guard, not edge legality. Configura
 - [ ] ⬜ **P1** `mcp-server.create.agent-skill` — create_agent_skill rejects names containing '/', '\' or '..' (they become filesystem paths) and enforces per-scope uniqueness before writing SKILL.md
   - _given_ ai-agent
   - _then_ path-traversal/illegal name → validation error, no skill written; duplicate name in scope → rejected; valid → skill persisted
@@ -662,6 +654,10 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
   - _given_ ai-agent
   - _then_ blocked move returns code OPEN_WORKSPACE_NOT_MERGED; closed/merged/direct/no-workspace moves succeed (movedTo=Done)
   - _asserted by_ `terminal-done-guard.test.ts::blocks move to Done when issue has an open unmer`, `terminal-done-guard.test.ts::allows move to Done when issue has an open DIREC`, `terminal-done-guard.test.ts::blocks statusName=Done when issue has an open un`
+- [x] ✅ `mcp-server.move.issue.workflow-edge` — A workflow-driven issue may only move along a legal outgoing edge of its current node; an illegal jump is refused with the valid next stages and a pointer to propose_transition
+  - _given_ ai-agent
+  - _then_ illegal target → code WORKFLOW_TRANSITION_INVALID with the list of valid next stages; legal target proceeds
+  - _asserted by_ `move-issue-workflow-edge.test.ts`
 - [x] ✅ `mcp-server.get.board-status` — get_board_status answers 'what are my agents doing right now' — totals plus per-in-progress-issue workspace state and computed diff stats, excluding Done/Cancelled unless includeClosed, with no MCP-side cache
   - _given_ ai-agent
   - _then_ totals{totalIssues,inProgress,activeWorkspaces,runningSessions}; per-issue workspace.branch + diffStats; includeClosed toggles terminal issues; reads reflect DB immediately after a status change
@@ -914,23 +910,13 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 
 ## project-registration
 
-**project-registration** — 11/17 covered `[██████░░░░]`
+**project-registration** — 13/17 covered `[████████░░]`
 
 - [ ] ⬜ **P1** `project-registration.register.idempotent` — Re-registering the same repo (or a subdirectory resolving to the same git root) returns the existing project instead of creating a duplicate
   - _given_ operator
   - _then_ result.created === false and the same project id is returned; no second row; issues/skills stay on one project
   - _add dimensions_ workflow, boundary, error-handling
   - _gap_ the UI test fulfills a MOCK 409; no server-level test proves registering the same git root (or a subdirectory of it) returns the existing project with created=false and no second row
-- [ ] ⬜ **P1** `project-registration.dedup.sameGitRoot` — On startup, duplicate registrations resolving to one git root are merged into a single survivor — issues/skills/repos/scheduled-runs and the active-project pointer are moved, statuses remapped by name, duplicates deleted
-  - _given_ startup
-  - _then_ after boot only one project remains for that root; its issues/skills are intact; activeProjectId points at the survivor
-  - _add dimensions_ workflow, state-transition, regression
-  - _gap_ deduplicateProjects is vi.mock'd to a no-op in every test that imports it (startup-tasks/reconcile/issue-transition); the actual merge (move issues/skills/repos, status remap by name, active-project redirect, repoPath fi
-- [ ] ⬜ **P1** `project-registration.repair.backfill` — repairProjectRegistration idempotently backfills driveable state onto an old/partial project — seeds statuses if none, sets defaultBranch if null, and populates profile/verify/setup scripts if unset — never clobbering existing values
-  - _given_ operator
-  - _then_ returns {seededStatuses, setDefaultBranch, populatedStackProfile, populatedVerifyScript, populatedSetupScript}; re-running is a no-op once filled
-  - _add dimensions_ workflow, regression, config
-  - _gap_ repairProjectRegistration's idempotent backfill (seed statuses if none, set branch if null, populate profile/verify/setup if unset) has no direct test; its no-clobber/idempotency on a partial project is unverified
 - [ ] ⬜ **P1** `project-registration.enrich.llmGapFill` — When the rule-detected profile is sparse (no stack, or no test AND no build command) an LLM gap-fill is invoked and merged in ONLY where rules left null — rule facts win — and the whole derivation is fire-and-forget so it never slows or fails registration
   - _given_ operator
   - _then_ persisted profile gains LLM-supplied commands only in null slots, source flips to 'llm'; registration returns immediately regardless of LLM outcome
@@ -954,6 +940,14 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
   - _given_ operator
   - _then_ project.defaultBranch is non-null when a branch is checked out; POST /api/workspaces does not 400 'No default branch configured'
   - _asserted by_ `registration-resolve-default-branch.test.ts`
+- [x] ✅ `project-registration.dedup.sameGitRoot` — On startup, duplicate registrations resolving to one git root are merged into a single survivor — issues/skills/repos/scheduled-runs and the active-project pointer are moved, statuses remapped by name, duplicates deleted
+  - _given_ startup
+  - _then_ after boot only one project remains for that root; its issues/skills are intact; activeProjectId points at the survivor
+  - _asserted by_ `project-dedup-same-git-root.test.ts`
+- [x] ✅ `project-registration.repair.backfill` — repairProjectRegistration idempotently backfills driveable state onto an old/partial project — seeds statuses if none, sets defaultBranch if null, and populates profile/verify/setup scripts if unset — never clobbering existing values
+  - _given_ operator
+  - _then_ returns {seededStatuses, setDefaultBranch, populatedStackProfile, populatedVerifyScript, populatedSetupScript}; re-running is a no-op once filled
+  - _asserted by_ `registration-repair-backfill.test.ts`
 - [x] ✅ `project-registration.detect.stackProfile` — Marker files are reverse-engineered into one durable StackProfile across many stacks (node/pnpm/npm/yarn, rust/cargo, go, python/pip/poetry), inferring package manager, monorepo-ness, build/test/lint/dev commands, web-ness and dev port
   - _given_ operator
   - _then_ detectStackProfile returns a typed profile with the correct stack/commands; empty repo yields a valid sparse profile (stack null, source 'detected')

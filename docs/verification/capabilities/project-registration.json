@@ -640,49 +640,47 @@
       },
       {
         "ref": "project-registration.dedup.sameGitRoot",
-        "status": "uncovered",
-        "covered_by": [],
-        "dimensions_covered": [],
-        "dimensions_missing": [
+        "status": "covered",
+        "covered_by": [
+          {
+            "test": "packages/server/src/__tests__/project-dedup-same-git-root.test.ts",
+            "strength": "asserts-outcome"
+          }
+        ],
+        "dimensions_covered": [
           "workflow",
           "state-transition",
           "regression"
         ],
+        "dimensions_missing": [],
         "history": {
           "churn_90d": null,
           "bugs": 1
         },
-        "gap": {
-          "kind": "no-test",
-          "missing_dimensions": [
-            "workflow",
-            "state-transition"
-          ],
-          "rationale": "deduplicateProjects is vi.mock'd to a no-op in every test that imports it (startup-tasks/reconcile/issue-transition); the actual merge (move issues/skills/repos, status remap by name, active-project redirect, repoPath fixup) is never exercised"
-        }
+        "gap": null,
+        "note": "Closed by e2e-test-author wave-2 2026-06-27 (adversarially reviewed). project-dedup-same-git-root.test.ts"
       },
       {
         "ref": "project-registration.repair.backfill",
-        "status": "uncovered",
-        "covered_by": [],
-        "dimensions_covered": [],
-        "dimensions_missing": [
-          "workflow",
+        "status": "covered",
+        "covered_by": [
+          {
+            "test": "packages/server/src/__tests__/registration-repair-backfill.test.ts",
+            "strength": "asserts-outcome"
+          }
+        ],
+        "dimensions_covered": [
+          "state-transition",
           "regression",
           "config"
         ],
+        "dimensions_missing": [],
         "history": {
           "churn_90d": null,
           "bugs": 0
         },
-        "gap": {
-          "kind": "no-test",
-          "missing_dimensions": [
-            "workflow",
-            "regression"
-          ],
-          "rationale": "repairProjectRegistration's idempotent backfill (seed statuses if none, set branch if null, populate profile/verify/setup if unset) has no direct test; its no-clobber/idempotency on a partial project is unverified"
-        }
+        "gap": null,
+        "note": "Closed by e2e-test-author wave-2 2026-06-27 (adversarially reviewed). registration-repair-backfill.test.ts"
       },
       {
         "ref": "project-registration.detect.stackProfile",
@@ -1020,12 +1018,12 @@
       }
     ],
     "summary": {
-      "covered": 11,
+      "covered": 13,
       "partial": 2,
-      "uncovered": 4,
+      "uncovered": 2,
       "undocumented_implemented": 0,
       "documented_missing": 0,
-      "score": 0.706,
+      "score": 0.824,
       "by_dimension": {
         "config": {
           "covered": 8,
@@ -1079,27 +1077,6 @@
         "state-transition"
       ],
       "top_gaps": [
-        {
-          "ref": "project-registration.dedup.sameGitRoot",
-          "priority": "P1",
-          "roi": 4.5,
-          "dimensions_to_add": [
-            "workflow",
-            "state-transition",
-            "regression"
-          ],
-          "rationale": "deduplicateProjects is mocked away in every test; the actual merge (move issues/skills/repos, remap statuses by name, redirect activeProjectId, fix repoPath) is unverified despite running on every boot. A bug here fragments or loses a repo's issues. Seed two rows sharing a git root, run dedup, assert one survivor with all issues/skills intact."
-        },
-        {
-          "ref": "project-registration.repair.backfill",
-          "priority": "P1",
-          "roi": 4,
-          "dimensions_to_add": [
-            "workflow",
-            "regression"
-          ],
-          "rationale": "The idempotent backfill path that makes old/partial projects driveable (statuses/branch/profile/verify/setup) has no test; its no-clobber + 'only-when-unset' contract is exactly the kind of guard that silently rots. Backfill a partial project, assert each field populated once and a second run is a no-op."
-        },
         {
           "ref": "project-registration.enrich.llmGapFill",
           "priority": "P1",

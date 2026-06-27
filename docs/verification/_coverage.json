@@ -1282,7 +1282,7 @@
     },
     {
       "ref": "agent-sessions.launch.safety-guards",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/server/src/__tests__/session-lifecycle.test.ts::blocks Codex builder launches that resolve to gpt-5.3-codex-spark",
@@ -1295,25 +1295,21 @@
         {
           "test": "packages/server/src/__tests__/session-lifecycle.test.ts::blocks launch before spawning when workspace safety preflight fails",
           "strength": "asserts-outcome"
+        },
+        {
+          "test": "packages/server/src/__tests__/session-lifecycle.test.ts",
+          "strength": "asserts-outcome"
         }
       ],
       "dimensions_covered": [
         "error-handling",
         "config",
-        "regression"
+        "regression",
+        "boundary"
       ],
-      "dimensions_missing": [
-        "config",
-        "regression"
-      ],
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": [
-          "config",
-          "regression"
-        ],
-        "rationale": "spark refusal, default gpt-5.5, and preflight-block are asserted; the cross-provider-model DROP (a stored gpt-5.5 stripped from a Claude launch — the #698/#696 multi-cycle stall) is NOT directly asserted, only its downstream model-error launch-failure is"
-      }
+      "dimensions_missing": [],
+      "gap": null,
+      "note": "Closed by e2e-test-author wave-2 2026-06-27 (adversarially reviewed). session-lifecycle.test.ts"
     },
     {
       "ref": "agent-sessions.classify.exit-verdict",
@@ -2730,32 +2726,29 @@
     },
     {
       "ref": "butler.reject.busy",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/server/src/__tests__/butler-provider.test.ts::rejects overlapping Codex Butler turns instead of enqueueing ambiguous prompts",
           "strength": "asserts-outcome"
+        },
+        {
+          "test": "packages/server/src/__tests__/butler-message-busy-409.test.ts",
+          "strength": "asserts-outcome"
         }
       ],
       "dimensions_covered": [
-        "concurrency"
-      ],
-      "dimensions_missing": [
-        "error-handling",
+        "concurrency",
+        "error",
         "api"
       ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": null,
         "bugs": 0
       },
-      "gap": {
-        "kind": "dimension-missing",
-        "missing_dimensions": [
-          "error-handling",
-          "api"
-        ],
-        "rationale": "only the service-layer sendButlerTurn=false is asserted; the HTTP-level 409 on POST /message while busy is never asserted by any test"
-      }
+      "gap": null,
+      "note": "Closed by e2e-test-author wave-2 2026-06-27 (adversarially reviewed). butler-message-busy-409.test.ts"
     },
     {
       "ref": "butler.manage.definitions",
@@ -2999,33 +2992,30 @@
     },
     {
       "ref": "codemods.preview.generate",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/e2e/tests/api/codemod.test.ts::POST /api/codemods/preview with valid project returns script and file list",
           "strength": "touches-only"
+        },
+        {
+          "test": "packages/server/src/__tests__/codemod-preview-generate.test.ts",
+          "strength": "asserts-outcome"
         }
       ],
       "dimensions_covered": [
-        "api"
+        "api",
+        "capability",
+        "workflow"
       ],
-      "dimensions_missing": [
-        "workflow",
-        "capability"
-      ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": null,
         "bugs": 0,
         "last_regression": null
       },
-      "gap": {
-        "kind": "outcome-not-asserted",
-        "missing_dimensions": [
-          "workflow",
-          "capability"
-        ],
-        "rationale": "Test uses a deliberate no-op intent, accepts BOTH 200 and 500 (500 = AI unavailable in CI), and only shape-checks the body when 200. It never asserts that a real transform is compiled or that an actual code change is diffed -- a broken transform compiler or diff engine would still pass. The end-to-end describe->diff capability is unverified."
-      }
+      "gap": null,
+      "note": "Closed by e2e-test-author wave-2 2026-06-27 (adversarially reviewed). codemod-preview-generate.test.ts"
     },
     {
       "ref": "codemods.preview.validate-input",
@@ -4426,28 +4416,26 @@
     },
     {
       "ref": "mcp-server.move.issue.workflow-edge",
-      "status": "uncovered",
-      "covered_by": [],
-      "dimensions_covered": [],
-      "dimensions_missing": [
-        "error",
-        "state-transition",
-        "workflow"
+      "status": "covered",
+      "covered_by": [
+        {
+          "test": "packages/mcp-server/src/__tests__/tools/move-issue-workflow-edge.test.ts",
+          "strength": "asserts-outcome"
+        }
       ],
+      "dimensions_covered": [
+        "workflow",
+        "state-transition",
+        "error"
+      ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": null,
         "bugs": 0,
         "last_regression": null
       },
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": [
-          "error",
-          "state-transition",
-          "workflow"
-        ],
-        "rationale": "WORKFLOW_TRANSITION_INVALID (move-issue.ts:56) — refusing an illegal workflow-graph jump and returning the valid next stages — has no test. terminal-done-guard covers only the terminal guard, not edge legality. Configurable workflow graphs make this a real, reachable path."
-      }
+      "gap": null,
+      "note": "Closed by e2e-test-author wave-2 2026-06-27 (adversarially reviewed). move-issue-workflow-edge.test.ts"
     },
     {
       "ref": "mcp-server.merge.workspace.delegate",
@@ -6312,49 +6300,47 @@
     },
     {
       "ref": "project-registration.dedup.sameGitRoot",
-      "status": "uncovered",
-      "covered_by": [],
-      "dimensions_covered": [],
-      "dimensions_missing": [
+      "status": "covered",
+      "covered_by": [
+        {
+          "test": "packages/server/src/__tests__/project-dedup-same-git-root.test.ts",
+          "strength": "asserts-outcome"
+        }
+      ],
+      "dimensions_covered": [
         "workflow",
         "state-transition",
         "regression"
       ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": null,
         "bugs": 1
       },
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": [
-          "workflow",
-          "state-transition"
-        ],
-        "rationale": "deduplicateProjects is vi.mock'd to a no-op in every test that imports it (startup-tasks/reconcile/issue-transition); the actual merge (move issues/skills/repos, status remap by name, active-project redirect, repoPath fixup) is never exercised"
-      }
+      "gap": null,
+      "note": "Closed by e2e-test-author wave-2 2026-06-27 (adversarially reviewed). project-dedup-same-git-root.test.ts"
     },
     {
       "ref": "project-registration.repair.backfill",
-      "status": "uncovered",
-      "covered_by": [],
-      "dimensions_covered": [],
-      "dimensions_missing": [
-        "workflow",
+      "status": "covered",
+      "covered_by": [
+        {
+          "test": "packages/server/src/__tests__/registration-repair-backfill.test.ts",
+          "strength": "asserts-outcome"
+        }
+      ],
+      "dimensions_covered": [
+        "state-transition",
         "regression",
         "config"
       ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": null,
         "bugs": 0
       },
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": [
-          "workflow",
-          "regression"
-        ],
-        "rationale": "repairProjectRegistration's idempotent backfill (seed statuses if none, set branch if null, populate profile/verify/setup if unset) has no direct test; its no-clobber/idempotency on a partial project is unverified"
-      }
+      "gap": null,
+      "note": "Closed by e2e-test-author wave-2 2026-06-27 (adversarially reviewed). registration-repair-backfill.test.ts"
     },
     {
       "ref": "project-registration.detect.stackProfile",
@@ -8030,12 +8016,12 @@
         ]
       },
       "agent-sessions": {
-        "covered": 12,
-        "partial": 6,
+        "covered": 14,
+        "partial": 5,
         "uncovered": 1,
         "undocumented_implemented": 0,
         "documented_missing": 0,
-        "score": 0.74,
+        "score": 0.825,
         "by_dimension": {
           "state-transition": {
             "covered": 8,
@@ -8113,16 +8099,6 @@
               "concurrency"
             ],
             "rationale": "reattachSession + notifyExternalExit (the hot-reload-survival promise and its idempotent exit) are untested; only dead-PID cleanup is covered. A regression here double-finalizes (re-launching the next ticket twice) or loses a live agent across restart — the exact failures the idempotency guard exists to prevent."
-          },
-          {
-            "ref": "agent-sessions.launch.safety-guards",
-            "priority": "P1",
-            "roi": 4,
-            "dimensions_to_add": [
-              "config",
-              "regression"
-            ],
-            "rationale": "The cross-provider stored-model DROP (a gpt-5.5 stripped from a Claude launch) is the #698/#696 multi-cycle stall and is not directly asserted — only its downstream model-error launch-failure is. Pin the drop so a cross-provider id can never reach --model again."
           },
           {
             "ref": "agent-sessions.turn.followup",
@@ -8286,12 +8262,12 @@
         "cut_line": "Emitted P1–P3. Below the line (not emitted): board-ui.move.dependencyPreview (P2, dependency-impact preview untested) and palette workspace-action failure-path error handling (P4) — real but lower ROI than the rollback/archive/realtime trio."
       },
       "butler": {
-        "covered": 12,
-        "partial": 4,
+        "covered": 15,
+        "partial": 3,
         "uncovered": 1,
         "undocumented_implemented": 0,
         "documented_missing": 0,
-        "score": 0.74,
+        "score": 0.868,
         "by_dimension": {
           "capability": {
             "covered": 6,
@@ -8370,16 +8346,6 @@
             "rationale": "The entire board-event → butler injection pipeline (AK-75) is unverified — no test touches emitButlerSystemEvent. Asserting that a warm default butler receives a [system event] turn, that bursts collapse to one summary within the 30s window, that named butlers DON'T receive it, and that a cold session drops the event would lock four documented invariants at once. Medium exec/maint cost (in-process service test)."
           },
           {
-            "ref": "butler.reject.busy",
-            "priority": "P1",
-            "roi": 4,
-            "dimensions_to_add": [
-              "error-handling",
-              "api"
-            ],
-            "rationale": "The single-in-flight-turn invariant is only asserted at the service-boolean layer; the HTTP 409 on POST /message while busy — the contract the UI and CLI/MCP depend on — is never asserted. A concurrency-sensitive route that should fail closed. Cheap to add via the test-app route harness."
-          },
-          {
             "ref": "butler.history.access",
             "priority": "P4",
             "roi": 3,
@@ -8411,12 +8377,12 @@
         ]
       },
       "codemods": {
-        "covered": 6,
-        "partial": 2,
+        "covered": 7,
+        "partial": 1,
         "uncovered": 1,
         "undocumented_implemented": 0,
         "documented_missing": 0,
-        "score": 0.72,
+        "score": 0.833,
         "by_dimension": {
           "api": {
             "covered": 6,
@@ -8470,16 +8436,6 @@
           "boundary"
         ],
         "top_gaps": [
-          {
-            "ref": "codemods.preview.generate",
-            "priority": "P1",
-            "roi": 4,
-            "dimensions_to_add": [
-              "workflow",
-              "capability"
-            ],
-            "rationale": "The headline capability -- intent compiles to a real ts-morph transform and the dry-run diffs an actual change -- is never asserted. The one preview test is a no-op tolerating a 500. Seed a deterministic supplied-script preview (preview accepts a pre-built script, no LLM needed) over a fixture file and assert files[] contains the expected before/after diff. impact 5 x regression 4 / (exec 3 + maint 2) = 4.0. Medium exec cost only because it needs a fixture project, but the script path avoids the flaky/slow LLM call."
-          },
           {
             "ref": "codemods.preview.limit-guard",
             "priority": "P3",
@@ -8720,12 +8676,12 @@
         ]
       },
       "mcp-server": {
-        "covered": 13,
+        "covered": 14,
         "partial": 3,
-        "uncovered": 4,
+        "uncovered": 3,
         "undocumented_implemented": 0,
         "documented_missing": 0,
-        "score": 0.725,
+        "score": 0.775,
         "by_dimension": {
           "api": {
             "covered": 9,
@@ -8785,17 +8741,6 @@
           "config(security egress)"
         ],
         "top_gaps": [
-          {
-            "ref": "mcp-server.move.issue.workflow-edge",
-            "priority": "P1",
-            "roi": 4.5,
-            "dimensions_to_add": [
-              "error",
-              "state-transition",
-              "workflow"
-            ],
-            "rationale": "A core, reachable mutation guard (WORKFLOW_TRANSITION_INVALID) with zero coverage on a board that supports configurable workflow graphs. Cheap to test at the registrar level (seed a workflow node, attempt an illegal jump, assert the code + valid-next-stages list). Sits right beside the well-covered terminal guard — symmetry gap."
-          },
           {
             "ref": "mcp-server.create.agent-skill",
             "priority": "P1",
@@ -9093,12 +9038,12 @@
         ]
       },
       "project-registration": {
-        "covered": 11,
+        "covered": 13,
         "partial": 2,
-        "uncovered": 4,
+        "uncovered": 2,
         "undocumented_implemented": 0,
         "documented_missing": 0,
-        "score": 0.706,
+        "score": 0.824,
         "by_dimension": {
           "config": {
             "covered": 8,
@@ -9152,27 +9097,6 @@
           "state-transition"
         ],
         "top_gaps": [
-          {
-            "ref": "project-registration.dedup.sameGitRoot",
-            "priority": "P1",
-            "roi": 4.5,
-            "dimensions_to_add": [
-              "workflow",
-              "state-transition",
-              "regression"
-            ],
-            "rationale": "deduplicateProjects is mocked away in every test; the actual merge (move issues/skills/repos, remap statuses by name, redirect activeProjectId, fix repoPath) is unverified despite running on every boot. A bug here fragments or loses a repo's issues. Seed two rows sharing a git root, run dedup, assert one survivor with all issues/skills intact."
-          },
-          {
-            "ref": "project-registration.repair.backfill",
-            "priority": "P1",
-            "roi": 4,
-            "dimensions_to_add": [
-              "workflow",
-              "regression"
-            ],
-            "rationale": "The idempotent backfill path that makes old/partial projects driveable (statuses/branch/profile/verify/setup) has no test; its no-clobber + 'only-when-unset' contract is exactly the kind of guard that silently rots. Backfill a partial project, assert each field populated once and a second run is a no-op."
-          },
           {
             "ref": "project-registration.enrich.llmGapFill",
             "priority": "P1",
@@ -9396,14 +9320,14 @@
     ],
     "weak_dimension_note": "state-transition is the weakest column (4 uncovered + 1 partial) — every gap is a runtime lifecycle edge: plan approve/reject, hang-watchdog kill, restart-reattach, post-merge cascade, quarantine→In Progress. error is second-weakest, driven by two un-asserted negatives (turn-missing-content, one-direct exact status) and the watchdog. permission is correctly near-empty (single-user).",
     "totals": {
-      "covered": 215,
-      "partial": 35,
-      "uncovered": 23,
+      "covered": 221,
+      "partial": 32,
+      "uncovered": 20,
       "undocumented_implemented": 0,
       "documented_missing": 0,
       "behaviors": 273,
       "capabilities": 15,
-      "overall_score": 0.852
+      "overall_score": 0.868
     }
   }
 }

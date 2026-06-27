@@ -41,6 +41,22 @@
       "tests_passing": "server 10/10 + mcp-server 8/8 (18 cases, 5 files)",
       "product_tickets_filed": ["#926 disabled_mcp_tools no trim/case (security)", "#927 buildSpawnEnv dead branch + CLAUDE_CODE_ env bleed (security)", "#928 Node26 libsql :memory: cascade suite baseline-red"],
       "followups_logged": ["workflow-engine maxVisits/terminal via MCP", "cascade-delete: set-null referrer + cascade-FK-table-in-fresh-DB sub-cases"]
+    },
+    {
+      "date": "2026-06-27",
+      "batch": "wave-2 (6 cheap-deterministic gaps, parallel generator + 1-refuter-each adversarial pass)",
+      "review_mode": "adversarial-refute (1 reviewer per test; 4 sound / 2 needs-fix, both fixed before landing)",
+      "results": [
+        { "gap": "mcp-server.move.issue.workflow-edge", "priority": "P1", "test_file": "packages/mcp-server/src/__tests__/tools/move-issue-workflow-edge.test.ts", "dimensions": ["workflow","state-transition","error"], "verdict": "sound", "status_after": "covered" },
+        { "gap": "project-registration.repair.backfill", "priority": "P1", "test_file": "packages/server/src/__tests__/registration-repair-backfill.test.ts", "dimensions": ["state-transition","regression","config"], "verdict": "sound", "status_after": "covered" },
+        { "gap": "project-registration.dedup.sameGitRoot", "priority": "P1", "test_file": "packages/server/src/__tests__/project-dedup-same-git-root.test.ts", "dimensions": ["workflow","state-transition","regression"], "verdict": "sound-after-honesty-fix", "fix": "tightened scope claim to the 4 reassigned child types + same-named status; corrected FK-mechanism comment; the refuter EXPOSED a real product bug -> ticket #929", "status_after": "covered" },
+        { "gap": "butler.reject.busy", "priority": "P1", "test_file": "packages/server/src/__tests__/butler-message-busy-409.test.ts", "dimensions": ["error","api","concurrency"], "verdict": "sound", "fix": "tightened exact-string assertion to /already processing/i", "status_after": "covered" },
+        { "gap": "codemods.preview.generate", "priority": "P1", "test_file": "packages/server/src/__tests__/codemod-preview-generate.test.ts", "dimensions": ["capability","workflow"], "verdict": "sound", "fix": "dropped the api dim (service-level, not HTTP route)", "status_after": "covered" },
+        { "gap": "agent-sessions.launch.safety-guards", "priority": "P1", "test_file": "packages/server/src/__tests__/session-lifecycle.test.ts", "dimensions": ["config","regression","boundary"], "verdict": "sound-after-fix", "fix": "de-brittled (dropped positional launchArgs[15] for membership checks); dropped error-handling dim; added unknown-id pass-through + reverse-direction (claude-on-codex) cases to earn boundary", "status_after": "covered" }
+      ],
+      "tests_passing": "server 28/28 + mcp-server 2/2 (30 cases, 6 files)",
+      "product_tickets_filed": ["#929 deduplicateProjects loses/orphans the dup's children beyond the 4 reassigned tables (data loss)"],
+      "followups_logged": ["move_issue terminal-node any-target", "repair: no-clobber of a DIFFERING user override", "codemods >100-file limit-guard + HTTP route", "butler busy-clears-after-completion", "session-launch covered the model-drop guard; other launch guards already covered"]
     }
   ]
 }
