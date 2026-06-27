@@ -7907,12 +7907,53 @@
         "undocumented_implemented": 0,
         "documented_missing": 0,
         "uncovered_high_risk": 1,
-        "weak_dimensions": ["state-transition", "error"],
+        "weak_dimensions": [
+          "state-transition",
+          "error"
+        ],
         "top_gaps": [
-          { "ref": "workspaces.plan.approve-reject", "priority": "P1", "roi": 4.0, "dimensions_to_add": ["workflow","state-transition","api","error"], "rationale": "Plan-mode approval gate (implement-plan/reject-plan) has no e2e/HTTP test; workspace-actions.ts is the highest-churn workspace route; AK-924 strand history." },
-          { "ref": "workspaces.lifecycle.reattach-survives-reload", "priority": "P1", "roi": 3.6, "dimensions_to_add": ["state-transition","regression"], "rationale": "Whole-fleet survival across server hot-reload; agent.service.ts churn 91; prior reaper regression. Sole HIGH-risk uncovered remaining." },
-          { "ref": "workspaces.cascade.partial-blockers-no-start", "priority": "P1", "roi": 3.0, "dimensions_to_add": ["state-transition","error"], "rationale": "Multi-blocker every-guard: dependent with only SOME blockers Done must NOT auto-start; invisible to the single-blocker P0 test. Raised by adversarial review." },
-          { "ref": "workspaces.turn.missing-content", "priority": "P4", "roi": 3.0, "dimensions_to_add": ["error","api"], "rationale": "POST /:id/turn with no content → 400; cheap, high-churn route." }
+          {
+            "ref": "workspaces.plan.approve-reject",
+            "priority": "P1",
+            "roi": 4,
+            "dimensions_to_add": [
+              "workflow",
+              "state-transition",
+              "api",
+              "error"
+            ],
+            "rationale": "Plan-mode approval gate (implement-plan/reject-plan) has no e2e/HTTP test; workspace-actions.ts is the highest-churn workspace route; AK-924 strand history."
+          },
+          {
+            "ref": "workspaces.lifecycle.reattach-survives-reload",
+            "priority": "P1",
+            "roi": 3.6,
+            "dimensions_to_add": [
+              "state-transition",
+              "regression"
+            ],
+            "rationale": "Whole-fleet survival across server hot-reload; agent.service.ts churn 91; prior reaper regression. Sole HIGH-risk uncovered remaining."
+          },
+          {
+            "ref": "workspaces.cascade.partial-blockers-no-start",
+            "priority": "P1",
+            "roi": 3,
+            "dimensions_to_add": [
+              "state-transition",
+              "error"
+            ],
+            "rationale": "Multi-blocker every-guard: dependent with only SOME blockers Done must NOT auto-start; invisible to the single-blocker P0 test. Raised by adversarial review."
+          },
+          {
+            "ref": "workspaces.turn.missing-content",
+            "priority": "P4",
+            "roi": 3,
+            "dimensions_to_add": [
+              "error",
+              "api"
+            ],
+            "rationale": "POST /:id/turn with no content → 400; cheap, high-churn route."
+          }
         ]
       },
       "agent-providers": {

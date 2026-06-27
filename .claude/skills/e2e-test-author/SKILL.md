@@ -19,6 +19,14 @@ same gaps.
 
 Reads the shared model (**`../coverage-intelligence/references/verification-model.md`**).
 
+### This skill is the "generator" + "healer" (cf. Playwright Agents)
+The planner (`coverage-intelligence`) produces the living `_testplan.md` and the ranked
+`_priorities.md` work order. This skill is the **generator** — it implements the plan's open
+scenarios top-down and checks them off (re-rendering the plan flips `[ ]`→`[x]`). It is also the
+**healer**: when an authored or existing test fails or flakes, run it down to a real cause with
+the `flaky-test-triage` skill (known-flaky vs regression), fix the test or escalate a real
+product bug, and only then re-render. A green suite that matches the plan is the goal state.
+
 ---
 
 ## Phase 0 — Inherit the project's test conventions (don't reinvent them)
@@ -77,6 +85,7 @@ tests land. Record verdicts in `_authored.json`.
 - Run the surviving tests; confirm green and non-flaky (re-run P0/P1 a few times).
 - Write each new test into `_coverage.json`: append to the behaviour's `covered_by`
   (`asserts-outcome`), clear the closed `dimensions_missing`, flip status to `covered`/`partial`.
+- **Re-render the living test plan** so its checkbox ticks: `node <coverage-intelligence-skill>/tools/testplan.mjs <verification-dir>` (also `render.mjs` for the matrix/gaps/priorities). The scenario you just closed flips `[ ]`→`[x]` automatically — that is the visible progress signal, the generator checking off the planner's plan.
 - Append the run to `_authored.json` and `_verification-log.md`.
 - Commit (the project always commits after a task) with a message naming the gaps closed.
 - Report: gaps closed (with P-level + dimensions), tests added, review verdicts, and the

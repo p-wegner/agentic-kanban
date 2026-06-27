@@ -1,0 +1,1266 @@
+# Verification Test Plan — agentic-kanban
+
+> **Living, generated plan — do not hand-edit checkboxes.** Each scenario is one observable
+> behaviour; the tick is derived from `_coverage.json` (`testplan.mjs`). Regenerate after
+> tests land and ticks update themselves — the plan can't drift from reality.
+
+**Progress: 210/273 scenarios covered (77%)** · 37 partial · 26 to author
+
+`[███████████████░░░░░]`
+
+Pipeline roles (cf. Playwright Agents): **planner** = behavior-discovery + coverage-intelligence (this plan) · **generator** = e2e-test-author (implements gaps top-down) · **healer** = e2e-test-author re-run + flaky-test-triage (keeps the suite green).
+
+Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / dims missing) · `[ ]` ⬜ gap (priority shown).
+
+## Index
+
+| Capability | Covered | Plan |
+|---|--:|---|
+| [agent-providers](#agent-providers) | 13/16 | `[████████░░]` |
+| [agent-sessions](#agent-sessions) | 13/20 | `[███████░░░]` |
+| [board-ui](#board-ui) | 18/24 | `[████████░░]` |
+| [butler](#butler) | 14/19 | `[███████░░░]` |
+| [codemods](#codemods) | 6/9 | `[███████░░░]` |
+| [git-integration](#git-integration) | 16/18 | `[█████████░]` |
+| [issues-board](#issues-board) | 19/20 | `[██████████]` |
+| [mcp-server](#mcp-server) | 12/20 | `[██████░░░░]` |
+| [monitor-orchestration](#monitor-orchestration) | 16/19 | `[████████░░]` |
+| [persistence-schema](#persistence-schema) | 13/15 | `[█████████░]` |
+| [preferences-config](#preferences-config) | 14/16 | `[█████████░]` |
+| [project-registration](#project-registration) | 10/17 | `[██████░░░░]` |
+| [review-merge](#review-merge) | 15/18 | `[████████░░]` |
+| [workflow-engine](#workflow-engine) | 11/16 | `[███████░░░]` |
+| [workspaces](#workspaces) | 20/26 | `[████████░░]` |
+
+---
+
+## agent-providers
+
+**agent-providers** — 13/16 covered `[████████░░]`
+
+- [ ] ⬜ **medium** `agent-providers.login.oauthBootstrap` — Picking a Codex license / Claude subscription with no auth on disk creates the credential dir and pops a REAL visible terminal (windowsHide:false) running codex login / claude /login with the right CODEX_HOME/CLAUDE_CONFIG_DIR; failure is non-fatal because the equivalent manual command is returned for a copy-button
+  - _given_ operator
+  - _then_ a foreground terminal opens for the OAuth callback server; the manual command string is returned; a hidden/background spawn would tear down the callback
+  - _add dimensions_ workflow, error-handling, config
+  - _gap_ No test exercises claude-login.service.ts / codex-login.service.ts. The load-bearing invariant (windowsHide:false so the OAuth callback survives) and the non-fatal-failure / returned-manual-command contract are entirely 
+- [~] ⚠️ **low** `agent-providers.preflight.profileHealth` — listAgentProfileHealth computes an ok/warning/error verdict per (provider,profile) from auth/config existence + binary-on-PATH + buildable flags + version probe, and a recorded launch FAILURE overrides an otherwise-ok static verdict to error
+  - _given_ operator
+  - _then_ the dashboard shows error for a missing codex config / below-min version / recorded launch failure; secrets in flags/errors are redacted
+  - _add dimensions_ state-transition
+  - _gap_ failure-override-to-error and missing-config-error are asserted, but the version-probe-cached-once-per-(provider,command) optimization and the full ok→warning→error verdict folding across license-ring vs config-file auth
+- [~] ⚠️ **high** `agent-providers.strip.profileEnv` — Before a profile is applied, the server's own profile-owned ANTHROPIC_* env vars are stripped from the spawn env to prevent cross-profile credential bleed, and if a Claude profile sets ANTHROPIC_AUTH_TOKEN but no key, ANTHROPIC_API_KEY is deleted so the profile's auth wins cleanly
+  - _given_ agent-sessions
+  - _then_ the spawn env contains no leaked server ANTHROPIC_* vars; token+key conflict is resolved by dropping the key
+  - _add dimensions_ boundary, error-handling
+  - _gap_ buildSpawnEnv stripping the server's own ANTHROPIC_* vars (cross-profile credential-bleed guard, helpers.ts:119) and the delete-ANTHROPIC_API_KEY-when-AUTH_TOKEN-present rule (helpers.ts:161) are security-relevant but no
+- [x] ✅ `agent-providers.build.launch` — buildAgentLaunchConfig dispatches by ProviderName to the matching adapter and returns a ready-to-spawn {command,args,env} plus stdin-delivery hints
+  - _given_ agent-sessions
+  - _then_ config.command/args/env reflect the provider's invocation grammar; claude-code routes to claude; unknown provider throws in registry but narrows to claude at narrowProviderName
+  - _asserted by_ `agent-provider.test.ts::builds default Claude launch config with stream-`, `agent-provider.test.ts::routes to CodexProvider when provider is 'codex'`, `agent-provider-registry.test.ts::registry resolves every ProviderName to a provid`
+- [x] ✅ `agent-providers.narrow.providerName` — Any untrusted provider string (pref/request/legacy claude-code) narrows to a canonical ProviderName and defaults to claude rather than throwing
+  - _given_ agent-sessions
+  - _then_ narrowProviderName returns one of claude/codex/copilot/pi; claude-code→claude; junk→claude; getProfilePrefKey returns the matching pref key
+  - _asserted by_ `agent-provider-registry.test.ts::narrowProviderName canonicalizes and defaults to`, `agent-provider-registry.test.ts::getProfilePrefKey resolves untrusted strings (in`
+- [x] ✅ `agent-providers.suppress.modelCustomEndpoint` — For a Claude profile that sets a custom ANTHROPIC_BASE_URL (e.g. z.ai/glm), --model is omitted so the profile's own ANTHROPIC_MODEL decides the model
+  - _given_ agent-sessions
+  - _then_ the launch config contains no --model flag for custom-endpoint profiles but does for standard profiles
+  - _asserted by_ `agent-provider.test.ts::skips --model for profiles with a custom ANTHROP`, `agent-provider.test.ts::adds --model for a standard profile without a cu`
+- [x] ✅ `agent-providers.guard.crossProviderModel` — A provider-agnostic default_model id is dropped unless it belongs to the chosen provider's family, preventing a stale gpt-* from killing a Claude launch (and vice versa); unknown ids pass through; copilot/pi never strip
+  - _given_ agent-sessions
+  - _then_ modelBelongsToProvider returns false (→ model dropped) for cross-family ids, true for matching/unknown/copilot/pi
+  - _asserted by_ `model-provider.test.ts::rejects a codex model id for the claude provider`, `provider-switch-stale-default-model.test.ts::rejects a Codex gpt-5.5 model for the claude pro`, `provider-switch-stale-default-model.test.ts::POST /api/workspaces/preview — stale Codex defau`
+- [x] ✅ `agent-providers.order.codexExecFlags` — Codex exec flags (--json, sandbox, --profile, --model) are emitted BEFORE the resume subcommand because codex exec resume rejects them after resume and exits code 2
+  - _given_ agent-sessions
+  - _then_ in the codex args array all exec options precede the literal 'resume' token
+  - _asserted by_ `agent-provider.test.ts::uses codex exec with profile and resume`, `agent-provider.test.ts::uses codex exec without resume`
+- [x] ✅ `agent-providers.enforce.planMode` — Plan ('produce a plan, change nothing') mode is enforced per provider by the strongest mechanism — Claude --permission-mode plan, Codex read-only sandbox + prompt prefix, Copilot --plan + --deny-tool list, Pi prompt prefix — and non-Claude plans are wrapped in ===PLAN BEGIN/END=== markers
+  - _given_ agent-sessions
+  - _then_ each provider's config carries its plan enforcement (flag/sandbox/deny-tool/prefix) and emits the agreed plan markers where applicable
+  - _asserted by_ `agent-provider.test.ts::adds plan mode flags`, `agent-provider.test.ts::uses read-only sandbox (not the bypass flag) in `, `agent-provider.test.ts::copilot plan mode adds --plan + --deny-tool + PL`
+- [x] ✅ `agent-providers.parse.streamEvent` — Each provider adapter normalizes its CLI's stdout JSON into one ParsedStreamEvent model (providerSessionId, liveStats, stats, toolActivity, todos, turnComplete, rate-limit)
+  - _given_ agent-sessions
+  - _then_ parseStreamEvent returns the unified event fields for valid lines and undefined for non-JSON/fieldless lines, per claude/codex/copilot/pi wire format
+  - _asserted by_ `agent-provider.test.ts::extracts stats from result event`, `copilot-parse-stream-event.test.ts::builds stats + turnComplete on a result event`, `pi-parse-stream-event.test.ts::builds stats + turnComplete`
+- [x] ✅ `agent-providers.observe.unknownEvent` — A valid-JSON-but-unrecognized stream line is loud-logged via parseStreamEventObserved under the canonical provider name instead of silently swallowed (the #898 0-tokens misdiagnosis guard)
+  - _given_ agent-sessions
+  - _then_ the unknown event is recorded under its canonical provider name; a recognized event (e.g. codex turn.completed) is NOT counted as unknown
+  - _asserted by_ `agent-provider-observed-parse.test.ts::records an unknown codex event under its canonic`, `agent-provider-observed-parse.test.ts::does not count a recognized codex turn.completed`
+- [x] ✅ `agent-providers.oneShot.text` — One-shot text mode produces a non-streaming launch for internal AI utilities — Claude --output-format text -p, Codex exec WITHOUT --json reading prompt from stdin — so a text utility never sends Claude flags to codex
+  - _given_ agent-sessions
+  - _then_ the config emits plain-text args (no stream-json/MCP) and the correct per-provider non-streaming flags
+  - _asserted by_ `agent-provider.test.ts::emits plain text args (no stream-json/MCP) endin`, `agent-provider.test.ts::uses `codex exec` WITHOUT --json, reading the pr`
+- [x] ✅ `agent-providers.detect.cliVersion` — A CLI --version probe is range-checked: below the supported floor is a hard error, above-known/unparseable/unavailable are non-blocking warnings, and the probe is cached once per (provider,command)
+  - _given_ operator
+  - _then_ detectCliVersion returns below-min→error, in-range→ok, no-semver→unparseable warning, throw/missing→unavailable warning, exceeds maxKnown→above-known warning
+  - _asserted by_ `agent-cli-version.service.test.ts::reports below-min when the CLI is older than the`, `agent-cli-version.service.test.ts::reports unparseable when --version output has no`, `agent-cli-version.service.test.ts::reports above-known when a maxKnown ceiling is s`
+- [x] ✅ `agent-providers.resolve.providerConfig` — Provider/profile/model resolution funnels through one shared resolver with fixed precedence: explicit profileOverride > legacy claudeProfile > Strategy selection > provider pref; the model is read ONLY from provider-scoped keys (the global default_model is unrepresentable, #902)
+  - _given_ agent-sessions
+  - _then_ resolveProviderConfig returns the right provider/profile per precedence; a stale global default_model never leaks into a launch; copilot never gets a model
+  - _asserted by_ `provider-config-resolution.test.ts::explicit profileOverride.provider=codex forces c`, `provider-config-resolution.test.ts::ignores the retired global default_model — only `, `workspace-provider-resolution.test.ts::(a) explicit claudeProfile forces provider=claud`, `no-global-default-model.test.ts::a value in the global default_model key is IGNOR`
+- [x] ✅ `agent-providers.detect.providerDivergence` — The board reports when the global provider/profile prefs diverge from the Strategy Bullseye selection so the operator can re-sync them (#903 anti-drift)
+  - _given_ operator
+  - _then_ GET /api/preferences/provider-divergence returns hasBullseye + diverged; diverged=true on provider or profile mismatch, false when they agree or no Bullseye
+  - _asserted by_ `provider-divergence.test.ts::returns diverged=true when global provider diffe`, `provider-divergence.test.ts::returns diverged=true when provider matches but `, `provider-divergence.test.ts::GET /api/preferences/provider-divergence returns`
+- [x] ✅ `agent-providers.rotate.rateLimitExit` — On a usage-limit session exit the exhausted profile is cooled and the provider's credential ring rotated to the next usable profile BEFORE any relaunch; the worktree is auto-relaunched on the fresh profile only if rotation succeeded AND it was a builder session, otherwise the workspace is left blocked with a human-readable reason
+  - _given_ monitor
+  - _then_ ring picks next non-cooled license/subscription, switches the active-profile pref, builder resumes same worktree with a continuation prompt; non-builder or no-fresh-profile → blocked, never silently relaunched
+  - _asserted by_ `rate-limit-exit-decision.test.ts::relaunches only when rotated to a fresh profile `, `usage-limit-rotation-exit.test.ts::rotates a Codex license and relaunches the build`, `usage-limit-rotation-exit.test.ts::leaves the workspace blocked (no relaunch) when `, `codex-license-ring.test.ts::pickNextLicense rotates to the next entry in rin`
+
+## agent-sessions
+
+**agent-sessions** — 13/20 covered `[███████░░░]`
+
+- [ ] ⬜ **P1** `agent-sessions.resume.provider-id` — The provider's own resume token (Claude session_id from system/init, Pi session header) is captured from the stream and stored, then passed as --resume / --session on relaunch so the conversation continues
+  - _given_ operator
+  - _then_ sessions.providerSessionId persisted; a relaunch spawns with --resume <id> and the agent continues the prior conversation
+  - _add dimensions_ workflow, regression, config
+  - _gap_ no test asserts that the Claude session_id / Pi session header is captured from init events into sessions.providerSessionId, nor that relaunch passes --resume/--session to continue the conversation; apply-stream-event ex
+- [~] ⚠️ **P1** `agent-sessions.launch.safety-guards` — Launch is gated by safety policy: a Codex builder refuses the gpt-5.3-codex-spark model, an absent model defaults to gpt-5.5, a cross-provider stored model is dropped, and a failed workspace preflight blocks the spawn
+  - _given_ operator
+  - _then_ spark launch rejected (CONFLICT/UNSAFE_CODEX_MODEL, no session row); default resolvedModel=gpt-5.5 in launch stats; cross-provider model not passed as --model; stale-safety preflight throws CONFLICT/STALE_SAFETY_POLICY with no launch
+  - _add dimensions_ config, regression
+  - _gap_ spark refusal, default gpt-5.5, and preflight-block are asserted; the cross-provider-model DROP (a stored gpt-5.5 stripped from a Claude launch — the #698/#696 multi-cycle stall) is NOT directly asserted, only its downst
+- [~] ⚠️ **P2** `agent-sessions.persist.split-batch` — stdout is persisted only to the on-disk .out file while non-stdout events are batched (50 rows / 250ms) into session_messages and flushed on exit; a FK failure from a racing workspace cleanup is swallowed
+  - _given_ agent-subprocess
+  - _then_ stdout produces zero DB rows; a 50-event non-stdout batch flushes as one insert; remaining buffer flushed at exit; FK-violation insert does not surface as an error
+  - _add dimensions_ error-handling, concurrency
+  - _gap_ stdout→file split and the 50-row batch flush are asserted; the 250ms time-based flush, the flush-on-exit guarantee, and the swallowed FK-constraint insert race (broadcast.ts:92) are not asserted
+- [~] ⚠️ **P2** `agent-sessions.read.rest` — REST read endpoints expose the session: output is ETag-cached (304 on match), plus stats, parsed summary, and LIKE transcript search joined up the issue→project→status chain
+  - _given_ board-ui
+  - _then_ GET output returns 200+ETag then 304 on matching If-None-Match; stats/summary return structured bodies; search returns matching transcripts filtered by issue
+  - _add dimensions_ api, boundary
+  - _gap_ output ETag/304 and search are asserted; GET /api/sessions/:id/stats and /summary HTTP response shapes are not asserted at the endpoint layer (only the pure parser is). NOTE the documented boundary risk: search is LIKE o
+- [~] ⚠️ `agent-sessions.stream.live-subscribe` — A WebSocket subscriber receives the live message stream, a late subscriber replays the full in-memory buffer on connect, and the buffer is freed only when the last subscriber leaves AND the session has exited
+  - _given_ board-ui
+  - _then_ connecting WS receives prior AgentOutputMessage frames (reconnect/replay) then live frames; buffer not freed while a subscriber is attached or the session is live
+  - _add dimensions_ concurrency, state-transition
+  - _gap_ late-subscriber buffer replay is asserted; the buffer-free invariant (freed ONLY when last subscriber leaves AND session exited) and multi-subscriber behaviour are not exercised
+- [~] ⚠️ **P1** `agent-sessions.reattach.recover` — After a server restart, surviving detached agents are reattached (in-memory context/provider restored) and a PID-poll-detected exit mirrors the normal exit path idempotently; a stale running session whose PID is dead is finalized stopped and its workspace set idle
+  - _given_ monitor
+  - _then_ reattached session resumes broadcast + exit handling; notifyExternalExit finalizes once; cleanupStaleSession sets session=stopped(endedAt) + workspace=idle and purges in-memory state
+  - _add dimensions_ regression, concurrency
+  - _gap_ dead-PID stale cleanup is covered; reattachSession (restoring context/provider for a survived detached agent across hot-reload) and notifyExternalExit mirroring the exit path idempotently are NOT exercised — the core res
+- [~] ⚠️ **P1** `agent-sessions.turn.followup` — A follow-up turn is gated on turnState==waiting AND a verified-alive process; a dead process returns stale:true so the caller resumes into a fresh session; turnState flips to waiting only on a provider turnComplete with stdin still open
+  - _given_ operator
+  - _then_ sendTurn on a waiting+alive session proceeds (state→processing); on a dead/unknown session returns stale; turnState transitions processing↔waiting on result/sendTurn events
+  - _add dimensions_ error-handling, workflow
+  - _gap_ turnState processing↔waiting transitions are asserted; the stale-process gate is only re-derived inline (touches-only, not a real sendTurn call against a dead process), and the full waiting-AND-alive precondition for a r
+- [x] ✅ `agent-sessions.launch.session` — Starting a session persists a running session row (with the workspace's skill snapshot) and launches the agent process in the workspace's working directory
+  - _given_ operator
+  - _then_ sessions row status=running, workspaceId set, skillId/skillName snapshotted; agent launched with workingDir
+  - _asserted by_ `session-lifecycle.test.ts::startSession inserts a running session row and l`, `session-lifecycle.test.ts::records the workspace's skill (id + snapshotted `
+- [x] ✅ `agent-sessions.classify.exit-verdict` — The pure exit classifier returns a verdict by strict priority stopped > usage-limit > launch-failure > completed, with a 10s launch-failure window splitting zero-output vs non-zero-error fast exits
+  - _given_ agent-subprocess
+  - _then_ classifySessionExit phase + effectiveExitCode/errorText match the priority and window rules at the boundary
+  - _asserted by_ `session-exit-state-machine.test.ts::usage-limit WINS over the launch-failure window`, `session-exit-state-machine.test.ts::a zero-output exit EXACTLY at the window edge is`, `session-exit-state-machine.test.ts::user-stop WINS over a usage limit (the explicit `
+- [x] ✅ `agent-sessions.finalize.completed` — A clean substantive exit finalizes the session completed, advances the workspace (idle, issue→In Review), writes HANDOFF.md, and fires onSessionExit so the board advances
+  - _given_ agent-subprocess
+  - _then_ session status=completed exitCode=0 endedAt set; workspace status=idle; issue moved to In Review; board broadcast workspace_idle/issue_updated; onSessionExit(workspaceId,sessionId,0) called once
+  - _asserted by_ `session-lifecycle.test.ts::transitions running->completed when the agent pr`, `session-completion-callback-idempotency.test.ts::runs the workspace completion workflow once when`
+- [x] ✅ `agent-sessions.finalize.launch-failure` — A fast zero-output exit, or a fast non-zero exit with error text, is finalized as a launch failure: session stopped (exitCode 1, launchFailure stats) and workspace returned to idle/retryable
+  - _given_ agent-subprocess
+  - _then_ session status=stopped exitCode=1; stats.launchFailure=true success=false agentSummary quotes the error; workspace status=idle; onSessionExit(...,1)
+  - _asserted by_ `session-lifecycle.test.ts::marks a fast provider exit with no model output `, `session-lifecycle.test.ts::flags a short non-zero exit with substantive out`
+- [x] ✅ `agent-sessions.finalize.usage-limit` — A provider usage-limit exit is finalized with rate-limit stats and the workspace is routed to blocked (for credential rotation), not idle
+  - _given_ agent-subprocess
+  - _then_ stats.rateLimited=true, rateLimitKind, retryAfter, failureReason set; workspace status=blocked
+  - _asserted by_ `session-lifecycle.test.ts::marks Codex usage-limit exits as blocked instead`
+- [x] ✅ `agent-sessions.exit.idempotent` — Session exit is finalized exactly once even when the exit event fires multiple times (live exit + reattach PID-poll) — no double DB write, no double workflow callback
+  - _given_ agent-subprocess
+  - _then_ onSessionExit + workspace-completion workflow run once despite repeated exit callbacks; session row written once
+  - _asserted by_ `session-completion-callback-idempotency.test.ts::runs the workspace completion workflow once when`
+- [x] ✅ `agent-sessions.stop.authoritative` — A user stop is the authoritative verdict: the session is recorded stopped, the exit handler must not overwrite it, and a repeated stop is a safe no-op
+  - _given_ operator
+  - _then_ stopSession writes status=stopped; a later exit keeps stopped; second stopSession resolves true with no duplicate side effect; classifier routes stoppedByUser to 'stopped' over every other condition
+  - _asserted by_ `session-lifecycle.test.ts::stopSession on an already-stopped session is a n`, `session-exit-state-machine.test.ts::user-stop WINS over a launch failure`
+- [x] ✅ `agent-sessions.plan.clear-and-land` — A plan-mode run ALWAYS clears planMode on exit and lands in a visible state: plan recovered from the raw ===PLAN BEGIN/END=== buffer → PLAN.md + auto-continue, or park at awaiting-plan-approval, or no-plan → blocked
+  - _given_ agent-subprocess
+  - _then_ workspace.planMode=false in all three cases; PLAN.md written + implement session launched (auto-continue), OR status=awaiting-plan-approval+pendingPlanPath, OR status=blocked with no implement launch
+  - _asserted by_ `session-lifecycle.test.ts::recovers a codex plan from the raw stream buffer`, `session-lifecycle.test.ts::parks at awaiting-plan-approval when plan_auto_c`, `session-lifecycle.test.ts::clears planMode and marks the workspace blocked `
+- [x] ✅ `agent-sessions.drain.before-exit` — The detached-agent output file is drained to EOF before the exit event is emitted, so a crash within one poll interval is not misclassified as a zero-output launch failure (#909)
+  - _given_ agent-subprocess
+  - _then_ the tail stdout event arrives before the exit event and is not duplicated with already-polled content
+  - _asserted by_ `agent-exit-output-drain.test.ts::drains the .out file tail to EOF on exit before `, `agent-exit-output-drain.test.ts::does not re-emit content the poll already consum`
+- [x] ✅ `agent-sessions.stream.pipeline` — Each provider stream chunk is parsed into a normalized display event; real assistant/tool/stats output marks the session substantive while keepalive/error noise does not; a valid-JSON event of unknown type is counted and logged loudly, never silently dropped
+  - _given_ agent-subprocess
+  - _then_ display events normalized (init/assistant/tool_use/result/raw); sessionSubstantiveOutput set only on content-bearing events; unknown-event counter increments + warning logged
+  - _asserted by_ `apply-stream-event.test.ts::flags substantive output for content-bearing eve`, `agent-stream-unknown-events.test.ts::records an unknown event type and returns undefi`, `agent-stream-parser-characterization.test.ts::(suite — display-event normalization)`, `agent-output-parser.test.ts::(suite — client display events)`
+- [x] ✅ `agent-sessions.summary.parse` — A persisted transcript is parsed server-side (no LLM) into a structured summary — files read/edited/written, commands, errors, model, rate-limits, tool fail-rate friction — uniformly across Claude/Codex/Copilot formats
+  - _given_ operator
+  - _then_ summary lists files/commands/toolUsePatterns(count,failedCount)/model/rateLimit for each provider format
+  - _asserted by_ `session-summary.test.ts::extracts file operations and commands`, `session-summary.test.ts::extracts Codex exec --json streaming session act`, `session-summary.test.ts::extracts Copilot JSONL session activity`, `session-summary.test.ts::records Codex command errors and turn failures`
+- [x] ✅ `agent-sessions.persist.prune` — A background pruner bounds DB growth: it deletes session_messages for workspaces merged/closed >3 days ago and caps each still-active session at 2000 rows, dropping the oldest excess
+  - _given_ monitor
+  - _then_ messages for stale merged workspaces removed; per-session rows capped at MAX_MESSAGES_PER_ACTIVE_SESSION
+  - _asserted by_ `session-message-pruner.test.ts::deletes messages for old merged workspaces beyon`, `session-message-pruner.test.ts::removes oldest messages beyond the per-session c`
+- [x] ✅ `agent-sessions.board.events` — Project-scoped change reasons (board_changed, workspace_idle, session_completed, issue_updated …) are broadcast to every board WebSocket subscriber so all views refresh
+  - _given_ board-ui
+  - _then_ all subscribers receive the typed event frame on a change
+  - _asserted by_ `board-events.test.ts::sends board_changed event to all subscribers`, `session-completion-callback-idempotency.test.ts::(asserts broadcast workspace_idle / issue_update`
+
+## board-ui
+
+**board-ui** — 18/24 covered `[████████░░]`
+
+- [ ] ⬜ **P1** `board-ui.move.archiveConfirm` — Moving a ticket into Done/Cancelled while it has a live (non-closed) workspace requires explicit confirmation before committing
+  - _given_ operator
+  - _then_ a confirm dialog blocks the move; only on confirm does the PATCH+refetch run; cancel leaves the card in place
+  - _add dimensions_ workflow, error-handling, state-transition, risk
+  - _gap_ No e2e moves a ticket WITH a live workspace into Done/Cancelled to exercise the confirm dialog (block on cancel, commit on confirm). ai-reviewed-column tests move issues to terminal statuses but without a live workspace,
+- [ ] ⬜ **P1** `board-ui.move.rollback` — A server-rejected move rolls the card back to its exact prior position and surfaces the server's rejection message
+  - _given_ operator
+  - _then_ card snaps back to source column; a toast shows the server error message; board state matches pre-move snapshot
+  - _add dimensions_ error-handling, state-transition, risk
+  - _gap_ The drag e2e covers only the happy path. No test forces a server-rejected move (e.g. terminal-move guard) and asserts the card snaps back to the exact prior column + the server error message is shown. This is the optimis
+- [ ] ⬜ `board-ui.move.dependencyPreview` — Advancing/closing a ticket that has dependents shows a dependency-impact preview before committing
+  - _given_ operator
+  - _then_ a dependency-impact preview is shown; the move proceeds only after acknowledgement
+  - _add dimensions_ workflow, feature
+  - _gap_ No candidate test advances/closes a ticket with dependents to assert the dependency-impact preview is shown before commit.
+- [~] ⚠️ **P1** `board-ui.realtime.reflectServerChange` — Board state changed server-side (agent/monitor/MCP/CLI/API) is reflected in the live UI without a manual refresh, via the WebSocket push + coalesced refetch
+  - _given_ server-push
+  - _then_ a ticket created via API appears on the board within seconds; a status change relocates the card to the new column
+  - _add dimensions_ concurrency
+  - _gap_ The 'status changes via API' e2e asserts the SERVER board reflects the move, not that the UI relocated the card (touches-only for the UI outcome). The agent-cascade coalescing/seq-guard behaviour (poll+WS overlap, out-of
+- [~] ⚠️ **P3** `board-ui.wip.visualLimit` — A column over its configured WIP limit tints its header red (advisory only — the move is never blocked); an unset/garbage limit is treated as no limit
+  - _given_ operator
+  - _then_ column classified under/at/over drives the header tint; zero/negative/non-numeric coerced to no-limit
+  - _add dimensions_ feature
+  - _gap_ The classifier logic (incl. boundary coercion of zero/garbage) is fully unit-tested, but the user-visible outcome — the column header rendering its red 'over' tint — is asserted by no test. The visual policy itself is un
+- [~] ⚠️ **P2** `board-ui.shortcuts.keyboardNav` — Arrow/vim keys move a card cursor across columns and rows, seeding onto the first card and clamping at edges, skipping empty columns
+  - _given_ operator
+  - _then_ the focused/cursor card moves with arrows/hjkl; clamps at column edges; skips empty columns horizontally; can advance a card to the next status
+  - _add dimensions_ accessibility
+  - _gap_ The pure cursor-target arithmetic is fully unit-tested, but no e2e drives arrow/vim keys against the rendered board to assert the focused card actually moves (the keyboard-operability a11y outcome). The unit test would p
+- [x] ✅ `board-ui.render.columns` — The board renders one lane per configured workflow status, each holding its ticket cards, with the expected status names
+  - _given_ operator
+  - _then_ named status columns appear (Todo/In Progress/Done/…); cards render under their status; header title shown
+  - _asserted by_ `board.test.ts::shows kanban columns with expected names`, `board.test.ts::shows header with title`
+- [x] ✅ `board-ui.render.skeleton` — A skeleton placeholder is shown while the board API is in-flight, then replaced by real content
+  - _given_ operator
+  - _then_ skeleton board visible during load; replaced by columns once data arrives
+  - _asserted by_ `skeleton-board.test.ts::skeleton is shown while the board API is in-flig`
+- [x] ✅ `board-ui.move.optimistic` — Dragging (or keyboard-advancing) a card to another column applies the move instantly and converges on the server-persisted position
+  - _given_ operator
+  - _then_ card lands in the target column immediately; server board reflects the new status/sortOrder after a debounced refetch
+  - _asserted by_ `board.test.ts::drag issue between columns`, `issueMoveHelpers.test.ts::moveIssueToStatus (8 cases)`, `issueMoveHelpers.test.ts::applyLocalReorder`
+- [x] ✅ `board-ui.create.inline` — The inline create form on the Todo column creates a new ticket and it appears on the board
+  - _given_ operator
+  - _then_ submitting the inline form adds the new card; cancel/Escape closes the form without creating
+  - _asserted by_ `board.test.ts::create issue via inline form`, `board.test.ts::cancel create form`
+- [x] ✅ `board-ui.create.expandPanel` — The inline create form can expand to a full-screen creation panel, carrying over entered state and exposing all fields incl. an optional Start-Workspace toggle
+  - _given_ operator
+  - _then_ panel shows all fields; in-progress input carries over; Start Workspace reveals sub-options; submit creates; backdrop/Escape/Cancel close it; submit disabled when title empty
+  - _asserted by_ `expandable-create-panel.test.ts::open inline form then expand to full-screen pane`, `expandable-create-panel.test.ts::panel state is carried over from inline form`, `expandable-create-panel.test.ts::fill and submit creates issue`, `expandable-create-panel.test.ts::Start workspace checkbox shows workspace sub-opt`, `expandable-create-panel.test.ts::submit button is disabled when title is empty`
+- [x] ✅ `board-ui.detail.editDelete` — Clicking a card opens the issue detail panel; the operator can edit and delete the ticket, and Escape/expand-collapse control the panel layout
+  - _given_ operator
+  - _then_ detail panel opens with ticket data; edits persist; delete removes the card; Escape closes; expand cycles sidebar→modal→fullscreen and collapse reverses
+  - _asserted by_ `board.test.ts::open detail panel by clicking issue card`, `board.test.ts::edit issue from detail panel`, `board.test.ts::delete issue from detail panel`, `board.test.ts::escape closes detail panel`, `board.test.ts::expand button cycles panel through modal and ful`, `board.test.ts::collapse button returns panel from fullscreen to`
+- [x] ✅ `board-ui.card.agentActivityBadge` — A card surfaces its workspace's live agent state — Agent working / AI reviewing / AI fixing — and shows none when idle or workspace-less
+  - _given_ server-push
+  - _then_ the matching activity badge renders for active/reviewing/resolving states; no badge for idle or no-workspace
+  - _asserted by_ `IssueCard.test.tsx::active-agent indicator (working/reviewing/fixing`, `code-review.test.ts::AI Reviewing badge appears on issue card while r`
+- [x] ✅ `board-ui.archiveColumn.conditional` — The 'AI Reviewed' staging column renders only when it holds issues, or when auto-review is on without auto-merge; it appears/disappears as tickets enter/leave
+  - _given_ operator
+  - _then_ column hidden when empty; appears when an issue moves in (with an awaiting-manual-merge hint); hides again when the issue leaves; always shown under autoReview&&!autoMerge
+  - _asserted by_ `ai-reviewed-column.test.ts::AI Reviewed column is hidden when no issues are `, `ai-reviewed-column.test.ts::AI Reviewed column appears when an issue is move`, `ai-reviewed-column.test.ts::Awaiting manual merge hint is shown in AI Review`, `ai-reviewed-column.test.ts::AI Reviewed column hides again when issue is mov`, `ai-reviewed-column.test.ts::AI Reviewed column shown when autoReview=true an`
+- [x] ✅ `board-ui.view.switch` — The operator switches between Board, Table, and Graph views; each renders its expected content and supports its own interactions (table sort/filter/row-open; graph zoom/legend/status-filter)
+  - _given_ operator
+  - _then_ Table view shows column headers + issue rows, sortable headers reorder, status filter narrows rows, row click opens detail; Graph view renders nodes/legend, zoom scales, status filter shows/hides backlog+done; switching back restores kanban
+  - _asserted by_ `graph-table-views.test.ts::switch to Table view via header toggle`, `graph-table-views.test.ts::Table view renders expected column headers`, `graph-table-views.test.ts::clicking a sortable column header changes sort o`, `graph-table-views.test.ts::status filter dropdown filters visible rows`, `graph-table-views.test.ts::clicking a table row opens the detail panel`, `graph-table-views.test.ts::switch to Graph view via header toggle`, `graph-table-views.test.ts::Graph status filter can show backlog issues`, `graph-table-views.test.ts::zoom in button increases scale transform`, `graph-table-views.test.ts::switching back to Board view from Graph restores`
+- [x] ✅ `board-ui.view.criticalPath` — In Graph view, Critical Path mode highlights root blockers with downstream-count badges and opens a dependency-chain side panel
+  - _given_ operator
+  - _then_ Critical Path toggle visible; clicking switches to critical-path rendering; root blockers show downstream count; clicking one opens the chain panel; toggling back restores normal graph
+  - _asserted by_ `graph-table-views.test.ts::Critical Path toggle is visible when dependencie`, `graph-table-views.test.ts::Clicking Critical Path switches to critical-path`, `graph-table-views.test.ts::Root blocker nodes show downstream count badge`, `graph-table-views.test.ts::Clicking a root blocker opens chain side panel`
+- [x] ✅ `board-ui.bulkSelect.update` — Ctrl-clicking multiple cards multi-selects them and a bulk action (e.g. priority change) applies to the whole selection
+  - _given_ operator
+  - _then_ selected cards highlight; a bulk priority change updates all selected tickets
+  - _asserted by_ `board-card-bulk-select.test.ts::selects cards with Ctrl-click and applies a bulk`
+- [x] ✅ `board-ui.palette.execute` — The command palette (Ctrl+K) fuzzy-filters actions and executes them by keyboard or click, incl. project switching and context create
+  - _given_ operator
+  - _then_ Ctrl+K opens palette; typing filters; arrow+Enter or click runs the action; 'New Issue + Start Workspace' opens the create panel with workspace checked; project switch changes active project and refreshes board; Escape closes
+  - _asserted by_ `command-palette.test.ts::Ctrl+K opens command palette`, `command-palette.test.ts::type to filter actions`, `command-palette.test.ts::arrow keys navigate, Enter executes action`, `command-palette.test.ts::New Issue + Start Workspace opens create panel w`, `command-palette.test.ts::switches active project and refreshes board data`, `command-palette.test.ts::Escape closes palette`
+- [x] ✅ `board-ui.palette.workspaceActions` — Workspace actions (Review/Merge) surface in the palette only for eligible workspaces and are gated by workspace state
+  - _given_ operator
+  - _then_ Review/Merge appear for idle workspaces; triggering Review transitions the workspace to reviewing (toast); actions absent for active/closed/no-workspace issues
+  - _asserted by_ `command-palette.test.ts::Review action triggers review and shows toast`, `command-palette.test.ts::Merge action is absent for active (non-idle) wor`, `command-palette.test.ts::Review and Merge actions absent when workspace i`, `command-palette-workspace.test.ts::triggering Review action from palette transition`
+- [x] ✅ `board-ui.shortcuts.helpOverlay` — Single-key shortcuts open panels/overlays (?, a, q) and a context-aware shortcut-help overlay, while being suppressed during text entry
+  - _given_ operator
+  - _then_ ? toggles a help overlay listing shortcuts (context-aware for Butler); 'a' opens All-Workspaces panel; 'q' opens Quick Tasks; single keys do NOT fire while typing in search; Escape/backdrop/repeat-? dismiss
+  - _asserted by_ `shortcuts.test.ts::press ? to show shortcut help overlay`, `shortcuts.test.ts::shortcut help overlay contains expected shortcut`, `shortcuts.test.ts::shortcut help is context-aware for Butler`, `shortcuts.test.ts::single-key shortcuts do not fire while typing in`, `all-workspaces-panel.test.ts::opens via keyboard shortcut 'a'`, `quick-tasks-panel.test.ts::keyboard shortcut 'q' opens the Quick Tasks pane`
+- [x] ✅ `board-ui.diff.viewAndComment` — The diff viewer shows a workspace's changes (stats header, file tree, added lines, unified/split toggle) and supports full diff-comment CRUD
+  - _given_ operator
+  - _then_ diff stats + file tree + added lines render; unified/split toggles; comments can be created/edited/deleted via UI; comment count badge updates
+  - _asserted by_ `diff-viewer.test.ts::View Diff button shows diff stats header`, `diff-viewer.test.ts::file tree shows changed file and is expandable`, `diff-viewer.test.ts::diff content shows added lines`, `diff-viewer.test.ts::Unified/Split view toggle switches rendering`, `diff-viewer.test.ts::comment edit and delete via UI`, `diff-viewer.test.ts::comment badge count updates after adding a comme`
+- [x] ✅ `board-ui.statsBar.counts` — The board stats bar shows per-status ticket counts and a commits counter, and a Blocked filter narrows the board to blocked issues
+  - _given_ operator
+  - _then_ stats bar shows counts per status + commits; Blocked filter shows only blocked issues and toggling off restores all
+  - _asserted by_ `board-stats-bar.test.ts::shows ticket counts per status in stats bar`, `board-stats-bar.test.ts::shows commits counter in stats bar`, `board-stats-bar.test.ts::Blocked filter shows only blocked issues, toggle`
+- [x] ✅ `board-ui.settings.persist` — The settings panel saves agent/workflow preferences that persist across reopen (agent command, profile, auto-review/auto-fix/auto-merge/board-monitoring toggles)
+  - _given_ operator
+  - _then_ saved values are present on reopen; workflow toggles persist; cancel closes without saving; profile dropdown exposes harness-named options
+  - _asserted by_ `settings.test.ts::fill agent command and save`, `settings.test.ts::settings persist after reopening`, `settings.test.ts::cancel closes panel without saving`, `settings-workflow.test.ts::auto code review toggle persists after save`, `settings-workflow.test.ts::auto-merge toggle persists after save`, `settings-workflow.test.ts::board monitoring toggle persists after save`
+- [x] ✅ `board-ui.error.apiBanner` — A failed board mutation surfaces the server error to the user rather than failing silently
+  - _given_ operator
+  - _then_ an error banner/toast appears carrying the failure; the optimistic state is corrected
+  - _asserted by_ `board.test.ts::error banner on API failure`
+
+## butler
+
+**butler** — 14/19 covered `[███████░░░]`
+
+- [ ] ⬜ **P1** `butler.feed.systemEvents` — Board events (merge failures, agent crashes, stuck workspaces) are injected as [system event] turns into the warm DEFAULT butler only, rate-limited to 1 turn / 30s / project with bursts collapsed to a summary line; dropped silently if no session is warm
+  - _given_ board-event-feed
+  - _then_ a [system event] turn appears in the default butler's transcript; named butlers never receive it; ≥2 events in 30s collapse to one 'Nx kind' summary; cold session → event dropped
+  - _add dimensions_ capability, config, concurrency, error-handling
+  - _gap_ no test exercises emitButlerSystemEvent's injection path. usage-limit-rotation-exit.test.ts imports butler-event-feed but tests builder license-rotation relaunch, NOT event injection. The 30s rate-limit, burst-collapse-t
+- [~] ⚠️ **P2** `butler.interrupt.inflight` — Interrupting cancels the IN-FLIGHT turn (query.interrupt) while keeping the session warm
+  - _given_ operator
+  - _then_ in-flight stream stops; GET /butler still active:true; next turn accepted
+  - _add dimensions_ state-transition, concurrency, api
+  - _gap_ the e2e test interrupts with NO active turn and only asserts res.ok(); the MCP test only checks request shape. The real behaviour — cancelling an IN-FLIGHT stream while keeping the session warm and accepting a subsequent
+- [~] ⚠️ **P1** `butler.reject.busy` — A turn is rejected while the butler is busy — a single in-flight turn per session, no concurrent streams into one context
+  - _given_ operator
+  - _then_ POST /message returns 409 (HTTP); at the service layer sendButlerTurn returns false for the second concurrent turn
+  - _add dimensions_ error-handling, api
+  - _gap_ only the service-layer sendButlerTurn=false is asserted; the HTTP-level 409 on POST /message while busy is never asserted by any test
+- [~] ⚠️ **P3** `butler.manage.definitions` — Named butler personas are GLOBAL (shared across projects), CRUD-managed and capped at MAX_BUTLERS=4; the 'default' butler can be renamed/re-modelled but never deleted (it holds back-compat pref keys)
+  - _given_ operator
+  - _then_ POST creates (201) and appears in list; PUT renames; DELETE removes a named one; default always present; a 5th create is refused; deleting default is refused
+  - _add dimensions_ boundary
+  - _gap_ CRUD happy paths asserted, but the two invariants — MAX_BUTLERS=4 cap refusing a 5th create, and 'default' being un-deletable — are never asserted
+- [~] ⚠️ **P4** `butler.history.access` — Past-session history is browsable (capped at 50 ids, most-recent-first) and a past session's transcript is readable ONLY if its id is allowlisted to this project's tracked ids (security boundary)
+  - _given_ operator
+  - _then_ GET /sessions returns the capped list; GET /sessions/:sid/messages returns the transcript for an own id but REFUSES a session id belonging to another project
+  - _add dimensions_ permission, boundary, api
+  - _gap_ the sessions list is only checked for being an array; the 50-id cap is never asserted, and the SECURITY allowlist (a foreign project's session id must be refused on /sessions/:sid/messages) has no negative-path test
+- [x] ✅ `butler.ensure.warm` — Starting the butler provisions a warm in-process LLM session for the (project, butler); a second ensure returns the existing session (no context fork)
+  - _given_ operator
+  - _then_ POST /ensure returns 201 {active:true, sessionId}; GET /butler then shows active:true; cold session starts WITHOUT a resume when no id persisted
+  - _asserted by_ `butler.test.ts::POST /butler/ensure starts a mock session`, `butler-provider.test.ts::starts cold Butler sessions fresh when no resume`
+- [x] ✅ `butler.converse.turn` — Sending a message pushes a turn into the warm session and streams an assistant reply back (token deltas + tool cards) over SSE
+  - _given_ operator
+  - _then_ user bubble appears, mock/assistant reply streams into chat; /message accepted; reply text returned
+  - _asserted by_ `butler.test.ts::sends a message and shows mock response in chat`, `butler.test.ts::Start Butler button starts a mock session and re`
+- [x] ✅ `butler.ask.sync` — A synchronous /ask turn lets a separate process (CLI/MCP) get a buffered answer without reading the in-memory SSE stream
+  - _given_ cli-mcp-caller
+  - _then_ POST /ask returns {isError:false, text} containing the assistant reply; resolves on result/error or 120s timeout
+  - _asserted by_ `butler.test.ts::POST /butler/ask returns a mock response`, `butler-tools.test.ts::butler_state GETs the butler endpoint and return`
+- [x] ✅ `butler.persist.context` — Conversation context persists across turns: the transcript accumulates user+assistant messages and multiple turns keep prior history
+  - _given_ operator
+  - _then_ GET /messages returns ordered user+assistant messages; two turns yield 4 messages with both prompts present
+  - _asserted by_ `butler.test.ts::GET /butler/messages returns transcript after as`, `butler.test.ts::multiple turns maintain conversation history`
+- [x] ✅ `butler.clear.context` — Clearing context (DELETE /butler) stops the session, forgets the resume id, and empties the transcript — the mechanism for 'new session' / applying an edited skill
+  - _given_ operator
+  - _then_ GET /butler shows active:false; GET /messages returns []; UI shows 'Butler is ready.' placeholder
+  - _asserted by_ `butler.test.ts::DELETE /butler clears session and transcript`, `butler.test.ts::Clear context button resets the chat`
+- [x] ✅ `butler.switch.model` — Switching model applies live via the SDK setModel control request and PRESERVES conversation context (no restart); the model lives on the global butler definition
+  - _given_ operator
+  - _then_ POST /model → {ok, model, applied:true}; SDK setModel called with the alias; GET /butler reflects new model; sessionId unchanged
+  - _asserted by_ `butler-provider.test.ts::keeps displayed and running model/profile select`
+- [x] ✅ `butler.switch.profile` — Switching profile (auth endpoint) RESTARTS the session and forgets the old resume id — a different endpoint cannot resume the same transcript
+  - _given_ operator
+  - _then_ POST /profile → {ok, profile, active:true}; a fresh SDK query starts WITHOUT resume; persisted session-id pref now tracks the new session
+  - _asserted by_ `butler-provider.test.ts::keeps displayed and running model/profile select`, `butler-sdk-resume-regression.test.ts::forces a fresh session start when profile change`
+- [x] ✅ `butler.resume.persisted` — A persisted SDK session id is replayed as resume on next ensure, so the butler survives a server restart with its conversation intact
+  - _given_ operator
+  - _then_ cold GET /butler reports the persisted sessionId; ensure passes options.resume = that id instead of starting a new conversation
+  - _asserted by_ `butler-provider.test.ts::resumes a persisted Butler session id instead of`
+- [x] ✅ `butler.recover.staleResume` — A dead/unresumable session (Anthropic invalid-thinking-signature 400, or codex 'no rollout found') is recovered: drop the resume, start fresh, and re-send the in-flight turn so the user's message is not lost
+  - _given_ operator
+  - _then_ first query throws → second query starts WITHOUT resume; session adopts the fresh id; turn succeeds; no error bubble; genuine (non-stale) failures still surface and do NOT retry
+  - _asserted by_ `butler-sdk-resume-regression.test.ts::recovers from 'Invalid signature in thinking blo`, `butler-sdk-resume-regression.test.ts::accepts a turn on the fresh session after signat`, `butler-codex-resume-recovery.test.ts::drops a dead resume id and retries the turn on a`, `butler-codex-resume-recovery.test.ts::surfaces a non-resume failure as an error (no in`, `butler-loop-classify.test.ts::resume-reset on invalid thinking signature (only`
+- [x] ✅ `butler.select.backend` — The butler resolves its backend (claude SDK / codex CLI / mock) via the shared provider cascade; a codex license-profile butler launches under its own CODEX_HOME with --profile dropped
+  - _given_ operator
+  - _then_ GET /butler reports backend matching the provider; GET /profiles lists provider profiles + selected; a codex license butler spawns with CODEX_HOME=licenseDir and no --profile; claude model aliases not applied to a codex butler
+  - _asserted by_ `butler-provider.test.ts::uses Codex profiles and starts a logical Codex B`, `butler-provider.test.ts::does not apply saved Claude model aliases to a C`, `butler-codex-home.test.ts::launches a license-profile butler under its CODE`, `butler-codex-home.test.ts::does NOT override CODEX_HOME for a codex butler `
+- [x] ✅ `butler.customize.skill` — A project-scoped butler behavior prompt override can be set and retrieved; it wins over the global default and is scoped per project (no leak); deleting reverts to the global
+  - _given_ operator
+  - _then_ PUT /skill stores prompt; GET /skill returns it with isOverride:true; another project keeps its own; empty PUT reverts to global default
+  - _asserted by_ `butler.test.ts::PUT /butler/skill sets and GET retrieves project`, `butler-skill-repository.test.ts::a project override wins over the global`, `butler-skill-repository.test.ts::override is scoped per project (one project's ov`
+- [x] ✅ `butler.render.stream` — The pure client reducer folds the SSE ButlerEvent stream into chat bubbles + collapsible tool cards deterministically (dedupes user echoes, accumulates assistant deltas, settles tool results, never double-renders streamed text)
+  - _given_ operator
+  - _then_ given a sequence of events the chat state contains the expected bubbles/tool cards; input state is never mutated
+  - _asserted by_ `butler-event-reducer.test.ts::reduceButlerEvent — streamed assistant text accu`, `butler-event-reducer.test.ts::tool-result settles the matching pending tool by`, `butler-event-reducer.test.ts::result does NOT duplicate text already streamed `, `butler-event-reducer.test.ts::never mutates the input state or buffer`
+- [x] ✅ `butler.slash.commands` — Slash-command autocomplete: typing '/' offers commands merged from the live SDK supportedCommands and the repo's own .claude/skills, parsed/filtered/applied client-side
+  - _given_ operator
+  - _then_ GET /commands returns the merged deduped command list; client parse/filter/apply transform the input correctly
+  - _asserted by_ `butler-slash-commands.test.ts::filterCommands filters case-insensitively and ca`, `butler-slash-commands.test.ts::applyCommandToInput replaces a trailing slash to`
+- [x] ✅ `butler.ticketChat.prompt` — The 'Chat about this ticket' retrospective builds an opening prompt referencing the ticket by number (or title), its spec questions, type/status, and a truncated description
+  - _given_ operator
+  - _then_ the generated prompt contains the #number, retrospective questions, metadata, and a truncated description (omitted when empty)
+  - _asserted by_ `butler-ticket-prompt.test.ts::references the ticket by number when available`, `butler-ticket-prompt.test.ts::includes the description but truncates a very lo`
+
+## codemods
+
+**codemods** — 6/9 covered `[███████░░░]`
+
+- [ ] ⬜ **P3** `codemods.preview.limit-guard` — A project with more than 100 TS files refuses to preview until the caller explicitly acknowledges the blast radius via overrideLimit:true
+  - _given_ operator
+  - _then_ ValidationError surfaced instructing the caller to resend overrideLimit:true (the UI shows a yellow 'run on all files' override); resending with overrideLimit:true proceeds to diff
+  - _add dimensions_ boundary, error-handling, config
+  - _gap_ The >100-TS-file blast-radius guard and its overrideLimit override path are never exercised. This is the module's scale safety interlock and has no test at either the block or the override-and-proceed edge.
+- [~] ⚠️ **P1** `codemods.preview.generate` — Previewing an intent compiles it into a ts-morph transform and returns dry-run per-file diffs across the whole project without writing anything
+  - _given_ operator
+  - _then_ 200 with a generated script string, a files[] of changed files each carrying unified diff + original/modified, totalTsFiles count, limitReached flag; the project's files on disk are unchanged
+  - _add dimensions_ workflow, capability
+  - _gap_ Test uses a deliberate no-op intent, accepts BOTH 200 and 500 (500 = AI unavailable in CI), and only shape-checks the body when 200. It never asserts that a real transform is compiled or that an actual code change is dif
+- [~] ⚠️ `codemods.get.byid` — Fetching a saved codemod by id returns it, or 404 for an unknown id
+  - _given_ operator
+  - _then_ 200 with the codemod when the id exists; 404 with error when it does not
+  - _add dimensions_ api
+  - _gap_ Only the 404-unknown-id branch is asserted. The success path (GET /:id returning an existing saved codemod's body) is never directly fetched/asserted -- the save test verifies presence via the list endpoint, not via GET 
+- [x] ✅ `codemods.preview.validate-input` — Preview refuses without the two required inputs (description and projectId), returning a 400 that names the missing field
+  - _given_ operator
+  - _then_ 400 with error matching /description/i when description absent; 400 with error matching /projectId/i when projectId absent
+  - _asserted by_ `codemod.test.ts::POST /api/codemods/preview returns 400 without d`, `codemod.test.ts::POST /api/codemods/preview returns 400 without p`
+- [x] ✅ `codemods.apply.confine-writes` — Apply confines every write to the project repo: a target path that resolves outside repoPath is rejected and the file on disk is left untouched (the core security boundary)
+  - _given_ operator
+  - _then_ 400 with error matching /outside the project/i; the out-of-repo file's content is unchanged
+  - _asserted by_ `codemod.test.ts::POST /api/codemods/apply refuses to write outsid`
+- [x] ✅ `codemods.apply.write-selected` — Apply writes the supplied modified content to disk for the selected in-repo files (empty selection = all changed files) and reports applied vs skipped
+  - _given_ operator
+  - _then_ 200 with {applied[], skipped[]}; the named files now contain the modified text; applied contains the written path and skipped is empty when all selected
+  - _asserted by_ `codemod.test.ts::POST /api/codemods/apply writes selected files`, `codemod.test.ts::POST /api/codemods/apply skips files not in sele`
+- [x] ✅ `codemods.apply.validate-input` — Apply refuses without projectId (the security boundary) or with an empty changes array, returning 400
+  - _given_ operator
+  - _then_ 400 with error matching /projectId/i when projectId absent; 400 when changes is missing/empty
+  - _asserted by_ `codemod.test.ts::POST /api/codemods/apply returns 400 with empty `, `codemod.test.ts::POST /api/codemods/apply returns 400 without pro`
+- [x] ✅ `codemods.save.reusable` — A working transform is saved as a named reusable codemod (agent_skills row tagged type='codemod') and appears in the codemod listing; required fields are enforced and a name collision in scope is refused
+  - _given_ operator
+  - _then_ 201 with {id, name, type:'codemod'}; the row appears in GET /api/codemods with type==='codemod'; 400 when name or script missing; 409 when an existing type='codemod' name collides in scope
+  - _asserted by_ `codemod.test.ts::POST /api/codemods creates a saved codemod`, `codemod.test.ts::POST /api/codemods returns 400 when name missing`, `codemod.test.ts::POST /api/codemods returns 400 when script missi`
+- [x] ✅ `codemods.list.filter-type` — The codemod listing returns only agent_skills discriminated as type='codemod', never plain skills
+  - _given_ operator
+  - _then_ 200 array where every item has type==='codemod'
+  - _asserted by_ `codemod.test.ts::GET /api/codemods returns only codemods`
+
+## git-integration
+
+**git-integration** — 16/18 covered `[█████████░]`
+
+- [~] ⚠️ **P3** `git-integration.diff.working-tree` — Diffing a branch/worktree surfaces its changes vs base including UNTRACKED files (hand-synthesized diff headers), and a direct workspace diffs via git diff HEAD; diff-stat ref semantics match the board (worktree→base, direct→HEAD)
+  - _given_ mcp-agent
+  - _then_ getWorkingTreeDiff output contains 'diff --git', 'new file mode', and the untracked file's added lines; getDiffShortstat called with the right (path, base) per workspace kind
+  - _add dimensions_ boundary
+  - _gap_ untracked-diff synthesis edge cases untested: binary/unreadable file (header-only) and trailing-newline off-by-one. Display-grade only; domain doc flags it as not apply-grade.
+- [~] ⚠️ **P1** `git-integration.rebase.prepare-review` — Preparing a branch for review rebases onto the LOCAL base branch (not origin/*), first committing any leftover uncommitted worktree changes instead of bailing on a dirty tree, aborting a stale rebase, fetching best-effort, and on conflict collecting --diff-filter=U files then aborting to leave the tree clean
+  - _given_ server-services
+  - _then_ rebaseOntoBase succeeds on a dirty tree and leaves status clean; (untested) rebases onto local master ahead of origin and returns the conflicting-file list on conflict without leaving a half-rebase
+  - _add dimensions_ workflow, error-handling
+  - _gap_ only the dirty-tree leftover-commit path is asserted. The local-base preference (rebase onto local master ahead of a stale origin), abort-stale-rebase, and the on-conflict --diff-filter=U file-list return are never exerc
+- [x] ✅ `git-integration.create.worktree` — Creating a workspace provisions an isolated worktree checked out on its own branch cut from the requested base, with a guaranteed non-detached HEAD; an existing healthy worktree for the same branch is reused (same path returned), not duplicated
+  - _given_ server-services
+  - _then_ worktree directory exists with the base branch's files; createWorktree returns the path; a second call for the same branch returns the same path
+  - _asserted by_ `git.service.test.ts::creates a worktree for a new branch`, `git.service.test.ts::reuses existing worktree for an already-checked-`
+- [x] ✅ `git-integration.refresh.reused-branch` — A reused branch with NO unique commits beyond base is hard-refreshed onto the advanced base; a reused branch WITH its own commits is left untouched (never discarded)
+  - _given_ server-services
+  - _then_ never-built branch tip == new base after createWorktree; branch with own work keeps its own tip
+  - _asserted by_ `git-service-branch-refresh.test.ts::createWorktree re-cuts a reused never-built-on b`, `git-service-branch-refresh.test.ts::createWorktree leaves a reused branch WITH its o`
+- [x] ✅ `git-integration.remove.worktree` — Removing a worktree breaks every junction (top-level and nested packages/*/node_modules) before deleting and never recurses into a link, refuses any path not strictly inside .worktrees/, and falls back to a manual recursive delete when `git worktree remove` fails — so the shared dependency store is never touched
+  - _given_ server-services
+  - _then_ worktree dir gone; junction target dirs + their sentinel files survive; an unsafe path throws 'Refusing to recursively remove unsafe worktree path' and is left intact
+  - _asserted by_ `git-service-remove-worktree.test.ts::removes a non-empty directory left behind when g`, `git-service-remove-worktree.test.ts::does not recursively remove paths outside the ma`, `git-service-remove-worktree.test.ts::does not delete junction target when recursively`, `git-service-remove-worktree.test.ts::does not delete NESTED packages/<pkg>/node_modul`
+- [x] ✅ `git-integration.merge.clean` — A clean branch lands via a plumbing merge (merge-tree→commit-tree→update-ref): the target ref advances, and when the target is checked out the working tree is synced to the merge commit and left clean
+  - _given_ server-services
+  - _then_ result contains 'plumbing-merge'; base ref + checked-out working tree contain the feature file; status --porcelain empty; no uncommitted tracked changes
+  - _asserted by_ `git-service.integration.test.ts::mergeBranch creates a clean plumbing merge and s`, `git.service.test.ts::merges a branch via plumbing and syncs the worki`
+- [x] ✅ `git-integration.merge.reject-conflict` — A conflicting merge is refused via three independent gates (stage-entry parse, merge-tree exit-1, marker scan of changed feature blobs excluding .md): it throws, never advances the target ref, never creates MERGE_HEAD, and never commits conflict markers into history or the working tree
+  - _given_ server-services
+  - _then_ mergeBranch rejects /conflict/i; target ref unchanged; no MERGE_HEAD; working-tree + every historical blob free of <<<<<<< / ======= / >>>>>>>
+  - _asserted by_ `git-service.integration.test.ts::mergeBranch rejects conflicts without committing`, `git.service.test.ts::rejects a conflicting plumbing merge and never c`, `git.service.test.ts::aborts merge on _journal.json conflict and leave`
+- [x] ✅ `git-integration.merge.idempotent` — Merging a branch already reachable from the target is idempotent — no new commit, ref/count unchanged — and it self-heals an interrupted plumbing merge (ref advanced but working tree never reset) by syncing the clean checked-out target forward
+  - _given_ server-services
+  - _then_ result says 'already merged'; target ref + commit count unchanged across a second merge; an interrupted-merge checkout gets the missing files back
+  - _asserted by_ `git.service.test.ts::is idempotent when merging a branch that is alre`, `git.service.test.ts::syncs a clean checked-out target when retrying a`, `git.service.test.ts::does not reset dirty already-merged targets unle`
+- [x] ✅ `git-integration.merge.refuse-dirty` — Merging into a checked-out target that has uncommitted tracked changes is refused up-front rather than reset --hard over the user's work
+  - _given_ server-services
+  - _then_ mergeBranch rejects /uncommitted tracked change/; the local edit survives byte-for-byte
+  - _asserted by_ `git.service.test.ts::refuses to merge into a checked-out branch with `
+- [x] ✅ `git-integration.merge.safe-sync` — The post-merge working-tree sync only ever moves forward: it resolves a safe sync target (never reset --hard to a SHA that isn't a descendant of HEAD, so a stale deferred sync can't delete files a concurrent merge added — #771) and self-heals tracked files deleted relative to HEAD after an interrupted hard sync (#692)
+  - _given_ server-services
+  - _then_ a late applyDeferredWorkingTreeSync(stale-sha) deletes nothing; files added by the concurrent merge + the restored deleted files all present; status clean
+  - _asserted by_ `git-service.integration.test.ts::a stale deferred working-tree sync never deletes`, `git-service.integration.test.ts::mergeBranch self-heals a desynced checkout, neve`
+- [x] ✅ `git-integration.merge.append-resolve` — A merge whose ONLY conflicts are pure tail-appends to shared hot files auto-resolves by concatenation (seeded from the conflicted merged tree, so the feature's clean files are NOT dropped) — but only behind the explicit autoResolveAppendConflicts opt-in; any overlapping EDIT still throws
+  - _given_ server-services
+  - _then_ result contains 'append-merge'; master holds every ticket's appended block + each branch's own feature file; without the flag the same conflict throws; an edit-conflict throws even with the flag
+  - _asserted by_ `append-only-hotfile-merge.integration.test.ts::lands a 3-ticket append-only cluster via the plu`, `append-only-hotfile-merge.integration.test.ts::without the opt-in flag the same append conflict`, `append-only-hotfile-merge.integration.test.ts::an overlapping EDIT to the hot file is not an ap`
+- [x] ✅ `git-integration.detect.conflicts` — Conflict detection is read-only via merge-tree --write-tree: detectConflicts / detectConflictsByBranch / detectAppendOnlyResolvableConflicts report conflicting files (or append-resolvable hot files) without moving HEAD, touching the index/working tree, or creating MERGE_HEAD
+  - _given_ server-services
+  - _then_ hasConflicts + conflictingFiles correct; HEAD, status --porcelain, and file content identical before/after; no MERGE_HEAD
+  - _asserted by_ `git-service.integration.test.ts::detectConflicts reports conflicts without touchi`, `git-service.integration.test.ts::detectConflictsByBranch detects conflicts betwee`, `git-service.integration.test.ts::detectConflictsByBranch returns no conflicts for`, `append-only-hotfile-merge.integration.test.ts::detectAppendOnlyResolvableConflicts reports the `
+- [x] ✅ `git-integration.recover.detached-head` — Commits made from a detached HEAD in a worktree are recovered: syncBranchToHead force-updates the branch ref to the detached commit, and ensureOnBranch reattaches so subsequent merges aren't silent no-ops
+  - _given_ server-services
+  - _then_ branch ref == detached commit after syncBranchToHead (returns true); current branch == feature branch after ensureOnBranch; the commit's file content is on disk
+  - _asserted by_ `git-service.integration.test.ts::syncBranchToHead and ensureOnBranch recover comm`
+- [x] ✅ `git-integration.renumber.migrations` — Before merge, a feature branch's added drizzle migrations are auto-renumbered above the base's highest (all-or-nothing, multiple shifted without clobber) and _journal.json is rebuilt as base-prefix + renumbered entries, turning a guaranteed collision into a clean merge; no-op when no migrations were added; idempotent
+  - _given_ server-services
+  - _then_ renames reported (0001_b→0002_b, 0002_c→0003_c); journal tags ordered base-prefix-first; the previously-conflicting merge now succeeds; second renumber makes no commit; no-mig branch unchanged
+  - _asserted by_ `git.service.test.ts::is a no-op when the feature branch added no migr`, `git.service.test.ts::renumbers a single colliding migration and the m`, `git.service.test.ts::renumbers MULTIPLE feature migrations without cl`, `git.service.test.ts::is idempotent - a second renumber after a succes`
+- [x] ✅ `git-integration.detect.repo-info` — Repo detection resolves the path to the git toplevel (subdirectory registration yields the same project), prefers default branch main-then-master (null if neither exists), reads the origin remote, and throws on a non-git directory
+  - _given_ server-services
+  - _then_ repoPath == git root; defaultBranch main>master or null; remoteUrl from origin; 'Not a git repository' thrown for non-git
+  - _asserted by_ `git-info.service.test.ts::detects basic repo info`, `git-info.service.test.ts::resolves to git root when called from a subdirec`, `git-info.service.test.ts::throws for non-git directory`, `git-info.service.test.ts::prefers main over master when both branches exis`
+- [x] ✅ `git-integration.stats.hotspots` — Project git stats compute commit count, recent commits, source-tree LOC (prod vs test), 12-week history, and churn-ranked hotspots; the async twin dedupes concurrent cold computes into one shared in-flight promise and shares a 60s HEAD-keyed cache with the sync twin; a dormant repo falls back to a bounded full-history hotspot scan
+  - _given_ operator
+  - _then_ commitCount/codeMetrics/history/hotspots populated and equal sync↔async; concurrent calls return the SAME object references; old-only repo still yields hotspots via fallback; fallback log args capped by --max-count
+  - _asserted by_ `git-info-async.service.test.ts::computes commit stats, code metrics, history, an`, `git-info-async.service.test.ts::deduplicates concurrent cold computations into o`, `git-info-async.service.test.ts::falls back to full history for hotspots when all`, `git-info.service.test.ts::returns commit count when defaultBranch is provi`
+- [x] ✅ `git-integration.guard.single-spawn` — The git CLI is spawnable from exactly one adapter (git-exec.ts); an AST gate scans every package src/ and fails if any other module spawns git directly (via literal, const, variable, promisify alias, namespace, or dynamic import), keeping the 'single source of truth' true
+  - _given_ server-services
+  - _then_ the gate reports zero offenders outside the allowlisted adapter, and still detects the adapter itself (allowlist is live, not stale)
+  - _asserted by_ `git-exec-single-spawn.test.ts::no package source spawns git outside the git-exe`, `git-exec-single-spawn.test.ts::the adapter itself is detected as a git spawn si`
+- [x] ✅ `git-integration.name.branch` — Branch names are derived deterministically from an issue: sanitizeBranchName lowercases, replaces spaces, collapses/trims hyphens, keeps slashes, truncates to 80; suggestBranchName yields feature/ak-<n>-<slug> (slug capped 40, issue number omitted when absent)
+  - _given_ server-services
+  - _then_ exact branch strings, e.g. feature/ak-3-fix-the-big-bug; 80-char / 40-char truncation enforced
+  - _asserted by_ `branch.test.ts::sanitizeBranchName (6 cases incl. 80-char trunca`, `branch.test.ts::suggestBranchName (8 cases incl. 40-char slug tr`
+
+## issues-board
+
+**Issues & Board (kanban core)** — 19/20 covered `[██████████]`
+
+- [~] ⚠️ **P4** `issues-board.config.statuses` — Per-project workflow columns are CRUD-configurable; a status that still has linked issues cannot be deleted (would leave issues dangling with no fallback column)
+  - _given_ operator
+  - _then_ GET lists >=5 default statuses; POST creates a new column; DELETE of a status with linked issues -> 409 (no orphaned issues)
+  - _add dimensions_ error, state-transition
+  - _gap_ the key invariant — DELETE of a status with linked issues must return 409 (project.repository.ts:224) so issues are never orphaned — has no asserting test in the candidate set; only GET/POST happy paths are exercised
+- [x] ✅ `issues-board.create.issue` — Creating an issue requires a non-empty title and allocates a per-project sequential issueNumber (MAX+1), independent across projects and reused after the max is deleted
+  - _given_ operator
+  - _then_ 201 with issueNumber starting at 1 and incrementing per project; whitespace/empty title -> 400; missing projectId/statusId -> 400
+  - _asserted by_ `issue-number.test.ts::first/second/third issue gets number; per-projec`, `issues-routes-edge-cases.test.ts::POST rejects whitespace/empty title (400)`
+- [x] ✅ `issues-board.create.batch` — Batch-create atomically inserts N issues with consecutive numbers plus optional parent_of edges and a Drive record, rolling back entirely (persisting nothing) on any validation failure
+  - _given_ agent
+  - _then_ 201 with N issues + consecutive issueNumbers; parentIssueId wires child_of edges; driveTarget+parent creates active Drive (no Drive without parent); a bad item -> 400 {index} and zero rows persisted
+  - _asserted by_ `issues-batch.test.ts::creates 5 issues with consecutive numbers; 400 w`
+- [x] ✅ `issues-board.declare.dependencies` — A typed dependency edge can be added singly (POST /:id/dependencies, defaults depends_on) or declared by 0-based index in a batch create/edge batch; symmetric types (related_to/coupled_with) carry no ordering
+  - _given_ agent
+  - _then_ 201 with {id,type}; batch returns {added,skipped}; idempotent re-add skipped; related_to reverse edge allowed
+  - _asserted by_ `dependency-graph-edge.test.ts::adds depends_on/blocked_by/related_to; defaults `, `coupling-batch-and-contract-mode.test.ts::validateBatchDependencies defaults+normalises+co`, `issues-batch.test.ts::dependencies/batch adds+skips idempotently`
+- [x] ✅ `issues-board.reject.dependencyCycle` — Adding a directional edge (depends_on/blocked_by/parent_of/child_of) that would close a cycle is rejected; symmetric pairs are exempt; rollback leaves edges unchanged
+  - _given_ agent
+  - _then_ single add -> 409 'cycle'; batch -> 400 'cycle' with no edges persisted; transitive A->B->C + C->A also rejected; coupled_with mutual pair accepted
+  - _asserted by_ `dependency-graph-edge.test.ts::rejects direct + transitive + blocked_by cycle (`, `issues-batch.test.ts::dependencies/batch rejects cycle and rolls back `, `coupling-contraction.test.ts (dependency-graph cycle math)`
+- [x] ✅ `issues-board.reject.dependencyInvalid` — Self-edges, unsupported edge types, cross-project edges, and duplicate (issue,dependsOn,type) edges are rejected with typed errors
+  - _given_ agent
+  - _then_ self -> 400 'itself'; duplicate -> 409 'already exists'; same pair different type allowed; bad type/cross-project -> 400
+  - _asserted by_ `dependency-graph-edge.test.ts::rejects self (400); duplicate (409); same pair d`, `coupling-batch-and-contract-mode.test.ts::rejects out-of-range/self/duplicate/unsupported-`
+- [x] ✅ `issues-board.remove.dependency` — Deleting a dependency edge removes it so it no longer appears in the issue's dependency list
+  - _given_ operator
+  - _then_ DELETE -> 200 {success:true}; subsequent GET /dependencies omits it
+  - _asserted by_ `dependency-graph-edge.test.ts::removes edge (200) and it is gone from GET /depe`
+- [x] ✅ `issues-board.guard.terminalMove` — Moving an issue to a terminal status (Done/Cancelled) is BLOCKED while it has an open, non-direct, unmerged workspace (AK-535 silent-merge-loss guard); the block is a no-op and the bulk path is atomic
+  - _given_ operator
+  - _then_ updateIssue/updateIssuesBulk reject with code CONFLICT; status unchanged; workspace not auto-closed; closed/merged or direct or no workspace -> move allowed
+  - _asserted by_ `terminal-move-guard.test.ts::BLOCKS move to Done with open non-direct ws (CON`
+- [x] ✅ `issues-board.close.workspaceOnTerminal` — Transitioning into a terminal status closes any still-open (direct) workspace so the monitor stops relaunching it; non-terminal moves and already-closed workspaces are untouched (mergedAt preserved)
+  - _given_ operator
+  - _then_ open direct workspace -> status 'closed'; non-terminal change leaves workspace idle; already-closed workspace keeps status+mergedAt
+  - _asserted by_ `close-workspace-on-terminal-issue.test.ts::closes open direct ws on Done; leaves non-termin`
+- [x] ✅ `issues-board.validate.externalUrl` — An issue's externalUrl must be absent or a well-formed http(s) URL; non-http schemes (javascript:/data:) are rejected to prevent smuggling executable payloads into a new-tab link
+  - _given_ operator
+  - _then_ valid https persists and round-trips; javascript: -> rejected (4xx); empty/null clears it
+  - _asserted by_ `api.test.ts::POST persists externalUrl; rejects non-http exte`, `url.test.ts (url scheme helper)`
+- [x] ✅ `issues-board.contract.coupled` — Contraction collapses a connected coupled_with component onto one lead: external sequential edges are repointed onto the lead (deduped, no self-edges), internal coupling dropped, members become duplicates of the lead and move to the resolved terminal status (Cancelled preferred, else Done)
+  - _given_ agent
+  - _then_ 200 with rewired edges + members absorbed (description 'Absorbed into #N', status Cancelled); partial selection -> 400 'exactly match'; cross-project -> 400 'across projects'; would-be-cycle -> 400 'cycle' with full rollback
+  - _asserted by_ `issues-batch.test.ts::contract-coupled rewires external edges onto lea`, `coupling-contraction.test.ts::planContraction edge inheritance`
+- [x] ✅ `issues-board.derive.boardStatus` — getBoardStatus assembles each issue's EFFECTIVE column from its most-relevant workspace's workflow node (falling back to the issue's own statusId), computes totals, and excludes Done/Cancelled unless includeClosed
+  - _given_ monitor
+  - _then_ issues carry derived statusName (workspace node wins over stale issue status), diffStats, lastAgentMessage, totals.inProgress/activeWorkspaces/runningSessions; unknown project -> NotFoundError
+  - _asserted by_ `board-status.test.ts::derives effective In Review from workflow node o`
+- [x] ✅ `issues-board.classify.boardBuckets` — An In-Review issue is purely classified into an attention bucket (closed-in-review / stale-in-review / idle-awaiting) or a pending_merge bucket (when auto-merge + auto-merge-in-review are enabled and a real diff exists) — one shared policy for human and agent
+  - _given_ monitor
+  - _then_ zero-diff not-ready -> attention idle-awaiting; null diff -> stale-in-review; closed workspace -> closed-in-review; idle+real diff+auto-merge -> mergeState pending_merge (attention null); ready-for-merge -> no flags
+  - _asserted by_ `board-status-classifiers.test.ts::all three attention buckets + pending_merge + nu`, `board-status.test.ts::idle-awaiting / stale-in-review / pending_merge `
+- [x] ✅ `issues-board.read.boardColumns` — GET /:id/board returns columns whose counts/placements reflect every mutation (PATCH status, workspace merge, workspace delete), with a memoized ETag conditional-GET fast path that serves 304 without recompute until a board-changed broadcast bumps the generation
+  - _given_ operator
+  - _then_ PATCH status moves issue between columns and updates counts; merge broadcast moves to Done; workspace delete removes workspaceSummary; matching If-None-Match -> 304 with no rebuild; a mutation broadcast or >60s or different includeArchived shape forces a full compute
+  - _asserted by_ `board-column-count-invariant.test.ts::PATCH status / merge broadcast / workspace delet`, `board-etag-fast-path.test.ts::304 from memo without recompute; generation bump`
+- [x] ✅ `issues-board.compute.blockedMap` — An issue is blocked iff it has a depends_on/blocked_by edge to a not-yet-resolved blocker; 'resolved' uses the WIDER {Done, AI Reviewed, Cancelled} set, but a blocker only truly unblocks once it has also landed on base (mergedAt / isDirect / no workspace); fan-in dependents stay blocked until ALL blockers land
+  - _given_ monitor
+  - _then_ monitor selects a Todo issue only when every blocker is resolved+landed; AI-Reviewed blocker counts resolved; a missing blocker is conservatively still-blocking; cycle members are not selected
+  - _asserted by_ `status-view.test.ts::isResolvedDependencyStatusView wider set; comput`, `dependency-auto-chain.test.ts::selects unblocked Todo only when all blockers re`
+- [x] ✅ `issues-board.archive.done` — archive-done moves issues that are Done and whose statusChangedAt is strictly older than N days into the Archived column
+  - _given_ operator
+  - _then_ issues strictly older than the cutoff move to Archived (boundary: exactly-at-cutoff stays Done); {archived:n}; invalid olderThanDays -> 400
+  - _asserted by_ `issues-batch.test.ts::archives exactly Done issues strictly older than`
+- [x] ✅ `issues-board.list.issues` — Listing returns a project's issues with their per-project issueNumbers; the slim variant omits descriptions and statusName filters to one column
+  - _given_ operator
+  - _then_ GET without projectId -> 400; with projectId -> issues array; statusName=Nope -> []; slim omits description (~60% payload)
+  - _asserted by_ `issue-number.test.ts::GET returns issues with numbers per project`, `issues-routes-edge-cases.test.ts::statusName filter returns matching / [] for unkn`, `issues-slim.test.ts::slim omits description`
+- [x] ✅ `issues-board.manage.tags` — Tags are CRUD-managed and duplicates can be merged; built-in tags are protected (cannot be deleted/renamed/merged away) and deleting a tag detaches it from issues without deleting the issues
+  - _given_ operator
+  - _then_ duplicate name -> 409; builtin delete/rename/merge -> 403; deleting a tag removes its issue associations only; non-builtin tags delete/rename normally
+  - _asserted by_ `tags.test.ts::CRUD; duplicate 409; builtin delete/rename/merge`
+- [x] ✅ `issues-board.summarize.milestones` — Milestones group issues toward a deliverable; the summary aggregates per-milestone totals (total/open/closed/progressPercent) and a server-computed burndown series
+  - _given_ operator
+  - _then_ summary returns per-milestone counts, progressPercent, and burndown of requested length; empty milestone reports zeros with a full-length burndown
+  - _asserted by_ `milestones-summary.test.ts::aggregates totals/open/closed/progressPercent + `
+- [x] ✅ `issues-board.seed.defaultStatuses` — Project registration seeds a fixed canonical 7-status workflow (Backlog at sortOrder -1, Todo as the single default landing column, plus In Progress/In Review/AI Reviewed/Done/Cancelled)
+  - _given_ operator
+  - _then_ initializeProjectStatuses produces exactly the 7 canonical names, no duplicates, Backlog sortOrder -1, exactly one default (Todo)
+  - _asserted by_ `registration-default-statuses.test.ts::seeds canonical 7 statuses; Backlog -1; single d`
+
+## mcp-server
+
+**mcp-server** — 12/20 covered `[██████░░░░]`
+
+- [ ] ⬜ **P0** `mcp-server.govern.disabled-tools` — A tool whose name is in the disabled_mcp_tools preference is never registered, so it does not appear in tools/list and cannot be called for that session
+  - _given_ settings-operator
+  - _then_ the disabled tool is absent from tools/list; calling it returns method-not-found
+  - _add dimensions_ permission, config, api
+  - _gap_ The disabled_mcp_tools registration gate (index.ts:198) — the ONLY authority knob on the surface — is untested. No test asserts that a listed tool is absent from tools/list and uncallable. Client-side toggle UI tests (mc
+- [ ] ⬜ **P1** `mcp-server.move.issue.workflow-edge` — A workflow-driven issue may only move along a legal outgoing edge of its current node; an illegal jump is refused with the valid next stages and a pointer to propose_transition
+  - _given_ ai-agent
+  - _then_ illegal target → code WORKFLOW_TRANSITION_INVALID with the list of valid next stages; legal target proceeds
+  - _add dimensions_ error, state-transition, workflow
+  - _gap_ WORKFLOW_TRANSITION_INVALID (move-issue.ts:56) — refusing an illegal workflow-graph jump and returning the valid next stages — has no test. terminal-done-guard covers only the terminal guard, not edge legality. Configura
+- [ ] ⬜ **P1** `mcp-server.create.agent-skill` — create_agent_skill rejects names containing '/', '\' or '..' (they become filesystem paths) and enforces per-scope uniqueness before writing SKILL.md
+  - _given_ ai-agent
+  - _then_ path-traversal/illegal name → validation error, no skill written; duplicate name in scope → rejected; valid → skill persisted
+  - _add dimensions_ error, boundary, permission
+  - _gap_ No test exercises create_agent_skill. The path-traversal guard (names with '/','\','..' become .claude/skills/<name>/SKILL.md filesystem paths) and per-scope uniqueness (create-agent-skill.ts:19,26) are a security-releva
+- [ ] ⬜ **P1** `mcp-server.fire.webhook` — A status-change mutation (move_issue/update_issue) fires the project's outbound webhook best-effort, but only after the URL is validated loopback-only (the single egress boundary against a malicious pref)
+  - _given_ ai-agent
+  - _then_ valid loopback URL → POST issue-status payload; non-loopback/non-http(s) host → not fired; mutation succeeds regardless of webhook outcome
+  - _add dimensions_ error, config, risk
+  - _gap_ No MCP test fires the outbound webhook on a status change, nor asserts the loopback-only egress validation (outbound-webhook.ts:44) that is the one SSRF boundary against a malicious outbound_webhook_url_<projectId> pref.
+- [ ] ⬜ `mcp-server.resilience.stay-up` — Unhandled async rejections are caught and logged to stderr so the stdio process stays connected; a stray write must never corrupt stdout (the JSON-RPC stream)
+  - _given_ ai-agent
+  - _then_ the server keeps answering subsequent requests; logs go to stderr only; stdout stays pure JSON-RPC
+  - _add dimensions_ error, risk, regression
+  - _gap_ The async-rejection-swallow / stdout-purity resilience policy (index.ts:236,246) — a stray rejection must not drop the stdio connection or corrupt the JSON-RPC stream — has no test. High blast radius (a crash makes every
+- [~] ⚠️ `mcp-server.orient.context` — get_context orients an agent: returns the active project, issue counts by status, and an active-workspace count
+  - _given_ ai-agent
+  - _then_ JSON with project{id,name}, status counts, activeWorkspaces; the active project resolves from the activeProjectId pref (not the first-inserted project)
+  - _add dimensions_ boundary
+  - _gap_ activeWorkspaces count is asserted with a single project; the suspected cross-project bleed (count not scoped by projectId, get-context.ts:35) is never asserted in a multi-project board.
+- [~] ⚠️ **P1** `mcp-server.merge.workspace.delegate` — merge_workspace fast-fails missing/closed workspaces locally, then delegates the authoritative merge to the REST server (lock/backup/conflict-recovery) instead of re-implementing it
+  - _given_ ai-agent
+  - _then_ missing → WORKSPACE_NOT_FOUND, closed → WORKSPACE_CLOSED, no workingDir → WORKSPACE_WORKING_DIR_MISSING (no fetch); valid → POST /api/workspaces/:id/merge result passed through
+  - _add dimensions_ api, risk
+  - _gap_ Only the pre-fetch fast-fail errors are asserted. The success path — that a valid merge_workspace actually POSTs /api/workspaces/:id/merge and passes the server's result (incl. 409 lock / 503 verify-fail / conflict) back
+- [~] ⚠️ `mcp-server.launch.workspace` — launch_workspace / relaunch_workspace pre-validate workspace state then delegate the spawn to the REST server; relaunch refuses a non-idle workspace
+  - _given_ ai-agent
+  - _then_ relaunch on active ws → WORKSPACE_NOT_IDLE (no fetch); structured not-found/closed/no-dir errors; valid → REST /launch result
+  - _add dimensions_ api
+  - _gap_ relaunch's WORKSPACE_NOT_IDLE and missing/closed errors are asserted; the actual delegation to REST /launch and its passthrough result are not. launch_workspace success path untested.
+- [x] ✅ `mcp-server.resolve.active-project` — Every project-scoped tool resolves to the passed projectId, else the activeProjectId pref, else fails with an actionable 'No active project' fix-it message
+  - _given_ ai-agent
+  - _then_ with no projectId and no active pref → error text 'No active project'; with the pref set → operation lands in the active project, not the first inserted
+  - _asserted by_ `mcp-tools.test.ts::get_context returns error when no activeProjectI`, `mcp-tools.test.ts::create_issue with no projectId creates in the ac`, `create-issue.test.ts::falls back to the active project when no project`
+- [x] ✅ `mcp-server.create.issue` — create_issue inserts an issue with a per-project auto-incremented issue number and pings the board
+  - _given_ ai-agent
+  - _then_ returns the new issue (issueNumber increments per project); row persisted; notifyBoard(projectId,'mcp_create_issue') fired
+  - _asserted by_ `create-issue.test.ts::creates an issue in the given project with an au`, `mcp-tools.test.ts::create_issue creates a new issue`
+- [x] ✅ `mcp-server.create.issues-batch` — create_issues_batch atomically seeds N issues plus dependency/coupling edges in one transaction, rolling back entirely on any validation failure and rejecting cycles/self/duplicate edges
+  - _given_ ai-agent
+  - _then_ consecutive issue numbers from current max; on validation failure (out-of-range index, self-dep, duplicate, cross-batch cycle) NOTHING persists
+  - _asserted by_ `create-issues-batch.test.ts::rolls back on validation failure — no issues per`, `create-issues-batch.test.ts::rejects a cycle across the batch's directional e`, `create-issues-batch.test.ts::seeds issues AND dependency edges atomically in `
+- [x] ✅ `mcp-server.list.issues` — list_issues returns a project's issues as a bare JSON array, optionally filtered by status name
+  - _given_ ai-agent
+  - _then_ content[0].text parses to an Array (not {issues}); status filter narrows to matching issues
+  - _asserted by_ `list-issues.test.ts::returns all issues for a project`, `list-issues.test.ts::filters by status name`, `mcp-tools.test.ts::list_issues returns issues array`
+- [x] ✅ `mcp-server.update.issue` — update_issue edits fields and walks status by name, reporting which fields changed and pinging the board
+  - _given_ ai-agent
+  - _then_ updated[] contains changed field keys (priority/statusId); DB reflects them; unknown status name → 'not found' error listing valid names
+  - _asserted by_ `update-issue.test.ts::updates priority and moves the issue to a new st`, `update-issue.test.ts::returns an error for an unknown status name`
+- [x] ✅ `mcp-server.move.issue.terminal-guard` — Moving an issue to a terminal status (Done/Cancelled) is blocked when it has an open, non-direct, unmerged workspace — the agent is told to merge_workspace first; direct/closed/no workspaces are allowed
+  - _given_ ai-agent
+  - _then_ blocked move returns code OPEN_WORKSPACE_NOT_MERGED; closed/merged/direct/no-workspace moves succeed (movedTo=Done)
+  - _asserted by_ `terminal-done-guard.test.ts::blocks move to Done when issue has an open unmer`, `terminal-done-guard.test.ts::allows move to Done when issue has an open DIREC`, `terminal-done-guard.test.ts::blocks statusName=Done when issue has an open un`
+- [x] ✅ `mcp-server.get.board-status` — get_board_status answers 'what are my agents doing right now' — totals plus per-in-progress-issue workspace state and computed diff stats, excluding Done/Cancelled unless includeClosed, with no MCP-side cache
+  - _given_ ai-agent
+  - _then_ totals{totalIssues,inProgress,activeWorkspaces,runningSessions}; per-issue workspace.branch + diffStats; includeClosed toggles terminal issues; reads reflect DB immediately after a status change
+  - _asserted by_ `get-board-status.test.ts::reports in-progress issues with workspace state `, `get-board-status.test.ts::excludes Done/Cancelled issues by default and in`, `get-board-status.test.ts::reflects updated Done count immediately after an`
+- [x] ✅ `mcp-server.delete.cascade` — delete_issue / delete_workspace remove the entity and every scoped child row (sessions, messages, diff comments, artifacts, comments, repos, transitions, retry decisions, tags, dependencies) through the shared cascade, leaving siblings intact
+  - _given_ ai-agent
+  - _then_ {id,deleted:true}; all child tables emptied for that entity; other issues/workspaces untouched; notifyBoard fired
+  - _asserted by_ `delete-cascade.test.ts::delete_workspace removes every workspace-scoped `, `delete-cascade.test.ts::delete_issue removes issue-scoped rows and works`
+- [x] ✅ `mcp-server.attach.artifact` — attach_artifact records proof-of-work (text/link/image/webm) keyed to an issue or resolved from a workspaceId, surfacing it on the board
+  - _given_ ai-agent
+  - _then_ artifact row persisted with type/content/caption; workspaceId resolves to its issue; notifyBoard('mcp_attach_artifact')
+  - _asserted by_ `attach-artifact.test.ts::attaches a text artifact to an issue`, `attach-artifact.test.ts::resolves the issue from workspaceId`
+- [x] ✅ `mcp-server.manage.dependencies-batch` — update_dependencies_batch / contract_coupled_issues mutate the dependency graph idempotently, rejecting cycles and self-dependencies and refusing to contract components with open workspaces
+  - _given_ ai-agent
+  - _then_ existing edges skipped not failed; cycle/self rejected with no mutation; coupled contraction blocked when a member has an open workspace or the selection is partial
+  - _asserted by_ `update-dependencies-batch.test.ts::rejects a batch that introduces a cycle`, `update-dependencies-batch.test.ts::adds multiple edges idempotently — already-exist`, `contract-coupled-issues.test.ts::rejects components with open workspaces before m`
+- [x] ✅ `mcp-server.front.butler` — The butler_* tool family is a thin HTTP front over the per-project warm Butler session (interrupt/set-model/set-profile/state), surfacing server error bodies and a friendly message when the REST server is unreachable
+  - _given_ ai-agent
+  - _then_ POST/GET to /projects/:id/butler/* returns the server JSON; non-2xx body propagated; ECONNREFUSED → 'Failed to reach the butler'
+  - _asserted by_ `butler-tools.test.ts::butler_set_model POSTs the model body to /model`, `butler-tools.test.ts::returns the server's error message on non-2xx`, `butler-tools.test.ts::returns a friendly message when the server is un`
+- [x] ✅ `mcp-server.catalog.parity` — The advertised MCP_TOOL_DEFINITIONS catalog and the runtime tools/list stay in exact name-parity in BOTH directions, and every runtime tool ships a non-empty description
+  - _given_ ai-agent
+  - _then_ advertised ⊆ registered (no phantom tool like the old mark_ready_for_merge) AND registered ⊆ advertised; mark_ready_for_merge present; no blank descriptions
+  - _asserted by_ `mcp-tools.test.ts::the MCP_TOOL_DEFINITIONS catalog and the runtime`
+
+## monitor-orchestration
+
+**monitor-orchestration** — 16/19 covered `[████████░░]`
+
+- [ ] ⬜ **high** `monitor-orchestration.conductor.lifecycle` — POST /conductor start spawns loop.sh detached (survives hot-reload), records the OS PID, clears the stop-marker, and is a NO-OP if one is already alive; stop tree-kills by PID plus a PowerShell backstop reaping every loop.sh and drops a stop-marker so read-only status reports 'stopped' immediately.
+  - _given_ operator
+  - _then_ starting twice does not spawn a second loop; stopping makes the orchestrator status flip to not-alive
+  - _add dimensions_ state-transition, error, regression
+  - _gap_ conductor-control.service (start no-op-if-alive, detached spawn, tree-kill + PowerShell backstop, stop-marker) has NO test. project-conductor.service.test.ts covers config parsing only; orchestrator-monitor covers the re
+- [ ] ⬜ **high** `monitor-orchestration.guard.re-entrancy-and-maintenance` — A cycle never overlaps itself (re-entrancy guard): a trigger arriving mid-cycle schedules exactly one more pass at the end; a maintenance window suppresses all disruptive actions without disabling the monitor.
+  - _given_ autopilot-monitor
+  - _then_ two concurrent triggers never both POST a workspace for the same issue; during maintenance no relaunch/merge/start fires
+  - _add dimensions_ state-transition, regression, config
+  - _gap_ No test asserts the re-entrancy guard (a mid-cycle trigger runs exactly one more pass, never two concurrent cycles) nor the maintenance-window suppression. startup-timers-hmr covers timer-handle recreation only, not the 
+- [ ] ⬜ **low** `monitor-orchestration.butler.llm-cycle` — The Monitor Butler runs a fresh, stateless Claude Agent SDK session on a schedule (10-min hard timeout) that snapshots the board, reads strategy from objective.md, acts through MCP tools, and logs every tool call + start/end to board_health_events; a crashed cycle never poisons the next, and it drives only ONE active project per cycle.
+  - _given_ monitor-butler
+  - _then_ board_health_events rows appear per cycle; only the active project is acted on
+  - _add dimensions_ workflow, observability, config
+  - _gap_ runMonitorButlerCycle has no behavioural test (only startup-timers-hmr asserts its scheduler timer is recreated/cleared). The single-active-project limitation and board_health_events logging are unasserted. Lower priorit
+- [x] ✅ `monitor-orchestration.resolve.start-policy` — Start Mode is the single per-project kill-switch for auto-start: manual stops ALL auto-start paths, monitor enables in-process starts, conductor keeps in-process OFF; explicit start_mode_<id> fully supersedes the global auto_monitor toggle.
+  - _given_ autopilot-monitor
+  - _then_ resolveStartPolicy returns {mode, autoStartUnblocked, postMergeCascade, backlogRefill, scheduledRuns, source}; manual ⇒ all four capabilities false even with every legacy opt-in flag ON
+  - _asserted by_ `start-policy.service.test.ts::manual ⇒ NOTHING auto-starts even with legacy op`, `start-policy.service.test.ts::monitor ⇒ auto-start on; cascade/refill follow o`, `start-policy.service.test.ts::conductor ⇒ in-process auto-start OFF`
+- [x] ✅ `monitor-orchestration.derive.start-mode` — A project with no explicit start_mode derives one from legacy prefs (board_autodrive OR (auto_monitor AND nudge_auto_start) ⇒ monitor; else manual); conductor is NEVER derived, only set explicitly; an unknown mode value falls back to derivation.
+  - _given_ autopilot-monitor
+  - _then_ resolveStartPolicy returns source='derived' with the back-compat mode; conductor never appears from derivation
+  - _asserted by_ `start-policy.service.test.ts::board_autodrive=true ⇒ monitor (derived)`, `start-policy.service.test.ts::never derives conductor`, `start-policy.service.test.ts::unknown start_mode falls back to derivation`
+- [x] ✅ `monitor-orchestration.autostart.dependency-readiness` — A dependent is auto-started only when every blocker reached a terminal status AND its work actually LANDED on the base branch (mergedAt / direct commit), not merely 'Done'; a fan-in dependent waits for ALL upstreams to land.
+  - _given_ autopilot-monitor
+  - _then_ no workspace is POSTed for a Done-but-unmerged blocker; a workspace IS created once mergedAt is set or a missing blocker row is treated as not-ready
+  - _asserted by_ `monitor-auto-start.test.ts::does NOT start a dependent whose blocker is Done`, `monitor-auto-start.test.ts::starts a dependent once its blocker is actually `, `monitor-auto-start.test.ts::does NOT start a fan-in dependent while one bloc`
+- [x] ✅ `monitor-orchestration.autostart.wip-capacity` — WIP counts only active/reviewing/fixing workspaces (not blocked usage-limit launches or idle zero-output launch failures), so the auto-start ceiling reflects real running agents; starts are also capped at maxNewStartsPerCycle.
+  - _given_ autopilot-monitor
+  - _then_ auto-start launches up to the WIP target counting only active-state workspaces; a stale-idle backlog over the target still permits a fresh start (#815); never more than maxNewStarts per cycle
+  - _asserted by_ `monitor-auto-start-wip-capacity.test.ts (9 titles)`, `monitor-auto-start.test.ts::starts an unblocked Backlog issue even when stal`
+- [x] ✅ `monitor-orchestration.autostart.meta-and-feature-filter` — Drive/epic META issues are never auto-started as builders (detected by Drive.metaIssueId or parent_of/child_of edge, enforced per-issue AND in the candidate SQL); feature/enhancement tickets are excluded globally UNLESS the project is auto-driven; no-auto-start-tagged issues are always skipped.
+  - _given_ autopilot-monitor
+  - _then_ metas and tagged issues produce no workspace; feature-typed Backlog issues auto-start only on an auto-driven project
+  - _asserted by_ `monitor-meta-autostart.test.ts (isDriveOrEpicMeta + notDriveOrEpicMetaSql real DB)`, `monitor-auto-start.test.ts::auto-starts a feature-typed Backlog issue on an `, `monitor-auto-start.test.ts::skips an In-Progress issue tagged no-auto-start`
+- [x] ✅ `monitor-orchestration.autostart.planmode-override` — Wave/auto-started builders for an auto-driven project are forwarded planMode:false so they start in EXECUTE mode, matching the New-Workspace default; non-auto-driven projects keep the priority default.
+  - _given_ autopilot-monitor
+  - _then_ the POST /api/workspaces body carries planMode:false for auto-driven projects only
+  - _asserted by_ `monitor-auto-start.test.ts::passes planMode:false for Todo/In-Progress in an`, `dependency-wave.service.test.ts (planMode:false wave builders)`
+- [x] ✅ `monitor-orchestration.merge.auto-merge-gated` — Automatic landing of approved/idle workspaces requires auto_merge='true' AND merge strategy='monitor', with a per-project auto_merge_disabled_<id> override; manual POST /merge is never affected. Merges are capped per cycle with fix-and-merge fallback on conflict.
+  - _given_ autopilot-monitor
+  - _then_ merge fires only when enabled and the project isn't disabled; falls back to fix-and-merge on conflict; no more than the merge cap per cycle
+  - _asserted by_ `monitor-cycle.test.ts::auto_merge gating (enabled/disabled, caps, fix-a`, `monitor-cycle.test.ts::per-project auto_merge_disabled`
+- [x] ✅ `monitor-orchestration.merge.premerge-gate-withhold` — Un-ready In-Review/stopped-review work is auto-merged only after the pre-merge verify+smoke gate passes; a project with a verify_script or web stack profile is 'gated' and a failed gate WITHHOLDS the merge (leaves In Review).
+  - _given_ autopilot-monitor
+  - _then_ projectHasMergeGate true ⇒ merge runs the gate at the merge site and does not land on failure (#821)
+  - _asserted by_ `monitor-merge-gate.test.ts::projectHasMergeGate (#821)`, `monitor-cycle.test.ts::auto_merge_in_review (not-ready In Review)`
+- [x] ✅ `monitor-orchestration.recover.stuck-builder` — Stuck-builder recovery fires only for a builder session 0 commits ahead AND (non-trivial uncommitted diff OR repeated-failed-command retry loop): it commits leftover work and routes to review instead of killing progress; a workspace with >=10 sessions (>=5 In Review) is force-closed as stuck.
+  - _given_ autopilot-monitor
+  - _then_ leftover work committed + review launched; runaway relaunch/review loops force-closed
+  - _asserted by_ `monitor-cycle.test.ts::stops a long-running builder with zero commits a`
+- [x] ✅ `monitor-orchestration.cascade.post-merge-dependency` — On a blocker merge, the post-merge dependency cascade (a THIRD auto-start path) selects exactly ONE Todo/Backlog issue whose deps all LANDED, respects the WIP cap, skips no-auto-start + dependency-cycle members, and records an audit comment — BUT is gated by the project's Start Mode: with manual it is a clean no-op (not even an audit comment) even when dependency_auto_chain=true.
+  - _given_ autopilot-monitor
+  - _then_ one dependent workspace starts (or a skip is audited) when monitor mode; nothing happens at all under manual
+  - _asserted by_ `dependency-auto-chain.test.ts::starts an unblocked child and records an audit c`, `dependency-auto-chain.test.ts::does NOT cascade when Start Mode is manual even `, `dependency-auto-chain.test.ts::WIP cap / no-auto-start / dependency cycle skips`
+- [x] ✅ `monitor-orchestration.plan.dependency-wave` — The dependency-wave planner partitions candidates into ready / blocked / cyclicInvalid, starts only the next ready wave that FITS under the WIP target, reports per-dependent which upstreams are still un-landed, and never launches cycle members.
+  - _given_ operator
+  - _then_ wave start launches a slice up to wip.available; blocked dependents list their specific blockers; cyclic candidates are invalid
+  - _asserted by_ `dependency-wave.service.test.ts (partition + per-dependent blockers + WIP-fit + planMode:false)`
+- [x] ✅ `monitor-orchestration.refill.backlog` — Backlog refill generates synthetic tickets only when unstarted-Todo < backlog floor AND WIP < target AND a cooldown (default 120min) elapsed AND backlog_empty_strategy='generate_tickets'; the host issue is born In Progress (can't re-trigger itself) and the cooldown is stamped only on a successful launch.
+  - _given_ autopilot-monitor
+  - _then_ a generation-skill workspace launches and stamps cooldown; nothing happens when backlog has unstarted issues, WIP is full, cooldown active, or strategy is skip/unset; orphan host deleted on launch failure
+  - _asserted by_ `monitor-backlog.test.ts::gating (skip/unset/cooldown)`, `monitor-backlog.test.ts::generation (launch+stamp, WIP-full no-op, floor,`
+- [x] ✅ `monitor-orchestration.contract.coupled-tickets` — An opt-in pre-fan-out step contracts coupled_with tickets into one so they never start as conflicting parallel workspaces; contract mode is off by default and resolved per project (apply/suggest/true ⇒ on).
+  - _given_ autopilot-monitor
+  - _then_ coupled components merged before fan-out; batch dependency validation rejects cycles/self/duplicate/out-of-range edges
+  - _asserted by_ `coupling-batch-and-contract-mode.test.ts::validateBatchDependencies + resolveContractMode `
+- [x] ✅ `monitor-orchestration.drive.toggle-coherent-bundle` — The one-switch Drive flips a COHERENT pref set atomically (autodrive on, kill-switch off, review+merge on, planMode off, verify gate ensured) and on OFF restores triage and re-arms the kill-switch; provider/profile is intentionally NOT owned by Drive, and an existing user verify-script override is preserved.
+  - _given_ operator
+  - _then_ PUT /drive {enabled} writes every owned pref together; PUT without boolean enabled is rejected; provider survives a triage⇄drive flip
+  - _asserted by_ `drive.test.ts::enabling Drive sets every owned preference coher`, `drive.test.ts::disabling Drive restores triage and re-arms kill`, `drive.test.ts::rejects a PUT without a boolean enabled`
+- [x] ✅ `monitor-orchestration.drive.preflight-autorepair` — Drive preflight reports the machine-checkable prerequisites and with autoRepair flips Drive on ONLY when EVERY blocker is one-switch-fixable; hard blockers (null defaultBranch, missing status set, exhausted/mock Claude profile) are reported honestly and never silently worked around.
+  - _given_ operator
+  - _then_ a freshly-registered project lists what's missing; autoRepair flips on and reports ready when repairable; hard blockers keep it blocked and surface them (WIP=1 warns but doesn't block)
+  - _asserted by_ `drive-preflight.test.ts::blocks freshly-registered + lists missing`, `drive-preflight.test.ts::autoRepair flips on and reports ready`, `drive-preflight.test.ts::null defaultBranch / missing status / exhausted `
+- [x] ✅ `monitor-orchestration.conductor.liveness-readonly` — Read-only Conductor liveness is computed from disk: alive when loop.log mtime is fresh (<11min) and no newer stop-marker exists; a restart's fresh log supersedes a stale marker; a stale log reads not-alive regardless of marker.
+  - _given_ operator
+  - _then_ GET /orchestrator reports alive/not-alive consistent with log/marker mtimes
+  - _asserted by_ `orchestrator-monitor.service.test.ts::readOrchestratorStatus stop-marker (5 titles)`
+
+## persistence-schema
+
+**persistence-schema** — 13/15 covered `[█████████░]`
+
+- [ ] ⬜ **P2** `persistence-schema.resolve.db-location` — The DB file is resolved by existence (env override -> local checkout -> ~/.agentic-kanban), so a worktree dev-server transparently runs against a separate home-dir DB rather than the main board
+  - _given_ services
+  - _then_ getDbUrl returns the checkout DB when present, else the home-dir DB; a worktree (no checked-out db) gets a different database/project-IDs
+  - _add dimensions_ config, boundary, risk
+  - _gap_ No test imports data-dir.ts. The existence-based resolution and the env-override precedence (DB_URL/AGENTIC_KANBAN_DIR -> local checkout -> ~/.agentic-kanban) are unasserted, despite being the mechanism behind the worktr
+- [~] ⚠️ **P4** `persistence-schema.enforce.unique-issue-number` — Issue numbers are unique per project (not global): a unique index on (project_id, issue_number) lets two projects each have a #1, and next-number allocation is MAX+1 scoped per project
+  - _given_ services
+  - _then_ nextIssueNumber returns max+1 within a project and is unaffected by other projects; a duplicate (project_id, issue_number) insert is rejected by the DB unique index
+  - _add dimensions_ error-handling
+  - _gap_ Allocation logic (MAX+1, per-project scope) is asserted, but the DB-level uniqueness GUARANTEE — that a duplicate (project_id, issue_number) insert is rejected by idx_issues_project_id_issue_number — is never exercised. 
+- [x] ✅ `persistence-schema.apply.migrations` — Applying every journaled migration to an empty DB succeeds and reproduces the core schema (tables exist)
+  - _given_ startup-tasks
+  - _then_ no error thrown; expected tables (e.g. workspaces) present after apply
+  - _asserted by_ `migration-schema-drift.test.ts::applies all migrations to an empty DB without er`
+- [x] ✅ `persistence-schema.detect.schema-drift` — A freshly-migrated DB and the Drizzle schema agree on the table set and per-table column set (no schema column without a migration, and the reverse)
+  - _given_ startup-tasks
+  - _then_ missingTables/extraTables empty; no per-table columnDrift
+  - _asserted by_ `migration-schema-drift.test.ts::migrated DB and Drizzle schema agree on tables a`
+- [x] ✅ `persistence-schema.enforce.fk-action-parity` — The ON DELETE/ON UPDATE actions the migrations produce equal the actions the Drizzle schema declares (no schema-says-cascade / DB-on-NO-ACTION drift)
+  - _given_ startup-tasks
+  - _then_ diffForeignKeyActions returns no mismatches
+  - _asserted by_ `migration-schema-drift.test.ts::migrated DB and Drizzle schema agree on FK actio`
+- [x] ✅ `persistence-schema.guard.journal-integrity` — The migration journal is structurally sound: no duplicate NNNN numbers, no orphan .sql un-journaled files, every journal entry has a file, unique tags/idx
+  - _given_ startup-tasks
+  - _then_ no duplicate numbers, no orphans, journal/disk are bijective, tags+idx unique
+  - _asserted by_ `migration-schema-drift.test.ts::has no duplicate migration numbers on disk`, `migration-schema-drift.test.ts::every migration file on disk is referenced by th`, `migration-schema-drift.test.ts::every journal entry has a migration file on disk`
+- [x] ✅ `persistence-schema.retry.busy-lock` — A locked DB is treated as transient: SQLITE_BUSY/EBUSY/'database is locked' is retried up to 3 attempts (50ms then 100ms) and then re-throws; a non-busy error is not retried
+  - _given_ parallel-agents
+  - _then_ succeeds on a later attempt and returns the result; after 3 busy attempts re-throws the original; non-busy error throws after exactly 1 attempt with no retry log
+  - _asserted by_ `db-retry.test.ts::retries on SQLITE_BUSY (code) and succeeds on se`, `db-retry.test.ts::retries on 'database is locked' message and succ`, `db-retry.test.ts::gives up after 3 attempts and re-throws`, `db-retry.test.ts::does not retry non-busy errors`
+- [x] ✅ `persistence-schema.cascade.delete-issue` — Deleting an issue removes its entire dependent subtree (workspaces, sessions, messages, diff-comments, artifacts, comments, time-entries, showdowns, dependencies both directions, tags) atomically and leaves no orphan or FK violation
+  - _given_ operator
+  - _then_ issue + all children gone; sibling issue untouched; PRAGMA foreign_key_check returns no rows
+  - _asserted by_ `issue-cascade-and-dep.repo.test.ts::deletes an issue and leaves no orphans across is`, `issue-cascade-and-dep.repo.test.ts::deletes an issue with no children`
+- [x] ✅ `persistence-schema.cascade.delete-workspace` — Deleting a workspace removes every table that references the workspace or its sessions, atomically, while leaving the parent issue intact
+  - _given_ operator
+  - _then_ workspace + sessions gone; parent issue remains; no FK violations
+  - _asserted by_ `issue-cascade-and-dep.repo.test.ts::deletes every table that references the workspac`
+- [x] ✅ `persistence-schema.repair.fk-drift` — db:repair rebuilds a legacy table whose FK actions drifted (e.g. issue_dependencies on NO ACTION) to the schema's cascade, preserving all rows and user indexes, making the cascade actually fire, and is idempotent
+  - _given_ operator
+  - _then_ drift detected; table rebuilt; rows + unique index survive; deleting parent now cascades; a second run finds no drift
+  - _asserted by_ `fk-actions-repair.test.ts::detects FK-action drift on a legacy DB`, `fk-actions-repair.test.ts::rebuilds drifted tables to the schema's cascade `, `fk-actions-repair.test.ts::is idempotent — a second run finds no drift`, `fk-actions-repair.test.ts::replaces the FK clauses while preserving columns`
+- [x] ✅ `persistence-schema.assert.fk-enabled-startup` — At startup FK enforcement is asserted per connection (throws LOUD if PRAGMA foreign_keys is OFF) and FK-action drift on the live DB is repaired before serving
+  - _given_ startup-tasks
+  - _then_ passes when FK=ON; throws a connection-named error when OFF; legacy drift is rebuilt so the schema's cascades fire; a matched DB is a silent no-op
+  - _asserted by_ `fk-alignment-startup.test.ts::passes when PRAGMA foreign_keys=ON took effect`, `fk-alignment-startup.test.ts::throws LOUD when FK enforcement is off (the swal`, `fk-alignment-startup.test.ts::repairs FK-action drift on a legacy live DB at s`, `fk-alignment-startup.test.ts::is a silent no-op on a DB whose FK actions alrea`
+- [x] ✅ `persistence-schema.backup.create-verified` — createBackup writes a WAL-consistent, committed-only single-file snapshot (VACUUM INTO) and verifies it before accepting: integrity_check ok and row counts match the live source
+  - _given_ backup-scheduler
+  - _then_ returns a verified backup whose project/issue counts equal the source; an in-flight uncommitted write is excluded from the snapshot
+  - _asserted by_ `backup.test.ts::createBackup verifies ok and matches source coun`, `backup.test.ts::backup taken during an in-flight write is consis`, `backup.test.ts::returns null when db is missing or empty`
+- [x] ✅ `persistence-schema.backup.reject-bad` — A backup is refused unless trustworthy: a corrupt/truncated file fails integrity_check, and an empty-when-live-is-not snapshot (0 projects or 0 issues while live has rows) is rejected rather than rotated in; a failed verify never promotes and preserves the previous good backup
+  - _given_ backup-scheduler
+  - _then_ verifyBackup throws on corrupt / 0-projects / 0-issues; a forced verify failure leaves the prior good backup intact and no .tmp scratch behind
+  - _asserted by_ `backup.test.ts::verifyBackup rejects a truncated/corrupt file`, `backup.test.ts::verifyBackup rejects a 0-project backup when liv`, `backup.test.ts::verifyBackup rejects a 0-issue backup when live `, `backup.test.ts::does not promote a backup that fails verificatio`
+- [x] ✅ `persistence-schema.backup.rotate-prune` — Backups rotate safely: keep exactly KEEP_LAST(5) newest, never prune to zero, enforce a hard total-size cap keeping at least one, and reap interrupted-write scratch (.tmp/.promote + journal sidecars) without harming legitimate final-backup sidecars
+  - _given_ backup-scheduler
+  - _then_ 5 newest survive; size-cap trims oldest but never to zero; scratch removed, good backups + their sidecars kept
+  - _asserted by_ `backup.test.ts::pruneBackups keeps exactly KEEP_LAST and never d`, `backup.test.ts::reaps orphan .tmp/.promote/journal scratch from `, `backup.test.ts::createBackup clears pre-existing scratch and lea`, `backup.test.ts::enforces a hard size cap on retained backups, ke`
+- [x] ✅ `persistence-schema.restore.roundtrip` — A wipe is recoverable: backup -> wipe -> verify+restore reproduces the original row counts (local-only durability guarantee)
+  - _given_ operator
+  - _then_ restored DB project/issue counts equal the pre-wipe live DB
+  - _asserted by_ `backup.test.ts::db restore round-trip: seed -> backup -> wipe ->`
+
+## preferences-config
+
+**preferences-config** — 14/16 covered `[█████████░]`
+
+- [~] ⚠️ **P1** `preferences-config.resolve.start-policy` — Start Mode is the single auto-start kill-switch: manual stops ALL auto-start, conductor forces in-process auto-start off, monitor enables it; an unset mode is derived from legacy flags (conductor never derived)
+  - _given_ monitor
+  - _then_ StartPolicy exposes autoStartUnblocked/postMergeCascade/backlogRefill/scheduledRuns booleans + source; manual → all false, conductor → all in-process false (scheduledRuns true)
+  - _add dimensions_ state-transition, risk
+  - _gap_ Only the mode='monitor' StartPolicy is asserted (via resolveProjectRuntimeConfig). The kill-switch semantics that justify this module's existence (decision 008) — manual → all four capability booleans false, conductor → 
+- [~] ⚠️ **P2** `preferences-config.read.quota-usage` — Live quota telemetry is surfaced from the external tampermonkey-direct service and degrades to 503 (with empty providers) when that source is unavailable
+  - _given_ operator
+  - _then_ GET returns quota data (200) or {error, providers:[]} with 503 when the external endpoint is down
+  - _add dimensions_ api, error
+  - _gap_ No test exercises the GET /api/preferences/quota-usage route or its 503 graceful-degradation path. The quota selection LOGIC (isPolicyBlockedByQuota) is well covered, but the HTTP endpoint contract (200 shape vs 503 on e
+- [x] ✅ `preferences-config.write.settings` — A settings write persists every whitelisted (registry or dynamic) key and reports the applied set
+  - _given_ operator
+  - _then_ 200 {ok:true, applied:[...]}; a later GET returns the saved value; upserts overwrite
+  - _asserted by_ `preferences.test.ts::PUT /api/preferences/settings returns 200 + appl`, `preferences.test.ts::GET /api/preferences/settings returns saved valu`, `preferences.test.ts::PUT /api/preferences/settings upserts existing v`
+- [x] ✅ `preferences-config.reject.unknown-key` — An un-whitelisted key is rejected LOUDLY (422 + droppedKeys) rather than silently dropped; valid keys in the same write still apply
+  - _given_ operator
+  - _then_ 422 {ok:false, droppedKeys, applied}; the dropped key is NOT persisted, the valid key IS
+  - _asserted by_ `preferences.test.ts::PUT /api/preferences/settings rejects disallowed`, `dynamic-preference-keys.test.ts::accepts the card-aging board prefixes (#904)`
+- [x] ✅ `preferences-config.reject.provider-divergence` — A provider/profile write that would put global prefs out of sync with the active project's Bullseye is rejected (422) with nothing persisted — the enforced divergence invariant
+  - _given_ operator
+  - _then_ 422 {ok:false, divergence:{bullseyeProvider, settingsProvider,...}}; provider/profile prefs unchanged in DB
+  - _asserted by_ `settings-divergence-guard.test.ts::rejects a provider write that would diverge from`, `settings-divergence-guard.test.ts::rejects a profile write that would diverge (same`, `settings-divergence-guard.test.ts::allows a provider write that AGREES with the Bul`
+- [x] ✅ `preferences-config.guard.skip-untouched` — The divergence guard fires ONLY when the write touches a provider/profile key, and is a no-op when the active project has no Bullseye
+  - _given_ operator
+  - _then_ an unrelated toggle save returns 200 despite drift; a provider write with no Bullseye returns 200 and persists
+  - _asserted by_ `settings-divergence-guard.test.ts::allows an UNRELATED settings write even when a p`, `settings-divergence-guard.test.ts::allows a provider write when there is no Bullsey`
+- [x] ✅ `preferences-config.resolve.provider-precedence` — Provider/profile is resolved by a fixed precedence: explicit per-workspace override > legacy claudeProfile > Strategy Bullseye selection > global settings pref
+  - _given_ workspace-creator
+  - _then_ resolved {provider, profileName} follows precedence; an unknown provider string narrows to claude
+  - _asserted by_ `provider-config-resolution.test.ts::explicit profileOverride.provider=codex forces c`, `provider-config-resolution.test.ts::profileOverride takes precedence over legacy cla`, `provider-config-resolution.test.ts::strategy selection is applied when there is no o`, `project-runtime-config.test.ts::uses strategy before workspace fallback, and wor`, `agent-settings.test.ts::falls back to Claude for unknown provider values`
+- [x] ✅ `preferences-config.resolve.model-provider-scoped` — Model is provider-scoped only: the retired global default_model is never read, and a model not belonging to the resolved provider is dropped to the provider default
+  - _given_ workspace-creator
+  - _then_ only default_model_<provider> (or requestedModel) drives the model; global default_model has no effect; mismatch → undefined (provider default)
+  - _asserted by_ `no-global-default-model.test.ts::a value in the global default_model key is IGNOR`, `no-global-default-model.test.ts::the resolver source does NOT read the global def`, `provider-config-resolution.test.ts::a stale global default_model never leaks into a `, `provider-config-resolution.test.ts::keeps provider-specific model defaults isolated `
+- [x] ✅ `preferences-config.resolve.monitor-tunables` — A saved Strategy Bullseye derives the monitor's effective dials (active-agents target, backlog floor, max-new-starts, refill focus); bugfix-heavy weights yield bugfix-only refill; malformed/absent Bullseye falls back to legacy nudge prefs
+  - _given_ monitor
+  - _then_ resolveMonitorTunables returns {tunables, source:'strategy'|'prefs'}; malformed JSON silently falls through to legacy with source='prefs'
+  - _asserted by_ `strategy-objective.service.test.ts::derives tunables from a saved Strategy Bullseye`, `strategy-objective.service.test.ts::falls back to staggered legacy nudge prefs when `, `strategy-objective.service.test.ts::falls back to legacy prefs when the strategy JSO`, `strategy-objective.service.test.ts::maps bugfix-heavy bullseye weights to bugfix-onl`
+- [x] ✅ `preferences-config.select.provider-strategy` — Bullseye provider routing picks fill > throttle > fallback-only, skipping any policy blocked by live quota, and degrades gracefully (static order) when quota telemetry is missing
+  - _given_ monitor
+  - _then_ selectProviderFromStrategy returns the highest-priority non-quota-blocked policy; null when only fallback-only and allowFallback false; quota=null → ignores quota
+  - _asserted by_ `strategy-objective.test.ts::prefers fill over throttle`, `strategy-objective.test.ts::skips fill policy when quota is exhausted, falls`, `strategy-objective.test.ts::returns throttle when quota data is absent (grac`, `strategy-objective.test.ts::fill: blocked at 100%`
+- [x] ✅ `preferences-config.resolve.harness-setting` — A per-harness behavior knob resolves scoped (harness.<h>.<key>) > legacy flat key > per-harness default, treating empty scoped values as unset
+  - _given_ workspace-creator
+  - _then_ getHarnessBoolSetting returns the scoped value when set, else legacy, else the harness default
+  - _asserted by_ `harness-settings.test.ts::scoped key takes precedence over legacy and defa`, `harness-settings.test.ts::legacy key is consulted when scoped key is absen`, `harness-settings.test.ts::ignores empty-string scoped values and falls thr`
+- [x] ✅ `preferences-config.append.claude-skip-perms` — The Claude-specific --dangerously-skip-permissions flag is appended only for the Claude provider; other providers' args are left untouched
+  - _given_ workspace-creator
+  - _then_ Claude agentArgs gain the flag; Copilot/Codex/Pi do not
+  - _asserted by_ `agent-settings.test.ts::still appends Claude skip-permissions flag for C`, `agent-settings.test.ts::does not append Claude skip-permissions flag for`
+- [x] ✅ `preferences-config.set.active-project` — The active-project preference can be read and set (stored as-is, no validation against the project list) and scopes the divergence guard
+  - _given_ operator
+  - _then_ PUT echoes and persists projectId (incl. null/fake ids); GET returns it as both projectId and value
+  - _asserted by_ `preferences.test.ts::PUT /api/preferences/active-project sets active `, `preferences.test.ts::PUT upserts the active-project preference`, `preferences.test.ts::PUT /api/preferences/active-project with invalid`
+- [x] ✅ `preferences-config.export-import.config` — Board config export bundles statuses + Bullseye + the 3 safe workflow prefs and omits secrets/profiles; import validates shape, supports dryRun preview, drops disallowed keys non-fatally, and round-trips onto a fresh project
+  - _given_ operator
+  - _then_ export JSON excludes provider/claude_profile; import 400 on bad shape, dryRun returns statusChanges without applying, evil keys ignored, round-trip reproduces statuses+strategy
+  - _asserted by_ `config-export-import.test.ts::export does not include secret or profile keys`, `config-export-import.test.ts::round-trip: export then import on a fresh projec`, `config-export-import.test.ts::dryRun=true returns preview without applying cha`, `config-export-import.test.ts::import rejects invalid shape`, `config-export-import.test.ts::import ignores disallowed preference keys`
+- [x] ✅ `preferences-config.detect.divergence-banner` — The provider-divergence read endpoint reports whether global provider/profile prefs drift from a project's Bullseye (hasBullseye=false when none configured or projectId omitted)
+  - _given_ operator
+  - _then_ GET returns {hasBullseye, bullseye*, settings*, diverged}; diverged=true on provider or profile mismatch, false when they agree or no Bullseye
+  - _asserted by_ `provider-divergence.test.ts::returns diverged=true when global provider diffe`, `provider-divergence.test.ts::returns diverged=true when provider matches but `, `provider-divergence.test.ts::returns diverged=false when Bullseye and global `, `provider-divergence.test.ts::returns hasBullseye=false for a project with no `
+- [x] ✅ `preferences-config.recognize.dynamic-key` — Per-project/freeform dynamic keys are recognized by prefix (project-scoped requires a hex/UUID suffix; freeform requires any non-empty suffix), so unknowable project ids are accepted while garbage is rejected
+  - _given_ operator
+  - _then_ valid project-scoped keys persist and read back; non-hex/empty suffixes are rejected; board_strategy_<id> is handled separately
+  - _asserted by_ `dynamic-preference-keys.test.ts::accepts every project-scoped prefix with a valid`, `dynamic-preference-keys.test.ts::rejects a project-scoped prefix with a non-hex s`, `preferences.test.ts::PUT /api/preferences/settings stores project-sco`
+
+## project-registration
+
+**project-registration** — 10/17 covered `[██████░░░░]`
+
+- [ ] ⬜ **P0** `project-registration.resolve.defaultBranch` — A newly registered project never gets a null defaultBranch — it falls back to the repo's actually checked-out branch so the project is not silently undriveable (#772)
+  - _given_ operator
+  - _then_ project.defaultBranch is non-null when a branch is checked out; POST /api/workspaces does not 400 'No default branch configured'
+  - _add dimensions_ regression, error-handling, boundary
+  - _gap_ the #772 never-null-branch guarantee (fallback to checked-out branch on a non-main/master repo) has no asserting test; a regression would silently re-create undriveable projects. PATCH defaultBranch-validation is a diffe
+- [ ] ⬜ **P1** `project-registration.register.idempotent` — Re-registering the same repo (or a subdirectory resolving to the same git root) returns the existing project instead of creating a duplicate
+  - _given_ operator
+  - _then_ result.created === false and the same project id is returned; no second row; issues/skills stay on one project
+  - _add dimensions_ workflow, boundary, error-handling
+  - _gap_ the UI test fulfills a MOCK 409; no server-level test proves registering the same git root (or a subdirectory of it) returns the existing project with created=false and no second row
+- [ ] ⬜ **P1** `project-registration.dedup.sameGitRoot` — On startup, duplicate registrations resolving to one git root are merged into a single survivor — issues/skills/repos/scheduled-runs and the active-project pointer are moved, statuses remapped by name, duplicates deleted
+  - _given_ startup
+  - _then_ after boot only one project remains for that root; its issues/skills are intact; activeProjectId points at the survivor
+  - _add dimensions_ workflow, state-transition, regression
+  - _gap_ deduplicateProjects is vi.mock'd to a no-op in every test that imports it (startup-tasks/reconcile/issue-transition); the actual merge (move issues/skills/repos, status remap by name, active-project redirect, repoPath fi
+- [ ] ⬜ **P1** `project-registration.repair.backfill` — repairProjectRegistration idempotently backfills driveable state onto an old/partial project — seeds statuses if none, sets defaultBranch if null, and populates profile/verify/setup scripts if unset — never clobbering existing values
+  - _given_ operator
+  - _then_ returns {seededStatuses, setDefaultBranch, populatedStackProfile, populatedVerifyScript, populatedSetupScript}; re-running is a no-op once filled
+  - _add dimensions_ workflow, regression, config
+  - _gap_ repairProjectRegistration's idempotent backfill (seed statuses if none, set branch if null, populate profile/verify/setup if unset) has no direct test; its no-clobber/idempotency on a partial project is unverified
+- [ ] ⬜ **P1** `project-registration.enrich.llmGapFill` — When the rule-detected profile is sparse (no stack, or no test AND no build command) an LLM gap-fill is invoked and merged in ONLY where rules left null — rule facts win — and the whole derivation is fire-and-forget so it never slows or fails registration
+  - _given_ operator
+  - _then_ persisted profile gains LLM-supplied commands only in null slots, source flips to 'llm'; registration returns immediately regardless of LLM outcome
+  - _add dimensions_ config, error-handling, risk
+  - _gap_ enrichWithLlm/parseLlmJson and the sparse-profile gate have no test; neither the 'rules win, LLM fills only nulls' merge rule nor the shell-exec trust boundary (an LLM testCommand becoming the executed verify gate) is as
+- [~] ⚠️ `project-registration.register.create` — Registering a git repo creates a driveable project: a project row, canonical statuses, a default branch and default skill, returned synchronously as 201
+  - _given_ operator
+  - _then_ POST /api/projects returns 201 with {id, name, repoPath}; project appears in GET /api/projects
+  - _add dimensions_ workflow
+  - _gap_ e2e asserts 201+{id,name,repoPath} but not the registration consequences as a journey (statuses seeded, branch non-null, skill attached) on the freshly-created project; UI test mocks the API so it only proves the modal f
+- [~] ⚠️ `project-registration.seed.statuses` — Every new project is seeded the canonical 7-status set (incl. Backlog at -1) so issue batch-create and Backlog-pull auto-start work
+  - _given_ operator
+  - _then_ GET /api/projects/:id/statuses lists Todo/In Progress/In Review/Done/Cancelled (+Backlog); POST /api/issues/batch does not 400 'No statuses found'
+  - _add dimensions_ workflow
+  - _gap_ statuses are asserted on the long-lived E2E fixture project, not as a freshly-registered project's seeding consequence; the Backlog(-1) lane specifically is not asserted to exist
+- [x] ✅ `project-registration.reject.missingRepoPath` — Registering with no repoPath (or a non-git path) is rejected with a 4xx and an explanatory error, leaving no project created
+  - _given_ operator
+  - _then_ POST /api/projects returns 400 with error mentioning repoPath; duplicate path returns 409
+  - _asserted by_ `projects.test.ts::POST /api/projects rejects missing repoPath`
+- [x] ✅ `project-registration.detect.stackProfile` — Marker files are reverse-engineered into one durable StackProfile across many stacks (node/pnpm/npm/yarn, rust/cargo, go, python/pip/poetry), inferring package manager, monorepo-ness, build/test/lint/dev commands, web-ness and dev port
+  - _given_ operator
+  - _then_ detectStackProfile returns a typed profile with the correct stack/commands; empty repo yields a valid sparse profile (stack null, source 'detected')
+  - _asserted by_ `stack-profile.service.test.ts::detects a node single-package pnpm project with `, `stack-profile.service.test.ts::detects a pnpm monorepo from pnpm-workspace.yaml`, `stack-profile.service.test.ts::populates cargo profile`, `stack-profile.service.test.ts::populates go profile`, `stack-profile.service.test.ts::populates python profile (requirements.txt → pip`, `stack-profile.service.test.ts::returns an empty-but-valid profile when no marke`, `stack-detector.service.test.ts::detects a Node pnpm project`
+- [x] ✅ `project-registration.detect.gradleHeuristics` — The JVM/Gradle branch picks platform-correct, project-shape-correct commands: Kotlin vs Java compile task, KMP allTests vs test, Spring bootRun vs application run vs Ktor, .\gradlew.bat vs ./gradlew, dev-port scan, web-ness
+  - _given_ operator
+  - _then_ profile reflects e.g. KMP allTests + no compileJava/dev; Ktor isWeb + run + port 8080/literal; Spring bootRun + isWeb; Java compileJava typecheck
+  - _asserted by_ `stack-profile.service.test.ts::a Kotlin Multiplatform gradle project has no com`, `stack-profile.service.test.ts::a Ktor gradle app is web with a `run` dev comman`, `stack-profile.service.test.ts::a Spring Boot gradle project keeps bootRun + isW`, `stack-profile.service.test.ts::populates java/gradle profile with the platform-`, `stack-detector.service.test.ts::detects a Ktor server (kotlin-jvm + application `
+- [x] ✅ `project-registration.derive.verifyScript` — The keystone merge gate is derived as `testCommand && buildCommand` (test first), persisted to verify_script_<projectId>, no-op on nothing-derivable, never clobbering a user/AI override
+  - _given_ operator
+  - _then_ verify_script pref = 'pnpm test && pnpm build' (or test-only, or marker fallback); empty profile writes nothing; existing override survives
+  - _asserted by_ `verify-script-populate.test.ts::joins testCommand and buildCommand from the prof`, `verify-script-populate.test.ts::persists the derived verify script to verify_scr`, `verify-script-populate.test.ts::no-ops safely (writes nothing) when detection is`, `verify-script-populate.test.ts::does not clobber an existing user override`, `project-setup.service.test.ts::suggests pnpm test && pnpm run build for a pnpm `
+- [x] ✅ `project-registration.derive.setupScript` — The monorepo-aware install/setup command is derived (pnpm install -r, gradle assemble, cargo fetch, …), persisted to projects.setup_script, no-op when empty and never clobbering an existing value
+  - _given_ operator
+  - _then_ projects.setup_script = monorepo-aware install; single-package gets non-recursive install; empty detection leaves it null; existing value preserved
+  - _asserted by_ `setup-script-populate.test.ts::persists the monorepo-aware install to projects.`, `setup-script-populate.test.ts::no-ops safely (writes nothing) when detection is`, `setup-script-populate.test.ts::does not clobber an existing setup script`, `stack-profile.service.test.ts::uses a non-recursive install for a single-packag`
+- [x] ✅ `project-registration.derive.smokeCheck` — A boot-and-respond smoke check is built only for a bootable web/service project with a resolvable health URL — HTTP 200 plus HTML-shell needles for browser UIs, 200-only for headless APIs, null (skip) for CLI/library/no-URL
+  - _given_ review-merge
+  - _then_ buildSmokeCheck returns {devCommand, healthUrl, expectBodyContains} for web UIs; [] needles for JSON APIs; null for non-web/no-URL
+  - _asserted by_ `smoke-check-build.test.ts::builds a check from devHealthUrl for a browser-U`, `smoke-check-build.test.ts::asserts only HTTP-200 (no body needles) for a he`, `smoke-check-build.test.ts::returns null for a non-web project (CLI/library `, `smoke-check.test.ts`
+- [x] ✅ `project-registration.derive.smartHooksRules` — Edit-time feedback rules are generated cheapest-signal-first and scoped to the stack's source globs, with the slow-JVM family downgraded (no per-edit test rule, non-blocking typecheck)
+  - _given_ operator
+  - _then_ .claude/smart-hooks-rules.json holds Typecheck/Quick-tests rules with stack-correct filePatterns; gradle gets no blocking per-edit test rule; no usable command → no rules
+  - _asserted by_ `stack-profile.service.test.ts::emits a typecheck + quick-test rule for a node p`, `stack-profile.service.test.ts::skips the per-edit test rule for the slow JVM (g`, `stack-profile.service.test.ts::writes .claude/smart-hooks-rules.json derived fr`
+- [x] ✅ `project-registration.scaffold.testScaffold` — A trivially-passing runnable test is generated in the project's REAL test dir + runner syntax (vitest/pytest/cargo/go/JUnit/kotlin.test), and is never written into a dir that already has tests
+  - _given_ operator
+  - _then_ writeTestScaffold writes one green test at the right path/extension; unknown stack writes nothing; existing tests are not clobbered/duplicated
+  - _asserted by_ `test-scaffold.test.ts::scaffolds a vitest test in the profile's testDir`, `test-scaffold.test.ts::never clobbers an existing test file (idempotent`, `test-scaffold.test.ts::skips when the test dir already has tests under `, `stack-profile.service.test.ts::generates a kotlin.test .kt scaffold under commo`
+- [x] ✅ `project-registration.scaffold.cleanMainGuards` — New-project scaffold keeps main clean and clean-clones buildable: per-stack build-artifact + agent .gitignore (idempotent, no-clobber) and per-package-manager clean-build hardening (pnpm onlyBuiltDependencies, bun trustedDependencies, packageManager pin) so a fresh clone builds with no approval prompts
+  - _given_ operator
+  - _then_ .gitignore gains the stack's artifact lines + agent lines once; package.json/pnpm config approves native postinstall + pins the manager; non-Node stacks are a clean no-op
+  - _asserted by_ `project-scaffold.test.ts::ignores ${stack} build output when no .gitignore`, `project-scaffold.test.ts::appends only the missing ${stack} build lines to`, `project-scaffold.test.ts::adds esbuild to package.json pnpm.onlyBuiltDepen`, `project-scaffold.test.ts::pins packageManager to a pnpm version that honor`, `project-scaffold.test.ts::non-Node stacks (cargo/go/python) are a clean no`
+- [x] ✅ `project-registration.gate.coldCloneBuild` — The opt-in cold-clone build gate clones the committed branch into a fresh temp dir and runs install then build, failing the review on breakage that only appears on a truly clean clone, and always cleaning up the temp dir
+  - _given_ review-merge
+  - _then_ result.ok=false with reason build-failed/install-failed/clone-failed and failedCommand on breakage; ok=true 'no-build-command' when nothing derivable; temp clone always cleaned
+  - _asserted by_ `cold-clone-build-check.service.test.ts::FAILS when the build breaks on a fresh clone (th`, `cold-clone-build-check.service.test.ts::fails on a non-zero install and never reaches th`, `cold-clone-build-check.service.test.ts::reports clone-failed without running install/bui`, `cold-clone-build-check.service.test.ts::always cleans up the temp clone, even after a bu`
+
+## review-merge
+
+**review-merge** — 15/18 covered `[████████░░]`
+
+- [~] ⚠️ **P1** `review-merge.recover.fix-and-merge` — A failed/conflicting merge can be recovered by relaunching an agent in the worktree (status → fixing); on resolver exit the merge is re-attempted, the workspace stays retryable if the branch didn't land, or closes if it did; stale zero-output fix sessions are force-recovered
+  - _given_ fix-agent
+  - _then_ workspace status fixing; resolver exit without landing → workspace kept open+idle (retryable); resolver exit having landed → workspace closed, issue Done; zero-output zombie fix session force-stopped before retry
+  - _add dimensions_ api
+  - _gap_ Resolver-exit recovery and zombie-fix recovery are well asserted, but the POST /api/workspaces/:id/fix-and-merge endpoint itself — that it transitions the workspace to status=fixing and relaunches the fix agent in the wo
+- [~] ⚠️ **P1** `review-merge.reconcile.stranded-review` — Work stranded idle/In-Review/not-ready with commits and no review session is recovered by relaunching review (or marked ready when auto_review is off); the reconciler no-ops when disabled
+  - _given_ reconcilers
+  - _then_ a review session is (re)launched and the workspace leaves the stranded state; zero mutations when disabled via dep or DB pref
+  - _add dimensions_ workflow, state-transition
+  - _gap_ The ONLY asserted path is the disable/no-op guard (#582). The reconciler's core honesty-restoration outcome — that a genuinely stranded idle/In-Review/not-ready workspace with commits gets a review relaunched (or is mark
+- [~] ⚠️ **P2** `review-merge.foundational.sync-merge` — A no-own-dependency ticket with >=1 open dependent is classified as a foundational blocker eligible for synchronous merge, so dependents aren't cut from an empty pre-merge base
+  - _given_ auto-merge-orchestrator
+  - _then_ isFoundationalBlocker true only when an open dependent exists AND own deps are Done; false for leaf tickets, unresolved-own-dep tickets, terminal-only dependents, non-blocking relations
+  - _add dimensions_ workflow
+  - _gap_ isFoundationalBlocker eligibility classification is thoroughly covered, but the actual observable consequence — that an eligible foundational blocker is merged SYNCHRONOUSLY so a dependent isn't cut from an empty pre-mer
+- [x] ✅ `review-merge.launch.review` — Launching a review starts an LLM review session on the builder's OWN provider/profile for an idle workspace; a non-idle workspace is refused
+  - _given_ operator
+  - _then_ 200 with sessionId, workspace transitions reviewing; 409 ReviewError when not idle; review uses workspace provider/profile not the global default
+  - _asserted by_ `code-review.test.ts::Review API returns 200 and sessionId for idle wo`, `code-review.test.ts::Review endpoint returns 409 when workspace is no`, `review-concurrent.test.ts::returns 409 ReviewError (not a bare throw) when `, `review-concurrent.test.ts::concurrent review triggers: second call gets CON`, `review-workspace-profile.test.ts::overrides provider + codex_profile from a codex `
+- [x] ✅ `review-merge.exit.auto-review` — A builder that exits having committed work moves its issue to In Review and (when auto_review on) launches a review session; the transition is idempotent
+  - _given_ auto-merge-orchestrator
+  - _then_ issue=In Review, board/workspace/workflow-node agree; repeated exit calls do not duplicate the review session or advance past In Review
+  - _asserted by_ `active-stopped-workspace-enters-review.test.ts::board status, workspace status, and workflow nod`, `active-stopped-workspace-enters-review.test.ts::is idempotent: a second exit call does not dupli`, `zero-diff-inreview-exit.test.ts::leaves In Progress issue untouched when no commi`
+- [x] ✅ `review-merge.guard.zero-commit-no-approve` — A review that exits on a 0-commit branch must NOT approve it: readyForMerge stays false, workspace stays idle/In Review, no ready broadcast (#629)
+  - _given_ reviewer-agent
+  - _then_ readyForMerge=false; workspace idle, issue In Review; workspace_ready_for_merge NOT broadcast
+  - _asserted by_ `ready-for-merge-zero-commit-guard.test.ts::does NOT set readyForMerge=true when review exit`, `ready-for-merge-zero-commit-guard.test.ts::keeps workspace idle and in In Review when revie`, `ready-for-merge-zero-commit-guard.test.ts::does NOT broadcast workspace_ready_for_merge for`
+- [x] ✅ `review-merge.signal.ready` — The reviewer signals merge-readiness via mark_ready_for_merge (readyForMerge=true) and is contractually forbidden from merging itself, so the system's gates always run (#822)
+  - _given_ reviewer-agent
+  - _then_ readyForMerge flips true and is reflected in workspace GET + board summary; review prompt instructs verify+approve but NOT self-merge
+  - _asserted by_ `ready-for-merge.test.ts::POST /api/workspaces/:id/ready-for-merge sets re`, `ready-for-merge.test.ts::board workspaceSummary reflects readyForMerge=tr`, `review-prompt-approval-instruction.test.ts::reviewer mode verifies + approves but does NOT s`
+- [x] ✅ `review-merge.merge.approved` — Merging an approved workspace lands its branch on the base branch (advancing master), closes the workspace, and moves the issue to Done; concurrent requests to the same workspace are deduplicated
+  - _given_ operator
+  - _then_ 200 {merged:true, mergeCommitSha, baseHeadShaBefore/After}; base branch advances; workspace closed; issue Done; concurrent /merge calls share one promise
+  - _asserted by_ `workspace-merge-service.test.ts::calls mergeBranch and returns merged=true with S`, `workspace-merge-service.test.ts::closes the workspace and moves the issue to Done`, `merge-advances-master.test.ts::POST /merge closes workspace and moves issue to `, `workspace-merge-service.test.ts::returns the same promise for concurrent calls to`, `merge-atomic-done-transition.test.ts::normal merge: both workspace closed and issue Do`
+- [x] ✅ `review-merge.reject.not-approved` — Merging a non-direct workspace whose readyForMerge=false is refused with 409 not_approved — unless auto_merge_in_review bypasses the gate (and the project isn't gated)
+  - _given_ operator
+  - _then_ 409 CONFLICT mergeReason=not_approved, no git merge; auto_merge_in_review=true proceeds past the gate; isDirect workspaces skip the gate unconditionally
+  - _asserted by_ `workspace-already-merged.test.ts::throws CONFLICT with mergeReason=not_approved wh`, `merge-error-reporting.test.ts::reason=not_approved when workspace is not ready `, `workspace-merge-service.test.ts::proceeds past the readyForMerge gate when autoMe`, `workspace-merge-service.test.ts::does not bypass the gate for isDirect workspaces`
+- [x] ✅ `review-merge.guard.dirty-main` — A merge is blocked when the main checkout has any uncommitted tracked change — never merge on top of someone's WIP
+  - _given_ operator
+  - _then_ 409 CONFLICT mergeReason=dirty_main, mergeBranch never called; proceeds once the checkout is clean; checked even when workingDir is missing
+  - _asserted by_ `workspace-merge-service.test.ts::throws CONFLICT with mergeReason=dirty_main when`, `workspace-merge-service.test.ts::checks dirty-main even when workingDir is missin`, `merge-error-reporting.test.ts::reason=dirty_main when main checkout has uncommi`
+- [x] ✅ `review-merge.reject.conflict` — A conflicting merge is refused with 409 conflict (listing conflict files), clears the stale readyForMerge flag, leaves the issue not-Done, and the server stays healthy
+  - _given_ operator
+  - _then_ 409 CONFLICT with conflictFiles + behindCount; readyForMerge cleared; workspace not closed, issue not Done; no conflict markers spilled; server health endpoint responsive
+  - _asserted by_ `merge-service-edge-cases.test.ts::throws CONFLICT with mergeReason=conflict when m`, `merge-service-edge-cases.test.ts::clears readyForMerge and throws CONFLICT when br`, `merge-conflict-server-health.test.ts::returns 409 and does NOT advance master when the`, `merge-conflict-server-health.test.ts::server health endpoint remains responsive after `
+- [x] ✅ `review-merge.reconcile.already-merged` — When a branch tip is already an ancestor of base (with >=1 unique commit), /merge is a no-op reconcile: 200 {merged:false, reconciled:true}, NO new merge commit, issue→Done, stale review session closed; honored idempotently via mergedAt on dropped-response retries
+  - _given_ operator
+  - _then_ 200 merged:false reconciled:true with baseBranch+baseHeadSha; mergeBranch NOT called; issue Done; retry after dropped response converges without re-merging
+  - _asserted by_ `merge-endpoint-reconcile-noop.test.ts::(b2) reconcile no-op response shape: merged=fals`, `merge-endpoint-reconcile-noop.test.ts::(d) NO new merge commit created on master — merg`, `merge-endpoint-reconcile-noop.test.ts::closes stale reviewing workspace and running rev`, `workspace-merge-service.test.ts::reconciles idempotently when mergedAt is set (dr`, `workspace-merge-flap.test.ts::retry with mergedAt already set reconciles issue`
+- [x] ✅ `review-merge.guard.zero-commit-no-reconcile` — A branch with 0 unique commits (branchSha===baseSha) is NOT reconciled-as-Done — it is kept In Review (reconciled:false / clean-ancestor) as a false-positive guard against silent-merge-loss
+  - _given_ operator
+  - _then_ workspace stays open, issue stays In Review, reconciled:false; no Done transition, no merge commit
+  - _asserted by_ `merge-service-edge-cases.test.ts::does not mark the workspace closed or move issue`, `merge-service-edge-cases.test.ts::returns clean-ancestor no-op when 0-commit branc`, `workspace-merge-service.test.ts::returns clean-ancestor when branch equals the ba`
+- [x] ✅ `review-merge.batch.auto-merge` — The scheduled auto-merge engine selects idle reviewed workspaces (incl. ready work stranded in Done), excludes direct/closed/in-progress/user-parked/auto_merge_disabled projects, and only runs when merge_strategy=merge_queue; In-Review idle work is included only when auto_merge_in_review is on
+  - _given_ auto-merge-orchestrator
+  - _then_ findCompletedWorkspaceIds returns exactly the eligible set; engine no-ops when strategy != merge_queue; zombie reconciler session reaped so next tick can relaunch
+  - _asserted by_ `auto-merge-orchestrator.test.ts::runs only when the merge strategy is the merge q`, `auto-merge-orchestrator.test.ts::finds idle reviewed workspaces (incl. ready work`, `auto-merge-orchestrator.test.ts::excludes a project that has auto_merge_disabled_`, `auto-merge-orchestrator.test.ts::includes idle In Review workspaces only when aut`, `merge-strategy.test.ts::disables automatic merging only for the direct s`, `auto-merge-pref.test.ts::defaults to ENABLED when the key is unset`
+- [x] ✅ `review-merge.batch.execute` — Batch execution lands clean siblings in least-overlap order while skipping/aborting conflicts, sequences+auto-renumbers migration-number collisions, auto-resolves pure-append hot-file conflicts by concatenation, and lands mechanically-mergeable overlap clusters without a re-conflict loop
+  - _given_ auto-merge-orchestrator
+  - _then_ clean members land; conflicting member skipped and its rebase aborted (worktree not left mid-rebase); migration collisions reported + renumbered before rebase; append-only cluster lands without strand; clusters converge idempotently
+  - _asserted by_ `merge-queue.service.test.ts::reports migration-number collisions across queue`, `merge-queue.service.test.ts::renumbers migrations before the queue rebases th`, `merge-queue.service.test.ts::aborts a skipped rebase conflict so the worktree`, `merge-queue-strategy.test.ts::overlapping cluster, no conflict → integration-u`, `append-only-hotfile-merge.integration.test.ts::lands a 3-ticket append-only cluster via the plu`, `merge-overlap-cluster-landing.test.ts::lands a mechanically-mergeable overlap cluster w`
+- [x] ✅ `review-merge.invariant.done-unmerged` — The Done⇔merged scanner detects a Done/AI-Reviewed issue whose branch isn't on base, NEVER reopens it, and forward-only auto-merges a clean ahead-only branch under rate limits; multiple false-positive guards (0-commit, too-far-behind, conflicting, has-merged-ws, deleted-branch) suppress unsafe action
+  - _given_ reconcilers
+  - _then_ real loss flagged + auto-merged (<=3/cycle, ahead>=1, behind<=20, conflict-free); 0-commit/too-behind/conflicting/deleted-branch are log-only with no status change; issue never reopened; idempotent after stamping mergedAt
+  - _asserted by_ `done-unmerged-invariant-scanner.test.ts::regression #584/#581: detects Done issue whose b`, `done-unmerged-invariant-scanner.test.ts::#592: auto-merges Done issue with clean ahead-on`, `done-unmerged-invariant-scanner.test.ts::#592: NEVER reopens issue — 0-commit branch is l`, `done-unmerged-invariant-scanner.test.ts::#592: rate-limit cap — auto-merges at most 3 per`, `done-unmerged-invariant-scanner.test.ts::#590 guard 1: skips issue that has ANY workspace`
+- [x] ✅ `review-merge.reconcile.idempotent-done` — Post-merge Done convergence is idempotent and crash-safe: mergedAt anchors recovery so a dropped HTTP response, a failed workspace-close, or a re-merge call all converge the issue to Done exactly once without rollback or double-transition
+  - _given_ reconcilers
+  - _then_ reconcileMergedIssue moves In-Review→Done, no-ops when already Done, preserves statusChangedAt; issue stays Done even when workspace close DB write fails; ancestor-branch reconciler closes ancestor In-Review ws and Dones it without a merge commit
+  - _asserted by_ `reconcile-merged-issue.test.ts::is idempotent: calling twice is safe and does no`, `merge-cleanup.service.test.ts::keeps issue Done when workspace close fails (#66`, `merge-atomic-done-transition.test.ts::issue is Done even when workspace close DB write`, `issue-transition-on-interrupted-merge.test.ts::issue ends up Done via ancestor-branch reconcile`, `reconcile-silently-merged.test.ts::closes a workspace that has mergedAt set but sta`
+- [x] ✅ `review-merge.gate.verify-smoke` — A configured verify/smoke pre-merge gate FAILS the merge when verify_script exits non-zero or a web project's boot/render smoke check fails; a configured gate that can't run (no worktree) fails closed; neither configured is a no-op pass
+  - _given_ in-process-monitor
+  - _then_ merge withheld on non-zero verify / failed smoke / missing-worktree-when-configured; passes when verify exits 0 and smoke renders; runs verify THEN smoke when both set
+  - _asserted by_ `pre-merge-gate.service.test.ts::FAILS (withholds merge) when verify_script exits`, `pre-merge-gate.service.test.ts::fail-closed: verify_script configured but NO wor`, `pre-merge-gate.service.test.ts::runs the smoke check for a web project and FAILS`, `monitor-merge-gate.test.ts::true when a verify_script is configured`
+
+## workflow-engine
+
+**workflow-engine** — 11/16 covered `[███████░░░]`
+
+- [ ] ⬜ **P1** `workflow-engine.advance.mcpProposeTransition` — The MCP propose_transition tool is the AGENT's primary entry point to advance work — resolving the agent's workspace, applying the same legality/auto-route/gate/maxVisits rules, and returning the next stages for prompt re-injection
+  - _given_ agent
+  - _then_ tool returns ok + next stages (or a refusal reason) and the board column advances; mirrors the REST transition contract
+  - _add dimensions_ api, workflow, state-transition
+  - _gap_ the agent's PRIMARY entry point to advance the workflow has no test in packages/mcp-server; only the REST /transition path (same engine) is tested. The MCP tool's workspace-resolution + result-shaping wrapper around prop
+- [~] ⚠️ **P4** `workflow-engine.autoroute.condition` — With no explicit target, the engine auto-takes an edge IFF exactly one outgoing condition fires for the current signals; zero firing => refuse and ask the agent to choose; multiple firing => ambiguous, refuse
+  - _given_ agent
+  - _then_ single fire: ok true, autoResolved true, lands on that node; zero: ok false 'Specify a target'; multiple: ok false 'Multiple edges fired'
+  - _add dimensions_ boundary
+  - _gap_ single-fire (auto Fix) and zero-fire (specify-a-target) are asserted, but the 'multiple edges fired -> refuse ambiguous' branch (transitions.ts:111) is never exercised
+- [~] ⚠️ **P3** `workflow-engine.evaluate.condition` — The edge condition DSL maps a stored condition string to fire/block/manual: auto_on_exit_0 always fires; tests_pass/tests_fail key off reported flag (manual if unknown); diff_clean off file count; diff_touches:<glob> off a hand-rolled glob; unknown/agent_score/custom_js => manual
+  - _given_ agent
+  - _then_ deterministic verdict per (condition, signals) pair driving auto-routing/gating
+  - _add dimensions_ boundary
+  - _gap_ core fire/block/manual verdicts asserted incl. one diff_touches glob, but glob boundary cases (single '*' not crossing '/', '?', '**/' collapse, unsupported brace/negation -> silent no-match) and agent_score/custom_js->m
+- [~] ⚠️ **P4** `workflow-engine.validate.graph` — Saving a template enforces graph well-formedness: exactly one start, >=1 end, no orphan/dead-end nodes, all nodes reachable from start, unique node ids, unmarked cycles rejected (isLoop exempt), paired parallel-fork<->parallel-join
+  - _given_ operator
+  - _then_ validateGraph returns specific human-readable error strings (empty = valid); create/update returns 400 + errors[] when malformed
+  - _add dimensions_ error-handling, boundary
+  - _gap_ disconnect/dup-id/cycle/loop-exempt asserted, but the start-count!=1, missing-end, orphan-inbound, dead-end-outbound, and parallel fork<->join pairing rejection rules (graph-validation.ts:39-124) have no asserting test
+- [~] ⚠️ `workflow-engine.crud.template` — The visual builder can create/update/delete/clone/import/export project templates; built-in templates are immutable (edit/delete refused 'duplicate first'); create allows an empty-node draft
+  - _given_ operator
+  - _then_ 201 on create with id; 400 on missing name/invalid graph; 400 on editing/deleting a built-in; valid round-trip via export->import
+  - _add dimensions_ boundary
+  - _gap_ full CRUD + builtin-immutability + import/export covered, but the empty-node draft create affordance (templates.ts:125 skips validation when nodes.length===0, resolving to a null start) is not asserted
+- [x] ✅ `workflow-engine.resolve.template` — An issue is matched to a workflow template by a 5-tier precedence: explicit id (project/global scope only) -> project default-for-type -> global default-for-type -> global Simple Ticket -> null (legacy status-only)
+  - _given_ operator
+  - _then_ GET /resolve / resolveTemplateForIssue returns the expected templateId (e.g. bug->simple-bug, unmapped chore->simple-ticket); cross-scope explicit id is ignored
+  - _asserted by_ `workflow-engine.test.ts::routes a bug issue to the Simple Bug template`, `workflow-engine.test.ts::falls back to Simple Ticket for an unmapped type`, `workflow.service.test.ts::resolves template by issueId`
+- [x] ✅ `workflow-engine.init.workspace` — Creating a workspace places it on the template's start node, derives + persists the issue's status from that node, and records an initial 'Workspace started' system transition (fromNodeId null); no workflow => returns null
+  - _given_ fork-orchestrator
+  - _then_ issue.currentNodeId = start node, issue.statusId = node's mapped status (e.g. In Progress), workspace.currentNodeId set, one system transition row inserted
+  - _asserted by_ `workflow-engine.test.ts::initialises a workspace on the start node and sy`, `workflow-fork.test.ts::setupForkAtSplit (init + transition)`
+- [x] ✅ `workflow-engine.advance.transition` — Advancing a workspace along an existing outgoing edge records a transition, moves workspace.currentNodeId, and (unless a fork child) syncs the issue's currentNodeId + derived statusId/statusChangedAt
+  - _given_ agent
+  - _then_ result.ok true, toNode is the target, issue status derived from the new node (e.g. Review->In Review), transition history row appended
+  - _asserted by_ `workflow-engine.test.ts::advances along a valid edge and syncs the derive`, `workflow.service.test.ts::advances workspace node and syncs issue status`, `workflows-route.test.ts::syncs the issue status when transitioning from I`
+- [x] ✅ `workflow-engine.refuse.invalidTransition` — A transition to a node that is NOT an existing outgoing edge from the current node is refused (the graph IS the legality contract) — no teleporting to an arbitrary stage
+  - _given_ agent
+  - _then_ result.ok false with 'No valid transition'; route returns 400; no issue/workspace mutation, no fork children materialized
+  - _asserted by_ `workflow-engine.test.ts::rejects an invalid transition`, `workflow.service.test.ts::rejects transition to invalid stage`, `workflows-route.test.ts::does not materialize task children when the requ`
+- [x] ✅ `workflow-engine.gate.blockedTarget` — An explicitly-chosen target whose condition evaluates to 'block' is refused even when a human/agent names it (e.g. can't advance to Review when tests demonstrably failed)
+  - _given_ agent
+  - _then_ result.ok false with 'gated by condition'; no transition recorded
+  - _asserted by_ `workflow-engine.test.ts::auto-routes on a firing condition and gates a bl`
+- [x] ✅ `workflow-engine.enforce.maxVisits` — Entering a node already visited maxVisits times is refused, forcing human escalation — a runtime cycle guard against infinite agent looping
+  - _given_ agent
+  - _then_ result.ok false with 'visit budget'; node visit count not incremented past budget
+  - _asserted by_ `workflow-engine.test.ts::enforces maxVisits as a cycle guard`
+- [x] ✅ `workflow-engine.sync.statusToNode` — When a human moves an issue's status (drag/move_issue/CLI), currentNodeId is repointed to a node whose statusName matches the new status and propagated to non-closed workspaces (closed workspaces untouched); no-op if no workflow or no matching node
+  - _given_ operator
+  - _then_ issue.currentNodeId + non-closed workspaces' currentNodeId point at the matching node so the board column override stays consistent; closed workspaces unchanged
+  - _asserted by_ `workflow-engine.test.ts::syncCurrentNodeToStatus maps a manual status mov`, `workflow-engine.test.ts::syncCurrentNodeToStatus also updates non-closed `, `workflow-engine.test.ts::syncCurrentNodeToStatus does not update closed w`
+- [x] ✅ `workflow-engine.create.issueStatus` — Creating an issue with a template attached keeps it in the column it was created in; currentNodeId aligns to the node mapping that status (start node only if the created status maps to a node, else null = workflow-inactive); a template not owned by the project is rejected BAD_REQUEST
+  - _given_ operator
+  - _then_ Todo-created issue stays Todo with currentNodeId null; In Progress-created aligns to start node; foreign-project template => BAD_REQUEST
+  - _asserted by_ `issue-create-workflow-status.test.ts::keeps the issue in the created column ('Todo')`, `issue-create-workflow-status.test.ts::aligns currentNodeId to the workflow node when c`, `issue-create-workflow-status.test.ts::rejects a workflow template that does not belong`, `workflow-engine.test.ts::rejects a workflow template from another project`
+- [x] ✅ `workflow-engine.forkjoin.orchestrate` — A parallel-fork spawns one child workspace+worktree+session per fork edge; once all (or all-surviving) children reach the join, the parent is structurally placed on the join node, the issue status syncs to the join, and children are marked joined + cleaned up — fork children never drive the shared issue's status
+  - _given_ fork-orchestrator
+  - _then_ N children running with own currentNodeId; failed child launch tolerated; parent lands on join, issue status = join's status, children forkStatus joined + worktrees removed
+  - _asserted by_ `workflow-fork.test.ts::spawns one child per fork edge with worktrees + `, `workflow-fork.test.ts::consolidates into the parent join node once all `, `workflow-fork.test.ts::marks a failed child launch and still consolidat`, `workflow-fork.test.ts::launches the attached spec phase skill when ente`
+- [x] ✅ `workflow-engine.report.analytics` — The engine exposes per-workspace progress (transition history + next stages) and project analytics: per-node entered/advanced/dropoff funnel, average dwell-time trends, burndown, and per-stage workspace visits scoped to the project
+  - _given_ operator
+  - _then_ GET /progress returns ordered transitions + valid next stages; /analytics returns funnel/durationTrends/burnDown; /analytics/:tpl/:node/workspaces lists visits with dwellMs + isCurrent
+  - _asserted by_ `workflows-route.test.ts::lists workspace visits for a stage with issue me`, `workflow.service.test.ts::returns workspace progress with transitions and `, `workflow.service.test.ts::computes per-node visit counts and dwell`
+- [x] ✅ `workflow-engine.prompt.transitionBlock` — The agent-prompt block adapts to node role: a parallel-fork node tells the agent to STOP (server spawns branches); a spec-planning stage is human-gated ('Approve & continue', no propose_transition); a normal node injects the propose_transition contract + valid next stages + condition hints
+  - _given_ agent
+  - _then_ rendered markdown contains/omits 'propose_transition' and the right next-stage list per node type
+  - _asserted by_ `workflow-engine.test.ts::builds a transition block embedding the workspac`, `workflow-engine.test.ts::keeps spec planning phases behind the human appr`, `workflow-fork.test.ts::launches the attached spec phase skill (prompt c`
+
+## workspaces
+
+**Workspaces & Worktrees** — 20/26 covered `[████████░░]`
+
+- [ ] ⬜ **P1** `workspaces.plan.approve-reject` — A plan-mode workspace produces a plan and awaits human approval; the agent writes no implementation code until the plan is approved, and a rejection re-runs planning with feedback
+  - _given_ operator
+  - _then_ GET /:id/plan returns the plan; POST /:id/implement-plan (201) starts implementation; POST /:id/reject-plan with feedback (201) re-plans; reject without feedback → 400
+  - _add dimensions_ workflow, state-transition, api, error
+  - _gap_ No candidate test exercises the plan-gate HTTP surface: GET /:id/plan, POST /:id/implement-plan (201 → starts implementation), POST /:id/reject-plan with feedback (201 → re-plans), reject without feedback → 400. plan-mod
+- [ ] ⬜ **P1** `workspaces.lifecycle.reattach-survives-reload` — A detached agent survives a server hot-reload: on restart, sessions with a live PID are reattached (output watcher resumes from the last byte offset) and dead-PID sessions are marked stopped with their workspaces reset to idle
+  - _given_ monitor
+  - _then_ surviving agents keep streaming after restart; crashed ones are reconciled to idle; not killed on SIGTERM, only on SIGINT
+  - _add dimensions_ state-transition, regression
+  - _gap_ No candidate test asserts the restart-reattach invariant: live-PID sessions reattach + resume the output watcher from the last byte offset, dead-PID sessions are marked stopped and their workspaces reset to idle, agents 
+- [ ] ⬜ **P4** `workspaces.turn.missing-content` — A turn request with no content field is rejected
+  - _given_ operator
+  - _then_ HTTP 400 {error: 'content is required'}, no session started
+  - _add dimensions_ error, api
+  - _gap_ No candidate test asserts POST /:id/turn with no content → 400 {error:'content is required'}. The turn route lives in workspace-actions.ts (churn 180, the single highest-churn workspace route file) — a refactor could sil
+- [ ] ⬜ `workspaces.lifecycle.hang-watchdog` — An agent that produces zero output for 15 minutes is killed by a spawn-layer watchdog (reset on every output event), turning an invisible provider deadlock into an observable exit
+  - _given_ agent-subprocess
+  - _then_ the agent process is killed and the session transitions to a stopped/failed state
+  - _add dimensions_ error, state-transition
+  - _gap_ No candidate test asserts that a zero-output-for-15-min agent is killed by the spawn-layer watchdog (reset on each output event). Implemented in agent.service.ts (churn 91 — the highest-churn workspace service file). age
+- [~] ⚠️ `workspaces.create.one-direct-per-issue` — Creation refuses a second open direct workspace for an issue, because two would both edit the shared main checkout and collide
+  - _given_ operator
+  - _then_ create is blocked (error surfaced), no second direct workspace row appears
+  - _add dimensions_ error
+  - _gap_ The block (no second direct workspace row) is asserted, but the exact HTTP failure contract (4xx code vs error-in-201-body) is never asserted — the behaviour model flags this as an open unknown. A consumer relying on a s
+- [~] ⚠️ `workspaces.stop.strand-recovery` — Stopping a workspace halts its running session and resets an active/reviewing workspace to idle (stranded-session recovery); quarantine additionally moves the issue back to In Progress
+  - _given_ operator
+  - _then_ running session stopped; workspace status → idle; quarantine also moves the issue to In Progress; safe (no-op) when nothing is running
+  - _add dimensions_ state-transition
+  - _gap_ Stop→idle reset is well covered. The quarantine sub-behaviour (POST /:id/quarantine additionally moves the issue BACK to In Progress) has no asserting test in the candidate set — the issue-status side of the transition i
+- [x] ✅ `workspaces.create.launch` — Creating a workspace provisions an isolated worktree on a fresh branch, injects ticket context, moves the issue to In Progress, and auto-launches the agent in one step
+  - _given_ operator
+  - _then_ HTTP 201 with the workspace record; issue moves to In Progress; an agent session starts; GET /:id/diff becomes reachable
+  - _asserted by_ `workspace.service.test.ts::creates a worktree, inserts the workspace, moves`, `workspace-lifecycle-status-transitions.test.ts::lifecycle: idle → active on launchSession (calls`, `workspace-create-harden.test.ts::returns 201-compatible result for successful cre`, `api.test.ts::POST /api/workspaces creates a workspace`, `workspace-lifecycle.test.ts::GET /api/workspaces/:id/diff returns diff for se`
+- [x] ✅ `workspaces.create.missing-issue` — A create request without an issueId is rejected at the boundary — no half-formed work unit may enter the system
+  - _given_ operator
+  - _then_ HTTP 400, no workspace row created
+  - _asserted by_ `api.test.ts::POST /api/workspaces requires issueId (branch is`, `workspaces.test.ts::POST /api/workspaces requires issueId and branch`
+- [x] ✅ `workspaces.create.launch-failure-persists` — A worktree-provisioning or agent-launch failure still persists the workspace row with an error/latestLaunchError field instead of dropping it, so the failure is visible and recoverable
+  - _given_ operator
+  - _then_ Response carries the workspace record plus an error field; workspace later shows as failed/idle; orphaned worktree is rolled back on a DB-txn failure
+  - _asserted by_ `workspace-create-harden.test.ts::marks stale safety-policy preflight launch failu`, `workspace-create-harden.test.ts::returns a well-formed response when worktree cre`, `workspace-create-worktree-rollback.test.ts::removes the orphaned worktree when the DB transa`, `workspace.service.test.ts::marks the workspace idle with a launch error whe`
+- [x] ✅ `workspaces.create.plan-mode-default` — Plan mode auto-enables for a high/critical-priority issue when the caller did not set it explicitly — a cost gate that surfaces an expensive misunderstanding as an approvable plan before tokens are burned; explicit caller intent still wins
+  - _given_ operator
+  - _then_ preview/create resolves planMode=true; an explicit planMode=false is honored even for high priority
+  - _asserted by_ `launch-preview.test.ts::resolves plan mode default for high-priority iss`, `launch-preview.test.ts::respects explicit planMode=false even for high p`
+- [x] ✅ `workspaces.preview.dry-run` — Preview returns the fully-resolved launch config (branch, base, provider/profile/model, derived dev ports, plan-mode default, blockedBy, collision/missing-profile/no-base warnings) as a read-only dry run with no side effects
+  - _given_ operator
+  - _then_ HTTP 200 with the resolved config; no workspace is created; 400 when issueId missing
+  - _asserted by_ `launch-preview.test.ts::returns preview for a valid issue`, `launch-preview.test.ts::is read-only — does not create a workspace`, `launch-preview.test.ts::returns 400 when issueId is missing`, `launch-preview.test.ts::returns blockedBy list when the issue has unreso`, `workspace-launch-preview.test.ts::preview renders resolved branch, base branch, an`
+- [x] ✅ `workspaces.list.scoped` — The workspace list is always project- or issue-scoped; an unscoped request is rejected rather than returning the whole table
+  - _given_ cli-mcp-caller
+  - _then_ GET with ?projectId= or ?issueId= returns 200 with the slim scoped list (model column included); without either returns HTTP 400 (confirmed live)
+  - _asserted by_ `project-scoped-workspace-list.test.ts::returns 200 with workspaces belonging to the giv`, `issue-scoped-workspace-list.test.ts::returns 400 when neither projectId nor issueId i`, `api.test.ts::GET /api/workspaces without projectId returns 40`, `api.test.ts::GET /api/workspaces surfaces the model column in`
+- [x] ✅ `workspaces.turn.followup` — A follow-up turn re-engages the agent on an existing workspace by sending a content message, resuming the provider session
+  - _given_ operator
+  - _then_ 201 with resumed:true + sessionId (or ok:true when delivered to a live session); a new agent run starts against the same worktree
+  - _asserted by_ `workspace-chat.test.ts::Send follow-up via /turn after agent session com`, `workspace-chat.test.ts::UI: send follow-up message after session complet`, `workspace.service.test.ts::sendTurn with auto_rebase_on_continue (auto-reba`
+- [x] ✅ `workspaces.diff.etag-cached` — The working-tree diff (including untracked files) is exposed and conditionally cached, so an unchanged diff is a cheap 304 and a changed diff invalidates to a new ETag
+  - _given_ operator
+  - _then_ 200 with ETag + diff body; 304 on matching If-None-Match; new ETag after the diff changes
+  - _asserted by_ `workspace-diff-etag.test.ts::returns 200 with ETag, then 304 on matching If-N`, `workspace-diff-etag.test.ts::returns 200 with new ETag when diff changes (inv`
+- [x] ✅ `workspaces.merge.land` — Merging lands the feature branch onto the base, stamps mergedAt + mergedHeadSha (which survive branch deletion), closes the workspace, and moves the issue to Done — terminal and irreversible
+  - _given_ operator
+  - _then_ 200 with merged:true + baseBranch/SHAs; board reflects Done immediately; concurrent merge calls are deduplicated to one promise
+  - _asserted by_ `workspace-merge-service.test.ts::MergeService — clean merge advances base (return`, `workspace-lifecycle-status-transitions.test.ts::lifecycle: reviewing → Done on merge success (re`, `workspace-merge-service.test.ts::MergeService — mergeWorkspaceDeduped deduplicate`, `api.test.ts::GET /api/projects/:id/board reflects Done counts`, `workspace.test.ts::Merge button merges and workspace status changes`
+- [x] ✅ `workspaces.merge.conflict` — A merge whose branch conflicts is refused with a structured 409 (reason=conflict + conflictFiles), the readyForMerge flag is cleared, the base is NOT advanced, and the server stays healthy
+  - _given_ operator
+  - _then_ HTTP 409 with {mergeReason:'conflict', conflictFiles}; base branch unchanged; workspace stays open; health endpoint still responsive
+  - _asserted by_ `merge-error-reporting.test.ts::reason=conflict with conflictFiles when detectCo`, `merge-conflict-server-health.test.ts::returns 409 and does NOT advance master when the`, `merge-conflict-server-health.test.ts::server health endpoint remains responsive after `, `workspace-merge-service.test.ts::MergeService — conflict-ready clears readyForMer`
+- [x] ✅ `workspaces.merge.not-approved` — A merge of a workspace that is not ready for merge is refused unless an auto-merge-in-review bypass is active
+  - _given_ monitor
+  - _then_ HTTP 409 with mergeReason=not_approved; base unchanged
+  - _asserted by_ `merge-error-reporting.test.ts::reason=not_approved when workspace is not ready `, `workspace-merge-service.test.ts::resolveMergeState — auto_merge_in_review bypasse`, `workspace-merge-service.test.ts::proceeds past the readyForMerge gate when autoMe`
+- [x] ✅ `workspaces.merge.dirty-main-blocked` — A merge is refused when the main checkout has uncommitted tracked source changes, because landing into a dirty main would otherwise stall automation
+  - _given_ monitor
+  - _then_ HTTP 409 with mergeReason=dirty_main; no git merge performed
+  - _asserted by_ `merge-error-reporting.test.ts::reason=dirty_main when main checkout has uncommi`, `workspace-merge-service.test.ts::resolveMergeState — error-skip (dirty main check`
+- [x] ✅ `workspaces.merge.already-merged-reconcile` — A retry whose branch is already an ancestor of base (e.g. a dropped response after the real merge) reconciles to Done without double-merging — idempotent, git-verified, and guarded against silent-merge-loss when the mergedAt flag is stale
+  - _given_ monitor
+  - _then_ 200 reconciled:true, mergeBranch NOT called; issue moved to Done; a stale mergedAt with a non-ancestor branch does NOT short-circuit
+  - _asserted by_ `workspace-merge-flap.test.ts::reconciles to Done when branch is already an anc`, `workspace-already-merged.test.ts::doMerge ancestry check ((a) already-merged branc`, `workspace-merge-service.test.ts::does NOT short-circuit to already-merged when me`
+- [x] ✅ `workspaces.fix-and-merge.resolve` — Fix-and-merge spawns a conflict-resolving 'fixing' agent that counts as active capacity, then re-attempts the landing; stale zero-output fixing zombies are force-recovered before retrying
+  - _given_ monitor
+  - _then_ a fixing session starts (consumes a WIP slot); on success the branch lands and the issue moves to Done
+  - _asserted by_ `workspace-merge-service.test.ts::MergeService — merge from fixing status moves is`, `workspace-merge-service.test.ts::force-stops a stale zero-output fix-and-merge se`, `workspace.service.test.ts::fixAndMerge with HEAD guard (syncs and rebases t`, `workspace-activity-state.test.ts::fixing workspace => fixing, counts as capacity`
+- [x] ✅ `workspaces.delete.cascade` — Deleting a workspace cascade-removes its sessions and messages and detaches its summary from the issue
+  - _given_ operator
+  - _then_ workspace + all FK children deleted; the issue's workspaceSummary disappears from the board
+  - _asserted by_ `api.test.ts::DELETE /api/workspaces/:id deletes all workspace`, `board-column-count-invariant.test.ts::removes workspaceSummary from issue after worksp`, `board-cache-workspace-lifecycle-invalidation.test.ts::refreshes /api/projects/:id/board immediately af`
+- [x] ✅ `workspaces.lifecycle.exit-classification` — When the agent process exits the run is classified by observed output: a ≤1s / zero-token / explicit-launchFailure run is 'failed' (relaunchable), a clean exit with committed changes flips the workspace to reviewing and moves the issue to In Review, and the exit-before-output drain prevents misclassifying a fast real run as a zero-output launch failure
+  - _given_ agent-subprocess
+  - _then_ workspace/session status reflects failed vs idle vs reviewing; on clean exit with a diff the issue is In Review and an auto-review session launches
+  - _asserted by_ `workspace-activity-state.test.ts::deriveWorkspaceActivityState (zero-output/1s fai`, `workspace-lifecycle-status-transitions.test.ts::lifecycle: active → reviewing on agent exit-0 wi`, `workspace-lifecycle-status-transitions.test.ts::leaves issue In Progress when agent exits with n`, `workspace-launch-failures.test.ts::flags a fast non-zero-exit session as session-er`, `active-stopped-workspace-enters-review.test.ts::active-stopped workspace with committed diff ent`
+- [x] ✅ `workspaces.cascade.post-merge-followups` — On merge, dependents whose blocking deps are now ALL Done get a worktree created and an agent launched automatically — the dependency DAG drives new work — but only when the project has a defaultBranch, the dependent has no in-flight workspace, and Start Mode permits it
+  - _given_ monitor
+  - _then_ new workspaces appear + agents launch for the unblocked dependents; a workspace_merged event is emitted only after the agent actually launches; skipped when no defaultBranch or dependent already in flight
+  - _asserted by_ `workspace-cascade-followup.test.ts::merging a blocker auto-creates a workspace for t`, `workspace-cascade-followup.test.ts::dependent that already has an active workspace d`
+- [x] ✅ `workspaces.direct.no-worktree` — A direct workspace operates in the project's main checkout with no worktree (null baseBranch), trading isolation for immediacy; its merge is a no-op close and its diff is computed against HEAD plus untracked files
+  - _given_ operator
+  - _then_ no worktree dir; workingDir = repoPath; diff vs HEAD; merge just closes the workspace; setup script skipped
+  - _asserted by_ `api.test.ts::POST /api/workspaces skips setup script for dire`, `workspace-diff-stats.test.ts::uses HEAD for direct workspace diff stats`, `workspace-merge-service.test.ts::resolveMergeState — direct-close (returns direct`, `close-workspace-on-terminal-issue.test.ts::closes a still-open DIRECT workspace when the is`
+- [x] ✅ `workspaces.provision.symlink-traversal-guard` — Per-worktree dependency bootstrap validates symlink target names against path traversal and absolute paths before creating any link, so autonomous setup cannot write outside the worktree
+  - _given_ agent-subprocess
+  - _then_ traversal/absolute link names are rejected; a node_modules request expands to each packages/*/node_modules under the strict pnpm linker
+  - _asserted by_ `worktree-symlink-bootstrap.test.ts::isValidDirName (rejects path traversal attempts;`, `worktree-symlink-bootstrap.test.ts::parseSymlinkDirs (filters out invalid directory `, `worktree-symlink-bootstrap.test.ts::discoverWorkspaceNodeModules (expands a packages`
+- [x] ✅ `workspaces.hygiene.stale-worktree-cleanup` — Operators can find orphaned worktree directories and retry failed post-merge cleanup, with path-safety guards that reject removal of anything outside the managed .worktrees/ dir
+  - _given_ operator
+  - _then_ stale list/cleanup-warnings returned; removal succeeds for safe paths; 400 for unsafe path / traversal / not-closed workspace / repo root
+  - _asserted by_ `stale-worktree-cleanup.test.ts::DELETE /api/workspaces/:id/stale-worktree (retur`, `cleanup-warnings.test.ts::POST /api/workspaces/:id/retry-cleanup (returns `, `worktrees-panel.test.ts::bulk clean confirm dialog appears and orphaned d`
+

@@ -14,6 +14,9 @@ docs/verification/
   _coverage-matrix.md      # human render: capability × dimension grid
   _gaps.md                 # human render: covered / partial / uncovered / undocumented-impl / documented-missing
   _priorities.md           # human render: ROI-ranked gap backlog (the test author's work-list)
+  _testplan.md             # LIVING test plan (planner output): one scenario per behaviour, [x]/[~]/[ ] derived from coverage
+  _candidates.json         # OWNED BY coverage-intelligence (tools/candidates.mjs) — per-capability candidate test sets
+  capabilities/<slug>.json # fan-out unit: one file per capability with { behavior, coverage } — assembled into the two JSONs above
   _test-index.json         # OWNED BY coverage-intelligence (tools/test-inventory.mjs) — deterministic existing-test inventory
   _authored.json           # OWNED BY e2e-test-author — what was generated, which gaps it closed, review verdicts
   _verification-log.md     # shared ledger: per-run strategy + findings + dispositions (dedup anchor across re-runs)

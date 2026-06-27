@@ -21,8 +21,9 @@ const bmPath = join(dir, "_behavior-model.json");
 const bm = existsSync(bmPath)
   ? JSON.parse(readFileSync(bmPath, "utf8"))
   : { schema: "verification-model/behavior@1", capabilities: [] };
-const bySlug = new Map(bm.capabilities.map((c) => [c.slug, c]));
-for (const p of parts) if (p.behavior) bySlug.set(p.slug, p.behavior);
+// seed only from records that carry a slug — drops any slugless orphans from earlier runs
+const bySlug = new Map(bm.capabilities.filter((c) => c.slug).map((c) => [c.slug, c]));
+for (const p of parts) if (p.behavior) { p.behavior.slug = p.slug; p.behavior.name = p.behavior.name || p.slug; bySlug.set(p.slug, p.behavior); }
 bm.capabilities = [...bySlug.values()];
 bm.evidence_sources = [...new Set((bm.evidence_sources || []).concat(["domain-docs", "source", "tests"]))];
 writeFileSync(bmPath, JSON.stringify(bm, null, 2) + "\n");
