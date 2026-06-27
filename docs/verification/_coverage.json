@@ -1674,7 +1674,7 @@
     },
     {
       "ref": "agent-sessions.reattach.recover",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/server/src/__tests__/session-lifecycle.test.ts::marks workspace idle and session stopped when cleanupStaleSession is called for a dead PID",
@@ -1683,28 +1683,24 @@
         {
           "test": "packages/server/src/__tests__/zombie-fix-session-reconciler.test.ts::reconciles a zombie fix-and-merge session (no PID, 0 messages, old enough)",
           "strength": "asserts-outcome"
+        },
+        {
+          "test": "packages/server/src/__tests__/agent-sessions-reattach-recover.test.ts",
+          "strength": "asserts-outcome"
         }
       ],
       "dimensions_covered": [
         "state-transition",
-        "error-handling"
+        "error-handling",
+        "regression"
       ],
-      "dimensions_missing": [
-        "regression",
-        "concurrency"
-      ],
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": [
-          "regression",
-          "concurrency"
-        ],
-        "rationale": "dead-PID stale cleanup is covered; reattachSession (restoring context/provider for a survived detached agent across hot-reload) and notifyExternalExit mirroring the exit path idempotently are NOT exercised — the core restart-survival promise is unverified"
-      }
+      "dimensions_missing": [],
+      "gap": null,
+      "note": "Closed by e2e-test-author wave-4 2026-06-27 (adversarially reviewed). agent-sessions-reattach-recover.test.ts"
     },
     {
       "ref": "agent-sessions.turn.followup",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/server/src/__tests__/session.manager.test.ts::turn state transitions: processing → waiting on result event",
@@ -1717,23 +1713,20 @@
         {
           "test": "packages/server/src/__tests__/session.manager.test.ts::sendTurn returns stale when session not in turnStates",
           "strength": "touches-only"
+        },
+        {
+          "test": "packages/server/src/__tests__/agent-session-turn-followup.test.ts",
+          "strength": "asserts-outcome"
         }
       ],
       "dimensions_covered": [
-        "state-transition"
+        "state-transition",
+        "workflow",
+        "error-handling"
       ],
-      "dimensions_missing": [
-        "error-handling",
-        "workflow"
-      ],
-      "gap": {
-        "kind": "outcome-not-asserted",
-        "missing_dimensions": [
-          "error-handling",
-          "workflow"
-        ],
-        "rationale": "turnState processing↔waiting transitions are asserted; the stale-process gate is only re-derived inline (touches-only, not a real sendTurn call against a dead process), and the full waiting-AND-alive precondition for a real follow-up turn is not exercised end-to-end"
-      }
+      "dimensions_missing": [],
+      "gap": null,
+      "note": "Closed by e2e-test-author wave-4 2026-06-27 (adversarially reviewed). agent-session-turn-followup.test.ts"
     },
     {
       "ref": "agent-sessions.resume.provider-id",
@@ -1881,22 +1874,20 @@
     },
     {
       "ref": "board-ui.move.rollback",
-      "status": "uncovered",
-      "covered_by": [],
-      "dimensions_covered": [],
-      "dimensions_missing": [
-        "error-handling",
-        "state-transition",
-        "risk"
+      "status": "covered",
+      "covered_by": [
+        {
+          "test": "packages/e2e/tests/ui/board-move-rollback.test.ts",
+          "strength": "asserts-outcome"
+        }
       ],
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": [
-          "error-handling",
-          "state-transition"
-        ],
-        "rationale": "The drag e2e covers only the happy path. No test forces a server-rejected move (e.g. terminal-move guard) and asserts the card snaps back to the exact prior column + the server error message is shown. This is the optimistic layer's core safety property."
-      }
+      "dimensions_covered": [
+        "error-handling",
+        "state-transition"
+      ],
+      "dimensions_missing": [],
+      "gap": null,
+      "note": "Closed by e2e-test-author wave-4 2026-06-27 (adversarially reviewed). board-move-rollback.test.ts"
     },
     {
       "ref": "board-ui.move.dependencyPreview",
@@ -4430,7 +4421,7 @@
     },
     {
       "ref": "mcp-server.merge.workspace.delegate",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/mcp-server/src/__tests__/tools/workspace-edge-errors.test.ts::merge_workspace returns a structured error when the workspace is missing",
@@ -4439,28 +4430,25 @@
         {
           "test": "packages/mcp-server/src/__tests__/tools/workspace-edge-errors.test.ts::merge_workspace returns a structured error when the workspace is closed",
           "strength": "asserts-outcome"
+        },
+        {
+          "test": "packages/mcp-server/src/__tests__/tools/merge-workspace-delegate.test.ts",
+          "strength": "asserts-outcome"
         }
       ],
       "dimensions_covered": [
-        "error"
-      ],
-      "dimensions_missing": [
+        "error",
         "api",
         "risk"
       ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": null,
         "bugs": 0,
         "last_regression": null
       },
-      "gap": {
-        "kind": "outcome-not-asserted",
-        "missing_dimensions": [
-          "api",
-          "risk"
-        ],
-        "rationale": "Only the pre-fetch fast-fail errors are asserted. The success path — that a valid merge_workspace actually POSTs /api/workspaces/:id/merge and passes the server's result (incl. 409 lock / 503 verify-fail / conflict) back through — is never asserted."
-      }
+      "gap": null,
+      "note": "Closed by e2e-test-author wave-4 2026-06-27 (adversarially reviewed). merge-workspace-delegate.test.ts"
     },
     {
       "ref": "mcp-server.launch.workspace",
@@ -6643,27 +6631,24 @@
     },
     {
       "ref": "project-registration.enrich.llmGapFill",
-      "status": "uncovered",
-      "covered_by": [],
-      "dimensions_covered": [],
-      "dimensions_missing": [
-        "config",
-        "error-handling",
-        "risk"
+      "status": "covered",
+      "covered_by": [
+        {
+          "test": "packages/server/src/__tests__/stack-profile-llm-gapfill.test.ts",
+          "strength": "asserts-outcome"
+        }
       ],
+      "dimensions_covered": [
+        "config",
+        "error-handling"
+      ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": null,
         "bugs": 0
       },
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": [
-          "config",
-          "error-handling",
-          "risk"
-        ],
-        "rationale": "enrichWithLlm/parseLlmJson and the sparse-profile gate have no test; neither the 'rules win, LLM fills only nulls' merge rule nor the shell-exec trust boundary (an LLM testCommand becoming the executed verify gate) is asserted"
-      }
+      "gap": null,
+      "note": "Closed by e2e-test-author wave-4 2026-06-27 (adversarially reviewed). stack-profile-llm-gapfill.test.ts"
     },
     {
       "ref": "review-merge.launch.review",
@@ -6981,7 +6966,7 @@
     },
     {
       "ref": "review-merge.recover.fix-and-merge",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/server/src/__tests__/stranded-fix-and-merge-resolver-exit.test.ts::keeps the workspace OPEN and idle (retryable) when the resolver exits but the branch did NOT land",
@@ -6998,6 +6983,10 @@
         {
           "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::closes the workspace and moves the issue to Done when merging from fixing status",
           "strength": "asserts-outcome"
+        },
+        {
+          "test": "packages/server/src/__tests__/fix-and-merge-endpoint.test.ts",
+          "strength": "asserts-outcome"
         }
       ],
       "requirements": [
@@ -7006,18 +6995,12 @@
       "dimensions_covered": [
         "state-transition",
         "error-handling",
-        "workflow"
-      ],
-      "dimensions_missing": [
+        "workflow",
         "api"
       ],
-      "gap": {
-        "kind": "outcome-not-asserted",
-        "missing_dimensions": [
-          "api"
-        ],
-        "rationale": "Resolver-exit recovery and zombie-fix recovery are well asserted, but the POST /api/workspaces/:id/fix-and-merge endpoint itself — that it transitions the workspace to status=fixing and relaunches the fix agent in the worktree — is never driven end-to-end and asserted."
-      }
+      "dimensions_missing": [],
+      "gap": null,
+      "note": "Closed by e2e-test-author wave-4 2026-06-27 (adversarially reviewed). fix-and-merge-endpoint.test.ts"
     },
     {
       "ref": "review-merge.batch.auto-merge",
@@ -8000,12 +7983,12 @@
         ]
       },
       "agent-sessions": {
-        "covered": 15,
-        "partial": 5,
+        "covered": 17,
+        "partial": 3,
         "uncovered": 0,
         "undocumented_implemented": 0,
         "documented_missing": 0,
-        "score": 0.875,
+        "score": 0.925,
         "by_dimension": {
           "state-transition": {
             "covered": 8,
@@ -8064,27 +8047,6 @@
         ],
         "top_gaps": [
           {
-            "ref": "agent-sessions.reattach.recover",
-            "priority": "P1",
-            "roi": 4,
-            "dimensions_to_add": [
-              "state-transition",
-              "regression",
-              "concurrency"
-            ],
-            "rationale": "reattachSession + notifyExternalExit (the hot-reload-survival promise and its idempotent exit) are untested; only dead-PID cleanup is covered. A regression here double-finalizes (re-launching the next ticket twice) or loses a live agent across restart — the exact failures the idempotency guard exists to prevent."
-          },
-          {
-            "ref": "agent-sessions.turn.followup",
-            "priority": "P1",
-            "roi": 3.5,
-            "dimensions_to_add": [
-              "error-handling",
-              "workflow"
-            ],
-            "rationale": "The stale-process gate (dead process → stale:true so the caller resumes fresh) is only re-derived inline, not asserted against a real dead-process sendTurn. The turn endpoint churns and a wrong gate silently enqueues onto a dead process."
-          },
-          {
             "ref": "agent-sessions.persist.split-batch",
             "priority": "P2",
             "roi": 3,
@@ -8109,10 +8071,10 @@
       "board-ui": {
         "covered": 19,
         "partial": 3,
-        "uncovered": 3,
+        "uncovered": 2,
         "undocumented_implemented": 0,
         "documented_missing": 0,
-        "score": 0.8,
+        "score": 0.854,
         "by_dimension": {
           "capability": {
             "covered": 5,
@@ -8184,16 +8146,6 @@
           "accessibility (keyboard-nav operability)"
         ],
         "top_gaps": [
-          {
-            "ref": "board-ui.move.rollback",
-            "priority": "P1",
-            "roi": 5.3,
-            "dimensions_to_add": [
-              "error-handling",
-              "state-transition"
-            ],
-            "rationale": "The optimistic-move layer's core safety property — a server-rejected move snaps the card back to its exact prior column and surfaces the server message — is entirely unverified. High blast radius (BoardPage is the hottest file, 718 commits; move legality is server-authoritative). Force a 4xx on PATCH /api/issues via page.route, drop a card, assert it returns to source + error toast text. Reuses the existing drag-dispatch helper in board.test.ts."
-          },
           {
             "ref": "board-ui.move.archiveConfirm",
             "priority": "P1",
@@ -8628,12 +8580,12 @@
         ]
       },
       "mcp-server": {
-        "covered": 15,
-        "partial": 3,
+        "covered": 16,
+        "partial": 2,
         "uncovered": 2,
         "undocumented_implemented": 0,
         "documented_missing": 0,
-        "score": 0.825,
+        "score": 0.85,
         "by_dimension": {
           "api": {
             "covered": 9,
@@ -8703,16 +8655,6 @@
               "risk"
             ],
             "rationale": "Loopback-only egress is the only SSRF boundary; firing a webhook from a status change is best-effort and unverified at the MCP call site. Assert a non-loopback pref URL is not fetched and a loopback one is, and that the mutation succeeds regardless."
-          },
-          {
-            "ref": "mcp-server.merge.workspace.delegate",
-            "priority": "P1",
-            "roi": 3,
-            "dimensions_to_add": [
-              "api",
-              "risk"
-            ],
-            "rationale": "Highest-risk delegation (merge) only has its pre-fetch error paths asserted; the success delegation + server-result passthrough (incl. 409/503/conflict) is unverified. Stub fetch and assert the POST target + passthrough body."
           }
         ]
       },
@@ -8979,12 +8921,12 @@
         ]
       },
       "project-registration": {
-        "covered": 13,
+        "covered": 14,
         "partial": 2,
-        "uncovered": 2,
+        "uncovered": 1,
         "undocumented_implemented": 0,
         "documented_missing": 0,
-        "score": 0.824,
+        "score": 0.882,
         "by_dimension": {
           "config": {
             "covered": 8,
@@ -9039,17 +8981,6 @@
         ],
         "top_gaps": [
           {
-            "ref": "project-registration.enrich.llmGapFill",
-            "priority": "P1",
-            "roi": 3.6,
-            "dimensions_to_add": [
-              "config",
-              "error-handling",
-              "risk"
-            ],
-            "rationale": "An LLM-supplied testCommand becomes the shell-executed verify gate for a sparse project with no allow-list (trust-boundary risk). Stub the LLM, assert rules win where present, LLM fills only nulls, source flips to 'llm', and a sparse profile triggers it while a complete one does not."
-          },
-          {
             "ref": "project-registration.register.idempotent",
             "priority": "P1",
             "roi": 3.5,
@@ -9062,12 +8993,12 @@
         ]
       },
       "review-merge": {
-        "covered": 16,
-        "partial": 2,
+        "covered": 17,
+        "partial": 1,
         "uncovered": 0,
         "undocumented_implemented": 0,
         "documented_missing": 0,
-        "score": 0.944,
+        "score": 0.972,
         "by_dimension": {
           "api": {
             "covered": 6,
@@ -9125,15 +9056,6 @@
           "api (fix-and-merge endpoint + manual-merge-gate-bypass unasserted)"
         ],
         "top_gaps": [
-          {
-            "ref": "review-merge.recover.fix-and-merge",
-            "priority": "P1",
-            "roi": 4,
-            "dimensions_to_add": [
-              "api"
-            ],
-            "rationale": "Conflict recovery is high-churn and high-blast-radius. Resolver-exit recovery is covered, but the POST /:id/fix-and-merge entry point itself (status→fixing + agent relaunch in worktree) is never driven end-to-end. An endpoint-level regression (e.g. not setting fixing, not launching) would be invisible."
-          },
           {
             "ref": "review-merge.foundational.sync-merge",
             "priority": "P2",
@@ -9242,14 +9164,14 @@
     ],
     "weak_dimension_note": "state-transition is the weakest column (4 uncovered + 1 partial) — every gap is a runtime lifecycle edge: plan approve/reject, hang-watchdog kill, restart-reattach, post-merge cascade, quarantine→In Progress. error is second-weakest, driven by two un-asserted negatives (turn-missing-content, one-direct exact status) and the watchdog. permission is correctly near-empty (single-user).",
     "totals": {
-      "covered": 226,
-      "partial": 30,
-      "uncovered": 17,
+      "covered": 232,
+      "partial": 26,
+      "uncovered": 15,
       "undocumented_implemented": 0,
       "documented_missing": 0,
       "behaviors": 273,
       "capabilities": 15,
-      "overall_score": 0.883
+      "overall_score": 0.897
     }
   }
 }

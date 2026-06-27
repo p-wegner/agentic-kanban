@@ -994,36 +994,33 @@
       },
       {
         "ref": "project-registration.enrich.llmGapFill",
-        "status": "uncovered",
-        "covered_by": [],
-        "dimensions_covered": [],
-        "dimensions_missing": [
-          "config",
-          "error-handling",
-          "risk"
+        "status": "covered",
+        "covered_by": [
+          {
+            "test": "packages/server/src/__tests__/stack-profile-llm-gapfill.test.ts",
+            "strength": "asserts-outcome"
+          }
         ],
+        "dimensions_covered": [
+          "config",
+          "error-handling"
+        ],
+        "dimensions_missing": [],
         "history": {
           "churn_90d": null,
           "bugs": 0
         },
-        "gap": {
-          "kind": "no-test",
-          "missing_dimensions": [
-            "config",
-            "error-handling",
-            "risk"
-          ],
-          "rationale": "enrichWithLlm/parseLlmJson and the sparse-profile gate have no test; neither the 'rules win, LLM fills only nulls' merge rule nor the shell-exec trust boundary (an LLM testCommand becoming the executed verify gate) is asserted"
-        }
+        "gap": null,
+        "note": "Closed by e2e-test-author wave-4 2026-06-27 (adversarially reviewed). stack-profile-llm-gapfill.test.ts"
       }
     ],
     "summary": {
-      "covered": 13,
+      "covered": 14,
       "partial": 2,
-      "uncovered": 2,
+      "uncovered": 1,
       "undocumented_implemented": 0,
       "documented_missing": 0,
-      "score": 0.824,
+      "score": 0.882,
       "by_dimension": {
         "config": {
           "covered": 8,
@@ -1077,17 +1074,6 @@
         "state-transition"
       ],
       "top_gaps": [
-        {
-          "ref": "project-registration.enrich.llmGapFill",
-          "priority": "P1",
-          "roi": 3.6,
-          "dimensions_to_add": [
-            "config",
-            "error-handling",
-            "risk"
-          ],
-          "rationale": "An LLM-supplied testCommand becomes the shell-executed verify gate for a sparse project with no allow-list (trust-boundary risk). Stub the LLM, assert rules win where present, LLM fills only nulls, source flips to 'llm', and a sparse profile triggers it while a complete one does not."
-        },
         {
           "ref": "project-registration.register.idempotent",
           "priority": "P1",

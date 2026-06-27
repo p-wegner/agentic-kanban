@@ -950,7 +950,7 @@
       },
       {
         "ref": "review-merge.recover.fix-and-merge",
-        "status": "partial",
+        "status": "covered",
         "covered_by": [
           {
             "test": "packages/server/src/__tests__/stranded-fix-and-merge-resolver-exit.test.ts::keeps the workspace OPEN and idle (retryable) when the resolver exits but the branch did NOT land",
@@ -967,6 +967,10 @@
           {
             "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::closes the workspace and moves the issue to Done when merging from fixing status",
             "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/fix-and-merge-endpoint.test.ts",
+            "strength": "asserts-outcome"
           }
         ],
         "requirements": [
@@ -975,18 +979,12 @@
         "dimensions_covered": [
           "state-transition",
           "error-handling",
-          "workflow"
-        ],
-        "dimensions_missing": [
+          "workflow",
           "api"
         ],
-        "gap": {
-          "kind": "outcome-not-asserted",
-          "missing_dimensions": [
-            "api"
-          ],
-          "rationale": "Resolver-exit recovery and zombie-fix recovery are well asserted, but the POST /api/workspaces/:id/fix-and-merge endpoint itself — that it transitions the workspace to status=fixing and relaunches the fix agent in the worktree — is never driven end-to-end and asserted."
-        }
+        "dimensions_missing": [],
+        "gap": null,
+        "note": "Closed by e2e-test-author wave-4 2026-06-27 (adversarially reviewed). fix-and-merge-endpoint.test.ts"
       },
       {
         "ref": "review-merge.batch.auto-merge",
@@ -1248,12 +1246,12 @@
       }
     ],
     "summary": {
-      "covered": 16,
-      "partial": 2,
+      "covered": 17,
+      "partial": 1,
       "uncovered": 0,
       "undocumented_implemented": 0,
       "documented_missing": 0,
-      "score": 0.944,
+      "score": 0.972,
       "by_dimension": {
         "api": {
           "covered": 6,
@@ -1311,15 +1309,6 @@
         "api (fix-and-merge endpoint + manual-merge-gate-bypass unasserted)"
       ],
       "top_gaps": [
-        {
-          "ref": "review-merge.recover.fix-and-merge",
-          "priority": "P1",
-          "roi": 4,
-          "dimensions_to_add": [
-            "api"
-          ],
-          "rationale": "Conflict recovery is high-churn and high-blast-radius. Resolver-exit recovery is covered, but the POST /:id/fix-and-merge entry point itself (status→fixing + agent relaunch in worktree) is never driven end-to-end. An endpoint-level regression (e.g. not setting fixing, not launching) would be invisible."
-        },
         {
           "ref": "review-merge.foundational.sync-merge",
           "priority": "P2",

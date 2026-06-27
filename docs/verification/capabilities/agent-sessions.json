@@ -1028,7 +1028,7 @@
       },
       {
         "ref": "agent-sessions.reattach.recover",
-        "status": "partial",
+        "status": "covered",
         "covered_by": [
           {
             "test": "packages/server/src/__tests__/session-lifecycle.test.ts::marks workspace idle and session stopped when cleanupStaleSession is called for a dead PID",
@@ -1037,28 +1037,24 @@
           {
             "test": "packages/server/src/__tests__/zombie-fix-session-reconciler.test.ts::reconciles a zombie fix-and-merge session (no PID, 0 messages, old enough)",
             "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/agent-sessions-reattach-recover.test.ts",
+            "strength": "asserts-outcome"
           }
         ],
         "dimensions_covered": [
           "state-transition",
-          "error-handling"
+          "error-handling",
+          "regression"
         ],
-        "dimensions_missing": [
-          "regression",
-          "concurrency"
-        ],
-        "gap": {
-          "kind": "no-test",
-          "missing_dimensions": [
-            "regression",
-            "concurrency"
-          ],
-          "rationale": "dead-PID stale cleanup is covered; reattachSession (restoring context/provider for a survived detached agent across hot-reload) and notifyExternalExit mirroring the exit path idempotently are NOT exercised — the core restart-survival promise is unverified"
-        }
+        "dimensions_missing": [],
+        "gap": null,
+        "note": "Closed by e2e-test-author wave-4 2026-06-27 (adversarially reviewed). agent-sessions-reattach-recover.test.ts"
       },
       {
         "ref": "agent-sessions.turn.followup",
-        "status": "partial",
+        "status": "covered",
         "covered_by": [
           {
             "test": "packages/server/src/__tests__/session.manager.test.ts::turn state transitions: processing → waiting on result event",
@@ -1071,23 +1067,20 @@
           {
             "test": "packages/server/src/__tests__/session.manager.test.ts::sendTurn returns stale when session not in turnStates",
             "strength": "touches-only"
+          },
+          {
+            "test": "packages/server/src/__tests__/agent-session-turn-followup.test.ts",
+            "strength": "asserts-outcome"
           }
         ],
         "dimensions_covered": [
-          "state-transition"
+          "state-transition",
+          "workflow",
+          "error-handling"
         ],
-        "dimensions_missing": [
-          "error-handling",
-          "workflow"
-        ],
-        "gap": {
-          "kind": "outcome-not-asserted",
-          "missing_dimensions": [
-            "error-handling",
-            "workflow"
-          ],
-          "rationale": "turnState processing↔waiting transitions are asserted; the stale-process gate is only re-derived inline (touches-only, not a real sendTurn call against a dead process), and the full waiting-AND-alive precondition for a real follow-up turn is not exercised end-to-end"
-        }
+        "dimensions_missing": [],
+        "gap": null,
+        "note": "Closed by e2e-test-author wave-4 2026-06-27 (adversarially reviewed). agent-session-turn-followup.test.ts"
       },
       {
         "ref": "agent-sessions.resume.provider-id",
@@ -1148,12 +1141,12 @@
       }
     ],
     "summary": {
-      "covered": 15,
-      "partial": 5,
+      "covered": 17,
+      "partial": 3,
       "uncovered": 0,
       "undocumented_implemented": 0,
       "documented_missing": 0,
-      "score": 0.875,
+      "score": 0.925,
       "by_dimension": {
         "state-transition": {
           "covered": 8,
@@ -1211,27 +1204,6 @@
         "workflow (provider-resume relaunch + multi-turn follow-up end-to-end gaps)"
       ],
       "top_gaps": [
-        {
-          "ref": "agent-sessions.reattach.recover",
-          "priority": "P1",
-          "roi": 4,
-          "dimensions_to_add": [
-            "state-transition",
-            "regression",
-            "concurrency"
-          ],
-          "rationale": "reattachSession + notifyExternalExit (the hot-reload-survival promise and its idempotent exit) are untested; only dead-PID cleanup is covered. A regression here double-finalizes (re-launching the next ticket twice) or loses a live agent across restart — the exact failures the idempotency guard exists to prevent."
-        },
-        {
-          "ref": "agent-sessions.turn.followup",
-          "priority": "P1",
-          "roi": 3.5,
-          "dimensions_to_add": [
-            "error-handling",
-            "workflow"
-          ],
-          "rationale": "The stale-process gate (dead process → stale:true so the caller resumes fresh) is only re-derived inline, not asserted against a real dead-process sendTurn. The turn endpoint churns and a wrong gate silently enqueues onto a dead process."
-        },
         {
           "ref": "agent-sessions.persist.split-batch",
           "priority": "P2",

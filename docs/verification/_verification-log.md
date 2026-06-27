@@ -154,6 +154,27 @@ score 0.837 → 0.883 (77% → 83%).** Every wave the adversarial reviewers conv
 tests into real fixes and surface ~2 genuine product bugs the happy-path tests assumed away —
 the strongest evidence that the refute step belongs in the skill, not as an optional add-on.
 
+## 2026-06-27 — e2e-test-author wave 4: closed 6 harder gaps (1 Playwright UI + 5 server)
+
+6 more (parallel) + 1-refuter-each: **3 sound, 3 needs-fix** (all fixed). New tests:
+board-move-rollback (Playwright), fix-and-merge-endpoint, merge-workspace-delegate (MCP),
+agent-sessions-reattach-recover, agent-session-turn-followup, stack-profile-llm-gapfill.
+
+- **Coverage: 0.883 → 0.897** (covered 226→232, partial 30→26, uncovered 17→15). Backlog 41→35.
+- The refuters caught three substantive issues this wave: a test that named the boot reattach
+  routine but drove a same-outcome SIBLING (rewritten to drive the real `cleanupStaleSessions`
+  with real `process.kill` PID liveness — the reviewer's required mutation now bites); a VACUOUS
+  `launch-not-called` assertion (sendTurn structurally can't relaunch); and an `error-handling`
+  dimension credited to a config opt-out (earned with real LLM-throws/malformed-JSON degrade cases).
+- **Product/infra bug #932:** the E2E happy-path drag tests (`board.test.ts`,
+  `drag-backlog-to-start.test.ts`) are BROKEN — they still poke `window.__dragData` but the app
+  refactored to a module store (`dragData.ts`, commit 2095a68f), so the move never fires and the
+  tests fail/don't exercise it. The new rollback test dispatches a real `dragstart` and is the only
+  working drag test of the three.
+
+**Running total across waves 1–4: 24 gaps closed, 7 product/infra bugs surfaced (#926–932),
+score 0.837 → 0.897 (77% → 85%).**
+
 ### Still open
 - **Phase 2 requirements-mapping NOT yet run** for any capability — so the `documented-missing`
   / `undocumented-implemented` buckets are empty by *omission of the pass*, not by verified
