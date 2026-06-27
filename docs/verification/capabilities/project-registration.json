@@ -1,0 +1,514 @@
+{
+  "slug": "project-registration",
+  "behavior": {
+    "business_purpose": "Onboard any git repo as a board project and reverse-engineer enough of its tech stack to drive it hands-off: create the project row + canonical statuses + non-null default branch + default skill, then derive every per-stack script the agent harness needs (install/setup, the merge-gate verify command, a boot-and-respond smoke check, edit-time feedback rules, a runnable green test scaffold, and clean-build/.gitignore hardening). This is the foundation that lets the board drive Node, Rust, Go, Python and JVM (Gradle/Kotlin/KMP/Spring/Ktor) repos, not just its own monorepo.",
+    "confidence": "high",
+    "source_paths": [
+      "packages/server/src/services/project-registration.ts",
+      "packages/server/src/services/stack-detector.service.ts",
+      "packages/server/src/services/stack-profile.service.ts",
+      "packages/server/src/services/stack-profile/persistence.ts",
+      "packages/server/src/services/stack-profile/verify-script.ts",
+      "packages/server/src/services/stack-profile/setup-script.ts",
+      "packages/server/src/services/stack-profile/smoke-check.ts",
+      "packages/server/src/services/stack-profile/test-scaffold.ts",
+      "packages/server/src/services/stack-profile/smart-hooks-rules.ts",
+      "packages/server/src/services/project-scaffold.ts",
+      "packages/server/src/services/gradle-detect.service.ts",
+      "packages/server/src/services/cold-clone-build-check.service.ts",
+      "packages/server/src/services/project-setup.service.ts"
+    ],
+    "actors": [
+      { "name": "operator", "kind": "human", "notes": "single local user registering a repo via UI 'Add Project' modal, CLI `pnpm cli -- register`, or MCP" },
+      { "name": "startup", "kind": "automation", "notes": "boot-time deduplicateProjects() runs on every server start" },
+      { "name": "monitor", "kind": "automation", "notes": "consumes the derived setup_script/verify_script downstream; only auto-starts a fully-driveable project" },
+      { "name": "review-merge", "kind": "automation", "notes": "pre-merge gate runs the derived verify_script + smoke + opt-in cold-clone check" }
+    ],
+    "entry_points": [
+      { "kind": "api", "ref": "POST /api/projects", "observable": "creates project (201 with {id,name,repoPath}); idempotent on same git root; fires best-effort profile/script derivation" },
+      { "kind": "ui", "ref": "Add Project modal (Import existing / Create new tabs)", "observable": "register path or create+scaffold a new repo; errors render inline, modal stays open" },
+      { "kind": "cli", "ref": "pnpm cli -- register <path>", "observable": "registers a repo as a project" },
+      { "kind": "service", "ref": "registerProject() / repairProjectRegistration()", "observable": "onboard or backfill driveable state + profile/scripts" },
+      { "kind": "service", "ref": "detectStackProfile() facade", "observable": "marker-file → StackProfile descriptor" },
+      { "kind": "startup-event", "ref": "deduplicateProjects()", "observable": "merges duplicate registrations sharing one git root at boot" },
+      { "kind": "service", "ref": "runColdCloneBuildCheck() (opt-in review gate)", "observable": "clean-clone install+build pass/fail result" }
+    ],
+    "behaviors": [
+      {
+        "id": "project-registration.register.create",
+        "statement": "Registering a git repo creates a driveable project: a project row, canonical statuses, a default branch and default skill, returned synchronously as 201",
+        "actor": "operator",
+        "preconditions": ["path is a valid git repo", "not already registered"],
+        "observable_outcome": "POST /api/projects returns 201 with {id, name, repoPath}; project appears in GET /api/projects",
+        "evidence": ["project-registration.ts:144", "project-registration.ts:177"],
+        "dimensions": ["api", "workflow", "capability"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "project-registration.register.idempotent",
+        "statement": "Re-registering the same repo (or a subdirectory resolving to the same git root) returns the existing project instead of creating a duplicate",
+        "actor": "operator",
+        "preconditions": ["a project already registered for that git root"],
+        "observable_outcome": "result.created === false and the same project id is returned; no second row; issues/skills stay on one project",
+        "evidence": ["project-registration.ts:150", "project-registration.ts:160"],
+        "dimensions": ["workflow", "boundary", "error-handling"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "project-registration.reject.missingRepoPath",
+        "statement": "Registering with no repoPath (or a non-git path) is rejected with a 4xx and an explanatory error, leaving no project created",
+        "actor": "operator",
+        "preconditions": [],
+        "observable_outcome": "POST /api/projects returns 400 with error mentioning repoPath; duplicate path returns 409",
+        "evidence": ["project-registration.ts:145"],
+        "dimensions": ["api", "error-handling"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "project-registration.resolve.defaultBranch",
+        "statement": "A newly registered project never gets a null defaultBranch — it falls back to the repo's actually checked-out branch so the project is not silently undriveable (#772)",
+        "actor": "operator",
+        "preconditions": ["repo's default branch is not named main/master, or detection returned null"],
+        "observable_outcome": "project.defaultBranch is non-null when a branch is checked out; POST /api/workspaces does not 400 'No default branch configured'",
+        "evidence": ["project-registration.ts:39", "project-registration.ts:168"],
+        "dimensions": ["regression", "error-handling", "boundary", "risk"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "project-registration.seed.statuses",
+        "statement": "Every new project is seeded the canonical 7-status set (incl. Backlog at -1) so issue batch-create and Backlog-pull auto-start work",
+        "actor": "operator",
+        "preconditions": ["fresh project"],
+        "observable_outcome": "GET /api/projects/:id/statuses lists Todo/In Progress/In Review/Done/Cancelled (+Backlog); POST /api/issues/batch does not 400 'No statuses found'",
+        "evidence": ["project-registration.ts:190"],
+        "dimensions": ["workflow", "config", "capability"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "project-registration.dedup.sameGitRoot",
+        "statement": "On startup, duplicate registrations resolving to one git root are merged into a single survivor — issues/skills/repos/scheduled-runs and the active-project pointer are moved, statuses remapped by name, duplicates deleted",
+        "actor": "startup",
+        "preconditions": ["two project rows share one resolved git root (legacy subdir registration)"],
+        "observable_outcome": "after boot only one project remains for that root; its issues/skills are intact; activeProjectId points at the survivor",
+        "evidence": ["project-registration.ts:71", "project-registration.ts:104"],
+        "dimensions": ["workflow", "state-transition", "regression"],
+        "risk": "high",
+        "confidence": "medium"
+      },
+      {
+        "id": "project-registration.repair.backfill",
+        "statement": "repairProjectRegistration idempotently backfills driveable state onto an old/partial project — seeds statuses if none, sets defaultBranch if null, and populates profile/verify/setup scripts if unset — never clobbering existing values",
+        "actor": "operator",
+        "preconditions": ["a project registered before profiles/scripts existed, or with missing statuses/branch"],
+        "observable_outcome": "returns {seededStatuses, setDefaultBranch, populatedStackProfile, populatedVerifyScript, populatedSetupScript}; re-running is a no-op once filled",
+        "evidence": ["project-registration.ts:231"],
+        "dimensions": ["workflow", "regression", "config"],
+        "risk": "medium",
+        "confidence": "medium"
+      },
+      {
+        "id": "project-registration.detect.stackProfile",
+        "statement": "Marker files are reverse-engineered into one durable StackProfile across many stacks (node/pnpm/npm/yarn, rust/cargo, go, python/pip/poetry), inferring package manager, monorepo-ness, build/test/lint/dev commands, web-ness and dev port",
+        "actor": "operator",
+        "preconditions": ["repo has recognizable marker files"],
+        "observable_outcome": "detectStackProfile returns a typed profile with the correct stack/commands; empty repo yields a valid sparse profile (stack null, source 'detected')",
+        "evidence": ["stack-detector.service.ts:281", "stack-detector.service.ts:115", "stack-detector.service.ts:175"],
+        "dimensions": ["config", "capability", "boundary"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "project-registration.detect.gradleHeuristics",
+        "statement": "The JVM/Gradle branch picks platform-correct, project-shape-correct commands: Kotlin vs Java compile task, KMP allTests vs test, Spring bootRun vs application run vs Ktor, .\\gradlew.bat vs ./gradlew, dev-port scan, web-ness",
+        "actor": "operator",
+        "preconditions": ["repo has build.gradle(.kts) + wrapper"],
+        "observable_outcome": "profile reflects e.g. KMP allTests + no compileJava/dev; Ktor isWeb + run + port 8080/literal; Spring bootRun + isWeb; Java compileJava typecheck",
+        "evidence": ["gradle-detect.service.ts", "stack-detector.service.ts:200"],
+        "dimensions": ["config", "boundary"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "project-registration.derive.verifyScript",
+        "statement": "The keystone merge gate is derived as `testCommand && buildCommand` (test first), persisted to verify_script_<projectId>, no-op on nothing-derivable, never clobbering a user/AI override",
+        "actor": "operator",
+        "preconditions": ["a profile or detectable markers"],
+        "observable_outcome": "verify_script pref = 'pnpm test && pnpm build' (or test-only, or marker fallback); empty profile writes nothing; existing override survives",
+        "evidence": ["stack-profile/verify-script.ts:27", "stack-profile/verify-script.ts:47"],
+        "dimensions": ["config", "boundary", "risk", "regression"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "project-registration.derive.setupScript",
+        "statement": "The monorepo-aware install/setup command is derived (pnpm install -r, gradle assemble, cargo fetch, …), persisted to projects.setup_script, no-op when empty and never clobbering an existing value",
+        "actor": "operator",
+        "preconditions": ["a profile with installCommand or detectable markers"],
+        "observable_outcome": "projects.setup_script = monorepo-aware install; single-package gets non-recursive install; empty detection leaves it null; existing value preserved",
+        "evidence": ["stack-profile/setup-script.ts:59", "stack-detector.service.ts:43"],
+        "dimensions": ["config", "boundary", "regression"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "project-registration.derive.smokeCheck",
+        "statement": "A boot-and-respond smoke check is built only for a bootable web/service project with a resolvable health URL — HTTP 200 plus HTML-shell needles for browser UIs, 200-only for headless APIs, null (skip) for CLI/library/no-URL",
+        "actor": "review-merge",
+        "preconditions": ["profile present"],
+        "observable_outcome": "buildSmokeCheck returns {devCommand, healthUrl, expectBodyContains} for web UIs; [] needles for JSON APIs; null for non-web/no-URL",
+        "evidence": ["stack-profile/smoke-check.ts:31"],
+        "dimensions": ["config", "boundary"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "project-registration.derive.smartHooksRules",
+        "statement": "Edit-time feedback rules are generated cheapest-signal-first and scoped to the stack's source globs, with the slow-JVM family downgraded (no per-edit test rule, non-blocking typecheck)",
+        "actor": "operator",
+        "preconditions": ["profile with a usable command"],
+        "observable_outcome": ".claude/smart-hooks-rules.json holds Typecheck/Quick-tests rules with stack-correct filePatterns; gradle gets no blocking per-edit test rule; no usable command → no rules",
+        "evidence": ["stack-profile/smart-hooks-rules.ts:63"],
+        "dimensions": ["config", "boundary"],
+        "risk": "low",
+        "confidence": "high"
+      },
+      {
+        "id": "project-registration.scaffold.testScaffold",
+        "statement": "A trivially-passing runnable test is generated in the project's REAL test dir + runner syntax (vitest/pytest/cargo/go/JUnit/kotlin.test), and is never written into a dir that already has tests",
+        "actor": "operator",
+        "preconditions": ["known stack/runner"],
+        "observable_outcome": "writeTestScaffold writes one green test at the right path/extension; unknown stack writes nothing; existing tests are not clobbered/duplicated",
+        "evidence": ["stack-profile/test-scaffold.ts:236", "stack-profile/test-scaffold.ts:270"],
+        "dimensions": ["config", "regression", "boundary"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "project-registration.scaffold.cleanMainGuards",
+        "statement": "New-project scaffold keeps main clean and clean-clones buildable: per-stack build-artifact + agent .gitignore (idempotent, no-clobber) and per-package-manager clean-build hardening (pnpm onlyBuiltDependencies, bun trustedDependencies, packageManager pin) so a fresh clone builds with no approval prompts",
+        "actor": "operator",
+        "preconditions": ["new/scaffolded project"],
+        "observable_outcome": ".gitignore gains the stack's artifact lines + agent lines once; package.json/pnpm config approves native postinstall + pins the manager; non-Node stacks are a clean no-op",
+        "evidence": ["project-scaffold.ts:73", "project-scaffold.ts:770", "project-scaffold.ts:187"],
+        "dimensions": ["regression", "config", "boundary"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "project-registration.gate.coldCloneBuild",
+        "statement": "The opt-in cold-clone build gate clones the committed branch into a fresh temp dir and runs install then build, failing the review on breakage that only appears on a truly clean clone, and always cleaning up the temp dir",
+        "actor": "review-merge",
+        "preconditions": ["cold_clone_check_<projectId> enabled; a derivable build command"],
+        "observable_outcome": "result.ok=false with reason build-failed/install-failed/clone-failed and failedCommand on breakage; ok=true 'no-build-command' when nothing derivable; temp clone always cleaned",
+        "evidence": ["cold-clone-build-check.service.ts:72", "cold-clone-build-check.service.ts:139"],
+        "dimensions": ["error-handling", "regression", "risk"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "project-registration.enrich.llmGapFill",
+        "statement": "When the rule-detected profile is sparse (no stack, or no test AND no build command) an LLM gap-fill is invoked and merged in ONLY where rules left null — rule facts win — and the whole derivation is fire-and-forget so it never slows or fails registration",
+        "actor": "operator",
+        "preconditions": ["a sparse-enough profile"],
+        "observable_outcome": "persisted profile gains LLM-supplied commands only in null slots, source flips to 'llm'; registration returns immediately regardless of LLM outcome",
+        "evidence": ["stack-profile/persistence.ts:22", "stack-profile/persistence.ts:102", "project-registration.ts:199"],
+        "dimensions": ["config", "error-handling", "risk"],
+        "risk": "medium",
+        "confidence": "medium"
+      }
+    ],
+    "permissions": [
+      { "actor": "operator", "behavior": "project-registration.register.create", "allowed": true, "notes": "single-user local app — no RBAC; permission dimension is N/A (one actor)" }
+    ],
+    "state_model": {
+      "states": ["unregistered", "registered-bare", "profile-derived", "scripts-live", "deduplicated"],
+      "transitions": [
+        { "from": "unregistered", "to": "registered-bare", "trigger": "registerProject (row+statuses+branch+skill)", "behavior": "project-registration.register.create" },
+        { "from": "registered-bare", "to": "scripts-live", "trigger": "fire-and-forget populateStackProfile→verify/setup", "behavior": "project-registration.derive.verifyScript" },
+        { "from": "registered-bare", "to": "deduplicated", "trigger": "startup deduplicateProjects merges duplicate roots", "behavior": "project-registration.dedup.sameGitRoot" },
+        { "from": "registered-bare", "to": "scripts-live", "trigger": "repairProjectRegistration backfill", "behavior": "project-registration.repair.backfill" }
+      ]
+    },
+    "error_states": [
+      { "id": "project-registration.err.notGitRepo", "statement": "Registering a non-git path returns 4xx with 'not a git repository'", "evidence": "project-registration.ts:145" },
+      { "id": "project-registration.err.duplicatePath", "statement": "Re-registering an already-registered path returns 409 'already registered' (UI surfaces it inline)", "evidence": "register-project.test.ts:77" },
+      { "id": "project-registration.err.coldCloneFailed", "statement": "cold-clone gate returns ok=false reason clone-failed/install-failed/build-failed", "evidence": "cold-clone-build-check.service.ts:72" },
+      { "id": "project-registration.err.llmHostileCommand", "statement": "A hallucinated/hostile testCommand from a sparse-profile LLM gap-fill becomes the shell-executed verify gate with no allow-list — exploitation needs both a sparse-enough profile and a hostile command", "evidence": "stack-profile/persistence.ts:108" }
+    ],
+    "external_integrations": ["git CLI (via shared git-exec adapter)", "claude-cli LLM (sparse-profile gap-fill + legacy generate* prompts)", "shell (cmd.exe / /bin/sh) running derived install/verify scripts", "filesystem (scaffold + smart-hooks + test-scaffold writes into the repo)"],
+    "unknowns": [
+      { "question": "Is the never-null defaultBranch guarantee (#772) asserted by any test, or only relied on in prod?", "why_unknown": "no test imports registerProject/resolveDefaultBranch; e2e only asserts 201+id, not branch non-null" },
+      { "question": "Is deduplicateProjects ever exercised, not just mocked out?", "why_unknown": "every test that touches it does vi.mock(...) to a no-op; no behavioral test found" },
+      { "question": "Does the LLM gap-fill merge rule (rules win, LLM fills only nulls) hold under a real/adversarial LLM JSON payload?", "why_unknown": "enrichWithLlm/parseLlmJson have no direct test; the shell-exec trust boundary is untested" },
+      { "question": "Is profile staleness ever auto-invalidated when a repo changes stack?", "why_unknown": "domain doc flags it inferred/unverified; only ?refresh=true recompute observed" }
+    ]
+  },
+  "coverage": {
+    "behaviors": [
+      {
+        "ref": "project-registration.register.create",
+        "status": "partial",
+        "covered_by": [
+          { "test": "packages/e2e/tests/api/projects.test.ts::POST /api/projects creates project with git info auto-detection", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/register-project.test.ts::successful registration closes modal and sends correct path", "strength": "touches-only" }
+        ],
+        "dimensions_covered": ["api", "capability"],
+        "dimensions_missing": ["workflow"],
+        "history": { "churn_90d": null, "bugs": 1, "last_regression": "#772 silent-undriveable" },
+        "gap": { "kind": "outcome-not-asserted", "missing_dimensions": ["workflow"], "rationale": "e2e asserts 201+{id,name,repoPath} but not the registration consequences as a journey (statuses seeded, branch non-null, skill attached) on the freshly-created project; UI test mocks the API so it only proves the modal flow" }
+      },
+      {
+        "ref": "project-registration.register.idempotent",
+        "status": "uncovered",
+        "covered_by": [
+          { "test": "packages/e2e/tests/ui/register-project.test.ts::duplicate path shows error message", "strength": "touches-only" }
+        ],
+        "dimensions_covered": [],
+        "dimensions_missing": ["workflow", "boundary", "error-handling"],
+        "history": { "churn_90d": null, "bugs": 1, "last_regression": "legacy subdir duplicates" },
+        "gap": { "kind": "no-test", "missing_dimensions": ["workflow", "boundary"], "rationale": "the UI test fulfills a MOCK 409; no server-level test proves registering the same git root (or a subdirectory of it) returns the existing project with created=false and no second row" }
+      },
+      {
+        "ref": "project-registration.reject.missingRepoPath",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/e2e/tests/api/projects.test.ts::POST /api/projects rejects missing repoPath", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["api", "error-handling"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 0 }
+      },
+      {
+        "ref": "project-registration.resolve.defaultBranch",
+        "status": "uncovered",
+        "covered_by": [],
+        "dimensions_covered": [],
+        "dimensions_missing": ["regression", "error-handling", "boundary"],
+        "history": { "churn_90d": null, "bugs": 1, "last_regression": "#772" },
+        "gap": { "kind": "no-test", "missing_dimensions": ["regression", "error-handling", "boundary"], "rationale": "the #772 never-null-branch guarantee (fallback to checked-out branch on a non-main/master repo) has no asserting test; a regression would silently re-create undriveable projects. PATCH defaultBranch-validation is a different path" }
+      },
+      {
+        "ref": "project-registration.seed.statuses",
+        "status": "partial",
+        "covered_by": [
+          { "test": "packages/e2e/tests/api/projects.test.ts::GET /api/projects/:id/statuses returns statuses", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["config"],
+        "dimensions_missing": ["workflow"],
+        "history": { "churn_90d": null, "bugs": 1, "last_regression": "#772 no statuses" },
+        "gap": { "kind": "dimension-missing", "missing_dimensions": ["workflow"], "rationale": "statuses are asserted on the long-lived E2E fixture project, not as a freshly-registered project's seeding consequence; the Backlog(-1) lane specifically is not asserted to exist" }
+      },
+      {
+        "ref": "project-registration.dedup.sameGitRoot",
+        "status": "uncovered",
+        "covered_by": [],
+        "dimensions_covered": [],
+        "dimensions_missing": ["workflow", "state-transition", "regression"],
+        "history": { "churn_90d": null, "bugs": 1 },
+        "gap": { "kind": "no-test", "missing_dimensions": ["workflow", "state-transition"], "rationale": "deduplicateProjects is vi.mock'd to a no-op in every test that imports it (startup-tasks/reconcile/issue-transition); the actual merge (move issues/skills/repos, status remap by name, active-project redirect, repoPath fixup) is never exercised" }
+      },
+      {
+        "ref": "project-registration.repair.backfill",
+        "status": "uncovered",
+        "covered_by": [],
+        "dimensions_covered": [],
+        "dimensions_missing": ["workflow", "regression", "config"],
+        "history": { "churn_90d": null, "bugs": 0 },
+        "gap": { "kind": "no-test", "missing_dimensions": ["workflow", "regression"], "rationale": "repairProjectRegistration's idempotent backfill (seed statuses if none, set branch if null, populate profile/verify/setup if unset) has no direct test; its no-clobber/idempotency on a partial project is unverified" }
+      },
+      {
+        "ref": "project-registration.detect.stackProfile",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/stack-profile.service.test.ts::detects a node single-package pnpm project with scripts", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/stack-profile.service.test.ts::detects a pnpm monorepo from pnpm-workspace.yaml", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/stack-profile.service.test.ts::populates cargo profile", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/stack-profile.service.test.ts::populates go profile", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/stack-profile.service.test.ts::populates python profile (requirements.txt → pip + pytest)", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/stack-profile.service.test.ts::returns an empty-but-valid profile when no markers are present", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/stack-detector.service.test.ts::detects a Node pnpm project", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["config", "capability", "boundary"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 0 }
+      },
+      {
+        "ref": "project-registration.detect.gradleHeuristics",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/stack-profile.service.test.ts::a Kotlin Multiplatform gradle project has no compileJava typecheck and no bootRun dev command", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/stack-profile.service.test.ts::a Ktor gradle app is web with a `run` dev command, default port, and compileKotlin typecheck", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/stack-profile.service.test.ts::a Spring Boot gradle project keeps bootRun + isWeb", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/stack-profile.service.test.ts::populates java/gradle profile with the platform-correct wrapper", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/stack-detector.service.test.ts::detects a Ktor server (kotlin-jvm + application + ktor dep) as web", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["config", "boundary"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 1, "last_regression": "JVM drive fixes (compileJava brick, .gradlew.bat, KMP allTests)" }
+      },
+      {
+        "ref": "project-registration.derive.verifyScript",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/verify-script-populate.test.ts::joins testCommand and buildCommand from the profile", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/verify-script-populate.test.ts::persists the derived verify script to verify_script_<projectId>", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/verify-script-populate.test.ts::no-ops safely (writes nothing) when detection is empty", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/verify-script-populate.test.ts::does not clobber an existing user override", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/project-setup.service.test.ts::suggests pnpm test && pnpm run build for a pnpm node repo with test and build scripts", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["config", "boundary", "risk", "regression"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 0 }
+      },
+      {
+        "ref": "project-registration.derive.setupScript",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/setup-script-populate.test.ts::persists the monorepo-aware install to projects.setup_script", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/setup-script-populate.test.ts::no-ops safely (writes nothing) when detection is empty", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/setup-script-populate.test.ts::does not clobber an existing setup script", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/stack-profile.service.test.ts::uses a non-recursive install for a single-package pnpm project (#810)", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["config", "boundary", "regression"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 0 }
+      },
+      {
+        "ref": "project-registration.derive.smokeCheck",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/smoke-check-build.test.ts::builds a check from devHealthUrl for a browser-UI dev server with render assertions", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/smoke-check-build.test.ts::asserts only HTTP-200 (no body needles) for a headless HTTP service", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/smoke-check-build.test.ts::returns null for a non-web project (CLI/library skips cleanly)", "strength": "asserts-outcome" },
+          { "test": "packages/shared/__tests__/smoke-check.test.ts", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["config", "boundary"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 0 }
+      },
+      {
+        "ref": "project-registration.derive.smartHooksRules",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/stack-profile.service.test.ts::emits a typecheck + quick-test rule for a node project, scoped to JS/TS source patterns", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/stack-profile.service.test.ts::skips the per-edit test rule for the slow JVM (gradle) family — too slow to gate each edit", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/stack-profile.service.test.ts::writes .claude/smart-hooks-rules.json derived from the profile", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["config", "boundary"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 0 }
+      },
+      {
+        "ref": "project-registration.scaffold.testScaffold",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/test-scaffold.test.ts::scaffolds a vitest test in the profile's testDir, .ts when TypeScript", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/test-scaffold.test.ts::never clobbers an existing test file (idempotent)", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/test-scaffold.test.ts::skips when the test dir already has tests under a different name (no redundant scaffold)", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/stack-profile.service.test.ts::generates a kotlin.test .kt scaffold under commonTest for a Kotlin gradle project", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["config", "regression", "boundary"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 1, "last_regression": "kmp-toolkit stray scaffold blocked auto-merge" }
+      },
+      {
+        "ref": "project-registration.scaffold.cleanMainGuards",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/project-scaffold.test.ts::ignores ${stack} build output when no .gitignore exists", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/project-scaffold.test.ts::appends only the missing ${stack} build lines to an existing .gitignore (idempotent, no clobber)", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/project-scaffold.test.ts::adds esbuild to package.json pnpm.onlyBuiltDependencies so a Vite app builds clean", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/project-scaffold.test.ts::pins packageManager to a pnpm version that honors the approval, for a pnpm project (#783)", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/project-scaffold.test.ts::non-Node stacks (cargo/go/python) are a clean no-op", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["regression", "config", "boundary"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 1, "last_regression": "#777/#783/#789/#811/#825 dirty-main / clean-clone" }
+      },
+      {
+        "ref": "project-registration.gate.coldCloneBuild",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/cold-clone-build-check.service.test.ts::FAILS when the build breaks on a fresh clone (the #783 / acceptance case)", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/cold-clone-build-check.service.test.ts::fails on a non-zero install and never reaches the build", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/cold-clone-build-check.service.test.ts::reports clone-failed without running install/build", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/cold-clone-build-check.service.test.ts::always cleans up the temp clone, even after a build failure", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["error-handling", "regression", "risk"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 1, "last_regression": "#783 fresh-clone build break" }
+      },
+      {
+        "ref": "project-registration.enrich.llmGapFill",
+        "status": "uncovered",
+        "covered_by": [],
+        "dimensions_covered": [],
+        "dimensions_missing": ["config", "error-handling", "risk"],
+        "history": { "churn_90d": null, "bugs": 0 },
+        "gap": { "kind": "no-test", "missing_dimensions": ["config", "error-handling", "risk"], "rationale": "enrichWithLlm/parseLlmJson and the sparse-profile gate have no test; neither the 'rules win, LLM fills only nulls' merge rule nor the shell-exec trust boundary (an LLM testCommand becoming the executed verify gate) is asserted" }
+      }
+    ],
+    "summary": {
+      "covered": 10,
+      "partial": 2,
+      "uncovered": 5,
+      "undocumented_implemented": 0,
+      "documented_missing": 0,
+      "score": 0.62,
+      "by_dimension": {
+        "config": { "covered": 8, "partial": 1, "uncovered": 2 },
+        "boundary": { "covered": 8, "partial": 0, "uncovered": 2 },
+        "api": { "covered": 1, "partial": 1, "uncovered": 0 },
+        "workflow": { "covered": 0, "partial": 2, "uncovered": 4 },
+        "error-handling": { "covered": 2, "partial": 0, "uncovered": 4 },
+        "regression": { "covered": 5, "partial": 0, "uncovered": 3 },
+        "state-transition": { "covered": 0, "partial": 0, "uncovered": 1 },
+        "risk": { "covered": 3, "partial": 0, "uncovered": 1 },
+        "capability": { "covered": 2, "partial": 1, "uncovered": 0 }
+      },
+      "weak_dimensions": ["workflow", "error-handling", "state-transition"],
+      "top_gaps": [
+        {
+          "ref": "project-registration.resolve.defaultBranch",
+          "priority": "P0",
+          "roi": 6.4,
+          "dimensions_to_add": ["regression", "error-handling", "boundary"],
+          "rationale": "The #772 never-null-defaultBranch guarantee is the line between a driveable project and a silently-undriveable one, yet no test asserts it. High blast radius (every downstream workspace/monitor start) + a real past regression. Register a repo on a non-main/master branch and assert defaultBranch is non-null and POST /api/workspaces does not 400."
+        },
+        {
+          "ref": "project-registration.dedup.sameGitRoot",
+          "priority": "P1",
+          "roi": 4.5,
+          "dimensions_to_add": ["workflow", "state-transition", "regression"],
+          "rationale": "deduplicateProjects is mocked away in every test; the actual merge (move issues/skills/repos, remap statuses by name, redirect activeProjectId, fix repoPath) is unverified despite running on every boot. A bug here fragments or loses a repo's issues. Seed two rows sharing a git root, run dedup, assert one survivor with all issues/skills intact."
+        },
+        {
+          "ref": "project-registration.repair.backfill",
+          "priority": "P1",
+          "roi": 4.0,
+          "dimensions_to_add": ["workflow", "regression"],
+          "rationale": "The idempotent backfill path that makes old/partial projects driveable (statuses/branch/profile/verify/setup) has no test; its no-clobber + 'only-when-unset' contract is exactly the kind of guard that silently rots. Backfill a partial project, assert each field populated once and a second run is a no-op."
+        },
+        {
+          "ref": "project-registration.enrich.llmGapFill",
+          "priority": "P1",
+          "roi": 3.6,
+          "dimensions_to_add": ["config", "error-handling", "risk"],
+          "rationale": "An LLM-supplied testCommand becomes the shell-executed verify gate for a sparse project with no allow-list (trust-boundary risk). Stub the LLM, assert rules win where present, LLM fills only nulls, source flips to 'llm', and a sparse profile triggers it while a complete one does not."
+        },
+        {
+          "ref": "project-registration.register.idempotent",
+          "priority": "P1",
+          "roi": 3.5,
+          "dimensions_to_add": ["workflow", "boundary"],
+          "rationale": "Server-level idempotency (same git root / legacy subdir → existing project, created=false, no duplicate) is only 'covered' by a mocked-409 UI test. Register the same repo twice (and a subdir of it) and assert one project id, created=false."
+        }
+      ]
+    }
+  }
+}

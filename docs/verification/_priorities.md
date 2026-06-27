@@ -1,103 +1,69 @@
-# Verification priorities — capability `workspaces` (ROI-ranked gap backlog)
+# Verification priorities — ROI-ranked backlog (all capabilities)
 
-Analyzed SHA `0a954ccd`. ROI = (business_impact × regression_value) / (exec_cost + maint_cost), each factor 1–5; bands set by intent.
-**Cut line: this list runs through P4.** P5 regression-locks are not emitted except the one inline note below. 8 gaps emitted; all open gaps from `_gaps.md` are represented.
+Aggregated from each capability's `top_gaps` (see per-capability files in `capabilities/` for full behaviour context). Ranked P-band then ROI. ROI = (business_impact × regression_value) / (exec_cost + maint_cost).
 
----
+> The detailed, self-contained gap specs for the `workspaces` capability (the first authored slice) and the post-merge cascade follow-up live in git history of this file; one of them (`workspaces.cascade.post-merge-followups`) is already CLOSED — see `_authored.json`.
 
-### [P0 · ROI 4.0] workspaces.cascade.post-merge-followups — assert dependents auto-start when their blockers all reach Done
-- capability: workspaces · dimensions to add: workflow, state-transition, capability
-- actor: monitor · preconditions: a merged workspace; a dependent issue whose every blocker is now Done; project has a defaultBranch; no in-flight workspace on the dependent; Start Mode permits auto-start
-- entry point: event `autoStartFollowups()` fired by POST /api/workspaces/:id/merge (followup-workspace.service.ts:27)
-- observable outcome: a new workspace row + launched agent appear for each unblocked dependent; a `workspace_merged` event is emitted only AFTER the agent launches; nothing starts when defaultBranch is absent, the dependent already has a workspace, or Start Mode = manual
-- suggested assertions: after merge, GET issue-scoped workspaces for the dependent returns a new non-closed row; cascade is SKIPPED (no new row) when project defaultBranch is null; cascade is SKIPPED when a non-closed workspace already exists on the dependent; (if mockable) Start Mode=manual produces no cascade
-- factors: impact 5 (engine of hands-off autonomy) · regression 4 (churn 14 + prior leak past manual kill-switch) · exec 3 (merge + dep-graph fixture; mock agent launch) · maint 2 → ROI (5×4)/(3+2)=4.0
-- evidence: followup-workspace.service.ts:27/44/55 ; behaviour workspaces.cascade.post-merge-followups (confidence medium); decision 008 Start Mode
-- existing partial: none in candidate set. merge-cascade.test.ts / auto-start-followup-setting.test.ts exist OUTSIDE the candidate set — verify whether they already cover this before authoring (may downgrade to a dimension top-up).
+| Rank | P | ROI | Capability | Behaviour | Dimensions to add | Why |
+|--:|---|--:|---|---|---|---|
+| 1 | P0 | 6.40 | project-registration | `project-registration.resolve.defaultBranch` | regression, error-handling, boundary | The #772 never-null-defaultBranch guarantee is the line between a driveable project and a silently-undriveable one, yet no test asserts it. High blast radius (every downstream workspace/monitor start) + a real past regression. Register a re |
+| 2 | P0 | 4.00 | mcp-server | `mcp-server.govern.disabled-tools` | permission, config, api | The single authority/governance knob of an unauthenticated surface, completely untested. If the gate silently breaks, an 'disabled' tool stays callable — a permission regression with no failing test. Assert that a tool in disabled_mcp_tools |
+| 3 | P1 | 6.00 | preferences-config | `preferences-config.resolve.start-policy` | state-transition, risk | The Start Mode kill-switch is this module's keystone (decision 008) and a documented multi-cycle-stall hazard, yet only mode='monitor' is asserted. Add direct resolveStartPolicy assertions: manual → autoStartUnblocked/postMergeCascade/backl |
+| 4 | P1 | 6.00 | persistence-schema | `persistence-schema.cascade.delete-issue` | completeness-vs-unseeded-table | Highest-value structural gap: deletion completeness depends on a hand-coded walk that the schema cannot enforce. A test that enumerates the schema's FK graph (every table referencing issues/workspaces) and asserts each is handled by the wal |
+| 5 | P1 | 5.30 | board-ui | `board-ui.move.rollback` | error-handling, state-transition | The optimistic-move layer's core safety property — a server-rejected move snaps the card back to its exact prior column and surfaces the server message — is entirely unverified. High blast radius (BoardPage is the hottest file, 718 commits; |
+| 6 | P1 | 5.30 | workflow-engine | `workflow-engine.advance.mcpProposeTransition` | api, workflow, state-transition | Highest blast radius unverified path: the agent advances every multi-stage ticket through this MCP tool, yet no test exercises it (only the parallel REST route). A regression in workspace-resolution or result shaping would silently strand a |
+| 7 | P1 | 5.30 | review-merge | `review-merge.reconcile.stranded-review` | workflow, state-transition | Highest-value gap: the stranded-review reconciler is a core honesty restorer, but only its disable/no-op path is tested. A regression that stops relaunching reviews for genuinely stranded work would pass the whole suite, silently stranding  |
+| 8 | P1 | 5.00 | agent-sessions | `agent-sessions.resume.provider-id` | workflow, regression | Entirely uncovered yet load-bearing: provider session-id capture (Claude session_id / Pi header) + --resume relaunch underpins every multi-turn and relaunch flow. A silent break strands resume into fresh sessions and loses context. High bus |
+| 9 | P1 | 5.00 | board-ui | `board-ui.move.archiveConfirm` | error-handling, workflow, state-transition | Moving a ticket with a LIVE workspace into Done/Cancelled must show a blocking confirm (risks discarding in-flight agent work). No e2e exercises the gate — the only terminal-move tests (ai-reviewed-column) lack a live workspace. Seed an iss |
+| 10 | P1 | 4.50 | project-registration | `project-registration.dedup.sameGitRoot` | workflow, state-transition, regression | deduplicateProjects is mocked away in every test; the actual merge (move issues/skills/repos, remap statuses by name, redirect activeProjectId, fix repoPath) is unverified despite running on every boot. A bug here fragments or loses a repo' |
+| 11 | P1 | 4.50 | mcp-server | `mcp-server.move.issue.workflow-edge` | error, state-transition, workflow | A core, reachable mutation guard (WORKFLOW_TRANSITION_INVALID) with zero coverage on a board that supports configurable workflow graphs. Cheap to test at the registrar level (seed a workflow node, attempt an illegal jump, assert the code +  |
+| 12 | P1 | 4.50 | board-ui | `board-ui.realtime.reflectServerChange` | concurrency | The 'status changes via API' realtime test asserts the SERVER board, not that the rendered card relocated (touches-only on the UI). On an agent-driven board this live-reflection is the headline value. Strengthen to assert the card visibly m |
+| 13 | P1 | 4.50 | review-merge | `review-merge.gate.verify-smoke` | api | Documented safety hole (domain doc Risks): the manual/orchestrator merge path (runWorkspacePreMergeValidation) does NOT run runPreMergeGate, so a hand-merge can land build/test/boot-unverified code. No test pins which paths gate vs don't. A |
+| 14 | P1 | 4.00 | project-registration | `project-registration.repair.backfill` | workflow, regression | The idempotent backfill path that makes old/partial projects driveable (statuses/branch/profile/verify/setup) has no test; its no-clobber + 'only-when-unset' contract is exactly the kind of guard that silently rots. Backfill a partial proje |
+| 15 | P1 | 4.00 | codemods | `codemods.preview.generate` | workflow, capability | The headline capability -- intent compiles to a real ts-morph transform and the dry-run diffs an actual change -- is never asserted. The one preview test is a no-op tolerating a 500. Seed a deterministic supplied-script preview (preview acc |
+| 16 | P1 | 4.00 | agent-sessions | `agent-sessions.reattach.recover` | state-transition, regression, concurrency | reattachSession + notifyExternalExit (the hot-reload-survival promise and its idempotent exit) are untested; only dead-PID cleanup is covered. A regression here double-finalizes (re-launching the next ticket twice) or loses a live agent acr |
+| 17 | P1 | 4.00 | agent-sessions | `agent-sessions.launch.safety-guards` | config, regression | The cross-provider stored-model DROP (a gpt-5.5 stripped from a Claude launch) is the #698/#696 multi-cycle stall and is not directly asserted — only its downstream model-error launch-failure is. Pin the drop so a cross-provider id can neve |
+| 18 | P1 | 4.00 | butler | `butler.feed.systemEvents` | capability, config, concurrency, error-handling | The entire board-event → butler injection pipeline (AK-75) is unverified — no test touches emitButlerSystemEvent. Asserting that a warm default butler receives a [system event] turn, that bursts collapse to one summary within the 30s window |
+| 19 | P1 | 4.00 | butler | `butler.reject.busy` | error-handling, api | The single-in-flight-turn invariant is only asserted at the service-boolean layer; the HTTP 409 on POST /message while busy — the contract the UI and CLI/MCP depend on — is never asserted. A concurrency-sensitive route that should fail clos |
+| 20 | P1 | 4.00 | workspaces | `workspaces.plan.approve-reject` | workflow, state-transition, api, error | Plan-mode approval gate (implement-plan/reject-plan) has no e2e/HTTP test; workspace-actions.ts is the highest-churn workspace route; AK-924 strand history. |
+| 21 | P1 | 4.00 | review-merge | `review-merge.recover.fix-and-merge` | api | Conflict recovery is high-churn and high-blast-radius. Resolver-exit recovery is covered, but the POST /:id/fix-and-merge entry point itself (status→fixing + agent relaunch in worktree) is never driven end-to-end. An endpoint-level regressi |
+| 22 | P1 | 4.00 | git-integration | `git-integration.rebase.prepare-review` | workflow, error-handling | prepareForReview is the rebase step on the build→review→merge critical path and churns; only its dirty-tree leftover-commit branch is asserted. The local-vs-origin base choice (rebasing onto a stale origin replays local history and conflict |
+| 23 | P1 | 3.60 | project-registration | `project-registration.enrich.llmGapFill` | config, error-handling, risk | An LLM-supplied testCommand becomes the shell-executed verify gate for a sparse project with no allow-list (trust-boundary risk). Stub the LLM, assert rules win where present, LLM fills only nulls, source flips to 'llm', and a sparse profil |
+| 24 | P1 | 3.60 | workspaces | `workspaces.lifecycle.reattach-survives-reload` | state-transition, regression | Whole-fleet survival across server hot-reload; agent.service.ts churn 91; prior reaper regression. Sole HIGH-risk uncovered remaining. |
+| 25 | P1 | 3.50 | project-registration | `project-registration.register.idempotent` | workflow, boundary | Server-level idempotency (same git root / legacy subdir → existing project, created=false, no duplicate) is only 'covered' by a mocked-409 UI test. Register the same repo twice (and a subdir of it) and assert one project id, created=false. |
+| 26 | P1 | 3.50 | mcp-server | `mcp-server.create.agent-skill` | error, boundary, permission | Path-traversal rejection (names → filesystem paths) is security-relevant and untested. Negative-input test is cheap and high-value: assert '../x', 'a/b', 'a\\b' rejected with no SKILL.md written, and per-scope duplicate rejected. |
+| 27 | P1 | 3.50 | agent-sessions | `agent-sessions.turn.followup` | error-handling, workflow | The stale-process gate (dead process → stale:true so the caller resumes fresh) is only re-derived inline, not asserted against a real dead-process sendTurn. The turn endpoint churns and a wrong gate silently enqueues onto a dead process. |
+| 28 | P1 | 3.20 | mcp-server | `mcp-server.fire.webhook` | error, config, risk | Loopback-only egress is the only SSRF boundary; firing a webhook from a status change is best-effort and unverified at the MCP call site. Assert a non-loopback pref URL is not fetched and a loopback one is, and that the mutation succeeds re |
+| 29 | P1 | 3.00 | mcp-server | `mcp-server.merge.workspace.delegate` | api, risk | Highest-risk delegation (merge) only has its pre-fetch error paths asserted; the success delegation + server-result passthrough (incl. 409/503/conflict) is unverified. Stub fetch and assert the POST target + passthrough body. |
+| 30 | P1 | 3.00 | workspaces | `workspaces.cascade.partial-blockers-no-start` | state-transition, error | Multi-blocker every-guard: dependent with only SOME blockers Done must NOT auto-start; invisible to the single-blocker P0 test. Raised by adversarial review. |
+| 31 | P2 | 3.00 | agent-sessions | `agent-sessions.persist.split-batch` | error-handling, concurrency | Flush-on-exit (no lost tail message) and the swallowed FK-insert race are unasserted; both are data-integrity guarantees of the transcript of record. |
+| 32 | P2 | 3.00 | board-ui | `board-ui.shortcuts.keyboardNav` | accessibility | computeNavTarget is unit-pure-tested but nothing asserts arrow/vim keys actually move the focused card in the running UI — the keyboard-operability a11y outcome. A thin e2e: focus board, press ArrowRight/j, assert the highlighted/selected c |
+| 33 | P2 | 3.00 | preferences-config | `preferences-config.read.quota-usage` | api, error | GET /api/preferences/quota-usage endpoint contract is untested (200 shape vs 503 on external :8742 outage). Inject a stub QuotaUsageProvider that throws → assert 503 + {providers:[]}; and one returning data → assert 200 shape. The provider  |
+| 34 | P2 | 3.00 | persistence-schema | `persistence-schema.resolve.db-location` | config, boundary | Only fully uncovered behaviour, high blast radius (~527) and the root of the worktree-different-DB footgun. A unit test over getDbUrl precedence (env override -> existing checkout db -> home-dir fall-through) is cheap and locks resolution.  |
+| 35 | P2 | 2.80 | agent-sessions | `agent-sessions.read.rest` | api | GET /api/sessions/:id/stats and /summary endpoint contracts are unasserted at the HTTP layer; also pin the documented search-coverage boundary (stdout not in session_messages + pruning) so the unreliable-search behaviour is at least charact |
+| 36 | P2 | 2.70 | review-merge | `review-merge.foundational.sync-merge` | workflow | Eligibility classifier is covered; the observable consequence (synchronous merge so a dependent isn't cut from an empty base, #797/#784) is not. Lower frequency than the reconciler/fix paths but a real cascade-correctness behaviour. |
+| 37 | P2 | 2.50 | butler | `butler.interrupt.inflight` | state-transition, concurrency | Existing tests interrupt with no active turn (touches-only). Need a test that starts a streaming turn, interrupts mid-flight, and asserts the stream stops AND the session stays warm and accepts a follow-up — the actual behaviour users rely  |
+| 38 | P3 | 3.00 | workflow-engine | `workflow-engine.evaluate.condition` | boundary | The hand-rolled diff_touches glob silently degrades to no-match/manual on unsupported patterns (brace/negation) and on '*' not crossing '/'. A boundary table-test pins the matcher's real semantics cheaply. impact 3 x regression 2 / (exec 0. |
+| 39 | P3 | 2.70 | issues-board | `issues-board.create.issue` | concurrency | issueNumber allocation is asserted sequentially only; the 3x-retry on the unique-index collision under parallel creates is unverified (domain-doc flags it as inferred-unverified). impact 4 x regression 2 / (exec 2 + maint 1) = 2.7. Costlier |
+| 40 | P3 | 2.50 | codemods | `codemods.preview.limit-guard` | boundary, config, error-handling | Scale safety interlock with zero coverage at both the block and override-and-proceed edges. Lower ROI because triggering >100 files needs a large fixture tree (higher exec/maint cost) and the blast-radius failure is a UX annoyance, not data |
+| 41 | P3 | 2.40 | board-ui | `board-ui.wip.visualLimit` | feature | WIP classifier (under/at/over + boundary coercion) is unit-tested; the visible red-tint outcome on the column header is unasserted. Set a wip_limit pref below a column's count, assert the header carries the 'over' visual state. Low blast ra |
+| 42 | P3 | 2.00 | butler | `butler.manage.definitions` | boundary | Assert the two persona invariants: a 5th create is refused (MAX_BUTLERS=4) and deleting 'default' is refused. Cheap API-level boundary tests guarding documented rules. |
+| 43 | P3 | 1.50 | git-integration | `git-integration.diff.working-tree` | boundary | untracked-diff synthesis is hand-rolled and flagged display-grade-not-apply-grade. Add boundary cases: a binary/unreadable untracked file (expect header-only, no crash) and a no-trailing-newline file (line-count off-by-one). impact 3 x regr |
+| 44 | P4 | 4.50 | persistence-schema | `persistence-schema.enforce.unique-issue-number` | error-handling | Assert the DB unique index actually rejects a duplicate (project_id, issue_number) insert — the real concurrency guarantee against two agents claiming the same #N. Cheap, deterministic, pins a constraint nothing currently fires. impact 3 x  |
+| 45 | P4 | 4.00 | workflow-engine | `workflow-engine.validate.graph` | error-handling, boundary | The visual builder's negative guards (start-count!=1, missing end, orphan inbound, dead-end outbound, fork<->join pairing) are the contract that keeps a saved graph runnable, but only 4 of ~8 rules are asserted. Pure-function tests, near-ze |
+| 46 | P4 | 4.00 | preferences-config | `preferences-config.error.guard-fails-open` | error, regression | Inferred hazard: the write-time divergence guard fails OPEN on malformed Bullseye JSON (resolveProviderDivergence try/catch → diverged:false), silently permitting a provider/profile write the #903 invariant was meant to block. Add a negativ |
+| 47 | P4 | 3.50 | workflow-engine | `workflow-engine.autoroute.condition` | boundary | The 'multiple edges fired -> ambiguous, refuse' branch is the safety valve preventing nondeterministic auto-routing; single/zero-fire are tested but the multi-fire refusal is not. impact 4 x regression 2 / (exec 1 + maint 1.3) = 3.5 |
+| 48 | P4 | 3.00 | butler | `butler.history.access` | permission, boundary | Security boundary: a past-session transcript must be readable ONLY for ids allowlisted to this project (routes/butler.ts:664-667). The deny path (foreign project's session id → refused) has no test, and the 50-id history cap is unasserted.  |
+| 49 | P4 | 3.00 | workspaces | `workspaces.turn.missing-content` | error, api | POST /:id/turn with no content → 400; cheap, high-churn route. |
+| 50 | P4 | 3.00 | issues-board | `issues-board.config.statuses` | error | The status-delete-with-linked-issues guard (409, project.repository.ts:224) prevents orphaning live issues but has no asserting test. impact 3 (data-integrity guard) x regression 3 / (exec 1 + maint 1) = 3.0. A single in-process Hono test:  |
+| 51 | P4 | 2.00 | codemods | `codemods.save.reusable` | error-handling | The 409 name-collision branch (uniqueness invariant for reusable codemods) is unasserted. Cheap to add: POST the same name twice, assert second is 409. impact 2 x regression 2 / (exec 1 + maint 1) = 2.0. |
+| 52 | P4 | 2.00 | issues-board | `issues-board.contract.coupled` | error | Contraction into a project lacking a Cancelled/Done status must 400 ('Project must have a Cancelled or Done status to absorb issues'); untested. Low frequency but a real rejection path. impact 2 x regression 2 / (exec 1 + maint 1) = 2.0. |
+| 53 | P4 | 1.30 | git-integration | `git-integration.detect.repo-info` | boundary, error-handling | documented latent risk: getDiff/getDiffFromRepo default baseBranch='main' while default-branch detection allows master-only repos — omitting the base on a master repo would diff against a nonexistent ref. Verify whether all real callers pas |
+| 54 | high | NaN | monitor-orchestration | `monitor-orchestration.guard.re-entrancy-and-maintenance` | state-transition, regression | The module's defining safety invariant — never double-drive a board (two concurrent cycles each POST a workspace for the same unblocked issue → conflicting worktrees) — has zero coverage, and the maintenance-window suppression is also unver |
+| 55 | high | NaN | monitor-orchestration | `monitor-orchestration.conductor.lifecycle` | state-transition, error | start-no-op-if-alive and the broad PowerShell taskkill backstop are OS-coupled and untested; a regression could spawn two external drivers (double-drive) or over-kill a sibling loop. Inject the spawn/kill port to assert the no-op-if-alive g |
+| 56 | low | NaN | monitor-orchestration | `monitor-orchestration.butler.llm-cycle` | workflow, observability | Off by default and LLM-driven (hard to assert deterministically); lowest ROI. A thin test could at least assert the single-active-project resolution and that a crashed cycle is isolated, mocking the SDK session. |
+| 57 | high | NaN | agent-providers | `agent-providers.strip.profileEnv` | boundary, error-handling | Security-relevant cross-profile credential-bleed guard (strip server ANTHROPIC_* before applying a profile + delete API_KEY when AUTH_TOKEN present) is untested; a leak would silently authenticate an agent with the wrong account. Cheap unit |
+| 58 | medium | NaN | agent-providers | `agent-providers.login.oauthBootstrap` | workflow, error-handling, config | Zero coverage of the OAuth login bootstrap. The windowsHide:false invariant (callback server must run foreground) and the non-fatal-failure + returned-manual-command behavior are unverified. Unit-testable with a mocked spawn asserting the c |
+| 59 | low | NaN | agent-providers | `agent-providers.preflight.profileHealth` | state-transition | Failure-override and missing-config are covered, but the once-per-(provider,command) version-probe cache and the ok→warning→error fold over license-ring vs config-file auth validation are not asserted. Medium value, moderate setup cost (spa |
 
-### [P1 · ROI 4.0] workspaces.plan.approve-reject — assert the plan-mode approval gate end-to-end
-- capability: workspaces · dimensions to add: workflow, state-transition, api, error
-- actor: operator · preconditions: a workspace launched in plan mode with a pendingPlanPath written
-- entry point: GET /api/workspaces/:id/plan ; POST /:id/implement-plan ; POST /:id/reject-plan (workspace-actions.ts:75/88)
-- observable outcome: GET returns the pending plan; implement-plan → 201 and the workspace transitions awaiting-plan-approval → active (implementation starts, no code written before approval); reject-plan WITH feedback → 201 and re-planning runs; reject WITHOUT feedback → 400
-- suggested assertions: GET body contains the plan text; POST implement-plan returns 201 and workspace status flips to active; POST reject-plan with feedback returns 201; POST reject-plan with no feedback returns 400 {error}; assert no implementation session starts while status is awaiting-plan-approval
-- factors: impact 4 (cost gate — prevents burning tokens on a misunderstanding) · regression 4 (workspace-actions.ts churn 180; AK-924 plan-mode strand) · exec 2 (route-level, mockable) · maint 2 → ROI (4×4)/(2+2)=4.0
-- evidence: workspace-actions.ts:75/88, schema/workspaces.ts:24 ; behaviour workspaces.plan.approve-reject (confidence medium); MEMORY: ak-924 plan-mode strand fix
-- existing partial: plan-mode.service.test.ts covers service logic but is OUTSIDE the candidate set and does not exercise the HTTP gate.
-
-### [P1 · ROI 3.6] workspaces.lifecycle.reattach-survives-reload — assert agents survive a server hot-reload
-- capability: workspaces · dimensions to add: state-transition, regression
-- actor: monitor · preconditions: an agent spawned detached + unref'd; the server process restarts (tsx hot-reload / SIGTERM)
-- entry point: startup reattach in agent.service.ts:509
-- observable outcome: sessions with a live PID are reattached and the output watcher resumes from the last byte offset; dead-PID sessions are marked stopped and their workspaces reset to idle; agents are NOT killed on SIGTERM (only on SIGINT)
-- suggested assertions: with a fake live PID, after reattach the session stays running and the watcher offset advances from the prior byte position; with a dead PID, the session is stopped and the workspace status is idle; a SIGTERM does not terminate the tracked child
-- factors: impact 5 (whole-fleet survival; an outage if broken) · regression 5 (agent.service.ts churn 91; prior hot-reload reaper regression) · exec 4 (must simulate restart + PID liveness) · maint 3 (couples to process internals) → ROI (5×5)/(4+3)=3.6
-- evidence: agent.service.ts:509, packages/server/CLAUDE.md (Agent process survival) ; behaviour workspaces.lifecycle.reattach-survives-reload (confidence medium)
-- existing partial: none. agent.service.test.ts is outside the candidate set; confirm it does not already assert reattach before authoring.
-
-### [P4 · ROI 3.0] workspaces.turn.missing-content — assert POST /:id/turn with no content is rejected
-- capability: workspaces · dimensions to add: error, api
-- actor: operator · preconditions: an existing workspace
-- entry point: POST /api/workspaces/:id/turn (workspace-actions.ts:55)
-- observable outcome: request returns 400 {error:'content is required'}; no agent session is started
-- suggested assertions: status 400; response body error message; session count for the workspace unchanged
-- factors: impact 2 (input-validation guard) · regression 3 (host file workspace-actions.ts churn 180) · exec 1 (single request) · maint 1 → ROI (2×3)/(1+1)=3.0
-- evidence: workspace-actions.ts:55 ; error_state workspaces.turn.missing-content (confidence high)
-- existing partial: none — no candidate test asserts the missing-content path; cheap, high-leverage on a very-high-churn route file.
-
-### [P2 · ROI 2.25] workspaces.stop.strand-recovery (quarantine) — assert quarantine moves the issue back to In Progress
-- capability: workspaces · dimensions to add: state-transition
-- actor: operator · preconditions: a workspace with a running or stranded session
-- entry point: POST /api/workspaces/:id/quarantine (workspace-actions.ts:69)
-- observable outcome: the running session is stopped, the workspace resets to idle, AND the issue moves back to In Progress (distinct from plain /stop, which leaves issue status untouched)
-- suggested assertions: workspace status idle after quarantine; issue status is In Progress after quarantine; quarantine is a safe no-op when nothing is running
-- factors: impact 3 · regression 3 (workspace-actions.ts churn 180) · exec 2 · maint 2 → ROI (3×3)/(2+2)=2.25
-- evidence: workspace-actions.ts:62/69, workspace-lifecycle-status-transitions.test.ts:962 ; behaviour workspaces.stop.strand-recovery (confidence high)
-- existing partial: lifecycle-status-transitions asserts stop→idle but NOT the quarantine issue-status move; e2e /stop test is touches-only.
-
-### [P2 · ROI 1.7] workspaces.lifecycle.hang-watchdog — assert a zero-output agent is killed after the watchdog interval
-- capability: workspaces · dimensions to add: error, state-transition
-- actor: agent-subprocess · preconditions: an agent running with no stdout/stderr for the watchdog interval (15 min)
-- entry point: spawn-layer watchdog in agent.service.ts:34/248
-- observable outcome: after the silent interval the agent process is killed and the session transitions to stopped/failed; the watchdog timer is reset on every output event (a chatty agent is never killed)
-- suggested assertions: with fake timers, advancing past the interval with zero output kills the process and marks the session stopped/failed; emitting output before the interval resets the timer and the agent survives
-- factors: impact 3 · regression 4 (agent.service.ts churn 91) · exec 4 (timer simulation, process-kill harness) · maint 3 → ROI (3×4)/(4+3)=1.7
-- evidence: agent.service.ts:34/248 ; behaviour workspaces.lifecycle.hang-watchdog (confidence medium)
-- existing partial: none in candidate set.
-
-### [P3 · ROI 2.0] workspaces.create.one-direct-per-issue — pin the exact failure contract of the second-direct block
-- capability: workspaces · dimensions to add: error
-- actor: operator · preconditions: an existing non-closed direct workspace on the same issue
-- entry point: POST /api/workspaces with isDirect=true (workspace-create.service.ts:378)
-- observable outcome: the create is refused with a determinate contract (assert the precise shape — 4xx status code vs error-in-201-body — and lock it); no second direct workspace row appears
-- suggested assertions: exact HTTP status of the refusal; error body/code; the issue still has exactly one non-closed direct workspace
-- factors: impact 2 · regression 2 · exec 1 · maint 1 → ROI (2×2)/(1+1)=2.0
-- evidence: workspace-create.service.ts:378, workspace-create-harden.test.ts:788 ; behaviour workspaces.create.one-direct-per-issue (confidence high) — closes the model's open unknown about the exact status code
-- existing partial: workspace-create-harden asserts the block but not the precise HTTP contract.
-
-### [P4 · ROI 2.0] workspaces.plan.approve-reject (negative) — assert reject-plan without feedback returns 400
-- capability: workspaces · dimensions to add: error
-- actor: operator · preconditions: a plan-mode workspace awaiting approval
-- entry point: POST /api/workspaces/:id/reject-plan (workspace-actions.ts:91)
-- observable outcome: a reject with no feedback body → 400; no re-planning session starts
-- suggested assertions: status 400; error message; no new session created
-- factors: impact 2 · regression 3 (workspace-actions.ts churn 180) · exec 1 · maint 1 → ROI (2×3)/(1+1)=3.0 (banded P4 as a negative path; fold into the P1 plan-gate test as one assertion rather than a separate file)
-- evidence: workspace-actions.ts:91, error_state workspaces.plan.reject-no-feedback ; behaviour workspaces.plan.approve-reject
-- note: this is the negative half of the P1 plan-gate gap — author it inside the same test file, not standalone.
-
----
-
-### Inline P5 candidate (regression-lock, not authored above)
-`state-vocabulary disagreement`: `ACTIVE_WORKSPACE_STATUSES` (active|fixing|reviewing|awaiting-plan-approval) vs the monitor auto-start gate's 3-state list that omits `awaiting-plan-approval`. If these are meant to converge, add a P5 lock asserting the intended set before a refactor silently aligns them. Not emitted as a gap row because today's divergence is by-design and already partly asserted by `workspace-activity-state.test.ts`.
-
----
-
-### [P1 · ROI 4.0] workspaces.cascade.partial-blockers-no-start — dependent with MULTIPLE blockers, only SOME Done, must NOT auto-start (NEW — from adversarial review of the P0 cascade test)
-- capability: workspaces · dimensions to add: state-transition, error (negative)
-- actor: monitor · preconditions: dependent D depends_on B1 AND B2; merge only B1 (B1→Done, B2 still open); `auto_start_followup`="true"
-- entry point: post-merge cascade → `autoStartFollowups` allResolved guard (followup-workspace.service.ts:57 `every(... isTerminalStatusIdView ...)`)
-- observable outcome: NO workspace is created for D and D's status is unchanged, because not every blocker is Done
-- suggested assertions: after merging B1, poll a window > observed cascade latency → D has zero non-closed workspaces and is still in its pre-merge status; then merge B2 → D NOW auto-starts (proves the guard releases on the last blocker, not earlier)
-- factors: impact 4 (a `.every`→`.some` regression would prematurely launch agents on still-blocked work) · regression 3 (followup churn) · exec 2 · maint 2 → ROI (4×3)/(2+2)=3.0
-- evidence: followup-workspace.service.ts:50-58 ; raised by all 3 adversarial reviewers as the highest-value case the single-blocker P0 test cannot distinguish (`.every` vs `.some` invisible with one blocker)
-- ISOLATION NOTE: same dual-path caveat as the P0 test — pin `start_mode`=manual + `dependency_auto_chain`=false so only the followup path can fire.
+_59 ranked gaps. Author top-down with the `e2e-test-author` skill; stop at the ROI bar you set._

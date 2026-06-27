@@ -1,0 +1,577 @@
+{
+  "slug": "agent-sessions",
+  "behavior": {
+    "business_purpose": "Turns a launched coding-agent subprocess's opaque provider stream into a first-class, observable domain object: live-streams what the agent is doing, classifies HOW the run ended (stopped / usage-limit / launch-failure / completed), persists a transcript + cost/friction stats, and emits the exit verdict that drives the workspace's next state and the autonomous monitor loop. It is the feedback channel of the whole agentic system.",
+    "confidence": "high",
+    "source_paths": [
+      "packages/server/src/services/session-manager/session-lifecycle.ts",
+      "packages/server/src/services/session-manager/session-exit-state-machine.ts",
+      "packages/server/src/services/session-manager/broadcast.ts",
+      "packages/server/src/services/session-manager/ws-handler.ts",
+      "packages/server/src/services/session-manager/types.ts",
+      "packages/server/src/services/board-events.ts",
+      "packages/server/src/services/session-message-pruner.service.ts",
+      "packages/server/src/repositories/session.repository.ts",
+      "packages/server/src/routes/sessions.ts",
+      "packages/shared/src/lib/agent-stream-parser.ts",
+      "packages/shared/src/lib/session-summary.ts",
+      "packages/shared/src/lib/session-output.ts",
+      "packages/client/src/lib/agent-output-parser.ts"
+    ],
+    "actors": [
+      { "name": "operator", "kind": "human", "notes": "single local user — starts/stops sessions, sends follow-up turns, reads transcript/stats via UI" },
+      { "name": "monitor", "kind": "automation", "notes": "in-process monitor / out-of-process Conductor — auto-starts sessions and consumes exit verdicts to start/merge/unstick tickets" },
+      { "name": "agent-subprocess", "kind": "external-process", "notes": "the spawned provider CLI (claude/codex/copilot/pi) — emits the stream this module parses; survives server hot-reload (detached)" },
+      { "name": "board-ui", "kind": "client", "notes": "WebSocket + REST consumer rendering live transcript, todos, stats, and reading history" }
+    ],
+    "entry_points": [
+      { "kind": "factory", "ref": "startSession (session-lifecycle.ts:173)", "observable": "inserts a running session row, launches the agent in the workspace dir, wires streaming + exit; returns sessionId" },
+      { "kind": "factory", "ref": "stopSession / sendTurn / cleanupStaleSession / reattachSession / notifyExternalExit (session-lifecycle.ts:782,813,854,887,904)", "observable": "stop, follow-up turn, recover, re-bind sessions" },
+      { "kind": "websocket", "ref": "GET /ws/sessions/:sessionId (ws-handler.ts:43)", "observable": "subscribe to one session's live message stream with full buffer replay on connect" },
+      { "kind": "websocket", "ref": "GET /ws/board/:projectId (board-events.ts:129)", "observable": "project-wide live invalidation + activity/stats/todos/approval pushes" },
+      { "kind": "api", "ref": "GET /api/sessions/:id/output|stats|summary|search (sessions.ts:45)", "observable": "ETag-cached transcript, persisted stats, server-parsed summary, LIKE transcript search" },
+      { "kind": "mcp", "ref": "session tools (get/search session output)", "observable": "transcript fetch by board session id; global transcript search filtered by issue" },
+      { "kind": "scheduled", "ref": "startSessionMessagePruner (session-message-pruner.service.ts:77)", "observable": "6h background prune of session_messages for old workspaces + per-session row cap" }
+    ],
+    "behaviors": [
+      {
+        "id": "agent-sessions.launch.session",
+        "statement": "Starting a session persists a running session row (with the workspace's skill snapshot) and launches the agent process in the workspace's working directory",
+        "actor": "operator",
+        "preconditions": ["active workspace exists", "preflight passes"],
+        "observable_outcome": "sessions row status=running, workspaceId set, skillId/skillName snapshotted; agent launched with workingDir",
+        "evidence": ["session-lifecycle.ts:173", "session-lifecycle.ts:271"],
+        "dimensions": ["workflow", "capability", "state-transition"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "agent-sessions.launch.safety-guards",
+        "statement": "Launch is gated by safety policy: a Codex builder refuses the gpt-5.3-codex-spark model, an absent model defaults to gpt-5.5, a cross-provider stored model is dropped, and a failed workspace preflight blocks the spawn",
+        "actor": "operator",
+        "preconditions": ["workspace with provider/model set", "preflight policy"],
+        "observable_outcome": "spark launch rejected (CONFLICT/UNSAFE_CODEX_MODEL, no session row); default resolvedModel=gpt-5.5 in launch stats; cross-provider model not passed as --model; stale-safety preflight throws CONFLICT/STALE_SAFETY_POLICY with no launch",
+        "evidence": ["session-lifecycle.ts:211", "session-lifecycle.ts:205", "session-lifecycle.ts:330"],
+        "dimensions": ["error-handling", "config", "regression", "boundary"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "agent-sessions.classify.exit-verdict",
+        "statement": "The pure exit classifier returns a verdict by strict priority stopped > usage-limit > launch-failure > completed, with a 10s launch-failure window splitting zero-output vs non-zero-error fast exits",
+        "actor": "agent-subprocess",
+        "preconditions": ["session exit context built after output drain"],
+        "observable_outcome": "classifySessionExit phase + effectiveExitCode/errorText match the priority and window rules at the boundary",
+        "evidence": ["session-exit-state-machine.ts:88", "session-exit-state-machine.ts:25"],
+        "dimensions": ["state-transition", "boundary", "risk", "regression"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "agent-sessions.finalize.completed",
+        "statement": "A clean substantive exit finalizes the session completed, advances the workspace (idle, issue→In Review), writes HANDOFF.md, and fires onSessionExit so the board advances",
+        "actor": "agent-subprocess",
+        "preconditions": ["session ran with substantive output", "exit past window or clean"],
+        "observable_outcome": "session status=completed exitCode=0 endedAt set; workspace status=idle; issue moved to In Review; board broadcast workspace_idle/issue_updated; onSessionExit(workspaceId,sessionId,0) called once",
+        "evidence": ["session-lifecycle.ts:514", "session-lifecycle.ts:521"],
+        "dimensions": ["workflow", "state-transition", "capability"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "agent-sessions.finalize.launch-failure",
+        "statement": "A fast zero-output exit, or a fast non-zero exit with error text, is finalized as a launch failure: session stopped (exitCode 1, launchFailure stats) and workspace returned to idle/retryable",
+        "actor": "agent-subprocess",
+        "preconditions": ["exit within 10s window with zero substantive output OR non-zero exit + error text"],
+        "observable_outcome": "session status=stopped exitCode=1; stats.launchFailure=true success=false agentSummary quotes the error; workspace status=idle; onSessionExit(...,1)",
+        "evidence": ["session-lifecycle.ts:454", "session-exit-state-machine.ts:96"],
+        "dimensions": ["error-handling", "state-transition", "regression", "risk"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "agent-sessions.finalize.usage-limit",
+        "statement": "A provider usage-limit exit is finalized with rate-limit stats and the workspace is routed to blocked (for credential rotation), not idle",
+        "actor": "agent-subprocess",
+        "preconditions": ["exit output contains a recognized usage-limit message"],
+        "observable_outcome": "stats.rateLimited=true, rateLimitKind, retryAfter, failureReason set; workspace status=blocked",
+        "evidence": ["session-lifecycle.ts:705", "session-exit-state-machine.ts:91"],
+        "dimensions": ["error-handling", "state-transition", "regression"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "agent-sessions.exit.idempotent",
+        "statement": "Session exit is finalized exactly once even when the exit event fires multiple times (live exit + reattach PID-poll) — no double DB write, no double workflow callback",
+        "actor": "agent-subprocess",
+        "preconditions": ["a session that has exited"],
+        "observable_outcome": "onSessionExit + workspace-completion workflow run once despite repeated exit callbacks; session row written once",
+        "evidence": ["session-lifecycle.ts:737", "session-lifecycle.ts:905"],
+        "dimensions": ["concurrency", "state-transition", "regression"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "agent-sessions.stop.authoritative",
+        "statement": "A user stop is the authoritative verdict: the session is recorded stopped, the exit handler must not overwrite it, and a repeated stop is a safe no-op",
+        "actor": "operator",
+        "preconditions": ["a running session"],
+        "observable_outcome": "stopSession writes status=stopped; a later exit keeps stopped; second stopSession resolves true with no duplicate side effect; classifier routes stoppedByUser to 'stopped' over every other condition",
+        "evidence": ["session-lifecycle.ts:680", "session-exit-state-machine.ts:88"],
+        "dimensions": ["state-transition", "error-handling", "concurrency"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "agent-sessions.plan.clear-and-land",
+        "statement": "A plan-mode run ALWAYS clears planMode on exit and lands in a visible state: plan recovered from the raw ===PLAN BEGIN/END=== buffer → PLAN.md + auto-continue, or park at awaiting-plan-approval, or no-plan → blocked",
+        "actor": "agent-subprocess",
+        "preconditions": ["workspace launched in plan mode"],
+        "observable_outcome": "workspace.planMode=false in all three cases; PLAN.md written + implement session launched (auto-continue), OR status=awaiting-plan-approval+pendingPlanPath, OR status=blocked with no implement launch",
+        "evidence": ["session-lifecycle.ts:595", "session-lifecycle.ts:690"],
+        "dimensions": ["state-transition", "workflow", "regression", "error-handling"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "agent-sessions.drain.before-exit",
+        "statement": "The detached-agent output file is drained to EOF before the exit event is emitted, so a crash within one poll interval is not misclassified as a zero-output launch failure (#909)",
+        "actor": "agent-subprocess",
+        "preconditions": ["detached file-poll launch path", "output written between last poll and exit"],
+        "observable_outcome": "the tail stdout event arrives before the exit event and is not duplicated with already-polled content",
+        "evidence": ["packages/server/src/services/agent.service.ts (drainNow)", "session-exit-state-machine.ts:30"],
+        "dimensions": ["regression", "concurrency", "boundary"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "agent-sessions.stream.pipeline",
+        "statement": "Each provider stream chunk is parsed into a normalized display event; real assistant/tool/stats output marks the session substantive while keepalive/error noise does not; a valid-JSON event of unknown type is counted and logged loudly, never silently dropped",
+        "actor": "agent-subprocess",
+        "preconditions": ["a live session emitting JSONL"],
+        "observable_outcome": "display events normalized (init/assistant/tool_use/result/raw); sessionSubstantiveOutput set only on content-bearing events; unknown-event counter increments + warning logged",
+        "evidence": ["broadcast.ts:120", "agent-stream-parser.ts:90", "agent-output-parser.ts:13"],
+        "dimensions": ["capability", "regression", "error-handling"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "agent-sessions.persist.split-batch",
+        "statement": "stdout is persisted only to the on-disk .out file while non-stdout events are batched (50 rows / 250ms) into session_messages and flushed on exit; a FK failure from a racing workspace cleanup is swallowed",
+        "actor": "agent-subprocess",
+        "preconditions": ["a streaming session"],
+        "observable_outcome": "stdout produces zero DB rows; a 50-event non-stdout batch flushes as one insert; remaining buffer flushed at exit; FK-violation insert does not surface as an error",
+        "evidence": ["broadcast.ts:315", "broadcast.ts:79", "broadcast.ts:92"],
+        "dimensions": ["api", "boundary", "error-handling", "concurrency"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "agent-sessions.summary.parse",
+        "statement": "A persisted transcript is parsed server-side (no LLM) into a structured summary — files read/edited/written, commands, errors, model, rate-limits, tool fail-rate friction — uniformly across Claude/Codex/Copilot formats",
+        "actor": "operator",
+        "preconditions": ["a session with a transcript"],
+        "observable_outcome": "summary lists files/commands/toolUsePatterns(count,failedCount)/model/rateLimit for each provider format",
+        "evidence": ["session-summary.ts:691", "session-summary.ts:827"],
+        "dimensions": ["capability", "config", "regression"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "agent-sessions.read.rest",
+        "statement": "REST read endpoints expose the session: output is ETag-cached (304 on match), plus stats, parsed summary, and LIKE transcript search joined up the issue→project→status chain",
+        "actor": "board-ui",
+        "preconditions": ["an existing session"],
+        "observable_outcome": "GET output returns 200+ETag then 304 on matching If-None-Match; stats/summary return structured bodies; search returns matching transcripts filtered by issue",
+        "evidence": ["sessions.ts:45", "session.repository.ts:466"],
+        "dimensions": ["api", "navigation", "boundary"],
+        "risk": "medium",
+        "confidence": "medium"
+      },
+      {
+        "id": "agent-sessions.stream.live-subscribe",
+        "statement": "A WebSocket subscriber receives the live message stream, a late subscriber replays the full in-memory buffer on connect, and the buffer is freed only when the last subscriber leaves AND the session has exited",
+        "actor": "board-ui",
+        "preconditions": ["a session with buffered messages"],
+        "observable_outcome": "connecting WS receives prior AgentOutputMessage frames (reconnect/replay) then live frames; buffer not freed while a subscriber is attached or the session is live",
+        "evidence": ["ws-handler.ts:16", "ws-handler.ts:32"],
+        "dimensions": ["workflow", "concurrency", "state-transition"],
+        "risk": "medium",
+        "confidence": "medium"
+      },
+      {
+        "id": "agent-sessions.reattach.recover",
+        "statement": "After a server restart, surviving detached agents are reattached (in-memory context/provider restored) and a PID-poll-detected exit mirrors the normal exit path idempotently; a stale running session whose PID is dead is finalized stopped and its workspace set idle",
+        "actor": "monitor",
+        "preconditions": ["a detached session that survived hot-reload, or a dead-PID running session"],
+        "observable_outcome": "reattached session resumes broadcast + exit handling; notifyExternalExit finalizes once; cleanupStaleSession sets session=stopped(endedAt) + workspace=idle and purges in-memory state",
+        "evidence": ["session-lifecycle.ts:887", "session-lifecycle.ts:854"],
+        "dimensions": ["state-transition", "regression", "concurrency", "error-handling"],
+        "risk": "high",
+        "confidence": "medium"
+      },
+      {
+        "id": "agent-sessions.turn.followup",
+        "statement": "A follow-up turn is gated on turnState==waiting AND a verified-alive process; a dead process returns stale:true so the caller resumes into a fresh session; turnState flips to waiting only on a provider turnComplete with stdin still open",
+        "actor": "operator",
+        "preconditions": ["an in-flight or just-completed multi-turn session"],
+        "observable_outcome": "sendTurn on a waiting+alive session proceeds (state→processing); on a dead/unknown session returns stale; turnState transitions processing↔waiting on result/sendTurn events",
+        "evidence": ["session-lifecycle.ts:813", "broadcast.ts:146"],
+        "dimensions": ["state-transition", "error-handling", "workflow"],
+        "risk": "medium",
+        "confidence": "medium"
+      },
+      {
+        "id": "agent-sessions.resume.provider-id",
+        "statement": "The provider's own resume token (Claude session_id from system/init, Pi session header) is captured from the stream and stored, then passed as --resume / --session on relaunch so the conversation continues",
+        "actor": "operator",
+        "preconditions": ["a session that emitted an init/session header"],
+        "observable_outcome": "sessions.providerSessionId persisted; a relaunch spawns with --resume <id> and the agent continues the prior conversation",
+        "evidence": ["session-lifecycle.ts:275", "broadcast.ts:134"],
+        "dimensions": ["workflow", "regression", "config"],
+        "risk": "high",
+        "confidence": "medium"
+      },
+      {
+        "id": "agent-sessions.persist.prune",
+        "statement": "A background pruner bounds DB growth: it deletes session_messages for workspaces merged/closed >3 days ago and caps each still-active session at 2000 rows, dropping the oldest excess",
+        "actor": "monitor",
+        "preconditions": ["old merged workspaces / sessions exceeding the row cap"],
+        "observable_outcome": "messages for stale merged workspaces removed; per-session rows capped at MAX_MESSAGES_PER_ACTIVE_SESSION",
+        "evidence": ["session-message-pruner.service.ts:25", "session-message-pruner.service.ts:57"],
+        "dimensions": ["boundary", "config", "regression"],
+        "risk": "low",
+        "confidence": "high"
+      },
+      {
+        "id": "agent-sessions.board.events",
+        "statement": "Project-scoped change reasons (board_changed, workspace_idle, session_completed, issue_updated …) are broadcast to every board WebSocket subscriber so all views refresh",
+        "actor": "board-ui",
+        "preconditions": ["a subscribed board client", "a state change"],
+        "observable_outcome": "all subscribers receive the typed event frame on a change",
+        "evidence": ["board-events.ts:129", "board-events.ts:38"],
+        "dimensions": ["api", "workflow", "navigation"],
+        "risk": "medium",
+        "confidence": "high"
+      }
+    ],
+    "permissions": [
+      { "actor": "operator", "behavior": "*", "allowed": true, "notes": "single-user local app — no RBAC; permission dimension is N/A (one human actor)" }
+    ],
+    "state_model": {
+      "states": ["running", "completed", "stopped"],
+      "session_status_note": "sessions.status ∈ {running, completed, stopped}; the launch-failure and usage-limit verdicts both land on 'stopped' with distinguishing stats (launchFailure / rateLimited).",
+      "transitions": [
+        { "from": "running", "to": "completed", "trigger": "clean substantive exit past window", "behavior": "agent-sessions.finalize.completed" },
+        { "from": "running", "to": "stopped", "trigger": "fast zero-output / non-zero error exit (launch failure)", "behavior": "agent-sessions.finalize.launch-failure" },
+        { "from": "running", "to": "stopped", "trigger": "usage-limit detected (workspace→blocked)", "behavior": "agent-sessions.finalize.usage-limit" },
+        { "from": "running", "to": "stopped", "trigger": "user stop", "behavior": "agent-sessions.stop.authoritative" },
+        { "from": "running", "to": "stopped", "trigger": "dead-PID stale cleanup on restart", "behavior": "agent-sessions.reattach.recover" }
+      ],
+      "driven_workspace_states": ["idle (completed/launch-failure)", "blocked (usage-limit / no-plan)", "active (plan auto-continue)", "awaiting-plan-approval (plan parked)"],
+      "turn_states": ["processing", "waiting"]
+    },
+    "error_states": [
+      { "id": "agent-sessions.err.unsafe-codex-model", "statement": "Codex builder launch with gpt-5.3-codex-spark rejected (CONFLICT/UNSAFE_CODEX_MODEL), no session row created", "evidence": "session-lifecycle.ts:211" },
+      { "id": "agent-sessions.err.stale-safety-preflight", "statement": "Stale workspace safety policy blocks launch (CONFLICT/STALE_SAFETY_POLICY) before spawn", "evidence": "session-lifecycle.ts:330" },
+      { "id": "agent-sessions.err.launch-throw", "statement": "A throw during launch records a profile launch-failure, cleans zombie state, marks the session stopped, and rethrows", "evidence": "session-lifecycle.ts:758" },
+      { "id": "agent-sessions.err.turn-stale", "statement": "sendTurn to a dead/unknown session returns stale:true instead of enqueuing a turn", "evidence": "session-lifecycle.ts:813" },
+      { "id": "agent-sessions.err.unknown-event", "statement": "A valid-JSON event of an unknown type is counted + logged loudly, not dropped", "evidence": "agent-stream-parser.ts:90" },
+      { "id": "agent-sessions.err.fk-insert-race", "statement": "A FK-constraint failure on message insert (session deleted by racing cleanup) is swallowed, not logged as error", "evidence": "broadcast.ts:92" }
+    ],
+    "external_integrations": ["agent provider CLIs (claude/codex/copilot/pi) via agent.service", "git CLI (workspace-side collaborators on completed path)", "filesystem (.out transcript file, PLAN.md / HANDOFF.md writes)", "SQLite/Drizzle (sessions, session_messages)", "WebSocket transport (@hono/node-ws)"],
+    "unknowns": [
+      { "question": "Is the provider-session-id capture from init events + --resume relaunch exercised anywhere (it is core to the resume chain)?", "why_unknown": "no test asserts providerSessionId persistence or --resume launch args; apply-stream-event explicitly mocks that persistence path away" },
+      { "question": "Is reattachSession / notifyExternalExit (restart survival) covered by any test?", "why_unknown": "no candidate test drives reattach; only cleanupStaleSession and zombie-reconciler paths are asserted" },
+      { "question": "Does the ws-handler buffer-free invariant (free only when last subscriber leaves AND session exited) have a direct test?", "why_unknown": "e2e asserts replay but not the free condition" },
+      { "question": "Are GET /api/sessions/:id/stats and /summary endpoint response shapes asserted at the HTTP layer (vs the pure parser)?", "why_unknown": "parser tested directly; endpoint contract not observed in candidate tests" }
+    ]
+  },
+  "coverage": {
+    "behaviors": [
+      {
+        "ref": "agent-sessions.launch.session",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/session-lifecycle.test.ts::startSession inserts a running session row and launches the agent process", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/session-lifecycle.test.ts::records the workspace's skill (id + snapshotted name) on the session row", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["workflow", "capability", "state-transition"],
+        "dimensions_missing": [],
+        "history": { "churn": "high (session-lifecycle is a top-churn god-file)" }
+      },
+      {
+        "ref": "agent-sessions.launch.safety-guards",
+        "status": "partial",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/session-lifecycle.test.ts::blocks Codex builder launches that resolve to gpt-5.3-codex-spark", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/session-lifecycle.test.ts::launches Codex builders with a safe explicit model, counter-instructions, and launch diagnostics", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/session-lifecycle.test.ts::blocks launch before spawning when workspace safety preflight fails", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["error-handling", "config", "regression"],
+        "dimensions_missing": ["config", "regression"],
+        "gap": { "kind": "no-test", "missing_dimensions": ["config", "regression"], "rationale": "spark refusal, default gpt-5.5, and preflight-block are asserted; the cross-provider-model DROP (a stored gpt-5.5 stripped from a Claude launch — the #698/#696 multi-cycle stall) is NOT directly asserted, only its downstream model-error launch-failure is" }
+      },
+      {
+        "ref": "agent-sessions.classify.exit-verdict",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/session-exit-state-machine.test.ts::usage-limit WINS over the launch-failure window", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/session-exit-state-machine.test.ts::a zero-output exit EXACTLY at the window edge is still a launch failure (<=)", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/session-exit-state-machine.test.ts::user-stop WINS over a usage limit (the explicit stop must never be reclassified)", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["state-transition", "boundary", "risk", "regression"],
+        "dimensions_missing": []
+      },
+      {
+        "ref": "agent-sessions.finalize.completed",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/session-lifecycle.test.ts::transitions running->completed when the agent process exits cleanly (exit code 0)", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/session-completion-callback-idempotency.test.ts::runs the workspace completion workflow once when a completion callback is repeated", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["workflow", "state-transition", "capability"],
+        "dimensions_missing": ["regression"],
+        "gap": { "kind": "dimension-missing", "missing_dimensions": ["regression"], "rationale": "completed status + workspace idle + issue→In Review + onSessionExit asserted; the HANDOFF.md file write and scorecard/metrics side effects on the completed path are not asserted" }
+      },
+      {
+        "ref": "agent-sessions.finalize.launch-failure",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/session-lifecycle.test.ts::marks a fast provider exit with no model output as a stopped launch failure", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/session-lifecycle.test.ts::flags a short non-zero exit with substantive output as a model-error launch failure (#699)", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["error-handling", "state-transition", "regression", "risk"],
+        "dimensions_missing": []
+      },
+      {
+        "ref": "agent-sessions.finalize.usage-limit",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/session-lifecycle.test.ts::marks Codex usage-limit exits as blocked instead of idle", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["error-handling", "state-transition", "regression"],
+        "dimensions_missing": ["config"],
+        "gap": { "kind": "dimension-missing", "missing_dimensions": ["config"], "rationale": "Codex usage-limit→blocked asserted; the Claude subscription-reset usage-limit variant is not separately asserted at the lifecycle level" }
+      },
+      {
+        "ref": "agent-sessions.exit.idempotent",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/session-completion-callback-idempotency.test.ts::runs the workspace completion workflow once when a completion callback is repeated", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["concurrency", "state-transition", "regression"],
+        "dimensions_missing": ["concurrency"],
+        "gap": { "kind": "dimension-missing", "missing_dimensions": ["concurrency"], "rationale": "repeated live-exit idempotency asserted; the live-exit RACING the reattach PID-poll exit (the other source the guard protects against) is not exercised" }
+      },
+      {
+        "ref": "agent-sessions.stop.authoritative",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/session-lifecycle.test.ts::stopSession on an already-stopped session is a no-op (does not throw)", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/session-exit-state-machine.test.ts::user-stop WINS over a launch failure", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["state-transition", "error-handling", "concurrency"],
+        "dimensions_missing": []
+      },
+      {
+        "ref": "agent-sessions.plan.clear-and-land",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/session-lifecycle.test.ts::recovers a codex plan from the raw stream buffer and clears planMode (auto-continues)", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/session-lifecycle.test.ts::parks at awaiting-plan-approval when plan_auto_continue is disabled", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/session-lifecycle.test.ts::clears planMode and marks the workspace blocked when a plan run produces NO plan", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["state-transition", "workflow", "regression", "error-handling"],
+        "dimensions_missing": ["state-transition"],
+        "gap": { "kind": "dimension-missing", "missing_dimensions": ["state-transition"], "rationale": "all three plan-exit outcomes asserted; the 'only one auto-resume after an ExitPlanMode denial' loop-guard (session-lifecycle.ts:544) is not exercised" }
+      },
+      {
+        "ref": "agent-sessions.drain.before-exit",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/agent-exit-output-drain.test.ts::drains the .out file tail to EOF on exit before emitting the exit event", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/agent-exit-output-drain.test.ts::does not re-emit content the poll already consumed", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["regression", "concurrency", "boundary"],
+        "dimensions_missing": ["state-transition"],
+        "gap": { "kind": "dimension-missing", "missing_dimensions": ["state-transition"], "rationale": "the live-proc exit path drain is asserted; the reattach PID-poll exit path (5s poll) which must ALSO call drainNow() is not covered" }
+      },
+      {
+        "ref": "agent-sessions.stream.pipeline",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/apply-stream-event.test.ts::flags substantive output for content-bearing events but not empty ones", "strength": "asserts-outcome" },
+          { "test": "packages/shared/__tests__/agent-stream-unknown-events.test.ts::records an unknown event type and returns undefined", "strength": "asserts-outcome" },
+          { "test": "packages/shared/__tests__/agent-stream-parser-characterization.test.ts::(suite — display-event normalization)", "strength": "asserts-outcome" },
+          { "test": "packages/client/src/lib/agent-output-parser.test.ts::(suite — client display events)", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["capability", "regression", "error-handling"],
+        "dimensions_missing": []
+      },
+      {
+        "ref": "agent-sessions.persist.split-batch",
+        "status": "partial",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/broadcast-batch.test.ts::does not write stdout messages to DB", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/broadcast-batch.test.ts::flushes immediately when batch size (50) of non-stdout is reached", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["api", "boundary"],
+        "dimensions_missing": ["error-handling", "concurrency"],
+        "gap": { "kind": "no-test", "missing_dimensions": ["error-handling", "concurrency"], "rationale": "stdout→file split and the 50-row batch flush are asserted; the 250ms time-based flush, the flush-on-exit guarantee, and the swallowed FK-constraint insert race (broadcast.ts:92) are not asserted" }
+      },
+      {
+        "ref": "agent-sessions.summary.parse",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/session-summary.test.ts::extracts file operations and commands", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/session-summary.test.ts::extracts Codex exec --json streaming session activity", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/session-summary.test.ts::extracts Copilot JSONL session activity", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/session-summary.test.ts::records Codex command errors and turn failures", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["capability", "config", "regression"],
+        "dimensions_missing": ["boundary"],
+        "gap": { "kind": "dimension-missing", "missing_dimensions": ["boundary"], "rationale": "per-provider extraction + per-tool failedCount asserted; the repeated-command waste signal (computeFrictionStats denominator) is not directly asserted" }
+      },
+      {
+        "ref": "agent-sessions.read.rest",
+        "status": "partial",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/session-output-etag.test.ts::returns 200 with ETag, then 304 on matching If-None-Match", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/api/session-history.test.ts::GET /api/sessions/:id/output returns persisted messages after mock agent run", "strength": "asserts-outcome" },
+          { "test": "packages/mcp-server/src/__tests__/tools/session-tools.test.ts::searches session transcripts globally and filters by issue number", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["api", "navigation"],
+        "dimensions_missing": ["api", "boundary"],
+        "gap": { "kind": "no-test", "missing_dimensions": ["api"], "rationale": "output ETag/304 and search are asserted; GET /api/sessions/:id/stats and /summary HTTP response shapes are not asserted at the endpoint layer (only the pure parser is). NOTE the documented boundary risk: search is LIKE over session_messages but stdout no longer lands there and old rows are pruned — historical full-text search is unreliable; no test pins this expectation" }
+      },
+      {
+        "ref": "agent-sessions.stream.live-subscribe",
+        "status": "partial",
+        "covered_by": [
+          { "test": "packages/e2e/tests/api/ws-session-reconnect.test.ts::connecting to a valid session's ws receives AgentOutputMessage frames (reconnect/replay)", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["workflow"],
+        "dimensions_missing": ["concurrency", "state-transition"],
+        "gap": { "kind": "dimension-missing", "missing_dimensions": ["concurrency", "state-transition"], "rationale": "late-subscriber buffer replay is asserted; the buffer-free invariant (freed ONLY when last subscriber leaves AND session exited) and multi-subscriber behaviour are not exercised" }
+      },
+      {
+        "ref": "agent-sessions.reattach.recover",
+        "status": "partial",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/session-lifecycle.test.ts::marks workspace idle and session stopped when cleanupStaleSession is called for a dead PID", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/zombie-fix-session-reconciler.test.ts::reconciles a zombie fix-and-merge session (no PID, 0 messages, old enough)", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["state-transition", "error-handling"],
+        "dimensions_missing": ["regression", "concurrency"],
+        "gap": { "kind": "no-test", "missing_dimensions": ["regression", "concurrency"], "rationale": "dead-PID stale cleanup is covered; reattachSession (restoring context/provider for a survived detached agent across hot-reload) and notifyExternalExit mirroring the exit path idempotently are NOT exercised — the core restart-survival promise is unverified" }
+      },
+      {
+        "ref": "agent-sessions.turn.followup",
+        "status": "partial",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/session.manager.test.ts::turn state transitions: processing → waiting on result event", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/session.manager.test.ts::turn state transitions: waiting → processing on sendTurn", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/session.manager.test.ts::sendTurn returns stale when session not in turnStates", "strength": "touches-only" }
+        ],
+        "dimensions_covered": ["state-transition"],
+        "dimensions_missing": ["error-handling", "workflow"],
+        "gap": { "kind": "outcome-not-asserted", "missing_dimensions": ["error-handling", "workflow"], "rationale": "turnState processing↔waiting transitions are asserted; the stale-process gate is only re-derived inline (touches-only, not a real sendTurn call against a dead process), and the full waiting-AND-alive precondition for a real follow-up turn is not exercised end-to-end" }
+      },
+      {
+        "ref": "agent-sessions.resume.provider-id",
+        "status": "uncovered",
+        "covered_by": [],
+        "dimensions_covered": [],
+        "dimensions_missing": ["workflow", "regression", "config"],
+        "gap": { "kind": "no-test", "missing_dimensions": ["workflow", "regression", "config"], "rationale": "no test asserts that the Claude session_id / Pi session header is captured from init events into sessions.providerSessionId, nor that relaunch passes --resume/--session to continue the conversation; apply-stream-event explicitly mocks the persistence path away. This is the resume chain that all multi-turn/relaunch flows depend on" }
+      },
+      {
+        "ref": "agent-sessions.persist.prune",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/session-message-pruner.test.ts::deletes messages for old merged workspaces beyond the retention window", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/session-message-pruner.test.ts::removes oldest messages beyond the per-session cap", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["boundary", "config", "regression"],
+        "dimensions_missing": []
+      },
+      {
+        "ref": "agent-sessions.board.events",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/board-events.test.ts::sends board_changed event to all subscribers", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/session-completion-callback-idempotency.test.ts::(asserts broadcast workspace_idle / issue_updated)", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["api", "workflow", "navigation"],
+        "dimensions_missing": []
+      }
+    ],
+    "summary": {
+      "covered": 12,
+      "partial": 6,
+      "uncovered": 1,
+      "undocumented_implemented": 0,
+      "documented_missing": 0,
+      "score": 0.74,
+      "by_dimension": {
+        "state-transition": { "covered": 8, "partial": 4, "uncovered": 0 },
+        "error-handling": { "covered": 6, "partial": 3, "uncovered": 0 },
+        "regression": { "covered": 7, "partial": 4, "uncovered": 1 },
+        "concurrency": { "covered": 2, "partial": 4, "uncovered": 0 },
+        "boundary": { "covered": 4, "partial": 2, "uncovered": 0 },
+        "workflow": { "covered": 5, "partial": 3, "uncovered": 1 },
+        "api": { "covered": 3, "partial": 1, "uncovered": 0 },
+        "config": { "covered": 3, "partial": 1, "uncovered": 1 },
+        "capability": { "covered": 4, "partial": 0, "uncovered": 0 },
+        "permission": { "na": true, "reason": "single-user local app — no roles" }
+      },
+      "weak_dimensions": ["concurrency (reattach/exit-race, buffer-free, FK-race all partial/untested)", "regression (resume chain + restart survival unverified)", "workflow (provider-resume relaunch + multi-turn follow-up end-to-end gaps)"],
+      "top_gaps": [
+        {
+          "ref": "agent-sessions.resume.provider-id",
+          "priority": "P1",
+          "roi": 5.0,
+          "dimensions_to_add": ["workflow", "regression"],
+          "rationale": "Entirely uncovered yet load-bearing: provider session-id capture (Claude session_id / Pi header) + --resume relaunch underpins every multi-turn and relaunch flow. A silent break strands resume into fresh sessions and loses context. High business impact (4) × high regression likelihood (4, session-lifecycle is top-churn) over low exec/maint cost."
+        },
+        {
+          "ref": "agent-sessions.reattach.recover",
+          "priority": "P1",
+          "roi": 4.0,
+          "dimensions_to_add": ["state-transition", "regression", "concurrency"],
+          "rationale": "reattachSession + notifyExternalExit (the hot-reload-survival promise and its idempotent exit) are untested; only dead-PID cleanup is covered. A regression here double-finalizes (re-launching the next ticket twice) or loses a live agent across restart — the exact failures the idempotency guard exists to prevent."
+        },
+        {
+          "ref": "agent-sessions.launch.safety-guards",
+          "priority": "P1",
+          "roi": 4.0,
+          "dimensions_to_add": ["config", "regression"],
+          "rationale": "The cross-provider stored-model DROP (a gpt-5.5 stripped from a Claude launch) is the #698/#696 multi-cycle stall and is not directly asserted — only its downstream model-error launch-failure is. Pin the drop so a cross-provider id can never reach --model again."
+        },
+        {
+          "ref": "agent-sessions.turn.followup",
+          "priority": "P1",
+          "roi": 3.5,
+          "dimensions_to_add": ["error-handling", "workflow"],
+          "rationale": "The stale-process gate (dead process → stale:true so the caller resumes fresh) is only re-derived inline, not asserted against a real dead-process sendTurn. The turn endpoint churns and a wrong gate silently enqueues onto a dead process."
+        },
+        {
+          "ref": "agent-sessions.persist.split-batch",
+          "priority": "P2",
+          "roi": 3.0,
+          "dimensions_to_add": ["error-handling", "concurrency"],
+          "rationale": "Flush-on-exit (no lost tail message) and the swallowed FK-insert race are unasserted; both are data-integrity guarantees of the transcript of record."
+        },
+        {
+          "ref": "agent-sessions.read.rest",
+          "priority": "P2",
+          "roi": 2.8,
+          "dimensions_to_add": ["api"],
+          "rationale": "GET /api/sessions/:id/stats and /summary endpoint contracts are unasserted at the HTTP layer; also pin the documented search-coverage boundary (stdout not in session_messages + pruning) so the unreliable-search behaviour is at least characterized."
+        }
+      ],
+      "cut_line": "Emitted P1–P2. Below the line: ExitPlanMode auto-resume loop-guard (P3), Claude subscription-reset usage-limit variant (P3), buffer-free multi-subscriber invariant (P3) — real but lower ROI."
+    }
+  }
+}

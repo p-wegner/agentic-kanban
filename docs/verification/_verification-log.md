@@ -62,8 +62,36 @@ isolation fix.
 - New gap added to `_priorities.md`: `workspaces.cascade.partial-blockers-no-start` (the
   multi-blocker `every`-guard, invisible to the single-blocker P0 test).
 
+## 2026-06-27 — full fan-out: discovery + coverage for the remaining 14 capabilities
+
+Completed the model. Ran a combined discover+cover subagent per capability (3 waves of 4–5),
+each anchored on its deterministic candidate-test set and writing its own
+`capabilities/<slug>.json`, then assembled + rendered deterministically.
+
+- New tooling (dogfood-driven): `tools/candidates.mjs` (per-capability candidate sets via
+  source-import ∪ api-path ∪ keyword — the fix from the workspaces dry-run, now at scale),
+  `tools/assemble.mjs` (merge per-capability files → `_behavior-model.json` + `_coverage.json`),
+  `tools/render.mjs` (regenerate `_coverage-matrix.md` / `_gaps.md` / `_priorities.md`).
+- **Model now: 15 capabilities, 273 behaviours, overall functional-coverage score 0.837**
+  (210 covered / 37 partial / 26 uncovered; 0 undocumented-implemented / 0 documented-missing —
+  see caveat below). Per-capability scores 0.62 → 0.94 in `_coverage-matrix.md`.
+- Weakest capabilities: project-registration (0.62 — registration orchestration untested though
+  per-stack derivation is dense), mcp-server (0.63 — governance/permission gaps on an
+  unauthenticated surface). Strongest: git-integration / issues-board (0.94).
+- Top P0s in the consolidated `_priorities.md`: `project-registration.resolve.defaultBranch`
+  (#772 never-null guarantee untested) and `mcp-server.govern.disabled-tools` (the only authority
+  knob on the MCP surface, untested). 59 ranked gaps total.
+- High-signal findings raised by the per-capability agents (verify before acting): manual `/merge`
+  may bypass the verify/smoke gate (review-merge unknown); provider env-strip credential-bleed
+  guard untested (agent-providers); cascade-walk can't catch a future unseeded child table
+  (persistence-schema); divergence guard may fail-open on malformed Bullseye JSON (preferences).
+
 ### Still open
-- Run discovery + coverage for the remaining 14 capabilities (fan-out, per the skills).
-- Re-map `workspaces` with the source-matched candidate set; reconcile the 3 suspect uncovereds.
-- Phase 2 requirements-mapping (PRD/ADR/constraint → behaviour) not yet run — `documented-missing`
-  / `undocumented-implemented` buckets are empty only because that pass hasn't happened.
+- **Phase 2 requirements-mapping NOT yet run** for any capability — so the `documented-missing`
+  / `undocumented-implemented` buckets are empty by *omission of the pass*, not by verified
+  absence. This is the next highest-value step (mine PRD/ADRs/constraints/tests → behaviours).
+- Per-capability summaries report coverage from each agent's candidate slice; a cross-capability
+  dedup pass (a test crediting two capabilities) hasn't run.
+- Author down the backlog with `e2e-test-author` (1 of 59 gaps closed so far: the workspaces P0).
+- `_behavior-model.json` should split `workspaces.cascade.*` into followups vs unblocked-dependency
+  (the dual-path correction from the cascade authoring run).

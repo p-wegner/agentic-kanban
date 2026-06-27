@@ -1,0 +1,473 @@
+{
+  "slug": "persistence-schema",
+  "behavior": {
+    "business_purpose": "The single physical truth of the product: one SQLite file (kanban.db) holding every project, issue, workspace, session, message and preference. As a Published Language the Drizzle schema is the shared data vocabulary every package imports; as a runtime kernel it provides the connection, the busy-retry policy under heavy concurrent agent writes, migration management, FK-integrity (cascade/drift/repair), application-level cascade deletion, and a verified rotating-backup recovery subsystem. Its correctness guarantees are what keep the board from silently corrupting when many parallel worktree agents stream output into one file.",
+    "confidence": "high",
+    "source_paths": [
+      "packages/shared/src/schema/index.ts",
+      "packages/shared/src/schema/issues.ts",
+      "packages/shared/src/schema/sessions.ts",
+      "packages/shared/src/schema/session-messages.ts",
+      "packages/shared/src/lib/fk-actions.ts",
+      "packages/shared/src/lib/fk-actions-repair.ts",
+      "packages/shared/src/lib/cascade-delete.ts",
+      "packages/server/src/db/index.ts",
+      "packages/server/src/db/retry.ts",
+      "packages/server/src/db/data-dir.ts",
+      "packages/server/src/db/backup.ts",
+      "packages/server/src/startup/fk-alignment.ts",
+      "packages/server/src/__tests__/helpers/migrations.ts"
+    ],
+    "actors": [
+      { "name": "operator", "kind": "human", "notes": "single local user; runs db:repair / db:restore CLI" },
+      { "name": "services", "kind": "automation", "notes": "every server/MCP/CLI module reads/writes through db/writeDb handles and the schema" },
+      { "name": "parallel-agents", "kind": "automation", "notes": "many worktree agent subprocesses streaming session_messages concurrently into one DB — the contention source" },
+      { "name": "startup-tasks", "kind": "automation", "notes": "boot-time FK-enable assertion + FK-action alignment + pre-migration backup" },
+      { "name": "backup-scheduler", "kind": "automation", "notes": "periodic verified snapshots + rotation" }
+    ],
+    "entry_points": [
+      { "kind": "import", "ref": "packages/shared/src/schema/index.ts (schema barrel)", "observable": "Published-Language: row types every package shares; a new column is a fact the whole product can reason about" },
+      { "kind": "runtime", "ref": "db / writeDb handles (packages/server/src/db/index.ts:52)", "observable": "typed read/write queries against kanban.db; separate WAL reader/writer connections" },
+      { "kind": "runtime", "ref": "withDbRetry / withTransaction (db/retry.ts:26, db/index.ts:72)", "observable": "wraps a DB op or transaction in bounded SQLITE_BUSY retry" },
+      { "kind": "service", "ref": "deleteIssueCascade / deleteWorkspaceCascade (lib/cascade-delete.ts)", "observable": "atomically remove an entity and its whole dependent subtree, asserting nothing remains" },
+      { "kind": "cli", "ref": "pnpm db:repair (alignForeignKeyActions)", "observable": "detects + rebuilds FK-action drift on a legacy live DB without data loss" },
+      { "kind": "cli", "ref": "pnpm db:restore (scripts/db-restore.ts)", "observable": "lists/verifies/restores a backup snapshot into kanban.db" },
+      { "kind": "config", "ref": "getDbUrl / DATA_DIR (db/data-dir.ts:19)", "observable": "resolves where kanban.db lives; worktree falls through to ~/.agentic-kanban" },
+      { "kind": "test-infra", "ref": "migrationFilesInOrder (helpers/migrations.ts:27)", "observable": "journaled migration list in apply order; drives in-memory test DB" }
+    ],
+    "behaviors": [
+      {
+        "id": "persistence-schema.apply.migrations",
+        "statement": "Applying every journaled migration to an empty DB succeeds and reproduces the core schema (tables exist)",
+        "actor": "startup-tasks",
+        "preconditions": ["fresh empty libsql DB", "journal lists migrations in apply order"],
+        "observable_outcome": "no error thrown; expected tables (e.g. workspaces) present after apply",
+        "evidence": ["packages/server/src/__tests__/migration-schema-drift.test.ts:146", "packages/server/src/__tests__/helpers/migrations.ts:16"],
+        "dimensions": ["migration-correctness", "regression", "risk"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "persistence-schema.detect.schema-drift",
+        "statement": "A freshly-migrated DB and the Drizzle schema agree on the table set and per-table column set (no schema column without a migration, and the reverse)",
+        "actor": "startup-tasks",
+        "preconditions": ["all migrations applied to in-memory DB"],
+        "observable_outcome": "missingTables/extraTables empty; no per-table columnDrift",
+        "evidence": ["packages/server/src/__tests__/migration-schema-drift.test.ts:156"],
+        "dimensions": ["migration-correctness", "boundary", "regression"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "persistence-schema.enforce.fk-action-parity",
+        "statement": "The ON DELETE/ON UPDATE actions the migrations produce equal the actions the Drizzle schema declares (no schema-says-cascade / DB-on-NO-ACTION drift)",
+        "actor": "startup-tasks",
+        "preconditions": ["migrations applied", "expectedForeignKeyActions derived from schema"],
+        "observable_outcome": "diffForeignKeyActions returns no mismatches",
+        "evidence": ["packages/server/src/__tests__/migration-schema-drift.test.ts:213", "packages/shared/src/lib/fk-actions.ts:82"],
+        "dimensions": ["migration-correctness", "boundary", "regression", "risk"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "persistence-schema.guard.journal-integrity",
+        "statement": "The migration journal is structurally sound: no duplicate NNNN numbers, no orphan .sql un-journaled files, every journal entry has a file, unique tags/idx",
+        "actor": "startup-tasks",
+        "preconditions": ["drizzle dir + meta/_journal.json on disk"],
+        "observable_outcome": "no duplicate numbers, no orphans, journal/disk are bijective, tags+idx unique",
+        "evidence": ["packages/server/src/__tests__/migration-schema-drift.test.ts:70"],
+        "dimensions": ["migration-correctness", "boundary", "regression"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "persistence-schema.retry.busy-lock",
+        "statement": "A locked DB is treated as transient: SQLITE_BUSY/EBUSY/'database is locked' is retried up to 3 attempts (50ms then 100ms) and then re-throws; a non-busy error is not retried",
+        "actor": "parallel-agents",
+        "preconditions": ["operation rejects with a busy-class error (by code or message substring)"],
+        "observable_outcome": "succeeds on a later attempt and returns the result; after 3 busy attempts re-throws the original; non-busy error throws after exactly 1 attempt with no retry log",
+        "evidence": ["packages/server/src/db/retry.ts:4", "packages/server/src/db/retry.ts:30", "packages/server/src/__tests__/db-retry.test.ts:23"],
+        "dimensions": ["concurrency", "error-handling", "regression", "risk"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "persistence-schema.cascade.delete-issue",
+        "statement": "Deleting an issue removes its entire dependent subtree (workspaces, sessions, messages, diff-comments, artifacts, comments, time-entries, showdowns, dependencies both directions, tags) atomically and leaves no orphan or FK violation",
+        "actor": "operator",
+        "preconditions": ["issue with seeded children across every issue/workspace-referencing table", "FK enforcement ON"],
+        "observable_outcome": "issue + all children gone; sibling issue untouched; PRAGMA foreign_key_check returns no rows",
+        "evidence": ["packages/shared/src/lib/cascade-delete.ts:21", "packages/server/src/__tests__/issue-cascade-and-dep.repo.test.ts:118"],
+        "dimensions": ["state-transition", "boundary", "regression", "risk"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "persistence-schema.cascade.delete-workspace",
+        "statement": "Deleting a workspace removes every table that references the workspace or its sessions, atomically, while leaving the parent issue intact",
+        "actor": "operator",
+        "preconditions": ["workspace with seeded sessions/messages/diff-comments/artifacts/repos/retry-decisions/transitions", "FK enforcement ON"],
+        "observable_outcome": "workspace + sessions gone; parent issue remains; no FK violations",
+        "evidence": ["packages/shared/src/lib/cascade-delete.ts:153", "packages/server/src/__tests__/issue-cascade-and-dep.repo.test.ts:177"],
+        "dimensions": ["state-transition", "regression", "risk"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "persistence-schema.repair.fk-drift",
+        "statement": "db:repair rebuilds a legacy table whose FK actions drifted (e.g. issue_dependencies on NO ACTION) to the schema's cascade, preserving all rows and user indexes, making the cascade actually fire, and is idempotent",
+        "actor": "operator",
+        "preconditions": ["a live DB with a drifted FK action and existing rows"],
+        "observable_outcome": "drift detected; table rebuilt; rows + unique index survive; deleting parent now cascades; a second run finds no drift",
+        "evidence": ["packages/shared/src/lib/fk-actions-repair.ts:152", "packages/server/src/__tests__/fk-actions-repair.test.ts:93"],
+        "dimensions": ["migration-correctness", "boundary", "regression", "risk"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "persistence-schema.assert.fk-enabled-startup",
+        "statement": "At startup FK enforcement is asserted per connection (throws LOUD if PRAGMA foreign_keys is OFF) and FK-action drift on the live DB is repaired before serving",
+        "actor": "startup-tasks",
+        "preconditions": ["read + write connections opened", "possibly a legacy drifted live DB"],
+        "observable_outcome": "passes when FK=ON; throws a connection-named error when OFF; legacy drift is rebuilt so the schema's cascades fire; a matched DB is a silent no-op",
+        "evidence": ["packages/server/src/startup/fk-alignment.ts:1", "packages/server/src/__tests__/fk-alignment-startup.test.ts:46"],
+        "dimensions": ["error-handling", "config", "regression", "risk"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "persistence-schema.enforce.unique-issue-number",
+        "statement": "Issue numbers are unique per project (not global): a unique index on (project_id, issue_number) lets two projects each have a #1, and next-number allocation is MAX+1 scoped per project",
+        "actor": "services",
+        "preconditions": ["project with issues"],
+        "observable_outcome": "nextIssueNumber returns max+1 within a project and is unaffected by other projects; a duplicate (project_id, issue_number) insert is rejected by the DB unique index",
+        "evidence": ["packages/shared/src/schema/issues.ts:43", "packages/mcp-server/src/__tests__/tools/db-utils.test.ts:83"],
+        "dimensions": ["boundary", "error-handling", "regression"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "persistence-schema.backup.create-verified",
+        "statement": "createBackup writes a WAL-consistent, committed-only single-file snapshot (VACUUM INTO) and verifies it before accepting: integrity_check ok and row counts match the live source",
+        "actor": "backup-scheduler",
+        "preconditions": ["live DB with rows"],
+        "observable_outcome": "returns a verified backup whose project/issue counts equal the source; an in-flight uncommitted write is excluded from the snapshot",
+        "evidence": ["packages/server/src/db/backup.ts:310", "packages/server/src/__tests__/backup.test.ts:68", "packages/server/src/__tests__/backup.test.ts:93"],
+        "dimensions": ["regression", "risk", "concurrency"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "persistence-schema.backup.reject-bad",
+        "statement": "A backup is refused unless trustworthy: a corrupt/truncated file fails integrity_check, and an empty-when-live-is-not snapshot (0 projects or 0 issues while live has rows) is rejected rather than rotated in; a failed verify never promotes and preserves the previous good backup",
+        "actor": "backup-scheduler",
+        "preconditions": ["live DB has rows", "candidate backup is corrupt or empty"],
+        "observable_outcome": "verifyBackup throws on corrupt / 0-projects / 0-issues; a forced verify failure leaves the prior good backup intact and no .tmp scratch behind",
+        "evidence": ["packages/server/src/db/backup.ts:190", "packages/server/src/__tests__/backup.test.ts:114", "packages/server/src/__tests__/backup.test.ts:147"],
+        "dimensions": ["error-handling", "boundary", "regression", "risk"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "persistence-schema.backup.rotate-prune",
+        "statement": "Backups rotate safely: keep exactly KEEP_LAST(5) newest, never prune to zero, enforce a hard total-size cap keeping at least one, and reap interrupted-write scratch (.tmp/.promote + journal sidecars) without harming legitimate final-backup sidecars",
+        "actor": "backup-scheduler",
+        "preconditions": ["backup dir with >KEEP_LAST files and/or orphan scratch"],
+        "observable_outcome": "5 newest survive; size-cap trims oldest but never to zero; scratch removed, good backups + their sidecars kept",
+        "evidence": ["packages/server/src/db/backup.ts:26", "packages/server/src/db/backup.ts:280", "packages/server/src/__tests__/backup.test.ts:174", "packages/server/src/__tests__/backup.test.ts:202"],
+        "dimensions": ["boundary", "config", "regression"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "persistence-schema.restore.roundtrip",
+        "statement": "A wipe is recoverable: backup -> wipe -> verify+restore reproduces the original row counts (local-only durability guarantee)",
+        "actor": "operator",
+        "preconditions": ["a verified backup of seeded data"],
+        "observable_outcome": "restored DB project/issue counts equal the pre-wipe live DB",
+        "evidence": ["packages/server/src/scripts/db-restore.ts:135", "packages/server/src/__tests__/backup.test.ts:281"],
+        "dimensions": ["regression", "risk", "workflow"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "persistence-schema.resolve.db-location",
+        "statement": "The DB file is resolved by existence (env override -> local checkout -> ~/.agentic-kanban), so a worktree dev-server transparently runs against a separate home-dir DB rather than the main board",
+        "actor": "services",
+        "preconditions": ["no DB_URL/AGENTIC_KANBAN_DIR override; checkout may or may not have a local kanban.db"],
+        "observable_outcome": "getDbUrl returns the checkout DB when present, else the home-dir DB; a worktree (no checked-out db) gets a different database/project-IDs",
+        "evidence": ["packages/server/src/db/data-dir.ts:9", "packages/server/src/db/data-dir.ts:15"],
+        "dimensions": ["config", "boundary", "risk"],
+        "risk": "medium",
+        "confidence": "medium"
+      }
+    ],
+    "permissions": [
+      { "actor": "operator", "behavior": "persistence-schema.cascade.delete-issue", "allowed": true, "notes": "single-user local app — no RBAC; permission dimension is trivial (one actor)" }
+    ],
+    "state_model": {
+      "states": ["empty", "migrated", "live", "drifted", "backed-up", "restored"],
+      "transitions": [
+        { "from": "empty", "to": "migrated", "trigger": "apply journaled migrations", "behavior": "persistence-schema.apply.migrations" },
+        { "from": "drifted", "to": "live", "trigger": "db:repair / startup FK alignment rebuilds tables", "behavior": "persistence-schema.repair.fk-drift" },
+        { "from": "live", "to": "backed-up", "trigger": "createBackup VACUUM INTO + verify", "behavior": "persistence-schema.backup.create-verified" },
+        { "from": "backed-up", "to": "restored", "trigger": "db:restore", "behavior": "persistence-schema.restore.roundtrip" }
+      ]
+    },
+    "error_states": [
+      { "id": "persistence-schema.error.fk-off", "statement": "PRAGMA foreign_keys OFF on a connection throws a LOUD connection-named error at startup", "evidence": "packages/server/src/__tests__/fk-alignment-startup.test.ts:54" },
+      { "id": "persistence-schema.error.busy-giveup", "statement": "After 3 busy attempts the original lock error is re-thrown ('giving up after 3 attempts')", "evidence": "packages/server/src/__tests__/db-retry.test.ts:67" },
+      { "id": "persistence-schema.error.cascade-incomplete", "statement": "If a child row survives a cascade walk, assert*CascadeComplete throws (deletion incompleteness is a hard error)", "evidence": "packages/shared/src/lib/cascade-delete.ts:43" },
+      { "id": "persistence-schema.error.backup-unverifiable", "statement": "A corrupt or empty-when-live-is-not backup is rejected by verifyBackup and never promoted", "evidence": "packages/server/src/__tests__/backup.test.ts:114" }
+    ],
+    "external_integrations": ["libsql/SQLite (kanban.db)", "drizzle-orm", "filesystem (DATA_DIR, backup dir, WAL/SHM sidecars)"],
+    "unknowns": [
+      { "question": "Does any startup assertion re-check journal_mode=WAL the way assertForeignKeysEnabled re-checks FK?", "why_unknown": "no WAL-specific re-assertion found; PRAGMA failures are logged non-fatal — only FK is independently re-asserted" },
+      { "question": "Is the (project_id, issue_number) unique index ever exercised by a duplicate-insert rejection test?", "why_unknown": "no test inserts a duplicate to assert the constraint fires; only MAX+1 allocation and per-project scoping are asserted" },
+      { "question": "Is getDbUrl's existence-based resolution / worktree fall-through covered by any test?", "why_unknown": "no test imports data-dir; behaviour known only from code + docs" },
+      { "question": "Does any test enumerate the schema FK graph to prove the hand-coded cascade walk covers every child table?", "why_unknown": "domain doc flags this residual gap — foreign_key_check only catches violations among seeded tables, so a never-seeded new child table escapes both walk and test" }
+    ]
+  },
+  "coverage": {
+    "behaviors": [
+      {
+        "ref": "persistence-schema.apply.migrations",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/migration-schema-drift.test.ts::applies all migrations to an empty DB without error", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["migration-correctness", "regression", "risk"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": "high (96 migration files; FK arch-review churn #858/#871/#881/#894)", "bugs": "0039 orphan collision; #858 FK drift" }
+      },
+      {
+        "ref": "persistence-schema.detect.schema-drift",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/migration-schema-drift.test.ts::migrated DB and Drizzle schema agree on tables and columns", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["migration-correctness", "boundary", "regression"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": "high", "bugs": "schema/migration divergence (#871)" }
+      },
+      {
+        "ref": "persistence-schema.enforce.fk-action-parity",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/migration-schema-drift.test.ts::migrated DB and Drizzle schema agree on FK actions (ON DELETE / ON UPDATE)", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["migration-correctness", "boundary", "regression", "risk"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": "high", "bugs": "#858 FK onDelete drift, #881" }
+      },
+      {
+        "ref": "persistence-schema.guard.journal-integrity",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/migration-schema-drift.test.ts::has no duplicate migration numbers on disk", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/migration-schema-drift.test.ts::every migration file on disk is referenced by the journal", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/migration-schema-drift.test.ts::every journal entry has a migration file on disk", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["migration-correctness", "boundary", "regression"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": "high", "bugs": "orphaned un-journaled 0039 collision" }
+      },
+      {
+        "ref": "persistence-schema.retry.busy-lock",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/db-retry.test.ts::retries on SQLITE_BUSY (code) and succeeds on second attempt", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/db-retry.test.ts::retries on 'database is locked' message and succeeds", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/db-retry.test.ts::gives up after 3 attempts and re-throws", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/db-retry.test.ts::does not retry non-busy errors", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["concurrency", "error-handling", "regression", "risk"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": "medium", "bugs": "parallel-agent lock 500s", "note": "unit-level (fake timers + mocked op); no real two-connection contention test, but the policy is fully asserted" }
+      },
+      {
+        "ref": "persistence-schema.cascade.delete-issue",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/issue-cascade-and-dep.repo.test.ts::deletes an issue and leaves no orphans across issue/workspace-referencing tables", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/issue-cascade-and-dep.repo.test.ts::deletes an issue with no children", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["state-transition", "boundary", "regression", "risk"],
+        "dimensions_missing": ["completeness-vs-unseeded-table"],
+        "history": { "churn_90d": "medium", "bugs": "#858 issue delete omitted issue-scoped children" },
+        "gap": {
+          "kind": "dimension-missing",
+          "missing_dimensions": ["completeness-vs-unseeded-table"],
+          "rationale": "Test seeds every KNOWN child table and asserts foreign_key_check clean, so it catches under-deletion of seeded tables. It does NOT enumerate the schema FK graph, so a NEW child table referencing issues that nobody adds to the walk (and nobody seeds in the test) escapes both. Strong coverage of today's graph; structurally cannot catch tomorrow's drift."
+        }
+      },
+      {
+        "ref": "persistence-schema.cascade.delete-workspace",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/issue-cascade-and-dep.repo.test.ts::deletes every table that references the workspace or its sessions", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["state-transition", "regression", "risk"],
+        "dimensions_missing": ["completeness-vs-unseeded-table"],
+        "history": { "churn_90d": "medium", "bugs": "shares #858 lineage" },
+        "gap": {
+          "kind": "dimension-missing",
+          "missing_dimensions": ["completeness-vs-unseeded-table"],
+          "rationale": "Same structural limit as delete-issue: only seeded child tables are proved empty; an unseeded future workspace-child escapes."
+        }
+      },
+      {
+        "ref": "persistence-schema.repair.fk-drift",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/fk-actions-repair.test.ts::detects FK-action drift on a legacy DB", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/fk-actions-repair.test.ts::rebuilds drifted tables to the schema's cascade behaviour, preserving rows", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/fk-actions-repair.test.ts::is idempotent — a second run finds no drift", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/fk-actions-repair.test.ts::replaces the FK clauses while preserving columns verbatim", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["migration-correctness", "boundary", "regression", "risk"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": "medium", "bugs": "#881 repair; #858 drift in the wild" }
+      },
+      {
+        "ref": "persistence-schema.assert.fk-enabled-startup",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/fk-alignment-startup.test.ts::passes when PRAGMA foreign_keys=ON took effect", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/fk-alignment-startup.test.ts::throws LOUD when FK enforcement is off (the swallowed-pragma hole)", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/fk-alignment-startup.test.ts::repairs FK-action drift on a legacy live DB at startup", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/fk-alignment-startup.test.ts::is a silent no-op on a DB whose FK actions already match", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["error-handling", "config", "regression", "risk"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": "medium", "bugs": "#894 swallowed PRAGMA + repair-not-on-startup" }
+      },
+      {
+        "ref": "persistence-schema.enforce.unique-issue-number",
+        "status": "partial",
+        "covered_by": [
+          { "test": "packages/mcp-server/src/__tests__/tools/db-utils.test.ts::returns max + 1 when issues exist", "strength": "asserts-outcome" },
+          { "test": "packages/mcp-server/src/__tests__/tools/db-utils.test.ts::is scoped per project — other projects' issues don't affect the count", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["boundary", "regression"],
+        "dimensions_missing": ["error-handling"],
+        "history": { "churn_90d": "low", "bugs": "none recorded" },
+        "gap": {
+          "kind": "dimension-missing",
+          "missing_dimensions": ["error-handling"],
+          "rationale": "Allocation logic (MAX+1, per-project scope) is asserted, but the DB-level uniqueness GUARANTEE — that a duplicate (project_id, issue_number) insert is rejected by idx_issues_project_id_issue_number — is never exercised. A concurrent double-allocate (two agents claiming the same #N) would only be caught by the index, which no test fires."
+        }
+      },
+      {
+        "ref": "persistence-schema.backup.create-verified",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/backup.test.ts::createBackup verifies ok and matches source counts", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/backup.test.ts::backup taken during an in-flight write is consistent (committed snapshot only)", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/backup.test.ts::returns null when db is missing or empty", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["regression", "risk", "concurrency"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": "medium", "bugs": "#856 scratch runaway; past silent empty-backup loss" }
+      },
+      {
+        "ref": "persistence-schema.backup.reject-bad",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/backup.test.ts::verifyBackup rejects a truncated/corrupt file", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/backup.test.ts::verifyBackup rejects a 0-project backup when live has projects", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/backup.test.ts::verifyBackup rejects a 0-issue backup when live has issues", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/backup.test.ts::does not promote a backup that fails verification and preserves the previous good backup", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["error-handling", "boundary", "regression", "risk"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": "medium", "bugs": "silent empty-backup loss" }
+      },
+      {
+        "ref": "persistence-schema.backup.rotate-prune",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/backup.test.ts::pruneBackups keeps exactly KEEP_LAST and never deletes the last one", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/backup.test.ts::reaps orphan .tmp/.promote/journal scratch from an interrupted backup (#856)", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/backup.test.ts::createBackup clears pre-existing scratch and leaves none behind (#856)", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/backup.test.ts::enforces a hard size cap on retained backups, keeping at least one (#856)", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["boundary", "config", "regression"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": "medium", "bugs": "#856 scratch filled C: and took dev server down" }
+      },
+      {
+        "ref": "persistence-schema.restore.roundtrip",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/backup.test.ts::db restore round-trip: seed -> backup -> wipe -> restore -> counts match", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["regression", "risk", "workflow"],
+        "dimensions_missing": ["error-handling"],
+        "history": { "churn_90d": "low", "bugs": "none" },
+        "gap": {
+          "kind": "dimension-missing",
+          "missing_dimensions": ["error-handling"],
+          "rationale": "Happy-path round-trip is proved, but the test copies the file directly rather than driving scripts/db-restore.ts; the CLI's refuse-when-live-locked guard and the pre-restore safety backup are not asserted."
+        }
+      },
+      {
+        "ref": "persistence-schema.resolve.db-location",
+        "status": "uncovered",
+        "covered_by": [],
+        "dimensions_covered": [],
+        "dimensions_missing": ["config", "boundary", "risk"],
+        "history": { "churn_90d": "low", "bugs": "worktree-runs-against-different-DB confusion (operational, not a code bug)" },
+        "gap": {
+          "kind": "no-test",
+          "missing_dimensions": ["config", "boundary"],
+          "rationale": "No test imports data-dir.ts. The existence-based resolution and the env-override precedence (DB_URL/AGENTIC_KANBAN_DIR -> local checkout -> ~/.agentic-kanban) are unasserted, despite being the mechanism behind the worktree-runs-against-a-different-database sharp edge and a high blast radius (~527)."
+        }
+      }
+    ],
+    "summary": {
+      "covered": 13,
+      "partial": 1,
+      "uncovered": 1,
+      "undocumented_implemented": 0,
+      "documented_missing": 0,
+      "score": 0.88,
+      "by_dimension": {
+        "migration-correctness": { "covered": 5, "partial": 0, "uncovered": 0 },
+        "concurrency": { "covered": 2, "partial": 0, "uncovered": 0 },
+        "error-handling": { "covered": 4, "partial": 1, "uncovered": 0 },
+        "state-transition": { "covered": 2, "partial": 0, "uncovered": 0 },
+        "boundary": { "covered": 6, "partial": 1, "uncovered": 1 },
+        "regression": { "covered": 12, "partial": 1, "uncovered": 0 },
+        "risk": { "covered": 9, "partial": 0, "uncovered": 1 },
+        "config": { "covered": 2, "partial": 0, "uncovered": 1 },
+        "workflow": { "covered": 1, "partial": 0, "uncovered": 0 },
+        "permission": { "covered": 0, "partial": 0, "uncovered": 0, "na_reason": "single-user local app — no RBAC" }
+      },
+      "weak_dimensions": ["config (db-location resolution unverified)", "completeness-vs-unseeded-table (cascade walk vs future child tables)", "error-handling (unique-constraint rejection + restore guards)"],
+      "top_gaps": [
+        {
+          "ref": "persistence-schema.cascade.delete-issue",
+          "priority": "P1",
+          "roi": 6.0,
+          "dimensions_to_add": ["completeness-vs-unseeded-table"],
+          "rationale": "Highest-value structural gap: deletion completeness depends on a hand-coded walk that the schema cannot enforce. A test that enumerates the schema's FK graph (every table referencing issues/workspaces) and asserts each is handled by the walk would catch the exact silent-orphan/FK-fail regression the current seed-based test cannot (a future unseeded child table). Core never-corrupt guarantee; medium churn around child tables. impact 5 x regression 3 / (exec 1.5 + maint 1) = 6.0"
+        },
+        {
+          "ref": "persistence-schema.enforce.unique-issue-number",
+          "priority": "P4",
+          "roi": 4.5,
+          "dimensions_to_add": ["error-handling"],
+          "rationale": "Assert the DB unique index actually rejects a duplicate (project_id, issue_number) insert — the real concurrency guarantee against two agents claiming the same #N. Cheap, deterministic, pins a constraint nothing currently fires. impact 3 x regression 3 / (exec 1 + maint 1) = 4.5"
+        },
+        {
+          "ref": "persistence-schema.resolve.db-location",
+          "priority": "P2",
+          "roi": 3.0,
+          "dimensions_to_add": ["config", "boundary"],
+          "rationale": "Only fully uncovered behaviour, high blast radius (~527) and the root of the worktree-different-DB footgun. A unit test over getDbUrl precedence (env override -> existing checkout db -> home-dir fall-through) is cheap and locks resolution. impact 3 x regression 2 / (exec 1 + maint 1) = 3.0"
+        }
+      ]
+    }
+  }
+}

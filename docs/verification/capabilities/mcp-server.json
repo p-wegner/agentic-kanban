@@ -1,0 +1,560 @@
+{
+  "slug": "mcp-server",
+  "behavior": {
+    "business_purpose": "The machine-facing front door of the board: an AI coding agent (Builder in a worktree, the Conductor monitor, a Smith analysis session) speaks Model Context Protocol over stdio and gets the same board operations a human gets in the UI/REST — file/move issues, spin up/merge/relaunch workspaces, query 'what are my agents doing', manage agent-skills, capture evidence — as named, typed tools, so the autonomous loop can manage its own work without a human or hand-rolled HTTP. The module owns no tables; its value is the policies it enforces at the agent boundary (active-project resolution, terminal-status merge-loss guard, workflow-edge legality, delegate-don't-reimplement for dangerous ops).",
+    "confidence": "high",
+    "source_paths": [
+      "packages/mcp-server/src/index.ts",
+      "packages/mcp-server/src/db-utils.ts",
+      "packages/mcp-server/src/tools/",
+      "packages/shared/src/lib/mcp-tool-definitions.ts",
+      "packages/shared/src/lib/outbound-webhook.ts"
+    ],
+    "actors": [
+      { "name": "ai-agent", "kind": "agent-subprocess", "notes": "Builder/Conductor/Smith — Claude Code, Codex, Copilot; the only real caller. Speaks JSON-RPC over stdio." },
+      { "name": "settings-operator", "kind": "human", "notes": "Indirectly shrinks the surface via the disabled_mcp_tools preference (Settings tool browser); no per-agent auth otherwise." }
+    ],
+    "entry_points": [
+      { "kind": "process", "ref": "main() over StdioServerTransport (index.ts:216,234)", "observable": "live JSON-RPC server; tools/list returns the registered catalog; logs counts to stderr only" },
+      { "kind": "mcp", "ref": "get_context", "observable": "returns active project info + issue counts by status + active-workspace count" },
+      { "kind": "mcp", "ref": "create_issue / create_issues_batch / list_issues / get_issue / update_issue / move_issue / delete_issue", "observable": "DB-direct issue CRUD + notifyBoard ping; bare-array output for list tools" },
+      { "kind": "mcp", "ref": "merge_workspace / launch_workspace / relaunch_workspace / get_workspace_diff", "observable": "fast structured pre-check then HTTP-delegate to REST :3001 for git/session ops" },
+      { "kind": "mcp", "ref": "create_agent_skill / list/get/export_agent_skills", "observable": "skill CRUD written to .claude/skills/<name>/SKILL.md; name validation" },
+      { "kind": "mcp", "ref": "ask_butler + butler_* family", "observable": "HTTP front over the per-project warm Butler session" },
+      { "kind": "mcp", "ref": "get_board_status", "observable": "per-issue agent state projection from shared classifiers" },
+      { "kind": "mcp", "ref": "attach_artifact / start_drive / update_dependencies_batch / contract_coupled_issues / openspec / propose_transition", "observable": "evidence capture, drive records, dependency-graph ops with cycle detection, living specs" }
+    ],
+    "behaviors": [
+      {
+        "id": "mcp-server.orient.context",
+        "statement": "get_context orients an agent: returns the active project, issue counts by status, and an active-workspace count",
+        "actor": "ai-agent",
+        "preconditions": ["an active project preference is set"],
+        "observable_outcome": "JSON with project{id,name}, status counts, activeWorkspaces; the active project resolves from the activeProjectId pref (not the first-inserted project)",
+        "evidence": ["packages/mcp-server/src/tools/get-context.ts:7", "packages/mcp-server/src/tools/get-context.ts:35"],
+        "dimensions": ["api", "capability", "config"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "mcp-server.resolve.active-project",
+        "statement": "Every project-scoped tool resolves to the passed projectId, else the activeProjectId pref, else fails with an actionable 'No active project' fix-it message",
+        "actor": "ai-agent",
+        "preconditions": [],
+        "observable_outcome": "with no projectId and no active pref → error text 'No active project'; with the pref set → operation lands in the active project, not the first inserted",
+        "evidence": ["packages/mcp-server/src/db-utils.ts:109", "packages/mcp-server/src/tools/get-context.ts:15"],
+        "dimensions": ["error", "config", "api"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "mcp-server.create.issue",
+        "statement": "create_issue inserts an issue with a per-project auto-incremented issue number and pings the board",
+        "actor": "ai-agent",
+        "preconditions": ["a resolvable project"],
+        "observable_outcome": "returns the new issue (issueNumber increments per project); row persisted; notifyBoard(projectId,'mcp_create_issue') fired",
+        "evidence": ["packages/mcp-server/src/tools/create-issue.ts:8", "packages/mcp-server/src/db-utils.ts:29"],
+        "dimensions": ["api", "capability"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "mcp-server.create.issues-batch",
+        "statement": "create_issues_batch atomically seeds N issues plus dependency/coupling edges in one transaction, rolling back entirely on any validation failure and rejecting cycles/self/duplicate edges",
+        "actor": "ai-agent",
+        "preconditions": ["a resolvable project"],
+        "observable_outcome": "consecutive issue numbers from current max; on validation failure (out-of-range index, self-dep, duplicate, cross-batch cycle) NOTHING persists",
+        "evidence": ["packages/mcp-server/src/tools/create-issues-batch.ts:1"],
+        "dimensions": ["api", "boundary", "error", "state-transition"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "mcp-server.list.issues",
+        "statement": "list_issues returns a project's issues as a bare JSON array, optionally filtered by status name",
+        "actor": "ai-agent",
+        "preconditions": ["a resolvable project"],
+        "observable_outcome": "content[0].text parses to an Array (not {issues}); status filter narrows to matching issues",
+        "evidence": ["packages/mcp-server/src/tools/list-issues.ts:1"],
+        "dimensions": ["api", "capability"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "mcp-server.update.issue",
+        "statement": "update_issue edits fields and walks status by name, reporting which fields changed and pinging the board",
+        "actor": "ai-agent",
+        "preconditions": ["issue exists"],
+        "observable_outcome": "updated[] contains changed field keys (priority/statusId); DB reflects them; unknown status name → 'not found' error listing valid names",
+        "evidence": ["packages/mcp-server/src/tools/update-issue.ts:8", "packages/mcp-server/src/db-utils.ts:191"],
+        "dimensions": ["api", "error", "state-transition"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "mcp-server.move.issue.terminal-guard",
+        "statement": "Moving an issue to a terminal status (Done/Cancelled) is blocked when it has an open, non-direct, unmerged workspace — the agent is told to merge_workspace first; direct/closed/no workspaces are allowed",
+        "actor": "ai-agent",
+        "preconditions": ["issue with an open workspace"],
+        "observable_outcome": "blocked move returns code OPEN_WORKSPACE_NOT_MERGED; closed/merged/direct/no-workspace moves succeed (movedTo=Done)",
+        "evidence": ["packages/mcp-server/src/tools/move-issue.ts:37", "packages/mcp-server/src/db-utils.ts:168"],
+        "dimensions": ["error", "state-transition", "regression", "risk"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "mcp-server.move.issue.workflow-edge",
+        "statement": "A workflow-driven issue may only move along a legal outgoing edge of its current node; an illegal jump is refused with the valid next stages and a pointer to propose_transition",
+        "actor": "ai-agent",
+        "preconditions": ["issue is on a workflow graph (currentNodeId set) with outgoing transitions"],
+        "observable_outcome": "illegal target → code WORKFLOW_TRANSITION_INVALID with the list of valid next stages; legal target proceeds",
+        "evidence": ["packages/mcp-server/src/tools/move-issue.ts:56"],
+        "dimensions": ["error", "state-transition", "workflow"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "mcp-server.merge.workspace.delegate",
+        "statement": "merge_workspace fast-fails missing/closed workspaces locally, then delegates the authoritative merge to the REST server (lock/backup/conflict-recovery) instead of re-implementing it",
+        "actor": "ai-agent",
+        "preconditions": ["workspaceId"],
+        "observable_outcome": "missing → WORKSPACE_NOT_FOUND, closed → WORKSPACE_CLOSED, no workingDir → WORKSPACE_WORKING_DIR_MISSING (no fetch); valid → POST /api/workspaces/:id/merge result passed through",
+        "evidence": ["packages/mcp-server/src/tools/merge-workspace.ts:8", "packages/mcp-server/src/tools/merge-workspace.ts:49"],
+        "dimensions": ["api", "error", "risk"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "mcp-server.launch.workspace",
+        "statement": "launch_workspace / relaunch_workspace pre-validate workspace state then delegate the spawn to the REST server; relaunch refuses a non-idle workspace",
+        "actor": "ai-agent",
+        "preconditions": ["workspaceId"],
+        "observable_outcome": "relaunch on active ws → WORKSPACE_NOT_IDLE (no fetch); structured not-found/closed/no-dir errors; valid → REST /launch result",
+        "evidence": ["packages/mcp-server/src/tools/launch-workspace.ts:66", "packages/mcp-server/src/tools/relaunch-workspace.ts:1"],
+        "dimensions": ["api", "error", "state-transition"],
+        "risk": "high",
+        "confidence": "medium"
+      },
+      {
+        "id": "mcp-server.get.board-status",
+        "statement": "get_board_status answers 'what are my agents doing right now' — totals plus per-in-progress-issue workspace state and computed diff stats, excluding Done/Cancelled unless includeClosed, with no MCP-side cache",
+        "actor": "ai-agent",
+        "preconditions": ["a resolvable project"],
+        "observable_outcome": "totals{totalIssues,inProgress,activeWorkspaces,runningSessions}; per-issue workspace.branch + diffStats; includeClosed toggles terminal issues; reads reflect DB immediately after a status change",
+        "evidence": ["packages/mcp-server/src/tools/get-board-status.ts:8", "packages/mcp-server/src/tools/get-board-status.ts:22"],
+        "dimensions": ["api", "capability", "config"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "mcp-server.delete.cascade",
+        "statement": "delete_issue / delete_workspace remove the entity and every scoped child row (sessions, messages, diff comments, artifacts, comments, repos, transitions, retry decisions, tags, dependencies) through the shared cascade, leaving siblings intact",
+        "actor": "ai-agent",
+        "preconditions": ["entity exists with children"],
+        "observable_outcome": "{id,deleted:true}; all child tables emptied for that entity; other issues/workspaces untouched; notifyBoard fired",
+        "evidence": ["packages/mcp-server/src/tools/delete-issue.ts:1", "packages/mcp-server/src/tools/delete-workspace.ts:1"],
+        "dimensions": ["api", "state-transition", "risk"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "mcp-server.attach.artifact",
+        "statement": "attach_artifact records proof-of-work (text/link/image/webm) keyed to an issue or resolved from a workspaceId, surfacing it on the board",
+        "actor": "ai-agent",
+        "preconditions": ["a target issue or workspace"],
+        "observable_outcome": "artifact row persisted with type/content/caption; workspaceId resolves to its issue; notifyBoard('mcp_attach_artifact')",
+        "evidence": ["packages/mcp-server/src/tools/attach-artifact.ts:9"],
+        "dimensions": ["api", "capability"],
+        "risk": "low",
+        "confidence": "high"
+      },
+      {
+        "id": "mcp-server.manage.dependencies-batch",
+        "statement": "update_dependencies_batch / contract_coupled_issues mutate the dependency graph idempotently, rejecting cycles and self-dependencies and refusing to contract components with open workspaces",
+        "actor": "ai-agent",
+        "preconditions": ["issues exist"],
+        "observable_outcome": "existing edges skipped not failed; cycle/self rejected with no mutation; coupled contraction blocked when a member has an open workspace or the selection is partial",
+        "evidence": ["packages/mcp-server/src/tools/update-dependencies-batch.ts:1", "packages/mcp-server/src/tools/contract-coupled-issues.ts:1"],
+        "dimensions": ["api", "error", "state-transition"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "mcp-server.front.butler",
+        "statement": "The butler_* tool family is a thin HTTP front over the per-project warm Butler session (interrupt/set-model/set-profile/state), surfacing server error bodies and a friendly message when the REST server is unreachable",
+        "actor": "ai-agent",
+        "preconditions": ["projectId; REST server reachable for success"],
+        "observable_outcome": "POST/GET to /projects/:id/butler/* returns the server JSON; non-2xx body propagated; ECONNREFUSED → 'Failed to reach the butler'",
+        "evidence": ["packages/mcp-server/src/tools/ask-butler.ts:15", "packages/mcp-server/src/tools/butler-state.ts:1"],
+        "dimensions": ["api", "error"],
+        "risk": "low",
+        "confidence": "high"
+      },
+      {
+        "id": "mcp-server.catalog.parity",
+        "statement": "The advertised MCP_TOOL_DEFINITIONS catalog and the runtime tools/list stay in exact name-parity in BOTH directions, and every runtime tool ships a non-empty description",
+        "actor": "ai-agent",
+        "preconditions": ["server running"],
+        "observable_outcome": "advertised ⊆ registered (no phantom tool like the old mark_ready_for_merge) AND registered ⊆ advertised; mark_ready_for_merge present; no blank descriptions",
+        "evidence": ["packages/mcp-server/src/index.ts:104", "packages/shared/src/lib/mcp-tool-definitions.ts:40"],
+        "dimensions": ["api", "regression", "config"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "mcp-server.create.agent-skill",
+        "statement": "create_agent_skill rejects names containing '/', '\\' or '..' (they become filesystem paths) and enforces per-scope uniqueness before writing SKILL.md",
+        "actor": "ai-agent",
+        "preconditions": [],
+        "observable_outcome": "path-traversal/illegal name → validation error, no skill written; duplicate name in scope → rejected; valid → skill persisted",
+        "evidence": ["packages/mcp-server/src/tools/create-agent-skill.ts:19", "packages/mcp-server/src/tools/create-agent-skill.ts:26"],
+        "dimensions": ["error", "boundary", "permission"],
+        "risk": "medium",
+        "confidence": "medium"
+      },
+      {
+        "id": "mcp-server.govern.disabled-tools",
+        "statement": "A tool whose name is in the disabled_mcp_tools preference is never registered, so it does not appear in tools/list and cannot be called for that session",
+        "actor": "settings-operator",
+        "preconditions": ["disabled_mcp_tools pref lists a tool"],
+        "observable_outcome": "the disabled tool is absent from tools/list; calling it returns method-not-found",
+        "evidence": ["packages/mcp-server/src/index.ts:198", "packages/mcp-server/src/index.ts:221"],
+        "dimensions": ["permission", "config", "api"],
+        "risk": "medium",
+        "confidence": "medium"
+      },
+      {
+        "id": "mcp-server.fire.webhook",
+        "statement": "A status-change mutation (move_issue/update_issue) fires the project's outbound webhook best-effort, but only after the URL is validated loopback-only (the single egress boundary against a malicious pref)",
+        "actor": "ai-agent",
+        "preconditions": ["outbound_webhook_url_<projectId> pref set"],
+        "observable_outcome": "valid loopback URL → POST issue-status payload; non-loopback/non-http(s) host → not fired; mutation succeeds regardless of webhook outcome",
+        "evidence": ["packages/mcp-server/src/tools/move-issue.ts:92", "packages/shared/src/lib/outbound-webhook.ts:44"],
+        "dimensions": ["error", "config", "risk"],
+        "risk": "medium",
+        "confidence": "medium"
+      },
+      {
+        "id": "mcp-server.resilience.stay-up",
+        "statement": "Unhandled async rejections are caught and logged to stderr so the stdio process stays connected; a stray write must never corrupt stdout (the JSON-RPC stream)",
+        "actor": "ai-agent",
+        "preconditions": ["a tool handler async-rejects"],
+        "observable_outcome": "the server keeps answering subsequent requests; logs go to stderr only; stdout stays pure JSON-RPC",
+        "evidence": ["packages/mcp-server/src/index.ts:246", "packages/mcp-server/src/index.ts:236"],
+        "dimensions": ["error", "risk", "regression"],
+        "risk": "high",
+        "confidence": "medium"
+      }
+    ],
+    "permissions": [
+      { "actor": "ai-agent", "behavior": "all tools", "allowed": true, "notes": "No per-agent auth — any process reaching kanban.db over stdio has full board authority. The only authority knob is the global disabled_mcp_tools list (coarse, per-key). Intentional for a local-first single-user app; permission is near-trivial as a dimension." }
+  ],
+  "state_model": {
+    "states": ["issue: Backlog/Todo/In Progress/In Review/AI Reviewed/Done/Cancelled", "workspace: active/idle/closed (+isDirect)"],
+    "transitions": [
+      { "from": "any non-terminal", "to": "Done/Cancelled", "trigger": "move_issue/update_issue", "behavior": "mcp-server.move.issue.terminal-guard", "guard": "refused if open non-direct unmerged workspace" },
+      { "from": "workflow node", "to": "edge target", "trigger": "move_issue", "behavior": "mcp-server.move.issue.workflow-edge", "guard": "must be a legal outgoing edge" }
+    ]
+  },
+  "error_states": [
+    { "id": "mcp-server.err.no-active-project", "statement": "'No active project. Run pnpm cli -- register <path> first.' when no projectId and no active pref", "evidence": "db-utils.ts:109" },
+    { "id": "mcp-server.err.open-workspace-not-merged", "statement": "code OPEN_WORKSPACE_NOT_MERGED on terminal move with open unmerged ws", "evidence": "move-issue.ts:45" },
+    { "id": "mcp-server.err.workflow-transition-invalid", "statement": "code WORKFLOW_TRANSITION_INVALID on illegal workflow jump", "evidence": "move-issue.ts:72" },
+    { "id": "mcp-server.err.workspace-not-found", "statement": "structured WORKSPACE_NOT_FOUND / WORKSPACE_CLOSED / WORKSPACE_WORKING_DIR_MISSING / WORKSPACE_NOT_IDLE before any fetch", "evidence": "workspace-edge-errors.test.ts:77" },
+    { "id": "mcp-server.err.status-not-found", "statement": "unknown status name → error listing valid names", "evidence": "db-utils.ts:191" },
+    { "id": "mcp-server.err.dependency-cycle", "statement": "cycle/self-dependency rejected with no mutation", "evidence": "update-dependencies-batch.ts:1" },
+    { "id": "mcp-server.err.butler-unreachable", "statement": "'Failed to reach the butler' on ECONNREFUSED", "evidence": "butler-tools.test.ts:91" }
+  ],
+  "external_integrations": ["kanban.db (libsql/Drizzle, shared-database integration)", "REST server :3001 (conformist HTTP delegation for git/session/merge/butler)", "git CLI (get_workspace_diff)", "filesystem (.claude/skills/<name>/SKILL.md)", "outbound webhook (loopback-only egress)"],
+  "unknowns": [
+    { "question": "Is the disabled_mcp_tools registration gate exercised by any test, and does a disabled tool truly vanish from tools/list at runtime?", "why_unknown": "No test references disabled_mcp_tools; verified only from index.ts:198 code." },
+    { "question": "Does create_agent_skill actually reject '..'/'/'/'\\' names and per-scope duplicates end-to-end (incl. the SKILL.md write)?", "why_unknown": "No agent-skill test found; behaviour inferred from create-agent-skill.ts:19-26." },
+    { "question": "Is the outbound webhook fired-and-validated loopback-only path observable in a test?", "why_unknown": "No test fires a webhook; loopback validation verified only in shared/outbound-webhook.ts." },
+    { "question": "Does get_context's activeWorkspaces count bleed across projects in a multi-project board (suspected latent bug — query lacks projectId predicate)?", "why_unknown": "Domain doc flags it from get-context.ts:35; no test pins per-project scoping of the count." },
+    { "question": "Is async-rejection resilience (process stays up after a handler throws) observable without spawning the real stdio server?", "why_unknown": "Only the spawned mcp-tools.test.ts exercises the live process and it never injects a throwing handler." }
+  ]
+},
+  "coverage": {
+    "behaviors": [
+      {
+        "ref": "mcp-server.orient.context",
+        "status": "partial",
+        "covered_by": [
+          { "test": "packages/mcp-server/src/__tests__/mcp-tools.test.ts::get_context returns project info", "strength": "asserts-outcome" },
+          { "test": "packages/mcp-server/src/__tests__/mcp-tools.test.ts::get_context with no projectId returns the active project, not the first inserted", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["api", "capability", "config"],
+        "dimensions_missing": ["boundary"],
+        "history": { "churn_90d": null, "bugs": 1, "last_regression": "activeWorkspaces global count (doc-flagged)" },
+        "gap": { "kind": "dimension-missing", "missing_dimensions": ["boundary"], "rationale": "activeWorkspaces count is asserted with a single project; the suspected cross-project bleed (count not scoped by projectId, get-context.ts:35) is never asserted in a multi-project board." }
+      },
+      {
+        "ref": "mcp-server.resolve.active-project",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/mcp-server/src/__tests__/mcp-tools.test.ts::get_context returns error when no activeProjectId preference is set", "strength": "asserts-outcome" },
+          { "test": "packages/mcp-server/src/__tests__/mcp-tools.test.ts::create_issue with no projectId creates in the active project", "strength": "asserts-outcome" },
+          { "test": "packages/mcp-server/src/__tests__/tools/create-issue.test.ts::falls back to the active project when no projectId is given, and errors when none is set", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["error", "config", "api"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 0, "last_regression": null }
+      },
+      {
+        "ref": "mcp-server.create.issue",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/mcp-server/src/__tests__/tools/create-issue.test.ts::creates an issue in the given project with an auto-incremented issue number", "strength": "asserts-outcome" },
+          { "test": "packages/mcp-server/src/__tests__/mcp-tools.test.ts::create_issue creates a new issue", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["api", "capability"],
+        "dimensions_missing": ["concurrency"],
+        "history": { "churn_90d": null, "bugs": 0, "last_regression": null },
+        "gap": { "kind": "dimension-missing", "missing_dimensions": ["concurrency"], "rationale": "issue-number allocation retries up to 3x on the (project_id,issue_number) unique collision (create-issue.ts:8); the parallel-race retry path is never exercised — only sequential increment is asserted." }
+      },
+      {
+        "ref": "mcp-server.create.issues-batch",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/mcp-server/src/__tests__/tools/create-issues-batch.test.ts::rolls back on validation failure — no issues persisted", "strength": "asserts-outcome" },
+          { "test": "packages/mcp-server/src/__tests__/tools/create-issues-batch.test.ts::rejects a cycle across the batch's directional edges", "strength": "asserts-outcome" },
+          { "test": "packages/mcp-server/src/__tests__/tools/create-issues-batch.test.ts::seeds issues AND dependency edges atomically in one transaction (#765)", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["api", "boundary", "error", "state-transition"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 0, "last_regression": "#765/#918 edge-seeding" }
+      },
+      {
+        "ref": "mcp-server.list.issues",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/mcp-server/src/__tests__/tools/list-issues.test.ts::returns all issues for a project", "strength": "asserts-outcome" },
+          { "test": "packages/mcp-server/src/__tests__/tools/list-issues.test.ts::filters by status name", "strength": "asserts-outcome" },
+          { "test": "packages/mcp-server/src/__tests__/mcp-tools.test.ts::list_issues returns issues array", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["api", "capability"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 0, "last_regression": "bare-array output gotcha" }
+      },
+      {
+        "ref": "mcp-server.update.issue",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/mcp-server/src/__tests__/tools/update-issue.test.ts::updates priority and moves the issue to a new status by name", "strength": "asserts-outcome" },
+          { "test": "packages/mcp-server/src/__tests__/tools/update-issue.test.ts::returns an error for an unknown status name", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["api", "error", "state-transition"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 0, "last_regression": null }
+      },
+      {
+        "ref": "mcp-server.move.issue.terminal-guard",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/mcp-server/src/__tests__/tools/terminal-done-guard.test.ts::blocks move to Done when issue has an open unmerged workspace", "strength": "asserts-outcome" },
+          { "test": "packages/mcp-server/src/__tests__/tools/terminal-done-guard.test.ts::allows move to Done when issue has an open DIRECT workspace (no branch to merge)", "strength": "asserts-outcome" },
+          { "test": "packages/mcp-server/src/__tests__/tools/terminal-done-guard.test.ts::blocks statusName=Done when issue has an open unmerged workspace", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["error", "state-transition", "regression", "risk"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 1, "last_regression": "AK-535 silent merge loss" }
+      },
+      {
+        "ref": "mcp-server.move.issue.workflow-edge",
+        "status": "uncovered",
+        "covered_by": [],
+        "dimensions_covered": [],
+        "dimensions_missing": ["error", "state-transition", "workflow"],
+        "history": { "churn_90d": null, "bugs": 0, "last_regression": null },
+        "gap": { "kind": "no-test", "missing_dimensions": ["error", "state-transition", "workflow"], "rationale": "WORKFLOW_TRANSITION_INVALID (move-issue.ts:56) — refusing an illegal workflow-graph jump and returning the valid next stages — has no test. terminal-done-guard covers only the terminal guard, not edge legality. Configurable workflow graphs make this a real, reachable path." }
+      },
+      {
+        "ref": "mcp-server.merge.workspace.delegate",
+        "status": "partial",
+        "covered_by": [
+          { "test": "packages/mcp-server/src/__tests__/tools/workspace-edge-errors.test.ts::merge_workspace returns a structured error when the workspace is missing", "strength": "asserts-outcome" },
+          { "test": "packages/mcp-server/src/__tests__/tools/workspace-edge-errors.test.ts::merge_workspace returns a structured error when the workspace is closed", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["error"],
+        "dimensions_missing": ["api", "risk"],
+        "history": { "churn_90d": null, "bugs": 0, "last_regression": null },
+        "gap": { "kind": "outcome-not-asserted", "missing_dimensions": ["api", "risk"], "rationale": "Only the pre-fetch fast-fail errors are asserted. The success path — that a valid merge_workspace actually POSTs /api/workspaces/:id/merge and passes the server's result (incl. 409 lock / 503 verify-fail / conflict) back through — is never asserted." }
+      },
+      {
+        "ref": "mcp-server.launch.workspace",
+        "status": "partial",
+        "covered_by": [
+          { "test": "packages/mcp-server/src/__tests__/tools/workspace-edge-errors.test.ts::relaunch_workspace returns a structured error for non-idle workspaces before launch", "strength": "asserts-outcome" },
+          { "test": "packages/mcp-server/src/__tests__/tools/workspace-edge-errors.test.ts::relaunch_workspace returns a structured error when the workspace is missing", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["error", "state-transition"],
+        "dimensions_missing": ["api"],
+        "history": { "churn_90d": null, "bugs": 0, "last_regression": null },
+        "gap": { "kind": "outcome-not-asserted", "missing_dimensions": ["api"], "rationale": "relaunch's WORKSPACE_NOT_IDLE and missing/closed errors are asserted; the actual delegation to REST /launch and its passthrough result are not. launch_workspace success path untested." }
+      },
+      {
+        "ref": "mcp-server.get.board-status",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/mcp-server/src/__tests__/tools/get-board-status.test.ts::reports in-progress issues with workspace state and computed diff stats", "strength": "asserts-outcome" },
+          { "test": "packages/mcp-server/src/__tests__/tools/get-board-status.test.ts::excludes Done/Cancelled issues by default and includes them when includeClosed is true", "strength": "asserts-outcome" },
+          { "test": "packages/mcp-server/src/__tests__/tools/get-board-status.test.ts::reflects updated Done count immediately after an issue is merged (no cache in MCP path)", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["api", "capability", "config"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 0, "last_regression": "board-cache-stale-after-PATCH class" }
+      },
+      {
+        "ref": "mcp-server.delete.cascade",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/mcp-server/src/__tests__/tools/delete-cascade.test.ts::delete_workspace removes every workspace-scoped child row through the shared cascade", "strength": "asserts-outcome" },
+          { "test": "packages/mcp-server/src/__tests__/tools/delete-cascade.test.ts::delete_issue removes issue-scoped rows and workspace children through the shared cascade", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["api", "state-transition", "risk"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 0, "last_regression": null }
+      },
+      {
+        "ref": "mcp-server.attach.artifact",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/mcp-server/src/__tests__/tools/attach-artifact.test.ts::attaches a text artifact to an issue", "strength": "asserts-outcome" },
+          { "test": "packages/mcp-server/src/__tests__/tools/attach-artifact.test.ts::resolves the issue from workspaceId", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["api", "capability"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 0, "last_regression": null }
+      },
+      {
+        "ref": "mcp-server.manage.dependencies-batch",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/mcp-server/src/__tests__/tools/update-dependencies-batch.test.ts::rejects a batch that introduces a cycle", "strength": "asserts-outcome" },
+          { "test": "packages/mcp-server/src/__tests__/tools/update-dependencies-batch.test.ts::adds multiple edges idempotently — already-existing skipped not failed", "strength": "asserts-outcome" },
+          { "test": "packages/mcp-server/src/__tests__/tools/contract-coupled-issues.test.ts::rejects components with open workspaces before mutating", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["api", "error", "state-transition"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 0, "last_regression": null }
+      },
+      {
+        "ref": "mcp-server.front.butler",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/mcp-server/src/__tests__/tools/butler-tools.test.ts::butler_set_model POSTs the model body to /model", "strength": "asserts-outcome" },
+          { "test": "packages/mcp-server/src/__tests__/tools/butler-tools.test.ts::returns the server's error message on non-2xx", "strength": "asserts-outcome" },
+          { "test": "packages/mcp-server/src/__tests__/tools/butler-tools.test.ts::returns a friendly message when the server is unreachable", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["api", "error"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 0, "last_regression": null },
+        "gap": { "kind": "dimension-missing", "missing_dimensions": [], "rationale": "butler_interrupt/set-model/set-profile/state fully covered; ask_butler itself (the primary /butler/ask front) is not directly tested but shares the same wrapper — low residual risk." }
+      },
+      {
+        "ref": "mcp-server.catalog.parity",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/mcp-server/src/__tests__/mcp-tools.test.ts::the MCP_TOOL_DEFINITIONS catalog and the runtime tools/list stay in exact name-parity", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["api", "regression", "config"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 1, "last_regression": "mark_ready_for_merge unregistered (fffc1b85)" }
+      },
+      {
+        "ref": "mcp-server.create.agent-skill",
+        "status": "uncovered",
+        "covered_by": [],
+        "dimensions_covered": [],
+        "dimensions_missing": ["error", "boundary", "permission"],
+        "history": { "churn_90d": null, "bugs": 0, "last_regression": null },
+        "gap": { "kind": "no-test", "missing_dimensions": ["error", "boundary", "permission"], "rationale": "No test exercises create_agent_skill. The path-traversal guard (names with '/','\\','..' become .claude/skills/<name>/SKILL.md filesystem paths) and per-scope uniqueness (create-agent-skill.ts:19,26) are a security-relevant rejection path with zero coverage." }
+      },
+      {
+        "ref": "mcp-server.govern.disabled-tools",
+        "status": "uncovered",
+        "covered_by": [],
+        "dimensions_covered": [],
+        "dimensions_missing": ["permission", "config", "api"],
+        "history": { "churn_90d": null, "bugs": 0, "last_regression": null },
+        "gap": { "kind": "no-test", "missing_dimensions": ["permission", "config", "api"], "rationale": "The disabled_mcp_tools registration gate (index.ts:198) — the ONLY authority knob on the surface — is untested. No test asserts that a listed tool is absent from tools/list and uncallable. Client-side toggle UI tests (mcp-tool-toggle.test.ts) cover the pref editor, not the server gate." }
+      },
+      {
+        "ref": "mcp-server.fire.webhook",
+        "status": "uncovered",
+        "covered_by": [],
+        "dimensions_covered": [],
+        "dimensions_missing": ["error", "config", "risk"],
+        "history": { "churn_90d": null, "bugs": 0, "last_regression": null },
+        "gap": { "kind": "no-test", "missing_dimensions": ["error", "config", "risk"], "rationale": "No MCP test fires the outbound webhook on a status change, nor asserts the loopback-only egress validation (outbound-webhook.ts:44) that is the one SSRF boundary against a malicious outbound_webhook_url_<projectId> pref. Security-relevant and uncovered at the MCP call site." }
+      },
+      {
+        "ref": "mcp-server.resilience.stay-up",
+        "status": "uncovered",
+        "covered_by": [],
+        "dimensions_covered": [],
+        "dimensions_missing": ["error", "risk", "regression"],
+        "history": { "churn_90d": null, "bugs": 0, "last_regression": null },
+        "gap": { "kind": "no-test", "missing_dimensions": ["error", "risk", "regression"], "rationale": "The async-rejection-swallow / stdout-purity resilience policy (index.ts:236,246) — a stray rejection must not drop the stdio connection or corrupt the JSON-RPC stream — has no test. High blast radius (a crash makes every board op fail for the agent) but hard to assert without injecting a throwing handler into the spawned process." }
+      }
+    ],
+    "summary": {
+      "covered": 11,
+      "partial": 2,
+      "uncovered": 5,
+      "undocumented_implemented": 0,
+      "documented_missing": 0,
+      "score": 0.63,
+      "by_dimension": {
+        "api": { "covered": 9, "partial": 2, "uncovered": 3 },
+        "error": { "covered": 6, "partial": 1, "uncovered": 4 },
+        "state-transition": { "covered": 6, "partial": 1, "uncovered": 1 },
+        "config": { "covered": 4, "partial": 0, "uncovered": 2 },
+        "permission": { "covered": 0, "partial": 0, "uncovered": 2 },
+        "regression": { "covered": 3, "partial": 0, "uncovered": 1 },
+        "risk": { "covered": 3, "partial": 1, "uncovered": 2 },
+        "boundary": { "covered": 1, "partial": 1, "uncovered": 1 },
+        "workflow": { "covered": 0, "partial": 0, "uncovered": 1 },
+        "concurrency": { "covered": 0, "partial": 0, "uncovered": 1 }
+      },
+      "weak_dimensions": ["permission", "workflow", "concurrency", "config(security egress)"],
+      "top_gaps": [
+        {
+          "ref": "mcp-server.move.issue.workflow-edge",
+          "priority": "P1",
+          "roi": 4.5,
+          "dimensions_to_add": ["error", "state-transition", "workflow"],
+          "rationale": "A core, reachable mutation guard (WORKFLOW_TRANSITION_INVALID) with zero coverage on a board that supports configurable workflow graphs. Cheap to test at the registrar level (seed a workflow node, attempt an illegal jump, assert the code + valid-next-stages list). Sits right beside the well-covered terminal guard — symmetry gap."
+        },
+        {
+          "ref": "mcp-server.govern.disabled-tools",
+          "priority": "P0",
+          "roi": 4.0,
+          "dimensions_to_add": ["permission", "config", "api"],
+          "rationale": "The single authority/governance knob of an unauthenticated surface, completely untested. If the gate silently breaks, an 'disabled' tool stays callable — a permission regression with no failing test. Assert that a tool in disabled_mcp_tools is absent from tools/list and uncallable."
+        },
+        {
+          "ref": "mcp-server.create.agent-skill",
+          "priority": "P1",
+          "roi": 3.5,
+          "dimensions_to_add": ["error", "boundary", "permission"],
+          "rationale": "Path-traversal rejection (names → filesystem paths) is security-relevant and untested. Negative-input test is cheap and high-value: assert '../x', 'a/b', 'a\\\\b' rejected with no SKILL.md written, and per-scope duplicate rejected."
+        },
+        {
+          "ref": "mcp-server.fire.webhook",
+          "priority": "P1",
+          "roi": 3.2,
+          "dimensions_to_add": ["error", "config", "risk"],
+          "rationale": "Loopback-only egress is the only SSRF boundary; firing a webhook from a status change is best-effort and unverified at the MCP call site. Assert a non-loopback pref URL is not fetched and a loopback one is, and that the mutation succeeds regardless."
+        },
+        {
+          "ref": "mcp-server.merge.workspace.delegate",
+          "priority": "P1",
+          "roi": 3.0,
+          "dimensions_to_add": ["api", "risk"],
+          "rationale": "Highest-risk delegation (merge) only has its pre-fetch error paths asserted; the success delegation + server-result passthrough (incl. 409/503/conflict) is unverified. Stub fetch and assert the POST target + passthrough body."
+        }
+      ]
+    }
+  }
+}
