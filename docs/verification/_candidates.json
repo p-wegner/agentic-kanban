@@ -1,0 +1,5204 @@
+{
+  "issues-board": {
+    "name": "Issues & Board (kanban core)",
+    "source_basenames": [
+      "issues",
+      "projects",
+      "project-statuses",
+      "tags",
+      "issue-dependencies",
+      "issue.service",
+      "board-aggregation.service",
+      "board-column.service",
+      "board-status",
+      "board-status-classifiers",
+      "issue.repository",
+      "issue-number.repository",
+      "board-status.repository",
+      "project.repository",
+      "issue-summary-projection",
+      "dependency-graph",
+      "issue-dependency.service",
+      "issue-error",
+      "milestones"
+    ],
+    "candidate_count": 100,
+    "candidates": [
+      {
+        "file": "packages/server/src/__tests__/issues-routes-edge-cases.test.ts",
+        "titles": 66,
+        "why": [
+          "imports:issues,tags",
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workflow-engine.test.ts",
+        "titles": 33,
+        "why": [
+          "imports:issue.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/issues-batch.test.ts",
+        "titles": 21,
+        "why": [
+          "imports:issues",
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/api.test.ts",
+        "titles": 117,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/issue-number.test.ts",
+        "titles": 14,
+        "why": [
+          "imports:issues",
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-column-count-invariant.test.ts",
+        "titles": 8,
+        "why": [
+          "imports:projects,issues",
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-etag-fast-path.test.ts",
+        "titles": 7,
+        "why": [
+          "imports:projects",
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/coupling-batch-and-contract-mode.test.ts",
+        "titles": 15,
+        "why": [
+          "imports:issue.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/issues-slim.test.ts",
+        "titles": 5,
+        "why": [
+          "imports:issues",
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/shared/__tests__/coupling-contraction.test.ts",
+        "titles": 15,
+        "why": [
+          "imports:dependency-graph"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-cache-workspace-lifecycle-invalidation.test.ts",
+        "titles": 2,
+        "why": [
+          "imports:projects",
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/issue-artifacts-route.test.ts",
+        "titles": 2,
+        "why": [
+          "imports:issues",
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/issue-summary-projection.test.ts",
+        "titles": 12,
+        "why": [
+          "imports:issue-summary-projection"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/terminal-move-guard.test.ts",
+        "titles": 11,
+        "why": [
+          "imports:issue.service"
+        ]
+      },
+      {
+        "file": "packages/shared/__tests__/board-status-classifiers.test.ts",
+        "titles": 11,
+        "why": [
+          "imports:board-status-classifiers"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-rebuild-coalescing.test.ts",
+        "titles": 7,
+        "why": [
+          "imports:board-aggregation.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-status.test.ts",
+        "titles": 7,
+        "why": [
+          "imports:board-status"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/issue-update-fields.test.ts",
+        "titles": 7,
+        "why": [
+          "imports:issue.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-cache-merge-invalidation.test.ts",
+        "titles": 6,
+        "why": [
+          "imports:issue.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/health-route-deps-aware.test.ts",
+        "titles": 5,
+        "why": [
+          "imports:projects"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/quality-metrics.service.test.ts",
+        "titles": 5,
+        "why": [
+          "imports:project.repository"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-cache-patch-invalidation.test.ts",
+        "titles": 4,
+        "why": [
+          "imports:issue.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/close-workspace-on-terminal-issue.test.ts",
+        "titles": 4,
+        "why": [
+          "imports:issue.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/issue-create-workflow-status.test.ts",
+        "titles": 4,
+        "why": [
+          "imports:issue.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/milestones-summary.test.ts",
+        "titles": 2,
+        "why": [
+          "imports:milestones"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/registration-default-statuses.test.ts",
+        "titles": 2,
+        "why": [
+          "imports:issue.repository"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/tags.test.ts",
+        "titles": 29,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/dependency-graph-edge.test.ts",
+        "titles": 18,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/board.test.ts",
+        "titles": 14,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-events.test.ts",
+        "titles": 24,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/compress-middleware.test.ts",
+        "titles": 10,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-notify-route.test.ts",
+        "titles": 7,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/boardColumnSort.test.ts",
+        "titles": 17,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/reorderIssues.test.ts",
+        "titles": 16,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/issue-detail-bundle.test.ts",
+        "titles": 4,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/boardDataReconcile.test.ts",
+        "titles": 14,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/issue-tag-assignment.test.ts",
+        "titles": 3,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/issue-ai-touched-files.test.ts",
+        "titles": 13,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/issueCardDisplay.test.ts",
+        "titles": 13,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/tableView-bulk-ops.test.ts",
+        "titles": 3,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/create-issues-batch.test.ts",
+        "titles": 13,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/api/tags.test.ts",
+        "titles": 12,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/skeleton-board.test.ts",
+        "titles": 2,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-status-entry.test.ts",
+        "titles": 12,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/profileOptionLabels.test.ts",
+        "titles": 11,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-risk-digest.service.test.ts",
+        "titles": 10,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/createIssuePayload.test.ts",
+        "titles": 10,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/issueMoveHelpers.test.ts",
+        "titles": 10,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/settings-tags.test.ts",
+        "titles": 9,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/issue-comments.test.ts",
+        "titles": 9,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/api/issues.test.ts",
+        "titles": 8,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/issue-dependencies.test.ts",
+        "titles": 8,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/issue-cascade-and-dep.repo.test.ts",
+        "titles": 8,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/reconcile-merged-issue.test.ts",
+        "titles": 8,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/IssueCard.test.tsx",
+        "titles": 8,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/boardSavedViews.test.ts",
+        "titles": 8,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/selectedIssueSync.test.ts",
+        "titles": 8,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/priority-sort.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-health-events-route.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/issue-activity.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/issue-merged-commits.service.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/issue-transition-on-interrupted-merge.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/boardKeyboardNav.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/boardStats.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/issue-scoped-workspace-list.test.ts",
+        "titles": 6,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/api/board-workspace-summary.test.ts",
+        "titles": 5,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/issue-description-markdown.test.ts",
+        "titles": 5,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-monitor-skill.test.ts",
+        "titles": 5,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/drive-dashboard.service.test.ts",
+        "titles": 5,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/get-board-status.test.ts",
+        "titles": 5,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/api/board-events.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/api/board-notify.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/api/board.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/api/issue-artifacts.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/board-stats-bar.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/issue-card-hover-buttons.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/issue-description-paste.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/issue-number-unique.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/session-output-etag.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/IssueActivitySection.test.tsx",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/IssueDetailPanel.test.tsx",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/contract-coupled-issues.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/board-realtime.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/issue-card-context-menu.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/done-issue-board-column.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-diff-etag.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/shared/__tests__/issue-number-single-source.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/BoardToolbar.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/boardCardSnapshot.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/routes/boardPageStateGate.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/create-issue.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/get-issue.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/list-issues.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/update-issue.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/agent-profile-dashboard.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/board-card-bulk-select.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/board-monitor-toolbar.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/copy-issue-reference.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/issue-detail-expand.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/create-sub-issue.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      }
+    ]
+  },
+  "workspaces": {
+    "name": "Workspaces & Worktrees (the unit of agent work)",
+    "source_basenames": [
+      "workspaces",
+      "workspace-actions",
+      "agent.service",
+      "workspace.repository",
+      "workspace-crud.repository",
+      "workspace-summary.repository",
+      "workspace-lifecycle-reconcile.repository",
+      "followup-workspace.service",
+      "dirty-main-checkout",
+      "workspace-activity-state",
+      "worktree-symlink-bootstrap"
+    ],
+    "candidate_count": 85,
+    "candidates": [
+      {
+        "file": "packages/server/src/__tests__/workspace.service.test.ts",
+        "titles": 46,
+        "why": [
+          "imports:workspace.repository"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/agent.service.test.ts",
+        "titles": 32,
+        "why": [
+          "imports:agent.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/session-artifacts.test.ts",
+        "titles": 18,
+        "why": [
+          "imports:workspace-actions",
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/api.test.ts",
+        "titles": 117,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-column-count-invariant.test.ts",
+        "titles": 8,
+        "why": [
+          "imports:workspaces",
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/merge-error-reporting.test.ts",
+        "titles": 8,
+        "why": [
+          "imports:workspace-actions",
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/session-lifecycle.test.ts",
+        "titles": 18,
+        "why": [
+          "imports:agent.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/worktree-symlink-bootstrap.test.ts",
+        "titles": 17,
+        "why": [
+          "imports:worktree-symlink-bootstrap"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/merge-conflict-server-health.test.ts",
+        "titles": 3,
+        "why": [
+          "imports:workspace-actions",
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-actions-route.test.ts",
+        "titles": 3,
+        "why": [
+          "imports:workspace-actions",
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-diff-etag.test.ts",
+        "titles": 3,
+        "why": [
+          "imports:workspace-actions",
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-cache-workspace-lifecycle-invalidation.test.ts",
+        "titles": 2,
+        "why": [
+          "imports:workspaces",
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/terminal-move-guard.test.ts",
+        "titles": 11,
+        "why": [
+          "imports:workspace.repository"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/issue-cascade-and-dep.repo.test.ts",
+        "titles": 8,
+        "why": [
+          "imports:workspace.repository"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspaces-cost-over-time.test.ts",
+        "titles": 7,
+        "why": [
+          "imports:workspaces"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/dirty-main-checkout.test.ts",
+        "titles": 4,
+        "why": [
+          "imports:dirty-main-checkout"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-create-worktree-rollback.test.ts",
+        "titles": 4,
+        "why": [
+          "imports:workspace-crud.repository"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/agent-exit-output-drain.test.ts",
+        "titles": 3,
+        "why": [
+          "imports:agent.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/process-guard.test.ts",
+        "titles": 2,
+        "why": [
+          "imports:agent.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/session-completion-callback-idempotency.test.ts",
+        "titles": 2,
+        "why": [
+          "imports:agent.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-merge-service.test.ts",
+        "titles": 57,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-activity-state.test.ts",
+        "titles": 41,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/monitor-action-display.test.ts",
+        "titles": 24,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/launch-preview.test.ts",
+        "titles": 18,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/cleanup-warnings.test.ts",
+        "titles": 15,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-risk.service.integration.test.ts",
+        "titles": 25,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/stale-worktree-cleanup.test.ts",
+        "titles": 14,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-already-merged.test.ts",
+        "titles": 24,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/workspace-secondary-data.test.ts",
+        "titles": 14,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/all-workspaces-panel.test.ts",
+        "titles": 23,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/provider-switch-stale-default-model.test.ts",
+        "titles": 12,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-lifecycle-status-transitions.test.ts",
+        "titles": 21,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-lifecycle-transitions.test.ts",
+        "titles": 20,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-diff-cache.test.ts",
+        "titles": 19,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-launch-failures.test.ts",
+        "titles": 18,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-lifecycle-reconcile.service.test.ts",
+        "titles": 17,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-risk.service.test.ts",
+        "titles": 17,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-summary-cache.test.ts",
+        "titles": 17,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/issue-scoped-workspace-list.test.ts",
+        "titles": 6,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workflows-route.test.ts",
+        "titles": 6,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/review-prompt-approval-instruction.test.ts",
+        "titles": 5,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-details-projection.test.ts",
+        "titles": 15,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/createWorkspaceBody.test.ts",
+        "titles": 14,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-summary-session.test.ts",
+        "titles": 13,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/allWorkspacesFilter.test.ts",
+        "titles": 13,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-merge-subservices.test.ts",
+        "titles": 12,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-teardown.service.test.ts",
+        "titles": 12,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/allWorkspacesStatus.test.ts",
+        "titles": 12,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/workspacePanelDrag.test.ts",
+        "titles": 12,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/workspace-launch.test.ts",
+        "titles": 11,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-create-harden.test.ts",
+        "titles": 10,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-create-policy.test.ts",
+        "titles": 10,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-summary.service.test.ts",
+        "titles": 10,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/workspace-chat.test.ts",
+        "titles": 9,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-merge-flap.test.ts",
+        "titles": 9,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/workspaceLaunchState.test.ts",
+        "titles": 9,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/api/workspaces.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/project-scoped-workspace-list.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/review-workspace-profile.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/terminal-workspace-reaper.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/workspace-preview.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/api/workspace-lifecycle.test.ts",
+        "titles": 6,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/api/worktrees.test.ts",
+        "titles": 6,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/workspace.test.ts",
+        "titles": 6,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/worktrees-panel.test.ts",
+        "titles": 6,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/git-service-remove-worktree.test.ts",
+        "titles": 6,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-provider-resolution.test.ts",
+        "titles": 6,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/api/board-workspace-summary.test.ts",
+        "titles": 5,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/command-palette-workspace.test.ts",
+        "titles": 5,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/active-stopped-workspace-enters-review.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/close-workspace-on-terminal-issue.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/WorkspacePanel.test.tsx",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/WorkspaceScorecardPanel.test.tsx",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/api/workspace-cascade-followup.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/workspace-info.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/workspace-launch-preview.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-code-metrics.service.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-diff-stats.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/WorkspacePreviewPanel.test.tsx",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/direct-workspace-ui.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/workspace-vscode-button.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/worktrees-row-actions.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/WorkspaceActionBar.test.tsx",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/get-workspace-diff.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/workspace-edge-errors.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      }
+    ]
+  },
+  "agent-providers": {
+    "name": "Agent Providers (Claude / Codex / Copilot / Pi)",
+    "source_basenames": [
+      "index",
+      "types",
+      "registry",
+      "helpers",
+      "claude-provider",
+      "codex-provider",
+      "copilot-provider",
+      "pi-provider",
+      "agent-provider",
+      "agent-cli-version.service",
+      "agent-profile-health.service",
+      "claude-login.service",
+      "codex-login.service",
+      "provider-models",
+      "auth-rotation-ring",
+      "codex-license-ring",
+      "claude-subscription-ring",
+      "exit-workflow",
+      "rate-limit-exit-decision"
+    ],
+    "candidate_count": 41,
+    "candidates": [
+      {
+        "file": "packages/server/src/__tests__/agent-provider.test.ts",
+        "titles": 111,
+        "why": [
+          "imports:agent-provider"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/claude-subscription-ring.test.ts",
+        "titles": 28,
+        "why": [
+          "imports:claude-subscription-ring"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/api.test.ts",
+        "titles": 117,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/codex-license-ring.test.ts",
+        "titles": 27,
+        "why": [
+          "imports:codex-license-ring"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/copilot-parse-stream-event.test.ts",
+        "titles": 24,
+        "why": [
+          "imports:copilot-provider"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-lifecycle-status-transitions.test.ts",
+        "titles": 21,
+        "why": [
+          "imports:exit-workflow"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/pi-parse-stream-event.test.ts",
+        "titles": 20,
+        "why": [
+          "imports:pi-provider"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/plan-mode.service.test.ts",
+        "titles": 18,
+        "why": [
+          "imports:agent-provider"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/session-lifecycle.test.ts",
+        "titles": 18,
+        "why": [
+          "imports:types"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/provider-exit-behavior.test.ts",
+        "titles": 16,
+        "why": [
+          "imports:codex-license-ring,claude-subscription-ring"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/agent-cli-version.service.test.ts",
+        "titles": 15,
+        "why": [
+          "imports:agent-cli-version.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/rate-limit-exit-decision.test.ts",
+        "titles": 11,
+        "why": [
+          "imports:rate-limit-exit-decision"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/apply-stream-event.test.ts",
+        "titles": 10,
+        "why": [
+          "imports:types,agent-provider"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/drive-preflight.test.ts",
+        "titles": 9,
+        "why": [
+          "imports:claude-subscription-ring"
+        ]
+      },
+      {
+        "file": "packages/shared/__tests__/model-provider.test.ts",
+        "titles": 9,
+        "why": [
+          "imports:provider-models"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/agent-provider-registry.test.ts",
+        "titles": 8,
+        "why": [
+          "imports:types,registry"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/broadcast-batch.test.ts",
+        "titles": 7,
+        "why": [
+          "imports:types"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/agent-profile-health.service.test.ts",
+        "titles": 5,
+        "why": [
+          "imports:agent-profile-health.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/agent-provider-observed-parse.test.ts",
+        "titles": 5,
+        "why": [
+          "imports:agent-provider"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/active-stopped-workspace-enters-review.test.ts",
+        "titles": 4,
+        "why": [
+          "imports:exit-workflow"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/no-global-default-model.test.ts",
+        "titles": 4,
+        "why": [
+          "imports:agent-provider"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/ready-for-merge-zero-commit-guard.test.ts",
+        "titles": 4,
+        "why": [
+          "imports:exit-workflow"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/stranded-fix-and-merge-resolver-exit.test.ts",
+        "titles": 4,
+        "why": [
+          "imports:exit-workflow"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/usage-limit-rotation-exit.test.ts",
+        "titles": 4,
+        "why": [
+          "imports:codex-license-ring,claude-subscription-ring,exit-workflow"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/zero-diff-inreview-exit.test.ts",
+        "titles": 3,
+        "why": [
+          "imports:exit-workflow"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/session-completion-callback-idempotency.test.ts",
+        "titles": 2,
+        "why": [
+          "imports:types,exit-workflow"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/copilot-event-extractors.test.ts",
+        "titles": 49,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/preferences.test.ts",
+        "titles": 24,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/provider-divergence.test.ts",
+        "titles": 16,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/provider-config-resolution.test.ts",
+        "titles": 22,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/agent-settings.test.ts",
+        "titles": 16,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/provider-switch-stale-default-model.test.ts",
+        "titles": 12,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/claude-rate-limit.test.ts",
+        "titles": 11,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/butler-provider.test.ts",
+        "titles": 9,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/insights-provider-profile.test.ts",
+        "titles": 8,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-provider-resolution.test.ts",
+        "titles": 6,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/resolver-provider-relaunch.test.ts",
+        "titles": 5,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/provider-resolution-single-source.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/shared/__tests__/copilot-event-types-lockstep.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/butler-codex-home.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/butler-codex-resume-recovery.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      }
+    ]
+  },
+  "agent-sessions": {
+    "name": "Agent Sessions & Streaming",
+    "source_basenames": [
+      "index",
+      "broadcast",
+      "session-lifecycle",
+      "session-exit-state-machine",
+      "ws-handler",
+      "types",
+      "board-events",
+      "session-output-reader",
+      "agent-stream-parser",
+      "session-output",
+      "session-summary",
+      "session.repository",
+      "session-lifecycle.repository",
+      "sessions",
+      "agent-output-parser"
+    ],
+    "candidate_count": 52,
+    "candidates": [
+      {
+        "file": "packages/server/src/__tests__/api.test.ts",
+        "titles": 117,
+        "why": [
+          "imports:board-events",
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/agent-output-parser.test.ts",
+        "titles": 41,
+        "why": [
+          "imports:agent-output-parser"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/session-output.test.ts",
+        "titles": 35,
+        "why": [
+          "imports:session-output"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/terminal-transcript.test.ts",
+        "titles": 33,
+        "why": [
+          "imports:agent-output-parser"
+        ]
+      },
+      {
+        "file": "packages/shared/__tests__/agent-stream-parser-characterization.test.ts",
+        "titles": 30,
+        "why": [
+          "imports:agent-stream-parser"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/session-summary.test.ts",
+        "titles": 18,
+        "why": [
+          "imports:sessions",
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/session-exit-state-machine.test.ts",
+        "titles": 25,
+        "why": [
+          "imports:session-exit-state-machine"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-risk.service.integration.test.ts",
+        "titles": 25,
+        "why": [
+          "imports:session-output-reader"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-events.test.ts",
+        "titles": 24,
+        "why": [
+          "imports:board-events"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/TerminalView.test.tsx",
+        "titles": 21,
+        "why": [
+          "imports:agent-output-parser"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/session-lifecycle.test.ts",
+        "titles": 18,
+        "why": [
+          "imports:types,session-lifecycle"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-summary-cache.test.ts",
+        "titles": 17,
+        "why": [
+          "imports:board-events"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/startup-timers-hmr.test.ts",
+        "titles": 16,
+        "why": [
+          "imports:board-events"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/session-output-etag.test.ts",
+        "titles": 4,
+        "why": [
+          "imports:sessions",
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/agent-questions-perf.test.ts",
+        "titles": 13,
+        "why": [
+          "imports:session-output-reader"
+        ]
+      },
+      {
+        "file": "packages/shared/__tests__/agent-stream-unknown-events.test.ts",
+        "titles": 13,
+        "why": [
+          "imports:agent-stream-parser"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/zombie-fix-session-reconciler.test.ts",
+        "titles": 11,
+        "why": [
+          "imports:board-events"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/apply-stream-event.test.ts",
+        "titles": 10,
+        "why": [
+          "imports:types,broadcast"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/agent-provider-registry.test.ts",
+        "titles": 8,
+        "why": [
+          "imports:types"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-column-count-invariant.test.ts",
+        "titles": 8,
+        "why": [
+          "imports:board-events"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-etag-fast-path.test.ts",
+        "titles": 7,
+        "why": [
+          "imports:board-events"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-notify-route.test.ts",
+        "titles": 7,
+        "why": [
+          "imports:board-events"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/broadcast-batch.test.ts",
+        "titles": 7,
+        "why": [
+          "imports:types,broadcast"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/plan-mode-reconciler.test.ts",
+        "titles": 7,
+        "why": [
+          "imports:board-events"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-cache-merge-invalidation.test.ts",
+        "titles": 6,
+        "why": [
+          "imports:board-events"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/agent-provider-observed-parse.test.ts",
+        "titles": 5,
+        "why": [
+          "imports:agent-stream-parser"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/done-write-path-guard.test.ts",
+        "titles": 5,
+        "why": [
+          "imports:board-events"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-cache-patch-invalidation.test.ts",
+        "titles": 4,
+        "why": [
+          "imports:board-events"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/merge-cleanup.service.test.ts",
+        "titles": 3,
+        "why": [
+          "imports:board-events"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/stranded-review-reconciler.test.ts",
+        "titles": 3,
+        "why": [
+          "imports:board-events"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-cache-workspace-lifecycle-invalidation.test.ts",
+        "titles": 2,
+        "why": [
+          "imports:board-events"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/session-completion-callback-idempotency.test.ts",
+        "titles": 2,
+        "why": [
+          "imports:session-lifecycle,types"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/session.manager.test.ts",
+        "titles": 48,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/agent.service.test.ts",
+        "titles": 32,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/copilot-parse-stream-event.test.ts",
+        "titles": 24,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/pi-parse-stream-event.test.ts",
+        "titles": 20,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/session-artifacts.test.ts",
+        "titles": 18,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/session-exit-classification.test.ts",
+        "titles": 18,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-summary-session.test.ts",
+        "titles": 13,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/session-replay-turns.test.ts",
+        "titles": 12,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/session-messages-perf.test.ts",
+        "titles": 9,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/session-message-pruner.test.ts",
+        "titles": 8,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/session-filter.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/api/session-replay.test.ts",
+        "titles": 5,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/api/session-history.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/session-stats.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/session-messages-index.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/api/ws-session-reconnect.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/session-history.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/agent-exit-output-drain.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/session-tools.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/output-parser.spec.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      }
+    ]
+  },
+  "workflow-engine": {
+    "name": "Workflow Engine (configurable status graphs)",
+    "source_basenames": [
+      "workflow-engine",
+      "engine",
+      "transitions",
+      "conditions",
+      "graph-validation",
+      "node-config",
+      "node-queries",
+      "status-resolution",
+      "status-sync",
+      "templates",
+      "types",
+      "workspace-init",
+      "workflows",
+      "workflow.repository"
+    ],
+    "candidate_count": 26,
+    "candidates": [
+      {
+        "file": "packages/server/src/__tests__/workflow-engine.test.ts",
+        "titles": 33,
+        "why": [
+          "imports:workflow-engine"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/api.test.ts",
+        "titles": 117,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/session-lifecycle.test.ts",
+        "titles": 18,
+        "why": [
+          "imports:types"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workflows-route.test.ts",
+        "titles": 6,
+        "why": [
+          "imports:workflows",
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/apply-stream-event.test.ts",
+        "titles": 10,
+        "why": [
+          "imports:types"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/agent-provider-registry.test.ts",
+        "titles": 8,
+        "why": [
+          "imports:types"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/broadcast-batch.test.ts",
+        "titles": 7,
+        "why": [
+          "imports:types"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workflow-fork.test.ts",
+        "titles": 5,
+        "why": [
+          "imports:workflow-engine"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/session-completion-callback-idempotency.test.ts",
+        "titles": 2,
+        "why": [
+          "imports:types"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workflow.service.test.ts",
+        "titles": 32,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-lifecycle-status-transitions.test.ts",
+        "titles": 21,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-lifecycle-transitions.test.ts",
+        "titles": 20,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/config-export-import.test.ts",
+        "titles": 7,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/status-view.test.ts",
+        "titles": 13,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-status-entry.test.ts",
+        "titles": 12,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/allWorkspacesStatus.test.ts",
+        "titles": 12,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/shared/__tests__/board-status-classifiers.test.ts",
+        "titles": 11,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/settings-workflow.test.ts",
+        "titles": 9,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-status.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/issue-transition-on-interrupted-merge.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/merge-atomic-done-transition.test.ts",
+        "titles": 5,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/monitorToolbarStatus.test.ts",
+        "titles": 5,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/get-board-status.test.ts",
+        "titles": 5,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/issue-create-workflow-status.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/workflowHistory.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/registration-default-statuses.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      }
+    ]
+  },
+  "monitor-orchestration": {
+    "name": "Monitor / Conductor / Autopilot (board orchestration)",
+    "source_basenames": [
+      "monitor-cycle",
+      "monitor-cycle-rules",
+      "monitor-cycle-actions",
+      "monitor-eligibility",
+      "monitor-backlog",
+      "monitor-auto-start",
+      "monitor-contract",
+      "monitor-setup",
+      "monitor-butler",
+      "conductor-control.service",
+      "drive.service",
+      "drive-preflight.service",
+      "drive-obstacles.service",
+      "drive",
+      "board-monitor"
+    ],
+    "candidate_count": 24,
+    "candidates": [
+      {
+        "file": "packages/server/src/__tests__/monitor-auto-start.test.ts",
+        "titles": 32,
+        "why": [
+          "imports:monitor-auto-start"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/monitor-cycle.test.ts",
+        "titles": 30,
+        "why": [
+          "imports:monitor-cycle"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/startup-timers-hmr.test.ts",
+        "titles": 16,
+        "why": [
+          "imports:monitor-setup,monitor-butler"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/coupling-batch-and-contract-mode.test.ts",
+        "titles": 15,
+        "why": [
+          "imports:monitor-contract"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/monitor-backlog.test.ts",
+        "titles": 11,
+        "why": [
+          "imports:monitor-backlog"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/drive-obstacles.test.ts",
+        "titles": 10,
+        "why": [
+          "imports:drive-obstacles.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/drive-preflight.test.ts",
+        "titles": 9,
+        "why": [
+          "imports:drive-preflight.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/drive-retro.test.ts",
+        "titles": 9,
+        "why": [
+          "imports:drive.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/monitor-auto-start-wip-capacity.test.ts",
+        "titles": 9,
+        "why": [
+          "imports:monitor-auto-start"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/monitor-meta-autostart.test.ts",
+        "titles": 6,
+        "why": [
+          "imports:monitor-auto-start"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/drive-dashboard.service.test.ts",
+        "titles": 5,
+        "why": [
+          "imports:drive.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/monitor-merge-gate.test.ts",
+        "titles": 5,
+        "why": [
+          "imports:monitor-cycle"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/monitor-cycle-health.test.ts",
+        "titles": 34,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/monitor-action-display.test.ts",
+        "titles": 24,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/board-monitor-toolbar.test.ts",
+        "titles": 2,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/api/monitor-merge-reconciliation.test.ts",
+        "titles": 6,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/monitor-popover.test.ts",
+        "titles": 6,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-monitor-skill.test.ts",
+        "titles": 5,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/orchestrator-monitor.service.test.ts",
+        "titles": 5,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/monitorToolbarStatus.test.ts",
+        "titles": 5,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/project-conductor.service.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/auto-start-followup-setting.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/monitor-nudge.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/MonitorPopover.test.tsx",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      }
+    ]
+  },
+  "review-merge": {
+    "name": "Review & Merge (landing work on the default branch)",
+    "source_basenames": [
+      "merge-queue.service",
+      "merge-helpers.service",
+      "merge-cleanup.service",
+      "foundational-merge.service",
+      "merge-workflow",
+      "merge-strategy",
+      "auto-merge-orchestrator",
+      "stranded-review-reconciler",
+      "done-unmerged-invariant-scanner",
+      "completion-state-reconciler",
+      "review.repository",
+      "workspace-merge.repository",
+      "workspace-merge-execution.repository",
+      "workspace-merge-prevalidation.repository",
+      "auto-merge-pref"
+    ],
+    "candidate_count": 77,
+    "candidates": [
+      {
+        "file": "packages/server/src/__tests__/done-unmerged-invariant-scanner.test.ts",
+        "titles": 36,
+        "why": [
+          "imports:done-unmerged-invariant-scanner"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/api.test.ts",
+        "titles": 117,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/startup-timers-hmr.test.ts",
+        "titles": 16,
+        "why": [
+          "imports:auto-merge-orchestrator,done-unmerged-invariant-scanner,stranded-review-reconciler"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/completion-state-reconciler.test.ts",
+        "titles": 12,
+        "why": [
+          "imports:completion-state-reconciler"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/foundational-merge.service.test.ts",
+        "titles": 8,
+        "why": [
+          "imports:foundational-merge.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/merge-queue-strategy.test.ts",
+        "titles": 8,
+        "why": [
+          "imports:merge-queue.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/merge-queue.service.test.ts",
+        "titles": 8,
+        "why": [
+          "imports:merge-queue.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/reconcile-merged-issue.test.ts",
+        "titles": 8,
+        "why": [
+          "imports:merge-cleanup.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/reconciler.service.test.ts",
+        "titles": 8,
+        "why": [
+          "imports:merge-queue.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/auto-merge-pref.test.ts",
+        "titles": 7,
+        "why": [
+          "imports:auto-merge-pref"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/auto-merge-orchestrator.test.ts",
+        "titles": 6,
+        "why": [
+          "imports:auto-merge-orchestrator"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/visual-verification-relevance.test.ts",
+        "titles": 6,
+        "why": [
+          "imports:merge-workflow"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/done-write-path-guard.test.ts",
+        "titles": 5,
+        "why": [
+          "imports:merge-workflow"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/merge-strategy.test.ts",
+        "titles": 4,
+        "why": [
+          "imports:merge-strategy"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/merge-cleanup.service.test.ts",
+        "titles": 3,
+        "why": [
+          "imports:merge-cleanup.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/shared-dist-rebuild-on-merge.test.ts",
+        "titles": 3,
+        "why": [
+          "imports:merge-helpers.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/stranded-review-reconciler.test.ts",
+        "titles": 3,
+        "why": [
+          "imports:stranded-review-reconciler"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/learning-step-prompt.test.ts",
+        "titles": 2,
+        "why": [
+          "imports:merge-helpers.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/issues-routes-edge-cases.test.ts",
+        "titles": 66,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-merge-service.test.ts",
+        "titles": 57,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/tags.test.ts",
+        "titles": 29,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/monitor-action-display.test.ts",
+        "titles": 24,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/launch-preview.test.ts",
+        "titles": 18,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/review-effectiveness-aggregation.test.ts",
+        "titles": 26,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-already-merged.test.ts",
+        "titles": 24,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/provider-switch-stale-default-model.test.ts",
+        "titles": 12,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/drives-api.test.ts",
+        "titles": 10,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/review-effectiveness-report.test.ts",
+        "titles": 19,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-diff-cache.test.ts",
+        "titles": 19,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/merge-error-reporting.test.ts",
+        "titles": 8,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/merge-queue-route.test.ts",
+        "titles": 6,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/review-concurrent.test.ts",
+        "titles": 16,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/merge-service-edge-cases.test.ts",
+        "titles": 15,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/review-prompt-approval-instruction.test.ts",
+        "titles": 5,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/merge-conflict-server-health.test.ts",
+        "titles": 3,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-actions-route.test.ts",
+        "titles": 3,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-diff-etag.test.ts",
+        "titles": 3,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/diff-viewer.test.ts",
+        "titles": 12,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-merge-subservices.test.ts",
+        "titles": 12,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/reconcile-silently-merged.test.ts",
+        "titles": 11,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/diff-parse.test.ts",
+        "titles": 11,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/merge-response-before-cleanup.test.ts",
+        "titles": 10,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/pre-merge-gate.service.test.ts",
+        "titles": 10,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/DiffViewer.test.tsx",
+        "titles": 10,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/code-review.test.ts",
+        "titles": 9,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/merge-endpoint-reconcile-noop.test.ts",
+        "titles": 9,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/review-effectiveness.service.test.ts",
+        "titles": 9,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-merge-flap.test.ts",
+        "titles": 9,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/shared/__tests__/append-only-hotfile-merge.integration.test.ts",
+        "titles": 9,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/issue-merged-commits.service.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/issue-transition-on-interrupted-merge.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/review-workspace-profile.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/workspace-preview.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/api/monitor-merge-reconciliation.test.ts",
+        "titles": 6,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/api/ready-for-merge.test.ts",
+        "titles": 6,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/ai-reviewed-column.test.ts",
+        "titles": 6,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-cache-merge-invalidation.test.ts",
+        "titles": 6,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/merge-atomic-done-transition.test.ts",
+        "titles": 5,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/merge-overlap-cluster-landing.test.ts",
+        "titles": 5,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/monitor-merge-gate.test.ts",
+        "titles": 5,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/diff-highlight.test.ts",
+        "titles": 5,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/api/merge-advances-master.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/ready-for-merge-badge.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/active-stopped-workspace-enters-review.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/ready-for-merge-zero-commit-guard.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/stranded-fix-and-merge-resolver-exit.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/api/merge-cascade.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/markdown-preview-toggle.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/workspace-launch-preview.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-diff-stats.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/zero-diff-inreview-exit.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/MergeQueuePanel.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/WorkspacePreviewPanel.test.tsx",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/api/stale-ready-flag-merge.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/merge-queue-panel.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/skip-review-toggle.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/get-workspace-diff.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      }
+    ]
+  },
+  "butler": {
+    "name": "Butler (warm conversational assistant)",
+    "source_basenames": [
+      "butler-sdk.service",
+      "butler-definitions.service",
+      "butler-transcripts.service",
+      "butler-event-feed",
+      "board-guide",
+      "butler",
+      "butler-definitions",
+      "butler-ticket-prompt",
+      "ButlerView",
+      "ButlerViewBody",
+      "ButlerChatParts",
+      "ButlerManageModal",
+      "butler-format",
+      "butler-event-reducer"
+    ],
+    "candidate_count": 16,
+    "candidates": [
+      {
+        "file": "packages/client/src/lib/butler-event-reducer.test.ts",
+        "titles": 29,
+        "why": [
+          "imports:butler-event-reducer"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/butler-provider.test.ts",
+        "titles": 9,
+        "why": [
+          "imports:butler,butler-sdk.service",
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/butler-codex-home.test.ts",
+        "titles": 3,
+        "why": [
+          "imports:butler,butler-sdk.service",
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/butler-format.test.ts",
+        "titles": 11,
+        "why": [
+          "imports:butler-format"
+        ]
+      },
+      {
+        "file": "packages/shared/__tests__/butler-ticket-prompt.test.ts",
+        "titles": 7,
+        "why": [
+          "imports:butler-ticket-prompt"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/butler-sdk-resume-regression.test.ts",
+        "titles": 4,
+        "why": [
+          "imports:butler-sdk.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/usage-limit-rotation-exit.test.ts",
+        "titles": 4,
+        "why": [
+          "imports:butler-event-feed"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/butler-codex-resume-recovery.test.ts",
+        "titles": 3,
+        "why": [
+          "imports:butler-sdk.service"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/butler.test.ts",
+        "titles": 23,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/butler-url.test.ts",
+        "titles": 4,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/butler-slash-commands.test.ts",
+        "titles": 10,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/butler-loop-classify.test.ts",
+        "titles": 8,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/butler-skill-repository.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/butler-tools.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/butler-speech.test.ts",
+        "titles": 5,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/cli-butler.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      }
+    ]
+  },
+  "git-integration": {
+    "name": "Git Integration (worktree / merge / diff service)",
+    "source_basenames": [
+      "git-service",
+      "",
+      "git-exec",
+      "branch",
+      "git.service",
+      "git-info.service",
+      "diff-stats.service"
+    ],
+    "candidate_count": 41,
+    "candidates": [
+      {
+        "file": "packages/server/src/__tests__/done-unmerged-invariant-scanner.test.ts",
+        "titles": 36,
+        "why": [
+          "imports:git-service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/api.test.ts",
+        "titles": 117,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-risk.service.integration.test.ts",
+        "titles": 25,
+        "why": [
+          "imports:git.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/git.service.test.ts",
+        "titles": 20,
+        "why": [
+          "imports:git.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/ancestor-branch-reconciler.test.ts",
+        "titles": 19,
+        "why": [
+          "imports:git-service"
+        ]
+      },
+      {
+        "file": "packages/shared/__tests__/branch.test.ts",
+        "titles": 15,
+        "why": [
+          "imports:branch"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/git-info.service.test.ts",
+        "titles": 13,
+        "why": [
+          "imports:git-info.service"
+        ]
+      },
+      {
+        "file": "packages/shared/__tests__/git-service.integration.test.ts",
+        "titles": 13,
+        "why": [
+          "imports:git-service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/reconcile-silently-merged.test.ts",
+        "titles": 11,
+        "why": [
+          "imports:git.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/git-info-async.service.test.ts",
+        "titles": 10,
+        "why": [
+          "imports:git-info.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/startup-tasks.test.ts",
+        "titles": 10,
+        "why": [
+          "imports:git.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/branch.test.ts",
+        "titles": 9,
+        "why": [
+          "imports:branch"
+        ]
+      },
+      {
+        "file": "packages/shared/__tests__/append-only-hotfile-merge.integration.test.ts",
+        "titles": 9,
+        "why": [
+          "imports:git-service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/check-branch-tip-is-ancestor.test.ts",
+        "titles": 8,
+        "why": [
+          "imports:git-service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/file-contention.service.test.ts",
+        "titles": 8,
+        "why": [
+          "imports:git.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/issue-merged-commits.service.test.ts",
+        "titles": 7,
+        "why": [
+          "imports:git-service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/terminal-workspace-reaper.test.ts",
+        "titles": 7,
+        "why": [
+          "imports:git-service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/git-service-remove-worktree.test.ts",
+        "titles": 6,
+        "why": [
+          "imports:git.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/merge-overlap-cluster-landing.test.ts",
+        "titles": 5,
+        "why": [
+          "imports:git.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/git-service-branch-refresh.test.ts",
+        "titles": 4,
+        "why": [
+          "imports:git.service"
+        ]
+      },
+      {
+        "file": "packages/shared/__tests__/barrel-client-safety.test.ts",
+        "titles": 3,
+        "why": [
+          "imports:git-service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/git-service-contract.test.ts",
+        "titles": 2,
+        "why": [
+          "imports:git.service"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/get-workspace-diff.test.ts",
+        "titles": 2,
+        "why": [
+          "imports:git-service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/stale-worktree-cleanup.test.ts",
+        "titles": 14,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/workspace-secondary-data.test.ts",
+        "titles": 14,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-diff-cache.test.ts",
+        "titles": 19,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/worktree-symlink-bootstrap.test.ts",
+        "titles": 17,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-diff-etag.test.ts",
+        "titles": 3,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/diff-viewer.test.ts",
+        "titles": 12,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/diff-parse.test.ts",
+        "titles": 11,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/DiffViewer.test.tsx",
+        "titles": 10,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/shared/__tests__/git-exec-single-spawn.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/api/worktrees.test.ts",
+        "titles": 6,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/worktrees-panel.test.ts",
+        "titles": 6,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/diff-highlight.test.ts",
+        "titles": 5,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/basebranch-skill-display.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-create-worktree-rollback.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/github-handoff-draft.service.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-diff-stats.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/zero-diff-inreview-exit.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/worktrees-row-actions.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      }
+    ]
+  },
+  "mcp-server": {
+    "name": "MCP Server (agent-facing tool surface)",
+    "source_basenames": [
+      "index",
+      "create-issue",
+      "update-issue",
+      "move-issue",
+      "get-context",
+      "get-board-status",
+      "list-issues",
+      "launch-workspace",
+      "merge-workspace",
+      "deps",
+      "ask-butler",
+      "create-agent-skill",
+      "mcp-tool-definitions"
+    ],
+    "candidate_count": 29,
+    "candidates": [
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/create-issues-batch.test.ts",
+        "titles": 13,
+        "why": [
+          "imports:deps"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/terminal-done-guard.test.ts",
+        "titles": 12,
+        "why": [
+          "imports:move-issue,update-issue"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/get-board-status.test.ts",
+        "titles": 5,
+        "why": [
+          "imports:get-board-status"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/update-dependencies-batch.test.ts",
+        "titles": 5,
+        "why": [
+          "imports:deps"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/contract-coupled-issues.test.ts",
+        "titles": 4,
+        "why": [
+          "imports:deps"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/create-issue.test.ts",
+        "titles": 3,
+        "why": [
+          "imports:create-issue"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/list-issues.test.ts",
+        "titles": 3,
+        "why": [
+          "imports:list-issues"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/update-issue.test.ts",
+        "titles": 3,
+        "why": [
+          "imports:update-issue"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/create-sub-issue.test.ts",
+        "titles": 2,
+        "why": [
+          "imports:deps"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/workspace-edge-errors.test.ts",
+        "titles": 2,
+        "why": [
+          "imports:merge-workspace"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/mcp-tools.test.ts",
+        "titles": 15,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/db-utils.test.ts",
+        "titles": 13,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/mcp-tool-toggle.test.ts",
+        "titles": 9,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/toolbarTabOverflow.test.ts",
+        "titles": 8,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/butler-tools.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/drives.test.ts",
+        "titles": 6,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/monitorToolbarStatus.test.ts",
+        "titles": 5,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/mcp-health.service.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/attach-artifact.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/BoardToolbar.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/analyze-touched-files.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/delete-cascade.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/get-issue.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/openspec.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/session-tools.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/board-monitor-toolbar.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/db.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/clarify-or-propose.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/get-workspace-diff.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      }
+    ]
+  },
+  "persistence-schema": {
+    "name": "Persistence & Schema (data kernel)",
+    "source_basenames": [
+      "index",
+      "sessions",
+      "session-messages",
+      "preferences",
+      "data-dir",
+      "retry",
+      "fk-actions",
+      "fk-actions-repair",
+      "cascade-delete",
+      "migrations"
+    ],
+    "candidate_count": 16,
+    "candidates": [
+      {
+        "file": "packages/server/src/__tests__/cli.test.ts",
+        "titles": 66,
+        "why": [
+          "imports:migrations"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/issues-routes-edge-cases.test.ts",
+        "titles": 66,
+        "why": [
+          "imports:preferences"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/preferences.test.ts",
+        "titles": 24,
+        "why": [
+          "imports:preferences"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/session-summary.test.ts",
+        "titles": 18,
+        "why": [
+          "imports:sessions"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/migration-schema-drift.test.ts",
+        "titles": 9,
+        "why": [
+          "imports:migrations,fk-actions"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/db-retry.test.ts",
+        "titles": 8,
+        "why": [
+          "imports:retry"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/reconcile-merged-issue.test.ts",
+        "titles": 8,
+        "why": [
+          "imports:migrations"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/fk-actions-repair.test.ts",
+        "titles": 7,
+        "why": [
+          "imports:fk-actions-repair,fk-actions"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/fk-alignment-startup.test.ts",
+        "titles": 6,
+        "why": [
+          "imports:fk-actions"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/project-scripts.test.ts",
+        "titles": 5,
+        "why": [
+          "imports:migrations"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/session-output-etag.test.ts",
+        "titles": 4,
+        "why": [
+          "imports:sessions"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/merge-cleanup.service.test.ts",
+        "titles": 3,
+        "why": [
+          "imports:migrations"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/cli-butler.test.ts",
+        "titles": 2,
+        "why": [
+          "imports:migrations"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/db-utils.test.ts",
+        "titles": 13,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/butler-skill-repository.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/db.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      }
+    ]
+  },
+  "board-ui": {
+    "name": "Board UI (React client)",
+    "source_basenames": [
+      "BoardPage",
+      "BoardKanbanView",
+      "BoardColumn",
+      "BoardColumnCard",
+      "IssueCard",
+      "IssueDetailPanel",
+      "WorkspacePanel",
+      "BoardToolbar",
+      "api",
+      "useBoardEvents",
+      "issueMoveHelpers",
+      "wipLimits",
+      "boardColumnSort"
+    ],
+    "candidate_count": 94,
+    "candidates": [
+      {
+        "file": "packages/client/src/lib/agentGridView.test.ts",
+        "titles": 29,
+        "why": [
+          "imports:useBoardEvents"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/api.test.ts",
+        "titles": 117,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/boardColumnSort.test.ts",
+        "titles": 17,
+        "why": [
+          "imports:boardColumnSort"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/wipLimits.test.ts",
+        "titles": 12,
+        "why": [
+          "imports:wipLimits"
+        ]
+      },
+      {
+        "file": "packages/shared/__tests__/board-status-classifiers.test.ts",
+        "titles": 11,
+        "why": [
+          "imports:api"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/settingsStore.test.ts",
+        "titles": 11,
+        "why": [
+          "imports:api"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/issueMoveHelpers.test.ts",
+        "titles": 10,
+        "why": [
+          "imports:issueMoveHelpers"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/IssueCard.test.tsx",
+        "titles": 8,
+        "why": [
+          "imports:IssueCard"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/api.test.ts",
+        "titles": 5,
+        "why": [
+          "imports:api"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/BoardToolbar.test.ts",
+        "titles": 3,
+        "why": [
+          "imports:BoardToolbar"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/issues-routes-edge-cases.test.ts",
+        "titles": 66,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/launch-preview.test.ts",
+        "titles": 18,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/review-effectiveness-aggregation.test.ts",
+        "titles": 26,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-events.test.ts",
+        "titles": 24,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/all-workspaces-panel.test.ts",
+        "titles": 23,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/graph-table-views.test.ts",
+        "titles": 23,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/provider-switch-stale-default-model.test.ts",
+        "titles": 12,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/timelineView.test.ts",
+        "titles": 22,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/TerminalView.test.tsx",
+        "titles": 21,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/drives-api.test.ts",
+        "titles": 10,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/review-effectiveness-report.test.ts",
+        "titles": 19,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-column-count-invariant.test.ts",
+        "titles": 8,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-etag-fast-path.test.ts",
+        "titles": 7,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-notify-route.test.ts",
+        "titles": 7,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/merge-queue-route.test.ts",
+        "titles": 6,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/review-concurrent.test.ts",
+        "titles": 16,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/board.test.ts",
+        "titles": 14,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/boardDataReconcile.test.ts",
+        "titles": 14,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/status-view.test.ts",
+        "titles": 13,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/tableView-cells.test.ts",
+        "titles": 13,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/diff-viewer.test.ts",
+        "titles": 12,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/skeleton-board.test.ts",
+        "titles": 2,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-cache-workspace-lifecycle-invalidation.test.ts",
+        "titles": 2,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-status-entry.test.ts",
+        "titles": 12,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/CapabilityMatrix.test.tsx",
+        "titles": 12,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/workspacePanelDrag.test.ts",
+        "titles": 12,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/viewRegistry.test.tsx",
+        "titles": 11,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/expandable-create-panel.test.ts",
+        "titles": 10,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/quick-tasks-panel.test.ts",
+        "titles": 10,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-risk-digest.service.test.ts",
+        "titles": 10,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/DiffViewer.test.tsx",
+        "titles": 10,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/ProjectSelector.test.tsx",
+        "titles": 10,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/code-review.test.ts",
+        "titles": 9,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/review-effectiveness.service.test.ts",
+        "titles": 9,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/boardSavedViews.test.ts",
+        "titles": 8,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-health-events-route.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-rebuild-coalescing.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-status.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/review-workspace-profile.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/boardKeyboardNav.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/boardStats.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/workspace-preview.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/ai-reviewed-column.test.ts",
+        "titles": 6,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/worktrees-panel.test.ts",
+        "titles": 6,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-cache-merge-invalidation.test.ts",
+        "titles": 6,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/api/board-workspace-summary.test.ts",
+        "titles": 5,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-monitor-skill.test.ts",
+        "titles": 5,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/drive-dashboard.service.test.ts",
+        "titles": 5,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/review-prompt-approval-instruction.test.ts",
+        "titles": 5,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/ProjectTabs.test.tsx",
+        "titles": 5,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/StrategyTargetsView.test.tsx",
+        "titles": 5,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/mcp-server/src/__tests__/tools/get-board-status.test.ts",
+        "titles": 5,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/api/board-events.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/api/board-notify.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/api/board.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/board-stats-bar.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/active-stopped-workspace-enters-review.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-cache-patch-invalidation.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/IssueActivitySection.test.tsx",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/IssueDetailPanel.test.tsx",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/workflowHistory.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/WorkspacePanel.test.tsx",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/WorkspaceScorecardPanel.test.tsx",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/board-realtime.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/markdown-preview-toggle.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/workspace-launch-preview.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/done-issue-board-column.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/stranded-review-reconciler.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/zero-diff-inreview-exit.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/CrimeSceneCityView.test.tsx",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/MergeQueuePanel.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/MonitorPopover.test.tsx",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/ProjectScriptsMenu.test.tsx",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/RunQueueForecastPanel.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/WorkspacePreviewPanel.test.tsx",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/boardCardSnapshot.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/tableView-bulk-ops.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/routes/boardPageStateGate.test.ts",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/agent-profile-dashboard.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/board-card-bulk-select.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/board-monitor-toolbar.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/merge-queue-panel.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/skip-review-toggle.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/WorkspaceActionBar.test.tsx",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      }
+    ]
+  },
+  "preferences-config": {
+    "name": "Preferences & Configuration",
+    "source_basenames": [
+      "preference-keys",
+      "preferences.repository",
+      "preference.service",
+      "preferences",
+      "config-export-import",
+      "effective-config.service",
+      "strategy-objective.service",
+      "agent-settings.service",
+      "start-policy.service",
+      "harness-settings",
+      "provider-config-resolution",
+      "project-runtime-config.service",
+      "quota-usage.service",
+      "settings-registry"
+    ],
+    "candidate_count": 39,
+    "candidates": [
+      {
+        "file": "packages/server/src/__tests__/issues-routes-edge-cases.test.ts",
+        "titles": 66,
+        "why": [
+          "imports:preferences",
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/agent-questions.test.ts",
+        "titles": 42,
+        "why": [
+          "imports:preferences.repository"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/preferences.test.ts",
+        "titles": 24,
+        "why": [
+          "imports:preferences",
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/strategy-objective.test.ts",
+        "titles": 30,
+        "why": [
+          "imports:strategy-objective.service,quota-usage.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/api.test.ts",
+        "titles": 117,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/provider-divergence.test.ts",
+        "titles": 16,
+        "why": [
+          "imports:strategy-objective.service,preference.service,preferences.repository",
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/provider-config-resolution.test.ts",
+        "titles": 22,
+        "why": [
+          "imports:provider-config-resolution"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/agent-settings.test.ts",
+        "titles": 16,
+        "why": [
+          "imports:agent-settings.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/settings-divergence-guard.test.ts",
+        "titles": 6,
+        "why": [
+          "imports:preference.service,preferences.repository",
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/startup-timers-hmr.test.ts",
+        "titles": 16,
+        "why": [
+          "imports:preferences.repository"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/agent-questions-perf.test.ts",
+        "titles": 13,
+        "why": [
+          "imports:preferences.repository"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/strategy-objective.service.test.ts",
+        "titles": 13,
+        "why": [
+          "imports:strategy-objective.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/verify-script-populate.test.ts",
+        "titles": 11,
+        "why": [
+          "imports:preferences.repository"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/pre-merge-gate.service.test.ts",
+        "titles": 10,
+        "why": [
+          "imports:preferences.repository"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/butler-provider.test.ts",
+        "titles": 9,
+        "why": [
+          "imports:preferences.repository,agent-settings.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/project-runtime-config.test.ts",
+        "titles": 8,
+        "why": [
+          "imports:harness-settings,project-runtime-config.service,start-policy.service"
+        ]
+      },
+      {
+        "file": "packages/shared/__tests__/settings-registry.test.ts",
+        "titles": 8,
+        "why": [
+          "imports:settings-registry"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/harness-settings.test.ts",
+        "titles": 7,
+        "why": [
+          "imports:harness-settings"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/monitor-merge-gate.test.ts",
+        "titles": 5,
+        "why": [
+          "imports:preferences.repository"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/resolver-provider-relaunch.test.ts",
+        "titles": 5,
+        "why": [
+          "imports:strategy-objective.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/merge-strategy.test.ts",
+        "titles": 4,
+        "why": [
+          "imports:preference-keys,settings-registry"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/no-global-default-model.test.ts",
+        "titles": 4,
+        "why": [
+          "imports:effective-config.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/settings-registry-keys.test.ts",
+        "titles": 4,
+        "why": [
+          "imports:preference.service,settings-registry,harness-settings"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/butler-codex-home.test.ts",
+        "titles": 3,
+        "why": [
+          "imports:preferences.repository"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/settingsStore.test.ts",
+        "titles": 11,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/drive-preflight.test.ts",
+        "titles": 9,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/config-export-import.test.ts",
+        "titles": 7,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/preflight-check.test.ts",
+        "titles": 17,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-monitor-skill.test.ts",
+        "titles": 5,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/settings-shared.test.ts",
+        "titles": 15,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/agent-profile-dashboard.test.ts",
+        "titles": 2,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/dynamic-preference-keys.test.ts",
+        "titles": 10,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/settings-tags.test.ts",
+        "titles": 9,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/settings-workflow.test.ts",
+        "titles": 9,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/settings.test.ts",
+        "titles": 9,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/auto-merge-pref.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/api/settings.test.ts",
+        "titles": 6,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/settings-scheduled-runs.test.ts",
+        "titles": 6,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/api/preferences.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      }
+    ]
+  },
+  "project-registration": {
+    "name": "Project Registration & Stack Profiles",
+    "source_basenames": [
+      "project-registration",
+      "stack-detector.service",
+      "stack-profile.service",
+      "project-setup.service",
+      "project-scaffold",
+      "gradle-detect.service",
+      "cold-clone-build-check.service",
+      "persistence",
+      "setup-script",
+      "verify-script",
+      "smoke-check",
+      "test-scaffold",
+      "smart-hooks-rules",
+      "project-registration.repository",
+      "stack-profile.repository",
+      "project-setup.repository",
+      "project-scaffold.repository"
+    ],
+    "candidate_count": 53,
+    "candidates": [
+      {
+        "file": "packages/server/src/__tests__/project-scaffold.test.ts",
+        "titles": 42,
+        "why": [
+          "imports:project-scaffold"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/stack-profile.service.test.ts",
+        "titles": 34,
+        "why": [
+          "imports:stack-profile.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/api.test.ts",
+        "titles": 117,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/test-scaffold.test.ts",
+        "titles": 17,
+        "why": [
+          "imports:stack-profile.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/project-setup.service.test.ts",
+        "titles": 15,
+        "why": [
+          "imports:project-setup.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/cold-clone-build-check.service.test.ts",
+        "titles": 11,
+        "why": [
+          "imports:cold-clone-build-check.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/verify-script-populate.test.ts",
+        "titles": 11,
+        "why": [
+          "imports:stack-profile.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/pre-merge-gate.service.test.ts",
+        "titles": 10,
+        "why": [
+          "imports:stack-profile.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/setup-script-populate.test.ts",
+        "titles": 9,
+        "why": [
+          "imports:stack-profile.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/smoke-check-build.test.ts",
+        "titles": 9,
+        "why": [
+          "imports:stack-profile.service"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/stack-detector.service.test.ts",
+        "titles": 7,
+        "why": [
+          "imports:stack-detector.service"
+        ]
+      },
+      {
+        "file": "packages/shared/__tests__/smoke-check.test.ts",
+        "titles": 7,
+        "why": [
+          "imports:smoke-check"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/monitor-merge-gate.test.ts",
+        "titles": 5,
+        "why": [
+          "imports:stack-profile.service"
+        ]
+      },
+      {
+        "file": "packages/shared/__tests__/barrel-client-safety.test.ts",
+        "titles": 3,
+        "why": [
+          "imports:smoke-check"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/issues-routes-edge-cases.test.ts",
+        "titles": 66,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/monitor-cycle-health.test.ts",
+        "titles": 34,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/preferences.test.ts",
+        "titles": 24,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/register-project.test.ts",
+        "titles": 28,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/drives-api.test.ts",
+        "titles": 10,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/butler-provider.test.ts",
+        "titles": 9,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/drive-preflight.test.ts",
+        "titles": 9,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/runbooks.test.ts",
+        "titles": 9,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-column-count-invariant.test.ts",
+        "titles": 8,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-etag-fast-path.test.ts",
+        "titles": 7,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/config-export-import.test.ts",
+        "titles": 7,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/drive-obstacles-route.test.ts",
+        "titles": 7,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/agentQuestionsStore.test.ts",
+        "titles": 7,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/drive.test.ts",
+        "titles": 6,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-monitor-skill.test.ts",
+        "titles": 5,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/health-route-deps-aware.test.ts",
+        "titles": 5,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/project-scripts.test.ts",
+        "titles": 5,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/quality-metrics-collector-skill.test.ts",
+        "titles": 5,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/workspace-details-projection.test.ts",
+        "titles": 15,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/appRoutes.test.ts",
+        "titles": 5,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/quality-metrics-route.test.ts",
+        "titles": 4,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/client/src/lib/butler-url.test.ts",
+        "titles": 4,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/butler-codex-home.test.ts",
+        "titles": 3,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/skeleton-board.test.ts",
+        "titles": 2,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/board-cache-workspace-lifecycle-invalidation.test.ts",
+        "titles": 2,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/issue-summary-projection.test.ts",
+        "titles": 12,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/milestones-summary.test.ts",
+        "titles": 2,
+        "why": [
+          "api-path"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/project-completion-reconciler.test.ts",
+        "titles": 11,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/ProjectSelector.test.tsx",
+        "titles": 10,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/api/projects.test.ts",
+        "titles": 8,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/project-activity.test.ts",
+        "titles": 8,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/project-runtime-config.test.ts",
+        "titles": 8,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/project-scoped-workspace-list.test.ts",
+        "titles": 7,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/ProjectTabs.test.tsx",
+        "titles": 5,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/server/src/__tests__/project-conductor.service.test.ts",
+        "titles": 4,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/client/src/components/ProjectScriptsMenu.test.tsx",
+        "titles": 3,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/api/global-setup.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/active-project-recovery.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      },
+      {
+        "file": "packages/e2e/tests/ui/project-scripts.test.ts",
+        "titles": 2,
+        "why": [
+          "file-keyword"
+        ]
+      }
+    ]
+  },
+  "codemods": {
+    "name": "Codemod Factory",
+    "source_basenames": [
+      "codemod.service",
+      "codemods",
+      "CodemodPanel"
+    ],
+    "candidate_count": 1,
+    "candidates": [
+      {
+        "file": "packages/e2e/tests/api/codemod.test.ts",
+        "titles": 14,
+        "why": [
+          "file-keyword"
+        ]
+      }
+    ]
+  }
+}

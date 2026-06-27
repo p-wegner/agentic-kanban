@@ -1,0 +1,580 @@
+{
+  "slug": "issues-board",
+  "behavior": {
+    "slug": "issues-board",
+    "name": "Issues & Board (kanban core)",
+    "business_purpose": "The work-unit substrate of the whole product: projects (managed git repos), issues/tickets (units of AI coding work), configurable per-project workflow statuses, tags, milestones and typed dependency edges — plus the aggregated, classified board read model that humans (React board) and agents (MCP get_board_status) both observe. Every other capability moves issues across the board or reads its state.",
+    "confidence": "high",
+    "source_paths": [
+      "packages/server/src/services/issue.service.ts",
+      "packages/server/src/services/issue-dependency.service.ts",
+      "packages/server/src/services/board-status.ts",
+      "packages/server/src/services/board-column.service.ts",
+      "packages/shared/src/lib/board-status-classifiers.ts",
+      "packages/shared/src/lib/dependency-graph.ts",
+      "packages/shared/src/lib/status-view.ts",
+      "packages/server/src/repositories/issue-number.repository.ts",
+      "packages/server/src/repositories/issue.repository.ts",
+      "packages/server/src/repositories/project.repository.ts",
+      "packages/server/src/routes/issues.ts",
+      "packages/server/src/routes/projects.ts",
+      "packages/server/src/routes/tags.ts",
+      "packages/server/src/routes/milestones.ts"
+    ],
+    "actors": [
+      { "name": "operator", "kind": "human", "notes": "single local user driving the React board / REST" },
+      { "name": "agent", "kind": "automation", "notes": "Butler / MCP / batch-generating agent creating issues + declaring coupling edges by index" },
+      { "name": "monitor", "kind": "automation", "notes": "in-process monitor / Conductor reading the board read model (blocked map, attention buckets) to decide auto-starts and auto-merges" }
+    ],
+    "entry_points": [
+      { "kind": "api", "ref": "POST /api/issues", "observable": "creates one issue (title required); allocates per-project issueNumber=MAX+1; 201 with issueNumber" },
+      { "kind": "api", "ref": "POST /api/issues/batch", "observable": "atomically creates N issues + declared dependency edges (by index) + optional parentIssueId child_of + driveTarget Drive; 201 or 400-with-index, persists nothing on failure" },
+      { "kind": "api", "ref": "GET /api/issues?projectId=(&slim=1&statusName=)", "observable": "lists a project's issues; slim omits description; statusName filters" },
+      { "kind": "api", "ref": "PATCH /api/issues/:id, PATCH /api/issues/bulk", "observable": "updates fields/status; terminal-move guard applies; bulk is atomic" },
+      { "kind": "api", "ref": "POST/DELETE /api/issues/:id/dependencies, /dependencies/batch", "observable": "add/remove typed edges; cycle/self/dup/cross-project checked" },
+      { "kind": "api", "ref": "POST /api/issues/contract, /contract-coupled, /contract/confirm", "observable": "propose/apply contraction of a coupled component onto a lead" },
+      { "kind": "api", "ref": "POST /api/issues/archive-done", "observable": "moves Done issues older than N days to Archived; {archived:n}" },
+      { "kind": "api", "ref": "GET /api/projects/:id/board (?includeArchived)", "observable": "board read model columns+nested issues; ETag/304 conditional-GET fast path" },
+      { "kind": "api", "ref": "GET/POST/PATCH/DELETE /api/projects/:id/statuses", "observable": "configure per-project workflow columns; delete blocked while issues linked" },
+      { "kind": "api", "ref": "GET/POST/PATCH/DELETE /api/tags, POST /api/tags/merge", "observable": "manage tags + merge duplicates; builtin tags protected (403)" },
+      { "kind": "api", "ref": "GET/POST/PUT/DELETE /api/projects/:id/milestones, /milestones/summary", "observable": "group issues; progress+burndown summary" },
+      { "kind": "function/mcp", "ref": "getBoardStatus(...) / MCP get_board_status", "observable": "assembled classified board overview (effective status, attention, mergeState, totals)" }
+    ],
+    "behaviors": [
+      {
+        "id": "issues-board.create.issue",
+        "statement": "Creating an issue requires a non-empty title and allocates a per-project sequential issueNumber (MAX+1), independent across projects and reused after the max is deleted",
+        "actor": "operator",
+        "preconditions": ["project exists with at least one status"],
+        "observable_outcome": "201 with issueNumber starting at 1 and incrementing per project; whitespace/empty title -> 400; missing projectId/statusId -> 400",
+        "evidence": ["packages/server/src/repositories/issue-number.repository.ts:65", "packages/server/src/services/issue.service.ts:315", "packages/server/src/routes/issues.ts:284"],
+        "dimensions": ["api", "capability", "boundary", "error", "concurrency"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "issues-board.create.batch",
+        "statement": "Batch-create atomically inserts N issues with consecutive numbers plus optional parent_of edges and a Drive record, rolling back entirely (persisting nothing) on any validation failure",
+        "actor": "agent",
+        "preconditions": ["project with statuses"],
+        "observable_outcome": "201 with N issues + consecutive issueNumbers; parentIssueId wires child_of edges; driveTarget+parent creates active Drive (no Drive without parent); a bad item -> 400 {index} and zero rows persisted",
+        "evidence": ["packages/server/src/services/issue.service.ts:367", "packages/server/src/routes/issues.ts:157"],
+        "dimensions": ["api", "workflow", "state-transition", "error"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "issues-board.declare.dependencies",
+        "statement": "A typed dependency edge can be added singly (POST /:id/dependencies, defaults depends_on) or declared by 0-based index in a batch create/edge batch; symmetric types (related_to/coupled_with) carry no ordering",
+        "actor": "agent",
+        "preconditions": ["target issues exist in same project"],
+        "observable_outcome": "201 with {id,type}; batch returns {added,skipped}; idempotent re-add skipped; related_to reverse edge allowed",
+        "evidence": ["packages/server/src/services/issue-dependency.service.ts:102", "packages/server/src/services/issue.service.ts (validateBatchDependencies)"],
+        "dimensions": ["api", "capability", "boundary"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "issues-board.reject.dependencyCycle",
+        "statement": "Adding a directional edge (depends_on/blocked_by/parent_of/child_of) that would close a cycle is rejected; symmetric pairs are exempt; rollback leaves edges unchanged",
+        "actor": "agent",
+        "preconditions": ["existing edge chain"],
+        "observable_outcome": "single add -> 409 'cycle'; batch -> 400 'cycle' with no edges persisted; transitive A->B->C + C->A also rejected; coupled_with mutual pair accepted",
+        "evidence": ["packages/server/src/services/issue-dependency.service.ts:134", "packages/shared/src/lib/dependency-graph.ts:64"],
+        "dimensions": ["error", "boundary", "state-transition"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "issues-board.reject.dependencyInvalid",
+        "statement": "Self-edges, unsupported edge types, cross-project edges, and duplicate (issue,dependsOn,type) edges are rejected with typed errors",
+        "actor": "agent",
+        "preconditions": ["issues exist"],
+        "observable_outcome": "self -> 400 'itself'; duplicate -> 409 'already exists'; same pair different type allowed; bad type/cross-project -> 400",
+        "evidence": ["packages/server/src/services/issue-dependency.service.ts:114", "packages/server/src/services/issue-dependency.service.ts:159"],
+        "dimensions": ["error", "boundary"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "issues-board.remove.dependency",
+        "statement": "Deleting a dependency edge removes it so it no longer appears in the issue's dependency list",
+        "actor": "operator",
+        "preconditions": ["edge exists"],
+        "observable_outcome": "DELETE -> 200 {success:true}; subsequent GET /dependencies omits it",
+        "evidence": ["packages/server/src/routes/issues.ts:181"],
+        "dimensions": ["api"],
+        "risk": "low",
+        "confidence": "high"
+      },
+      {
+        "id": "issues-board.guard.terminalMove",
+        "statement": "Moving an issue to a terminal status (Done/Cancelled) is BLOCKED while it has an open, non-direct, unmerged workspace (AK-535 silent-merge-loss guard); the block is a no-op and the bulk path is atomic",
+        "actor": "operator",
+        "preconditions": ["issue has an open non-direct workspace"],
+        "observable_outcome": "updateIssue/updateIssuesBulk reject with code CONFLICT; status unchanged; workspace not auto-closed; closed/merged or direct or no workspace -> move allowed",
+        "evidence": ["packages/server/src/services/issue.service.ts:451", "packages/server/src/services/issue.service.ts:538"],
+        "dimensions": ["error", "state-transition", "risk", "regression"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "issues-board.close.workspaceOnTerminal",
+        "statement": "Transitioning into a terminal status closes any still-open (direct) workspace so the monitor stops relaunching it; non-terminal moves and already-closed workspaces are untouched (mergedAt preserved)",
+        "actor": "operator",
+        "preconditions": ["issue moving non-terminal -> terminal"],
+        "observable_outcome": "open direct workspace -> status 'closed'; non-terminal change leaves workspace idle; already-closed workspace keeps status+mergedAt",
+        "evidence": ["packages/server/src/services/issue.service.ts:478"],
+        "dimensions": ["state-transition", "regression"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "issues-board.validate.externalUrl",
+        "statement": "An issue's externalUrl must be absent or a well-formed http(s) URL; non-http schemes (javascript:/data:) are rejected to prevent smuggling executable payloads into a new-tab link",
+        "actor": "operator",
+        "preconditions": ["create/update issue with externalUrl"],
+        "observable_outcome": "valid https persists and round-trips; javascript: -> rejected (4xx); empty/null clears it",
+        "evidence": ["packages/server/src/services/issue.service.ts:114"],
+        "dimensions": ["error", "boundary", "regression"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "issues-board.contract.coupled",
+        "statement": "Contraction collapses a connected coupled_with component onto one lead: external sequential edges are repointed onto the lead (deduped, no self-edges), internal coupling dropped, members become duplicates of the lead and move to the resolved terminal status (Cancelled preferred, else Done)",
+        "actor": "agent",
+        "preconditions": ["issueIds exactly equal the lead's coupled_with component; no open workspaces; project has a Cancelled or Done status"],
+        "observable_outcome": "200 with rewired edges + members absorbed (description 'Absorbed into #N', status Cancelled); partial selection -> 400 'exactly match'; cross-project -> 400 'across projects'; would-be-cycle -> 400 'cycle' with full rollback",
+        "evidence": ["packages/shared/src/lib/dependency-graph.ts:143", "packages/server/src/services/issue.service.ts:582", "packages/server/src/services/issue.service.ts:652"],
+        "dimensions": ["workflow", "state-transition", "error"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "issues-board.derive.boardStatus",
+        "statement": "getBoardStatus assembles each issue's EFFECTIVE column from its most-relevant workspace's workflow node (falling back to the issue's own statusId), computes totals, and excludes Done/Cancelled unless includeClosed",
+        "actor": "monitor",
+        "preconditions": ["project resolvable (active-project pref if none)"],
+        "observable_outcome": "issues carry derived statusName (workspace node wins over stale issue status), diffStats, lastAgentMessage, totals.inProgress/activeWorkspaces/runningSessions; unknown project -> NotFoundError",
+        "evidence": ["packages/server/src/services/board-status.ts:45", "packages/server/src/services/board-status.ts:64"],
+        "dimensions": ["capability", "workflow", "state-transition"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "issues-board.classify.boardBuckets",
+        "statement": "An In-Review issue is purely classified into an attention bucket (closed-in-review / stale-in-review / idle-awaiting) or a pending_merge bucket (when auto-merge + auto-merge-in-review are enabled and a real diff exists) — one shared policy for human and agent",
+        "actor": "monitor",
+        "preconditions": ["issue in In Review with a workspace"],
+        "observable_outcome": "zero-diff not-ready -> attention idle-awaiting; null diff -> stale-in-review; closed workspace -> closed-in-review; idle+real diff+auto-merge -> mergeState pending_merge (attention null); ready-for-merge -> no flags",
+        "evidence": ["packages/shared/src/lib/board-status-classifiers.ts:31", "packages/shared/src/lib/board-status-classifiers.ts:64"],
+        "dimensions": ["capability", "state-transition", "config"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "issues-board.read.boardColumns",
+        "statement": "GET /:id/board returns columns whose counts/placements reflect every mutation (PATCH status, workspace merge, workspace delete), with a memoized ETag conditional-GET fast path that serves 304 without recompute until a board-changed broadcast bumps the generation",
+        "actor": "operator",
+        "preconditions": ["project with statuses+issues"],
+        "observable_outcome": "PATCH status moves issue between columns and updates counts; merge broadcast moves to Done; workspace delete removes workspaceSummary; matching If-None-Match -> 304 with no rebuild; a mutation broadcast or >60s or different includeArchived shape forces a full compute",
+        "evidence": ["packages/server/src/routes/projects.ts:291", "packages/server/src/services/board-aggregation.service.ts:1"],
+        "dimensions": ["api", "navigation", "regression", "config"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "issues-board.compute.blockedMap",
+        "statement": "An issue is blocked iff it has a depends_on/blocked_by edge to a not-yet-resolved blocker; 'resolved' uses the WIDER {Done, AI Reviewed, Cancelled} set, but a blocker only truly unblocks once it has also landed on base (mergedAt / isDirect / no workspace); fan-in dependents stay blocked until ALL blockers land",
+        "actor": "monitor",
+        "preconditions": ["issues with directional edges"],
+        "observable_outcome": "monitor selects a Todo issue only when every blocker is resolved+landed; AI-Reviewed blocker counts resolved; a missing blocker is conservatively still-blocking; cycle members are not selected",
+        "evidence": ["packages/server/src/services/board-column.service.ts:39", "packages/shared/src/lib/status-view.ts:58", "packages/shared/src/lib/status-view.ts:98"],
+        "dimensions": ["capability", "state-transition", "boundary"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "issues-board.archive.done",
+        "statement": "archive-done moves issues that are Done and whose statusChangedAt is strictly older than N days into the Archived column",
+        "actor": "operator",
+        "preconditions": ["project has Done and Archived statuses"],
+        "observable_outcome": "issues strictly older than the cutoff move to Archived (boundary: exactly-at-cutoff stays Done); {archived:n}; invalid olderThanDays -> 400",
+        "evidence": ["packages/server/src/services/issue.service.ts:888", "packages/server/src/routes/issues.ts:229"],
+        "dimensions": ["api", "boundary", "error"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "issues-board.list.issues",
+        "statement": "Listing returns a project's issues with their per-project issueNumbers; the slim variant omits descriptions and statusName filters to one column",
+        "actor": "operator",
+        "preconditions": ["projectId provided"],
+        "observable_outcome": "GET without projectId -> 400; with projectId -> issues array; statusName=Nope -> []; slim omits description (~60% payload)",
+        "evidence": ["packages/server/src/routes/issues.ts:64"],
+        "dimensions": ["api", "navigation"],
+        "risk": "low",
+        "confidence": "high"
+      },
+      {
+        "id": "issues-board.config.statuses",
+        "statement": "Per-project workflow columns are CRUD-configurable; a status that still has linked issues cannot be deleted (would leave issues dangling with no fallback column)",
+        "actor": "operator",
+        "preconditions": ["project exists"],
+        "observable_outcome": "GET lists >=5 default statuses; POST creates a new column; DELETE of a status with linked issues -> 409 (no orphaned issues)",
+        "evidence": ["packages/server/src/routes/projects.ts:167", "packages/server/src/repositories/project.repository.ts:224"],
+        "dimensions": ["api", "error", "state-transition"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "issues-board.manage.tags",
+        "statement": "Tags are CRUD-managed and duplicates can be merged; built-in tags are protected (cannot be deleted/renamed/merged away) and deleting a tag detaches it from issues without deleting the issues",
+        "actor": "operator",
+        "preconditions": ["project / tags exist"],
+        "observable_outcome": "duplicate name -> 409; builtin delete/rename/merge -> 403; deleting a tag removes its issue associations only; non-builtin tags delete/rename normally",
+        "evidence": ["packages/server/src/routes/tags.ts:11"],
+        "dimensions": ["api", "error"],
+        "risk": "low",
+        "confidence": "high"
+      },
+      {
+        "id": "issues-board.summarize.milestones",
+        "statement": "Milestones group issues toward a deliverable; the summary aggregates per-milestone totals (total/open/closed/progressPercent) and a server-computed burndown series",
+        "actor": "operator",
+        "preconditions": ["project with milestones+issues"],
+        "observable_outcome": "summary returns per-milestone counts, progressPercent, and burndown of requested length; empty milestone reports zeros with a full-length burndown",
+        "evidence": ["packages/server/src/routes/milestones.ts:11"],
+        "dimensions": ["api", "capability"],
+        "risk": "low",
+        "confidence": "high"
+      },
+      {
+        "id": "issues-board.seed.defaultStatuses",
+        "statement": "Project registration seeds a fixed canonical 7-status workflow (Backlog at sortOrder -1, Todo as the single default landing column, plus In Progress/In Review/AI Reviewed/Done/Cancelled)",
+        "actor": "operator",
+        "preconditions": ["new/bare project"],
+        "observable_outcome": "initializeProjectStatuses produces exactly the 7 canonical names, no duplicates, Backlog sortOrder -1, exactly one default (Todo)",
+        "evidence": ["packages/server/src/repositories/issue.repository.ts:41"],
+        "dimensions": ["capability", "regression"],
+        "risk": "medium",
+        "confidence": "high"
+      }
+    ],
+    "permissions": [
+      { "actor": "operator", "behavior": "*", "allowed": true, "notes": "single-user local app — no RBAC; the only enforced 'permission'-like rules are builtin-tag protection (403) and the status-delete-with-issues guard (409), both modeled as error-handling, not roles" }
+    ],
+    "state_model": {
+      "states": ["Backlog", "Todo", "In Progress", "In Review", "AI Reviewed", "Done", "Cancelled", "Archived"],
+      "notes": "Per-project, reorderable; the diagram is the seeded default. Effective state is DERIVED from the most-relevant workspace's workflow node, with the issue's statusId as fallback.",
+      "transitions": [
+        { "from": "In Progress", "to": "In Review", "trigger": "agent done / review requested", "behavior": "issues-board.derive.boardStatus" },
+        { "from": "In Review", "to": "Done", "trigger": "merge / auto-merge-in-review", "behavior": "issues-board.classify.boardBuckets" },
+        { "from": "*non-terminal*", "to": "Done|Cancelled", "trigger": "terminal move (BLOCKED while open non-direct unmerged workspace)", "behavior": "issues-board.guard.terminalMove" },
+        { "from": "Done", "to": "Archived", "trigger": "archive-done older than N days", "behavior": "issues-board.archive.done" }
+      ]
+    },
+    "error_states": [
+      { "id": "issues-board.err.titleRequired", "statement": "empty/whitespace title -> 400", "evidence": "routes/issues.ts:284" },
+      { "id": "issues-board.err.dependencyCycle", "statement": "directional cycle -> 409 (single) / 400 (batch)", "evidence": "issue-dependency.service.ts:134" },
+      { "id": "issues-board.err.dependencyDuplicate", "statement": "duplicate edge -> 409 'already exists'", "evidence": "issue-dependency.service.ts:159" },
+      { "id": "issues-board.err.terminalMoveBlocked", "statement": "terminal move with open non-direct workspace -> CONFLICT", "evidence": "issue.service.ts:451" },
+      { "id": "issues-board.err.externalUrlScheme", "statement": "non-http(s) externalUrl rejected", "evidence": "issue.service.ts:114" },
+      { "id": "issues-board.err.contractTerminalStatusMissing", "statement": "contraction with no Cancelled/Done status -> BAD_REQUEST", "evidence": "issue.service.ts:652" },
+      { "id": "issues-board.err.statusDeleteInUse", "statement": "delete a status with linked issues -> 409", "evidence": "project.repository.ts:224" },
+      { "id": "issues-board.err.builtinTagProtected", "statement": "delete/rename/merge-away a builtin tag -> 403", "evidence": "routes/tags.ts" }
+    ],
+    "external_integrations": ["git CLI (diff/conflict cache feeding board read model)", "workspaces capability (workspace status/diff/sessions)", "workflow-engine (currentNodeId ↔ statusId sync)"],
+    "unknowns": [
+      { "question": "Is the 3x issueNumber-allocation retry empirically sufficient under heavy parallel CLI creates?", "why_unknown": "no concurrency test forces a real collision; behavior asserted only sequentially" },
+      { "question": "Does the contraction-requires-terminal-status BAD_REQUEST path have a test?", "why_unknown": "happy/partial/cross-project/cycle paths are tested; the 'no Cancelled/Done status' rejection was not observed in the candidate set" },
+      { "question": "Is the rename/localize-Done risk (string-coupled terminalStatusIds) reachable in practice?", "why_unknown": "domain doc flags it; no test renames Done to confirm the legacy fallback loses terminal semantics" }
+    ]
+  },
+  "coverage": {
+    "behaviors": [
+      {
+        "ref": "issues-board.create.issue",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/issue-number.test.ts::first/second/third issue gets number; per-project independent; reuse after delete", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/issues-routes-edge-cases.test.ts::POST rejects whitespace/empty title (400)", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["api", "capability", "boundary", "error"],
+        "dimensions_missing": ["concurrency"],
+        "history": { "churn_90d": null },
+        "gap": { "kind": "dimension-missing", "missing_dimensions": ["concurrency"], "rationale": "MAX+1 allocation asserted only sequentially; the 3x-retry race under parallel creates is never forced, so a regression in the unique-index guard would not be caught" }
+      },
+      {
+        "ref": "issues-board.create.batch",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/issues-batch.test.ts::creates 5 issues with consecutive numbers; 400 with index persists nothing; parentIssueId child_of; driveTarget Drive", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["api", "workflow", "state-transition", "error"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null },
+        "gap": null
+      },
+      {
+        "ref": "issues-board.declare.dependencies",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/dependency-graph-edge.test.ts::adds depends_on/blocked_by/related_to; defaults depends_on", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/coupling-batch-and-contract-mode.test.ts::validateBatchDependencies defaults+normalises+coupled_with", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/issues-batch.test.ts::dependencies/batch adds+skips idempotently", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["api", "capability", "boundary"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null },
+        "gap": null
+      },
+      {
+        "ref": "issues-board.reject.dependencyCycle",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/dependency-graph-edge.test.ts::rejects direct + transitive + blocked_by cycle (409); allows related_to reverse + non-closing chain", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/issues-batch.test.ts::dependencies/batch rejects cycle and rolls back (400)", "strength": "asserts-outcome" },
+          { "test": "packages/shared/__tests__/coupling-contraction.test.ts (dependency-graph cycle math)", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["error", "boundary", "state-transition"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null },
+        "gap": null
+      },
+      {
+        "ref": "issues-board.reject.dependencyInvalid",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/dependency-graph-edge.test.ts::rejects self (400); duplicate (409); same pair different type allowed", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/coupling-batch-and-contract-mode.test.ts::rejects out-of-range/self/duplicate/unsupported-type", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["error", "boundary"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null },
+        "gap": null
+      },
+      {
+        "ref": "issues-board.remove.dependency",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/dependency-graph-edge.test.ts::removes edge (200) and it is gone from GET /dependencies", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["api"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null },
+        "gap": null
+      },
+      {
+        "ref": "issues-board.guard.terminalMove",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/terminal-move-guard.test.ts::BLOCKS move to Done with open non-direct ws (CONFLICT, no-op); ALLOWS direct/closed/none; bulk atomic", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["error", "state-transition", "risk", "regression"],
+        "dimensions_missing": [],
+        "history": { "bugs": 1, "last_regression": "AK-535 / #854" },
+        "gap": null
+      },
+      {
+        "ref": "issues-board.close.workspaceOnTerminal",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/close-workspace-on-terminal-issue.test.ts::closes open direct ws on Done; leaves non-terminal; preserves already-closed mergedAt", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["state-transition", "regression"],
+        "dimensions_missing": [],
+        "history": { "bugs": 1, "last_regression": "#776" },
+        "gap": null
+      },
+      {
+        "ref": "issues-board.validate.externalUrl",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/api.test.ts::POST persists externalUrl; rejects non-http externalUrl (javascript:); PATCH clears", "strength": "asserts-outcome" },
+          { "test": "packages/client/src/lib/url.test.ts (url scheme helper)", "strength": "touches-only" }
+        ],
+        "dimensions_covered": ["error", "boundary", "regression"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null },
+        "gap": null
+      },
+      {
+        "ref": "issues-board.contract.coupled",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/issues-batch.test.ts::contract-coupled rewires external edges onto lead, members->duplicates->Cancelled; rejects partial selection, cross-project, would-be-cycle (rollback)", "strength": "asserts-outcome" },
+          { "test": "packages/shared/__tests__/coupling-contraction.test.ts::planContraction edge inheritance", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["workflow", "state-transition", "error"],
+        "dimensions_missing": ["error:no-terminal-status"],
+        "history": { "churn_90d": null },
+        "gap": { "kind": "dimension-missing", "missing_dimensions": ["error"], "rationale": "the 'project lacks a Cancelled/Done status -> BAD_REQUEST' rejection (issue.service.ts:652) is not exercised by the candidate set; tests always seed a Cancelled status" }
+      },
+      {
+        "ref": "issues-board.derive.boardStatus",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/board-status.test.ts::derives effective In Review from workflow node over stale issue status; totals.inProgress; fixing counts as active capacity", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["capability", "workflow", "state-transition"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null },
+        "gap": null
+      },
+      {
+        "ref": "issues-board.classify.boardBuckets",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/shared/__tests__/board-status-classifiers.test.ts::all three attention buckets + pending_merge + null cases", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/board-status.test.ts::idle-awaiting / stale-in-review / pending_merge end-to-end", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["capability", "state-transition", "config"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null },
+        "gap": null
+      },
+      {
+        "ref": "issues-board.read.boardColumns",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/board-column-count-invariant.test.ts::PATCH status / merge broadcast / workspace delete all reflect in column counts", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/board-etag-fast-path.test.ts::304 from memo without recompute; generation bump / 60s / includeArchived shape force full compute", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["api", "navigation", "regression", "config"],
+        "dimensions_missing": [],
+        "history": { "bugs": 3, "last_regression": "#551/#552/#591" },
+        "gap": null
+      },
+      {
+        "ref": "issues-board.compute.blockedMap",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/status-view.test.ts::isResolvedDependencyStatusView wider set; computeBlockerReadiness landed-on-base + fan-in AND", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/dependency-auto-chain.test.ts::selects unblocked Todo only when all blockers resolved; skips while blocked; cycle members not selected", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["capability", "state-transition", "boundary"],
+        "dimensions_missing": [],
+        "history": { "bugs": 1, "last_regression": "#782/#784/#798" },
+        "gap": null
+      },
+      {
+        "ref": "issues-board.archive.done",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/issues-batch.test.ts::archives exactly Done issues strictly older than threshold (boundary at-cutoff/1ms over); 0 when none; 400 invalid days", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["api", "boundary", "error"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null },
+        "gap": null
+      },
+      {
+        "ref": "issues-board.list.issues",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/issue-number.test.ts::GET returns issues with numbers per project", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/issues-routes-edge-cases.test.ts::statusName filter returns matching / [] for unknown; GET without projectId 400", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/issues-slim.test.ts::slim omits description", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["api", "navigation"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null },
+        "gap": null
+      },
+      {
+        "ref": "issues-board.config.statuses",
+        "status": "partial",
+        "covered_by": [
+          { "test": "packages/e2e/tests/api/projects.test.ts::GET statuses returns >=5 defaults; POST creates a new status", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["api"],
+        "dimensions_missing": ["error", "state-transition"],
+        "history": { "churn_90d": null },
+        "gap": { "kind": "no-test", "missing_dimensions": ["error"], "rationale": "the key invariant — DELETE of a status with linked issues must return 409 (project.repository.ts:224) so issues are never orphaned — has no asserting test in the candidate set; only GET/POST happy paths are exercised" }
+      },
+      {
+        "ref": "issues-board.manage.tags",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/tags.test.ts::CRUD; duplicate 409; builtin delete/rename/merge 403; delete detaches associations; assign/list/remove end-to-end", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["api", "error"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null },
+        "gap": null
+      },
+      {
+        "ref": "issues-board.summarize.milestones",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/milestones-summary.test.ts::aggregates totals/open/closed/progressPercent + burndown; empty milestone zeros", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["api", "capability"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null },
+        "gap": null
+      },
+      {
+        "ref": "issues-board.seed.defaultStatuses",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/registration-default-statuses.test.ts::seeds canonical 7 statuses; Backlog -1; single default Todo", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["capability", "regression"],
+        "dimensions_missing": [],
+        "history": { "bugs": 1, "last_regression": "#772" },
+        "gap": null
+      }
+    ],
+    "summary": {
+      "covered": 18,
+      "partial": 1,
+      "uncovered": 0,
+      "undocumented_implemented": 0,
+      "documented_missing": 0,
+      "score": 0.94,
+      "by_dimension": {
+        "capability": { "covered": 7, "partial": 0, "uncovered": 0 },
+        "api": { "covered": 11, "partial": 1, "uncovered": 0 },
+        "workflow": { "covered": 3, "partial": 0, "uncovered": 0 },
+        "state-transition": { "covered": 8, "partial": 1, "uncovered": 0 },
+        "error": { "covered": 7, "partial": 1, "uncovered": 1 },
+        "boundary": { "covered": 6, "partial": 0, "uncovered": 0 },
+        "navigation": { "covered": 2, "partial": 0, "uncovered": 0 },
+        "config": { "covered": 2, "partial": 0, "uncovered": 0 },
+        "regression": { "covered": 5, "partial": 0, "uncovered": 0 },
+        "risk": { "covered": 1, "partial": 0, "uncovered": 0 },
+        "concurrency": { "covered": 0, "partial": 0, "uncovered": 1 },
+        "permission": { "covered": 0, "partial": 0, "uncovered": 0 },
+        "accessibility": { "covered": 0, "partial": 0, "uncovered": 0 }
+      },
+      "weak_dimensions": ["concurrency", "error (negative-path edges: status-delete-in-use, contraction-no-terminal-status)"],
+      "notes": "permission/role and accessibility are N/A for this single-user, local, API/service-level capability (no RBAC; UI a11y is out of this capability's scope). The suite is unusually strong — most invariants have a dedicated regression test tied to a ticket number. The remaining gaps are negative-path error cells and one true concurrency cell.",
+      "top_gaps": [
+        {
+          "ref": "issues-board.config.statuses",
+          "priority": "P4",
+          "roi": 3.0,
+          "dimensions_to_add": ["error"],
+          "rationale": "The status-delete-with-linked-issues guard (409, project.repository.ts:224) prevents orphaning live issues but has no asserting test. impact 3 (data-integrity guard) x regression 3 / (exec 1 + maint 1) = 3.0. A single in-process Hono test: seed a status with an issue, DELETE the status, assert 409 + issue untouched."
+        },
+        {
+          "ref": "issues-board.contract.coupled",
+          "priority": "P4",
+          "roi": 2.0,
+          "dimensions_to_add": ["error"],
+          "rationale": "Contraction into a project lacking a Cancelled/Done status must 400 ('Project must have a Cancelled or Done status to absorb issues'); untested. Low frequency but a real rejection path. impact 2 x regression 2 / (exec 1 + maint 1) = 2.0."
+        },
+        {
+          "ref": "issues-board.create.issue",
+          "priority": "P3",
+          "roi": 2.7,
+          "dimensions_to_add": ["concurrency"],
+          "rationale": "issueNumber allocation is asserted sequentially only; the 3x-retry on the unique-index collision under parallel creates is unverified (domain-doc flags it as inferred-unverified). impact 4 x regression 2 / (exec 2 + maint 1) = 2.7. Costlier (needs parallel inserts), hence P3."
+        }
+      ]
+    }
+  }
+}

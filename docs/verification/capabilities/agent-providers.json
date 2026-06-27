@@ -1,0 +1,468 @@
+{
+  "slug": "agent-providers",
+  "behavior": {
+    "business_purpose": "The anti-corruption seam between the board's uniform 'launch an agent on this ticket' notion and four mutually-incompatible third-party coding CLIs (Anthropic claude, OpenAI codex, GitHub copilot, pi). It translates provider-neutral launch options into a concrete spawn {command,args,env}, normalizes each CLI's stdout into one ParsedStreamEvent model, validates that a chosen provider+profile can actually launch (auth/binary/version preflight), bootstraps OAuth logins, and rotates credential rings on rate-limit exhaustion. Without it the board could track tickets but spawn no agent.",
+    "confidence": "high",
+    "source_paths": [
+      "packages/server/src/services/agent-provider/",
+      "packages/server/src/services/agent-cli-version.service.ts",
+      "packages/server/src/services/agent-profile-health.service.ts",
+      "packages/server/src/services/claude-login.service.ts",
+      "packages/server/src/services/codex-login.service.ts",
+      "packages/server/src/services/codex-license-ring.ts",
+      "packages/server/src/services/claude-subscription-ring.ts",
+      "packages/server/src/services/auth-rotation-ring.ts",
+      "packages/server/src/startup/exit-workflow.ts",
+      "packages/server/src/startup/rate-limit-exit-decision.ts",
+      "packages/shared/src/lib/provider-models.ts"
+    ],
+    "actors": [
+      { "name": "agent-sessions", "kind": "automation", "notes": "primary consumer: agent.service.ts builds a launch and spawns the CLI" },
+      { "name": "operator", "kind": "human", "notes": "single local user; selects provider/profile/model in Settings, triggers OAuth login, views the profile-health dashboard" },
+      { "name": "monitor", "kind": "automation", "notes": "Strategy Bullseye + selectProviderFromStrategy feed the default provider; usage-limit exit dispatcher drives ring rotation" },
+      { "name": "agent-cli", "kind": "external", "notes": "the four third-party CLIs whose unversioned flag/wire contracts this module shields against" }
+    ],
+    "entry_points": [
+      { "kind": "function", "ref": "buildAgentLaunchConfig(options) registry.ts:33", "observable": "returns a {command,args,useShell,env,stdin-hints} spawn recipe for the named provider" },
+      { "kind": "function", "ref": "narrowProviderName(value) registry.ts:44", "observable": "coerces any untrusted string to a canonical ProviderName, defaulting to claude" },
+      { "kind": "function", "ref": "getProfilePrefKey(provider) registry.ts:54", "observable": "maps a provider to its profile-pref key (codex_profile, pi_profile, ...)" },
+      { "kind": "function", "ref": "parseStreamEventObserved(line) types.ts:90", "observable": "normalizes a provider stdout line to ParsedStreamEvent; loud-logs valid-JSON-unrecognized lines under the canonical provider name" },
+      { "kind": "service", "ref": "listAgentProfileHealth(db,lists) agent-profile-health.service.ts:368", "observable": "computes ok/warning/error verdict per (provider,profile) for the Settings dashboard" },
+      { "kind": "service", "ref": "detectCliVersion(provider,command) agent-cli-version.service.ts:140", "observable": "probes <cli> --version and range-checks it (below-min=error, above/unparseable/unavailable=warning)" },
+      { "kind": "service", "ref": "spawnClaudeLogin/spawnCodexLogin(dir) claude-login.service.ts:16 codex-login.service.ts:15", "observable": "pops a real visible terminal running claude /login | codex login with the right CONFIG_DIR/CODEX_HOME" },
+      { "kind": "api", "ref": "GET /api/preferences/provider-divergence", "observable": "reports whether the global provider/profile prefs diverge from the Strategy Bullseye (#903)" },
+      { "kind": "function", "ref": "handleUsageLimitExit exit-workflow.ts:382", "observable": "on a usage-limit session exit: cools the exhausted profile, rotates the credential ring, relaunches a builder on the fresh profile or blocks" }
+    ],
+    "behaviors": [
+      {
+        "id": "agent-providers.build.launch",
+        "statement": "buildAgentLaunchConfig dispatches by ProviderName to the matching adapter and returns a ready-to-spawn {command,args,env} plus stdin-delivery hints",
+        "actor": "agent-sessions",
+        "preconditions": ["a ProviderName (or legacy id) is chosen", "prefs/profile resolved"],
+        "observable_outcome": "config.command/args/env reflect the provider's invocation grammar; claude-code routes to claude; unknown provider throws in registry but narrows to claude at narrowProviderName",
+        "evidence": ["packages/server/src/services/agent-provider/registry.ts:33"],
+        "dimensions": ["capability", "workflow", "config"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "agent-providers.narrow.providerName",
+        "statement": "Any untrusted provider string (pref/request/legacy claude-code) narrows to a canonical ProviderName and defaults to claude rather than throwing",
+        "actor": "agent-sessions",
+        "preconditions": ["a stored or request provider string exists"],
+        "observable_outcome": "narrowProviderName returns one of claude/codex/copilot/pi; claude-code→claude; junk→claude; getProfilePrefKey returns the matching pref key",
+        "evidence": ["packages/server/src/services/agent-provider/registry.ts:44"],
+        "dimensions": ["boundary", "config", "error-handling"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "agent-providers.suppress.modelCustomEndpoint",
+        "statement": "For a Claude profile that sets a custom ANTHROPIC_BASE_URL (e.g. z.ai/glm), --model is omitted so the profile's own ANTHROPIC_MODEL decides the model",
+        "actor": "agent-sessions",
+        "preconditions": ["claudeProfile settings.json defines a custom ANTHROPIC_BASE_URL"],
+        "observable_outcome": "the launch config contains no --model flag for custom-endpoint profiles but does for standard profiles",
+        "evidence": ["packages/server/src/services/agent-provider/claude-provider.ts:101", "packages/server/src/services/agent-provider/helpers.ts:132"],
+        "dimensions": ["config", "boundary"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "agent-providers.guard.crossProviderModel",
+        "statement": "A provider-agnostic default_model id is dropped unless it belongs to the chosen provider's family, preventing a stale gpt-* from killing a Claude launch (and vice versa); unknown ids pass through; copilot/pi never strip",
+        "actor": "agent-sessions",
+        "preconditions": ["a model id is present from a provider-scoped pref or request"],
+        "observable_outcome": "modelBelongsToProvider returns false (→ model dropped) for cross-family ids, true for matching/unknown/copilot/pi",
+        "evidence": ["packages/shared/src/lib/provider-models.ts:45"],
+        "dimensions": ["config", "boundary", "regression"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "agent-providers.order.codexExecFlags",
+        "statement": "Codex exec flags (--json, sandbox, --profile, --model) are emitted BEFORE the resume subcommand because codex exec resume rejects them after resume and exits code 2",
+        "actor": "agent-sessions",
+        "preconditions": ["provider=codex", "a providerSessionId to resume"],
+        "observable_outcome": "in the codex args array all exec options precede the literal 'resume' token",
+        "evidence": ["packages/server/src/services/agent-provider/codex-provider.ts:77"],
+        "dimensions": ["config", "regression", "boundary"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "agent-providers.enforce.planMode",
+        "statement": "Plan ('produce a plan, change nothing') mode is enforced per provider by the strongest mechanism — Claude --permission-mode plan, Codex read-only sandbox + prompt prefix, Copilot --plan + --deny-tool list, Pi prompt prefix — and non-Claude plans are wrapped in ===PLAN BEGIN/END=== markers",
+        "actor": "agent-sessions",
+        "preconditions": ["planMode=true"],
+        "observable_outcome": "each provider's config carries its plan enforcement (flag/sandbox/deny-tool/prefix) and emits the agreed plan markers where applicable",
+        "evidence": ["packages/server/src/services/agent-provider/claude-provider.ts:113", "packages/server/src/services/agent-provider/copilot-provider.ts:90"],
+        "dimensions": ["config", "feature", "workflow"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "agent-providers.parse.streamEvent",
+        "statement": "Each provider adapter normalizes its CLI's stdout JSON into one ParsedStreamEvent model (providerSessionId, liveStats, stats, toolActivity, todos, turnComplete, rate-limit)",
+        "actor": "agent-sessions",
+        "preconditions": ["a stdout line is read from a running agent"],
+        "observable_outcome": "parseStreamEvent returns the unified event fields for valid lines and undefined for non-JSON/fieldless lines, per claude/codex/copilot/pi wire format",
+        "evidence": ["packages/server/src/services/agent-provider/types.ts:73", "packages/server/src/services/agent-provider/copilot-provider.ts:1"],
+        "dimensions": ["capability", "boundary", "config"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "agent-providers.observe.unknownEvent",
+        "statement": "A valid-JSON-but-unrecognized stream line is loud-logged via parseStreamEventObserved under the canonical provider name instead of silently swallowed (the #898 0-tokens misdiagnosis guard)",
+        "actor": "agent-sessions",
+        "preconditions": ["a recognized CLI emits an unknown/renamed event shape"],
+        "observable_outcome": "the unknown event is recorded under its canonical provider name; a recognized event (e.g. codex turn.completed) is NOT counted as unknown",
+        "evidence": ["packages/server/src/services/agent-provider/types.ts:90"],
+        "dimensions": ["regression", "error-handling"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "agent-providers.oneShot.text",
+        "statement": "One-shot text mode produces a non-streaming launch for internal AI utilities — Claude --output-format text -p, Codex exec WITHOUT --json reading prompt from stdin — so a text utility never sends Claude flags to codex",
+        "actor": "agent-sessions",
+        "preconditions": ["oneShotText=true"],
+        "observable_outcome": "the config emits plain-text args (no stream-json/MCP) and the correct per-provider non-streaming flags",
+        "evidence": ["packages/server/src/services/agent-provider/types.ts:59", "packages/server/src/services/agent-provider/claude-provider.ts:49"],
+        "dimensions": ["config", "feature", "regression"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "agent-providers.detect.cliVersion",
+        "statement": "A CLI --version probe is range-checked: below the supported floor is a hard error, above-known/unparseable/unavailable are non-blocking warnings, and the probe is cached once per (provider,command)",
+        "actor": "operator",
+        "preconditions": ["a provider command resolvable on PATH"],
+        "observable_outcome": "detectCliVersion returns below-min→error, in-range→ok, no-semver→unparseable warning, throw/missing→unavailable warning, exceeds maxKnown→above-known warning",
+        "evidence": ["packages/server/src/services/agent-cli-version.service.ts:140"],
+        "dimensions": ["error-handling", "boundary", "config"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "agent-providers.preflight.profileHealth",
+        "statement": "listAgentProfileHealth computes an ok/warning/error verdict per (provider,profile) from auth/config existence + binary-on-PATH + buildable flags + version probe, and a recorded launch FAILURE overrides an otherwise-ok static verdict to error",
+        "actor": "operator",
+        "preconditions": ["Settings opened or a profile selected"],
+        "observable_outcome": "the dashboard shows error for a missing codex config / below-min version / recorded launch failure; secrets in flags/errors are redacted",
+        "evidence": ["packages/server/src/services/agent-profile-health.service.ts:368", "packages/server/src/services/agent-profile-health.service.ts:453"],
+        "dimensions": ["error-handling", "state-transition", "config"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "agent-providers.resolve.providerConfig",
+        "statement": "Provider/profile/model resolution funnels through one shared resolver with fixed precedence: explicit profileOverride > legacy claudeProfile > Strategy selection > provider pref; the model is read ONLY from provider-scoped keys (the global default_model is unrepresentable, #902)",
+        "actor": "agent-sessions",
+        "preconditions": ["a workspace launch or preview is requested"],
+        "observable_outcome": "resolveProviderConfig returns the right provider/profile per precedence; a stale global default_model never leaks into a launch; copilot never gets a model",
+        "evidence": ["packages/server/src/services/agent-settings.service.ts:1", "packages/shared/src/lib/provider-models.ts:45"],
+        "dimensions": ["config", "workflow", "regression"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "agent-providers.detect.providerDivergence",
+        "statement": "The board reports when the global provider/profile prefs diverge from the Strategy Bullseye selection so the operator can re-sync them (#903 anti-drift)",
+        "actor": "operator",
+        "preconditions": ["a project may or may not have a Bullseye configured"],
+        "observable_outcome": "GET /api/preferences/provider-divergence returns hasBullseye + diverged; diverged=true on provider or profile mismatch, false when they agree or no Bullseye",
+        "evidence": ["packages/server/src/services/agent-settings.service.ts:1"],
+        "dimensions": ["api", "config", "regression"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "agent-providers.rotate.rateLimitExit",
+        "statement": "On a usage-limit session exit the exhausted profile is cooled and the provider's credential ring rotated to the next usable profile BEFORE any relaunch; the worktree is auto-relaunched on the fresh profile only if rotation succeeded AND it was a builder session, otherwise the workspace is left blocked with a human-readable reason",
+        "actor": "monitor",
+        "preconditions": ["session stats match a codex/claude usage-limit signature", "a credential ring exists"],
+        "observable_outcome": "ring picks next non-cooled license/subscription, switches the active-profile pref, builder resumes same worktree with a continuation prompt; non-builder or no-fresh-profile → blocked, never silently relaunched",
+        "evidence": ["packages/server/src/startup/exit-workflow.ts:382", "packages/server/src/startup/rate-limit-exit-decision.ts:27"],
+        "dimensions": ["state-transition", "workflow", "error-handling", "config"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "agent-providers.login.oauthBootstrap",
+        "statement": "Picking a Codex license / Claude subscription with no auth on disk creates the credential dir and pops a REAL visible terminal (windowsHide:false) running codex login / claude /login with the right CODEX_HOME/CLAUDE_CONFIG_DIR; failure is non-fatal because the equivalent manual command is returned for a copy-button",
+        "actor": "operator",
+        "preconditions": ["selected profile lacks auth.json/.credentials.json"],
+        "observable_outcome": "a foreground terminal opens for the OAuth callback server; the manual command string is returned; a hidden/background spawn would tear down the callback",
+        "evidence": ["packages/server/src/services/claude-login.service.ts:20", "packages/server/src/services/codex-login.service.ts:19"],
+        "dimensions": ["workflow", "error-handling", "config"],
+        "risk": "medium",
+        "confidence": "medium"
+      },
+      {
+        "id": "agent-providers.strip.profileEnv",
+        "statement": "Before a profile is applied, the server's own profile-owned ANTHROPIC_* env vars are stripped from the spawn env to prevent cross-profile credential bleed, and if a Claude profile sets ANTHROPIC_AUTH_TOKEN but no key, ANTHROPIC_API_KEY is deleted so the profile's auth wins cleanly",
+        "actor": "agent-sessions",
+        "preconditions": ["a profile is selected for a Claude launch"],
+        "observable_outcome": "the spawn env contains no leaked server ANTHROPIC_* vars; token+key conflict is resolved by dropping the key",
+        "evidence": ["packages/server/src/services/agent-provider/helpers.ts:119", "packages/server/src/services/agent-provider/helpers.ts:161"],
+        "dimensions": ["config", "boundary", "error-handling"],
+        "risk": "high",
+        "confidence": "medium"
+      }
+    ],
+    "permissions": [
+      { "actor": "operator", "behavior": "agent-providers.login.oauthBootstrap", "allowed": true, "notes": "single-user local app — no RBAC; permission dimension is trivial here" }
+    ],
+    "state_model": {
+      "states": ["active", "blocked"],
+      "transitions": [
+        { "from": "active", "to": "active", "trigger": "usage-limit exit, ring rotated to fresh profile, builder session", "behavior": "agent-providers.rotate.rateLimitExit" },
+        { "from": "active", "to": "blocked", "trigger": "usage-limit exit, no fresh profile OR non-builder session", "behavior": "agent-providers.rotate.rateLimitExit" }
+      ]
+    },
+    "error_states": [
+      { "id": "agent-providers.error.belowMinVersion", "statement": "a CLI older than the supported floor yields a hard error verdict in preflight", "evidence": "agent-cli-version.service.ts:181" },
+      { "id": "agent-providers.error.launchFailureOverride", "statement": "a recorded launch failure forces a profile's health to error even when static preflight is ok", "evidence": "agent-profile-health.service.ts:453" },
+      { "id": "agent-providers.error.rotationBlocked", "statement": "when every profile is cooling (no rotation) the workspace is left blocked, never silently relaunched", "evidence": "exit-workflow.ts:333" },
+      { "id": "agent-providers.error.unknownProvider", "statement": "getProvider throws on an unknown provider name (callers must narrow first)", "evidence": "registry.ts:21" }
+    ],
+    "external_integrations": ["claude CLI", "codex CLI", "copilot CLI", "pi CLI", "OS terminal (OAuth login)", "credential directories (CODEX_HOME / CLAUDE_CONFIG_DIR)"],
+    "unknowns": [
+      { "question": "Is the above-known version warning path ever reachable in production?", "why_unknown": "maxKnown is null for all four providers, so only below-min/unparseable/unavailable fire; tested synthetically (a maxKnown is injected) but never exercised against a real provider table." },
+      { "question": "Does a blocked-by-rate-limit workspace ever auto-resume on the rotated profile?", "why_unknown": "domain doc states the in-process monitor skips blocked workspaces; no automatic re-launch path observed — appears manual-only." },
+      { "question": "Is the visible-terminal OAuth login spawn actually observed end-to-end?", "why_unknown": "no test spawns the login services; verified only by code reading (windowsHide:false)." }
+    ]
+  },
+  "coverage": {
+    "behaviors": [
+      {
+        "ref": "agent-providers.build.launch",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/agent-provider.test.ts::builds default Claude launch config with stream-json", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/agent-provider.test.ts::routes to CodexProvider when provider is 'codex'", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/agent-provider-registry.test.ts::registry resolves every ProviderName to a provider whose name matches", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["capability", "workflow", "config"],
+        "dimensions_missing": []
+      },
+      {
+        "ref": "agent-providers.narrow.providerName",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/agent-provider-registry.test.ts::narrowProviderName canonicalizes and defaults to claude", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/agent-provider-registry.test.ts::getProfilePrefKey resolves untrusted strings (incl. claude-code) to the right key", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["boundary", "config", "error-handling"],
+        "dimensions_missing": []
+      },
+      {
+        "ref": "agent-providers.suppress.modelCustomEndpoint",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/agent-provider.test.ts::skips --model for profiles with a custom ANTHROPIC_BASE_URL (e.g. z.ai)", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/agent-provider.test.ts::adds --model for a standard profile without a custom endpoint", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["config", "boundary"],
+        "dimensions_missing": []
+      },
+      {
+        "ref": "agent-providers.guard.crossProviderModel",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/shared/__tests__/model-provider.test.ts::rejects a codex model id for the claude provider", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/provider-switch-stale-default-model.test.ts::rejects a Codex gpt-5.5 model for the claude provider", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/provider-switch-stale-default-model.test.ts::POST /api/workspaces/preview — stale Codex default_model is dropped for Claude provider", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["config", "boundary", "regression"],
+        "dimensions_missing": []
+      },
+      {
+        "ref": "agent-providers.order.codexExecFlags",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/agent-provider.test.ts::uses codex exec with profile and resume", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/agent-provider.test.ts::uses codex exec without resume", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["config", "regression", "boundary"],
+        "dimensions_missing": []
+      },
+      {
+        "ref": "agent-providers.enforce.planMode",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/agent-provider.test.ts::adds plan mode flags", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/agent-provider.test.ts::uses read-only sandbox (not the bypass flag) in plan mode", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/agent-provider.test.ts::copilot plan mode adds --plan + --deny-tool + PLAN BEGIN markers", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["config", "feature", "workflow"],
+        "dimensions_missing": []
+      },
+      {
+        "ref": "agent-providers.parse.streamEvent",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/agent-provider.test.ts::extracts stats from result event", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/copilot-parse-stream-event.test.ts::builds stats + turnComplete on a result event", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/pi-parse-stream-event.test.ts::builds stats + turnComplete", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["capability", "boundary", "config"],
+        "dimensions_missing": []
+      },
+      {
+        "ref": "agent-providers.observe.unknownEvent",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/agent-provider-observed-parse.test.ts::records an unknown codex event under its canonical provider name", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/agent-provider-observed-parse.test.ts::does not count a recognized codex turn.completed (the 0-tokens regression guard)", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["regression", "error-handling"],
+        "dimensions_missing": []
+      },
+      {
+        "ref": "agent-providers.oneShot.text",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/agent-provider.test.ts::emits plain text args (no stream-json/MCP) ending in -p", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/agent-provider.test.ts::uses `codex exec` WITHOUT --json, reading the prompt from stdin", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["config", "feature", "regression"],
+        "dimensions_missing": []
+      },
+      {
+        "ref": "agent-providers.detect.cliVersion",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/agent-cli-version.service.test.ts::reports below-min when the CLI is older than the supported floor", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/agent-cli-version.service.test.ts::reports unparseable when --version output has no semver", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/agent-cli-version.service.test.ts::reports above-known when a maxKnown ceiling is set and exceeded", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["error-handling", "boundary", "config"],
+        "dimensions_missing": [],
+        "history": { "note": "above-known synthetic only — maxKnown is null for all real providers" }
+      },
+      {
+        "ref": "agent-providers.preflight.profileHealth",
+        "status": "partial",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/agent-profile-health.service.test.ts::persists and maps the latest launch failure summary by provider profile", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/agent-profile-health.service.test.ts::reports a missing codex profile config file as an error", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/agent-profile-health.service.test.ts::includes a default Pi profile and runs Pi launch preflight", "strength": "touches-only" }
+        ],
+        "dimensions_covered": ["error-handling", "config"],
+        "dimensions_missing": ["state-transition"],
+        "gap": {
+          "kind": "dimension-missing",
+          "missing_dimensions": ["state-transition"],
+          "rationale": "failure-override-to-error and missing-config-error are asserted, but the version-probe-cached-once-per-(provider,command) optimization and the full ok→warning→error verdict folding across license-ring vs config-file auth validation are not directly asserted."
+        }
+      },
+      {
+        "ref": "agent-providers.resolve.providerConfig",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/provider-config-resolution.test.ts::explicit profileOverride.provider=codex forces codex regardless of prefs", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/provider-config-resolution.test.ts::ignores the retired global default_model — only the provider-scoped slot is consulted (#902)", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workspace-provider-resolution.test.ts::(a) explicit claudeProfile forces provider=claude even when global provider=codex", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/no-global-default-model.test.ts::a value in the global default_model key is IGNORED — only provider-scoped keys win", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["config", "workflow", "regression"],
+        "dimensions_missing": []
+      },
+      {
+        "ref": "agent-providers.detect.providerDivergence",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/provider-divergence.test.ts::returns diverged=true when global provider differs from Bullseye", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/provider-divergence.test.ts::returns diverged=true when provider matches but profile differs", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/provider-divergence.test.ts::GET /api/preferences/provider-divergence returns hasBullseye=false for a project with no Bullseye", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["api", "config", "regression"],
+        "dimensions_missing": []
+      },
+      {
+        "ref": "agent-providers.rotate.rateLimitExit",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/rate-limit-exit-decision.test.ts::relaunches only when rotated to a fresh profile AND a builder session", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/usage-limit-rotation-exit.test.ts::rotates a Codex license and relaunches the builder on the fresh profile", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/usage-limit-rotation-exit.test.ts::leaves the workspace blocked (no relaunch) when the ring cannot rotate", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/codex-license-ring.test.ts::pickNextLicense rotates to the next entry in ring order, wrapping", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["state-transition", "workflow", "error-handling", "config"],
+        "dimensions_missing": []
+      },
+      {
+        "ref": "agent-providers.login.oauthBootstrap",
+        "status": "uncovered",
+        "covered_by": [],
+        "dimensions_covered": [],
+        "dimensions_missing": ["workflow", "error-handling", "config"],
+        "gap": {
+          "kind": "no-test",
+          "missing_dimensions": ["workflow", "error-handling", "config"],
+          "rationale": "No test exercises claude-login.service.ts / codex-login.service.ts. The load-bearing invariant (windowsHide:false so the OAuth callback survives) and the non-fatal-failure / returned-manual-command contract are entirely unverified. Hard to e2e (real terminal) but the command-construction and env (CODEX_HOME/CLAUDE_CONFIG_DIR) and the spawn options object are unit-testable with a mocked spawn."
+        }
+      },
+      {
+        "ref": "agent-providers.strip.profileEnv",
+        "status": "partial",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/agent-provider.test.ts::skips --model for profiles with a custom ANTHROPIC_BASE_URL (e.g. z.ai)", "strength": "touches-only" }
+        ],
+        "dimensions_covered": ["config"],
+        "dimensions_missing": ["boundary", "error-handling"],
+        "gap": {
+          "kind": "outcome-not-asserted",
+          "missing_dimensions": ["boundary", "error-handling"],
+          "rationale": "buildSpawnEnv stripping the server's own ANTHROPIC_* vars (cross-profile credential-bleed guard, helpers.ts:119) and the delete-ANTHROPIC_API_KEY-when-AUTH_TOKEN-present rule (helpers.ts:161) are security-relevant but not directly asserted; only the downstream --model suppression is tested. A test should seed a polluted process.env and assert the spawn env is clean."
+        }
+      }
+    ],
+    "summary": {
+      "covered": 13,
+      "partial": 2,
+      "uncovered": 1,
+      "undocumented_implemented": 0,
+      "documented_missing": 0,
+      "score": 0.875,
+      "by_dimension": {
+        "config": { "covered": 12, "partial": 2, "uncovered": 1 },
+        "workflow": { "covered": 6, "partial": 0, "uncovered": 1 },
+        "boundary": { "covered": 6, "partial": 1, "uncovered": 0 },
+        "regression": { "covered": 7, "partial": 0, "uncovered": 0 },
+        "error-handling": { "covered": 5, "partial": 2, "uncovered": 1 },
+        "state-transition": { "covered": 1, "partial": 1, "uncovered": 0 },
+        "api": { "covered": 1, "partial": 0, "uncovered": 0 },
+        "capability": { "covered": 2, "partial": 0, "uncovered": 0 },
+        "feature": { "covered": 2, "partial": 0, "uncovered": 0 },
+        "permission": { "covered": 0, "partial": 0, "uncovered": 0, "note": "N/A — single-user local app, no RBAC" }
+      },
+      "weak_dimensions": ["error-handling (login + env-strip security paths)", "state-transition (full preflight verdict folding)", "config (env-stripping under a polluted process env)"],
+      "top_gaps": [
+        {
+          "ref": "agent-providers.strip.profileEnv",
+          "priority": "high",
+          "roi": "high",
+          "dimensions_to_add": ["boundary", "error-handling"],
+          "rationale": "Security-relevant cross-profile credential-bleed guard (strip server ANTHROPIC_* before applying a profile + delete API_KEY when AUTH_TOKEN present) is untested; a leak would silently authenticate an agent with the wrong account. Cheap unit test: pollute process.env, build a profile launch, assert the spawn env is clean. High blast radius, low exec cost."
+        },
+        {
+          "ref": "agent-providers.login.oauthBootstrap",
+          "priority": "medium",
+          "roi": "medium",
+          "dimensions_to_add": ["workflow", "error-handling", "config"],
+          "rationale": "Zero coverage of the OAuth login bootstrap. The windowsHide:false invariant (callback server must run foreground) and the non-fatal-failure + returned-manual-command behavior are unverified. Unit-testable with a mocked spawn asserting the command/args/env (CODEX_HOME/CLAUDE_CONFIG_DIR) and spawn options; full terminal e2e is impractical."
+        },
+        {
+          "ref": "agent-providers.preflight.profileHealth",
+          "priority": "low",
+          "roi": "medium",
+          "dimensions_to_add": ["state-transition"],
+          "rationale": "Failure-override and missing-config are covered, but the once-per-(provider,command) version-probe cache and the ok→warning→error fold over license-ring vs config-file auth validation are not asserted. Medium value, moderate setup cost (spawn + db mocks)."
+        }
+      ]
+    }
+  }
+}

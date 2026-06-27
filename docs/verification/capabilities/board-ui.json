@@ -1,0 +1,672 @@
+{
+  "slug": "board-ui",
+  "behavior": {
+    "business_purpose": "The product surface of agentic-kanban: the single screen a local operator uses to watch and steer a fleet of AI coding agents. It renders the kanban board (columns = workflow statuses, cards = tickets), lets the user create/move/edit/delete tickets by drag or keyboard, opens issue-detail and workspace/diff panels, exposes a command palette and keyboard shortcuts, and reflects live agent activity (which ticket an agent works, review/merge state, approvals) in real time without manual refresh. It is a mostly-thin optimistic projection of server truth with a few client-local UX policies (WIP visual tint, drop-position arithmetic, archive-confirm gate, column partitioning).",
+    "confidence": "high",
+    "source_paths": [
+      "packages/client/src/routes/BoardPage.tsx",
+      "packages/client/src/components/BoardColumn.tsx",
+      "packages/client/src/components/BoardColumnCard.tsx",
+      "packages/client/src/components/IssueCard.tsx",
+      "packages/client/src/components/IssueDetailPanel.tsx",
+      "packages/client/src/components/WorkspacePanel.tsx",
+      "packages/client/src/components/BoardToolbar.tsx",
+      "packages/client/src/hooks/useBoardIssueMovement.ts",
+      "packages/client/src/hooks/useBoardRefetch.ts",
+      "packages/client/src/lib/useBoardEvents.ts",
+      "packages/client/src/lib/issueMoveHelpers.ts",
+      "packages/client/src/lib/reorderIssues.ts",
+      "packages/client/src/lib/wipLimits.ts",
+      "packages/client/src/lib/boardColumnSort.ts",
+      "packages/client/src/lib/boardKeyboardNav.ts",
+      "packages/client/src/lib/api.ts"
+    ],
+    "actors": [
+      { "name": "operator", "kind": "human", "notes": "the single local user; drives every UI control" },
+      { "name": "server-push", "kind": "automation", "notes": "agent/monitor/MCP/CLI mutations broadcast over the board WebSocket and are reflected without user action" }
+    ],
+    "entry_points": [
+      { "kind": "ui", "ref": "BoardPage route '/' (kanban view)", "observable": "renders status columns + cards; drag/keyboard interactions mutate the board" },
+      { "kind": "ui", "ref": "View toggle (Board / Table / Graph)", "observable": "switches the active board view component" },
+      { "kind": "ui", "ref": "Command palette (Ctrl+K)", "observable": "fuzzy action list; executes create/navigate/project-switch/workspace actions" },
+      { "kind": "ui", "ref": "Keyboard shortcuts (?, a, q, arrows/vim, Escape)", "observable": "open overlays/panels, navigate cards, close dialogs" },
+      { "kind": "ui", "ref": "Issue detail panel / inline+expandable create panel", "observable": "view/edit/delete a ticket; create a ticket with optional workspace launch" },
+      { "kind": "ui", "ref": "Workspace panel / diff viewer / settings panel", "observable": "review/merge a workspace, read diff, add diff comments, change settings prefs" },
+      { "kind": "event", "ref": "useBoardEvents WS subscription (/ws/board/:projectId) + 30s safety poll", "observable": "board_changed/session_*/approval_requested pushes drive coalesced refetch and card badges" },
+      { "kind": "infra", "ref": "api.ts apiFetch/apiPost/Patch/Delete", "observable": "typed REST client; throws Error carrying server error message + status, surfaced as toast/banner" }
+    ],
+    "behaviors": [
+      {
+        "id": "board-ui.render.columns",
+        "statement": "The board renders one lane per configured workflow status, each holding its ticket cards, with the expected status names",
+        "actor": "operator",
+        "preconditions": ["a project is active", "board API responds"],
+        "observable_outcome": "named status columns appear (Todo/In Progress/Done/…); cards render under their status; header title shown",
+        "evidence": ["packages/client/src/routes/BoardPage.tsx:92", "packages/client/src/components/BoardColumn.tsx:296"],
+        "dimensions": ["capability", "navigation"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "board-ui.render.skeleton",
+        "statement": "A skeleton placeholder is shown while the board API is in-flight, then replaced by real content",
+        "actor": "operator",
+        "preconditions": ["board GET pending"],
+        "observable_outcome": "skeleton board visible during load; replaced by columns once data arrives",
+        "evidence": ["packages/client/src/routes/BoardPage.tsx:92"],
+        "dimensions": ["navigation", "state-transition"],
+        "risk": "low",
+        "confidence": "high"
+      },
+      {
+        "id": "board-ui.move.optimistic",
+        "statement": "Dragging (or keyboard-advancing) a card to another column applies the move instantly and converges on the server-persisted position",
+        "actor": "operator",
+        "preconditions": ["a ticket card exists in a source column", "a valid target column"],
+        "observable_outcome": "card lands in the target column immediately; server board reflects the new status/sortOrder after a debounced refetch",
+        "evidence": ["packages/client/src/hooks/useBoardIssueMovement.ts:162", "packages/client/src/lib/issueMoveHelpers.ts:31", "packages/client/src/lib/reorderIssues.ts:8"],
+        "dimensions": ["workflow", "capability", "state-transition"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "board-ui.move.archiveConfirm",
+        "statement": "Moving a ticket into Done/Cancelled while it has a live (non-closed) workspace requires explicit confirmation before committing",
+        "actor": "operator",
+        "preconditions": ["target is an archive status", "the ticket's main workspace is active/not-closed"],
+        "observable_outcome": "a confirm dialog blocks the move; only on confirm does the PATCH+refetch run; cancel leaves the card in place",
+        "evidence": ["packages/client/src/hooks/useBoardIssueMovement.ts:173", "packages/client/src/hooks/useBoardIssueMovement.ts:249"],
+        "dimensions": ["workflow", "error-handling", "state-transition", "risk"],
+        "risk": "high",
+        "confidence": "medium"
+      },
+      {
+        "id": "board-ui.move.rollback",
+        "statement": "A server-rejected move rolls the card back to its exact prior position and surfaces the server's rejection message",
+        "actor": "operator",
+        "preconditions": ["a move whose PATCH the server rejects (e.g. terminal-move guard)"],
+        "observable_outcome": "card snaps back to source column; a toast shows the server error message; board state matches pre-move snapshot",
+        "evidence": ["packages/client/src/hooks/useBoardIssueMovement.ts:200", "packages/client/src/hooks/useBoardIssueMovement.ts:219"],
+        "dimensions": ["error-handling", "state-transition", "risk"],
+        "risk": "high",
+        "confidence": "medium"
+      },
+      {
+        "id": "board-ui.move.dependencyPreview",
+        "statement": "Advancing/closing a ticket that has dependents shows a dependency-impact preview before committing",
+        "actor": "operator",
+        "preconditions": ["the ticket has downstream dependents"],
+        "observable_outcome": "a dependency-impact preview is shown; the move proceeds only after acknowledgement",
+        "evidence": ["packages/client/src/hooks/useBoardIssueMovement.ts:290", "packages/client/src/hooks/useBoardIssueMovement.ts:244"],
+        "dimensions": ["workflow", "feature"],
+        "risk": "medium",
+        "confidence": "medium"
+      },
+      {
+        "id": "board-ui.create.inline",
+        "statement": "The inline create form on the Todo column creates a new ticket and it appears on the board",
+        "actor": "operator",
+        "preconditions": ["board loaded"],
+        "observable_outcome": "submitting the inline form adds the new card; cancel/Escape closes the form without creating",
+        "evidence": ["packages/client/src/routes/BoardPage.tsx:105"],
+        "dimensions": ["capability", "workflow"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "board-ui.create.expandPanel",
+        "statement": "The inline create form can expand to a full-screen creation panel, carrying over entered state and exposing all fields incl. an optional Start-Workspace toggle",
+        "actor": "operator",
+        "preconditions": ["inline create form open"],
+        "observable_outcome": "panel shows all fields; in-progress input carries over; Start Workspace reveals sub-options; submit creates; backdrop/Escape/Cancel close it; submit disabled when title empty",
+        "evidence": ["packages/client/src/routes/BoardPage.tsx:105"],
+        "dimensions": ["feature", "workflow", "boundary"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "board-ui.detail.editDelete",
+        "statement": "Clicking a card opens the issue detail panel; the operator can edit and delete the ticket, and Escape/expand-collapse control the panel layout",
+        "actor": "operator",
+        "preconditions": ["a ticket card exists"],
+        "observable_outcome": "detail panel opens with ticket data; edits persist; delete removes the card; Escape closes; expand cycles sidebar→modal→fullscreen and collapse reverses",
+        "evidence": ["packages/client/src/components/IssueDetailPanel.tsx:1", "packages/client/src/routes/BoardPage.tsx:216"],
+        "dimensions": ["capability", "workflow", "navigation"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "board-ui.realtime.reflectServerChange",
+        "statement": "Board state changed server-side (agent/monitor/MCP/CLI/API) is reflected in the live UI without a manual refresh, via the WebSocket push + coalesced refetch",
+        "actor": "server-push",
+        "preconditions": ["board open and WS connected", "a server-side issue create or status change"],
+        "observable_outcome": "a ticket created via API appears on the board within seconds; a status change relocates the card to the new column",
+        "evidence": ["packages/client/src/lib/useBoardEvents.ts:99", "packages/client/src/hooks/useBoardRefetch.ts:131"],
+        "dimensions": ["workflow", "state-transition", "concurrency", "risk"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "board-ui.card.agentActivityBadge",
+        "statement": "A card surfaces its workspace's live agent state — Agent working / AI reviewing / AI fixing — and shows none when idle or workspace-less",
+        "actor": "server-push",
+        "preconditions": ["the ticket has a workspace in a given status"],
+        "observable_outcome": "the matching activity badge renders for active/reviewing/resolving states; no badge for idle or no-workspace",
+        "evidence": ["packages/client/src/components/IssueCard.tsx:68"],
+        "dimensions": ["feature", "state-transition"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "board-ui.wip.visualLimit",
+        "statement": "A column over its configured WIP limit tints its header red (advisory only — the move is never blocked); an unset/garbage limit is treated as no limit",
+        "actor": "operator",
+        "preconditions": ["a WIP-limit pref set for a status"],
+        "observable_outcome": "column classified under/at/over drives the header tint; zero/negative/non-numeric coerced to no-limit",
+        "evidence": ["packages/client/src/lib/wipLimits.ts:7", "packages/client/src/components/BoardColumn.tsx:310"],
+        "dimensions": ["feature", "config", "boundary"],
+        "risk": "low",
+        "confidence": "high"
+      },
+      {
+        "id": "board-ui.archiveColumn.conditional",
+        "statement": "The 'AI Reviewed' staging column renders only when it holds issues, or when auto-review is on without auto-merge; it appears/disappears as tickets enter/leave",
+        "actor": "operator",
+        "preconditions": ["workflow has an AI-Reviewed status"],
+        "observable_outcome": "column hidden when empty; appears when an issue moves in (with an awaiting-manual-merge hint); hides again when the issue leaves; always shown under autoReview&&!autoMerge",
+        "evidence": ["packages/client/src/routes/BoardPage.tsx:366"],
+        "dimensions": ["feature", "config", "navigation"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "board-ui.view.switch",
+        "statement": "The operator switches between Board, Table, and Graph views; each renders its expected content and supports its own interactions (table sort/filter/row-open; graph zoom/legend/status-filter)",
+        "actor": "operator",
+        "preconditions": ["board loaded"],
+        "observable_outcome": "Table view shows column headers + issue rows, sortable headers reorder, status filter narrows rows, row click opens detail; Graph view renders nodes/legend, zoom scales, status filter shows/hides backlog+done; switching back restores kanban",
+        "evidence": ["packages/client/src/components/BoardKanbanView.tsx:1", "packages/client/src/components/BoardToolbar.tsx:1"],
+        "dimensions": ["navigation", "feature", "workflow"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "board-ui.view.criticalPath",
+        "statement": "In Graph view, Critical Path mode highlights root blockers with downstream-count badges and opens a dependency-chain side panel",
+        "actor": "operator",
+        "preconditions": ["dependencies exist between issues"],
+        "observable_outcome": "Critical Path toggle visible; clicking switches to critical-path rendering; root blockers show downstream count; clicking one opens the chain panel; toggling back restores normal graph",
+        "evidence": ["packages/client/src/components/BoardKanbanView.tsx:1"],
+        "dimensions": ["feature", "navigation"],
+        "risk": "low",
+        "confidence": "high"
+      },
+      {
+        "id": "board-ui.bulkSelect.update",
+        "statement": "Ctrl-clicking multiple cards multi-selects them and a bulk action (e.g. priority change) applies to the whole selection",
+        "actor": "operator",
+        "preconditions": ["≥2 cards present"],
+        "observable_outcome": "selected cards highlight; a bulk priority change updates all selected tickets",
+        "evidence": ["packages/client/src/components/BoardColumnCard.tsx:1"],
+        "dimensions": ["feature", "workflow", "concurrency"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "board-ui.palette.execute",
+        "statement": "The command palette (Ctrl+K) fuzzy-filters actions and executes them by keyboard or click, incl. project switching and context create",
+        "actor": "operator",
+        "preconditions": ["board loaded"],
+        "observable_outcome": "Ctrl+K opens palette; typing filters; arrow+Enter or click runs the action; 'New Issue + Start Workspace' opens the create panel with workspace checked; project switch changes active project and refreshes board; Escape closes",
+        "evidence": ["packages/client/src/routes/BoardPage.tsx:92"],
+        "dimensions": ["navigation", "feature", "accessibility"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "board-ui.palette.workspaceActions",
+        "statement": "Workspace actions (Review/Merge) surface in the palette only for eligible workspaces and are gated by workspace state",
+        "actor": "operator",
+        "preconditions": ["an issue with a workspace in a given state"],
+        "observable_outcome": "Review/Merge appear for idle workspaces; triggering Review transitions the workspace to reviewing (toast); actions absent for active/closed/no-workspace issues",
+        "evidence": ["packages/client/src/routes/BoardPage.tsx:92"],
+        "dimensions": ["feature", "permission", "state-transition", "error-handling"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "board-ui.shortcuts.helpOverlay",
+        "statement": "Single-key shortcuts open panels/overlays (?, a, q) and a context-aware shortcut-help overlay, while being suppressed during text entry",
+        "actor": "operator",
+        "preconditions": ["board focused, not typing in an input"],
+        "observable_outcome": "? toggles a help overlay listing shortcuts (context-aware for Butler); 'a' opens All-Workspaces panel; 'q' opens Quick Tasks; single keys do NOT fire while typing in search; Escape/backdrop/repeat-? dismiss",
+        "evidence": ["packages/client/src/routes/BoardPage.tsx:92"],
+        "dimensions": ["accessibility", "navigation", "feature"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "board-ui.shortcuts.keyboardNav",
+        "statement": "Arrow/vim keys move a card cursor across columns and rows, seeding onto the first card and clamping at edges, skipping empty columns",
+        "actor": "operator",
+        "preconditions": ["board has navigable cards"],
+        "observable_outcome": "the focused/cursor card moves with arrows/hjkl; clamps at column edges; skips empty columns horizontally; can advance a card to the next status",
+        "evidence": ["packages/client/src/lib/boardKeyboardNav.ts:1"],
+        "dimensions": ["accessibility", "navigation"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "board-ui.diff.viewAndComment",
+        "statement": "The diff viewer shows a workspace's changes (stats header, file tree, added lines, unified/split toggle) and supports full diff-comment CRUD",
+        "actor": "operator",
+        "preconditions": ["a workspace with a real diff"],
+        "observable_outcome": "diff stats + file tree + added lines render; unified/split toggles; comments can be created/edited/deleted via UI; comment count badge updates",
+        "evidence": ["packages/client/src/components/WorkspacePanel.tsx:1"],
+        "dimensions": ["capability", "workflow", "feature"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "board-ui.statsBar.counts",
+        "statement": "The board stats bar shows per-status ticket counts and a commits counter, and a Blocked filter narrows the board to blocked issues",
+        "actor": "operator",
+        "preconditions": ["board loaded"],
+        "observable_outcome": "stats bar shows counts per status + commits; Blocked filter shows only blocked issues and toggling off restores all",
+        "evidence": ["packages/client/src/components/BoardToolbar.tsx:1"],
+        "dimensions": ["feature", "navigation"],
+        "risk": "low",
+        "confidence": "high"
+      },
+      {
+        "id": "board-ui.settings.persist",
+        "statement": "The settings panel saves agent/workflow preferences that persist across reopen (agent command, profile, auto-review/auto-fix/auto-merge/board-monitoring toggles)",
+        "actor": "operator",
+        "preconditions": ["settings panel open"],
+        "observable_outcome": "saved values are present on reopen; workflow toggles persist; cancel closes without saving; profile dropdown exposes harness-named options",
+        "evidence": ["packages/client/src/components/BoardToolbar.tsx:1"],
+        "dimensions": ["config", "feature", "navigation"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "board-ui.error.apiBanner",
+        "statement": "A failed board mutation surfaces the server error to the user rather than failing silently",
+        "actor": "operator",
+        "preconditions": ["a mutation whose API call fails (5xx)"],
+        "observable_outcome": "an error banner/toast appears carrying the failure; the optimistic state is corrected",
+        "evidence": ["packages/client/src/lib/api.ts:34"],
+        "dimensions": ["error-handling"],
+        "risk": "medium",
+        "confidence": "high"
+      }
+    ],
+    "permissions": [
+      { "actor": "operator", "behavior": "all", "allowed": true, "notes": "single-user local app — no RBAC; permission dimension is near-N/A. The only permission-shaped gate is server-side approval_requested (human approves an agent tool call), surfaced as a dialog." }
+    ],
+    "state_model": {
+      "states": ["loading-skeleton", "rendered", "optimistic-move-pending", "confirm-gated", "rolled-back", "live-refetching"],
+      "transitions": [
+        { "from": "loading-skeleton", "to": "rendered", "trigger": "board GET resolves", "behavior": "board-ui.render.skeleton" },
+        { "from": "rendered", "to": "optimistic-move-pending", "trigger": "drop/keyboard move", "behavior": "board-ui.move.optimistic" },
+        { "from": "optimistic-move-pending", "to": "confirm-gated", "trigger": "target is archive + live workspace", "behavior": "board-ui.move.archiveConfirm" },
+        { "from": "optimistic-move-pending", "to": "rolled-back", "trigger": "server rejects PATCH", "behavior": "board-ui.move.rollback" },
+        { "from": "rendered", "to": "live-refetching", "trigger": "WS board_changed / poll", "behavior": "board-ui.realtime.reflectServerChange" }
+      ]
+    },
+    "error_states": [
+      { "id": "board-ui.move.rollback", "statement": "server-rejected move snaps the card back and toasts the server message", "evidence": "useBoardIssueMovement.ts:219" },
+      { "id": "board-ui.error.apiBanner", "statement": "failed mutation shows an error banner", "evidence": "api.ts:34" },
+      { "id": "board-ui.palette.workspaceActions", "statement": "Review/Merge gated — absent or refused when the workspace is not idle", "evidence": "BoardPage.tsx:92" }
+    ],
+    "external_integrations": ["server REST API (/api/...)", "board WebSocket (/ws/board/:projectId)", "browser DataTransfer/DragEvent", "localStorage (column sort mode, prefs)"],
+    "unknowns": [
+      { "question": "Does any test assert the archive-confirm dialog actually blocks/commits a Done move with a live workspace?", "why_unknown": "no e2e among candidates exercises the confirm path; only the AI-Reviewed-column tests move issues to terminal statuses without a live workspace" },
+      { "question": "Is the optimistic-move rollback flicker (card snaps back + error toast) asserted anywhere?", "why_unknown": "the drag e2e asserts only the success convergence via server board API; no negative/rejected-move e2e found" },
+      { "question": "Is the WIP-limit red header tint asserted as a rendered visual outcome?", "why_unknown": "wipLimits.test.ts asserts the classifier (under/at/over) but no test reads the column header style" },
+      { "question": "Does the approval_requested dialog have any UI coverage?", "why_unknown": "no candidate test drives an approval push to a visible dialog" },
+      { "question": "Is keyboard card navigation (cursor move + focus) covered end-to-end in the running UI?", "why_unknown": "boardKeyboardNav.test.ts covers the pure computeNavTarget function only; no e2e drives the actual focus/cursor" }
+    ]
+  },
+  "coverage": {
+    "behaviors": [
+      {
+        "ref": "board-ui.render.columns",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/e2e/tests/ui/board.test.ts::shows kanban columns with expected names", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/board.test.ts::shows header with title", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["capability", "navigation"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": "high (BoardPage hottest file, 718 commits)", "bugs": "several board-shape regressions" }
+      },
+      {
+        "ref": "board-ui.render.skeleton",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/e2e/tests/ui/skeleton-board.test.ts::skeleton is shown while the board API is in-flight, then replaced by content", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["navigation", "state-transition"],
+        "dimensions_missing": []
+      },
+      {
+        "ref": "board-ui.move.optimistic",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/e2e/tests/ui/board.test.ts::drag issue between columns", "strength": "asserts-outcome" },
+          { "test": "packages/client/src/lib/issueMoveHelpers.test.ts::moveIssueToStatus (8 cases)", "strength": "asserts-outcome" },
+          { "test": "packages/client/src/lib/issueMoveHelpers.test.ts::applyLocalReorder", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["workflow", "capability", "state-transition"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": "high", "note": "drag e2e asserts convergence via server board API, not UI snapshot; pure transform fully unit-tested" }
+      },
+      {
+        "ref": "board-ui.move.archiveConfirm",
+        "status": "uncovered",
+        "covered_by": [],
+        "dimensions_covered": [],
+        "dimensions_missing": ["workflow", "error-handling", "state-transition", "risk"],
+        "gap": { "kind": "no-test", "missing_dimensions": ["workflow", "error-handling", "state-transition"], "rationale": "No e2e moves a ticket WITH a live workspace into Done/Cancelled to exercise the confirm dialog (block on cancel, commit on confirm). ai-reviewed-column tests move issues to terminal statuses but without a live workspace, so the gate never fires. High blast radius (risks discarding in-flight agent work)." }
+      },
+      {
+        "ref": "board-ui.move.rollback",
+        "status": "uncovered",
+        "covered_by": [],
+        "dimensions_covered": [],
+        "dimensions_missing": ["error-handling", "state-transition", "risk"],
+        "gap": { "kind": "no-test", "missing_dimensions": ["error-handling", "state-transition"], "rationale": "The drag e2e covers only the happy path. No test forces a server-rejected move (e.g. terminal-move guard) and asserts the card snaps back to the exact prior column + the server error message is shown. This is the optimistic layer's core safety property." }
+      },
+      {
+        "ref": "board-ui.move.dependencyPreview",
+        "status": "uncovered",
+        "covered_by": [],
+        "dimensions_covered": [],
+        "dimensions_missing": ["workflow", "feature"],
+        "gap": { "kind": "no-test", "missing_dimensions": ["workflow", "feature"], "rationale": "No candidate test advances/closes a ticket with dependents to assert the dependency-impact preview is shown before commit." }
+      },
+      {
+        "ref": "board-ui.create.inline",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/e2e/tests/ui/board.test.ts::create issue via inline form", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/board.test.ts::cancel create form", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["capability", "workflow"],
+        "dimensions_missing": []
+      },
+      {
+        "ref": "board-ui.create.expandPanel",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/e2e/tests/ui/expandable-create-panel.test.ts::open inline form then expand to full-screen panel", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/expandable-create-panel.test.ts::panel state is carried over from inline form", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/expandable-create-panel.test.ts::fill and submit creates issue", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/expandable-create-panel.test.ts::Start workspace checkbox shows workspace sub-options when checked", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/expandable-create-panel.test.ts::submit button is disabled when title is empty", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["feature", "workflow", "boundary"],
+        "dimensions_missing": []
+      },
+      {
+        "ref": "board-ui.detail.editDelete",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/e2e/tests/ui/board.test.ts::open detail panel by clicking issue card", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/board.test.ts::edit issue from detail panel", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/board.test.ts::delete issue from detail panel", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/board.test.ts::escape closes detail panel", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/board.test.ts::expand button cycles panel through modal and fullscreen modes", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/board.test.ts::collapse button returns panel from fullscreen to sidebar", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["capability", "workflow", "navigation"],
+        "dimensions_missing": []
+      },
+      {
+        "ref": "board-ui.realtime.reflectServerChange",
+        "status": "partial",
+        "covered_by": [
+          { "test": "packages/e2e/tests/ui/board-realtime.test.ts::board updates when issue created via API", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/board-realtime.test.ts::board updates when issue status changes via API", "strength": "touches-only" },
+          { "test": "packages/client/src/lib/boardDataReconcile.test.ts::reconcileBoardIssueIdentity / deriveInactiveIssueIds / prunePendingWorkspaceIssueIds", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["workflow", "state-transition"],
+        "dimensions_missing": ["concurrency"],
+        "gap": { "kind": "dimension-missing", "missing_dimensions": ["concurrency"], "rationale": "The 'status changes via API' e2e asserts the SERVER board reflects the move, not that the UI relocated the card (touches-only for the UI outcome). The agent-cascade coalescing/seq-guard behaviour (poll+WS overlap, out-of-order discard) is unit-tested in reconcile but never exercised as a live concurrent burst against the rendered board." }
+      },
+      {
+        "ref": "board-ui.card.agentActivityBadge",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/client/src/components/IssueCard.test.tsx::active-agent indicator (working/reviewing/fixing/idle/none — 5 cases)", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/code-review.test.ts::AI Reviewing badge appears on issue card while review session runs", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["feature", "state-transition"],
+        "dimensions_missing": []
+      },
+      {
+        "ref": "board-ui.wip.visualLimit",
+        "status": "partial",
+        "covered_by": [
+          { "test": "packages/client/src/lib/wipLimits.test.ts::getWipLimit / evaluateWipLimit (under/at/over, zero, non-numeric, no-limit)", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["config", "boundary"],
+        "dimensions_missing": ["feature"],
+        "gap": { "kind": "outcome-not-asserted", "missing_dimensions": ["feature"], "rationale": "The classifier logic (incl. boundary coercion of zero/garbage) is fully unit-tested, but the user-visible outcome — the column header rendering its red 'over' tint — is asserted by no test. The visual policy itself is unverified." }
+      },
+      {
+        "ref": "board-ui.archiveColumn.conditional",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/e2e/tests/ui/ai-reviewed-column.test.ts::AI Reviewed column is hidden when no issues are in that status", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/ai-reviewed-column.test.ts::AI Reviewed column appears when an issue is moved to that status", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/ai-reviewed-column.test.ts::Awaiting manual merge hint is shown in AI Reviewed column header", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/ai-reviewed-column.test.ts::AI Reviewed column hides again when issue is moved out", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/ai-reviewed-column.test.ts::AI Reviewed column shown when autoReview=true and autoMerge=false regardless of issues", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["feature", "config", "navigation"],
+        "dimensions_missing": []
+      },
+      {
+        "ref": "board-ui.view.switch",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/e2e/tests/ui/graph-table-views.test.ts::switch to Table view via header toggle", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/graph-table-views.test.ts::Table view renders expected column headers", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/graph-table-views.test.ts::clicking a sortable column header changes sort order", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/graph-table-views.test.ts::status filter dropdown filters visible rows", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/graph-table-views.test.ts::clicking a table row opens the detail panel", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/graph-table-views.test.ts::switch to Graph view via header toggle", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/graph-table-views.test.ts::Graph status filter can show backlog issues", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/graph-table-views.test.ts::zoom in button increases scale transform", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/graph-table-views.test.ts::switching back to Board view from Graph restores kanban", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["navigation", "feature", "workflow"],
+        "dimensions_missing": []
+      },
+      {
+        "ref": "board-ui.view.criticalPath",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/e2e/tests/ui/graph-table-views.test.ts::Critical Path toggle is visible when dependencies exist", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/graph-table-views.test.ts::Clicking Critical Path switches to critical-path mode", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/graph-table-views.test.ts::Root blocker nodes show downstream count badge", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/graph-table-views.test.ts::Clicking a root blocker opens chain side panel", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["feature", "navigation"],
+        "dimensions_missing": []
+      },
+      {
+        "ref": "board-ui.bulkSelect.update",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/e2e/tests/ui/board-card-bulk-select.test.ts::selects cards with Ctrl-click and applies a bulk priority change", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["feature", "workflow"],
+        "dimensions_missing": ["concurrency"],
+        "gap": { "kind": "dimension-missing", "missing_dimensions": ["concurrency"], "rationale": "Single happy-path bulk update is asserted; no assertion on partial-failure of a bulk op (some succeed, some fail) — low priority." }
+      },
+      {
+        "ref": "board-ui.palette.execute",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/e2e/tests/ui/command-palette.test.ts::Ctrl+K opens command palette", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/command-palette.test.ts::type to filter actions", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/command-palette.test.ts::arrow keys navigate, Enter executes action", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/command-palette.test.ts::New Issue + Start Workspace opens create panel with workspace checked", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/command-palette.test.ts::switches active project and refreshes board data", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/command-palette.test.ts::Escape closes palette", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["navigation", "feature", "accessibility"],
+        "dimensions_missing": []
+      },
+      {
+        "ref": "board-ui.palette.workspaceActions",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/e2e/tests/ui/command-palette.test.ts::Review action triggers review and shows toast", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/command-palette.test.ts::Merge action is absent for active (non-idle) workspace", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/command-palette.test.ts::Review and Merge actions absent when workspace is closed", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/command-palette-workspace.test.ts::triggering Review action from palette transitions workspace to reviewing", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["feature", "permission", "state-transition"],
+        "dimensions_missing": ["error-handling"],
+        "gap": { "kind": "dimension-missing", "missing_dimensions": ["error-handling"], "rationale": "Eligibility gating (present/absent by ws state) and the reviewing transition are well asserted; what the palette shows when the Review/Merge call itself fails (server 409/500) is not asserted." }
+      },
+      {
+        "ref": "board-ui.shortcuts.helpOverlay",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/e2e/tests/ui/shortcuts.test.ts::press ? to show shortcut help overlay", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/shortcuts.test.ts::shortcut help overlay contains expected shortcuts", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/shortcuts.test.ts::shortcut help is context-aware for Butler", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/shortcuts.test.ts::single-key shortcuts do not fire while typing in search", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/all-workspaces-panel.test.ts::opens via keyboard shortcut 'a'", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/quick-tasks-panel.test.ts::keyboard shortcut 'q' opens the Quick Tasks panel", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["accessibility", "navigation", "feature"],
+        "dimensions_missing": []
+      },
+      {
+        "ref": "board-ui.shortcuts.keyboardNav",
+        "status": "partial",
+        "covered_by": [
+          { "test": "packages/client/src/lib/boardKeyboardNav.test.ts::computeNavTarget (seed/clamp/skip-empty/no-op — 6 cases)", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["navigation"],
+        "dimensions_missing": ["accessibility"],
+        "gap": { "kind": "outcome-not-asserted", "missing_dimensions": ["accessibility"], "rationale": "The pure cursor-target arithmetic is fully unit-tested, but no e2e drives arrow/vim keys against the rendered board to assert the focused card actually moves (the keyboard-operability a11y outcome). The unit test would pass even if the keydown handler were unwired." }
+      },
+      {
+        "ref": "board-ui.diff.viewAndComment",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/e2e/tests/ui/diff-viewer.test.ts::View Diff button shows diff stats header", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/diff-viewer.test.ts::file tree shows changed file and is expandable", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/diff-viewer.test.ts::diff content shows added lines", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/diff-viewer.test.ts::Unified/Split view toggle switches rendering", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/diff-viewer.test.ts::comment edit and delete via UI", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/diff-viewer.test.ts::comment badge count updates after adding a comment via API", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["capability", "workflow", "feature"],
+        "dimensions_missing": []
+      },
+      {
+        "ref": "board-ui.statsBar.counts",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/e2e/tests/ui/board-stats-bar.test.ts::shows ticket counts per status in stats bar", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/board-stats-bar.test.ts::shows commits counter in stats bar", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/board-stats-bar.test.ts::Blocked filter shows only blocked issues, toggle off restores all", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["feature", "navigation"],
+        "dimensions_missing": []
+      },
+      {
+        "ref": "board-ui.settings.persist",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/e2e/tests/ui/settings.test.ts::fill agent command and save", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/settings.test.ts::settings persist after reopening", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/settings.test.ts::cancel closes panel without saving", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/settings-workflow.test.ts::auto code review toggle persists after save", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/settings-workflow.test.ts::auto-merge toggle persists after save", "strength": "asserts-outcome" },
+          { "test": "packages/e2e/tests/ui/settings-workflow.test.ts::board monitoring toggle persists after save", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["config", "feature", "navigation"],
+        "dimensions_missing": []
+      },
+      {
+        "ref": "board-ui.error.apiBanner",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/e2e/tests/ui/board.test.ts::error banner on API failure", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["error-handling"],
+        "dimensions_missing": []
+      }
+    ],
+    "summary": {
+      "covered": 19,
+      "partial": 3,
+      "uncovered": 3,
+      "undocumented_implemented": 0,
+      "documented_missing": 0,
+      "score": 0.80,
+      "by_dimension": {
+        "capability": { "covered": 5, "partial": 0, "uncovered": 0 },
+        "workflow": { "covered": 9, "partial": 1, "uncovered": 2 },
+        "navigation": { "covered": 9, "partial": 0, "uncovered": 0 },
+        "feature": { "covered": 10, "partial": 1, "uncovered": 1 },
+        "state-transition": { "covered": 4, "partial": 1, "uncovered": 2 },
+        "error-handling": { "covered": 1, "partial": 0, "uncovered": 2, "dimension-missing": 1 },
+        "config": { "covered": 3, "partial": 0, "uncovered": 0 },
+        "boundary": { "covered": 2, "partial": 0, "uncovered": 0 },
+        "accessibility": { "covered": 2, "partial": 1, "uncovered": 0 },
+        "concurrency": { "covered": 0, "partial": 2, "uncovered": 0 },
+        "permission": { "covered": 1, "partial": 0, "uncovered": 0, "note": "near-N/A: single-user local app, no RBAC" },
+        "risk": { "covered": 0, "partial": 0, "uncovered": 2 }
+      },
+      "weak_dimensions": ["error-handling", "concurrency", "state-transition (negative/rejected edges)", "accessibility (keyboard-nav operability)"],
+      "top_gaps": [
+        {
+          "ref": "board-ui.move.rollback",
+          "priority": "P1",
+          "roi": 5.3,
+          "dimensions_to_add": ["error-handling", "state-transition"],
+          "rationale": "The optimistic-move layer's core safety property — a server-rejected move snaps the card back to its exact prior column and surfaces the server message — is entirely unverified. High blast radius (BoardPage is the hottest file, 718 commits; move legality is server-authoritative). Force a 4xx on PATCH /api/issues via page.route, drop a card, assert it returns to source + error toast text. Reuses the existing drag-dispatch helper in board.test.ts."
+        },
+        {
+          "ref": "board-ui.move.archiveConfirm",
+          "priority": "P1",
+          "roi": 5.0,
+          "dimensions_to_add": ["error-handling", "workflow", "state-transition"],
+          "rationale": "Moving a ticket with a LIVE workspace into Done/Cancelled must show a blocking confirm (risks discarding in-flight agent work). No e2e exercises the gate — the only terminal-move tests (ai-reviewed-column) lack a live workspace. Seed an issue with an active/mock workspace, attempt the archive move, assert the confirm dialog blocks on cancel and only commits on confirm."
+        },
+        {
+          "ref": "board-ui.realtime.reflectServerChange",
+          "priority": "P1",
+          "roi": 4.5,
+          "dimensions_to_add": ["concurrency"],
+          "rationale": "The 'status changes via API' realtime test asserts the SERVER board, not that the rendered card relocated (touches-only on the UI). On an agent-driven board this live-reflection is the headline value. Strengthen to assert the card visibly moves columns in the UI after an out-of-band PATCH, and add a burst (multiple rapid pushes) to exercise the coalescing/seq-guard against the live DOM."
+        },
+        {
+          "ref": "board-ui.shortcuts.keyboardNav",
+          "priority": "P2",
+          "roi": 3.0,
+          "dimensions_to_add": ["accessibility"],
+          "rationale": "computeNavTarget is unit-pure-tested but nothing asserts arrow/vim keys actually move the focused card in the running UI — the keyboard-operability a11y outcome. A thin e2e: focus board, press ArrowRight/j, assert the highlighted/selected card changed."
+        },
+        {
+          "ref": "board-ui.wip.visualLimit",
+          "priority": "P3",
+          "roi": 2.4,
+          "dimensions_to_add": ["feature"],
+          "rationale": "WIP classifier (under/at/over + boundary coercion) is unit-tested; the visible red-tint outcome on the column header is unasserted. Set a wip_limit pref below a column's count, assert the header carries the 'over' visual state. Low blast radius (advisory-only policy)."
+        }
+      ],
+      "cut_line": "Emitted P1–P3. Below the line (not emitted): board-ui.move.dependencyPreview (P2, dependency-impact preview untested) and palette workspace-action failure-path error handling (P4) — real but lower ROI than the rollback/archive/realtime trio."
+    }
+  }
+}

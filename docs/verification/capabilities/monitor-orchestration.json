@@ -1,0 +1,552 @@
+{
+  "slug": "monitor-orchestration",
+  "behavior": {
+    "business_purpose": "The board's control plane: the machinery that drives kanban tickets toward merged code with no human in the loop. It decides PER PROJECT how work auto-starts (the Start Mode gate), relaunches/merges/nudges in-flight work up to a WIP target, pulls the next dependency-ready ticket on a merge, and refills a starved backlog — while guaranteeing two mechanisms never double-start the same ticket into conflicting worktrees.",
+    "confidence": "high",
+    "source_paths": [
+      "packages/server/src/services/start-policy.service.ts",
+      "packages/server/src/startup/monitor-setup.ts",
+      "packages/server/src/startup/monitor-cycle.ts",
+      "packages/server/src/startup/monitor-cycle-rules.ts",
+      "packages/server/src/startup/monitor-auto-start.ts",
+      "packages/server/src/startup/monitor-eligibility.ts",
+      "packages/server/src/startup/monitor-backlog.ts",
+      "packages/server/src/startup/monitor-contract.ts",
+      "packages/server/src/services/dependency-auto-chain.service.ts",
+      "packages/server/src/services/dependency-wave.service.ts",
+      "packages/server/src/services/strategy-objective.service.ts",
+      "packages/server/src/services/conductor-control.service.ts",
+      "packages/server/src/services/orchestrator-monitor.service.ts",
+      "packages/server/src/services/monitor-butler.ts",
+      "packages/server/src/services/drive.service.ts",
+      "packages/server/src/services/drive-preflight.service.ts",
+      "packages/server/src/routes/drive.ts",
+      "packages/server/src/routes/board-monitor.ts"
+    ],
+    "actors": [
+      { "name": "operator", "kind": "human", "notes": "single local user; flips Start Mode / Drive, starts-stops the Conductor via REST/UI" },
+      { "name": "autopilot-monitor", "kind": "automation", "notes": "in-process deterministic cycle (runMonitorCycle); the supported hands-off driver" },
+      { "name": "conductor", "kind": "automation", "notes": "out-of-process loop.sh spawned/killed by the server; sole driver in conductor mode" },
+      { "name": "monitor-butler", "kind": "automation", "notes": "in-process LLM (fresh Agent SDK session per cycle); off by default" },
+      { "name": "agent-subprocess", "kind": "automation", "notes": "the per-ticket builder/reviewer launched into a worktree" }
+    ],
+    "entry_points": [
+      { "kind": "scheduled", "ref": "runMonitorCycle (poll timer auto_monitor_interval ~4min OR debounced board event ~1.5s)", "observable": "one full Autopilot pass: process inflight, contract, auto-start, refill; recorded as a monitor cycle row with actions" },
+      { "kind": "api", "ref": "POST /api/internal/monitor-run", "observable": "forces a cycle now; returns cycle result" },
+      { "kind": "api", "ref": "GET /api/internal/monitor-status", "observable": "reads monitor state, recent actions, warnings, maintenance window" },
+      { "kind": "api", "ref": "GET/PUT /api/projects/:id/drive", "observable": "reads / flips the one-switch Drive coherent pref bundle" },
+      { "kind": "api", "ref": "GET/POST /api/projects/:id/drive/preflight", "observable": "asserts hands-off prerequisites; with autoRepair flips Drive on iff every blocker is one-switch-fixable" },
+      { "kind": "api", "ref": "POST /api/projects/:id/conductor {action:start|stop}", "observable": "spawns/kills the out-of-process loop.sh; records PID; drops stop-marker" },
+      { "kind": "api", "ref": "GET /api/projects/:id/orchestrator", "observable": "read-only Conductor liveness/phase from disk (mtime-based)" },
+      { "kind": "api", "ref": "GET /api/projects/:id/monitor-tunables", "observable": "effective tunables + source + start policy provenance for the UI" },
+      { "kind": "api", "ref": "GET/PUT /api/projects/:id/conductor-schedule", "observable": "per-project Conductor cron config" },
+      { "kind": "scheduled", "ref": "runMonitorButlerCycle (monitor_butler_enabled, interval default 15min)", "observable": "fresh LLM session acts via MCP tools; logs to board_health_events" }
+    ],
+    "behaviors": [
+      {
+        "id": "monitor-orchestration.resolve.start-policy",
+        "statement": "Start Mode is the single per-project kill-switch for auto-start: manual stops ALL auto-start paths, monitor enables in-process starts, conductor keeps in-process OFF; explicit start_mode_<id> fully supersedes the global auto_monitor toggle.",
+        "actor": "autopilot-monitor",
+        "preconditions": ["a per-project start_mode_<id> pref or legacy flags exist"],
+        "observable_outcome": "resolveStartPolicy returns {mode, autoStartUnblocked, postMergeCascade, backlogRefill, scheduledRuns, source}; manual ⇒ all four capabilities false even with every legacy opt-in flag ON",
+        "evidence": ["start-policy.service.ts:57-97", "start-policy.service.ts:103-108"],
+        "dimensions": ["config", "state-transition", "regression", "permission"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "monitor-orchestration.derive.start-mode",
+        "statement": "A project with no explicit start_mode derives one from legacy prefs (board_autodrive OR (auto_monitor AND nudge_auto_start) ⇒ monitor; else manual); conductor is NEVER derived, only set explicitly; an unknown mode value falls back to derivation.",
+        "actor": "autopilot-monitor",
+        "preconditions": ["start_mode_<id> unset or invalid"],
+        "observable_outcome": "resolveStartPolicy returns source='derived' with the back-compat mode; conductor never appears from derivation",
+        "evidence": ["start-policy.service.ts:103-108"],
+        "dimensions": ["config", "regression", "boundary"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "monitor-orchestration.autostart.dependency-readiness",
+        "statement": "A dependent is auto-started only when every blocker reached a terminal status AND its work actually LANDED on the base branch (mergedAt / direct commit), not merely 'Done'; a fan-in dependent waits for ALL upstreams to land.",
+        "actor": "autopilot-monitor",
+        "preconditions": ["project autoStartUnblocked", "dependent has depends_on/blocked_by edges"],
+        "observable_outcome": "no workspace is POSTed for a Done-but-unmerged blocker; a workspace IS created once mergedAt is set or a missing blocker row is treated as not-ready",
+        "evidence": ["monitor-auto-start.ts:252-288"],
+        "dimensions": ["workflow", "state-transition", "regression"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "monitor-orchestration.autostart.wip-capacity",
+        "statement": "WIP counts only active/reviewing/fixing workspaces (not blocked usage-limit launches or idle zero-output launch failures), so the auto-start ceiling reflects real running agents; starts are also capped at maxNewStartsPerCycle.",
+        "actor": "autopilot-monitor",
+        "preconditions": ["unblocked backlog/Todo issues exist"],
+        "observable_outcome": "auto-start launches up to the WIP target counting only active-state workspaces; a stale-idle backlog over the target still permits a fresh start (#815); never more than maxNewStarts per cycle",
+        "evidence": ["monitor-auto-start.ts:24,40-69,150"],
+        "dimensions": ["boundary", "config", "regression"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "monitor-orchestration.autostart.meta-and-feature-filter",
+        "statement": "Drive/epic META issues are never auto-started as builders (detected by Drive.metaIssueId or parent_of/child_of edge, enforced per-issue AND in the candidate SQL); feature/enhancement tickets are excluded globally UNLESS the project is auto-driven; no-auto-start-tagged issues are always skipped.",
+        "actor": "autopilot-monitor",
+        "preconditions": ["candidate issues of various types/tags exist"],
+        "observable_outcome": "metas and tagged issues produce no workspace; feature-typed Backlog issues auto-start only on an auto-driven project",
+        "evidence": ["monitor-auto-start.ts:87-109,164,172,236,250", "monitor-eligibility.ts:27-53"],
+        "dimensions": ["workflow", "permission", "regression"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "monitor-orchestration.autostart.planmode-override",
+        "statement": "Wave/auto-started builders for an auto-driven project are forwarded planMode:false so they start in EXECUTE mode, matching the New-Workspace default; non-auto-driven projects keep the priority default.",
+        "actor": "autopilot-monitor",
+        "preconditions": ["auto-driven project", "eligible Todo/In-Progress issue"],
+        "observable_outcome": "the POST /api/workspaces body carries planMode:false for auto-driven projects only",
+        "evidence": ["monitor-auto-start.ts:471-525", "dependency-wave.service.ts:255-260"],
+        "dimensions": ["config", "regression"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "monitor-orchestration.merge.auto-merge-gated",
+        "statement": "Automatic landing of approved/idle workspaces requires auto_merge='true' AND merge strategy='monitor', with a per-project auto_merge_disabled_<id> override; manual POST /merge is never affected. Merges are capped per cycle with fix-and-merge fallback on conflict.",
+        "actor": "autopilot-monitor",
+        "preconditions": ["idle workspace with readyForMerge OR reviewing+stopped"],
+        "observable_outcome": "merge fires only when enabled and the project isn't disabled; falls back to fix-and-merge on conflict; no more than the merge cap per cycle",
+        "evidence": ["monitor-cycle.ts:73,209-217,389-505", "monitor-setup.ts:246"],
+        "dimensions": ["workflow", "permission", "config", "regression"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "monitor-orchestration.merge.premerge-gate-withhold",
+        "statement": "Un-ready In-Review/stopped-review work is auto-merged only after the pre-merge verify+smoke gate passes; a project with a verify_script or web stack profile is 'gated' and a failed gate WITHHOLDS the merge (leaves In Review).",
+        "actor": "autopilot-monitor",
+        "preconditions": ["auto_merge_in_review on", "not-ready In-Review workspace"],
+        "observable_outcome": "projectHasMergeGate true ⇒ merge runs the gate at the merge site and does not land on failure (#821)",
+        "evidence": ["monitor-cycle.ts:238-268,322-336", "monitor-merge-gate.test.ts:19-39"],
+        "dimensions": ["workflow", "error", "regression", "risk"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "monitor-orchestration.recover.stuck-builder",
+        "statement": "Stuck-builder recovery fires only for a builder session 0 commits ahead AND (non-trivial uncommitted diff OR repeated-failed-command retry loop): it commits leftover work and routes to review instead of killing progress; a workspace with >=10 sessions (>=5 In Review) is force-closed as stuck.",
+        "actor": "autopilot-monitor",
+        "preconditions": ["active+running builder past the stuck timeout"],
+        "observable_outcome": "leftover work committed + review launched; runaway relaunch/review loops force-closed",
+        "evidence": ["monitor-cycle.ts:137-190,224-237", "monitor-cycle-rules.ts:4,26-45"],
+        "dimensions": ["state-transition", "error", "regression"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "monitor-orchestration.cascade.post-merge-dependency",
+        "statement": "On a blocker merge, the post-merge dependency cascade (a THIRD auto-start path) selects exactly ONE Todo/Backlog issue whose deps all LANDED, respects the WIP cap, skips no-auto-start + dependency-cycle members, and records an audit comment — BUT is gated by the project's Start Mode: with manual it is a clean no-op (not even an audit comment) even when dependency_auto_chain=true.",
+        "actor": "autopilot-monitor",
+        "preconditions": ["a blocker just merged", "dependents exist"],
+        "observable_outcome": "one dependent workspace starts (or a skip is audited) when monitor mode; nothing happens at all under manual",
+        "evidence": ["dependency-auto-chain.service.ts:90-184,216-217,231-271", "dependency-auto-chain.test.ts:235-259"],
+        "dimensions": ["workflow", "state-transition", "regression", "config"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "monitor-orchestration.plan.dependency-wave",
+        "statement": "The dependency-wave planner partitions candidates into ready / blocked / cyclicInvalid, starts only the next ready wave that FITS under the WIP target, reports per-dependent which upstreams are still un-landed, and never launches cycle members.",
+        "actor": "operator",
+        "preconditions": ["a dependency graph of open issues"],
+        "observable_outcome": "wave start launches a slice up to wip.available; blocked dependents list their specific blockers; cyclic candidates are invalid",
+        "evidence": ["dependency-wave.service.ts:166-226,234,255-260"],
+        "dimensions": ["workflow", "boundary", "navigation"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "monitor-orchestration.refill.backlog",
+        "statement": "Backlog refill generates synthetic tickets only when unstarted-Todo < backlog floor AND WIP < target AND a cooldown (default 120min) elapsed AND backlog_empty_strategy='generate_tickets'; the host issue is born In Progress (can't re-trigger itself) and the cooldown is stamped only on a successful launch.",
+        "actor": "autopilot-monitor",
+        "preconditions": ["project backlogRefill allowed", "starved board"],
+        "observable_outcome": "a generation-skill workspace launches and stamps cooldown; nothing happens when backlog has unstarted issues, WIP is full, cooldown active, or strategy is skip/unset; orphan host deleted on launch failure",
+        "evidence": ["monitor-backlog.ts:52-53,121,138-200"],
+        "dimensions": ["workflow", "boundary", "config", "regression"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "monitor-orchestration.contract.coupled-tickets",
+        "statement": "An opt-in pre-fan-out step contracts coupled_with tickets into one so they never start as conflicting parallel workspaces; contract mode is off by default and resolved per project (apply/suggest/true ⇒ on).",
+        "actor": "autopilot-monitor",
+        "preconditions": ["auto_contract_coupled_<id> opt-in", "coupled_with edges exist"],
+        "observable_outcome": "coupled components merged before fan-out; batch dependency validation rejects cycles/self/duplicate/out-of-range edges",
+        "evidence": ["monitor-contract.ts:8-26", "coupling-batch-and-contract-mode.test.ts:13-106"],
+        "dimensions": ["workflow", "config", "boundary"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "monitor-orchestration.drive.toggle-coherent-bundle",
+        "statement": "The one-switch Drive flips a COHERENT pref set atomically (autodrive on, kill-switch off, review+merge on, planMode off, verify gate ensured) and on OFF restores triage and re-arms the kill-switch; provider/profile is intentionally NOT owned by Drive, and an existing user verify-script override is preserved.",
+        "actor": "operator",
+        "preconditions": ["a registered project"],
+        "observable_outcome": "PUT /drive {enabled} writes every owned pref together; PUT without boolean enabled is rejected; provider survives a triage⇄drive flip",
+        "evidence": ["drive.service.ts:29-56,113-146", "drive.test.ts:34-122"],
+        "dimensions": ["config", "permission", "regression"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "monitor-orchestration.drive.preflight-autorepair",
+        "statement": "Drive preflight reports the machine-checkable prerequisites and with autoRepair flips Drive on ONLY when EVERY blocker is one-switch-fixable; hard blockers (null defaultBranch, missing status set, exhausted/mock Claude profile) are reported honestly and never silently worked around.",
+        "actor": "operator",
+        "preconditions": ["a project in any readiness state"],
+        "observable_outcome": "a freshly-registered project lists what's missing; autoRepair flips on and reports ready when repairable; hard blockers keep it blocked and surface them (WIP=1 warns but doesn't block)",
+        "evidence": ["drive-preflight.service.ts:169,319-342", "drive-preflight.test.ts:81-170"],
+        "dimensions": ["error", "boundary", "config"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "monitor-orchestration.conductor.lifecycle",
+        "statement": "POST /conductor start spawns loop.sh detached (survives hot-reload), records the OS PID, clears the stop-marker, and is a NO-OP if one is already alive; stop tree-kills by PID plus a PowerShell backstop reaping every loop.sh and drops a stop-marker so read-only status reports 'stopped' immediately.",
+        "actor": "operator",
+        "preconditions": ["a project with a Conductor objective"],
+        "observable_outcome": "starting twice does not spawn a second loop; stopping makes the orchestrator status flip to not-alive",
+        "evidence": ["conductor-control.service.ts:52,114-119", "board-monitor.ts:57"],
+        "dimensions": ["state-transition", "error", "regression"],
+        "risk": "high",
+        "confidence": "medium"
+      },
+      {
+        "id": "monitor-orchestration.conductor.liveness-readonly",
+        "statement": "Read-only Conductor liveness is computed from disk: alive when loop.log mtime is fresh (<11min) and no newer stop-marker exists; a restart's fresh log supersedes a stale marker; a stale log reads not-alive regardless of marker.",
+        "actor": "operator",
+        "preconditions": ["a Conductor state directory on disk"],
+        "observable_outcome": "GET /orchestrator reports alive/not-alive consistent with log/marker mtimes",
+        "evidence": ["orchestrator-monitor.service.ts:22", "orchestrator-monitor.service.test.ts:32-55"],
+        "dimensions": ["state-transition", "boundary", "observability"],
+        "risk": "low",
+        "confidence": "high"
+      },
+      {
+        "id": "monitor-orchestration.guard.re-entrancy-and-maintenance",
+        "statement": "A cycle never overlaps itself (re-entrancy guard): a trigger arriving mid-cycle schedules exactly one more pass at the end; a maintenance window suppresses all disruptive actions without disabling the monitor.",
+        "actor": "autopilot-monitor",
+        "preconditions": ["concurrent triggers OR an active maintenance window"],
+        "observable_outcome": "two concurrent triggers never both POST a workspace for the same issue; during maintenance no relaunch/merge/start fires",
+        "evidence": ["monitor-setup.ts:130,171-176,178-184,204-209,287"],
+        "dimensions": ["state-transition", "regression", "config"],
+        "risk": "high",
+        "confidence": "medium"
+      },
+      {
+        "id": "monitor-orchestration.butler.llm-cycle",
+        "statement": "The Monitor Butler runs a fresh, stateless Claude Agent SDK session on a schedule (10-min hard timeout) that snapshots the board, reads strategy from objective.md, acts through MCP tools, and logs every tool call + start/end to board_health_events; a crashed cycle never poisons the next, and it drives only ONE active project per cycle.",
+        "actor": "monitor-butler",
+        "preconditions": ["monitor_butler_enabled='true'"],
+        "observable_outcome": "board_health_events rows appear per cycle; only the active project is acted on",
+        "evidence": ["monitor-butler.ts:112,124-130,277"],
+        "dimensions": ["workflow", "observability", "config"],
+        "risk": "medium",
+        "confidence": "medium"
+      }
+    ],
+    "permissions": [
+      { "actor": "operator", "behavior": "monitor-orchestration.drive.toggle-coherent-bundle", "allowed": true },
+      { "actor": "operator", "behavior": "monitor-orchestration.conductor.lifecycle", "allowed": true },
+      { "actor": "autopilot-monitor", "behavior": "monitor-orchestration.autostart.dependency-readiness", "allowed": true, "notes": "gated by Start Mode = monitor" }
+    ],
+    "state_model": {
+      "states": ["manual", "monitor", "conductor"],
+      "transitions": [
+        { "from": "manual", "to": "monitor", "trigger": "set start_mode=monitor or Drive ON / derive from board_autodrive", "behavior": "monitor-orchestration.resolve.start-policy" },
+        { "from": "monitor", "to": "manual", "trigger": "set start_mode=manual or Drive OFF (true kill-switch)", "behavior": "monitor-orchestration.resolve.start-policy" },
+        { "from": "manual", "to": "conductor", "trigger": "explicit start_mode=conductor (never derived) + POST /conductor start", "behavior": "monitor-orchestration.conductor.lifecycle" }
+      ]
+    },
+    "error_states": [
+      { "id": "monitor-orchestration.merge.gate-withheld", "statement": "auto-merge withheld because the pre-merge verify/smoke gate failed (workspace stays In Review)", "evidence": "monitor-cycle.ts:238-268" },
+      { "id": "monitor-orchestration.autostart.launch-failure", "statement": "POST /api/workspaces returns non-ok ⇒ a failure action is recorded + warning surfaced (#775)", "evidence": "monitor-auto-start.ts:419-447" },
+      { "id": "monitor-orchestration.refill.launch-failed", "statement": "generation workspace launch fails ⇒ orphan host issue deleted, cooldown NOT stamped", "evidence": "monitor-backlog.ts:221" },
+      { "id": "monitor-orchestration.drive.hard-blocker", "statement": "preflight reports a non-auto-repairable blocker (null defaultBranch / no statuses / exhausted/mock profile); Drive stays off", "evidence": "drive-preflight.service.ts:319-342" },
+      { "id": "monitor-orchestration.drive.bad-request", "statement": "PUT /drive without a boolean enabled is rejected", "evidence": "drive.test.ts:67" }
+    ],
+    "external_integrations": ["git CLI (via worktree/merge through workspaces)", "agent subprocess (builder/reviewer)", "Claude Agent SDK (Monitor Butler)", "bash + PowerShell (out-of-process Conductor loop.sh lifecycle)", "objective.md file (Conductor + Butler + Bullseye co-read, no code edge)"],
+    "unknowns": [
+      { "question": "Does a project set to start_mode=monitor via start_mode_<id> ALONE (no board_autodrive / global auto_monitor) cause the cycle to schedule ITSELF, or only act once scheduled by another project?", "why_unknown": "monitorShouldRun (monitor-setup.ts:39-41) gates scheduling on auto_monitor OR board_autodrive and does not consult resolveStartPolicy; not exercised by any test." },
+      { "question": "Can the conductor-control PowerShell taskkill backstop match a sibling repo's loop.sh and over-kill?", "why_unknown": "documented in-code as scoped to board-monitor.loop.sh command lines but not asserted by a test." },
+      { "question": "Are the hard-coded relaunch/merge caps (2) ever Bullseye-tunable like maxNewStartsPerCycle?", "why_unknown": "two cap regimes coexist; only maxNewStarts comes from tunables (monitor-cycle.ts:36-37)." }
+    ]
+  },
+  "coverage": {
+    "behaviors": [
+      {
+        "ref": "monitor-orchestration.resolve.start-policy",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/services/start-policy.service.test.ts::manual ⇒ NOTHING auto-starts even with legacy opt-in flags ON", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/services/start-policy.service.test.ts::monitor ⇒ auto-start on; cascade/refill follow own prefs", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/services/start-policy.service.test.ts::conductor ⇒ in-process auto-start OFF", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["config", "state-transition", "regression", "permission"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 1, "last_regression": "post-merge cascade leaked past drive-off switch" },
+        "gap": null
+      },
+      {
+        "ref": "monitor-orchestration.derive.start-mode",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/services/start-policy.service.test.ts::board_autodrive=true ⇒ monitor (derived)", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/services/start-policy.service.test.ts::never derives conductor", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/services/start-policy.service.test.ts::unknown start_mode falls back to derivation", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["config", "regression", "boundary"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 0 },
+        "gap": null
+      },
+      {
+        "ref": "monitor-orchestration.autostart.dependency-readiness",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/monitor-auto-start.test.ts::does NOT start a dependent whose blocker is Done but not yet merged", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/monitor-auto-start.test.ts::starts a dependent once its blocker is actually merged", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/monitor-auto-start.test.ts::does NOT start a fan-in dependent while one blocker is unmerged (#782)", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["workflow", "state-transition", "regression"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 4, "last_regression": "#535/#537/#782/#784 premature-cascade class" },
+        "gap": null
+      },
+      {
+        "ref": "monitor-orchestration.autostart.wip-capacity",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/monitor-auto-start-wip-capacity.test.ts (9 titles)", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/monitor-auto-start.test.ts::starts an unblocked Backlog issue even when stale idle workspaces exceed the WIP target (#815)", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["boundary", "config", "regression"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 2, "last_regression": "#690 over-count of launch failures" },
+        "gap": null
+      },
+      {
+        "ref": "monitor-orchestration.autostart.meta-and-feature-filter",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/monitor-meta-autostart.test.ts (isDriveOrEpicMeta + notDriveOrEpicMetaSql real DB)", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/monitor-auto-start.test.ts::auto-starts a feature-typed Backlog issue on an auto-driven project (#773)", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/monitor-auto-start.test.ts::skips an In-Progress issue tagged no-auto-start", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["workflow", "permission", "regression"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 2, "last_regression": "#824/#664 meta-builder; #773 feature exclusion" },
+        "gap": null
+      },
+      {
+        "ref": "monitor-orchestration.autostart.planmode-override",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/monitor-auto-start.test.ts::passes planMode:false for Todo/In-Progress in an auto-driven project (#666)", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/dependency-wave.service.test.ts (planMode:false wave builders)", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["config", "regression"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 1, "last_regression": "#666/#767 plan-mode strand" },
+        "gap": null
+      },
+      {
+        "ref": "monitor-orchestration.merge.auto-merge-gated",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/monitor-cycle.test.ts::auto_merge gating (enabled/disabled, caps, fix-and-merge fallback)", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/monitor-cycle.test.ts::per-project auto_merge_disabled", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["workflow", "permission", "config", "regression"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 1 },
+        "gap": null
+      },
+      {
+        "ref": "monitor-orchestration.merge.premerge-gate-withhold",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/monitor-merge-gate.test.ts::projectHasMergeGate (#821)", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/monitor-cycle.test.ts::auto_merge_in_review (not-ready In Review)", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["workflow", "error", "regression", "risk"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 1, "last_regression": "#821 unverified code landed" },
+        "gap": null
+      },
+      {
+        "ref": "monitor-orchestration.recover.stuck-builder",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/monitor-cycle.test.ts::stops a long-running builder with zero commits and dirty worktree, commits leftovers, launches review", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["state-transition", "error", "regression"],
+        "dimensions_missing": ["boundary"],
+        "history": { "churn_90d": null, "bugs": 1 },
+        "gap": { "kind": "dimension-missing", "missing_dimensions": ["boundary"], "rationale": "MAX_SESSIONS force-close (>=10, >=5 In Review) thresholds not directly boundary-tested in candidate set." }
+      },
+      {
+        "ref": "monitor-orchestration.cascade.post-merge-dependency",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/dependency-auto-chain.test.ts::starts an unblocked child and records an audit comment", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/dependency-auto-chain.test.ts::does NOT cascade when Start Mode is manual even with dependency_auto_chain=true (incident regression-lock)", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/dependency-auto-chain.test.ts::WIP cap / no-auto-start / dependency cycle skips", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["workflow", "state-transition", "regression", "config"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 1, "last_regression": "cascade leaked past drive-off (Start-Mode gate)" },
+        "gap": null
+      },
+      {
+        "ref": "monitor-orchestration.plan.dependency-wave",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/dependency-wave.service.test.ts (partition + per-dependent blockers + WIP-fit + planMode:false)", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["workflow", "boundary"],
+        "dimensions_missing": ["navigation"],
+        "history": { "churn_90d": null, "bugs": 0 },
+        "gap": { "kind": "dimension-missing", "missing_dimensions": ["navigation"], "rationale": "Service-level partition asserted; the UI surfacing of per-dependent blockers (navigation) is not e2e-asserted." }
+      },
+      {
+        "ref": "monitor-orchestration.refill.backlog",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/monitor-backlog.test.ts::gating (skip/unset/cooldown)", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/monitor-backlog.test.ts::generation (launch+stamp, WIP-full no-op, floor, launch-fail cleanup)", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["workflow", "boundary", "config", "regression"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 0 },
+        "gap": null
+      },
+      {
+        "ref": "monitor-orchestration.contract.coupled-tickets",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/coupling-batch-and-contract-mode.test.ts::validateBatchDependencies + resolveContractMode + contractModeByProject", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["config", "boundary"],
+        "dimensions_missing": ["workflow"],
+        "history": { "churn_90d": null, "bugs": 0 },
+        "gap": { "kind": "dimension-missing", "missing_dimensions": ["workflow"], "rationale": "Edge validation + mode resolution covered; the end-to-end 'coupled tickets contracted into one before fan-out' workflow effect is not directly asserted." }
+      },
+      {
+        "ref": "monitor-orchestration.drive.toggle-coherent-bundle",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/drive.test.ts::enabling Drive sets every owned preference coherently", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/drive.test.ts::disabling Drive restores triage and re-arms kill-switch", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/drive.test.ts::rejects a PUT without a boolean enabled", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["config", "permission", "regression"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 0 },
+        "gap": null
+      },
+      {
+        "ref": "monitor-orchestration.drive.preflight-autorepair",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/drive-preflight.test.ts::blocks freshly-registered + lists missing", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/drive-preflight.test.ts::autoRepair flips on and reports ready", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/drive-preflight.test.ts::null defaultBranch / missing status / exhausted / mock profile = hard blocker", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["error", "boundary", "config"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 1, "last_regression": "#807 claimed-repair-that-left-blockers" },
+        "gap": null
+      },
+      {
+        "ref": "monitor-orchestration.conductor.lifecycle",
+        "status": "uncovered",
+        "covered_by": [],
+        "dimensions_covered": [],
+        "dimensions_missing": ["state-transition", "error", "regression"],
+        "history": { "churn_90d": null, "bugs": 0 },
+        "gap": { "kind": "no-test", "missing_dimensions": ["state-transition", "error", "regression"], "rationale": "conductor-control.service (start no-op-if-alive, detached spawn, tree-kill + PowerShell backstop, stop-marker) has NO test. project-conductor.service.test.ts covers config parsing only; orchestrator-monitor covers the read-only liveness side. The 'no-op if already alive' invariant and the broad-taskkill backstop are unasserted and OS-coupled — highest-risk untested behaviour." }
+      },
+      {
+        "ref": "monitor-orchestration.conductor.liveness-readonly",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/orchestrator-monitor.service.test.ts::readOrchestratorStatus stop-marker (5 titles)", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["state-transition", "boundary"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": null, "bugs": 0 },
+        "gap": null
+      },
+      {
+        "ref": "monitor-orchestration.guard.re-entrancy-and-maintenance",
+        "status": "uncovered",
+        "covered_by": [],
+        "dimensions_covered": [],
+        "dimensions_missing": ["state-transition", "regression", "config"],
+        "history": { "churn_90d": null, "bugs": 1, "last_regression": "double-start into conflicting worktrees was the motivating incident" },
+        "gap": { "kind": "no-test", "missing_dimensions": ["state-transition", "regression"], "rationale": "No test asserts the re-entrancy guard (a mid-cycle trigger runs exactly one more pass, never two concurrent cycles) nor the maintenance-window suppression. startup-timers-hmr covers timer-handle recreation only, not the in-cycle guard. This is the single most safety-critical invariant of the module (never double-drive) and it is unverified." }
+      },
+      {
+        "ref": "monitor-orchestration.butler.llm-cycle",
+        "status": "uncovered",
+        "covered_by": [],
+        "dimensions_covered": [],
+        "dimensions_missing": ["workflow", "observability", "config"],
+        "history": { "churn_90d": null, "bugs": 0 },
+        "gap": { "kind": "no-test", "missing_dimensions": ["workflow", "observability"], "rationale": "runMonitorButlerCycle has no behavioural test (only startup-timers-hmr asserts its scheduler timer is recreated/cleared). The single-active-project limitation and board_health_events logging are unasserted. Lower priority — off by default and LLM-driven, hard to assert deterministically." }
+      }
+    ],
+    "summary": {
+      "covered": 15,
+      "partial": 0,
+      "uncovered": 3,
+      "undocumented_implemented": 0,
+      "documented_missing": 0,
+      "score": 0.83,
+      "by_dimension": {
+        "config": { "covered": 11, "partial": 0, "uncovered": 2 },
+        "state-transition": { "covered": 6, "partial": 0, "uncovered": 2 },
+        "workflow": { "covered": 8, "partial": 0, "uncovered": 1 },
+        "regression": { "covered": 11, "partial": 0, "uncovered": 2 },
+        "error": { "covered": 3, "partial": 0, "uncovered": 1 },
+        "boundary": { "covered": 6, "partial": 1, "uncovered": 0 },
+        "permission": { "covered": 3, "partial": 0, "uncovered": 0 },
+        "navigation": { "covered": 0, "partial": 1, "uncovered": 0 },
+        "observability": { "covered": 1, "partial": 0, "uncovered": 1 }
+      },
+      "weak_dimensions": ["state-transition (conductor lifecycle + re-entrancy guard untested)", "observability (butler logging untested)", "navigation (wave/contract UI surfacing not e2e-asserted)"],
+      "top_gaps": [
+        {
+          "ref": "monitor-orchestration.guard.re-entrancy-and-maintenance",
+          "priority": "high",
+          "roi": "high",
+          "dimensions_to_add": ["state-transition", "regression"],
+          "rationale": "The module's defining safety invariant — never double-drive a board (two concurrent cycles each POST a workspace for the same unblocked issue → conflicting worktrees) — has zero coverage, and the maintenance-window suppression is also unverified. Highest regression value per test: a deterministic test driving runMonitorCycle with an injected mid-cycle trigger asserting exactly one rerun + a single workspace POST."
+        },
+        {
+          "ref": "monitor-orchestration.conductor.lifecycle",
+          "priority": "high",
+          "roi": "medium",
+          "dimensions_to_add": ["state-transition", "error"],
+          "rationale": "start-no-op-if-alive and the broad PowerShell taskkill backstop are OS-coupled and untested; a regression could spawn two external drivers (double-drive) or over-kill a sibling loop. Inject the spawn/kill port to assert the no-op-if-alive guard and that the kill regex is scoped to board-monitor.loop.sh."
+        },
+        {
+          "ref": "monitor-orchestration.butler.llm-cycle",
+          "priority": "low",
+          "roi": "low",
+          "dimensions_to_add": ["workflow", "observability"],
+          "rationale": "Off by default and LLM-driven (hard to assert deterministically); lowest ROI. A thin test could at least assert the single-active-project resolution and that a crashed cycle is isolated, mocking the SDK session."
+        }
+      ]
+    }
+  }
+}

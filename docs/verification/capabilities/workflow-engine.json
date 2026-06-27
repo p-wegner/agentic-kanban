@@ -1,0 +1,517 @@
+{
+  "slug": "workflow-engine",
+  "behavior": {
+    "business_purpose": "Turns a kanban board's lifecycle into per-project DATA: a directed graph of stages (nodes) and legal moves (edges) with data-driven guards, attached agent skills, and cycle budgets — so 'what columns exist and how work moves' is configuration, not code. The same graph is simultaneously the board's column model, the AI agent's state machine, and the auto-routing policy. The legacy fixed board is just one built-in template (Simple Ticket).",
+    "confidence": "high",
+    "source_paths": [
+      "packages/shared/src/lib/workflow-engine.ts",
+      "packages/shared/src/lib/workflow-engine/transitions.ts",
+      "packages/shared/src/lib/workflow-engine/conditions.ts",
+      "packages/shared/src/lib/workflow-engine/graph-validation.ts",
+      "packages/shared/src/lib/workflow-engine/templates.ts",
+      "packages/shared/src/lib/workflow-engine/workspace-init.ts",
+      "packages/shared/src/lib/workflow-engine/status-sync.ts",
+      "packages/shared/src/lib/workflow-engine/prompt.ts",
+      "packages/shared/src/lib/workflow-engine/node-config.ts",
+      "packages/shared/src/schema/workflows.ts",
+      "packages/server/src/routes/workflows.ts",
+      "packages/server/src/repositories/workflow.repository.ts",
+      "packages/mcp-server/src/tools/propose-transition.ts"
+    ],
+    "actors": [
+      { "name": "operator", "kind": "human", "notes": "single local user; edits templates in the visual builder, drags issues between columns, drives manual stage advances + spec-phase approvals from the UI" },
+      { "name": "agent", "kind": "agent-subprocess", "notes": "the per-ticket builder; advances the workflow via the MCP propose_transition tool, reports testsPassed signals" },
+      { "name": "fork-orchestrator", "kind": "automation", "notes": "server workflow-fork.service — spawns/joins parallel children using the engine's structural placement primitives" }
+    ],
+    "entry_points": [
+      { "kind": "api", "ref": "GET /api/workflows/templates?projectId=&ticketType=&graph=1", "observable": "returns project-scoped + global built-in templates (optionally with full node/edge graph)" },
+      { "kind": "api", "ref": "POST|PUT|DELETE /api/workflows/templates[/:id]", "observable": "create/update/delete/clone a non-builtin template; built-ins are immutable (400)" },
+      { "kind": "api", "ref": "POST /api/workflows/templates/import + GET /:id/export", "observable": "round-trips a template as a JSON envelope" },
+      { "kind": "api", "ref": "GET /api/workflows/resolve?issueId=&projectId=&issueType=", "observable": "previews which template/start node an issue would use" },
+      { "kind": "api", "ref": "POST /api/workflows/workspaces/:id/transition", "observable": "UI-driven manual stage advance; syncs issue status + writes spec phase artifact; 400 on illegal target" },
+      { "kind": "api", "ref": "GET /api/workflows/workspaces/:id/progress + /analytics + /analytics/:tpl/:node/workspaces", "observable": "transition history, funnel/dwell/burndown analytics, per-stage workspace visits" },
+      { "kind": "mcp", "ref": "propose_transition", "observable": "agent advances its workspace along a legal/auto-routed edge; returns next stages for prompt re-injection" },
+      { "kind": "event", "ref": "initWorkspaceWorkflow (on workspace create)", "observable": "places a new workspace on the start node, derives issue status, records the initial system transition" },
+      { "kind": "event", "ref": "syncCurrentNodeToStatus (on manual status move / move_issue / CLI drag)", "observable": "repoints currentNodeId to the node mapping the new status, propagating to non-closed workspaces" }
+    ],
+    "behaviors": [
+      {
+        "id": "workflow-engine.resolve.template",
+        "statement": "An issue is matched to a workflow template by a 5-tier precedence: explicit id (project/global scope only) -> project default-for-type -> global default-for-type -> global Simple Ticket -> null (legacy status-only)",
+        "actor": "operator",
+        "preconditions": ["project has built-in workflows seeded"],
+        "observable_outcome": "GET /resolve / resolveTemplateForIssue returns the expected templateId (e.g. bug->simple-bug, unmapped chore->simple-ticket); cross-scope explicit id is ignored",
+        "evidence": ["packages/shared/src/lib/workflow-engine/templates.ts:19", "packages/server/src/routes/workflows.ts:130"],
+        "dimensions": ["capability", "api", "config"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "workflow-engine.init.workspace",
+        "statement": "Creating a workspace places it on the template's start node, derives + persists the issue's status from that node, and records an initial 'Workspace started' system transition (fromNodeId null); no workflow => returns null",
+        "actor": "fork-orchestrator",
+        "preconditions": ["issue resolves to a template with a start node"],
+        "observable_outcome": "issue.currentNodeId = start node, issue.statusId = node's mapped status (e.g. In Progress), workspace.currentNodeId set, one system transition row inserted",
+        "evidence": ["packages/shared/src/lib/workflow-engine/workspace-init.ts:51"],
+        "dimensions": ["workflow", "state-transition"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "workflow-engine.advance.transition",
+        "statement": "Advancing a workspace along an existing outgoing edge records a transition, moves workspace.currentNodeId, and (unless a fork child) syncs the issue's currentNodeId + derived statusId/statusChangedAt",
+        "actor": "agent",
+        "preconditions": ["workspace on a node with a legal outgoing edge to the target"],
+        "observable_outcome": "result.ok true, toNode is the target, issue status derived from the new node (e.g. Review->In Review), transition history row appended",
+        "evidence": ["packages/shared/src/lib/workflow-engine/transitions.ts:56", "packages/server/src/routes/workflows.ts:151"],
+        "dimensions": ["state-transition", "workflow", "api"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "workflow-engine.refuse.invalidTransition",
+        "statement": "A transition to a node that is NOT an existing outgoing edge from the current node is refused (the graph IS the legality contract) — no teleporting to an arbitrary stage",
+        "actor": "agent",
+        "preconditions": ["named/ided target has no edge from current node"],
+        "observable_outcome": "result.ok false with 'No valid transition'; route returns 400; no issue/workspace mutation, no fork children materialized",
+        "evidence": ["packages/shared/src/lib/workflow-engine/transitions.ts:116"],
+        "dimensions": ["state-transition", "error-handling"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "workflow-engine.autoroute.condition",
+        "statement": "With no explicit target, the engine auto-takes an edge IFF exactly one outgoing condition fires for the current signals; zero firing => refuse and ask the agent to choose; multiple firing => ambiguous, refuse",
+        "actor": "agent",
+        "preconditions": ["current node has condition-gated outgoing edges; workspace signals computed"],
+        "observable_outcome": "single fire: ok true, autoResolved true, lands on that node; zero: ok false 'Specify a target'; multiple: ok false 'Multiple edges fired'",
+        "evidence": ["packages/shared/src/lib/workflow-engine/transitions.ts:97"],
+        "dimensions": ["state-transition", "config", "boundary"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "workflow-engine.gate.blockedTarget",
+        "statement": "An explicitly-chosen target whose condition evaluates to 'block' is refused even when a human/agent names it (e.g. can't advance to Review when tests demonstrably failed)",
+        "actor": "agent",
+        "preconditions": ["explicit target edge condition evaluates block given signals"],
+        "observable_outcome": "result.ok false with 'gated by condition'; no transition recorded",
+        "evidence": ["packages/shared/src/lib/workflow-engine/transitions.ts:124"],
+        "dimensions": ["error-handling", "state-transition"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "workflow-engine.enforce.maxVisits",
+        "statement": "Entering a node already visited maxVisits times is refused, forcing human escalation — a runtime cycle guard against infinite agent looping",
+        "actor": "agent",
+        "preconditions": ["target node has maxVisits>0 and visit count already at budget"],
+        "observable_outcome": "result.ok false with 'visit budget'; node visit count not incremented past budget",
+        "evidence": ["packages/shared/src/lib/workflow-engine/transitions.ts:139"],
+        "dimensions": ["state-transition", "boundary", "regression"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "workflow-engine.evaluate.condition",
+        "statement": "The edge condition DSL maps a stored condition string to fire/block/manual: auto_on_exit_0 always fires; tests_pass/tests_fail key off reported flag (manual if unknown); diff_clean off file count; diff_touches:<glob> off a hand-rolled glob; unknown/agent_score/custom_js => manual",
+        "actor": "agent",
+        "preconditions": ["a SignalContext"],
+        "observable_outcome": "deterministic verdict per (condition, signals) pair driving auto-routing/gating",
+        "evidence": ["packages/shared/src/lib/workflow-engine/conditions.ts:56"],
+        "dimensions": ["config", "boundary"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "workflow-engine.validate.graph",
+        "statement": "Saving a template enforces graph well-formedness: exactly one start, >=1 end, no orphan/dead-end nodes, all nodes reachable from start, unique node ids, unmarked cycles rejected (isLoop exempt), paired parallel-fork<->parallel-join",
+        "actor": "operator",
+        "preconditions": ["a TemplateInput graph submitted to create/update"],
+        "observable_outcome": "validateGraph returns specific human-readable error strings (empty = valid); create/update returns 400 + errors[] when malformed",
+        "evidence": ["packages/shared/src/lib/workflow-engine/graph-validation.ts:22"],
+        "dimensions": ["error-handling", "boundary", "state-transition"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "workflow-engine.sync.statusToNode",
+        "statement": "When a human moves an issue's status (drag/move_issue/CLI), currentNodeId is repointed to a node whose statusName matches the new status and propagated to non-closed workspaces (closed workspaces untouched); no-op if no workflow or no matching node",
+        "actor": "operator",
+        "preconditions": ["issue runs a workflow; new status maps to some node"],
+        "observable_outcome": "issue.currentNodeId + non-closed workspaces' currentNodeId point at the matching node so the board column override stays consistent; closed workspaces unchanged",
+        "evidence": ["packages/shared/src/lib/workflow-engine/status-sync.ts:11"],
+        "dimensions": ["state-transition", "regression", "workflow"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "workflow-engine.create.issueStatus",
+        "statement": "Creating an issue with a template attached keeps it in the column it was created in; currentNodeId aligns to the node mapping that status (start node only if the created status maps to a node, else null = workflow-inactive); a template not owned by the project is rejected BAD_REQUEST",
+        "actor": "operator",
+        "preconditions": ["createIssue with workflowTemplateId + statusId"],
+        "observable_outcome": "Todo-created issue stays Todo with currentNodeId null; In Progress-created aligns to start node; foreign-project template => BAD_REQUEST",
+        "evidence": ["packages/server/src/services/issue.service.ts:225", "packages/server/src/services/issue.service.ts:282"],
+        "dimensions": ["regression", "workflow", "error-handling"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "workflow-engine.crud.template",
+        "statement": "The visual builder can create/update/delete/clone/import/export project templates; built-in templates are immutable (edit/delete refused 'duplicate first'); create allows an empty-node draft",
+        "actor": "operator",
+        "preconditions": ["a project; optional cloneFrom/import envelope"],
+        "observable_outcome": "201 on create with id; 400 on missing name/invalid graph; 400 on editing/deleting a built-in; valid round-trip via export->import",
+        "evidence": ["packages/shared/src/lib/workflow-engine/templates.ts:120", "packages/shared/src/lib/workflow-engine/templates.ts:151"],
+        "dimensions": ["api", "capability", "permission", "error-handling"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "workflow-engine.forkjoin.orchestrate",
+        "statement": "A parallel-fork spawns one child workspace+worktree+session per fork edge; once all (or all-surviving) children reach the join, the parent is structurally placed on the join node, the issue status syncs to the join, and children are marked joined + cleaned up — fork children never drive the shared issue's status",
+        "actor": "fork-orchestrator",
+        "preconditions": ["workspace on a parallel-fork node of a parallel-review template"],
+        "observable_outcome": "N children running with own currentNodeId; failed child launch tolerated; parent lands on join, issue status = join's status, children forkStatus joined + worktrees removed",
+        "evidence": ["packages/shared/src/lib/workflow-engine/transitions.ts:204", "packages/server/src/services/workflow-fork.service.ts:1"],
+        "dimensions": ["workflow", "state-transition", "concurrency"],
+        "risk": "high",
+        "confidence": "high"
+      },
+      {
+        "id": "workflow-engine.report.analytics",
+        "statement": "The engine exposes per-workspace progress (transition history + next stages) and project analytics: per-node entered/advanced/dropoff funnel, average dwell-time trends, burndown, and per-stage workspace visits scoped to the project",
+        "actor": "operator",
+        "preconditions": ["transition history exists"],
+        "observable_outcome": "GET /progress returns ordered transitions + valid next stages; /analytics returns funnel/durationTrends/burnDown; /analytics/:tpl/:node/workspaces lists visits with dwellMs + isCurrent",
+        "evidence": ["packages/server/src/repositories/workflow.repository.ts:1", "packages/server/src/routes/workflows.ts:110"],
+        "dimensions": ["api", "capability"],
+        "risk": "low",
+        "confidence": "high"
+      },
+      {
+        "id": "workflow-engine.prompt.transitionBlock",
+        "statement": "The agent-prompt block adapts to node role: a parallel-fork node tells the agent to STOP (server spawns branches); a spec-planning stage is human-gated ('Approve & continue', no propose_transition); a normal node injects the propose_transition contract + valid next stages + condition hints",
+        "actor": "agent",
+        "preconditions": ["a node + its outgoing transitions"],
+        "observable_outcome": "rendered markdown contains/omits 'propose_transition' and the right next-stage list per node type",
+        "evidence": ["packages/shared/src/lib/workflow-engine/prompt.ts:8"],
+        "dimensions": ["workflow", "config"],
+        "risk": "medium",
+        "confidence": "high"
+      },
+      {
+        "id": "workflow-engine.advance.mcpProposeTransition",
+        "statement": "The MCP propose_transition tool is the AGENT's primary entry point to advance work — resolving the agent's workspace, applying the same legality/auto-route/gate/maxVisits rules, and returning the next stages for prompt re-injection",
+        "actor": "agent",
+        "preconditions": ["agent in a workspace running a workflow"],
+        "observable_outcome": "tool returns ok + next stages (or a refusal reason) and the board column advances; mirrors the REST transition contract",
+        "evidence": ["packages/mcp-server/src/tools/propose-transition.ts:1", "packages/mcp-server/src/index.ts:153"],
+        "dimensions": ["api", "workflow", "state-transition"],
+        "risk": "high",
+        "confidence": "medium"
+      }
+    ],
+    "permissions": [
+      { "actor": "operator", "behavior": "workflow-engine.crud.template", "allowed": true, "notes": "single-user local app; the only enforced permission-like rule is built-in immutability, not RBAC" },
+      { "actor": "operator", "behavior": "workflow-engine.crud.template.builtin", "allowed": false, "notes": "built-in templates cannot be edited/deleted" }
+    ],
+    "state_model": {
+      "states": ["unset (no workflow / currentNodeId null)", "start", "normal", "parallel-fork", "parallel-join", "end"],
+      "transitions": [
+        { "from": "unset", "to": "start", "trigger": "initWorkspaceWorkflow on workspace create", "behavior": "workflow-engine.init.workspace" },
+        { "from": "start|normal", "to": "normal|end", "trigger": "proposeTransition along a legal/firing edge", "behavior": "workflow-engine.advance.transition" },
+        { "from": "normal", "to": "normal", "trigger": "isLoop back-edge (bounded by maxVisits)", "behavior": "workflow-engine.enforce.maxVisits" },
+        { "from": "normal", "to": "parallel-fork", "trigger": "agent reaches fork; server spawns children", "behavior": "workflow-engine.forkjoin.orchestrate" },
+        { "from": "parallel-fork", "to": "parallel-join", "trigger": "all surviving children joined; parent placed on join", "behavior": "workflow-engine.forkjoin.orchestrate" },
+        { "from": "any-mapped-status", "to": "node-for-status", "trigger": "manual status drag (reverse sync)", "behavior": "workflow-engine.sync.statusToNode" }
+      ]
+    },
+    "error_states": [
+      { "id": "workflow-engine.err.invalidTarget", "statement": "transition to a non-edge target -> ok false 'No valid transition' / route 400", "evidence": "transitions.ts:116" },
+      { "id": "workflow-engine.err.ambiguousAutoroute", "statement": "no target + 0 or >1 firing conditions -> ok false (specify / multiple fired)", "evidence": "transitions.ts:104" },
+      { "id": "workflow-engine.err.blockedCondition", "statement": "explicit target gated by an unsatisfied condition -> ok false 'gated by condition'", "evidence": "transitions.ts:127" },
+      { "id": "workflow-engine.err.visitBudget", "statement": "target node at maxVisits -> ok false 'visit budget', escalate", "evidence": "transitions.ts:141" },
+      { "id": "workflow-engine.err.builtinImmutable", "statement": "edit/delete of a built-in template -> 400 'cannot be edited/deleted'", "evidence": "templates.ts:151" },
+      { "id": "workflow-engine.err.foreignTemplate", "statement": "createIssue with a template owned by another project -> BAD_REQUEST", "evidence": "issue.service.ts:282" },
+      { "id": "workflow-engine.err.graphInvalid", "statement": "malformed graph on save -> 400 + specific validateGraph error strings", "evidence": "graph-validation.ts:22" },
+      { "id": "workflow-engine.degrade.gitFailure", "statement": "git diff failure leaves diff signals undefined -> diff_* conditions degrade to 'manual' rather than crash", "evidence": "transitions.ts:32" }
+    ],
+    "external_integrations": ["git CLI (diff signals via git-service)", "agent subprocess (MCP propose_transition, testsPassed signal)", "SQLite/Drizzle (issues, workspaces, projectStatuses, workflow* tables)"],
+    "unknowns": [
+      { "question": "Is the MCP propose_transition tool exercised by any automated test?", "why_unknown": "no test file in packages/mcp-server references it; only registration in index.ts — coverage inferred uncovered" },
+      { "question": "Do the negative validateGraph rules (start-count!=1, missing end, orphan inbound, dead-end outbound, fork/join pairing) ever get asserted?", "why_unknown": "the workflow-engine.test validateGraph block only asserts disconnected/duplicate-id/cycle/loop-exempt; the others are untested" },
+      { "question": "Is the 'multiple edges fired' ambiguous-autoroute branch reachable and tested?", "why_unknown": "tests cover single-fire and zero-fire only; multi-fire refusal is not exercised" },
+      { "question": "deriveStatusName / isTerminalNodeType are unit-tested but have zero production callers (test-only helpers) — are they dead code to remove?", "why_unknown": "domain doc flags them unwired; tests exist but assert no live behavior" },
+      { "question": "diff_touches glob boundary behavior (no brace/negation, '?'/'**' edge cases) — is the hand-rolled matcher's failure mode (silent manual/no-match) intended?", "why_unknown": "only happy-path globs asserted in tests" }
+    ]
+  },
+  "coverage": {
+    "behaviors": [
+      {
+        "ref": "workflow-engine.resolve.template",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/workflow-engine.test.ts::routes a bug issue to the Simple Bug template", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workflow-engine.test.ts::falls back to Simple Ticket for an unmapped type", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workflow.service.test.ts::resolves template by issueId", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["capability", "config", "api"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": "medium", "bugs": 0 }
+      },
+      {
+        "ref": "workflow-engine.init.workspace",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/workflow-engine.test.ts::initialises a workspace on the start node and syncs status", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workflow-fork.test.ts::setupForkAtSplit (init + transition)", "strength": "touches-only" }
+        ],
+        "dimensions_covered": ["workflow", "state-transition"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": "medium", "bugs": 1 }
+      },
+      {
+        "ref": "workflow-engine.advance.transition",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/workflow-engine.test.ts::advances along a valid edge and syncs the derived status", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workflow.service.test.ts::advances workspace node and syncs issue status", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workflows-route.test.ts::syncs the issue status when transitioning from Implement to Review", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["state-transition", "workflow", "api"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": "high", "bugs": 2 }
+      },
+      {
+        "ref": "workflow-engine.refuse.invalidTransition",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/workflow-engine.test.ts::rejects an invalid transition", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workflow.service.test.ts::rejects transition to invalid stage", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workflows-route.test.ts::does not materialize task children when the requested transition is invalid", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["state-transition", "error-handling"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": "high", "bugs": 1 }
+      },
+      {
+        "ref": "workflow-engine.autoroute.condition",
+        "status": "partial",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/workflow-engine.test.ts::auto-routes on a firing condition and gates a blocked explicit target", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workflow.service.test.ts::rejects transition without target", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["state-transition", "config"],
+        "dimensions_missing": ["boundary"],
+        "gap": {
+          "kind": "dimension-missing",
+          "missing_dimensions": ["boundary"],
+          "rationale": "single-fire (auto Fix) and zero-fire (specify-a-target) are asserted, but the 'multiple edges fired -> refuse ambiguous' branch (transitions.ts:111) is never exercised"
+        }
+      },
+      {
+        "ref": "workflow-engine.gate.blockedTarget",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/workflow-engine.test.ts::auto-routes on a firing condition and gates a blocked explicit target", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["error-handling", "state-transition"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": "medium", "bugs": 0 }
+      },
+      {
+        "ref": "workflow-engine.enforce.maxVisits",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/workflow-engine.test.ts::enforces maxVisits as a cycle guard", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["state-transition", "boundary", "regression"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": "low", "bugs": 0 }
+      },
+      {
+        "ref": "workflow-engine.evaluate.condition",
+        "status": "partial",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/workflow-engine.test.ts::evaluateCondition handles the supported conditions", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["config"],
+        "dimensions_missing": ["boundary"],
+        "gap": {
+          "kind": "dimension-missing",
+          "missing_dimensions": ["boundary"],
+          "rationale": "core fire/block/manual verdicts asserted incl. one diff_touches glob, but glob boundary cases (single '*' not crossing '/', '?', '**/' collapse, unsupported brace/negation -> silent no-match) and agent_score/custom_js->manual are not asserted"
+        }
+      },
+      {
+        "ref": "workflow-engine.validate.graph",
+        "status": "partial",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/workflow-engine.test.ts::validateGraph > detects disconnected subgraphs with node names", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workflow-engine.test.ts::validateGraph > rejects duplicate node ids", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workflow-engine.test.ts::validateGraph > detects cycles with node names", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workflow-engine.test.ts::validateGraph > allows intentional loop edges to opt out", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workflow.service.test.ts::creates a template with a valid graph", "strength": "touches-only" }
+        ],
+        "dimensions_covered": ["state-transition"],
+        "dimensions_missing": ["error-handling", "boundary"],
+        "gap": {
+          "kind": "dimension-missing",
+          "missing_dimensions": ["error-handling", "boundary"],
+          "rationale": "disconnect/dup-id/cycle/loop-exempt asserted, but the start-count!=1, missing-end, orphan-inbound, dead-end-outbound, and parallel fork<->join pairing rejection rules (graph-validation.ts:39-124) have no asserting test"
+        }
+      },
+      {
+        "ref": "workflow-engine.sync.statusToNode",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/workflow-engine.test.ts::syncCurrentNodeToStatus maps a manual status move to the matching node", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workflow-engine.test.ts::syncCurrentNodeToStatus also updates non-closed workspaces (regression #552)", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workflow-engine.test.ts::syncCurrentNodeToStatus does not update closed workspaces", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["state-transition", "regression", "workflow"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": "medium", "bugs": 1, "last_regression": "#552 board staleness" }
+      },
+      {
+        "ref": "workflow-engine.create.issueStatus",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/issue-create-workflow-status.test.ts::keeps the issue in the created column ('Todo')", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/issue-create-workflow-status.test.ts::aligns currentNodeId to the workflow node when created in a mapped status", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/issue-create-workflow-status.test.ts::rejects a workflow template that does not belong to the project", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workflow-engine.test.ts::rejects a workflow template from another project when creating an issue", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["regression", "workflow", "error-handling"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": "medium", "bugs": 1, "last_regression": "quick-add column override" }
+      },
+      {
+        "ref": "workflow-engine.crud.template",
+        "status": "partial",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/workflow.service.test.ts::creates a template with a valid graph", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workflow.service.test.ts::clones a template", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workflow.service.test.ts::deletes a non-builtin template with cascade", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workflow.service.test.ts::rejects deletion of builtin templates", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workflow.service.test.ts::updates a non-builtin template", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workflow.service.test.ts::rejects update of builtin template", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workflow.service.test.ts::exports a template as a JSON envelope", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workflow.service.test.ts::imports a template from a JSON envelope", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workflow.service.test.ts::rejects creation without name/projectId; rejects import with missing name", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["api", "capability", "permission", "error-handling"],
+        "dimensions_missing": ["boundary"],
+        "gap": {
+          "kind": "dimension-missing",
+          "missing_dimensions": ["boundary"],
+          "rationale": "full CRUD + builtin-immutability + import/export covered, but the empty-node draft create affordance (templates.ts:125 skips validation when nodes.length===0, resolving to a null start) is not asserted"
+        }
+      },
+      {
+        "ref": "workflow-engine.forkjoin.orchestrate",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/workflow-fork.test.ts::spawns one child per fork edge with worktrees + sessions", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workflow-fork.test.ts::consolidates into the parent join node once all children join", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workflow-fork.test.ts::marks a failed child launch and still consolidates", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workflow-fork.test.ts::launches the attached spec phase skill when entering a spec-driven phase", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["workflow", "state-transition", "concurrency"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": "medium", "bugs": 0 }
+      },
+      {
+        "ref": "workflow-engine.report.analytics",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/workflows-route.test.ts::lists workspace visits for a stage with issue metadata and dwell time", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workflow.service.test.ts::returns workspace progress with transitions and next stages", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workflow.service.test.ts::computes per-node visit counts and dwell", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["api", "capability"],
+        "dimensions_missing": [],
+        "history": { "churn_90d": "low", "bugs": 0 }
+      },
+      {
+        "ref": "workflow-engine.prompt.transitionBlock",
+        "status": "covered",
+        "covered_by": [
+          { "test": "packages/server/src/__tests__/workflow-engine.test.ts::builds a transition block embedding the workspace id", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workflow-engine.test.ts::keeps spec planning phases behind the human approval panel", "strength": "asserts-outcome" },
+          { "test": "packages/server/src/__tests__/workflow-fork.test.ts::launches the attached spec phase skill (prompt contains entered phase + propose_transition)", "strength": "asserts-outcome" }
+        ],
+        "dimensions_covered": ["workflow", "config"],
+        "dimensions_missing": ["boundary"],
+        "gap": {
+          "kind": "dimension-missing",
+          "missing_dimensions": ["boundary"],
+          "rationale": "normal + spec + (indirectly) fork-stop rendered forms asserted, but the explicit parallel-fork 'stop here' block (prompt.ts:24) and the terminal-stage 'no further transitions' branch are not directly asserted"
+        }
+      },
+      {
+        "ref": "workflow-engine.advance.mcpProposeTransition",
+        "status": "uncovered",
+        "covered_by": [],
+        "dimensions_covered": [],
+        "dimensions_missing": ["api", "workflow", "state-transition"],
+        "gap": {
+          "kind": "no-test",
+          "missing_dimensions": ["api", "workflow", "state-transition"],
+          "rationale": "the agent's PRIMARY entry point to advance the workflow has no test in packages/mcp-server; only the REST /transition path (same engine) is tested. The MCP tool's workspace-resolution + result-shaping wrapper around proposeTransition is unverified"
+        }
+      }
+    ],
+    "summary": {
+      "covered": 11,
+      "partial": 4,
+      "uncovered": 1,
+      "undocumented_implemented": 0,
+      "documented_missing": 0,
+      "score": 0.81,
+      "by_dimension": {
+        "state-transition": { "covered": 8, "partial": 2, "uncovered": 1 },
+        "workflow": { "covered": 8, "partial": 0, "uncovered": 1 },
+        "api": { "covered": 5, "partial": 0, "uncovered": 1 },
+        "config": { "covered": 4, "partial": 1, "uncovered": 0 },
+        "error-handling": { "covered": 4, "partial": 1, "uncovered": 0 },
+        "boundary": { "covered": 1, "partial": 4, "uncovered": 0 },
+        "regression": { "covered": 3, "partial": 0, "uncovered": 0 },
+        "concurrency": { "covered": 1, "partial": 0, "uncovered": 0 },
+        "permission": { "covered": 1, "partial": 0, "uncovered": 0 }
+      },
+      "weak_dimensions": ["boundary", "error-handling (negative graph-validation rules)", "api (MCP agent entry)"],
+      "top_gaps": [
+        {
+          "ref": "workflow-engine.advance.mcpProposeTransition",
+          "priority": "P1",
+          "roi": 5.3,
+          "dimensions_to_add": ["api", "workflow", "state-transition"],
+          "rationale": "Highest blast radius unverified path: the agent advances every multi-stage ticket through this MCP tool, yet no test exercises it (only the parallel REST route). A regression in workspace-resolution or result shaping would silently strand agent-driven workflows. impact 5 x regression 3 / (exec 1 + maint 2.5) = 5.3"
+        },
+        {
+          "ref": "workflow-engine.validate.graph",
+          "priority": "P4",
+          "roi": 4.0,
+          "dimensions_to_add": ["error-handling", "boundary"],
+          "rationale": "The visual builder's negative guards (start-count!=1, missing end, orphan inbound, dead-end outbound, fork<->join pairing) are the contract that keeps a saved graph runnable, but only 4 of ~8 rules are asserted. Pure-function tests, near-zero exec/maint cost. impact 4 x regression 2 / (exec 0.5 + maint 1.5) = 4.0"
+        },
+        {
+          "ref": "workflow-engine.autoroute.condition",
+          "priority": "P4",
+          "roi": 3.5,
+          "dimensions_to_add": ["boundary"],
+          "rationale": "The 'multiple edges fired -> ambiguous, refuse' branch is the safety valve preventing nondeterministic auto-routing; single/zero-fire are tested but the multi-fire refusal is not. impact 4 x regression 2 / (exec 1 + maint 1.3) = 3.5"
+        },
+        {
+          "ref": "workflow-engine.evaluate.condition",
+          "priority": "P3",
+          "roi": 3.0,
+          "dimensions_to_add": ["boundary"],
+          "rationale": "The hand-rolled diff_touches glob silently degrades to no-match/manual on unsupported patterns (brace/negation) and on '*' not crossing '/'. A boundary table-test pins the matcher's real semantics cheaply. impact 3 x regression 2 / (exec 0.5 + maint 1.5) = 3.0"
+        }
+      ]
+    }
+  }
+}
