@@ -663,6 +663,26 @@
           ],
           "risk": "low",
           "confidence": "high"
+        },
+        {
+          "id": "workspaces.cascade.partial-blockers-no-start",
+          "statement": "A dependent with MULTIPLE blockers auto-starts ONLY when EVERY blocker is Done; merging only some blockers must NOT start it",
+          "actor": "monitor",
+          "preconditions": [
+            "dependent D depends_on B1 AND B2",
+            "auto_start_followup=true",
+            "start_mode=manual"
+          ],
+          "observable_outcome": "after merging only B1, D has no workspace and unchanged status; after merging B2 (last blocker), D auto-starts",
+          "evidence": [
+            "packages/server/src/services/followup-workspace.service.ts:57"
+          ],
+          "dimensions": [
+            "state-transition",
+            "error"
+          ],
+          "risk": "medium",
+          "confidence": "high"
         }
       ],
       "permissions": [

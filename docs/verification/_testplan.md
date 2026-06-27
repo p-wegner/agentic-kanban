@@ -4,7 +4,7 @@
 > behaviour; the tick is derived from `_coverage.json` (`testplan.mjs`). Regenerate after
 > tests land and ticks update themselves — the plan can't drift from reality.
 
-**Progress: 232/273 scenarios covered (85%)** · 26 partial · 15 to author
+**Progress: 238/274 scenarios covered (87%)** · 26 partial · 10 to author
 
 `[█████████████████░░░]`
 
@@ -18,19 +18,19 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 |---|--:|---|
 | [agent-providers](#agent-providers) | 14/16 | `[█████████░]` |
 | [agent-sessions](#agent-sessions) | 17/20 | `[█████████░]` |
-| [board-ui](#board-ui) | 19/24 | `[████████░░]` |
+| [board-ui](#board-ui) | 20/24 | `[████████░░]` |
 | [butler](#butler) | 16/19 | `[████████░░]` |
 | [codemods](#codemods) | 7/9 | `[████████░░]` |
 | [git-integration](#git-integration) | 17/18 | `[█████████░]` |
 | [issues-board](#issues-board) | 19/20 | `[██████████]` |
-| [mcp-server](#mcp-server) | 16/20 | `[████████░░]` |
+| [mcp-server](#mcp-server) | 17/20 | `[█████████░]` |
 | [monitor-orchestration](#monitor-orchestration) | 16/19 | `[████████░░]` |
-| [persistence-schema](#persistence-schema) | 13/15 | `[█████████░]` |
+| [persistence-schema](#persistence-schema) | 14/15 | `[█████████░]` |
 | [preferences-config](#preferences-config) | 15/16 | `[█████████░]` |
-| [project-registration](#project-registration) | 14/17 | `[████████░░]` |
+| [project-registration](#project-registration) | 15/17 | `[█████████░]` |
 | [review-merge](#review-merge) | 17/18 | `[█████████░]` |
 | [workflow-engine](#workflow-engine) | 12/16 | `[████████░░]` |
-| [workspaces](#workspaces) | 20/26 | `[████████░░]` |
+| [workspaces](#workspaces) | 22/27 | `[████████░░]` |
 
 ---
 
@@ -195,13 +195,8 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 
 ## board-ui
 
-**board-ui** — 19/24 covered `[████████░░]`
+**board-ui** — 20/24 covered `[████████░░]`
 
-- [ ] ⬜ **P1** `board-ui.move.archiveConfirm` — Moving a ticket into Done/Cancelled while it has a live (non-closed) workspace requires explicit confirmation before committing
-  - _given_ operator
-  - _then_ a confirm dialog blocks the move; only on confirm does the PATCH+refetch run; cancel leaves the card in place
-  - _add dimensions_ workflow, error-handling, state-transition, risk
-  - _gap_ No e2e moves a ticket WITH a live workspace into Done/Cancelled to exercise the confirm dialog (block on cancel, commit on confirm). ai-reviewed-column tests move issues to terminal statuses but without a live workspace,
 - [ ] ⬜ `board-ui.move.dependencyPreview` — Advancing/closing a ticket that has dependents shows a dependency-impact preview before committing
   - _given_ operator
   - _then_ a dependency-impact preview is shown; the move proceeds only after acknowledgement
@@ -234,6 +229,10 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
   - _given_ operator
   - _then_ card lands in the target column immediately; server board reflects the new status/sortOrder after a debounced refetch
   - _asserted by_ `board.test.ts::drag issue between columns`, `issueMoveHelpers.test.ts::moveIssueToStatus (8 cases)`, `issueMoveHelpers.test.ts::applyLocalReorder`
+- [x] ✅ `board-ui.move.archiveConfirm` — Moving a ticket into Done/Cancelled while it has a live (non-closed) workspace requires explicit confirmation before committing
+  - _given_ operator
+  - _then_ a confirm dialog blocks the move; only on confirm does the PATCH+refetch run; cancel leaves the card in place
+  - _asserted by_ `board-move-archive-confirm.test.ts`
 - [x] ✅ `board-ui.move.rollback` — A server-rejected move rolls the card back to its exact prior position and surfaces the server's rejection message
   - _given_ operator
   - _then_ card snaps back to source column; a toast shows the server error message; board state matches pre-move snapshot
@@ -592,13 +591,8 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 
 ## mcp-server
 
-**mcp-server** — 16/20 covered `[████████░░]`
+**mcp-server** — 17/20 covered `[█████████░]`
 
-- [ ] ⬜ **P1** `mcp-server.fire.webhook` — A status-change mutation (move_issue/update_issue) fires the project's outbound webhook best-effort, but only after the URL is validated loopback-only (the single egress boundary against a malicious pref)
-  - _given_ ai-agent
-  - _then_ valid loopback URL → POST issue-status payload; non-loopback/non-http(s) host → not fired; mutation succeeds regardless of webhook outcome
-  - _add dimensions_ error, config, risk
-  - _gap_ No MCP test fires the outbound webhook on a status change, nor asserts the loopback-only egress validation (outbound-webhook.ts:44) that is the one SSRF boundary against a malicious outbound_webhook_url_<projectId> pref.
 - [ ] ⬜ `mcp-server.resilience.stay-up` — Unhandled async rejections are caught and logged to stderr so the stdio process stays connected; a stray write must never corrupt stdout (the JSON-RPC stream)
   - _given_ ai-agent
   - _then_ the server keeps answering subsequent requests; logs go to stderr only; stdout stays pure JSON-RPC
@@ -678,6 +672,10 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
   - _given_ settings-operator
   - _then_ the disabled tool is absent from tools/list; calling it returns method-not-found
   - _asserted by_ `disabled-tools.test.ts`
+- [x] ✅ `mcp-server.fire.webhook` — A status-change mutation (move_issue/update_issue) fires the project's outbound webhook best-effort, but only after the URL is validated loopback-only (the single egress boundary against a malicious pref)
+  - _given_ ai-agent
+  - _then_ valid loopback URL → POST issue-status payload; non-loopback/non-http(s) host → not fired; mutation succeeds regardless of webhook outcome
+  - _asserted by_ `move-issue-webhook.test.ts`
 
 ## monitor-orchestration
 
@@ -765,13 +763,8 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 
 ## persistence-schema
 
-**persistence-schema** — 13/15 covered `[█████████░]`
+**persistence-schema** — 14/15 covered `[█████████░]`
 
-- [ ] ⬜ **P2** `persistence-schema.resolve.db-location` — The DB file is resolved by existence (env override -> local checkout -> ~/.agentic-kanban), so a worktree dev-server transparently runs against a separate home-dir DB rather than the main board
-  - _given_ services
-  - _then_ getDbUrl returns the checkout DB when present, else the home-dir DB; a worktree (no checked-out db) gets a different database/project-IDs
-  - _add dimensions_ config, boundary, risk
-  - _gap_ No test imports data-dir.ts. The existence-based resolution and the env-override precedence (DB_URL/AGENTIC_KANBAN_DIR -> local checkout -> ~/.agentic-kanban) are unasserted, despite being the mechanism behind the worktr
 - [~] ⚠️ **P4** `persistence-schema.enforce.unique-issue-number` — Issue numbers are unique per project (not global): a unique index on (project_id, issue_number) lets two projects each have a #1, and next-number allocation is MAX+1 scoped per project
   - _given_ services
   - _then_ nextIssueNumber returns max+1 within a project and is unaffected by other projects; a duplicate (project_id, issue_number) insert is rejected by the DB unique index
@@ -829,6 +822,10 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
   - _given_ operator
   - _then_ restored DB project/issue counts equal the pre-wipe live DB
   - _asserted by_ `backup.test.ts::db restore round-trip: seed -> backup -> wipe ->`
+- [x] ✅ `persistence-schema.resolve.db-location` — The DB file is resolved by existence (env override -> local checkout -> ~/.agentic-kanban), so a worktree dev-server transparently runs against a separate home-dir DB rather than the main board
+  - _given_ services
+  - _then_ getDbUrl returns the checkout DB when present, else the home-dir DB; a worktree (no checked-out db) gets a different database/project-IDs
+  - _asserted by_ `data-dir.test.ts`
 
 ## preferences-config
 
@@ -902,13 +899,8 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 
 ## project-registration
 
-**project-registration** — 14/17 covered `[████████░░]`
+**project-registration** — 15/17 covered `[█████████░]`
 
-- [ ] ⬜ **P1** `project-registration.register.idempotent` — Re-registering the same repo (or a subdirectory resolving to the same git root) returns the existing project instead of creating a duplicate
-  - _given_ operator
-  - _then_ result.created === false and the same project id is returned; no second row; issues/skills stay on one project
-  - _add dimensions_ workflow, boundary, error-handling
-  - _gap_ the UI test fulfills a MOCK 409; no server-level test proves registering the same git root (or a subdirectory of it) returns the existing project with created=false and no second row
 - [~] ⚠️ `project-registration.register.create` — Registering a git repo creates a driveable project: a project row, canonical statuses, a default branch and default skill, returned synchronously as 201
   - _given_ operator
   - _then_ POST /api/projects returns 201 with {id, name, repoPath}; project appears in GET /api/projects
@@ -919,6 +911,10 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
   - _then_ GET /api/projects/:id/statuses lists Todo/In Progress/In Review/Done/Cancelled (+Backlog); POST /api/issues/batch does not 400 'No statuses found'
   - _add dimensions_ workflow
   - _gap_ statuses are asserted on the long-lived E2E fixture project, not as a freshly-registered project's seeding consequence; the Backlog(-1) lane specifically is not asserted to exist
+- [x] ✅ `project-registration.register.idempotent` — Re-registering the same repo (or a subdirectory resolving to the same git root) returns the existing project instead of creating a duplicate
+  - _given_ operator
+  - _then_ result.created === false and the same project id is returned; no second row; issues/skills stay on one project
+  - _asserted by_ `register-project.test.ts::duplicate path shows error message`, `registration-idempotent.test.ts`
 - [x] ✅ `project-registration.reject.missingRepoPath` — Registering with no repoPath (or a non-git path) is rejected with a 4xx and an explanatory error, leaving no project created
   - _given_ operator
   - _then_ POST /api/projects returns 400 with error mentioning repoPath; duplicate path returns 409
@@ -1129,13 +1125,8 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 
 ## workspaces
 
-**Workspaces & Worktrees** — 20/26 covered `[████████░░]`
+**Workspaces & Worktrees** — 22/27 covered `[████████░░]`
 
-- [ ] ⬜ **P1** `workspaces.plan.approve-reject` — A plan-mode workspace produces a plan and awaits human approval; the agent writes no implementation code until the plan is approved, and a rejection re-runs planning with feedback
-  - _given_ operator
-  - _then_ GET /:id/plan returns the plan; POST /:id/implement-plan (201) starts implementation; POST /:id/reject-plan with feedback (201) re-plans; reject without feedback → 400
-  - _add dimensions_ workflow, state-transition, api, error
-  - _gap_ No candidate test exercises the plan-gate HTTP surface: GET /:id/plan, POST /:id/implement-plan (201 → starts implementation), POST /:id/reject-plan with feedback (201 → re-plans), reject without feedback → 400. plan-mod
 - [ ] ⬜ **P1** `workspaces.lifecycle.reattach-survives-reload` — A detached agent survives a server hot-reload: on restart, sessions with a live PID are reattached (output watcher resumes from the last byte offset) and dead-PID sessions are marked stopped with their workspaces reset to idle
   - _given_ monitor
   - _then_ surviving agents keep streaming after restart; crashed ones are reconciled to idle; not killed on SIGTERM, only on SIGINT
@@ -1217,6 +1208,10 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
   - _given_ monitor
   - _then_ a fixing session starts (consumes a WIP slot); on success the branch lands and the issue moves to Done
   - _asserted by_ `workspace-merge-service.test.ts::MergeService — merge from fixing status moves is`, `workspace-merge-service.test.ts::force-stops a stale zero-output fix-and-merge se`, `workspace.service.test.ts::fixAndMerge with HEAD guard (syncs and rebases t`, `workspace-activity-state.test.ts::fixing workspace => fixing, counts as capacity`
+- [x] ✅ `workspaces.plan.approve-reject` — A plan-mode workspace produces a plan and awaits human approval; the agent writes no implementation code until the plan is approved, and a rejection re-runs planning with feedback
+  - _given_ operator
+  - _then_ GET /:id/plan returns the plan; POST /:id/implement-plan (201) starts implementation; POST /:id/reject-plan with feedback (201) re-plans; reject without feedback → 400
+  - _asserted by_ `plan-approval-endpoint.test.ts`
 - [x] ✅ `workspaces.delete.cascade` — Deleting a workspace cascade-removes its sessions and messages and detaches its summary from the issue
   - _given_ operator
   - _then_ workspace + all FK children deleted; the issue's workspaceSummary disappears from the board
@@ -1241,4 +1236,8 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
   - _given_ operator
   - _then_ stale list/cleanup-warnings returned; removal succeeds for safe paths; 400 for unsafe path / traversal / not-closed workspace / repo root
   - _asserted by_ `stale-worktree-cleanup.test.ts::DELETE /api/workspaces/:id/stale-worktree (retur`, `cleanup-warnings.test.ts::POST /api/workspaces/:id/retry-cleanup (returns `, `worktrees-panel.test.ts::bulk clean confirm dialog appears and orphaned d`
+- [x] ✅ `workspaces.cascade.partial-blockers-no-start` — A dependent with MULTIPLE blockers auto-starts ONLY when EVERY blocker is Done; merging only some blockers must NOT start it
+  - _given_ monitor
+  - _then_ after merging only B1, D has no workspace and unchanged status; after merging B2 (last blocker), D auto-starts
+  - _asserted by_ `workspace-cascade-followup.test.ts`
 

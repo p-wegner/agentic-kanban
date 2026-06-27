@@ -2,16 +2,7 @@
 
 Every behaviour that is not `covered`, grouped by capability. `partial` = touched/some-dimensions; `uncovered` = no asserting test. Lead with the five-way taxonomy counts.
 
-**Totals:** 232 covered · 26 partial · 15 uncovered · 0 undocumented-implemented · 0 documented-missing.
-
-## workspaces (20/26 covered)
-
-- **[uncovered]** `workspaces.turn.missing-content` _(missing: error, api)_ — No candidate test asserts POST /:id/turn with no content → 400 {error:'content is required'}. The turn route lives in workspace-actions.ts (churn 180, the single highest-churn workspace route file) — a refactor could silently drop the guard
-- **[uncovered]** `workspaces.plan.approve-reject` _(missing: workflow, state-transition, api, error)_ — No candidate test exercises the plan-gate HTTP surface: GET /:id/plan, POST /:id/implement-plan (201 → starts implementation), POST /:id/reject-plan with feedback (201 → re-plans), reject without feedback → 400. plan-mode.service.test.ts ex
-- **[uncovered]** `workspaces.lifecycle.hang-watchdog` _(missing: error, state-transition)_ — No candidate test asserts that a zero-output-for-15-min agent is killed by the spawn-layer watchdog (reset on each output event). Implemented in agent.service.ts (churn 91 — the highest-churn workspace service file). agent.service.test.ts i
-- **[uncovered]** `workspaces.lifecycle.reattach-survives-reload` _(missing: state-transition, regression)_ — No candidate test asserts the restart-reattach invariant: live-PID sessions reattach + resume the output watcher from the last byte offset, dead-PID sessions are marked stopped and their workspaces reset to idle, agents are not killed on SI
-- **[partial]** `workspaces.create.one-direct-per-issue` _(missing: error)_ — The block (no second direct workspace row) is asserted, but the exact HTTP failure contract (4xx code vs error-in-201-body) is never asserted — the behaviour model flags this as an open unknown. A consumer relying on a specific status code 
-- **[partial]** `workspaces.stop.strand-recovery` _(missing: state-transition)_ — Stop→idle reset is well covered. The quarantine sub-behaviour (POST /:id/quarantine additionally moves the issue BACK to In Progress) has no asserting test in the candidate set — the issue-status side of the transition is unverified.
+**Totals:** 238 covered · 26 partial · 10 uncovered · 0 undocumented-implemented · 0 documented-missing.
 
 ## monitor-orchestration (15/18 covered)
 
@@ -24,20 +15,13 @@ Every behaviour that is not `covered`, grouped by capability. `partial` = touche
 - **[uncovered]** `codemods.preview.limit-guard` _(missing: boundary, error-handling, config)_ — The >100-TS-file blast-radius guard and its overrideLimit override path are never exercised. This is the module's scale safety interlock and has no test at either the block or the override-and-proceed edge.
 - **[partial]** `codemods.get.byid` _(missing: api)_ — Only the 404-unknown-id branch is asserted. The success path (GET /:id returning an existing saved codemod's body) is never directly fetched/asserted -- the save test verifies presence via the list endpoint, not via GET /:id.
 
-## mcp-server (16/20 covered)
+## workspaces (22/27 covered)
 
-- **[uncovered]** `mcp-server.fire.webhook` _(missing: error, config, risk)_ — No MCP test fires the outbound webhook on a status change, nor asserts the loopback-only egress validation (outbound-webhook.ts:44) that is the one SSRF boundary against a malicious outbound_webhook_url_<projectId> pref. Security-relevant a
-- **[uncovered]** `mcp-server.resilience.stay-up` _(missing: error, risk, regression)_ — The async-rejection-swallow / stdout-purity resilience policy (index.ts:236,246) — a stray rejection must not drop the stdio connection or corrupt the JSON-RPC stream — has no test. High blast radius (a crash makes every board op fail for t
-- **[partial]** `mcp-server.orient.context` _(missing: boundary)_ — activeWorkspaces count is asserted with a single project; the suspected cross-project bleed (count not scoped by projectId, get-context.ts:35) is never asserted in a multi-project board.
-- **[partial]** `mcp-server.launch.workspace` _(missing: api)_ — relaunch's WORKSPACE_NOT_IDLE and missing/closed errors are asserted; the actual delegation to REST /launch and its passthrough result are not. launch_workspace success path untested.
-
-## board-ui (19/24 covered)
-
-- **[uncovered]** `board-ui.move.archiveConfirm` _(missing: workflow, error-handling, state-transition, risk)_ — No e2e moves a ticket WITH a live workspace into Done/Cancelled to exercise the confirm dialog (block on cancel, commit on confirm). ai-reviewed-column tests move issues to terminal statuses but without a live workspace, so the gate never f
-- **[uncovered]** `board-ui.move.dependencyPreview` _(missing: workflow, feature)_ — No candidate test advances/closes a ticket with dependents to assert the dependency-impact preview is shown before commit.
-- **[partial]** `board-ui.realtime.reflectServerChange` _(missing: concurrency)_ — The 'status changes via API' e2e asserts the SERVER board reflects the move, not that the UI relocated the card (touches-only for the UI outcome). The agent-cascade coalescing/seq-guard behaviour (poll+WS overlap, out-of-order discard) is u
-- **[partial]** `board-ui.wip.visualLimit` _(missing: feature)_ — The classifier logic (incl. boundary coercion of zero/garbage) is fully unit-tested, but the user-visible outcome — the column header rendering its red 'over' tint — is asserted by no test. The visual policy itself is unverified.
-- **[partial]** `board-ui.shortcuts.keyboardNav` _(missing: accessibility)_ — The pure cursor-target arithmetic is fully unit-tested, but no e2e drives arrow/vim keys against the rendered board to assert the focused card actually moves (the keyboard-operability a11y outcome). The unit test would pass even if the keyd
+- **[uncovered]** `workspaces.turn.missing-content` _(missing: error, api)_ — No candidate test asserts POST /:id/turn with no content → 400 {error:'content is required'}. The turn route lives in workspace-actions.ts (churn 180, the single highest-churn workspace route file) — a refactor could silently drop the guard
+- **[uncovered]** `workspaces.lifecycle.hang-watchdog` _(missing: error, state-transition)_ — No candidate test asserts that a zero-output-for-15-min agent is killed by the spawn-layer watchdog (reset on each output event). Implemented in agent.service.ts (churn 91 — the highest-churn workspace service file). agent.service.test.ts i
+- **[uncovered]** `workspaces.lifecycle.reattach-survives-reload` _(missing: state-transition, regression)_ — No candidate test asserts the restart-reattach invariant: live-PID sessions reattach + resume the output watcher from the last byte offset, dead-PID sessions are marked stopped and their workspaces reset to idle, agents are not killed on SI
+- **[partial]** `workspaces.create.one-direct-per-issue` _(missing: error)_ — The block (no second direct workspace row) is asserted, but the exact HTTP failure contract (4xx code vs error-in-201-body) is never asserted — the behaviour model flags this as an open unknown. A consumer relying on a specific status code 
+- **[partial]** `workspaces.stop.strand-recovery` _(missing: state-transition)_ — Stop→idle reset is well covered. The quarantine sub-behaviour (POST /:id/quarantine additionally moves the issue BACK to In Progress) has no asserting test in the candidate set — the issue-status side of the transition is unverified.
 
 ## workflow-engine (12/16 covered)
 
@@ -46,16 +30,18 @@ Every behaviour that is not `covered`, grouped by capability. `partial` = touche
 - **[partial]** `workflow-engine.validate.graph` _(missing: error-handling, boundary)_ — disconnect/dup-id/cycle/loop-exempt asserted, but the start-count!=1, missing-end, orphan-inbound, dead-end-outbound, and parallel fork<->join pairing rejection rules (graph-validation.ts:39-124) have no asserting test
 - **[partial]** `workflow-engine.crud.template` _(missing: boundary)_ — full CRUD + builtin-immutability + import/export covered, but the empty-node draft create affordance (templates.ts:125 skips validation when nodes.length===0, resolving to a null start) is not asserted
 
-## project-registration (14/17 covered)
+## board-ui (20/24 covered)
 
-- **[uncovered]** `project-registration.register.idempotent` _(missing: workflow, boundary, error-handling)_ — the UI test fulfills a MOCK 409; no server-level test proves registering the same git root (or a subdirectory of it) returns the existing project with created=false and no second row
-- **[partial]** `project-registration.register.create` _(missing: workflow)_ — e2e asserts 201+{id,name,repoPath} but not the registration consequences as a journey (statuses seeded, branch non-null, skill attached) on the freshly-created project; UI test mocks the API so it only proves the modal flow
-- **[partial]** `project-registration.seed.statuses` _(missing: workflow)_ — statuses are asserted on the long-lived E2E fixture project, not as a freshly-registered project's seeding consequence; the Backlog(-1) lane specifically is not asserted to exist
+- **[uncovered]** `board-ui.move.dependencyPreview` _(missing: workflow, feature)_ — No candidate test advances/closes a ticket with dependents to assert the dependency-impact preview is shown before commit.
+- **[partial]** `board-ui.realtime.reflectServerChange` _(missing: concurrency)_ — The 'status changes via API' e2e asserts the SERVER board reflects the move, not that the UI relocated the card (touches-only for the UI outcome). The agent-cascade coalescing/seq-guard behaviour (poll+WS overlap, out-of-order discard) is u
+- **[partial]** `board-ui.wip.visualLimit` _(missing: feature)_ — The classifier logic (incl. boundary coercion of zero/garbage) is fully unit-tested, but the user-visible outcome — the column header rendering its red 'over' tint — is asserted by no test. The visual policy itself is unverified.
+- **[partial]** `board-ui.shortcuts.keyboardNav` _(missing: accessibility)_ — The pure cursor-target arithmetic is fully unit-tested, but no e2e drives arrow/vim keys against the rendered board to assert the focused card actually moves (the keyboard-operability a11y outcome). The unit test would pass even if the keyd
 
-## persistence-schema (13/15 covered)
+## mcp-server (17/20 covered)
 
-- **[uncovered]** `persistence-schema.resolve.db-location` _(missing: config, boundary, risk)_ — No test imports data-dir.ts. The existence-based resolution and the env-override precedence (DB_URL/AGENTIC_KANBAN_DIR -> local checkout -> ~/.agentic-kanban) are unasserted, despite being the mechanism behind the worktree-runs-against-a-di
-- **[partial]** `persistence-schema.enforce.unique-issue-number` _(missing: error-handling)_ — Allocation logic (MAX+1, per-project scope) is asserted, but the DB-level uniqueness GUARANTEE — that a duplicate (project_id, issue_number) insert is rejected by idx_issues_project_id_issue_number — is never exercised. A concurrent double-
+- **[uncovered]** `mcp-server.resilience.stay-up` _(missing: error, risk, regression)_ — The async-rejection-swallow / stdout-purity resilience policy (index.ts:236,246) — a stray rejection must not drop the stdio connection or corrupt the JSON-RPC stream — has no test. High blast radius (a crash makes every board op fail for t
+- **[partial]** `mcp-server.orient.context` _(missing: boundary)_ — activeWorkspaces count is asserted with a single project; the suspected cross-project bleed (count not scoped by projectId, get-context.ts:35) is never asserted in a multi-project board.
+- **[partial]** `mcp-server.launch.workspace` _(missing: api)_ — relaunch's WORKSPACE_NOT_IDLE and missing/closed errors are asserted; the actual delegation to REST /launch and its passthrough result are not. launch_workspace success path untested.
 
 ## agent-providers (14/16 covered)
 
@@ -77,6 +63,15 @@ Every behaviour that is not `covered`, grouped by capability. `partial` = touche
 ## issues-board (18/19 covered)
 
 - **[partial]** `issues-board.config.statuses` _(missing: error, state-transition)_ — the key invariant — DELETE of a status with linked issues must return 409 (project.repository.ts:224) so issues are never orphaned — has no asserting test in the candidate set; only GET/POST happy paths are exercised
+
+## project-registration (15/17 covered)
+
+- **[partial]** `project-registration.register.create` _(missing: workflow)_ — e2e asserts 201+{id,name,repoPath} but not the registration consequences as a journey (statuses seeded, branch non-null, skill attached) on the freshly-created project; UI test mocks the API so it only proves the modal flow
+- **[partial]** `project-registration.seed.statuses` _(missing: workflow)_ — statuses are asserted on the long-lived E2E fixture project, not as a freshly-registered project's seeding consequence; the Backlog(-1) lane specifically is not asserted to exist
+
+## persistence-schema (14/15 covered)
+
+- **[partial]** `persistence-schema.enforce.unique-issue-number` _(missing: error-handling)_ — Allocation logic (MAX+1, per-project scope) is asserted, but the DB-level uniqueness GUARANTEE — that a duplicate (project_id, issue_number) insert is rejected by idx_issues_project_id_issue_number — is never exercised. A concurrent double-
 
 ## preferences-config (15/16 covered)
 

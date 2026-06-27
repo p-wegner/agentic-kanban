@@ -38,6 +38,14 @@ and follow the target project's conventions exactly.
 6. **Condition-based waits only.** `expect(locator).toBeVisible()`, `expect.poll(...)` on an API
    field, `waitForFunction` — never a fixed sleep for correctness.
 
+## Boundaries (the orchestrator owns these — do NOT cross them)
+- **Write ONLY your test file** (+ a small fixture if unavoidable). Do **not** edit
+  `docs/verification/*` (the coverage model) — the orchestrator closes the loop from your
+  returned result. Concurrent generators editing the shared model corrupts it.
+- **Do NOT `git commit`, `git checkout`, `git reset`, or WIP-stash** anything. The orchestrator
+  commits. If a merge-based test reports a dirty-main `409`, report it — do not "set aside" other
+  agents' files with WIP commits to force a clean run.
+
 ## Self-check before returning (this is what the reviewer will attack)
 - **Mutation check**: would this test go RED if the behaviour broke? If you can't convince
   yourself it would, it asserts the wrong thing — fix it. For P0/P1, actually reason through the

@@ -175,6 +175,34 @@ agent-sessions-reattach-recover, agent-session-turn-followup, stack-profile-llm-
 **Running total across waves 1–4: 24 gaps closed, 7 product/infra bugs surfaced (#926–932),
 score 0.837 → 0.897 (77% → 85%).**
 
+## 2026-06-27 — e2e-test-author wave 5: closed 6 remaining high-value gaps
+
+6 more (parallel): board-move-archive-confirm (Playwright), plan-approval-endpoint (AK-924 plan
+gate), registration-idempotent, move-issue-webhook (loopback-only egress), the wave-1 cascade
+follow-up `workspaces.cascade.partial-blockers-no-start` (multi-blocker every-guard, a NEW
+behaviour added to the model), and data-dir db-location precedence. All green; no product code.
+
+- **Coverage: 0.897 → 0.916** (covered 232→238, partial 26, uncovered 15→10). Backlog 35→31.
+  Model is now 274 behaviours (added the cascade follow-up behaviour).
+- mcp webhook: loopback-only egress guard CONFIRMED present (foreign host + file:// refused) —
+  no new security finding.
+- **Process note:** concurrent generator agents edited `docs/verification` directly and one did
+  git WIP-surgery (set-aside commits) + the merge-based e2e tests left cascade-marker commits on
+  local master. The model was **re-derived deterministically** from the clean wave-4 baseline
+  (`git checkout 7954d38a -- docs/verification` then re-ran the close-loop scripts), so the
+  committed model is authoritative; the WIP/merge commits are harmless local-only noise. Lesson:
+  generator subagents should NOT edit the shared model or commit — the orchestrator owns the
+  close-loop. (Worth tightening in the e2e-test-author skill brief.)
+
+**Running total across waves 1–5: 30 gaps closed, 7 product/infra bugs (#926–932),
+score 0.837 → 0.916 (77% → 87%).**
+
+### Frontier reached
+The remaining 31 are now mostly **partials** (touch-but-don't-assert-all-dimensions) and a residue
+of genuinely-hard/low-ROI behaviours (timer/process-restart harnesses, WS-realtime timing) where a
+forced test would be brittle. Recommend treating these as a **deliberate-deferral frontier** with
+rationale rather than manufacturing flaky greens. The highest-value *clean* wins are now drained.
+
 ### Still open
 - **Phase 2 requirements-mapping NOT yet run** for any capability — so the `documented-missing`
   / `undocumented-implemented` buckets are empty by *omission of the pass*, not by verified
