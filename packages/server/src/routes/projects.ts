@@ -28,26 +28,9 @@ import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 import { createHash } from "node:crypto";
 import { createWorkspaceSummaryCache } from "../services/workspace-summary-cache.service.js";
-import { getStackProfile, populateStackProfile, saveStackProfile } from "../services/stack-profile.service.js";
+import { getStackProfile, populateStackProfile, saveManualStackProfile } from "../services/stack-profile.service.js";
+import { createBoardEtagCache } from "../services/board-etag-cache.service.js";
 import type { StackProfile } from "@agentic-kanban/shared";
-
-// Conditional-GET fast path for GET /:id/board: memo of the last served response per
-// (projectId + query shape). A request whose If-None-Match equals the memoized ETag can
-// be answered 304 WITHOUT rebuilding the board, as long as the workspace-summary cache
-// generation is unchanged and the memo is younger than this bound. Invariant making the
-// bounded staleness safe: every board-affecting mutation flows through
-// boardEvents.broadcast(), whose invalidation listener (below) bumps the cache
-// generation — so with an unchanged generation the board body can only drift via
-// time-derived fields (columnAgeDays / staleDays / isStale), which have DAY granularity.
-// 60s of fast-path staleness is therefore invisible; the TTL is just a safety net.
-const BOARD_ETAG_MEMO_MAX_AGE_MS = 60_000;
-const BOARD_ETAG_MEMO_MAX_ENTRIES = 500;
-
-interface BoardEtagMemo {
-  etag: string;
-  generation: number;
-  computedAt: number;
-}
 
 export function createProjectsRoute(database: Database, options?: { boardEvents?: BoardEvents; getSessionManager?: () => SessionManager }) {
   const router = createRouter();
@@ -57,8 +40,7 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
   // The fast path is only sound when boardEvents is wired: without the invalidation
   // listener below, mutations would never bump the cache generation and the memo
   // could serve a wrong 304. Disabled (never permissive) when boardEvents is absent.
-  const boardEtagFastPathEnabled = Boolean(options?.boardEvents);
-  const boardEtagMemos = new Map<string, BoardEtagMemo>();
+  const boardEtagCache = createBoardEtagCache({ enabled: Boolean(options?.boardEvents) });
   if (options?.boardEvents) {
     options.boardEvents.addInvalidationListener((projectId) => {
       workspaceSummaryCache.invalidate(projectId);
@@ -294,20 +276,10 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
 
     // Fast path: a conditional GET of an unchanged board answers 304 without
     // recomputing (the 30s client poll + post-event refetches mostly hit this).
-    // See BOARD_ETAG_MEMO_MAX_AGE_MS above for the staleness invariant.
-    if (boardEtagFastPathEnabled && ifNoneMatch) {
-      const memo = boardEtagMemos.get(memoKey);
-      if (
-        memo !== undefined &&
-        ifNoneMatch === memo.etag &&
-        workspaceSummaryCache.getGeneration(projectId) === memo.generation &&
-        Date.now() - memo.computedAt < BOARD_ETAG_MEMO_MAX_AGE_MS
-      ) {
-        return new Response(null, { status: 304, headers: { ETag: memo.etag } });
-      }
-    }
+    const fastPath = boardEtagCache.tryServe(memoKey, ifNoneMatch, workspaceSummaryCache.getGeneration(projectId));
+    if (fastPath) return fastPath;
 
-    // Full path — unchanged: compute the board, hash the body, compare If-None-Match.
+    // Full path: compute the board, hash the body, compare If-None-Match.
     // Capture the generation BEFORE the compute: if an invalidation lands mid-build,
     // the memoized generation is already stale and the next conditional GET takes the
     // full path instead of trusting a possibly pre-mutation body.
@@ -315,13 +287,7 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
     const result = await projectService.getBoard(projectId, undefined, { includeArchived });
     const body = JSON.stringify(result);
     const etag = `"${createHash("sha1").update(body).digest("hex").slice(0, 16)}"`;
-    if (boardEtagFastPathEnabled) {
-      if (!boardEtagMemos.has(memoKey) && boardEtagMemos.size >= BOARD_ETAG_MEMO_MAX_ENTRIES) {
-        const firstKey = boardEtagMemos.keys().next().value;
-        if (firstKey !== undefined) boardEtagMemos.delete(firstKey);
-      }
-      boardEtagMemos.set(memoKey, { etag, generation, computedAt: Date.now() });
-    }
+    boardEtagCache.store(memoKey, etag, generation);
     if (ifNoneMatch === etag) {
       return new Response(null, { status: 304, headers: { ETag: etag } });
     }
@@ -447,21 +413,7 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
     if (!project) return c.json({ error: "Project not found" }, 404);
 
     const body = await parseJsonBody<Partial<StackProfile>>(c);
-    const existing = (await getStackProfile(projectId, database)) ?? {
-      stack: null, packageManager: null, isMonorepo: false, workspaces: [],
-      installCommand: null, buildCommand: null, testCommand: null, quickTestCommand: null,
-      lintCommand: null, typecheckCommand: null, devCommand: null, isWeb: false,
-      devHealthUrl: null, devPort: null, testDir: null, testRunner: null,
-      source: "manual" as const, detectedMarkers: [], updatedAt: new Date().toISOString(),
-    };
-
-    const merged: StackProfile = {
-      ...existing,
-      ...body,
-      source: "manual",
-      updatedAt: new Date().toISOString(),
-    };
-    await saveStackProfile(projectId, merged, database, project.repoPath);
+    const merged = await saveManualStackProfile(projectId, body, database, project.repoPath);
     return c.json({ projectId, profile: merged });
   });
 

@@ -17,6 +17,7 @@ export {
   stackProfilePrefKey,
   populateStackProfile,
   saveStackProfile,
+  saveManualStackProfile,
   getStackProfile,
 } from "./stack-profile/persistence.js";
 
