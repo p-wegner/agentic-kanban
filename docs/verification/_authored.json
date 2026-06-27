@@ -73,6 +73,22 @@
       "tests_passing": "server 5 files (incl. it.fails markers) + mcp-server 1 file; all green (expected-fails = known-gap markers for #930/#931)",
       "product_tickets_filed": ["#930 manual /merge bypasses the verify/smoke gate", "#931 create_agent_skill guard weaker than materialization guard"],
       "followups_logged": ["stranded-review: commits-ahead=0 + running-session skip", "resume: executor-mismatch guard drops --resume across provider switch; Codex/Copilot resume", "rebaseOntoBase (inverse semantics: origin-default, leaves rebase in-progress)"]
+    },
+    {
+      "date": "2026-06-27",
+      "batch": "wave-4 (6 harder gaps: 1 Playwright UI + 5 server/unit; parallel generator + 1-refuter-each)",
+      "review_mode": "adversarial-refute (1 reviewer per test; 3 sound / 3 needs-fix, all fixed before landing)",
+      "results": [
+        { "gap": "board-ui.move.rollback", "priority": "P1", "test_file": "packages/e2e/tests/ui/board-move-rollback.test.ts", "dimensions": ["error-handling","state-transition"], "verdict": "sound", "note": "Playwright; real dragstart+drop, page.route 409, card snaps back + toast. Stable 3x", "status_after": "covered" },
+        { "gap": "review-merge.recover.fix-and-merge", "priority": "P1", "test_file": "packages/server/src/__tests__/fix-and-merge-endpoint.test.ts", "dimensions": ["api","state-transition","workflow"], "verdict": "sound", "note": "drives the real route; 'recoverable' is hand-fed (fixAndMerge always launches) — wording caveat only", "status_after": "covered" },
+        { "gap": "mcp-server.merge.workspace.delegate", "priority": "P1", "test_file": "packages/mcp-server/src/__tests__/tools/merge-workspace-delegate.test.ts", "dimensions": ["api","risk"], "verdict": "sound", "note": "delegation + verbatim passthrough + 409 framing; network-throw branch is a logged follow-up", "status_after": "covered" },
+        { "gap": "agent-sessions.reattach.recover", "priority": "P1", "test_file": "packages/server/src/__tests__/agent-sessions-reattach-recover.test.ts", "dimensions": ["state-transition","regression"], "verdict": "sound-after-fix", "fix": "REWRITTEN to drive the REAL boot routine cleanupStaleSessions (was calling a same-outcome sibling); real process.kill PID liveness (process.pid/999999/null); dropped concurrency+error-handling dims (idempotency double-defended, not a race); added pid=null=>dead case. Mutation: deleting startup-tasks.ts:272-274 idle-update now goes RED", "status_after": "covered" },
+        { "gap": "agent-sessions.turn.followup", "priority": "P1", "test_file": "packages/server/src/__tests__/agent-session-turn-followup.test.ts", "dimensions": ["workflow","error-handling"], "verdict": "sound-after-fix", "fix": "dropped a VACUOUS assertion (launch-not-called — sendTurn structurally can't relaunch); added the real if(!sent) stdin-closed branch (alive but sendInput=false => ok:false, no processing flip)", "status_after": "covered" },
+        { "gap": "project-registration.enrich.llmGapFill", "priority": "P1", "test_file": "packages/server/src/__tests__/stack-profile-llm-gapfill.test.ts", "dimensions": ["config","error-handling"], "verdict": "sound-after-fix", "fix": "earned error-handling with two real graceful-degrade cases (LLM throws / malformed JSON => persist rule profile source=detected, no throw). No product finding — degradation is real", "status_after": "covered" }
+      ],
+      "tests_passing": "server 4 files (incl. reattach driving the real boot routine) + mcp-server 1 + e2e 1 Playwright; all green",
+      "product_tickets_filed": ["#932 E2E drag tests broken since dragData refactor (board.test.ts + drag-backlog-to-start.test.ts no longer exercise a move)"],
+      "followups_logged": ["mcp merge delegate: network-throw no-crash case", "fix-and-merge: main-checkout head-drift 409 guard + rebase-left-in-conflict path", "board-ui rollback: non-Error/network branch + handleDropWithLane swimlane duplicate"]
     }
   ]
 }

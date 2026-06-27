@@ -789,7 +789,7 @@
       },
       {
         "ref": "mcp-server.merge.workspace.delegate",
-        "status": "partial",
+        "status": "covered",
         "covered_by": [
           {
             "test": "packages/mcp-server/src/__tests__/tools/workspace-edge-errors.test.ts::merge_workspace returns a structured error when the workspace is missing",
@@ -798,28 +798,25 @@
           {
             "test": "packages/mcp-server/src/__tests__/tools/workspace-edge-errors.test.ts::merge_workspace returns a structured error when the workspace is closed",
             "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/mcp-server/src/__tests__/tools/merge-workspace-delegate.test.ts",
+            "strength": "asserts-outcome"
           }
         ],
         "dimensions_covered": [
-          "error"
-        ],
-        "dimensions_missing": [
+          "error",
           "api",
           "risk"
         ],
+        "dimensions_missing": [],
         "history": {
           "churn_90d": null,
           "bugs": 0,
           "last_regression": null
         },
-        "gap": {
-          "kind": "outcome-not-asserted",
-          "missing_dimensions": [
-            "api",
-            "risk"
-          ],
-          "rationale": "Only the pre-fetch fast-fail errors are asserted. The success path — that a valid merge_workspace actually POSTs /api/workspaces/:id/merge and passes the server's result (incl. 409 lock / 503 verify-fail / conflict) back through — is never asserted."
-        }
+        "gap": null,
+        "note": "Closed by e2e-test-author wave-4 2026-06-27 (adversarially reviewed). merge-workspace-delegate.test.ts"
       },
       {
         "ref": "mcp-server.launch.workspace",
@@ -1113,12 +1110,12 @@
       }
     ],
     "summary": {
-      "covered": 15,
-      "partial": 3,
+      "covered": 16,
+      "partial": 2,
       "uncovered": 2,
       "undocumented_implemented": 0,
       "documented_missing": 0,
-      "score": 0.825,
+      "score": 0.85,
       "by_dimension": {
         "api": {
           "covered": 9,
@@ -1188,16 +1185,6 @@
             "risk"
           ],
           "rationale": "Loopback-only egress is the only SSRF boundary; firing a webhook from a status change is best-effort and unverified at the MCP call site. Assert a non-loopback pref URL is not fetched and a loopback one is, and that the mutation succeeds regardless."
-        },
-        {
-          "ref": "mcp-server.merge.workspace.delegate",
-          "priority": "P1",
-          "roi": 3,
-          "dimensions_to_add": [
-            "api",
-            "risk"
-          ],
-          "rationale": "Highest-risk delegation (merge) only has its pre-fetch error paths asserted; the success delegation + server-result passthrough (incl. 409/503/conflict) is unverified. Stub fetch and assert the POST target + passthrough body."
         }
       ]
     }

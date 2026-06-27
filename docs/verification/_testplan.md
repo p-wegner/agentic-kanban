@@ -4,7 +4,7 @@
 > behaviour; the tick is derived from `_coverage.json` (`testplan.mjs`). Regenerate after
 > tests land and ticks update themselves — the plan can't drift from reality.
 
-**Progress: 226/273 scenarios covered (83%)** · 30 partial · 17 to author
+**Progress: 232/273 scenarios covered (85%)** · 26 partial · 15 to author
 
 `[█████████████████░░░]`
 
@@ -17,18 +17,18 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 | Capability | Covered | Plan |
 |---|--:|---|
 | [agent-providers](#agent-providers) | 14/16 | `[█████████░]` |
-| [agent-sessions](#agent-sessions) | 15/20 | `[████████░░]` |
-| [board-ui](#board-ui) | 18/24 | `[████████░░]` |
+| [agent-sessions](#agent-sessions) | 17/20 | `[█████████░]` |
+| [board-ui](#board-ui) | 19/24 | `[████████░░]` |
 | [butler](#butler) | 16/19 | `[████████░░]` |
 | [codemods](#codemods) | 7/9 | `[████████░░]` |
 | [git-integration](#git-integration) | 17/18 | `[█████████░]` |
 | [issues-board](#issues-board) | 19/20 | `[██████████]` |
-| [mcp-server](#mcp-server) | 15/20 | `[████████░░]` |
+| [mcp-server](#mcp-server) | 16/20 | `[████████░░]` |
 | [monitor-orchestration](#monitor-orchestration) | 16/19 | `[████████░░]` |
 | [persistence-schema](#persistence-schema) | 13/15 | `[█████████░]` |
 | [preferences-config](#preferences-config) | 15/16 | `[█████████░]` |
-| [project-registration](#project-registration) | 13/17 | `[████████░░]` |
-| [review-merge](#review-merge) | 16/18 | `[█████████░]` |
+| [project-registration](#project-registration) | 14/17 | `[████████░░]` |
+| [review-merge](#review-merge) | 17/18 | `[█████████░]` |
 | [workflow-engine](#workflow-engine) | 12/16 | `[████████░░]` |
 | [workspaces](#workspaces) | 20/26 | `[████████░░]` |
 
@@ -107,7 +107,7 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 
 ## agent-sessions
 
-**agent-sessions** — 15/20 covered `[████████░░]`
+**agent-sessions** — 17/20 covered `[█████████░]`
 
 - [~] ⚠️ **P2** `agent-sessions.persist.split-batch` — stdout is persisted only to the on-disk .out file while non-stdout events are batched (50 rows / 250ms) into session_messages and flushed on exit; a FK failure from a racing workspace cleanup is swallowed
   - _given_ agent-subprocess
@@ -124,16 +124,6 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
   - _then_ connecting WS receives prior AgentOutputMessage frames (reconnect/replay) then live frames; buffer not freed while a subscriber is attached or the session is live
   - _add dimensions_ concurrency, state-transition
   - _gap_ late-subscriber buffer replay is asserted; the buffer-free invariant (freed ONLY when last subscriber leaves AND session exited) and multi-subscriber behaviour are not exercised
-- [~] ⚠️ **P1** `agent-sessions.reattach.recover` — After a server restart, surviving detached agents are reattached (in-memory context/provider restored) and a PID-poll-detected exit mirrors the normal exit path idempotently; a stale running session whose PID is dead is finalized stopped and its workspace set idle
-  - _given_ monitor
-  - _then_ reattached session resumes broadcast + exit handling; notifyExternalExit finalizes once; cleanupStaleSession sets session=stopped(endedAt) + workspace=idle and purges in-memory state
-  - _add dimensions_ regression, concurrency
-  - _gap_ dead-PID stale cleanup is covered; reattachSession (restoring context/provider for a survived detached agent across hot-reload) and notifyExternalExit mirroring the exit path idempotently are NOT exercised — the core res
-- [~] ⚠️ **P1** `agent-sessions.turn.followup` — A follow-up turn is gated on turnState==waiting AND a verified-alive process; a dead process returns stale:true so the caller resumes into a fresh session; turnState flips to waiting only on a provider turnComplete with stdin still open
-  - _given_ operator
-  - _then_ sendTurn on a waiting+alive session proceeds (state→processing); on a dead/unknown session returns stale; turnState transitions processing↔waiting on result/sendTurn events
-  - _add dimensions_ error-handling, workflow
-  - _gap_ turnState processing↔waiting transitions are asserted; the stale-process gate is only re-derived inline (touches-only, not a real sendTurn call against a dead process), and the full waiting-AND-alive precondition for a r
 - [x] ✅ `agent-sessions.launch.session` — Starting a session persists a running session row (with the workspace's skill snapshot) and launches the agent process in the workspace's working directory
   - _given_ operator
   - _then_ sessions row status=running, workspaceId set, skillId/skillName snapshotted; agent launched with workingDir
@@ -182,6 +172,14 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
   - _given_ operator
   - _then_ summary lists files/commands/toolUsePatterns(count,failedCount)/model/rateLimit for each provider format
   - _asserted by_ `session-summary.test.ts::extracts file operations and commands`, `session-summary.test.ts::extracts Codex exec --json streaming session act`, `session-summary.test.ts::extracts Copilot JSONL session activity`, `session-summary.test.ts::records Codex command errors and turn failures`
+- [x] ✅ `agent-sessions.reattach.recover` — After a server restart, surviving detached agents are reattached (in-memory context/provider restored) and a PID-poll-detected exit mirrors the normal exit path idempotently; a stale running session whose PID is dead is finalized stopped and its workspace set idle
+  - _given_ monitor
+  - _then_ reattached session resumes broadcast + exit handling; notifyExternalExit finalizes once; cleanupStaleSession sets session=stopped(endedAt) + workspace=idle and purges in-memory state
+  - _asserted by_ `session-lifecycle.test.ts::marks workspace idle and session stopped when cl`, `zombie-fix-session-reconciler.test.ts::reconciles a zombie fix-and-merge session (no PI`, `agent-sessions-reattach-recover.test.ts`
+- [x] ✅ `agent-sessions.turn.followup` — A follow-up turn is gated on turnState==waiting AND a verified-alive process; a dead process returns stale:true so the caller resumes into a fresh session; turnState flips to waiting only on a provider turnComplete with stdin still open
+  - _given_ operator
+  - _then_ sendTurn on a waiting+alive session proceeds (state→processing); on a dead/unknown session returns stale; turnState transitions processing↔waiting on result/sendTurn events
+  - _asserted by_ `session.manager.test.ts::turn state transitions: processing → waiting on `, `session.manager.test.ts::turn state transitions: waiting → processing on `, `session.manager.test.ts::sendTurn returns stale when session not in turnS`, `agent-session-turn-followup.test.ts`
 - [x] ✅ `agent-sessions.resume.provider-id` — The provider's own resume token (Claude session_id from system/init, Pi session header) is captured from the stream and stored, then passed as --resume / --session on relaunch so the conversation continues
   - _given_ operator
   - _then_ sessions.providerSessionId persisted; a relaunch spawns with --resume <id> and the agent continues the prior conversation
@@ -197,18 +195,13 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 
 ## board-ui
 
-**board-ui** — 18/24 covered `[████████░░]`
+**board-ui** — 19/24 covered `[████████░░]`
 
 - [ ] ⬜ **P1** `board-ui.move.archiveConfirm` — Moving a ticket into Done/Cancelled while it has a live (non-closed) workspace requires explicit confirmation before committing
   - _given_ operator
   - _then_ a confirm dialog blocks the move; only on confirm does the PATCH+refetch run; cancel leaves the card in place
   - _add dimensions_ workflow, error-handling, state-transition, risk
   - _gap_ No e2e moves a ticket WITH a live workspace into Done/Cancelled to exercise the confirm dialog (block on cancel, commit on confirm). ai-reviewed-column tests move issues to terminal statuses but without a live workspace,
-- [ ] ⬜ **P1** `board-ui.move.rollback` — A server-rejected move rolls the card back to its exact prior position and surfaces the server's rejection message
-  - _given_ operator
-  - _then_ card snaps back to source column; a toast shows the server error message; board state matches pre-move snapshot
-  - _add dimensions_ error-handling, state-transition, risk
-  - _gap_ The drag e2e covers only the happy path. No test forces a server-rejected move (e.g. terminal-move guard) and asserts the card snaps back to the exact prior column + the server error message is shown. This is the optimis
 - [ ] ⬜ `board-ui.move.dependencyPreview` — Advancing/closing a ticket that has dependents shows a dependency-impact preview before committing
   - _given_ operator
   - _then_ a dependency-impact preview is shown; the move proceeds only after acknowledgement
@@ -241,6 +234,10 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
   - _given_ operator
   - _then_ card lands in the target column immediately; server board reflects the new status/sortOrder after a debounced refetch
   - _asserted by_ `board.test.ts::drag issue between columns`, `issueMoveHelpers.test.ts::moveIssueToStatus (8 cases)`, `issueMoveHelpers.test.ts::applyLocalReorder`
+- [x] ✅ `board-ui.move.rollback` — A server-rejected move rolls the card back to its exact prior position and surfaces the server's rejection message
+  - _given_ operator
+  - _then_ card snaps back to source column; a toast shows the server error message; board state matches pre-move snapshot
+  - _asserted by_ `board-move-rollback.test.ts`
 - [x] ✅ `board-ui.create.inline` — The inline create form on the Todo column creates a new ticket and it appears on the board
   - _given_ operator
   - _then_ submitting the inline form adds the new card; cancel/Escape closes the form without creating
@@ -595,7 +592,7 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 
 ## mcp-server
 
-**mcp-server** — 15/20 covered `[████████░░]`
+**mcp-server** — 16/20 covered `[████████░░]`
 
 - [ ] ⬜ **P1** `mcp-server.fire.webhook` — A status-change mutation (move_issue/update_issue) fires the project's outbound webhook best-effort, but only after the URL is validated loopback-only (the single egress boundary against a malicious pref)
   - _given_ ai-agent
@@ -612,11 +609,6 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
   - _then_ JSON with project{id,name}, status counts, activeWorkspaces; the active project resolves from the activeProjectId pref (not the first-inserted project)
   - _add dimensions_ boundary
   - _gap_ activeWorkspaces count is asserted with a single project; the suspected cross-project bleed (count not scoped by projectId, get-context.ts:35) is never asserted in a multi-project board.
-- [~] ⚠️ **P1** `mcp-server.merge.workspace.delegate` — merge_workspace fast-fails missing/closed workspaces locally, then delegates the authoritative merge to the REST server (lock/backup/conflict-recovery) instead of re-implementing it
-  - _given_ ai-agent
-  - _then_ missing → WORKSPACE_NOT_FOUND, closed → WORKSPACE_CLOSED, no workingDir → WORKSPACE_WORKING_DIR_MISSING (no fetch); valid → POST /api/workspaces/:id/merge result passed through
-  - _add dimensions_ api, risk
-  - _gap_ Only the pre-fetch fast-fail errors are asserted. The success path — that a valid merge_workspace actually POSTs /api/workspaces/:id/merge and passes the server's result (incl. 409 lock / 503 verify-fail / conflict) back
 - [~] ⚠️ `mcp-server.launch.workspace` — launch_workspace / relaunch_workspace pre-validate workspace state then delegate the spawn to the REST server; relaunch refuses a non-idle workspace
   - _given_ ai-agent
   - _then_ relaunch on active ws → WORKSPACE_NOT_IDLE (no fetch); structured not-found/closed/no-dir errors; valid → REST /launch result
@@ -650,6 +642,10 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
   - _given_ ai-agent
   - _then_ illegal target → code WORKFLOW_TRANSITION_INVALID with the list of valid next stages; legal target proceeds
   - _asserted by_ `move-issue-workflow-edge.test.ts`
+- [x] ✅ `mcp-server.merge.workspace.delegate` — merge_workspace fast-fails missing/closed workspaces locally, then delegates the authoritative merge to the REST server (lock/backup/conflict-recovery) instead of re-implementing it
+  - _given_ ai-agent
+  - _then_ missing → WORKSPACE_NOT_FOUND, closed → WORKSPACE_CLOSED, no workingDir → WORKSPACE_WORKING_DIR_MISSING (no fetch); valid → POST /api/workspaces/:id/merge result passed through
+  - _asserted by_ `workspace-edge-errors.test.ts::merge_workspace returns a structured error when `, `workspace-edge-errors.test.ts::merge_workspace returns a structured error when `, `merge-workspace-delegate.test.ts`
 - [x] ✅ `mcp-server.get.board-status` — get_board_status answers 'what are my agents doing right now' — totals plus per-in-progress-issue workspace state and computed diff stats, excluding Done/Cancelled unless includeClosed, with no MCP-side cache
   - _given_ ai-agent
   - _then_ totals{totalIssues,inProgress,activeWorkspaces,runningSessions}; per-issue workspace.branch + diffStats; includeClosed toggles terminal issues; reads reflect DB immediately after a status change
@@ -906,18 +902,13 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 
 ## project-registration
 
-**project-registration** — 13/17 covered `[████████░░]`
+**project-registration** — 14/17 covered `[████████░░]`
 
 - [ ] ⬜ **P1** `project-registration.register.idempotent` — Re-registering the same repo (or a subdirectory resolving to the same git root) returns the existing project instead of creating a duplicate
   - _given_ operator
   - _then_ result.created === false and the same project id is returned; no second row; issues/skills stay on one project
   - _add dimensions_ workflow, boundary, error-handling
   - _gap_ the UI test fulfills a MOCK 409; no server-level test proves registering the same git root (or a subdirectory of it) returns the existing project with created=false and no second row
-- [ ] ⬜ **P1** `project-registration.enrich.llmGapFill` — When the rule-detected profile is sparse (no stack, or no test AND no build command) an LLM gap-fill is invoked and merged in ONLY where rules left null — rule facts win — and the whole derivation is fire-and-forget so it never slows or fails registration
-  - _given_ operator
-  - _then_ persisted profile gains LLM-supplied commands only in null slots, source flips to 'llm'; registration returns immediately regardless of LLM outcome
-  - _add dimensions_ config, error-handling, risk
-  - _gap_ enrichWithLlm/parseLlmJson and the sparse-profile gate have no test; neither the 'rules win, LLM fills only nulls' merge rule nor the shell-exec trust boundary (an LLM testCommand becoming the executed verify gate) is as
 - [~] ⚠️ `project-registration.register.create` — Registering a git repo creates a driveable project: a project row, canonical statuses, a default branch and default skill, returned synchronously as 201
   - _given_ operator
   - _then_ POST /api/projects returns 201 with {id, name, repoPath}; project appears in GET /api/projects
@@ -980,16 +971,15 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
   - _given_ review-merge
   - _then_ result.ok=false with reason build-failed/install-failed/clone-failed and failedCommand on breakage; ok=true 'no-build-command' when nothing derivable; temp clone always cleaned
   - _asserted by_ `cold-clone-build-check.service.test.ts::FAILS when the build breaks on a fresh clone (th`, `cold-clone-build-check.service.test.ts::fails on a non-zero install and never reaches th`, `cold-clone-build-check.service.test.ts::reports clone-failed without running install/bui`, `cold-clone-build-check.service.test.ts::always cleans up the temp clone, even after a bu`
+- [x] ✅ `project-registration.enrich.llmGapFill` — When the rule-detected profile is sparse (no stack, or no test AND no build command) an LLM gap-fill is invoked and merged in ONLY where rules left null — rule facts win — and the whole derivation is fire-and-forget so it never slows or fails registration
+  - _given_ operator
+  - _then_ persisted profile gains LLM-supplied commands only in null slots, source flips to 'llm'; registration returns immediately regardless of LLM outcome
+  - _asserted by_ `stack-profile-llm-gapfill.test.ts`
 
 ## review-merge
 
-**review-merge** — 16/18 covered `[█████████░]`
+**review-merge** — 17/18 covered `[█████████░]`
 
-- [~] ⚠️ **P1** `review-merge.recover.fix-and-merge` — A failed/conflicting merge can be recovered by relaunching an agent in the worktree (status → fixing); on resolver exit the merge is re-attempted, the workspace stays retryable if the branch didn't land, or closes if it did; stale zero-output fix sessions are force-recovered
-  - _given_ fix-agent
-  - _then_ workspace status fixing; resolver exit without landing → workspace kept open+idle (retryable); resolver exit having landed → workspace closed, issue Done; zero-output zombie fix session force-stopped before retry
-  - _add dimensions_ api
-  - _gap_ Resolver-exit recovery and zombie-fix recovery are well asserted, but the POST /api/workspaces/:id/fix-and-merge endpoint itself — that it transitions the workspace to status=fixing and relaunches the fix agent in the wo
 - [~] ⚠️ **P2** `review-merge.foundational.sync-merge` — A no-own-dependency ticket with >=1 open dependent is classified as a foundational blocker eligible for synchronous merge, so dependents aren't cut from an empty pre-merge base
   - _given_ auto-merge-orchestrator
   - _then_ isFoundationalBlocker true only when an open dependent exists AND own deps are Done; false for leaf tickets, unresolved-own-dep tickets, terminal-only dependents, non-blocking relations
@@ -1035,6 +1025,10 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
   - _given_ operator
   - _then_ workspace stays open, issue stays In Review, reconciled:false; no Done transition, no merge commit
   - _asserted by_ `merge-service-edge-cases.test.ts::does not mark the workspace closed or move issue`, `merge-service-edge-cases.test.ts::returns clean-ancestor no-op when 0-commit branc`, `workspace-merge-service.test.ts::returns clean-ancestor when branch equals the ba`
+- [x] ✅ `review-merge.recover.fix-and-merge` — A failed/conflicting merge can be recovered by relaunching an agent in the worktree (status → fixing); on resolver exit the merge is re-attempted, the workspace stays retryable if the branch didn't land, or closes if it did; stale zero-output fix sessions are force-recovered
+  - _given_ fix-agent
+  - _then_ workspace status fixing; resolver exit without landing → workspace kept open+idle (retryable); resolver exit having landed → workspace closed, issue Done; zero-output zombie fix session force-stopped before retry
+  - _asserted by_ `stranded-fix-and-merge-resolver-exit.test.ts::keeps the workspace OPEN and idle (retryable) wh`, `stranded-fix-and-merge-resolver-exit.test.ts::does NOT reopen/touch the workspace when the res`, `workspace-merge-service.test.ts::force-stops a stale zero-output fix-and-merge se`, `workspace-merge-service.test.ts::closes the workspace and moves the issue to Done`, `fix-and-merge-endpoint.test.ts`
 - [x] ✅ `review-merge.batch.auto-merge` — The scheduled auto-merge engine selects idle reviewed workspaces (incl. ready work stranded in Done), excludes direct/closed/in-progress/user-parked/auto_merge_disabled projects, and only runs when merge_strategy=merge_queue; In-Review idle work is included only when auto_merge_in_review is on
   - _given_ auto-merge-orchestrator
   - _then_ findCompletedWorkspaceIds returns exactly the eligible set; engine no-ops when strategy != merge_queue; zombie reconciler session reaped so next tick can relaunch
