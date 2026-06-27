@@ -17,7 +17,7 @@
     "regression",
     "risk"
   ],
-  "method_note": "Coverage judged against the candidate workspace-touching test set only (deterministic anchor). A test outside that set (e.g. plan-mode.service.test.ts, agent.service.test.ts, merge-cascade.test.ts) is NOT credited — noted in rationale where relevant. Strength=asserts-outcome means a test FAILS if the behaviour silently regresses. permission is near-N/A: single-user local-first, no RBAC; the one permission cell that matters is the merge readiness gate (not a role).",
+  "method_note": "Coverage judged against the candidate workspace-touching test set only (deterministic anchor). A test outside that set (e.g. plan-mode.service.test.ts, agent.service.test.ts, merge-cascade.test.ts) is NOT credited \u00e2\u20ac\u201d noted in rationale where relevant. Strength=asserts-outcome means a test FAILS if the behaviour silently regresses. permission is near-N/A: single-user local-first, no RBAC; the one permission cell that matters is the merge readiness gate (not a role).",
   "behaviors": [
     {
       "ref": "workspaces.create.launch",
@@ -28,7 +28,7 @@
           "strength": "asserts-outcome"
         },
         {
-          "test": "packages/server/src/__tests__/workspace-lifecycle-status-transitions.test.ts::lifecycle: idle → active on launchSession (calls sessionManager.startSession once and returns a sessionId)",
+          "test": "packages/server/src/__tests__/workspace-lifecycle-status-transitions.test.ts::lifecycle: idle \u00e2\u2020\u2019 active on launchSession (calls sessionManager.startSession once and returns a sessionId)",
           "strength": "asserts-outcome"
         },
         {
@@ -66,7 +66,7 @@
       "status": "covered",
       "covered_by": [
         {
-          "test": "packages/server/src/__tests__/api.test.ts::POST /api/workspaces requires issueId (branch is optional — auto-generated when omitted)",
+          "test": "packages/server/src/__tests__/api.test.ts::POST /api/workspaces requires issueId (branch is optional \u00e2\u20ac\u201d auto-generated when omitted)",
           "strength": "asserts-outcome"
         },
         {
@@ -128,10 +128,14 @@
     },
     {
       "ref": "workspaces.create.one-direct-per-issue",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/server/src/__tests__/workspace-create-harden.test.ts::blocks creation when the issue has an open direct workspace leftover",
+          "strength": "asserts-outcome"
+        },
+        {
+          "test": "packages/server/src/__tests__/workspace-one-direct-per-issue-error.test.ts::(authored wave6-10 @covers)",
           "strength": "asserts-outcome"
         }
       ],
@@ -140,22 +144,14 @@
       ],
       "dimensions_covered": [
         "boundary",
-        "capability"
-      ],
-      "dimensions_missing": [
+        "capability",
         "error"
       ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": 42,
         "bugs": 1,
         "last_regression": null
-      },
-      "gap": {
-        "kind": "dimension-missing",
-        "missing_dimensions": [
-          "error"
-        ],
-        "rationale": "The block (no second direct workspace row) is asserted, but the exact HTTP failure contract (4xx code vs error-in-201-body) is never asserted — the behaviour model flags this as an open unknown. A consumer relying on a specific status code is unguarded."
       }
     },
     {
@@ -195,7 +191,7 @@
           "strength": "asserts-outcome"
         },
         {
-          "test": "packages/server/src/__tests__/launch-preview.test.ts::is read-only — does not create a workspace",
+          "test": "packages/server/src/__tests__/launch-preview.test.ts::is read-only \u00e2\u20ac\u201d does not create a workspace",
           "strength": "asserts-outcome"
         },
         {
@@ -295,28 +291,25 @@
     },
     {
       "ref": "workspaces.turn.missing-content",
-      "status": "uncovered",
-      "covered_by": [],
+      "status": "covered",
+      "covered_by": [
+        {
+          "test": "packages/server/src/__tests__/workspace-turn-missing-content.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
+        }
+      ],
       "requirements": [
         "PRD-04:input-validation"
       ],
-      "dimensions_covered": [],
-      "dimensions_missing": [
-        "error",
-        "api"
+      "dimensions_covered": [
+        "api",
+        "error"
       ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": 180,
         "bugs": 0,
         "last_regression": null
-      },
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": [
-          "error",
-          "api"
-        ],
-        "rationale": "No candidate test asserts POST /:id/turn with no content → 400 {error:'content is required'}. The turn route lives in workspace-actions.ts (churn 180, the single highest-churn workspace route file) — a refactor could silently drop the guard. Cheap negative test, regression-prone host file."
       }
     },
     {
@@ -351,15 +344,15 @@
       "status": "covered",
       "covered_by": [
         {
-          "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::MergeService — clean merge advances base (returns merged=true with SHAs; closes ws; moves issue to Done)",
+          "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::MergeService \u00e2\u20ac\u201d clean merge advances base (returns merged=true with SHAs; closes ws; moves issue to Done)",
           "strength": "asserts-outcome"
         },
         {
-          "test": "packages/server/src/__tests__/workspace-lifecycle-status-transitions.test.ts::lifecycle: reviewing → Done on merge success (returns merged=true with baseBranch and SHAs)",
+          "test": "packages/server/src/__tests__/workspace-lifecycle-status-transitions.test.ts::lifecycle: reviewing \u00e2\u2020\u2019 Done on merge success (returns merged=true with baseBranch and SHAs)",
           "strength": "asserts-outcome"
         },
         {
-          "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::MergeService — mergeWorkspaceDeduped deduplicates concurrent requests",
+          "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::MergeService \u00e2\u20ac\u201d mergeWorkspaceDeduped deduplicates concurrent requests",
           "strength": "asserts-outcome"
         },
         {
@@ -404,7 +397,7 @@
           "strength": "asserts-outcome"
         },
         {
-          "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::MergeService — conflict-ready clears readyForMerge and throws",
+          "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::MergeService \u00e2\u20ac\u201d conflict-ready clears readyForMerge and throws",
           "strength": "asserts-outcome"
         }
       ],
@@ -432,7 +425,7 @@
           "strength": "asserts-outcome"
         },
         {
-          "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::resolveMergeState — auto_merge_in_review bypasses readyForMerge gate (not-approved when readyForMerge=false and autoMergeInReview=false)",
+          "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::resolveMergeState \u00e2\u20ac\u201d auto_merge_in_review bypasses readyForMerge gate (not-approved when readyForMerge=false and autoMergeInReview=false)",
           "strength": "asserts-outcome"
         },
         {
@@ -464,7 +457,7 @@
           "strength": "asserts-outcome"
         },
         {
-          "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::resolveMergeState — error-skip (dirty main checkout) returns error-skip when main checkout has uncommitted tracked changes",
+          "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::resolveMergeState \u00e2\u20ac\u201d error-skip (dirty main checkout) returns error-skip when main checkout has uncommitted tracked changes",
           "strength": "asserts-outcome"
         }
       ],
@@ -496,7 +489,7 @@
           "strength": "asserts-outcome"
         },
         {
-          "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::does NOT short-circuit to already-merged when mergedAt is set but the branch is NOT an ancestor (stale flag — silent-merge-loss guard)",
+          "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::does NOT short-circuit to already-merged when mergedAt is set but the branch is NOT an ancestor (stale flag \u00e2\u20ac\u201d silent-merge-loss guard)",
           "strength": "asserts-outcome"
         }
       ],
@@ -521,7 +514,7 @@
       "status": "covered",
       "covered_by": [
         {
-          "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::MergeService — merge from fixing status moves issue to Done",
+          "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::MergeService \u00e2\u20ac\u201d merge from fixing status moves issue to Done",
           "strength": "asserts-outcome"
         },
         {
@@ -581,7 +574,7 @@
     },
     {
       "ref": "workspaces.stop.strand-recovery",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/server/src/__tests__/workspace-lifecycle-status-transitions.test.ts::lifecycle: stranded-session recovery via stopWorkspace (resets active workspace to idle)",
@@ -598,29 +591,25 @@
         {
           "test": "packages/e2e/tests/api/workspace-lifecycle.test.ts::POST /api/workspaces/:id/stop returns successfully",
           "strength": "touches-only"
+        },
+        {
+          "test": "packages/server/src/__tests__/workspace-stop-strand-recovery.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
         }
       ],
       "requirements": [
         "PRD-04:strand-recovery"
       ],
       "dimensions_covered": [
-        "workflow",
-        "api"
+        "api",
+        "state-transition",
+        "workflow"
       ],
-      "dimensions_missing": [
-        "state-transition"
-      ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": 180,
         "bugs": 1,
         "last_regression": null
-      },
-      "gap": {
-        "kind": "outcome-not-asserted",
-        "missing_dimensions": [
-          "state-transition"
-        ],
-        "rationale": "Stop→idle reset is well covered. The quarantine sub-behaviour (POST /:id/quarantine additionally moves the issue BACK to In Progress) has no asserting test in the candidate set — the issue-status side of the transition is unverified."
       }
     },
     {
@@ -664,7 +653,7 @@
           "strength": "asserts-outcome"
         },
         {
-          "test": "packages/server/src/__tests__/workspace-lifecycle-status-transitions.test.ts::lifecycle: active → reviewing on agent exit-0 with committed changes (launches the auto-review session)",
+          "test": "packages/server/src/__tests__/workspace-lifecycle-status-transitions.test.ts::lifecycle: active \u00e2\u2020\u2019 reviewing on agent exit-0 with committed changes (launches the auto-review session)",
           "strength": "asserts-outcome"
         },
         {
@@ -698,55 +687,49 @@
     },
     {
       "ref": "workspaces.lifecycle.hang-watchdog",
-      "status": "uncovered",
-      "covered_by": [],
+      "status": "covered",
+      "covered_by": [
+        {
+          "test": "packages/server/src/__tests__/workspace-hang-watchdog.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
+        }
+      ],
       "requirements": [
         "PRD-04:hang-watchdog"
       ],
-      "dimensions_covered": [],
-      "dimensions_missing": [
+      "dimensions_covered": [
         "error",
         "state-transition"
       ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": 91,
         "bugs": 1,
         "last_regression": null
-      },
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": [
-          "error",
-          "state-transition"
-        ],
-        "rationale": "No candidate test asserts that a zero-output-for-15-min agent is killed by the spawn-layer watchdog (reset on each output event). Implemented in agent.service.ts (churn 91 — the highest-churn workspace service file). agent.service.test.ts is outside the candidate set and not credited. Testable with fake timers; exec cost is moderate (must simulate the silent-stream timeout)."
       }
     },
     {
       "ref": "workspaces.lifecycle.reattach-survives-reload",
-      "status": "uncovered",
-      "covered_by": [],
+      "status": "covered",
+      "covered_by": [
+        {
+          "test": "packages/server/src/__tests__/workspace-fleet-reattach-survives-reload.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
+        }
+      ],
       "requirements": [
         "PRD-04:agent-process-survival",
         "ADR:server-resilience"
       ],
-      "dimensions_covered": [],
-      "dimensions_missing": [
-        "state-transition",
-        "regression"
+      "dimensions_covered": [
+        "regression",
+        "state-transition"
       ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": 91,
         "bugs": 2,
         "last_regression": "ancestor-reconciler reaped fresh ws on hot-reload"
-      },
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": [
-          "state-transition",
-          "regression"
-        ],
-        "rationale": "No candidate test asserts the restart-reattach invariant: live-PID sessions reattach + resume the output watcher from the last byte offset, dead-PID sessions are marked stopped and their workspaces reset to idle, agents are not killed on SIGTERM. High blast radius (whole-fleet survival), high churn host (agent.service.ts:509). Exec cost is high — requires simulating a server restart with a detached/unref'd PID."
       }
     },
     {
@@ -777,7 +760,7 @@
         "last_regression": "post-merge cascade leaked past manual Start Mode"
       },
       "gap": null,
-      "note": "Covered by e2e-test-author run 2026-06-27 (P0). The test PINS start_mode=manual + dependency_auto_chain=false to isolate this followup path (gated by the auto_start_followup pref) from the SEPARATE maybeAutoStartUnblockedDependency path that produces an identical outcome — a dual-path confound caught by adversarial review. CORRECTION to the model: the gate is the auto_start_followup pref, NOT Start Mode (the requirements ref ADR-008:start-mode was wrong for this behaviour and is dropped). The multi-blocker partial-resolution boundary (every-guard) is NOT covered here — tracked as the new gap workspaces.cascade.partial-blockers-no-start in _priorities.md."
+      "note": "Covered by e2e-test-author run 2026-06-27 (P0). The test PINS start_mode=manual + dependency_auto_chain=false to isolate this followup path (gated by the auto_start_followup pref) from the SEPARATE maybeAutoStartUnblockedDependency path that produces an identical outcome \u00e2\u20ac\u201d a dual-path confound caught by adversarial review. CORRECTION to the model: the gate is the auto_start_followup pref, NOT Start Mode (the requirements ref ADR-008:start-mode was wrong for this behaviour and is dropped). The multi-blocker partial-resolution boundary (every-guard) is NOT covered here \u00e2\u20ac\u201d tracked as the new gap workspaces.cascade.partial-blockers-no-start in _priorities.md."
     },
     {
       "ref": "workspaces.direct.no-worktree",
@@ -792,7 +775,7 @@
           "strength": "asserts-outcome"
         },
         {
-          "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::resolveMergeState — direct-close (returns direct-close for isDirect workspaces)",
+          "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::resolveMergeState \u00e2\u20ac\u201d direct-close (returns direct-close for isDirect workspaces)",
           "strength": "asserts-outcome"
         },
         {
@@ -955,7 +938,7 @@
           "strength": "asserts-outcome"
         },
         {
-          "test": "packages/server/src/__tests__/provider-switch-stale-default-model.test.ts::POST /api/workspaces/preview — stale Codex default_model is dropped for Claude provider",
+          "test": "packages/server/src/__tests__/provider-switch-stale-default-model.test.ts::POST /api/workspaces/preview \u00e2\u20ac\u201d stale Codex default_model is dropped for Claude provider",
           "strength": "asserts-outcome"
         }
       ],
@@ -1097,12 +1080,12 @@
       ],
       "dimensions_missing": [],
       "history": {
-        "note": "above-known synthetic only — maxKnown is null for all real providers"
+        "note": "above-known synthetic only \u00e2\u20ac\u201d maxKnown is null for all real providers"
       }
     },
     {
       "ref": "agent-providers.preflight.profileHealth",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/server/src/__tests__/agent-profile-health.service.test.ts::persists and maps the latest launch failure summary by provider profile",
@@ -1115,22 +1098,18 @@
         {
           "test": "packages/server/src/__tests__/agent-profile-health.service.test.ts::includes a default Pi profile and runs Pi launch preflight",
           "strength": "touches-only"
+        },
+        {
+          "test": "packages/server/src/__tests__/profile-health-version-probe-cache.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
         }
       ],
       "dimensions_covered": [
+        "config",
         "error-handling",
-        "config"
-      ],
-      "dimensions_missing": [
         "state-transition"
       ],
-      "gap": {
-        "kind": "dimension-missing",
-        "missing_dimensions": [
-          "state-transition"
-        ],
-        "rationale": "failure-override-to-error and missing-config-error are asserted, but the version-probe-cached-once-per-(provider,command) optimization and the full ok→warning→error verdict folding across license-ring vs config-file auth validation are not directly asserted."
-      }
+      "dimensions_missing": []
     },
     {
       "ref": "agent-providers.resolve.providerConfig",
@@ -1141,7 +1120,7 @@
           "strength": "asserts-outcome"
         },
         {
-          "test": "packages/server/src/__tests__/provider-config-resolution.test.ts::ignores the retired global default_model — only the provider-scoped slot is consulted (#902)",
+          "test": "packages/server/src/__tests__/provider-config-resolution.test.ts::ignores the retired global default_model \u00e2\u20ac\u201d only the provider-scoped slot is consulted (#902)",
           "strength": "asserts-outcome"
         },
         {
@@ -1149,7 +1128,7 @@
           "strength": "asserts-outcome"
         },
         {
-          "test": "packages/server/src/__tests__/no-global-default-model.test.ts::a value in the global default_model key is IGNORED — only provider-scoped keys win",
+          "test": "packages/server/src/__tests__/no-global-default-model.test.ts::a value in the global default_model key is IGNORED \u00e2\u20ac\u201d only provider-scoped keys win",
           "strength": "asserts-outcome"
         }
       ],
@@ -1215,20 +1194,24 @@
     },
     {
       "ref": "agent-providers.login.oauthBootstrap",
-      "status": "uncovered",
-      "covered_by": [],
-      "dimensions_covered": [],
+      "status": "partial",
+      "covered_by": [
+        {
+          "test": "packages/server/src/__tests__/oauth-login-bootstrap.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
+        }
+      ],
+      "dimensions_covered": [
+        "config",
+        "workflow"
+      ],
       "dimensions_missing": [
-        "workflow",
-        "error-handling",
-        "config"
+        "error-handling"
       ],
       "gap": {
         "kind": "no-test",
         "missing_dimensions": [
-          "workflow",
-          "error-handling",
-          "config"
+          "error-handling"
         ],
         "rationale": "No test exercises claude-login.service.ts / codex-login.service.ts. The load-bearing invariant (windowsHide:false so the OAuth callback survives) and the non-fatal-failure / returned-manual-command contract are entirely unverified. Hard to e2e (real terminal) but the command-construction and env (CODEX_HOME/CLAUDE_CONFIG_DIR) and the spawn options object are unit-testable with a mocked spawn."
       }
@@ -1359,7 +1342,7 @@
         "missing_dimensions": [
           "regression"
         ],
-        "rationale": "completed status + workspace idle + issue→In Review + onSessionExit asserted; the HANDOFF.md file write and scorecard/metrics side effects on the completed path are not asserted"
+        "rationale": "completed status + workspace idle + issue\u00e2\u2020\u2019In Review + onSessionExit asserted; the HANDOFF.md file write and scorecard/metrics side effects on the completed path are not asserted"
       }
     },
     {
@@ -1405,7 +1388,7 @@
         "missing_dimensions": [
           "config"
         ],
-        "rationale": "Codex usage-limit→blocked asserted; the Claude subscription-reset usage-limit variant is not separately asserted at the lifecycle level"
+        "rationale": "Codex usage-limit\u00e2\u2020\u2019blocked asserted; the Claude subscription-reset usage-limit variant is not separately asserted at the lifecycle level"
       }
     },
     {
@@ -1529,11 +1512,11 @@
           "strength": "asserts-outcome"
         },
         {
-          "test": "packages/shared/__tests__/agent-stream-parser-characterization.test.ts::(suite — display-event normalization)",
+          "test": "packages/shared/__tests__/agent-stream-parser-characterization.test.ts::(suite \u00e2\u20ac\u201d display-event normalization)",
           "strength": "asserts-outcome"
         },
         {
-          "test": "packages/client/src/lib/agent-output-parser.test.ts::(suite — client display events)",
+          "test": "packages/client/src/lib/agent-output-parser.test.ts::(suite \u00e2\u20ac\u201d client display events)",
           "strength": "asserts-outcome"
         }
       ],
@@ -1555,23 +1538,26 @@
         {
           "test": "packages/server/src/__tests__/broadcast-batch.test.ts::flushes immediately when batch size (50) of non-stdout is reached",
           "strength": "asserts-outcome"
+        },
+        {
+          "test": "packages/server/src/__tests__/broadcast-flush-on-exit.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
         }
       ],
       "dimensions_covered": [
         "api",
-        "boundary"
+        "boundary",
+        "error-handling"
       ],
       "dimensions_missing": [
-        "error-handling",
         "concurrency"
       ],
       "gap": {
         "kind": "no-test",
         "missing_dimensions": [
-          "error-handling",
           "concurrency"
         ],
-        "rationale": "stdout→file split and the 50-row batch flush are asserted; the 250ms time-based flush, the flush-on-exit guarantee, and the swallowed FK-constraint insert race (broadcast.ts:92) are not asserted"
+        "rationale": "stdout\u00e2\u2020\u2019file split and the 50-row batch flush are asserted; the 250ms time-based flush, the flush-on-exit guarantee, and the swallowed FK-constraint insert race (broadcast.ts:92) are not asserted"
       }
     },
     {
@@ -1613,7 +1599,7 @@
     },
     {
       "ref": "agent-sessions.read.rest",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/server/src/__tests__/session-output-etag.test.ts::returns 200 with ETag, then 304 on matching If-None-Match",
@@ -1626,48 +1612,38 @@
         {
           "test": "packages/mcp-server/src/__tests__/tools/session-tools.test.ts::searches session transcripts globally and filters by issue number",
           "strength": "asserts-outcome"
-        }
-      ],
-      "dimensions_covered": [
-        "api",
-        "navigation"
-      ],
-      "dimensions_missing": [
-        "api",
-        "boundary"
-      ],
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": [
-          "api"
-        ],
-        "rationale": "output ETag/304 and search are asserted; GET /api/sessions/:id/stats and /summary HTTP response shapes are not asserted at the endpoint layer (only the pure parser is). NOTE the documented boundary risk: search is LIKE over session_messages but stdout no longer lands there and old rows are pruned — historical full-text search is unreliable; no test pins this expectation"
-      }
-    },
-    {
-      "ref": "agent-sessions.stream.live-subscribe",
-      "status": "partial",
-      "covered_by": [
+        },
         {
-          "test": "packages/e2e/tests/api/ws-session-reconnect.test.ts::connecting to a valid session's ws receives AgentOutputMessage frames (reconnect/replay)",
+          "test": "packages/e2e/tests/api/session-stats-summary.test.ts::(authored wave6-10 @covers)",
           "strength": "asserts-outcome"
         }
       ],
       "dimensions_covered": [
+        "api",
+        "boundary",
+        "navigation"
+      ],
+      "dimensions_missing": []
+    },
+    {
+      "ref": "agent-sessions.stream.live-subscribe",
+      "status": "covered",
+      "covered_by": [
+        {
+          "test": "packages/e2e/tests/api/ws-session-reconnect.test.ts::connecting to a valid session's ws receives AgentOutputMessage frames (reconnect/replay)",
+          "strength": "asserts-outcome"
+        },
+        {
+          "test": "packages/server/src/__tests__/session-stream-buffer-free.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
+        }
+      ],
+      "dimensions_covered": [
+        "concurrency",
+        "state-transition",
         "workflow"
       ],
-      "dimensions_missing": [
-        "concurrency",
-        "state-transition"
-      ],
-      "gap": {
-        "kind": "dimension-missing",
-        "missing_dimensions": [
-          "concurrency",
-          "state-transition"
-        ],
-        "rationale": "late-subscriber buffer replay is asserted; the buffer-free invariant (freed ONLY when last subscriber leaves AND session exited) and multi-subscriber behaviour are not exercised"
-      }
+      "dimensions_missing": []
     },
     {
       "ref": "agent-sessions.reattach.recover",
@@ -1700,11 +1676,11 @@
       "status": "covered",
       "covered_by": [
         {
-          "test": "packages/server/src/__tests__/session.manager.test.ts::turn state transitions: processing → waiting on result event",
+          "test": "packages/server/src/__tests__/session.manager.test.ts::turn state transitions: processing \u00e2\u2020\u2019 waiting on result event",
           "strength": "asserts-outcome"
         },
         {
-          "test": "packages/server/src/__tests__/session.manager.test.ts::turn state transitions: waiting → processing on sendTurn",
+          "test": "packages/server/src/__tests__/session.manager.test.ts::turn state transitions: waiting \u00e2\u2020\u2019 processing on sendTurn",
           "strength": "asserts-outcome"
         },
         {
@@ -1884,21 +1860,18 @@
     },
     {
       "ref": "board-ui.move.dependencyPreview",
-      "status": "uncovered",
-      "covered_by": [],
-      "dimensions_covered": [],
-      "dimensions_missing": [
-        "workflow",
-        "feature"
+      "status": "covered",
+      "covered_by": [
+        {
+          "test": "packages/e2e/tests/ui/dependency-impact-preview.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
+        }
       ],
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": [
-          "workflow",
-          "feature"
-        ],
-        "rationale": "No candidate test advances/closes a ticket with dependents to assert the dependency-impact preview is shown before commit."
-      }
+      "dimensions_covered": [
+        "feature",
+        "workflow"
+      ],
+      "dimensions_missing": []
     },
     {
       "ref": "board-ui.create.inline",
@@ -1989,7 +1962,7 @@
     },
     {
       "ref": "board-ui.realtime.reflectServerChange",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/e2e/tests/ui/board-realtime.test.ts::board updates when issue created via API",
@@ -2002,29 +1975,25 @@
         {
           "test": "packages/client/src/lib/boardDataReconcile.test.ts::reconcileBoardIssueIdentity / deriveInactiveIssueIds / prunePendingWorkspaceIssueIds",
           "strength": "asserts-outcome"
+        },
+        {
+          "test": "packages/e2e/tests/ui/board-realtime-card-relocate.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
         }
       ],
       "dimensions_covered": [
-        "workflow",
-        "state-transition"
+        "concurrency",
+        "state-transition",
+        "workflow"
       ],
-      "dimensions_missing": [
-        "concurrency"
-      ],
-      "gap": {
-        "kind": "dimension-missing",
-        "missing_dimensions": [
-          "concurrency"
-        ],
-        "rationale": "The 'status changes via API' e2e asserts the SERVER board reflects the move, not that the UI relocated the card (touches-only for the UI outcome). The agent-cascade coalescing/seq-guard behaviour (poll+WS overlap, out-of-order discard) is unit-tested in reconcile but never exercised as a live concurrent burst against the rendered board."
-      }
+      "dimensions_missing": []
     },
     {
       "ref": "board-ui.card.agentActivityBadge",
       "status": "covered",
       "covered_by": [
         {
-          "test": "packages/client/src/components/IssueCard.test.tsx::active-agent indicator (working/reviewing/fixing/idle/none — 5 cases)",
+          "test": "packages/client/src/components/IssueCard.test.tsx::active-agent indicator (working/reviewing/fixing/idle/none \u00e2\u20ac\u201d 5 cases)",
           "strength": "asserts-outcome"
         },
         {
@@ -2040,27 +2009,23 @@
     },
     {
       "ref": "board-ui.wip.visualLimit",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/client/src/lib/wipLimits.test.ts::getWipLimit / evaluateWipLimit (under/at/over, zero, non-numeric, no-limit)",
           "strength": "asserts-outcome"
+        },
+        {
+          "test": "packages/e2e/tests/ui/wip-visual-limit.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
         }
       ],
       "dimensions_covered": [
+        "boundary",
         "config",
-        "boundary"
-      ],
-      "dimensions_missing": [
         "feature"
       ],
-      "gap": {
-        "kind": "outcome-not-asserted",
-        "missing_dimensions": [
-          "feature"
-        ],
-        "rationale": "The classifier logic (incl. boundary coercion of zero/garbage) is fully unit-tested, but the user-visible outcome — the column header rendering its red 'over' tint — is asserted by no test. The visual policy itself is unverified."
-      }
+      "dimensions_missing": []
     },
     {
       "ref": "board-ui.archiveColumn.conditional",
@@ -2190,7 +2155,7 @@
         "missing_dimensions": [
           "concurrency"
         ],
-        "rationale": "Single happy-path bulk update is asserted; no assertion on partial-failure of a bulk op (some succeed, some fail) — low priority."
+        "rationale": "Single happy-path bulk update is asserted; no assertion on partial-failure of a bulk op (some succeed, some fail) \u00e2\u20ac\u201d low priority."
       }
     },
     {
@@ -2304,26 +2269,22 @@
     },
     {
       "ref": "board-ui.shortcuts.keyboardNav",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
-          "test": "packages/client/src/lib/boardKeyboardNav.test.ts::computeNavTarget (seed/clamp/skip-empty/no-op — 6 cases)",
+          "test": "packages/client/src/lib/boardKeyboardNav.test.ts::computeNavTarget (seed/clamp/skip-empty/no-op \u00e2\u20ac\u201d 6 cases)",
+          "strength": "asserts-outcome"
+        },
+        {
+          "test": "packages/e2e/tests/ui/board-keyboard-nav.test.ts::(authored wave6-10 @covers)",
           "strength": "asserts-outcome"
         }
       ],
       "dimensions_covered": [
+        "accessibility",
         "navigation"
       ],
-      "dimensions_missing": [
-        "accessibility"
-      ],
-      "gap": {
-        "kind": "outcome-not-asserted",
-        "missing_dimensions": [
-          "accessibility"
-        ],
-        "rationale": "The pure cursor-target arithmetic is fully unit-tested, but no e2e drives arrow/vim keys against the rendered board to assert the focused card actually moves (the keyboard-operability a11y outcome). The unit test would pass even if the keydown handler were unwired."
-      }
+      "dimensions_missing": []
     },
     {
       "ref": "board-ui.diff.viewAndComment",
@@ -2574,7 +2535,7 @@
     },
     {
       "ref": "butler.interrupt.inflight",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/e2e/tests/ui/butler.test.ts::POST /butler/interrupt stops in-flight turn gracefully",
@@ -2583,25 +2544,21 @@
         {
           "test": "packages/mcp-server/src/__tests__/tools/butler-tools.test.ts::butler_interrupt POSTs /interrupt and returns the JSON",
           "strength": "touches-only"
+        },
+        {
+          "test": "packages/server/src/__tests__/butler-interrupt-inflight.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
         }
       ],
-      "dimensions_covered": [],
-      "dimensions_missing": [
-        "state-transition",
+      "dimensions_covered": [
+        "api",
         "concurrency",
-        "api"
+        "state-transition"
       ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": null,
         "bugs": 0
-      },
-      "gap": {
-        "kind": "outcome-not-asserted",
-        "missing_dimensions": [
-          "state-transition",
-          "concurrency"
-        ],
-        "rationale": "the e2e test interrupts with NO active turn and only asserts res.ok(); the MCP test only checks request shape. The real behaviour — cancelling an IN-FLIGHT stream while keeping the session warm and accepting a subsequent turn — is never asserted"
       }
     },
     {
@@ -2733,7 +2690,7 @@
     },
     {
       "ref": "butler.manage.definitions",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/e2e/tests/ui/butler.test.ts::POST then DELETE /api/butler-definitions creates and removes named butler",
@@ -2746,25 +2703,21 @@
         {
           "test": "packages/e2e/tests/ui/butler.test.ts::GET /api/butler-definitions lists definitions including default",
           "strength": "asserts-outcome"
+        },
+        {
+          "test": "packages/server/src/__tests__/butler-definitions-limits.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
         }
       ],
       "dimensions_covered": [
-        "capability",
-        "api"
+        "api",
+        "boundary",
+        "capability"
       ],
-      "dimensions_missing": [
-        "boundary"
-      ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": null,
         "bugs": 0
-      },
-      "gap": {
-        "kind": "dimension-missing",
-        "missing_dimensions": [
-          "boundary"
-        ],
-        "rationale": "CRUD happy paths asserted, but the two invariants — MAX_BUTLERS=4 cap refusing a 5th create, and 'default' being un-deletable — are never asserted"
       }
     },
     {
@@ -2833,7 +2786,7 @@
       "status": "covered",
       "covered_by": [
         {
-          "test": "packages/client/src/lib/butler-event-reducer.test.ts::reduceButlerEvent — streamed assistant text accumulates deltas",
+          "test": "packages/client/src/lib/butler-event-reducer.test.ts::reduceButlerEvent \u00e2\u20ac\u201d streamed assistant text accumulates deltas",
           "strength": "asserts-outcome"
         },
         {
@@ -2915,7 +2868,7 @@
     },
     {
       "ref": "butler.history.access",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/e2e/tests/ui/butler.test.ts::GET /butler/sessions returns empty list when no tracked sessions",
@@ -2924,25 +2877,21 @@
         {
           "test": "packages/e2e/tests/ui/butler.test.ts::History panel opens and shows no sessions for a fresh mock session",
           "strength": "touches-only"
+        },
+        {
+          "test": "packages/server/src/__tests__/butler-history-access-allowlist.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
         }
       ],
-      "dimensions_covered": [],
-      "dimensions_missing": [
-        "permission",
+      "dimensions_covered": [
+        "api",
         "boundary",
-        "api"
+        "permission"
       ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": null,
         "bugs": 0
-      },
-      "gap": {
-        "kind": "outcome-not-asserted",
-        "missing_dimensions": [
-          "permission",
-          "boundary"
-        ],
-        "rationale": "the sessions list is only checked for being an array; the 50-id cap is never asserted, and the SECURITY allowlist (a foreign project's session id must be refused on /sessions/:sid/messages) has no negative-path test"
       }
     },
     {
@@ -3021,27 +2970,23 @@
     },
     {
       "ref": "codemods.preview.limit-guard",
-      "status": "uncovered",
-      "covered_by": [],
-      "dimensions_covered": [],
-      "dimensions_missing": [
-        "boundary",
-        "error-handling",
-        "config"
+      "status": "covered",
+      "covered_by": [
+        {
+          "test": "packages/server/src/__tests__/codemod-limit-guard.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
+        }
       ],
+      "dimensions_covered": [
+        "boundary",
+        "config",
+        "error-handling"
+      ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": null,
         "bugs": 0,
         "last_regression": null
-      },
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": [
-          "boundary",
-          "error-handling",
-          "config"
-        ],
-        "rationale": "The >100-TS-file blast-radius guard and its overrideLimit override path are never exercised. This is the module's scale safety interlock and has no test at either the block or the override-and-proceed edge."
       }
     },
     {
@@ -3183,30 +3128,26 @@
     },
     {
       "ref": "codemods.get.byid",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/e2e/tests/api/codemod.test.ts::GET /api/codemods/:id returns 404 for unknown id",
           "strength": "asserts-outcome"
+        },
+        {
+          "test": "packages/e2e/tests/api/codemod-get-byid.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
         }
       ],
       "dimensions_covered": [
+        "api",
         "error-handling"
       ],
-      "dimensions_missing": [
-        "api"
-      ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": null,
         "bugs": 0,
         "last_regression": null
-      },
-      "gap": {
-        "kind": "dimension-missing",
-        "missing_dimensions": [
-          "api"
-        ],
-        "rationale": "Only the 404-unknown-id branch is asserted. The success path (GET /:id returning an existing saved codemod's body) is never directly fetched/asserted -- the save test verifies presence via the list endpoint, not via GET /:id."
       }
     },
     {
@@ -3424,7 +3365,7 @@
           "strength": "asserts-outcome"
         },
         {
-          "test": "packages/shared/__tests__/append-only-hotfile-merge.integration.test.ts::an overlapping EDIT to the hot file is not an append — it still throws",
+          "test": "packages/shared/__tests__/append-only-hotfile-merge.integration.test.ts::an overlapping EDIT to the hot file is not an append \u00e2\u20ac\u201d it still throws",
           "strength": "asserts-outcome"
         }
       ],
@@ -3482,7 +3423,7 @@
     },
     {
       "ref": "git-integration.diff.working-tree",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/shared/__tests__/git-service.integration.test.ts::getWorkingTreeDiff includes untracked files",
@@ -3499,24 +3440,20 @@
         {
           "test": "packages/server/src/__tests__/workspace-diff-stats.test.ts::uses HEAD for direct workspace diff stats",
           "strength": "asserts-outcome"
+        },
+        {
+          "test": "packages/shared/__tests__/git-untracked-diff-boundary.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
         }
       ],
       "dimensions_covered": [
         "api",
+        "boundary",
         "capability"
       ],
-      "dimensions_missing": [
-        "boundary"
-      ],
+      "dimensions_missing": [],
       "history": {
         "bugs": 0
-      },
-      "gap": {
-        "kind": "dimension-missing",
-        "missing_dimensions": [
-          "boundary"
-        ],
-        "rationale": "untracked-diff synthesis edge cases untested: binary/unreadable file (header-only) and trailing-newline off-by-one. Display-grade only; domain doc flags it as not apply-grade."
       }
     },
     {
@@ -4097,29 +4034,25 @@
     },
     {
       "ref": "issues-board.config.statuses",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/e2e/tests/api/projects.test.ts::GET statuses returns >=5 defaults; POST creates a new status",
           "strength": "asserts-outcome"
+        },
+        {
+          "test": "packages/server/src/__tests__/status-delete-linked-guard.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
         }
       ],
       "dimensions_covered": [
-        "api"
-      ],
-      "dimensions_missing": [
+        "api",
         "error",
         "state-transition"
       ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": null
-      },
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": [
-          "error"
-        ],
-        "rationale": "the key invariant — DELETE of a status with linked issues must return 409 (project.repository.ts:224) so issues are never orphaned — has no asserting test in the candidate set; only GET/POST happy paths are exercised"
       }
     },
     {
@@ -4182,7 +4115,7 @@
     },
     {
       "ref": "mcp-server.orient.context",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/mcp-server/src/__tests__/mcp-tools.test.ts::get_context returns project info",
@@ -4191,27 +4124,23 @@
         {
           "test": "packages/mcp-server/src/__tests__/mcp-tools.test.ts::get_context with no projectId returns the active project, not the first inserted",
           "strength": "asserts-outcome"
+        },
+        {
+          "test": "packages/mcp-server/src/__tests__/tools/get-context-boundary.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
         }
       ],
       "dimensions_covered": [
         "api",
+        "boundary",
         "capability",
         "config"
       ],
-      "dimensions_missing": [
-        "boundary"
-      ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": null,
         "bugs": 1,
         "last_regression": "activeWorkspaces global count (doc-flagged)"
-      },
-      "gap": {
-        "kind": "dimension-missing",
-        "missing_dimensions": [
-          "boundary"
-        ],
-        "rationale": "activeWorkspaces count is asserted with a single project; the suspected cross-project bleed (count not scoped by projectId, get-context.ts:35) is never asserted in a multi-project board."
       }
     },
     {
@@ -4273,7 +4202,7 @@
         "missing_dimensions": [
           "concurrency"
         ],
-        "rationale": "issue-number allocation retries up to 3x on the (project_id,issue_number) unique collision (create-issue.ts:8); the parallel-race retry path is never exercised — only sequential increment is asserted."
+        "rationale": "issue-number allocation retries up to 3x on the (project_id,issue_number) unique collision (create-issue.ts:8); the parallel-race retry path is never exercised \u00e2\u20ac\u201d only sequential increment is asserted."
       }
     },
     {
@@ -4281,7 +4210,7 @@
       "status": "covered",
       "covered_by": [
         {
-          "test": "packages/mcp-server/src/__tests__/tools/create-issues-batch.test.ts::rolls back on validation failure — no issues persisted",
+          "test": "packages/mcp-server/src/__tests__/tools/create-issues-batch.test.ts::rolls back on validation failure \u00e2\u20ac\u201d no issues persisted",
           "strength": "asserts-outcome"
         },
         {
@@ -4445,7 +4374,7 @@
     },
     {
       "ref": "mcp-server.launch.workspace",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/mcp-server/src/__tests__/tools/workspace-edge-errors.test.ts::relaunch_workspace returns a structured error for non-idle workspaces before launch",
@@ -4454,26 +4383,22 @@
         {
           "test": "packages/mcp-server/src/__tests__/tools/workspace-edge-errors.test.ts::relaunch_workspace returns a structured error when the workspace is missing",
           "strength": "asserts-outcome"
+        },
+        {
+          "test": "packages/mcp-server/src/__tests__/tools/launch-workspace-api.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
         }
       ],
       "dimensions_covered": [
+        "api",
         "error",
         "state-transition"
       ],
-      "dimensions_missing": [
-        "api"
-      ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": null,
         "bugs": 0,
         "last_regression": null
-      },
-      "gap": {
-        "kind": "outcome-not-asserted",
-        "missing_dimensions": [
-          "api"
-        ],
-        "rationale": "relaunch's WORKSPACE_NOT_IDLE and missing/closed errors are asserted; the actual delegation to REST /launch and its passthrough result are not. launch_workspace success path untested."
       }
     },
     {
@@ -4563,7 +4488,7 @@
           "strength": "asserts-outcome"
         },
         {
-          "test": "packages/mcp-server/src/__tests__/tools/update-dependencies-batch.test.ts::adds multiple edges idempotently — already-existing skipped not failed",
+          "test": "packages/mcp-server/src/__tests__/tools/update-dependencies-batch.test.ts::adds multiple edges idempotently \u00e2\u20ac\u201d already-existing skipped not failed",
           "strength": "asserts-outcome"
         },
         {
@@ -4613,7 +4538,7 @@
       "gap": {
         "kind": "dimension-missing",
         "missing_dimensions": [],
-        "rationale": "butler_interrupt/set-model/set-profile/state fully covered; ask_butler itself (the primary /butler/ask front) is not directly tested but shares the same wrapper — low residual risk."
+        "rationale": "butler_interrupt/set-model/set-profile/state fully covered; ask_butler itself (the primary /butler/ask front) is not directly tested but shares the same wrapper \u00e2\u20ac\u201d low residual risk."
       }
     },
     {
@@ -4708,27 +4633,23 @@
     },
     {
       "ref": "mcp-server.resilience.stay-up",
-      "status": "uncovered",
-      "covered_by": [],
-      "dimensions_covered": [],
-      "dimensions_missing": [
-        "error",
-        "risk",
-        "regression"
+      "status": "covered",
+      "covered_by": [
+        {
+          "test": "packages/mcp-server/src/__tests__/server-resilience-stay-up.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
+        }
       ],
+      "dimensions_covered": [
+        "error",
+        "regression",
+        "risk"
+      ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": null,
         "bugs": 0,
         "last_regression": null
-      },
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": [
-          "error",
-          "risk",
-          "regression"
-        ],
-        "rationale": "The async-rejection-swallow / stdout-purity resilience policy (index.ts:236,246) — a stray rejection must not drop the stdio connection or corrupt the JSON-RPC stream — has no test. High blast radius (a crash makes every board op fail for the agent) but hard to assert without injecting a throwing handler into the spawned process."
       }
     },
     {
@@ -4736,15 +4657,15 @@
       "status": "covered",
       "covered_by": [
         {
-          "test": "packages/server/src/services/start-policy.service.test.ts::manual ⇒ NOTHING auto-starts even with legacy opt-in flags ON",
+          "test": "packages/server/src/services/start-policy.service.test.ts::manual \u00e2\u2021\u2019 NOTHING auto-starts even with legacy opt-in flags ON",
           "strength": "asserts-outcome"
         },
         {
-          "test": "packages/server/src/services/start-policy.service.test.ts::monitor ⇒ auto-start on; cascade/refill follow own prefs",
+          "test": "packages/server/src/services/start-policy.service.test.ts::monitor \u00e2\u2021\u2019 auto-start on; cascade/refill follow own prefs",
           "strength": "asserts-outcome"
         },
         {
-          "test": "packages/server/src/services/start-policy.service.test.ts::conductor ⇒ in-process auto-start OFF",
+          "test": "packages/server/src/services/start-policy.service.test.ts::conductor \u00e2\u2021\u2019 in-process auto-start OFF",
           "strength": "asserts-outcome"
         }
       ],
@@ -4767,7 +4688,7 @@
       "status": "covered",
       "covered_by": [
         {
-          "test": "packages/server/src/services/start-policy.service.test.ts::board_autodrive=true ⇒ monitor (derived)",
+          "test": "packages/server/src/services/start-policy.service.test.ts::board_autodrive=true \u00e2\u2021\u2019 monitor (derived)",
           "strength": "asserts-outcome"
         },
         {
@@ -5158,26 +5079,22 @@
     },
     {
       "ref": "monitor-orchestration.conductor.lifecycle",
-      "status": "uncovered",
-      "covered_by": [],
-      "dimensions_covered": [],
-      "dimensions_missing": [
-        "state-transition",
-        "error",
-        "regression"
+      "status": "covered",
+      "covered_by": [
+        {
+          "test": "packages/server/src/__tests__/conductor-lifecycle.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
+        }
       ],
+      "dimensions_covered": [
+        "error",
+        "regression",
+        "state-transition"
+      ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": null,
         "bugs": 0
-      },
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": [
-          "state-transition",
-          "error",
-          "regression"
-        ],
-        "rationale": "conductor-control.service (start no-op-if-alive, detached spawn, tree-kill + PowerShell backstop, stop-marker) has NO test. project-conductor.service.test.ts covers config parsing only; orchestrator-monitor covers the read-only liveness side. The 'no-op if already alive' invariant and the broad-taskkill backstop are unasserted and OS-coupled — highest-risk untested behaviour."
       }
     },
     {
@@ -5202,13 +5119,19 @@
     },
     {
       "ref": "monitor-orchestration.guard.re-entrancy-and-maintenance",
-      "status": "uncovered",
-      "covered_by": [],
-      "dimensions_covered": [],
+      "status": "partial",
+      "covered_by": [
+        {
+          "test": "packages/server/src/__tests__/monitor-reentrancy-guard.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
+        }
+      ],
+      "dimensions_covered": [
+        "config",
+        "regression"
+      ],
       "dimensions_missing": [
-        "state-transition",
-        "regression",
-        "config"
+        "state-transition"
       ],
       "history": {
         "churn_90d": null,
@@ -5218,33 +5141,29 @@
       "gap": {
         "kind": "no-test",
         "missing_dimensions": [
-          "state-transition",
-          "regression"
+          "state-transition"
         ],
         "rationale": "No test asserts the re-entrancy guard (a mid-cycle trigger runs exactly one more pass, never two concurrent cycles) nor the maintenance-window suppression. startup-timers-hmr covers timer-handle recreation only, not the in-cycle guard. This is the single most safety-critical invariant of the module (never double-drive) and it is unverified."
       }
     },
     {
       "ref": "monitor-orchestration.butler.llm-cycle",
-      "status": "uncovered",
-      "covered_by": [],
-      "dimensions_covered": [],
-      "dimensions_missing": [
-        "workflow",
-        "observability",
-        "config"
+      "status": "covered",
+      "covered_by": [
+        {
+          "test": "packages/server/src/__tests__/monitor-butler-llm-cycle.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
+        }
       ],
+      "dimensions_covered": [
+        "config",
+        "observability",
+        "workflow"
+      ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": null,
         "bugs": 0
-      },
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": [
-          "workflow",
-          "observability"
-        ],
-        "rationale": "runMonitorButlerCycle has no behavioural test (only startup-timers-hmr asserts its scheduler timer is recreated/cleared). The single-active-project limitation and board_health_events logging are unasserted. Lower priority — off by default and LLM-driven, hard to assert deterministically."
       }
     },
     {
@@ -5444,7 +5363,7 @@
           "strength": "asserts-outcome"
         },
         {
-          "test": "packages/server/src/__tests__/fk-actions-repair.test.ts::is idempotent — a second run finds no drift",
+          "test": "packages/server/src/__tests__/fk-actions-repair.test.ts::is idempotent \u00e2\u20ac\u201d a second run finds no drift",
           "strength": "asserts-outcome"
         },
         {
@@ -5499,34 +5418,30 @@
     },
     {
       "ref": "persistence-schema.enforce.unique-issue-number",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/mcp-server/src/__tests__/tools/db-utils.test.ts::returns max + 1 when issues exist",
           "strength": "asserts-outcome"
         },
         {
-          "test": "packages/mcp-server/src/__tests__/tools/db-utils.test.ts::is scoped per project — other projects' issues don't affect the count",
+          "test": "packages/mcp-server/src/__tests__/tools/db-utils.test.ts::is scoped per project \u00e2\u20ac\u201d other projects' issues don't affect the count",
+          "strength": "asserts-outcome"
+        },
+        {
+          "test": "packages/server/src/__tests__/unique-issue-number-constraint.test.ts::(authored wave6-10 @covers)",
           "strength": "asserts-outcome"
         }
       ],
       "dimensions_covered": [
         "boundary",
+        "error-handling",
         "regression"
       ],
-      "dimensions_missing": [
-        "error-handling"
-      ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": "low",
         "bugs": "none recorded"
-      },
-      "gap": {
-        "kind": "dimension-missing",
-        "missing_dimensions": [
-          "error-handling"
-        ],
-        "rationale": "Allocation logic (MAX+1, per-project scope) is asserted, but the DB-level uniqueness GUARANTEE — that a duplicate (project_id, issue_number) insert is rejected by idx_issues_project_id_issue_number — is never exercised. A concurrent double-allocate (two agents claiming the same #N) would only be caught by the index, which no test fires."
       }
     },
     {
@@ -5822,7 +5737,7 @@
       "status": "covered",
       "covered_by": [
         {
-          "test": "packages/server/src/__tests__/no-global-default-model.test.ts::a value in the global default_model key is IGNORED — only provider-scoped keys win",
+          "test": "packages/server/src/__tests__/no-global-default-model.test.ts::a value in the global default_model key is IGNORED \u00e2\u20ac\u201d only provider-scoped keys win",
           "strength": "asserts-outcome"
         },
         {
@@ -5830,7 +5745,7 @@
           "strength": "asserts-outcome"
         },
         {
-          "test": "packages/server/src/__tests__/provider-config-resolution.test.ts::a stale global default_model never leaks into a launch — it is unrepresentable now (#902/#696)",
+          "test": "packages/server/src/__tests__/provider-config-resolution.test.ts::a stale global default_model never leaks into a launch \u00e2\u20ac\u201d it is unrepresentable now (#902/#696)",
           "strength": "asserts-outcome"
         },
         {
@@ -6116,25 +6031,22 @@
     },
     {
       "ref": "preferences-config.read.quota-usage",
-      "status": "partial",
-      "covered_by": [],
-      "dimensions_covered": [],
-      "dimensions_missing": [
+      "status": "covered",
+      "covered_by": [
+        {
+          "test": "packages/server/src/__tests__/quota-usage-endpoint.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
+        }
+      ],
+      "dimensions_covered": [
         "api",
         "error"
       ],
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": [
-          "api",
-          "error"
-        ],
-        "rationale": "No test exercises the GET /api/preferences/quota-usage route or its 503 graceful-degradation path. The quota selection LOGIC (isPolicyBlockedByQuota) is well covered, but the HTTP endpoint contract (200 shape vs 503 on external outage) is unverified. Confirmed live: the endpoint returns 503 when tampermonkey-direct :8742 is down."
-      }
+      "dimensions_missing": []
     },
     {
       "ref": "project-registration.register.create",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/e2e/tests/api/projects.test.ts::POST /api/projects creates project with git info auto-detection",
@@ -6143,26 +6055,22 @@
         {
           "test": "packages/e2e/tests/ui/register-project.test.ts::successful registration closes modal and sends correct path",
           "strength": "touches-only"
+        },
+        {
+          "test": "packages/server/src/__tests__/registration-create-workflow.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
         }
       ],
       "dimensions_covered": [
         "api",
-        "capability"
-      ],
-      "dimensions_missing": [
+        "capability",
         "workflow"
       ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": null,
         "bugs": 1,
         "last_regression": "#772 silent-undriveable"
-      },
-      "gap": {
-        "kind": "outcome-not-asserted",
-        "missing_dimensions": [
-          "workflow"
-        ],
-        "rationale": "e2e asserts 201+{id,name,repoPath} but not the registration consequences as a journey (statuses seeded, branch non-null, skill attached) on the freshly-created project; UI test mocks the API so it only proves the modal flow"
       }
     },
     {
@@ -6235,30 +6143,26 @@
     },
     {
       "ref": "project-registration.seed.statuses",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/e2e/tests/api/projects.test.ts::GET /api/projects/:id/statuses returns statuses",
           "strength": "asserts-outcome"
+        },
+        {
+          "test": "packages/server/src/__tests__/registration-seed-statuses-workflow.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
         }
       ],
       "dimensions_covered": [
-        "config"
-      ],
-      "dimensions_missing": [
+        "config",
         "workflow"
       ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": null,
         "bugs": 1,
         "last_regression": "#772 no statuses"
-      },
-      "gap": {
-        "kind": "dimension-missing",
-        "missing_dimensions": [
-          "workflow"
-        ],
-        "rationale": "statuses are asserted on the long-lived E2E fixture project, not as a freshly-registered project's seeding consequence; the Backlog(-1) lane specifically is not asserted to exist"
       }
     },
     {
@@ -6326,7 +6230,7 @@
           "strength": "asserts-outcome"
         },
         {
-          "test": "packages/server/src/__tests__/stack-profile.service.test.ts::populates python profile (requirements.txt → pip + pytest)",
+          "test": "packages/server/src/__tests__/stack-profile.service.test.ts::populates python profile (requirements.txt \u00e2\u2020\u2019 pip + pytest)",
           "strength": "asserts-outcome"
         },
         {
@@ -6494,7 +6398,7 @@
           "strength": "asserts-outcome"
         },
         {
-          "test": "packages/server/src/__tests__/stack-profile.service.test.ts::skips the per-edit test rule for the slow JVM (gradle) family — too slow to gate each edit",
+          "test": "packages/server/src/__tests__/stack-profile.service.test.ts::skips the per-edit test rule for the slow JVM (gradle) family \u00e2\u20ac\u201d too slow to gate each edit",
           "strength": "asserts-outcome"
         },
         {
@@ -6893,7 +6797,7 @@
           "strength": "asserts-outcome"
         },
         {
-          "test": "packages/server/src/__tests__/merge-endpoint-reconcile-noop.test.ts::(d) NO new merge commit created on master — mergeBranch is not called",
+          "test": "packages/server/src/__tests__/merge-endpoint-reconcile-noop.test.ts::(d) NO new merge commit created on master \u00e2\u20ac\u201d mergeBranch is not called",
           "strength": "asserts-outcome"
         },
         {
@@ -7046,7 +6950,7 @@
           "strength": "asserts-outcome"
         },
         {
-          "test": "packages/server/src/__tests__/merge-queue-strategy.test.ts::overlapping cluster, no conflict → integration-union; members grouped",
+          "test": "packages/server/src/__tests__/merge-queue-strategy.test.ts::overlapping cluster, no conflict \u00e2\u2020\u2019 integration-union; members grouped",
           "strength": "asserts-outcome"
         },
         {
@@ -7083,11 +6987,11 @@
           "strength": "asserts-outcome"
         },
         {
-          "test": "packages/server/src/__tests__/done-unmerged-invariant-scanner.test.ts::#592: NEVER reopens issue — 0-commit branch is log-only, no status change",
+          "test": "packages/server/src/__tests__/done-unmerged-invariant-scanner.test.ts::#592: NEVER reopens issue \u00e2\u20ac\u201d 0-commit branch is log-only, no status change",
           "strength": "asserts-outcome"
         },
         {
-          "test": "packages/server/src/__tests__/done-unmerged-invariant-scanner.test.ts::#592: rate-limit cap — auto-merges at most 3 per cycle",
+          "test": "packages/server/src/__tests__/done-unmerged-invariant-scanner.test.ts::#592: rate-limit cap \u00e2\u20ac\u201d auto-merges at most 3 per cycle",
           "strength": "asserts-outcome"
         },
         {
@@ -7183,7 +7087,7 @@
           "strength": "asserts-outcome"
         },
         {
-          "test": "packages/server/src/__tests__/pre-merge-gate.service.test.ts::fail-closed: verify_script configured but NO worktree → fails, doesn't approve unverifiable work",
+          "test": "packages/server/src/__tests__/pre-merge-gate.service.test.ts::fail-closed: verify_script configured but NO worktree \u00e2\u2020\u2019 fails, doesn't approve unverifiable work",
           "strength": "asserts-outcome"
         },
         {
@@ -7213,7 +7117,7 @@
     },
     {
       "ref": "review-merge.foundational.sync-merge",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/server/src/__tests__/foundational-merge.service.test.ts::treats a no-dependency shell with an open tier-1 dependent as foundational",
@@ -7226,6 +7130,10 @@
         {
           "test": "packages/server/src/__tests__/foundational-merge.service.test.ts::IS foundational once its own dependency is already Done (no open blocker left)",
           "strength": "asserts-outcome"
+        },
+        {
+          "test": "packages/server/src/__tests__/foundational-sync-merge-consequence.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
         }
       ],
       "requirements": [
@@ -7233,18 +7141,10 @@
         "#784"
       ],
       "dimensions_covered": [
-        "config"
-      ],
-      "dimensions_missing": [
+        "config",
         "workflow"
       ],
-      "gap": {
-        "kind": "outcome-not-asserted",
-        "missing_dimensions": [
-          "workflow"
-        ],
-        "rationale": "isFoundationalBlocker eligibility classification is thoroughly covered, but the actual observable consequence — that an eligible foundational blocker is merged SYNCHRONOUSLY so a dependent isn't cut from an empty pre-merge base — is not asserted."
-      }
+      "dimensions_missing": []
     },
     {
       "ref": "workflow-engine.resolve.template",
@@ -7354,7 +7254,7 @@
     },
     {
       "ref": "workflow-engine.autoroute.condition",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/server/src/__tests__/workflow-engine.test.ts::auto-routes on a firing condition and gates a blocked explicit target",
@@ -7363,22 +7263,18 @@
         {
           "test": "packages/server/src/__tests__/workflow.service.test.ts::rejects transition without target",
           "strength": "asserts-outcome"
+        },
+        {
+          "test": "packages/server/src/__tests__/workflow-autoroute-multifire.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
         }
       ],
       "dimensions_covered": [
-        "state-transition",
-        "config"
+        "boundary",
+        "config",
+        "state-transition"
       ],
-      "dimensions_missing": [
-        "boundary"
-      ],
-      "gap": {
-        "kind": "dimension-missing",
-        "missing_dimensions": [
-          "boundary"
-        ],
-        "rationale": "single-fire (auto Fix) and zero-fire (specify-a-target) are asserted, but the 'multiple edges fired -> refuse ambiguous' branch (transitions.ts:111) is never exercised"
-      }
+      "dimensions_missing": []
     },
     {
       "ref": "workflow-engine.gate.blockedTarget",
@@ -7421,30 +7317,26 @@
     },
     {
       "ref": "workflow-engine.evaluate.condition",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/server/src/__tests__/workflow-engine.test.ts::evaluateCondition handles the supported conditions",
           "strength": "asserts-outcome"
+        },
+        {
+          "test": "packages/server/src/__tests__/workflow-engine-matcher-boundary.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
         }
       ],
       "dimensions_covered": [
+        "boundary",
         "config"
       ],
-      "dimensions_missing": [
-        "boundary"
-      ],
-      "gap": {
-        "kind": "dimension-missing",
-        "missing_dimensions": [
-          "boundary"
-        ],
-        "rationale": "core fire/block/manual verdicts asserted incl. one diff_touches glob, but glob boundary cases (single '*' not crossing '/', '?', '**/' collapse, unsupported brace/negation -> silent no-match) and agent_score/custom_js->manual are not asserted"
-      }
+      "dimensions_missing": []
     },
     {
       "ref": "workflow-engine.validate.graph",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/server/src/__tests__/workflow-engine.test.ts::validateGraph > detects disconnected subgraphs with node names",
@@ -7465,23 +7357,18 @@
         {
           "test": "packages/server/src/__tests__/workflow.service.test.ts::creates a template with a valid graph",
           "strength": "touches-only"
+        },
+        {
+          "test": "packages/server/src/__tests__/workflow-validate-graph-rules.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
         }
       ],
       "dimensions_covered": [
+        "boundary",
+        "error-handling",
         "state-transition"
       ],
-      "dimensions_missing": [
-        "error-handling",
-        "boundary"
-      ],
-      "gap": {
-        "kind": "dimension-missing",
-        "missing_dimensions": [
-          "error-handling",
-          "boundary"
-        ],
-        "rationale": "disconnect/dup-id/cycle/loop-exempt asserted, but the start-count!=1, missing-end, orphan-inbound, dead-end-outbound, and parallel fork<->join pairing rejection rules (graph-validation.ts:39-124) have no asserting test"
-      }
+      "dimensions_missing": []
     },
     {
       "ref": "workflow-engine.sync.statusToNode",
@@ -7547,7 +7434,7 @@
     },
     {
       "ref": "workflow-engine.crud.template",
-      "status": "partial",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/server/src/__tests__/workflow.service.test.ts::creates a template with a valid graph",
@@ -7584,24 +7471,20 @@
         {
           "test": "packages/server/src/__tests__/workflow.service.test.ts::rejects creation without name/projectId; rejects import with missing name",
           "strength": "asserts-outcome"
+        },
+        {
+          "test": "packages/server/src/__tests__/workflow-template-crud-boundary.test.ts::(authored wave6-10 @covers)",
+          "strength": "asserts-outcome"
         }
       ],
       "dimensions_covered": [
         "api",
+        "boundary",
         "capability",
-        "permission",
-        "error-handling"
+        "error-handling",
+        "permission"
       ],
-      "dimensions_missing": [
-        "boundary"
-      ],
-      "gap": {
-        "kind": "dimension-missing",
-        "missing_dimensions": [
-          "boundary"
-        ],
-        "rationale": "full CRUD + builtin-immutability + import/export covered, but the empty-node draft create affordance (templates.ts:125 skips validation when nodes.length===0, resolving to a null start) is not asserted"
-      }
+      "dimensions_missing": []
     },
     {
       "ref": "workflow-engine.forkjoin.orchestrate",
@@ -7829,7 +7712,7 @@
         "covered": 1,
         "partial": 0,
         "uncovered": 0,
-        "note": "near-N/A — single-user local-first, no RBAC; only the merge-readiness gate is a meaningful 'permission' cell"
+        "note": "near-N/A \u00e2\u20ac\u201d single-user local-first, no RBAC; only the merge-readiness gate is a meaningful 'permission' cell"
       },
       "regression": {
         "covered": 2,
@@ -7837,10 +7720,10 @@
         "uncovered": 1
       },
       "navigation": {
-        "note": "N/A for this capability — route/nav coverage belongs to the UI-navigation capability"
+        "note": "N/A for this capability \u00e2\u20ac\u201d route/nav coverage belongs to the UI-navigation capability"
       },
       "accessibility": {
-        "note": "N/A — headless/API-first capability; a11y tracked at the component capability level"
+        "note": "N/A \u00e2\u20ac\u201d headless/API-first capability; a11y tracked at the component capability level"
       }
     },
     "by_capability": {
@@ -7857,50 +7740,7 @@
           "state-transition",
           "error"
         ],
-        "top_gaps": [
-          {
-            "ref": "workspaces.plan.approve-reject",
-            "priority": "P1",
-            "roi": 4,
-            "dimensions_to_add": [
-              "workflow",
-              "state-transition",
-              "api",
-              "error"
-            ],
-            "rationale": "Plan-mode approval gate (implement-plan/reject-plan) has no e2e/HTTP test; workspace-actions.ts is the highest-churn workspace route; AK-924 strand history."
-          },
-          {
-            "ref": "workspaces.lifecycle.reattach-survives-reload",
-            "priority": "P1",
-            "roi": 3.6,
-            "dimensions_to_add": [
-              "state-transition",
-              "regression"
-            ],
-            "rationale": "Whole-fleet survival across server hot-reload; agent.service.ts churn 91; prior reaper regression. Sole HIGH-risk uncovered remaining."
-          },
-          {
-            "ref": "workspaces.cascade.partial-blockers-no-start",
-            "priority": "P1",
-            "roi": 3,
-            "dimensions_to_add": [
-              "state-transition",
-              "error"
-            ],
-            "rationale": "Multi-blocker every-guard: dependent with only SOME blockers Done must NOT auto-start; invisible to the single-blocker P0 test. Raised by adversarial review."
-          },
-          {
-            "ref": "workspaces.turn.missing-content",
-            "priority": "P4",
-            "roi": 3,
-            "dimensions_to_add": [
-              "error",
-              "api"
-            ],
-            "rationale": "POST /:id/turn with no content → 400; cheap, high-churn route."
-          }
-        ]
+        "top_gaps": []
       },
       "agent-providers": {
         "covered": 14,
@@ -7959,7 +7799,7 @@
             "covered": 0,
             "partial": 0,
             "uncovered": 0,
-            "note": "N/A — single-user local app, no RBAC"
+            "note": "N/A \u00e2\u20ac\u201d single-user local app, no RBAC"
           }
         },
         "weak_dimensions": [
@@ -7978,15 +7818,6 @@
               "config"
             ],
             "rationale": "Zero coverage of the OAuth login bootstrap. The windowsHide:false invariant (callback server must run foreground) and the non-fatal-failure + returned-manual-command behavior are unverified. Unit-testable with a mocked spawn asserting the command/args/env (CODEX_HOME/CLAUDE_CONFIG_DIR) and spawn options; full terminal e2e is impractical."
-          },
-          {
-            "ref": "agent-providers.preflight.profileHealth",
-            "priority": "low",
-            "roi": "medium",
-            "dimensions_to_add": [
-              "state-transition"
-            ],
-            "rationale": "Failure-override and missing-config are covered, but the once-per-(provider,command) version-probe cache and the ok→warning→error fold over license-ring vs config-file auth validation are not asserted. Medium value, moderate setup cost (spawn + db mocks)."
           }
         ]
       },
@@ -8045,7 +7876,7 @@
           },
           "permission": {
             "na": true,
-            "reason": "single-user local app — no roles"
+            "reason": "single-user local app \u00e2\u20ac\u201d no roles"
           }
         },
         "weak_dimensions": [
@@ -8063,18 +7894,9 @@
               "concurrency"
             ],
             "rationale": "Flush-on-exit (no lost tail message) and the swallowed FK-insert race are unasserted; both are data-integrity guarantees of the transcript of record."
-          },
-          {
-            "ref": "agent-sessions.read.rest",
-            "priority": "P2",
-            "roi": 2.8,
-            "dimensions_to_add": [
-              "api"
-            ],
-            "rationale": "GET /api/sessions/:id/stats and /summary endpoint contracts are unasserted at the HTTP layer; also pin the documented search-coverage boundary (stdout not in session_messages + pruning) so the unreliable-search behaviour is at least characterized."
           }
         ],
-        "cut_line": "Emitted P1–P2. Below the line: ExitPlanMode auto-resume loop-guard (P3), Claude subscription-reset usage-limit variant (P3), buffer-free multi-subscriber invariant (P3) — real but lower ROI."
+        "cut_line": "Emitted P1\u00e2\u20ac\u201cP2. Below the line: ExitPlanMode auto-resume loop-guard (P3), Claude subscription-reset usage-limit variant (P3), buffer-free multi-subscriber invariant (P3) \u00e2\u20ac\u201d real but lower ROI."
       },
       "board-ui": {
         "covered": 20,
@@ -8153,36 +7975,8 @@
           "state-transition (negative/rejected edges)",
           "accessibility (keyboard-nav operability)"
         ],
-        "top_gaps": [
-          {
-            "ref": "board-ui.realtime.reflectServerChange",
-            "priority": "P1",
-            "roi": 4.5,
-            "dimensions_to_add": [
-              "concurrency"
-            ],
-            "rationale": "The 'status changes via API' realtime test asserts the SERVER board, not that the rendered card relocated (touches-only on the UI). On an agent-driven board this live-reflection is the headline value. Strengthen to assert the card visibly moves columns in the UI after an out-of-band PATCH, and add a burst (multiple rapid pushes) to exercise the coalescing/seq-guard against the live DOM."
-          },
-          {
-            "ref": "board-ui.shortcuts.keyboardNav",
-            "priority": "P2",
-            "roi": 3,
-            "dimensions_to_add": [
-              "accessibility"
-            ],
-            "rationale": "computeNavTarget is unit-pure-tested but nothing asserts arrow/vim keys actually move the focused card in the running UI — the keyboard-operability a11y outcome. A thin e2e: focus board, press ArrowRight/j, assert the highlighted/selected card changed."
-          },
-          {
-            "ref": "board-ui.wip.visualLimit",
-            "priority": "P3",
-            "roi": 2.4,
-            "dimensions_to_add": [
-              "feature"
-            ],
-            "rationale": "WIP classifier (under/at/over + boundary coercion) is unit-tested; the visible red-tint outcome on the column header is unasserted. Set a wip_limit pref below a column's count, assert the header carries the 'over' visual state. Low blast radius (advisory-only policy)."
-          }
-        ],
-        "cut_line": "Emitted P1–P3. Below the line (not emitted): board-ui.move.dependencyPreview (P2, dependency-impact preview untested) and palette workspace-action failure-path error handling (P4) — real but lower ROI than the rollback/archive/realtime trio."
+        "top_gaps": [],
+        "cut_line": "Emitted P1\u00e2\u20ac\u201cP3. Below the line (not emitted): board-ui.move.dependencyPreview (P2, dependency-impact preview untested) and palette workspace-action failure-path error handling (P4) \u00e2\u20ac\u201d real but lower ROI than the rollback/archive/realtime trio."
       },
       "butler": {
         "covered": 16,
@@ -8255,37 +8049,7 @@
           "boundary",
           "config (event-feed)"
         ],
-        "top_gaps": [
-          {
-            "ref": "butler.history.access",
-            "priority": "P4",
-            "roi": 3,
-            "dimensions_to_add": [
-              "permission",
-              "boundary"
-            ],
-            "rationale": "Security boundary: a past-session transcript must be readable ONLY for ids allowlisted to this project (routes/butler.ts:664-667). The deny path (foreign project's session id → refused) has no test, and the 50-id history cap is unasserted. Negative-path test, low maintenance."
-          },
-          {
-            "ref": "butler.interrupt.inflight",
-            "priority": "P2",
-            "roi": 2.5,
-            "dimensions_to_add": [
-              "state-transition",
-              "concurrency"
-            ],
-            "rationale": "Existing tests interrupt with no active turn (touches-only). Need a test that starts a streaming turn, interrupts mid-flight, and asserts the stream stops AND the session stays warm and accepts a follow-up — the actual behaviour users rely on."
-          },
-          {
-            "ref": "butler.manage.definitions",
-            "priority": "P3",
-            "roi": 2,
-            "dimensions_to_add": [
-              "boundary"
-            ],
-            "rationale": "Assert the two persona invariants: a 5th create is refused (MAX_BUTLERS=4) and deleting 'default' is refused. Cheap API-level boundary tests guarding documented rules."
-          }
-        ]
+        "top_gaps": []
       },
       "codemods": {
         "covered": 7,
@@ -8346,28 +8110,7 @@
           "config",
           "boundary"
         ],
-        "top_gaps": [
-          {
-            "ref": "codemods.preview.limit-guard",
-            "priority": "P3",
-            "roi": 2.5,
-            "dimensions_to_add": [
-              "boundary",
-              "config",
-              "error-handling"
-            ],
-            "rationale": "Scale safety interlock with zero coverage at both the block and override-and-proceed edges. Lower ROI because triggering >100 files needs a large fixture tree (higher exec/maint cost) and the blast-radius failure is a UX annoyance, not data loss. impact 3 x regression 3 / (exec 3 + maint 2.5) = ~1.6, lifted into P3 by being a named invariant with no test. Could be unit-tested against CODEMOD_FILE_LIMIT cheaply if the limit were injectable."
-          },
-          {
-            "ref": "codemods.save.reusable",
-            "priority": "P4",
-            "roi": 2,
-            "dimensions_to_add": [
-              "error-handling"
-            ],
-            "rationale": "The 409 name-collision branch (uniqueness invariant for reusable codemods) is unasserted. Cheap to add: POST the same name twice, assert second is 409. impact 2 x regression 2 / (exec 1 + maint 1) = 2.0."
-          }
-        ]
+        "top_gaps": []
       },
       "git-integration": {
         "covered": 17,
@@ -8434,7 +8177,7 @@
           },
           "permission": {
             "na": true,
-            "reason": "single-user local-first app — no RBAC"
+            "reason": "single-user local-first app \u00e2\u20ac\u201d no RBAC"
           },
           "accessibility": {
             "na": true,
@@ -8445,27 +8188,7 @@
           "boundary",
           "workflow (rebase/review path)"
         ],
-        "top_gaps": [
-          {
-            "ref": "git-integration.diff.working-tree",
-            "priority": "P3",
-            "roi": 1.5,
-            "dimensions_to_add": [
-              "boundary"
-            ],
-            "rationale": "untracked-diff synthesis is hand-rolled and flagged display-grade-not-apply-grade. Add boundary cases: a binary/unreadable untracked file (expect header-only, no crash) and a no-trailing-newline file (line-count off-by-one). impact 3 x regression 2 / (exec 1 + maint 3). Low blast radius (review UI only)."
-          },
-          {
-            "ref": "git-integration.detect.repo-info",
-            "priority": "P4",
-            "roi": 1.3,
-            "dimensions_to_add": [
-              "boundary",
-              "error-handling"
-            ],
-            "rationale": "documented latent risk: getDiff/getDiffFromRepo default baseBranch='main' while default-branch detection allows master-only repos — omitting the base on a master repo would diff against a nonexistent ref. Verify whether all real callers pass an explicit base; if not, this is a bug, not just a gap. impact 3 x regression 2 / (exec 1 + maint 2)."
-          }
-        ]
+        "top_gaps": []
       },
       "issues-board": {
         "covered": 18,
@@ -8545,36 +8268,8 @@
           "concurrency",
           "error (negative-path edges: status-delete-in-use, contraction-no-terminal-status)"
         ],
-        "notes": "permission/role and accessibility are N/A for this single-user, local, API/service-level capability (no RBAC; UI a11y is out of this capability's scope). The suite is unusually strong — most invariants have a dedicated regression test tied to a ticket number. The remaining gaps are negative-path error cells and one true concurrency cell.",
-        "top_gaps": [
-          {
-            "ref": "issues-board.config.statuses",
-            "priority": "P4",
-            "roi": 3,
-            "dimensions_to_add": [
-              "error"
-            ],
-            "rationale": "The status-delete-with-linked-issues guard (409, project.repository.ts:224) prevents orphaning live issues but has no asserting test. impact 3 (data-integrity guard) x regression 3 / (exec 1 + maint 1) = 3.0. A single in-process Hono test: seed a status with an issue, DELETE the status, assert 409 + issue untouched."
-          },
-          {
-            "ref": "issues-board.contract.coupled",
-            "priority": "P4",
-            "roi": 2,
-            "dimensions_to_add": [
-              "error"
-            ],
-            "rationale": "Contraction into a project lacking a Cancelled/Done status must 400 ('Project must have a Cancelled or Done status to absorb issues'); untested. Low frequency but a real rejection path. impact 2 x regression 2 / (exec 1 + maint 1) = 2.0."
-          },
-          {
-            "ref": "issues-board.create.issue",
-            "priority": "P3",
-            "roi": 2.7,
-            "dimensions_to_add": [
-              "concurrency"
-            ],
-            "rationale": "issueNumber allocation is asserted sequentially only; the 3x-retry on the unique-index collision under parallel creates is unverified (domain-doc flags it as inferred-unverified). impact 4 x regression 2 / (exec 2 + maint 1) = 2.7. Costlier (needs parallel inserts), hence P3."
-          }
-        ]
+        "notes": "permission/role and accessibility are N/A for this single-user, local, API/service-level capability (no RBAC; UI a11y is out of this capability's scope). The suite is unusually strong \u00e2\u20ac\u201d most invariants have a dedicated regression test tied to a ticket number. The remaining gaps are negative-path error cells and one true concurrency cell.",
+        "top_gaps": []
       },
       "mcp-server": {
         "covered": 17,
@@ -8711,27 +8406,7 @@
               "state-transition",
               "regression"
             ],
-            "rationale": "The module's defining safety invariant — never double-drive a board (two concurrent cycles each POST a workspace for the same unblocked issue → conflicting worktrees) — has zero coverage, and the maintenance-window suppression is also unverified. Highest regression value per test: a deterministic test driving runMonitorCycle with an injected mid-cycle trigger asserting exactly one rerun + a single workspace POST."
-          },
-          {
-            "ref": "monitor-orchestration.conductor.lifecycle",
-            "priority": "high",
-            "roi": "medium",
-            "dimensions_to_add": [
-              "state-transition",
-              "error"
-            ],
-            "rationale": "start-no-op-if-alive and the broad PowerShell taskkill backstop are OS-coupled and untested; a regression could spawn two external drivers (double-drive) or over-kill a sibling loop. Inject the spawn/kill port to assert the no-op-if-alive guard and that the kill regex is scoped to board-monitor.loop.sh."
-          },
-          {
-            "ref": "monitor-orchestration.butler.llm-cycle",
-            "priority": "low",
-            "roi": "low",
-            "dimensions_to_add": [
-              "workflow",
-              "observability"
-            ],
-            "rationale": "Off by default and LLM-driven (hard to assert deterministically); lowest ROI. A thin test could at least assert the single-active-project resolution and that a crashed cycle is isolated, mocking the SDK session."
+            "rationale": "The module's defining safety invariant \u00e2\u20ac\u201d never double-drive a board (two concurrent cycles each POST a workspace for the same unblocked issue \u00e2\u2020\u2019 conflicting worktrees) \u00e2\u20ac\u201d has zero coverage, and the maintenance-window suppression is also unverified. Highest regression value per test: a deterministic test driving runMonitorCycle with an injected mid-cycle trigger asserting exactly one rerun + a single workspace POST."
           }
         ]
       },
@@ -8792,7 +8467,7 @@
             "covered": 0,
             "partial": 0,
             "uncovered": 0,
-            "na_reason": "single-user local app — no RBAC"
+            "na_reason": "single-user local app \u00e2\u20ac\u201d no RBAC"
           }
         },
         "weak_dimensions": [
@@ -8800,17 +8475,7 @@
           "completeness-vs-unseeded-table (cascade walk vs future child tables)",
           "error-handling (unique-constraint rejection + restore guards)"
         ],
-        "top_gaps": [
-          {
-            "ref": "persistence-schema.enforce.unique-issue-number",
-            "priority": "P4",
-            "roi": 4.5,
-            "dimensions_to_add": [
-              "error-handling"
-            ],
-            "rationale": "Assert the DB unique index actually rejects a duplicate (project_id, issue_number) insert — the real concurrency guarantee against two agents claiming the same #N. Cheap, deterministic, pins a constraint nothing currently fires. impact 3 x regression 3 / (exec 1 + maint 1) = 4.5"
-          }
-        ]
+        "top_gaps": []
       },
       "preferences-config": {
         "covered": 15,
@@ -8872,28 +8537,7 @@
           "api(quota-endpoint)",
           "risk(start-policy kill-switch)"
         ],
-        "top_gaps": [
-          {
-            "ref": "preferences-config.error.guard-fails-open",
-            "priority": "P4",
-            "roi": 4,
-            "dimensions_to_add": [
-              "error",
-              "regression"
-            ],
-            "rationale": "Inferred hazard: the write-time divergence guard fails OPEN on malformed Bullseye JSON (resolveProviderDivergence try/catch → diverged:false), silently permitting a provider/profile write the #903 invariant was meant to block. Add a negative test: active project with a corrupt board_strategy_<id> + a diverging provider write → currently 200 (drift persists). Either pins the current (surprising) behaviour or escalates it as a real defect — verify before asserting."
-          },
-          {
-            "ref": "preferences-config.read.quota-usage",
-            "priority": "P2",
-            "roi": 3,
-            "dimensions_to_add": [
-              "api",
-              "error"
-            ],
-            "rationale": "GET /api/preferences/quota-usage endpoint contract is untested (200 shape vs 503 on external :8742 outage). Inject a stub QuotaUsageProvider that throws → assert 503 + {providers:[]}; and one returning data → assert 200 shape. The provider is injectable, so this is cheap and stable; the live probe already confirms 503 on outage."
-          }
-        ]
+        "top_gaps": []
       },
       "project-registration": {
         "covered": 15,
@@ -9019,17 +8663,7 @@
           "workflow (reconciler-relaunch + sync-merge land paths unasserted)",
           "api (fix-and-merge endpoint + manual-merge-gate-bypass unasserted)"
         ],
-        "top_gaps": [
-          {
-            "ref": "review-merge.foundational.sync-merge",
-            "priority": "P2",
-            "roi": 2.7,
-            "dimensions_to_add": [
-              "workflow"
-            ],
-            "rationale": "Eligibility classifier is covered; the observable consequence (synchronous merge so a dependent isn't cut from an empty base, #797/#784) is not. Lower frequency than the reconciler/fix paths but a real cascade-correctness behaviour."
-          }
-        ]
+        "top_gaps": []
       },
       "workflow-engine": {
         "covered": 12,
@@ -9090,47 +8724,18 @@
           "error-handling (negative graph-validation rules)",
           "api (MCP agent entry)"
         ],
-        "top_gaps": [
-          {
-            "ref": "workflow-engine.validate.graph",
-            "priority": "P4",
-            "roi": 4,
-            "dimensions_to_add": [
-              "error-handling",
-              "boundary"
-            ],
-            "rationale": "The visual builder's negative guards (start-count!=1, missing end, orphan inbound, dead-end outbound, fork<->join pairing) are the contract that keeps a saved graph runnable, but only 4 of ~8 rules are asserted. Pure-function tests, near-zero exec/maint cost. impact 4 x regression 2 / (exec 0.5 + maint 1.5) = 4.0"
-          },
-          {
-            "ref": "workflow-engine.autoroute.condition",
-            "priority": "P4",
-            "roi": 3.5,
-            "dimensions_to_add": [
-              "boundary"
-            ],
-            "rationale": "The 'multiple edges fired -> ambiguous, refuse' branch is the safety valve preventing nondeterministic auto-routing; single/zero-fire are tested but the multi-fire refusal is not. impact 4 x regression 2 / (exec 1 + maint 1.3) = 3.5"
-          },
-          {
-            "ref": "workflow-engine.evaluate.condition",
-            "priority": "P3",
-            "roi": 3,
-            "dimensions_to_add": [
-              "boundary"
-            ],
-            "rationale": "The hand-rolled diff_touches glob silently degrades to no-match/manual on unsupported patterns (brace/negation) and on '*' not crossing '/'. A boundary table-test pins the matcher's real semantics cheaply. impact 3 x regression 2 / (exec 0.5 + maint 1.5) = 3.0"
-          }
-        ]
+        "top_gaps": []
       }
     },
     "systematically_weak_dimensions": [
       "state-transition",
       "error"
     ],
-    "weak_dimension_note": "state-transition is the weakest column (4 uncovered + 1 partial) — every gap is a runtime lifecycle edge: plan approve/reject, hang-watchdog kill, restart-reattach, post-merge cascade, quarantine→In Progress. error is second-weakest, driven by two un-asserted negatives (turn-missing-content, one-direct exact status) and the watchdog. permission is correctly near-empty (single-user).",
+    "weak_dimension_note": "state-transition is the weakest column (4 uncovered + 1 partial) \u00e2\u20ac\u201d every gap is a runtime lifecycle edge: plan approve/reject, hang-watchdog kill, restart-reattach, post-merge cascade, quarantine\u00e2\u2020\u2019In Progress. error is second-weakest, driven by two un-asserted negatives (turn-missing-content, one-direct exact status) and the watchdog. permission is correctly near-empty (single-user).",
     "totals": {
-      "covered": 238,
-      "partial": 26,
-      "uncovered": 10,
+      "covered": 271,
+      "partial": 3,
+      "uncovered": 0,
       "undocumented_implemented": 0,
       "documented_missing": 0,
       "behaviors": 274,

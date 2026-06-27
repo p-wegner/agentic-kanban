@@ -7,11 +7,19 @@
       "gap": "workspaces.cascade.post-merge-followups",
       "priority": "P0",
       "test_file": "packages/e2e/tests/api/workspace-cascade-followup.test.ts",
-      "declares_dimensions": ["workflow", "state-transition", "capability"],
+      "declares_dimensions": [
+        "workflow",
+        "state-transition",
+        "capability"
+      ],
       "review": {
         "mode": "adversarial-refute",
         "reviewers": 3,
-        "first_pass_verdicts": ["needs-fix", "needs-fix", "needs-fix"],
+        "first_pass_verdicts": [
+          "needs-fix",
+          "needs-fix",
+          "needs-fix"
+        ],
         "consensus_defect": "Did not isolate the followup cascade from a second observationally-identical post-merge path (autoStartUnblockedDependencyIssue); green attributable only by accident of default manual Start Mode.",
         "fixes_applied": [
           "pin start_mode=manual + dependency_auto_chain=false in beforeAll, restore in afterAll (isolation)",
@@ -24,87 +32,532 @@
       },
       "status_after": "covered",
       "tests_passing": "2/2 (2 consecutive stable runs)",
-      "followups_filed": ["workspaces.cascade.partial-blockers-no-start (multi-blocker every-guard)"]
+      "followups_filed": [
+        "workspaces.cascade.partial-blockers-no-start (multi-blocker every-guard)"
+      ]
     },
     {
       "date": "2026-06-27",
       "batch": "wave-1 (6 top-backlog gaps, parallel generator + 1-refuter-each adversarial pass)",
       "review_mode": "adversarial-refute (1 reviewer per test; 4 of 5 new tests returned needs-fix and were fixed before landing)",
       "results": [
-        { "gap": "project-registration.resolve.defaultBranch", "priority": "P0", "test_file": "packages/server/src/__tests__/registration-resolve-default-branch.test.ts", "dimensions": ["regression","error-handling","boundary"], "verdict": "sound-after-fix", "fix": "added detached-HEAD boundary case (the true #772 null-persist path); both mutation checks verified", "status_after": "covered" },
-        { "gap": "mcp-server.govern.disabled-tools", "priority": "P0", "test_file": "packages/mcp-server/src/__tests__/disabled-tools.test.ts", "dimensions": ["permission","config","api"], "verdict": "sound-after-fix", "fix": "strengthened call-refused assertion to the unregistered-tool signature (vs live missing-row isError); single-process spawn + await-exit teardown", "status_after": "covered" },
-        { "gap": "preferences-config.resolve.start-policy", "priority": "P1", "test_file": "packages/server/src/services/start-policy.service.test.ts", "dimensions": ["config","state-transition","risk"], "verdict": "false-gap", "fix": "already fully covered (manual/conductor/legacy branches asserted); candidate filter hadn't credited the colocated test. Added @covers tag only — no new test (scope discipline)", "status_after": "covered" },
-        { "gap": "agent-providers.strip.profileEnv", "priority": "P1", "test_file": "packages/server/src/__tests__/build-spawn-env-strip.test.ts", "dimensions": ["config","security"], "verdict": "sound-after-fix", "fix": "dropped error-handling dim (was credited to a DEAD branch, helpers.ts:161-163, confirmed by mutation); strip-loop guard mutation-verified. Product findings -> ticket #927", "status_after": "covered" },
-        { "gap": "persistence-schema.cascade.delete-issue", "priority": "P1", "test_file": "packages/server/src/__tests__/issue-cascade-completeness.repo.test.ts", "dimensions": ["completeness-vs-unseeded-table"], "verdict": "sound", "fix": "none — FK-graph-enumeration design (future-proof). Node-26 :memory: bug confirmed real -> file-backed test DB workaround -> ticket #928", "status_after": "covered" },
-        { "gap": "workflow-engine.advance.mcpProposeTransition", "priority": "P1", "test_file": "packages/mcp-server/src/__tests__/tools/propose-transition.test.ts", "dimensions": ["api","workflow","state-transition"], "verdict": "sound-after-fix", "fix": "mocked notifyWorkflowAdvanced (was firing a REAL fetch to :3001 during tests); structural assertions over engine copy; unambiguous skip-closed tie-break", "status_after": "covered" }
+        {
+          "gap": "project-registration.resolve.defaultBranch",
+          "priority": "P0",
+          "test_file": "packages/server/src/__tests__/registration-resolve-default-branch.test.ts",
+          "dimensions": [
+            "regression",
+            "error-handling",
+            "boundary"
+          ],
+          "verdict": "sound-after-fix",
+          "fix": "added detached-HEAD boundary case (the true #772 null-persist path); both mutation checks verified",
+          "status_after": "covered"
+        },
+        {
+          "gap": "mcp-server.govern.disabled-tools",
+          "priority": "P0",
+          "test_file": "packages/mcp-server/src/__tests__/disabled-tools.test.ts",
+          "dimensions": [
+            "permission",
+            "config",
+            "api"
+          ],
+          "verdict": "sound-after-fix",
+          "fix": "strengthened call-refused assertion to the unregistered-tool signature (vs live missing-row isError); single-process spawn + await-exit teardown",
+          "status_after": "covered"
+        },
+        {
+          "gap": "preferences-config.resolve.start-policy",
+          "priority": "P1",
+          "test_file": "packages/server/src/services/start-policy.service.test.ts",
+          "dimensions": [
+            "config",
+            "state-transition",
+            "risk"
+          ],
+          "verdict": "false-gap",
+          "fix": "already fully covered (manual/conductor/legacy branches asserted); candidate filter hadn't credited the colocated test. Added @covers tag only \u00e2\u20ac\u201d no new test (scope discipline)",
+          "status_after": "covered"
+        },
+        {
+          "gap": "agent-providers.strip.profileEnv",
+          "priority": "P1",
+          "test_file": "packages/server/src/__tests__/build-spawn-env-strip.test.ts",
+          "dimensions": [
+            "config",
+            "security"
+          ],
+          "verdict": "sound-after-fix",
+          "fix": "dropped error-handling dim (was credited to a DEAD branch, helpers.ts:161-163, confirmed by mutation); strip-loop guard mutation-verified. Product findings -> ticket #927",
+          "status_after": "covered"
+        },
+        {
+          "gap": "persistence-schema.cascade.delete-issue",
+          "priority": "P1",
+          "test_file": "packages/server/src/__tests__/issue-cascade-completeness.repo.test.ts",
+          "dimensions": [
+            "completeness-vs-unseeded-table"
+          ],
+          "verdict": "sound",
+          "fix": "none \u00e2\u20ac\u201d FK-graph-enumeration design (future-proof). Node-26 :memory: bug confirmed real -> file-backed test DB workaround -> ticket #928",
+          "status_after": "covered"
+        },
+        {
+          "gap": "workflow-engine.advance.mcpProposeTransition",
+          "priority": "P1",
+          "test_file": "packages/mcp-server/src/__tests__/tools/propose-transition.test.ts",
+          "dimensions": [
+            "api",
+            "workflow",
+            "state-transition"
+          ],
+          "verdict": "sound-after-fix",
+          "fix": "mocked notifyWorkflowAdvanced (was firing a REAL fetch to :3001 during tests); structural assertions over engine copy; unambiguous skip-closed tie-break",
+          "status_after": "covered"
+        }
       ],
       "tests_passing": "server 10/10 + mcp-server 8/8 (18 cases, 5 files)",
-      "product_tickets_filed": ["#926 disabled_mcp_tools no trim/case (security)", "#927 buildSpawnEnv dead branch + CLAUDE_CODE_ env bleed (security)", "#928 Node26 libsql :memory: cascade suite baseline-red"],
-      "followups_logged": ["workflow-engine maxVisits/terminal via MCP", "cascade-delete: set-null referrer + cascade-FK-table-in-fresh-DB sub-cases"]
+      "product_tickets_filed": [
+        "#926 disabled_mcp_tools no trim/case (security)",
+        "#927 buildSpawnEnv dead branch + CLAUDE_CODE_ env bleed (security)",
+        "#928 Node26 libsql :memory: cascade suite baseline-red"
+      ],
+      "followups_logged": [
+        "workflow-engine maxVisits/terminal via MCP",
+        "cascade-delete: set-null referrer + cascade-FK-table-in-fresh-DB sub-cases"
+      ]
     },
     {
       "date": "2026-06-27",
       "batch": "wave-2 (6 cheap-deterministic gaps, parallel generator + 1-refuter-each adversarial pass)",
       "review_mode": "adversarial-refute (1 reviewer per test; 4 sound / 2 needs-fix, both fixed before landing)",
       "results": [
-        { "gap": "mcp-server.move.issue.workflow-edge", "priority": "P1", "test_file": "packages/mcp-server/src/__tests__/tools/move-issue-workflow-edge.test.ts", "dimensions": ["workflow","state-transition","error"], "verdict": "sound", "status_after": "covered" },
-        { "gap": "project-registration.repair.backfill", "priority": "P1", "test_file": "packages/server/src/__tests__/registration-repair-backfill.test.ts", "dimensions": ["state-transition","regression","config"], "verdict": "sound", "status_after": "covered" },
-        { "gap": "project-registration.dedup.sameGitRoot", "priority": "P1", "test_file": "packages/server/src/__tests__/project-dedup-same-git-root.test.ts", "dimensions": ["workflow","state-transition","regression"], "verdict": "sound-after-honesty-fix", "fix": "tightened scope claim to the 4 reassigned child types + same-named status; corrected FK-mechanism comment; the refuter EXPOSED a real product bug -> ticket #929", "status_after": "covered" },
-        { "gap": "butler.reject.busy", "priority": "P1", "test_file": "packages/server/src/__tests__/butler-message-busy-409.test.ts", "dimensions": ["error","api","concurrency"], "verdict": "sound", "fix": "tightened exact-string assertion to /already processing/i", "status_after": "covered" },
-        { "gap": "codemods.preview.generate", "priority": "P1", "test_file": "packages/server/src/__tests__/codemod-preview-generate.test.ts", "dimensions": ["capability","workflow"], "verdict": "sound", "fix": "dropped the api dim (service-level, not HTTP route)", "status_after": "covered" },
-        { "gap": "agent-sessions.launch.safety-guards", "priority": "P1", "test_file": "packages/server/src/__tests__/session-lifecycle.test.ts", "dimensions": ["config","regression","boundary"], "verdict": "sound-after-fix", "fix": "de-brittled (dropped positional launchArgs[15] for membership checks); dropped error-handling dim; added unknown-id pass-through + reverse-direction (claude-on-codex) cases to earn boundary", "status_after": "covered" }
+        {
+          "gap": "mcp-server.move.issue.workflow-edge",
+          "priority": "P1",
+          "test_file": "packages/mcp-server/src/__tests__/tools/move-issue-workflow-edge.test.ts",
+          "dimensions": [
+            "workflow",
+            "state-transition",
+            "error"
+          ],
+          "verdict": "sound",
+          "status_after": "covered"
+        },
+        {
+          "gap": "project-registration.repair.backfill",
+          "priority": "P1",
+          "test_file": "packages/server/src/__tests__/registration-repair-backfill.test.ts",
+          "dimensions": [
+            "state-transition",
+            "regression",
+            "config"
+          ],
+          "verdict": "sound",
+          "status_after": "covered"
+        },
+        {
+          "gap": "project-registration.dedup.sameGitRoot",
+          "priority": "P1",
+          "test_file": "packages/server/src/__tests__/project-dedup-same-git-root.test.ts",
+          "dimensions": [
+            "workflow",
+            "state-transition",
+            "regression"
+          ],
+          "verdict": "sound-after-honesty-fix",
+          "fix": "tightened scope claim to the 4 reassigned child types + same-named status; corrected FK-mechanism comment; the refuter EXPOSED a real product bug -> ticket #929",
+          "status_after": "covered"
+        },
+        {
+          "gap": "butler.reject.busy",
+          "priority": "P1",
+          "test_file": "packages/server/src/__tests__/butler-message-busy-409.test.ts",
+          "dimensions": [
+            "error",
+            "api",
+            "concurrency"
+          ],
+          "verdict": "sound",
+          "fix": "tightened exact-string assertion to /already processing/i",
+          "status_after": "covered"
+        },
+        {
+          "gap": "codemods.preview.generate",
+          "priority": "P1",
+          "test_file": "packages/server/src/__tests__/codemod-preview-generate.test.ts",
+          "dimensions": [
+            "capability",
+            "workflow"
+          ],
+          "verdict": "sound",
+          "fix": "dropped the api dim (service-level, not HTTP route)",
+          "status_after": "covered"
+        },
+        {
+          "gap": "agent-sessions.launch.safety-guards",
+          "priority": "P1",
+          "test_file": "packages/server/src/__tests__/session-lifecycle.test.ts",
+          "dimensions": [
+            "config",
+            "regression",
+            "boundary"
+          ],
+          "verdict": "sound-after-fix",
+          "fix": "de-brittled (dropped positional launchArgs[15] for membership checks); dropped error-handling dim; added unknown-id pass-through + reverse-direction (claude-on-codex) cases to earn boundary",
+          "status_after": "covered"
+        }
       ],
       "tests_passing": "server 28/28 + mcp-server 2/2 (30 cases, 6 files)",
-      "product_tickets_filed": ["#929 deduplicateProjects loses/orphans the dup's children beyond the 4 reassigned tables (data loss)"],
-      "followups_logged": ["move_issue terminal-node any-target", "repair: no-clobber of a DIFFERING user override", "codemods >100-file limit-guard + HTTP route", "butler busy-clears-after-completion", "session-launch covered the model-drop guard; other launch guards already covered"]
+      "product_tickets_filed": [
+        "#929 deduplicateProjects loses/orphans the dup's children beyond the 4 reassigned tables (data loss)"
+      ],
+      "followups_logged": [
+        "move_issue terminal-node any-target",
+        "repair: no-clobber of a DIFFERING user override",
+        "codemods >100-file limit-guard + HTTP route",
+        "butler busy-clears-after-completion",
+        "session-launch covered the model-drop guard; other launch guards already covered"
+      ]
     },
     {
       "date": "2026-06-27",
       "batch": "wave-3 (6 server/integration gaps, parallel generator + 1-refuter-each adversarial pass)",
       "review_mode": "adversarial-refute (1 reviewer per test; 3 sound / 3 needs-fix, all fixed before landing)",
       "results": [
-        { "gap": "review-merge.reconcile.stranded-review", "priority": "P1", "test_file": "packages/server/src/__tests__/stranded-review-reconciler-relaunch.test.ts", "dimensions": ["workflow","config"], "verdict": "sound", "note": "state-transition dim trimmed (the reviewing flip is inside the mocked startManualReview)", "status_after": "covered" },
-        { "gap": "agent-sessions.resume.provider-id", "priority": "P1", "test_file": "packages/server/src/__tests__/agent-session-resume-provider-id.test.ts", "dimensions": ["workflow","regression"], "verdict": "sound", "note": "capture+resume for Claude & Pi; doc drift found — providerSessionId column, not legacy claudeSessionId", "status_after": "covered" },
-        { "gap": "review-merge.gate.verify-smoke", "priority": "P1", "test_file": "packages/server/src/__tests__/merge-verify-gate-path-coverage.test.ts", "dimensions": ["error-handling","config","risk"], "verdict": "sound-after-fix", "fix": "converted the bypass-pinning tests to it.fails markers asserting the DESIRED gated behaviour (self-flip when #930 fixed); dropped api dim. PRODUCT BUG -> #930 (manual /merge bypasses the verify gate)", "status_after": "covered" },
-        { "gap": "mcp-server.create.agent-skill", "priority": "P1", "test_file": "packages/mcp-server/src/__tests__/tools/create-agent-skill.test.ts", "dimensions": ["security","error","boundary"], "verdict": "sound-after-fix", "fix": "added it.fails cases for the create-vs-materialization guard divergence (./empty/C:); relabeled permission->security; per-test DB reset. PRODUCT BUG -> #931 (create guard weaker than materialization guard)", "status_after": "covered" },
-        { "gap": "butler.feed.systemEvents", "priority": "P1", "test_file": "packages/server/src/__tests__/butler-event-feed-injection.test.ts", "dimensions": ["capability","config","concurrency","error-handling"], "verdict": "sound-after-fix", "fix": "de-overfit burst summary to semantic tokens; added two-project isolation (earns concurrency) + throwing-collaborator swallow (earns error-handling)", "status_after": "covered", "committed": "4a8f08d7" },
-        { "gap": "git-integration.rebase.prepare-review", "priority": "P1", "test_file": "packages/server/src/__tests__/git-prepare-for-review.test.ts", "dimensions": ["workflow","error-handling","regression"], "verdict": "sound", "note": "local-vs-origin base choice + conflict-list return with clean abort (real temp git repos)", "status_after": "covered" }
+        {
+          "gap": "review-merge.reconcile.stranded-review",
+          "priority": "P1",
+          "test_file": "packages/server/src/__tests__/stranded-review-reconciler-relaunch.test.ts",
+          "dimensions": [
+            "workflow",
+            "config"
+          ],
+          "verdict": "sound",
+          "note": "state-transition dim trimmed (the reviewing flip is inside the mocked startManualReview)",
+          "status_after": "covered"
+        },
+        {
+          "gap": "agent-sessions.resume.provider-id",
+          "priority": "P1",
+          "test_file": "packages/server/src/__tests__/agent-session-resume-provider-id.test.ts",
+          "dimensions": [
+            "workflow",
+            "regression"
+          ],
+          "verdict": "sound",
+          "note": "capture+resume for Claude & Pi; doc drift found \u00e2\u20ac\u201d providerSessionId column, not legacy claudeSessionId",
+          "status_after": "covered"
+        },
+        {
+          "gap": "review-merge.gate.verify-smoke",
+          "priority": "P1",
+          "test_file": "packages/server/src/__tests__/merge-verify-gate-path-coverage.test.ts",
+          "dimensions": [
+            "error-handling",
+            "config",
+            "risk"
+          ],
+          "verdict": "sound-after-fix",
+          "fix": "converted the bypass-pinning tests to it.fails markers asserting the DESIRED gated behaviour (self-flip when #930 fixed); dropped api dim. PRODUCT BUG -> #930 (manual /merge bypasses the verify gate)",
+          "status_after": "covered"
+        },
+        {
+          "gap": "mcp-server.create.agent-skill",
+          "priority": "P1",
+          "test_file": "packages/mcp-server/src/__tests__/tools/create-agent-skill.test.ts",
+          "dimensions": [
+            "security",
+            "error",
+            "boundary"
+          ],
+          "verdict": "sound-after-fix",
+          "fix": "added it.fails cases for the create-vs-materialization guard divergence (./empty/C:); relabeled permission->security; per-test DB reset. PRODUCT BUG -> #931 (create guard weaker than materialization guard)",
+          "status_after": "covered"
+        },
+        {
+          "gap": "butler.feed.systemEvents",
+          "priority": "P1",
+          "test_file": "packages/server/src/__tests__/butler-event-feed-injection.test.ts",
+          "dimensions": [
+            "capability",
+            "config",
+            "concurrency",
+            "error-handling"
+          ],
+          "verdict": "sound-after-fix",
+          "fix": "de-overfit burst summary to semantic tokens; added two-project isolation (earns concurrency) + throwing-collaborator swallow (earns error-handling)",
+          "status_after": "covered",
+          "committed": "4a8f08d7"
+        },
+        {
+          "gap": "git-integration.rebase.prepare-review",
+          "priority": "P1",
+          "test_file": "packages/server/src/__tests__/git-prepare-for-review.test.ts",
+          "dimensions": [
+            "workflow",
+            "error-handling",
+            "regression"
+          ],
+          "verdict": "sound",
+          "note": "local-vs-origin base choice + conflict-list return with clean abort (real temp git repos)",
+          "status_after": "covered"
+        }
       ],
       "tests_passing": "server 5 files (incl. it.fails markers) + mcp-server 1 file; all green (expected-fails = known-gap markers for #930/#931)",
-      "product_tickets_filed": ["#930 manual /merge bypasses the verify/smoke gate", "#931 create_agent_skill guard weaker than materialization guard"],
-      "followups_logged": ["stranded-review: commits-ahead=0 + running-session skip", "resume: executor-mismatch guard drops --resume across provider switch; Codex/Copilot resume", "rebaseOntoBase (inverse semantics: origin-default, leaves rebase in-progress)"]
+      "product_tickets_filed": [
+        "#930 manual /merge bypasses the verify/smoke gate",
+        "#931 create_agent_skill guard weaker than materialization guard"
+      ],
+      "followups_logged": [
+        "stranded-review: commits-ahead=0 + running-session skip",
+        "resume: executor-mismatch guard drops --resume across provider switch; Codex/Copilot resume",
+        "rebaseOntoBase (inverse semantics: origin-default, leaves rebase in-progress)"
+      ]
     },
     {
       "date": "2026-06-27",
       "batch": "wave-4 (6 harder gaps: 1 Playwright UI + 5 server/unit; parallel generator + 1-refuter-each)",
       "review_mode": "adversarial-refute (1 reviewer per test; 3 sound / 3 needs-fix, all fixed before landing)",
       "results": [
-        { "gap": "board-ui.move.rollback", "priority": "P1", "test_file": "packages/e2e/tests/ui/board-move-rollback.test.ts", "dimensions": ["error-handling","state-transition"], "verdict": "sound", "note": "Playwright; real dragstart+drop, page.route 409, card snaps back + toast. Stable 3x", "status_after": "covered" },
-        { "gap": "review-merge.recover.fix-and-merge", "priority": "P1", "test_file": "packages/server/src/__tests__/fix-and-merge-endpoint.test.ts", "dimensions": ["api","state-transition","workflow"], "verdict": "sound", "note": "drives the real route; 'recoverable' is hand-fed (fixAndMerge always launches) — wording caveat only", "status_after": "covered" },
-        { "gap": "mcp-server.merge.workspace.delegate", "priority": "P1", "test_file": "packages/mcp-server/src/__tests__/tools/merge-workspace-delegate.test.ts", "dimensions": ["api","risk"], "verdict": "sound", "note": "delegation + verbatim passthrough + 409 framing; network-throw branch is a logged follow-up", "status_after": "covered" },
-        { "gap": "agent-sessions.reattach.recover", "priority": "P1", "test_file": "packages/server/src/__tests__/agent-sessions-reattach-recover.test.ts", "dimensions": ["state-transition","regression"], "verdict": "sound-after-fix", "fix": "REWRITTEN to drive the REAL boot routine cleanupStaleSessions (was calling a same-outcome sibling); real process.kill PID liveness (process.pid/999999/null); dropped concurrency+error-handling dims (idempotency double-defended, not a race); added pid=null=>dead case. Mutation: deleting startup-tasks.ts:272-274 idle-update now goes RED", "status_after": "covered" },
-        { "gap": "agent-sessions.turn.followup", "priority": "P1", "test_file": "packages/server/src/__tests__/agent-session-turn-followup.test.ts", "dimensions": ["workflow","error-handling"], "verdict": "sound-after-fix", "fix": "dropped a VACUOUS assertion (launch-not-called — sendTurn structurally can't relaunch); added the real if(!sent) stdin-closed branch (alive but sendInput=false => ok:false, no processing flip)", "status_after": "covered" },
-        { "gap": "project-registration.enrich.llmGapFill", "priority": "P1", "test_file": "packages/server/src/__tests__/stack-profile-llm-gapfill.test.ts", "dimensions": ["config","error-handling"], "verdict": "sound-after-fix", "fix": "earned error-handling with two real graceful-degrade cases (LLM throws / malformed JSON => persist rule profile source=detected, no throw). No product finding — degradation is real", "status_after": "covered" }
+        {
+          "gap": "board-ui.move.rollback",
+          "priority": "P1",
+          "test_file": "packages/e2e/tests/ui/board-move-rollback.test.ts",
+          "dimensions": [
+            "error-handling",
+            "state-transition"
+          ],
+          "verdict": "sound",
+          "note": "Playwright; real dragstart+drop, page.route 409, card snaps back + toast. Stable 3x",
+          "status_after": "covered"
+        },
+        {
+          "gap": "review-merge.recover.fix-and-merge",
+          "priority": "P1",
+          "test_file": "packages/server/src/__tests__/fix-and-merge-endpoint.test.ts",
+          "dimensions": [
+            "api",
+            "state-transition",
+            "workflow"
+          ],
+          "verdict": "sound",
+          "note": "drives the real route; 'recoverable' is hand-fed (fixAndMerge always launches) \u00e2\u20ac\u201d wording caveat only",
+          "status_after": "covered"
+        },
+        {
+          "gap": "mcp-server.merge.workspace.delegate",
+          "priority": "P1",
+          "test_file": "packages/mcp-server/src/__tests__/tools/merge-workspace-delegate.test.ts",
+          "dimensions": [
+            "api",
+            "risk"
+          ],
+          "verdict": "sound",
+          "note": "delegation + verbatim passthrough + 409 framing; network-throw branch is a logged follow-up",
+          "status_after": "covered"
+        },
+        {
+          "gap": "agent-sessions.reattach.recover",
+          "priority": "P1",
+          "test_file": "packages/server/src/__tests__/agent-sessions-reattach-recover.test.ts",
+          "dimensions": [
+            "state-transition",
+            "regression"
+          ],
+          "verdict": "sound-after-fix",
+          "fix": "REWRITTEN to drive the REAL boot routine cleanupStaleSessions (was calling a same-outcome sibling); real process.kill PID liveness (process.pid/999999/null); dropped concurrency+error-handling dims (idempotency double-defended, not a race); added pid=null=>dead case. Mutation: deleting startup-tasks.ts:272-274 idle-update now goes RED",
+          "status_after": "covered"
+        },
+        {
+          "gap": "agent-sessions.turn.followup",
+          "priority": "P1",
+          "test_file": "packages/server/src/__tests__/agent-session-turn-followup.test.ts",
+          "dimensions": [
+            "workflow",
+            "error-handling"
+          ],
+          "verdict": "sound-after-fix",
+          "fix": "dropped a VACUOUS assertion (launch-not-called \u00e2\u20ac\u201d sendTurn structurally can't relaunch); added the real if(!sent) stdin-closed branch (alive but sendInput=false => ok:false, no processing flip)",
+          "status_after": "covered"
+        },
+        {
+          "gap": "project-registration.enrich.llmGapFill",
+          "priority": "P1",
+          "test_file": "packages/server/src/__tests__/stack-profile-llm-gapfill.test.ts",
+          "dimensions": [
+            "config",
+            "error-handling"
+          ],
+          "verdict": "sound-after-fix",
+          "fix": "earned error-handling with two real graceful-degrade cases (LLM throws / malformed JSON => persist rule profile source=detected, no throw). No product finding \u00e2\u20ac\u201d degradation is real",
+          "status_after": "covered"
+        }
       ],
       "tests_passing": "server 4 files (incl. reattach driving the real boot routine) + mcp-server 1 + e2e 1 Playwright; all green",
-      "product_tickets_filed": ["#932 E2E drag tests broken since dragData refactor (board.test.ts + drag-backlog-to-start.test.ts no longer exercise a move)"],
-      "followups_logged": ["mcp merge delegate: network-throw no-crash case", "fix-and-merge: main-checkout head-drift 409 guard + rebase-left-in-conflict path", "board-ui rollback: non-Error/network branch + handleDropWithLane swimlane duplicate"]
+      "product_tickets_filed": [
+        "#932 E2E drag tests broken since dragData refactor (board.test.ts + drag-backlog-to-start.test.ts no longer exercise a move)"
+      ],
+      "followups_logged": [
+        "mcp merge delegate: network-throw no-crash case",
+        "fix-and-merge: main-checkout head-drift 409 guard + rebase-left-in-conflict path",
+        "board-ui rollback: non-Error/network branch + handleDropWithLane swimlane duplicate"
+      ]
     },
     {
       "date": "2026-06-27",
       "batch": "wave-5 (6 remaining high-value gaps: 2 Playwright + 1 route + 3 server unit)",
-      "review_mode": "first-pass author (deep self-mutation-checks; no separate refuter pass this wave — gaps are lower-ambiguity unit/route + 2 Playwright modeled on the already-reviewed wave-4 rollback/cascade tests)",
+      "review_mode": "first-pass author (deep self-mutation-checks; no separate refuter pass this wave \u00e2\u20ac\u201d gaps are lower-ambiguity unit/route + 2 Playwright modeled on the already-reviewed wave-4 rollback/cascade tests)",
       "results": [
-        { "gap": "board-ui.move.archiveConfirm", "priority": "P1", "test_file": "packages/e2e/tests/ui/board-move-archive-confirm.test.ts", "dimensions": ["error-handling","state-transition"], "verdict": "sound", "note": "Playwright; confirm gate on archiving a live-workspace issue; cancel no-op + 'delete workspace & move to Done' proceeds (AK-535 terminal-move guard means move-only is rejected). Stable 2x", "status_after": "covered" },
-        { "gap": "workspaces.plan.approve-reject", "priority": "P1", "test_file": "packages/server/src/__tests__/plan-approval-endpoint.test.ts", "dimensions": ["workflow","state-transition","api","error"], "verdict": "sound", "note": "GET /plan + implement-plan(201, awaiting->active) + reject-with-feedback(201) + reject-without-feedback(400); AK-924 plan gate", "status_after": "covered" },
-        { "gap": "project-registration.register.idempotent", "priority": "P1", "test_file": "packages/server/src/__tests__/registration-idempotent.test.ts", "dimensions": ["workflow","boundary"], "verdict": "sound", "note": "re-register same repo/subdir/legacy-subdir-row => one project, created:false, no dup statuses; dropped error-handling dim (re-register is not an error at this seam)", "status_after": "covered" },
-        { "gap": "mcp-server.fire.webhook", "priority": "P1", "test_file": "packages/mcp-server/src/__tests__/tools/move-issue-webhook.test.ts", "dimensions": ["error","config","risk"], "verdict": "sound", "note": "loopback-only egress: 127.0.0.1 fires; foreign host + file:// scheme REFUSED (no POST leaves); guard confirmed present, no security finding", "status_after": "covered" },
-        { "gap": "workspaces.cascade.partial-blockers-no-start", "priority": "P1", "test_file": "packages/e2e/tests/api/workspace-cascade-followup.test.ts", "dimensions": ["state-transition","error"], "verdict": "sound", "note": "the wave-1 follow-up: dependent with B1+B2 does NOT start after merging only B1; starts after B2 (last blocker). every-guard. NEW behaviour added to the model", "status_after": "covered" },
-        { "gap": "persistence-schema.resolve.db-location", "priority": "P2", "test_file": "packages/server/src/__tests__/data-dir.test.ts", "dimensions": ["config","boundary"], "verdict": "sound", "note": "DB_URL/AGENTIC_KANBAN_DIR override > local-db-if-exists > home fallback precedence; no real kanban.db touched", "status_after": "covered" }
+        {
+          "gap": "board-ui.move.archiveConfirm",
+          "priority": "P1",
+          "test_file": "packages/e2e/tests/ui/board-move-archive-confirm.test.ts",
+          "dimensions": [
+            "error-handling",
+            "state-transition"
+          ],
+          "verdict": "sound",
+          "note": "Playwright; confirm gate on archiving a live-workspace issue; cancel no-op + 'delete workspace & move to Done' proceeds (AK-535 terminal-move guard means move-only is rejected). Stable 2x",
+          "status_after": "covered"
+        },
+        {
+          "gap": "workspaces.plan.approve-reject",
+          "priority": "P1",
+          "test_file": "packages/server/src/__tests__/plan-approval-endpoint.test.ts",
+          "dimensions": [
+            "workflow",
+            "state-transition",
+            "api",
+            "error"
+          ],
+          "verdict": "sound",
+          "note": "GET /plan + implement-plan(201, awaiting->active) + reject-with-feedback(201) + reject-without-feedback(400); AK-924 plan gate",
+          "status_after": "covered"
+        },
+        {
+          "gap": "project-registration.register.idempotent",
+          "priority": "P1",
+          "test_file": "packages/server/src/__tests__/registration-idempotent.test.ts",
+          "dimensions": [
+            "workflow",
+            "boundary"
+          ],
+          "verdict": "sound",
+          "note": "re-register same repo/subdir/legacy-subdir-row => one project, created:false, no dup statuses; dropped error-handling dim (re-register is not an error at this seam)",
+          "status_after": "covered"
+        },
+        {
+          "gap": "mcp-server.fire.webhook",
+          "priority": "P1",
+          "test_file": "packages/mcp-server/src/__tests__/tools/move-issue-webhook.test.ts",
+          "dimensions": [
+            "error",
+            "config",
+            "risk"
+          ],
+          "verdict": "sound",
+          "note": "loopback-only egress: 127.0.0.1 fires; foreign host + file:// scheme REFUSED (no POST leaves); guard confirmed present, no security finding",
+          "status_after": "covered"
+        },
+        {
+          "gap": "workspaces.cascade.partial-blockers-no-start",
+          "priority": "P1",
+          "test_file": "packages/e2e/tests/api/workspace-cascade-followup.test.ts",
+          "dimensions": [
+            "state-transition",
+            "error"
+          ],
+          "verdict": "sound",
+          "note": "the wave-1 follow-up: dependent with B1+B2 does NOT start after merging only B1; starts after B2 (last blocker). every-guard. NEW behaviour added to the model",
+          "status_after": "covered"
+        },
+        {
+          "gap": "persistence-schema.resolve.db-location",
+          "priority": "P2",
+          "test_file": "packages/server/src/__tests__/data-dir.test.ts",
+          "dimensions": [
+            "config",
+            "boundary"
+          ],
+          "verdict": "sound",
+          "note": "DB_URL/AGENTIC_KANBAN_DIR override > local-db-if-exists > home fallback precedence; no real kanban.db touched",
+          "status_after": "covered"
+        }
       ],
       "tests_passing": "server 3 files (16 cases) + mcp-server 1 + e2e 2 Playwright; all green",
       "note": "Concurrent agents edited the model directly + the cascade agent did git WIP-surgery; the model was re-derived deterministically from the clean wave-4 baseline (agents' partial flips discarded, re-applied via the close-loop scripts). Merge/WIP commits remain as harmless local-only noise.",
-      "followups_logged": ["board-ui archiveConfirm: move-only path blocked by AK-535 terminal guard (by design)", "remaining backlog now mostly partials + genuinely-hard/low-ROI behaviours -> deliberate-deferral frontier"]
+      "followups_logged": [
+        "board-ui archiveConfirm: move-only path blocked by AK-535 terminal guard (by design)",
+        "remaining backlog now mostly partials + genuinely-hard/low-ROI behaviours -> deliberate-deferral frontier"
+      ]
+    },
+    {
+      "date": "2026-06-27",
+      "batch": "waves 6-10 (comprehensive: all 36 remaining open behaviours \u2014 10 uncovered + 26 partial \u2014 authored to the deferral frontier)",
+      "review_mode": "P1 = 3-reviewer adversarial refute; P2 = 1-reviewer; 4 security/safety-critical (butler.history.access, monitor re-entrancy, conductor lifecycle, oauth bootstrap) = 1-reviewer; remaining deterministic P3/P4/partial unit+characterization tests landed on deep self-mutation-checks (documented wave-5 mode)",
+      "coverage_delta": "238/26/10 -> 271 covered / 3 partial / 0 uncovered (87% -> 99%)",
+      "tests_added": "36 new test files (server unit, mcp unit, shared integration, e2e-api, Playwright UI); verified collectively green: server 25 files/85 tests + oauth 4 + mcp 3 files/5 + shared 3; Playwright/e2e verified individually vs live server",
+      "fully_covered": 33,
+      "left_partial": [
+        {
+          "ref": "agent-sessions.persist.split-batch",
+          "credited": [
+            "error-handling"
+          ],
+          "left_open": [
+            "concurrency"
+          ],
+          "why": "FK-race is SIMULATED (mock insert reject), not real parallelism \u2014 reviewer downgraded; honest"
+        },
+        {
+          "ref": "monitor-orchestration.guard.re-entrancy-and-maintenance",
+          "credited": [
+            "regression",
+            "config"
+          ],
+          "left_open": [
+            "state-transition"
+          ],
+          "why": "asserts start-count side-effect (no double-drive) + maintenance suppression, not an entity post-state"
+        },
+        {
+          "ref": "agent-providers.login.oauthBootstrap",
+          "credited": [
+            "workflow",
+            "config"
+          ],
+          "left_open": [
+            "error-handling"
+          ],
+          "why": "code has no try/catch; sync spawn throw is fatal (ticket #941); non-fatal async test was tautological \u2014 dropped error-handling + the overfit listener-absence assertion"
+        }
+      ],
+      "product_tickets_filed": [
+        "#940 diff_touches brace/negation silently literal",
+        "#941 oauth sync spawn throw fatal despite non-fatal contract",
+        "#942 untracked binary diff rendered as lossy content hunk (low)"
+      ],
+      "p1_fixes": [
+        "board-ui.realtime.reflectServerChange: 3 reviewers -> needs-fix; fixed degenerate secondTarget fallback (now throws not double-counts), count-based asserts (virtualization-proof), honest concurrency comment (convergence not seq-guard)",
+        "workspaces.lifecycle.reattach-survives-reload: 3 reviewers -> needs-fix; added selective-reconcile 4th workspace (reconciledCount===1 proves guard selective) + genuine cross-routine same-boot-pass interaction (dead-PID In-Review ws seen by BOTH cleanupStaleSessions and ancestor reconciler) answering the duplicate-coverage critique"
+      ],
+      "p2_fixes": [
+        "agent-sessions.read.rest: needs-fix -> added stderr positive-control proving /search works (was tautological 0-match)",
+        "butler.interrupt.inflight: corrected misattributed mutation comment + added 409-while-busy positive concurrency assertion"
+      ],
+      "followups_logged": [
+        "board-ui realtime: live relocation INTO archive/Done tray + live removal on DELETE (uncovered)",
+        "keyboardNav: nav-key suppression while a text input is focused (window-dispatch can't assert it)",
+        "split-batch: exactly-50 size-threshold immediate flush",
+        "butler.history.access: cross-butler same-project foreign ?butler= refusal; 50-id write cap",
+        "monitor re-entrancy: deferred-rerun no-double-start + expired-maintenance-window boundary",
+        "conductor: stop with pid=null orphaned-loop reaping; non-win32 backstop coverage",
+        "sync-merge: auto_merge_disabled_<projectId> must force foundational to defer",
+        "quota-usage: 200 with a per-provider degraded status entry (partial degradation)",
+        "preexisting test-infra: second real createWorkspace fails on in-memory test DB ('Failed query') \u2014 related to #928"
+      ]
     }
   ]
 }

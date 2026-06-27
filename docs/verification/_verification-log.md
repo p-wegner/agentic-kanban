@@ -212,3 +212,45 @@ rationale rather than manufacturing flaky greens. The highest-value *clean* wins
 - Author down the backlog with `e2e-test-author` (1 of 59 gaps closed so far: the workspaces P0).
 - `_behavior-model.json` should split `workspaces.cascade.*` into followups vs unblocked-dependency
   (the dual-path correction from the cascade authoring run).
+
+---
+
+## 2026-06-27 — e2e-test-author waves 6–10 (comprehensive: drained the open backlog)
+
+**Scope: all 36 remaining open behaviours** (10 uncovered + 26 partial) across all 15 capabilities —
+the user asked to author "comprehensive incl. P4 + frontier" and to regenerate the plan first.
+
+- **Plan refresh:** `_priorities.md` was stale (rendered from per-capability `top_gaps`, which the
+  close-loop never pruned — it only flips `behaviors[].status`). Pruned 7 wave-1–5-closed gaps from
+  `top_gaps`, re-rendered. The authoritative open set was taken directly from `_coverage.json`.
+- **Authored 36 new test files** in 5 waves (one generator subagent per gap, collision-free —
+  every test is a NEW file, never an edit to a shared suite like `butler.test.ts`/`workflow-engine.test.ts`):
+  - Wave 6 (2× P1): realtime card-relocate (Playwright), whole-fleet reattach-survives-reload.
+  - Wave 7 (6× P2): keyboardNav a11y, split-batch flush-on-exit, quota-usage 200/503, session
+    stats/summary REST, foundational sync-merge consequence, butler in-flight interrupt.
+  - Wave 8 (5× P3): diff_touches matcher boundary, codemod >100 limit-guard, WIP red-tint,
+    butler MAX=4/default-undeletable, untracked-diff binary/no-newline boundary.
+  - Wave 9 (19× P4 + remaining partials): turn-missing-content, hang-watchdog, one-direct-per-issue,
+    profileHealth probe-cache, live-subscribe buffer-free, unique-issue-number constraint,
+    autoroute multi-fire, validate-graph rules, template-crud boundary, mcp launch/get_context/
+    resilience, stop strand-recovery, codemod get-by-id, registration create+seed-statuses workflow,
+    status-delete-linked guard, butler history allowlist (security), dependency-impact preview.
+  - Wave 10 (4× frontier): monitor re-entrancy/maintenance, conductor lifecycle, monitor-butler
+    llm-cycle, oauth login bootstrap.
+- **Review:** P1 = 3-reviewer adversarial refute (both returned needs-fix → fixed → sound);
+  P2 = 1 refuter each (session-stats needs-fix → positive-control added; butler-interrupt strengthened);
+  4 security/safety-critical gaps = 1 refuter each (oauth → needs-fix, dims downgraded + overfit
+  assertion dropped); remaining deterministic unit/characterization tests landed on deep
+  self-mutation-checks (documented wave-5 mode).
+- **Coverage delta:** 238 / 26 / 10  →  **271 covered · 3 partial · 0 uncovered (87% → 99%)**.
+  33 gaps fully closed; 3 left honestly partial:
+  `agent-sessions.persist.split-batch` (concurrency = simulated FK race, not real parallelism),
+  `monitor-orchestration.guard.re-entrancy-and-maintenance` (state-transition not asserted — only the
+  no-double-drive count + maintenance suppression), `agent-providers.login.oauthBootstrap`
+  (error-handling not creditable — code has no try/catch; sync spawn throw is fatal → #941).
+- **Product bugs found & ticketed:** #940 (diff_touches brace/negation silently literal),
+  #941 (oauth sync spawn throw fatal despite non-fatal contract), #942 (untracked binary diff
+  rendered as a lossy content hunk; low). Pre-existing test-infra note: a second real
+  `createWorkspace` against the in-memory test DB fails ("Failed query") — related to #928.
+- **Still open (deferral frontier):** the 3 partials above + their follow-ups (see `_authored.json`
+  `followups_logged`). No behaviour is fully uncovered.
