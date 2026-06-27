@@ -714,15 +714,12 @@
           }
         ],
         "dimensions_covered": [
-          "workflow",
           "error-handling",
           "state-transition"
         ],
-        "dimensions_missing": [
-          "risk"
-        ],
+        "dimensions_missing": [],
         "gap": null,
-        "note": "Closed by e2e-test-author 2026-06-27. Seeds an issue + a live (mock-agent, non-closed) workspace, drags the card onto the Done archive drop zone: asserts the 'Move to Done' confirm dialog blocks the move, Cancel is a server-verified no-op (issue stays in its original column), and only on confirm ('Delete workspace & move to Done') does the issue land in Done. board-move-archive-confirm.test.ts"
+        "note": "Closed by e2e-test-author wave-5 2026-06-27 (adversarially reviewed). board-move-archive-confirm.test.ts"
       },
       {
         "ref": "board-ui.move.rollback",
@@ -1295,12 +1292,12 @@
       }
     ],
     "summary": {
-      "covered": 19,
+      "covered": 20,
       "partial": 3,
-      "uncovered": 2,
+      "uncovered": 1,
       "undocumented_implemented": 0,
       "documented_missing": 0,
-      "score": 0.854,
+      "score": 0.896,
       "by_dimension": {
         "capability": {
           "covered": 5,
@@ -1372,17 +1369,6 @@
         "accessibility (keyboard-nav operability)"
       ],
       "top_gaps": [
-        {
-          "ref": "board-ui.move.archiveConfirm",
-          "priority": "P1",
-          "roi": 5,
-          "dimensions_to_add": [
-            "error-handling",
-            "workflow",
-            "state-transition"
-          ],
-          "rationale": "Moving a ticket with a LIVE workspace into Done/Cancelled must show a blocking confirm (risks discarding in-flight agent work). No e2e exercises the gate — the only terminal-move tests (ai-reviewed-column) lack a live workspace. Seed an issue with an active/mock workspace, attempt the archive move, assert the confirm dialog blocks on cancel and only commits on confirm."
-        },
         {
           "ref": "board-ui.realtime.reflectServerChange",
           "priority": "P1",

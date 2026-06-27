@@ -89,6 +89,22 @@
       "tests_passing": "server 4 files (incl. reattach driving the real boot routine) + mcp-server 1 + e2e 1 Playwright; all green",
       "product_tickets_filed": ["#932 E2E drag tests broken since dragData refactor (board.test.ts + drag-backlog-to-start.test.ts no longer exercise a move)"],
       "followups_logged": ["mcp merge delegate: network-throw no-crash case", "fix-and-merge: main-checkout head-drift 409 guard + rebase-left-in-conflict path", "board-ui rollback: non-Error/network branch + handleDropWithLane swimlane duplicate"]
+    },
+    {
+      "date": "2026-06-27",
+      "batch": "wave-5 (6 remaining high-value gaps: 2 Playwright + 1 route + 3 server unit)",
+      "review_mode": "first-pass author (deep self-mutation-checks; no separate refuter pass this wave — gaps are lower-ambiguity unit/route + 2 Playwright modeled on the already-reviewed wave-4 rollback/cascade tests)",
+      "results": [
+        { "gap": "board-ui.move.archiveConfirm", "priority": "P1", "test_file": "packages/e2e/tests/ui/board-move-archive-confirm.test.ts", "dimensions": ["error-handling","state-transition"], "verdict": "sound", "note": "Playwright; confirm gate on archiving a live-workspace issue; cancel no-op + 'delete workspace & move to Done' proceeds (AK-535 terminal-move guard means move-only is rejected). Stable 2x", "status_after": "covered" },
+        { "gap": "workspaces.plan.approve-reject", "priority": "P1", "test_file": "packages/server/src/__tests__/plan-approval-endpoint.test.ts", "dimensions": ["workflow","state-transition","api","error"], "verdict": "sound", "note": "GET /plan + implement-plan(201, awaiting->active) + reject-with-feedback(201) + reject-without-feedback(400); AK-924 plan gate", "status_after": "covered" },
+        { "gap": "project-registration.register.idempotent", "priority": "P1", "test_file": "packages/server/src/__tests__/registration-idempotent.test.ts", "dimensions": ["workflow","boundary"], "verdict": "sound", "note": "re-register same repo/subdir/legacy-subdir-row => one project, created:false, no dup statuses; dropped error-handling dim (re-register is not an error at this seam)", "status_after": "covered" },
+        { "gap": "mcp-server.fire.webhook", "priority": "P1", "test_file": "packages/mcp-server/src/__tests__/tools/move-issue-webhook.test.ts", "dimensions": ["error","config","risk"], "verdict": "sound", "note": "loopback-only egress: 127.0.0.1 fires; foreign host + file:// scheme REFUSED (no POST leaves); guard confirmed present, no security finding", "status_after": "covered" },
+        { "gap": "workspaces.cascade.partial-blockers-no-start", "priority": "P1", "test_file": "packages/e2e/tests/api/workspace-cascade-followup.test.ts", "dimensions": ["state-transition","error"], "verdict": "sound", "note": "the wave-1 follow-up: dependent with B1+B2 does NOT start after merging only B1; starts after B2 (last blocker). every-guard. NEW behaviour added to the model", "status_after": "covered" },
+        { "gap": "persistence-schema.resolve.db-location", "priority": "P2", "test_file": "packages/server/src/__tests__/data-dir.test.ts", "dimensions": ["config","boundary"], "verdict": "sound", "note": "DB_URL/AGENTIC_KANBAN_DIR override > local-db-if-exists > home fallback precedence; no real kanban.db touched", "status_after": "covered" }
+      ],
+      "tests_passing": "server 3 files (16 cases) + mcp-server 1 + e2e 2 Playwright; all green",
+      "note": "Concurrent agents edited the model directly + the cascade agent did git WIP-surgery; the model was re-derived deterministically from the clean wave-4 baseline (agents' partial flips discarded, re-applied via the close-loop scripts). Merge/WIP commits remain as harmless local-only noise.",
+      "followups_logged": ["board-ui archiveConfirm: move-only path blocked by AK-535 terminal guard (by design)", "remaining backlog now mostly partials + genuinely-hard/low-ROI behaviours -> deliberate-deferral frontier"]
     }
   ]
 }

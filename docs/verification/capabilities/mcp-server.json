@@ -1079,7 +1079,7 @@
           "last_regression": null
         },
         "gap": null,
-        "note": "Closed by e2e-test-author wave-5 2026-06-27 (loopback-only egress). move-issue-webhook.test.ts asserts a loopback pref POSTs the issue.status_changed payload, a foreign host / non-http(s) scheme is refused (no fetch leaves), and the move succeeds regardless of webhook outcome."
+        "note": "Closed by e2e-test-author wave-5 2026-06-27 (adversarially reviewed). move-issue-webhook.test.ts"
       },
       {
         "ref": "mcp-server.resilience.stay-up",
@@ -1113,7 +1113,7 @@
       "uncovered": 1,
       "undocumented_implemented": 0,
       "documented_missing": 0,
-      "score": 0.88,
+      "score": 0.9,
       "by_dimension": {
         "api": {
           "covered": 9,
@@ -1121,9 +1121,9 @@
           "uncovered": 3
         },
         "error": {
-          "covered": 7,
+          "covered": 6,
           "partial": 1,
-          "uncovered": 3
+          "uncovered": 4
         },
         "state-transition": {
           "covered": 6,
@@ -1131,9 +1131,9 @@
           "uncovered": 1
         },
         "config": {
-          "covered": 5,
+          "covered": 4,
           "partial": 0,
-          "uncovered": 1
+          "uncovered": 2
         },
         "permission": {
           "covered": 0,
@@ -1146,9 +1146,9 @@
           "uncovered": 1
         },
         "risk": {
-          "covered": 4,
+          "covered": 3,
           "partial": 1,
-          "uncovered": 1
+          "uncovered": 2
         },
         "boundary": {
           "covered": 1,

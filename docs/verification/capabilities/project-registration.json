@@ -541,32 +541,29 @@
       },
       {
         "ref": "project-registration.register.idempotent",
-        "status": "uncovered",
+        "status": "covered",
         "covered_by": [
           {
             "test": "packages/e2e/tests/ui/register-project.test.ts::duplicate path shows error message",
             "strength": "touches-only"
+          },
+          {
+            "test": "packages/server/src/__tests__/registration-idempotent.test.ts",
+            "strength": "asserts-outcome"
           }
         ],
-        "dimensions_covered": [],
-        "dimensions_missing": [
+        "dimensions_covered": [
           "workflow",
-          "boundary",
-          "error-handling"
+          "boundary"
         ],
+        "dimensions_missing": [],
         "history": {
           "churn_90d": null,
           "bugs": 1,
           "last_regression": "legacy subdir duplicates"
         },
-        "gap": {
-          "kind": "no-test",
-          "missing_dimensions": [
-            "workflow",
-            "boundary"
-          ],
-          "rationale": "the UI test fulfills a MOCK 409; no server-level test proves registering the same git root (or a subdirectory of it) returns the existing project with created=false and no second row"
-        }
+        "gap": null,
+        "note": "Closed by e2e-test-author wave-5 2026-06-27 (adversarially reviewed). registration-idempotent.test.ts"
       },
       {
         "ref": "project-registration.reject.missingRepoPath",
@@ -1015,12 +1012,12 @@
       }
     ],
     "summary": {
-      "covered": 14,
+      "covered": 15,
       "partial": 2,
-      "uncovered": 1,
+      "uncovered": 0,
       "undocumented_implemented": 0,
       "documented_missing": 0,
-      "score": 0.882,
+      "score": 0.941,
       "by_dimension": {
         "config": {
           "covered": 8,
@@ -1073,18 +1070,7 @@
         "error-handling",
         "state-transition"
       ],
-      "top_gaps": [
-        {
-          "ref": "project-registration.register.idempotent",
-          "priority": "P1",
-          "roi": 3.5,
-          "dimensions_to_add": [
-            "workflow",
-            "boundary"
-          ],
-          "rationale": "Server-level idempotency (same git root / legacy subdir → existing project, created=false, no duplicate) is only 'covered' by a mocked-409 UI test. Register the same repo twice (and a subdir of it) and assert one project id, created=false."
-        }
-      ]
+      "top_gaps": []
     }
   }
 }

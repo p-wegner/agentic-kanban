@@ -902,35 +902,33 @@
       },
       {
         "ref": "persistence-schema.resolve.db-location",
-        "status": "uncovered",
-        "covered_by": [],
-        "dimensions_covered": [],
-        "dimensions_missing": [
-          "config",
-          "boundary",
-          "risk"
+        "status": "covered",
+        "covered_by": [
+          {
+            "test": "packages/server/src/__tests__/data-dir.test.ts",
+            "strength": "asserts-outcome"
+          }
         ],
+        "dimensions_covered": [
+          "config",
+          "boundary"
+        ],
+        "dimensions_missing": [],
         "history": {
           "churn_90d": "low",
           "bugs": "worktree-runs-against-different-DB confusion (operational, not a code bug)"
         },
-        "gap": {
-          "kind": "no-test",
-          "missing_dimensions": [
-            "config",
-            "boundary"
-          ],
-          "rationale": "No test imports data-dir.ts. The existence-based resolution and the env-override precedence (DB_URL/AGENTIC_KANBAN_DIR -> local checkout -> ~/.agentic-kanban) are unasserted, despite being the mechanism behind the worktree-runs-against-a-different-database sharp edge and a high blast radius (~527)."
-        }
+        "gap": null,
+        "note": "Closed by e2e-test-author wave-5 2026-06-27 (adversarially reviewed). data-dir.test.ts"
       }
     ],
     "summary": {
-      "covered": 13,
+      "covered": 14,
       "partial": 1,
-      "uncovered": 1,
+      "uncovered": 0,
       "undocumented_implemented": 0,
       "documented_missing": 0,
-      "score": 0.9,
+      "score": 0.967,
       "by_dimension": {
         "migration-correctness": {
           "covered": 5,
@@ -998,16 +996,6 @@
             "error-handling"
           ],
           "rationale": "Assert the DB unique index actually rejects a duplicate (project_id, issue_number) insert — the real concurrency guarantee against two agents claiming the same #N. Cheap, deterministic, pins a constraint nothing currently fires. impact 3 x regression 3 / (exec 1 + maint 1) = 4.5"
-        },
-        {
-          "ref": "persistence-schema.resolve.db-location",
-          "priority": "P2",
-          "roi": 3,
-          "dimensions_to_add": [
-            "config",
-            "boundary"
-          ],
-          "rationale": "Only fully uncovered behaviour, high blast radius (~527) and the root of the worktree-different-DB footgun. A unit test over getDbUrl precedence (env override -> existing checkout db -> home-dir fall-through) is cheap and locks resolution. impact 3 x regression 2 / (exec 1 + maint 1) = 3.0"
         }
       ]
     }

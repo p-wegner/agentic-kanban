@@ -554,33 +554,30 @@
     },
     {
       "ref": "workspaces.plan.approve-reject",
-      "status": "uncovered",
-      "covered_by": [],
+      "status": "covered",
+      "covered_by": [
+        {
+          "test": "packages/server/src/__tests__/plan-approval-endpoint.test.ts",
+          "strength": "asserts-outcome"
+        }
+      ],
       "requirements": [
         "PRD-04:plan-mode-gate"
       ],
-      "dimensions_covered": [],
-      "dimensions_missing": [
+      "dimensions_covered": [
         "workflow",
         "state-transition",
         "api",
         "error"
       ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": 180,
         "bugs": 1,
         "last_regression": "AK-924 plan-mode strand"
       },
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": [
-          "workflow",
-          "state-transition",
-          "api",
-          "error"
-        ],
-        "rationale": "No candidate test exercises the plan-gate HTTP surface: GET /:id/plan, POST /:id/implement-plan (201 → starts implementation), POST /:id/reject-plan with feedback (201 → re-plans), reject without feedback → 400. plan-mode.service.test.ts exists OUT of the candidate set (service logic only) and is not credited; the route gate that prevents an agent from writing code before approval is unverified end-to-end. AK-924 (plan-mode strand) is a recent regression in this exact area."
-      }
+      "gap": null,
+      "note": "Closed by e2e-test-author wave-5 2026-06-27 (adversarially reviewed). plan-approval-endpoint.test.ts"
     },
     {
       "ref": "workspaces.stop.strand-recovery",
@@ -1853,24 +1850,20 @@
     },
     {
       "ref": "board-ui.move.archiveConfirm",
-      "status": "uncovered",
-      "covered_by": [],
-      "dimensions_covered": [],
-      "dimensions_missing": [
-        "workflow",
-        "error-handling",
-        "state-transition",
-        "risk"
+      "status": "covered",
+      "covered_by": [
+        {
+          "test": "packages/e2e/tests/ui/board-move-archive-confirm.test.ts",
+          "strength": "asserts-outcome"
+        }
       ],
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": [
-          "workflow",
-          "error-handling",
-          "state-transition"
-        ],
-        "rationale": "No e2e moves a ticket WITH a live workspace into Done/Cancelled to exercise the confirm dialog (block on cancel, commit on confirm). ai-reviewed-column tests move issues to terminal statuses but without a live workspace, so the gate never fires. High blast radius (risks discarding in-flight agent work)."
-      }
+      "dimensions_covered": [
+        "error-handling",
+        "state-transition"
+      ],
+      "dimensions_missing": [],
+      "gap": null,
+      "note": "Closed by e2e-test-author wave-5 2026-06-27 (adversarially reviewed). board-move-archive-confirm.test.ts"
     },
     {
       "ref": "board-ui.move.rollback",
@@ -4692,28 +4685,26 @@
     },
     {
       "ref": "mcp-server.fire.webhook",
-      "status": "uncovered",
-      "covered_by": [],
-      "dimensions_covered": [],
-      "dimensions_missing": [
+      "status": "covered",
+      "covered_by": [
+        {
+          "test": "packages/mcp-server/src/__tests__/tools/move-issue-webhook.test.ts",
+          "strength": "asserts-outcome"
+        }
+      ],
+      "dimensions_covered": [
         "error",
         "config",
         "risk"
       ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": null,
         "bugs": 0,
         "last_regression": null
       },
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": [
-          "error",
-          "config",
-          "risk"
-        ],
-        "rationale": "No MCP test fires the outbound webhook on a status change, nor asserts the loopback-only egress validation (outbound-webhook.ts:44) that is the one SSRF boundary against a malicious outbound_webhook_url_<projectId> pref. Security-relevant and uncovered at the MCP call site."
-      }
+      "gap": null,
+      "note": "Closed by e2e-test-author wave-5 2026-06-27 (adversarially reviewed). move-issue-webhook.test.ts"
     },
     {
       "ref": "mcp-server.resilience.stay-up",
@@ -5662,26 +5653,24 @@
     },
     {
       "ref": "persistence-schema.resolve.db-location",
-      "status": "uncovered",
-      "covered_by": [],
-      "dimensions_covered": [],
-      "dimensions_missing": [
-        "config",
-        "boundary",
-        "risk"
+      "status": "covered",
+      "covered_by": [
+        {
+          "test": "packages/server/src/__tests__/data-dir.test.ts",
+          "strength": "asserts-outcome"
+        }
       ],
+      "dimensions_covered": [
+        "config",
+        "boundary"
+      ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": "low",
         "bugs": "worktree-runs-against-different-DB confusion (operational, not a code bug)"
       },
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": [
-          "config",
-          "boundary"
-        ],
-        "rationale": "No test imports data-dir.ts. The existence-based resolution and the env-override precedence (DB_URL/AGENTIC_KANBAN_DIR -> local checkout -> ~/.agentic-kanban) are unasserted, despite being the mechanism behind the worktree-runs-against-a-different-database sharp edge and a high blast radius (~527)."
-      }
+      "gap": null,
+      "note": "Closed by e2e-test-author wave-5 2026-06-27 (adversarially reviewed). data-dir.test.ts"
     },
     {
       "ref": "preferences-config.write.settings",
@@ -6178,32 +6167,29 @@
     },
     {
       "ref": "project-registration.register.idempotent",
-      "status": "uncovered",
+      "status": "covered",
       "covered_by": [
         {
           "test": "packages/e2e/tests/ui/register-project.test.ts::duplicate path shows error message",
           "strength": "touches-only"
+        },
+        {
+          "test": "packages/server/src/__tests__/registration-idempotent.test.ts",
+          "strength": "asserts-outcome"
         }
       ],
-      "dimensions_covered": [],
-      "dimensions_missing": [
+      "dimensions_covered": [
         "workflow",
-        "boundary",
-        "error-handling"
+        "boundary"
       ],
+      "dimensions_missing": [],
       "history": {
         "churn_90d": null,
         "bugs": 1,
         "last_regression": "legacy subdir duplicates"
       },
-      "gap": {
-        "kind": "no-test",
-        "missing_dimensions": [
-          "workflow",
-          "boundary"
-        ],
-        "rationale": "the UI test fulfills a MOCK 409; no server-level test proves registering the same git root (or a subdirectory of it) returns the existing project with created=false and no second row"
-      }
+      "gap": null,
+      "note": "Closed by e2e-test-author wave-5 2026-06-27 (adversarially reviewed). registration-idempotent.test.ts"
     },
     {
       "ref": "project-registration.reject.missingRepoPath",
@@ -7725,6 +7711,28 @@
       "dimensions_missing": [],
       "gap": null,
       "note": "Closed by e2e-test-author 2026-06-27 (adversarially reviewed). propose-transition.test.ts"
+    },
+    {
+      "ref": "workspaces.cascade.partial-blockers-no-start",
+      "status": "covered",
+      "covered_by": [
+        {
+          "test": "packages/e2e/tests/api/workspace-cascade-followup.test.ts",
+          "strength": "asserts-outcome"
+        }
+      ],
+      "requirements": [],
+      "dimensions_covered": [
+        "state-transition",
+        "error"
+      ],
+      "dimensions_missing": [],
+      "history": {
+        "churn_90d": 14,
+        "bugs": 0
+      },
+      "gap": null,
+      "note": "New behaviour (multi-blocker every-guard) authored + covered in wave-5; the wave-1 cascade follow-up."
     }
   ],
   "requirements": [
@@ -7837,11 +7845,11 @@
     },
     "by_capability": {
       "workspaces": {
-        "score": 0.81,
-        "behaviors_total": 26,
-        "covered": 20,
+        "score": 0.852,
+        "behaviors_total": 27,
+        "covered": 22,
         "partial": 2,
-        "uncovered": 4,
+        "uncovered": 3,
         "undocumented_implemented": 0,
         "documented_missing": 0,
         "uncovered_high_risk": 1,
@@ -8069,12 +8077,12 @@
         "cut_line": "Emitted P1–P2. Below the line: ExitPlanMode auto-resume loop-guard (P3), Claude subscription-reset usage-limit variant (P3), buffer-free multi-subscriber invariant (P3) — real but lower ROI."
       },
       "board-ui": {
-        "covered": 19,
+        "covered": 20,
         "partial": 3,
-        "uncovered": 2,
+        "uncovered": 1,
         "undocumented_implemented": 0,
         "documented_missing": 0,
-        "score": 0.854,
+        "score": 0.896,
         "by_dimension": {
           "capability": {
             "covered": 5,
@@ -8146,17 +8154,6 @@
           "accessibility (keyboard-nav operability)"
         ],
         "top_gaps": [
-          {
-            "ref": "board-ui.move.archiveConfirm",
-            "priority": "P1",
-            "roi": 5,
-            "dimensions_to_add": [
-              "error-handling",
-              "workflow",
-              "state-transition"
-            ],
-            "rationale": "Moving a ticket with a LIVE workspace into Done/Cancelled must show a blocking confirm (risks discarding in-flight agent work). No e2e exercises the gate — the only terminal-move tests (ai-reviewed-column) lack a live workspace. Seed an issue with an active/mock workspace, attempt the archive move, assert the confirm dialog blocks on cancel and only commits on confirm."
-          },
           {
             "ref": "board-ui.realtime.reflectServerChange",
             "priority": "P1",
@@ -8580,12 +8577,12 @@
         ]
       },
       "mcp-server": {
-        "covered": 16,
+        "covered": 17,
         "partial": 2,
-        "uncovered": 2,
+        "uncovered": 1,
         "undocumented_implemented": 0,
         "documented_missing": 0,
-        "score": 0.85,
+        "score": 0.9,
         "by_dimension": {
           "api": {
             "covered": 9,
@@ -8644,19 +8641,7 @@
           "concurrency",
           "config(security egress)"
         ],
-        "top_gaps": [
-          {
-            "ref": "mcp-server.fire.webhook",
-            "priority": "P1",
-            "roi": 3.2,
-            "dimensions_to_add": [
-              "error",
-              "config",
-              "risk"
-            ],
-            "rationale": "Loopback-only egress is the only SSRF boundary; firing a webhook from a status change is best-effort and unverified at the MCP call site. Assert a non-loopback pref URL is not fetched and a loopback one is, and that the mutation succeeds regardless."
-          }
-        ]
+        "top_gaps": []
       },
       "monitor-orchestration": {
         "covered": 15,
@@ -8751,12 +8736,12 @@
         ]
       },
       "persistence-schema": {
-        "covered": 13,
+        "covered": 14,
         "partial": 1,
-        "uncovered": 1,
+        "uncovered": 0,
         "undocumented_implemented": 0,
         "documented_missing": 0,
-        "score": 0.9,
+        "score": 0.967,
         "by_dimension": {
           "migration-correctness": {
             "covered": 5,
@@ -8824,16 +8809,6 @@
               "error-handling"
             ],
             "rationale": "Assert the DB unique index actually rejects a duplicate (project_id, issue_number) insert — the real concurrency guarantee against two agents claiming the same #N. Cheap, deterministic, pins a constraint nothing currently fires. impact 3 x regression 3 / (exec 1 + maint 1) = 4.5"
-          },
-          {
-            "ref": "persistence-schema.resolve.db-location",
-            "priority": "P2",
-            "roi": 3,
-            "dimensions_to_add": [
-              "config",
-              "boundary"
-            ],
-            "rationale": "Only fully uncovered behaviour, high blast radius (~527) and the root of the worktree-different-DB footgun. A unit test over getDbUrl precedence (env override -> existing checkout db -> home-dir fall-through) is cheap and locks resolution. impact 3 x regression 2 / (exec 1 + maint 1) = 3.0"
           }
         ]
       },
@@ -8921,12 +8896,12 @@
         ]
       },
       "project-registration": {
-        "covered": 14,
+        "covered": 15,
         "partial": 2,
-        "uncovered": 1,
+        "uncovered": 0,
         "undocumented_implemented": 0,
         "documented_missing": 0,
-        "score": 0.882,
+        "score": 0.941,
         "by_dimension": {
           "config": {
             "covered": 8,
@@ -8979,18 +8954,7 @@
           "error-handling",
           "state-transition"
         ],
-        "top_gaps": [
-          {
-            "ref": "project-registration.register.idempotent",
-            "priority": "P1",
-            "roi": 3.5,
-            "dimensions_to_add": [
-              "workflow",
-              "boundary"
-            ],
-            "rationale": "Server-level idempotency (same git root / legacy subdir → existing project, created=false, no duplicate) is only 'covered' by a mocked-409 UI test. Register the same repo twice (and a subdir of it) and assert one project id, created=false."
-          }
-        ]
+        "top_gaps": []
       },
       "review-merge": {
         "covered": 17,
@@ -9164,14 +9128,14 @@
     ],
     "weak_dimension_note": "state-transition is the weakest column (4 uncovered + 1 partial) — every gap is a runtime lifecycle edge: plan approve/reject, hang-watchdog kill, restart-reattach, post-merge cascade, quarantine→In Progress. error is second-weakest, driven by two un-asserted negatives (turn-missing-content, one-direct exact status) and the watchdog. permission is correctly near-empty (single-user).",
     "totals": {
-      "covered": 232,
+      "covered": 238,
       "partial": 26,
-      "uncovered": 15,
+      "uncovered": 10,
       "undocumented_implemented": 0,
       "documented_missing": 0,
-      "behaviors": 273,
+      "behaviors": 274,
       "capabilities": 15,
-      "overall_score": 0.897
+      "overall_score": 0.916
     }
   }
 }
