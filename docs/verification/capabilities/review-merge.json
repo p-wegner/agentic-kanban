@@ -25,33 +25,106 @@
       "packages/shared/src/lib/auto-merge-pref.ts"
     ],
     "actors": [
-      { "name": "operator", "kind": "human", "notes": "single local user — manual /review, /merge, /fix-and-merge via UI or REST" },
-      { "name": "auto-merge-orchestrator", "kind": "automation", "notes": "scheduled 30s batch engine, ON by default (merge_queue strategy)" },
-      { "name": "in-process-monitor", "kind": "automation", "notes": "alternate auto-merge engine (merge_strategy=monitor); also runs the verify/smoke gate" },
-      { "name": "reviewer-agent", "kind": "agent-subprocess", "notes": "LLM that reads the diff and signals via mark_ready_for_merge; never self-merges" },
-      { "name": "fix-agent", "kind": "agent-subprocess", "notes": "relaunched in-worktree to resolve conflicts / clean tree for fix-and-merge" },
-      { "name": "reconcilers", "kind": "automation", "notes": "interval+boot honesty restorers (done-unmerged, stranded-review, ancestor-branch, completion-state, zombie-fix)" }
+      {
+        "name": "operator",
+        "kind": "human",
+        "notes": "single local user — manual /review, /merge, /fix-and-merge via UI or REST"
+      },
+      {
+        "name": "auto-merge-orchestrator",
+        "kind": "automation",
+        "notes": "scheduled 30s batch engine, ON by default (merge_queue strategy)"
+      },
+      {
+        "name": "in-process-monitor",
+        "kind": "automation",
+        "notes": "alternate auto-merge engine (merge_strategy=monitor); also runs the verify/smoke gate"
+      },
+      {
+        "name": "reviewer-agent",
+        "kind": "agent-subprocess",
+        "notes": "LLM that reads the diff and signals via mark_ready_for_merge; never self-merges"
+      },
+      {
+        "name": "fix-agent",
+        "kind": "agent-subprocess",
+        "notes": "relaunched in-worktree to resolve conflicts / clean tree for fix-and-merge"
+      },
+      {
+        "name": "reconcilers",
+        "kind": "automation",
+        "notes": "interval+boot honesty restorers (done-unmerged, stranded-review, ancestor-branch, completion-state, zombie-fix)"
+      }
     ],
     "entry_points": [
-      { "kind": "api", "ref": "POST /api/workspaces/:id/review", "observable": "launches an AI review session on an idle workspace; 200 + sessionId, or 409 when not idle" },
-      { "kind": "api", "ref": "POST /api/workspaces/:id/ready-for-merge", "observable": "sets readyForMerge=true (the reviewer's approval signal); 404 unknown id" },
-      { "kind": "api", "ref": "POST /api/workspaces/:id/merge", "observable": "merges approved branch into base; 200 merged/reconciled, or 409 not_approved/conflict/dirty_main/already_merged" },
-      { "kind": "api", "ref": "POST /api/workspaces/:id/fix-and-merge", "observable": "relaunches an agent in the worktree to fix a failed merge; workspace status → fixing" },
-      { "kind": "api", "ref": "POST /api/workspaces/:id/resolve-conflicts, /update-base", "observable": "agentic conflict resolution / rebase base in" },
-      { "kind": "api", "ref": "GET /api/workspaces/:id/already-merged-status, POST reconcile-as-done", "observable": "detect/close already-landed branch without a new merge commit" },
-      { "kind": "scheduled", "ref": "auto-merge-orchestrator 30s tick", "observable": "batch-merges approved/reviewed workspaces via the queue" },
-      { "kind": "event", "ref": "builder-session exit (exit-workflow.ts:813)", "observable": "committed-exit → issue to In Review → auto-review handshake" },
-      { "kind": "scheduled", "ref": "interval reconcilers (60s/5min/boot)", "observable": "restore status↔git honesty (done-unmerged scan, stranded-review, ancestor-branch, completion-state, zombie-fix)" }
+      {
+        "kind": "api",
+        "ref": "POST /api/workspaces/:id/review",
+        "observable": "launches an AI review session on an idle workspace; 200 + sessionId, or 409 when not idle"
+      },
+      {
+        "kind": "api",
+        "ref": "POST /api/workspaces/:id/ready-for-merge",
+        "observable": "sets readyForMerge=true (the reviewer's approval signal); 404 unknown id"
+      },
+      {
+        "kind": "api",
+        "ref": "POST /api/workspaces/:id/merge",
+        "observable": "merges approved branch into base; 200 merged/reconciled, or 409 not_approved/conflict/dirty_main/already_merged"
+      },
+      {
+        "kind": "api",
+        "ref": "POST /api/workspaces/:id/fix-and-merge",
+        "observable": "relaunches an agent in the worktree to fix a failed merge; workspace status → fixing"
+      },
+      {
+        "kind": "api",
+        "ref": "POST /api/workspaces/:id/resolve-conflicts, /update-base",
+        "observable": "agentic conflict resolution / rebase base in"
+      },
+      {
+        "kind": "api",
+        "ref": "GET /api/workspaces/:id/already-merged-status, POST reconcile-as-done",
+        "observable": "detect/close already-landed branch without a new merge commit"
+      },
+      {
+        "kind": "scheduled",
+        "ref": "auto-merge-orchestrator 30s tick",
+        "observable": "batch-merges approved/reviewed workspaces via the queue"
+      },
+      {
+        "kind": "event",
+        "ref": "builder-session exit (exit-workflow.ts:813)",
+        "observable": "committed-exit → issue to In Review → auto-review handshake"
+      },
+      {
+        "kind": "scheduled",
+        "ref": "interval reconcilers (60s/5min/boot)",
+        "observable": "restore status↔git honesty (done-unmerged scan, stranded-review, ancestor-branch, completion-state, zombie-fix)"
+      }
     ],
     "behaviors": [
       {
         "id": "review-merge.launch.review",
         "statement": "Launching a review starts an LLM review session on the builder's OWN provider/profile for an idle workspace; a non-idle workspace is refused",
         "actor": "operator",
-        "preconditions": ["workspace exists", "workspace idle (no running session)"],
+        "preconditions": [
+          "workspace exists",
+          "workspace idle (no running session)"
+        ],
         "observable_outcome": "200 with sessionId, workspace transitions reviewing; 409 ReviewError when not idle; review uses workspace provider/profile not the global default",
-        "evidence": ["review.service.ts:325", "review.service.ts:68", "route-setup.ts:27"],
-        "dimensions": ["api", "workflow", "error-handling", "config", "concurrency"],
+        "evidence": [
+          "review.service.ts:325",
+          "review.service.ts:68",
+          "route-setup.ts:27"
+        ],
+        "dimensions": [
+          "api",
+          "workflow",
+          "error-handling",
+          "config",
+          "concurrency"
+        ],
         "risk": "medium",
         "confidence": "high"
       },
@@ -59,10 +132,20 @@
         "id": "review-merge.exit.auto-review",
         "statement": "A builder that exits having committed work moves its issue to In Review and (when auto_review on) launches a review session; the transition is idempotent",
         "actor": "auto-merge-orchestrator",
-        "preconditions": ["builder session exits", "branch has committed changes"],
+        "preconditions": [
+          "builder session exits",
+          "branch has committed changes"
+        ],
         "observable_outcome": "issue=In Review, board/workspace/workflow-node agree; repeated exit calls do not duplicate the review session or advance past In Review",
-        "evidence": ["exit-workflow.ts:794", "exit-workflow.ts:813"],
-        "dimensions": ["workflow", "state-transition", "concurrency"],
+        "evidence": [
+          "exit-workflow.ts:794",
+          "exit-workflow.ts:813"
+        ],
+        "dimensions": [
+          "workflow",
+          "state-transition",
+          "concurrency"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -70,10 +153,22 @@
         "id": "review-merge.guard.zero-commit-no-approve",
         "statement": "A review that exits on a 0-commit branch must NOT approve it: readyForMerge stays false, workspace stays idle/In Review, no ready broadcast (#629)",
         "actor": "reviewer-agent",
-        "preconditions": ["review session exits", "branch has no committed changes (re-verified via hasCommittedChanges)"],
+        "preconditions": [
+          "review session exits",
+          "branch has no committed changes (re-verified via hasCommittedChanges)"
+        ],
         "observable_outcome": "readyForMerge=false; workspace idle, issue In Review; workspace_ready_for_merge NOT broadcast",
-        "evidence": ["exit-workflow.ts:718", "exit-workflow.ts:720", "exit-workflow.ts:164"],
-        "dimensions": ["boundary", "state-transition", "regression", "risk"],
+        "evidence": [
+          "exit-workflow.ts:718",
+          "exit-workflow.ts:720",
+          "exit-workflow.ts:164"
+        ],
+        "dimensions": [
+          "boundary",
+          "state-transition",
+          "regression",
+          "risk"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -81,10 +176,20 @@
         "id": "review-merge.signal.ready",
         "statement": "The reviewer signals merge-readiness via mark_ready_for_merge (readyForMerge=true) and is contractually forbidden from merging itself, so the system's gates always run (#822)",
         "actor": "reviewer-agent",
-        "preconditions": ["review session active on a workspace"],
+        "preconditions": [
+          "review session active on a workspace"
+        ],
         "observable_outcome": "readyForMerge flips true and is reflected in workspace GET + board summary; review prompt instructs verify+approve but NOT self-merge",
-        "evidence": ["workspace-internals.ts:235", "review.service.ts:113", "review.service.ts:211"],
-        "dimensions": ["api", "permission", "state-transition"],
+        "evidence": [
+          "workspace-internals.ts:235",
+          "review.service.ts:113",
+          "review.service.ts:211"
+        ],
+        "dimensions": [
+          "api",
+          "permission",
+          "state-transition"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -92,10 +197,25 @@
         "id": "review-merge.merge.approved",
         "statement": "Merging an approved workspace lands its branch on the base branch (advancing master), closes the workspace, and moves the issue to Done; concurrent requests to the same workspace are deduplicated",
         "actor": "operator",
-        "preconditions": ["non-direct workspace", "readyForMerge=true", "clean main checkout", "no conflicts"],
+        "preconditions": [
+          "non-direct workspace",
+          "readyForMerge=true",
+          "clean main checkout",
+          "no conflicts"
+        ],
         "observable_outcome": "200 {merged:true, mergeCommitSha, baseHeadShaBefore/After}; base branch advances; workspace closed; issue Done; concurrent /merge calls share one promise",
-        "evidence": ["workspace-merge.service.ts:163", "merge-workflow.ts:195", "merge-workflow.ts:278"],
-        "dimensions": ["api", "workflow", "state-transition", "risk", "concurrency"],
+        "evidence": [
+          "workspace-merge.service.ts:163",
+          "merge-workflow.ts:195",
+          "merge-workflow.ts:278"
+        ],
+        "dimensions": [
+          "api",
+          "workflow",
+          "state-transition",
+          "risk",
+          "concurrency"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -103,10 +223,21 @@
         "id": "review-merge.reject.not-approved",
         "statement": "Merging a non-direct workspace whose readyForMerge=false is refused with 409 not_approved — unless auto_merge_in_review bypasses the gate (and the project isn't gated)",
         "actor": "operator",
-        "preconditions": ["non-direct workspace", "readyForMerge=false"],
+        "preconditions": [
+          "non-direct workspace",
+          "readyForMerge=false"
+        ],
         "observable_outcome": "409 CONFLICT mergeReason=not_approved, no git merge; auto_merge_in_review=true proceeds past the gate; isDirect workspaces skip the gate unconditionally",
-        "evidence": ["workspace-internals.ts:235", "workspace-merge-prevalidation.service.ts:50", "auto-merge-orchestrator.ts:148"],
-        "dimensions": ["error-handling", "permission", "config"],
+        "evidence": [
+          "workspace-internals.ts:235",
+          "workspace-merge-prevalidation.service.ts:50",
+          "auto-merge-orchestrator.ts:148"
+        ],
+        "dimensions": [
+          "error-handling",
+          "permission",
+          "config"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -114,10 +245,19 @@
         "id": "review-merge.guard.dirty-main",
         "statement": "A merge is blocked when the main checkout has any uncommitted tracked change — never merge on top of someone's WIP",
         "actor": "operator",
-        "preconditions": ["main checkout has uncommitted tracked changes"],
+        "preconditions": [
+          "main checkout has uncommitted tracked changes"
+        ],
         "observable_outcome": "409 CONFLICT mergeReason=dirty_main, mergeBranch never called; proceeds once the checkout is clean; checked even when workingDir is missing",
-        "evidence": ["merge-workflow.ts:173", "workspace-internals.ts:245"],
-        "dimensions": ["error-handling", "risk", "boundary"],
+        "evidence": [
+          "merge-workflow.ts:173",
+          "workspace-internals.ts:245"
+        ],
+        "dimensions": [
+          "error-handling",
+          "risk",
+          "boundary"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -125,10 +265,20 @@
         "id": "review-merge.reject.conflict",
         "statement": "A conflicting merge is refused with 409 conflict (listing conflict files), clears the stale readyForMerge flag, leaves the issue not-Done, and the server stays healthy",
         "actor": "operator",
-        "preconditions": ["branch conflicts with base (read-only merge-tree detection or behind-base rebase)"],
+        "preconditions": [
+          "branch conflicts with base (read-only merge-tree detection or behind-base rebase)"
+        ],
         "observable_outcome": "409 CONFLICT with conflictFiles + behindCount; readyForMerge cleared; workspace not closed, issue not Done; no conflict markers spilled; server health endpoint responsive",
-        "evidence": ["merge-queue.service.ts:435", "workspace-internals.ts:159", "workspace-merge.service.ts:163"],
-        "dimensions": ["error-handling", "risk", "regression"],
+        "evidence": [
+          "merge-queue.service.ts:435",
+          "workspace-internals.ts:159",
+          "workspace-merge.service.ts:163"
+        ],
+        "dimensions": [
+          "error-handling",
+          "risk",
+          "regression"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -136,10 +286,22 @@
         "id": "review-merge.reconcile.already-merged",
         "statement": "When a branch tip is already an ancestor of base (with >=1 unique commit), /merge is a no-op reconcile: 200 {merged:false, reconciled:true}, NO new merge commit, issue→Done, stale review session closed; honored idempotently via mergedAt on dropped-response retries",
         "actor": "operator",
-        "preconditions": ["branch tip is ancestor of base", ">=1 unique commit OR mergedAt already set"],
+        "preconditions": [
+          "branch tip is ancestor of base",
+          ">=1 unique commit OR mergedAt already set"
+        ],
         "observable_outcome": "200 merged:false reconciled:true with baseBranch+baseHeadSha; mergeBranch NOT called; issue Done; retry after dropped response converges without re-merging",
-        "evidence": ["workspace-merge-prevalidation.service.ts:252", "workspace-internals.ts:201", "merge-cleanup.service.ts:64"],
-        "dimensions": ["api", "state-transition", "regression", "concurrency"],
+        "evidence": [
+          "workspace-merge-prevalidation.service.ts:252",
+          "workspace-internals.ts:201",
+          "merge-cleanup.service.ts:64"
+        ],
+        "dimensions": [
+          "api",
+          "state-transition",
+          "regression",
+          "concurrency"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -147,10 +309,19 @@
         "id": "review-merge.guard.zero-commit-no-reconcile",
         "statement": "A branch with 0 unique commits (branchSha===baseSha) is NOT reconciled-as-Done — it is kept In Review (reconciled:false / clean-ancestor) as a false-positive guard against silent-merge-loss",
         "actor": "operator",
-        "preconditions": ["branch tip equals base / countUniqueCommits===0"],
+        "preconditions": [
+          "branch tip equals base / countUniqueCommits===0"
+        ],
         "observable_outcome": "workspace stays open, issue stays In Review, reconciled:false; no Done transition, no merge commit",
-        "evidence": ["workspace-merge-prevalidation.service.ts:263", "workspace-internals.ts:159"],
-        "dimensions": ["boundary", "regression", "state-transition"],
+        "evidence": [
+          "workspace-merge-prevalidation.service.ts:263",
+          "workspace-internals.ts:159"
+        ],
+        "dimensions": [
+          "boundary",
+          "regression",
+          "state-transition"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -158,10 +329,22 @@
         "id": "review-merge.recover.fix-and-merge",
         "statement": "A failed/conflicting merge can be recovered by relaunching an agent in the worktree (status → fixing); on resolver exit the merge is re-attempted, the workspace stays retryable if the branch didn't land, or closes if it did; stale zero-output fix sessions are force-recovered",
         "actor": "fix-agent",
-        "preconditions": ["a merge conflicted", "caller chose recovery (POST /fix-and-merge) or resolver session exits"],
+        "preconditions": [
+          "a merge conflicted",
+          "caller chose recovery (POST /fix-and-merge) or resolver session exits"
+        ],
         "observable_outcome": "workspace status fixing; resolver exit without landing → workspace kept open+idle (retryable); resolver exit having landed → workspace closed, issue Done; zero-output zombie fix session force-stopped before retry",
-        "evidence": ["workspace-merge.service.ts:394", "exit-workflow.ts:813", "workspace-merge.service.ts:445"],
-        "dimensions": ["workflow", "state-transition", "error-handling", "api"],
+        "evidence": [
+          "workspace-merge.service.ts:394",
+          "exit-workflow.ts:813",
+          "workspace-merge.service.ts:445"
+        ],
+        "dimensions": [
+          "workflow",
+          "state-transition",
+          "error-handling",
+          "api"
+        ],
         "risk": "high",
         "confidence": "medium"
       },
@@ -169,10 +352,22 @@
         "id": "review-merge.batch.auto-merge",
         "statement": "The scheduled auto-merge engine selects idle reviewed workspaces (incl. ready work stranded in Done), excludes direct/closed/in-progress/user-parked/auto_merge_disabled projects, and only runs when merge_strategy=merge_queue; In-Review idle work is included only when auto_merge_in_review is on",
         "actor": "auto-merge-orchestrator",
-        "preconditions": ["merge_strategy=merge_queue", "isAutoMergeEnabled"],
+        "preconditions": [
+          "merge_strategy=merge_queue",
+          "isAutoMergeEnabled"
+        ],
         "observable_outcome": "findCompletedWorkspaceIds returns exactly the eligible set; engine no-ops when strategy != merge_queue; zombie reconciler session reaped so next tick can relaunch",
-        "evidence": ["auto-merge-orchestrator.ts:72", "auto-merge-orchestrator.ts:346", "merge-strategy.ts:14"],
-        "dimensions": ["config", "permission", "workflow", "regression"],
+        "evidence": [
+          "auto-merge-orchestrator.ts:72",
+          "auto-merge-orchestrator.ts:346",
+          "merge-strategy.ts:14"
+        ],
+        "dimensions": [
+          "config",
+          "permission",
+          "workflow",
+          "regression"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -180,10 +375,22 @@
         "id": "review-merge.batch.execute",
         "statement": "Batch execution lands clean siblings in least-overlap order while skipping/aborting conflicts, sequences+auto-renumbers migration-number collisions, auto-resolves pure-append hot-file conflicts by concatenation, and lands mechanically-mergeable overlap clusters without a re-conflict loop",
         "actor": "auto-merge-orchestrator",
-        "preconditions": ["a planned batch of >=2 approved workspaces"],
+        "preconditions": [
+          "a planned batch of >=2 approved workspaces"
+        ],
         "observable_outcome": "clean members land; conflicting member skipped and its rebase aborted (worktree not left mid-rebase); migration collisions reported + renumbered before rebase; append-only cluster lands without strand; clusters converge idempotently",
-        "evidence": ["merge-queue.service.ts:433", "merge-queue.service.ts:291", "merge-workflow.ts:188", "merge-queue.service.ts:119"],
-        "dimensions": ["workflow", "boundary", "concurrency", "state-transition"],
+        "evidence": [
+          "merge-queue.service.ts:433",
+          "merge-queue.service.ts:291",
+          "merge-workflow.ts:188",
+          "merge-queue.service.ts:119"
+        ],
+        "dimensions": [
+          "workflow",
+          "boundary",
+          "concurrency",
+          "state-transition"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -191,10 +398,22 @@
         "id": "review-merge.invariant.done-unmerged",
         "statement": "The Done⇔merged scanner detects a Done/AI-Reviewed issue whose branch isn't on base, NEVER reopens it, and forward-only auto-merges a clean ahead-only branch under rate limits; multiple false-positive guards (0-commit, too-far-behind, conflicting, has-merged-ws, deleted-branch) suppress unsafe action",
         "actor": "reconcilers",
-        "preconditions": ["issue Done/AI-Reviewed", "mergedAt null", "branch not ancestor of base"],
+        "preconditions": [
+          "issue Done/AI-Reviewed",
+          "mergedAt null",
+          "branch not ancestor of base"
+        ],
         "observable_outcome": "real loss flagged + auto-merged (<=3/cycle, ahead>=1, behind<=20, conflict-free); 0-commit/too-behind/conflicting/deleted-branch are log-only with no status change; issue never reopened; idempotent after stamping mergedAt",
-        "evidence": ["done-unmerged-invariant-scanner.ts:109", "done-unmerged-invariant-scanner.ts:100", "done-unmerged-invariant-scanner.ts:19"],
-        "dimensions": ["regression", "risk", "boundary"],
+        "evidence": [
+          "done-unmerged-invariant-scanner.ts:109",
+          "done-unmerged-invariant-scanner.ts:100",
+          "done-unmerged-invariant-scanner.ts:19"
+        ],
+        "dimensions": [
+          "regression",
+          "risk",
+          "boundary"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -202,10 +421,20 @@
         "id": "review-merge.reconcile.idempotent-done",
         "statement": "Post-merge Done convergence is idempotent and crash-safe: mergedAt anchors recovery so a dropped HTTP response, a failed workspace-close, or a re-merge call all converge the issue to Done exactly once without rollback or double-transition",
         "actor": "reconcilers",
-        "preconditions": ["git merge already landed (mergedAt set) OR branch is an ancestor"],
+        "preconditions": [
+          "git merge already landed (mergedAt set) OR branch is an ancestor"
+        ],
         "observable_outcome": "reconcileMergedIssue moves In-Review→Done, no-ops when already Done, preserves statusChangedAt; issue stays Done even when workspace close DB write fails; ancestor-branch reconciler closes ancestor In-Review ws and Dones it without a merge commit",
-        "evidence": ["merge-cleanup.service.ts:64", "merge-cleanup.service.ts:147", "ancestor-branch-reconciler.ts:50"],
-        "dimensions": ["regression", "state-transition", "concurrency"],
+        "evidence": [
+          "merge-cleanup.service.ts:64",
+          "merge-cleanup.service.ts:147",
+          "ancestor-branch-reconciler.ts:50"
+        ],
+        "dimensions": [
+          "regression",
+          "state-transition",
+          "concurrency"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -213,10 +442,19 @@
         "id": "review-merge.reconcile.stranded-review",
         "statement": "Work stranded idle/In-Review/not-ready with commits and no review session is recovered by relaunching review (or marked ready when auto_review is off); the reconciler no-ops when disabled",
         "actor": "reconcilers",
-        "preconditions": ["workspace idle, issue In Review, readyForMerge=false, has commits, no session, no prior review"],
+        "preconditions": [
+          "workspace idle, issue In Review, readyForMerge=false, has commits, no session, no prior review"
+        ],
         "observable_outcome": "a review session is (re)launched and the workspace leaves the stranded state; zero mutations when disabled via dep or DB pref",
-        "evidence": ["stranded-review-reconciler.ts:43", "stranded-review-reconciler.ts:25"],
-        "dimensions": ["workflow", "state-transition", "config"],
+        "evidence": [
+          "stranded-review-reconciler.ts:43",
+          "stranded-review-reconciler.ts:25"
+        ],
+        "dimensions": [
+          "workflow",
+          "state-transition",
+          "config"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -224,10 +462,20 @@
         "id": "review-merge.gate.verify-smoke",
         "statement": "A configured verify/smoke pre-merge gate FAILS the merge when verify_script exits non-zero or a web project's boot/render smoke check fails; a configured gate that can't run (no worktree) fails closed; neither configured is a no-op pass",
         "actor": "in-process-monitor",
-        "preconditions": ["verify_script_<id> set OR project stack profile isWeb"],
+        "preconditions": [
+          "verify_script_<id> set OR project stack profile isWeb"
+        ],
         "observable_outcome": "merge withheld on non-zero verify / failed smoke / missing-worktree-when-configured; passes when verify exits 0 and smoke renders; runs verify THEN smoke when both set",
-        "evidence": ["pre-merge-gate.service.ts:47", "exit-workflow.ts:536", "monitor-cycle.ts:247"],
-        "dimensions": ["error-handling", "config", "risk"],
+        "evidence": [
+          "pre-merge-gate.service.ts:47",
+          "exit-workflow.ts:536",
+          "monitor-cycle.ts:247"
+        ],
+        "dimensions": [
+          "error-handling",
+          "config",
+          "risk"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -235,45 +483,153 @@
         "id": "review-merge.foundational.sync-merge",
         "statement": "A no-own-dependency ticket with >=1 open dependent is classified as a foundational blocker eligible for synchronous merge, so dependents aren't cut from an empty pre-merge base",
         "actor": "auto-merge-orchestrator",
-        "preconditions": ["workspace has no unresolved own dependency", ">=1 open dependent (depends_on or blocked_by)"],
+        "preconditions": [
+          "workspace has no unresolved own dependency",
+          ">=1 open dependent (depends_on or blocked_by)"
+        ],
         "observable_outcome": "isFoundationalBlocker true only when an open dependent exists AND own deps are Done; false for leaf tickets, unresolved-own-dep tickets, terminal-only dependents, non-blocking relations",
-        "evidence": ["foundational-merge.service.ts:73"],
-        "dimensions": ["workflow", "config"],
+        "evidence": [
+          "foundational-merge.service.ts:73"
+        ],
+        "dimensions": [
+          "workflow",
+          "config"
+        ],
         "risk": "medium",
         "confidence": "medium"
       }
     ],
     "permissions": [
-      { "actor": "operator", "behavior": "review-merge.merge.approved", "allowed": true, "notes": "single-user local app — no RBAC; permission axis is near-trivial except the reviewer/system separation" },
-      { "actor": "reviewer-agent", "behavior": "review-merge.merge.approved", "allowed": false, "notes": "reviewer may only SIGNAL via mark_ready_for_merge; self-merge is contractually forbidden so the system gates run (#822)" }
+      {
+        "actor": "operator",
+        "behavior": "review-merge.merge.approved",
+        "allowed": true,
+        "notes": "single-user local app — no RBAC; permission axis is near-trivial except the reviewer/system separation"
+      },
+      {
+        "actor": "reviewer-agent",
+        "behavior": "review-merge.merge.approved",
+        "allowed": false,
+        "notes": "reviewer may only SIGNAL via mark_ready_for_merge; self-merge is contractually forbidden so the system gates run (#822)"
+      }
     ],
     "state_model": {
-      "states": ["In Progress", "In Review", "reviewing", "AI Reviewed", "fixing", "merging", "Done", "stranded"],
+      "states": [
+        "In Progress",
+        "In Review",
+        "reviewing",
+        "AI Reviewed",
+        "fixing",
+        "merging",
+        "Done",
+        "stranded"
+      ],
       "transitions": [
-        { "from": "In Progress", "to": "In Review", "trigger": "builder exits with committed changes", "behavior": "review-merge.exit.auto-review" },
-        { "from": "In Review", "to": "reviewing", "trigger": "auto_review launches review", "behavior": "review-merge.launch.review" },
-        { "from": "reviewing", "to": "In Progress", "trigger": "reviewer finds CRITICAL/MAJOR (auto_fix kicks back)", "behavior": "review-merge.launch.review" },
-        { "from": "reviewing", "to": "AI Reviewed", "trigger": "reviewer marks readyForMerge", "behavior": "review-merge.signal.ready" },
-        { "from": "AI Reviewed", "to": "Done", "trigger": "merge lands + ancestry verified", "behavior": "review-merge.merge.approved" },
-        { "from": "AI Reviewed", "to": "stranded", "trigger": "conflict → skipped+escalated", "behavior": "review-merge.reject.conflict" },
-        { "from": "merging", "to": "fixing", "trigger": "fix-and-merge relaunch", "behavior": "review-merge.recover.fix-and-merge" },
-        { "from": "In Review", "to": "Done", "trigger": "branch already ancestor → reconcile no-op", "behavior": "review-merge.reconcile.already-merged" }
+        {
+          "from": "In Progress",
+          "to": "In Review",
+          "trigger": "builder exits with committed changes",
+          "behavior": "review-merge.exit.auto-review"
+        },
+        {
+          "from": "In Review",
+          "to": "reviewing",
+          "trigger": "auto_review launches review",
+          "behavior": "review-merge.launch.review"
+        },
+        {
+          "from": "reviewing",
+          "to": "In Progress",
+          "trigger": "reviewer finds CRITICAL/MAJOR (auto_fix kicks back)",
+          "behavior": "review-merge.launch.review"
+        },
+        {
+          "from": "reviewing",
+          "to": "AI Reviewed",
+          "trigger": "reviewer marks readyForMerge",
+          "behavior": "review-merge.signal.ready"
+        },
+        {
+          "from": "AI Reviewed",
+          "to": "Done",
+          "trigger": "merge lands + ancestry verified",
+          "behavior": "review-merge.merge.approved"
+        },
+        {
+          "from": "AI Reviewed",
+          "to": "stranded",
+          "trigger": "conflict → skipped+escalated",
+          "behavior": "review-merge.reject.conflict"
+        },
+        {
+          "from": "merging",
+          "to": "fixing",
+          "trigger": "fix-and-merge relaunch",
+          "behavior": "review-merge.recover.fix-and-merge"
+        },
+        {
+          "from": "In Review",
+          "to": "Done",
+          "trigger": "branch already ancestor → reconcile no-op",
+          "behavior": "review-merge.reconcile.already-merged"
+        }
       ]
     },
     "error_states": [
-      { "id": "review-merge.err.not_approved", "statement": "merge of unapproved non-direct ws → 409 mergeReason=not_approved", "evidence": "workspace-internals.ts:235" },
-      { "id": "review-merge.err.conflict", "statement": "conflicting merge → 409 mergeReason=conflict with conflictFiles, readyForMerge cleared", "evidence": "merge-service-edge-cases" },
-      { "id": "review-merge.err.dirty_main", "statement": "dirty main checkout → 409 mergeReason=dirty_main, no git merge", "evidence": "merge-workflow.ts:173" },
-      { "id": "review-merge.err.already_merged", "statement": "already-landed branch → 200 reconciled no-op, not an error", "evidence": "workspace-merge-prevalidation.service.ts:252" },
-      { "id": "review-merge.err.review_409", "statement": "review on non-idle ws → 409 ReviewError (not a bare throw / 500)", "evidence": "review.service.ts:325" },
-      { "id": "review-merge.err.server_build_stale", "statement": "stale server build → 503 reason=server_build_stale", "evidence": "merge-error-reporting" }
+      {
+        "id": "review-merge.err.not_approved",
+        "statement": "merge of unapproved non-direct ws → 409 mergeReason=not_approved",
+        "evidence": "workspace-internals.ts:235"
+      },
+      {
+        "id": "review-merge.err.conflict",
+        "statement": "conflicting merge → 409 mergeReason=conflict with conflictFiles, readyForMerge cleared",
+        "evidence": "merge-service-edge-cases"
+      },
+      {
+        "id": "review-merge.err.dirty_main",
+        "statement": "dirty main checkout → 409 mergeReason=dirty_main, no git merge",
+        "evidence": "merge-workflow.ts:173"
+      },
+      {
+        "id": "review-merge.err.already_merged",
+        "statement": "already-landed branch → 200 reconciled no-op, not an error",
+        "evidence": "workspace-merge-prevalidation.service.ts:252"
+      },
+      {
+        "id": "review-merge.err.review_409",
+        "statement": "review on non-idle ws → 409 ReviewError (not a bare throw / 500)",
+        "evidence": "review.service.ts:325"
+      },
+      {
+        "id": "review-merge.err.server_build_stale",
+        "statement": "stale server build → 503 reason=server_build_stale",
+        "evidence": "merge-error-reporting"
+      }
     ],
-    "external_integrations": ["git CLI (via shared git-service / git-exec adapter)", "agent subprocess (reviewer + fix-agent)", "drizzle/libsql DB", "WebSocket board broadcast"],
+    "external_integrations": [
+      "git CLI (via shared git-service / git-exec adapter)",
+      "agent subprocess (reviewer + fix-agent)",
+      "drizzle/libsql DB",
+      "WebSocket board broadcast"
+    ],
     "unknowns": [
-      { "question": "Does the manual /merge → runWorkspacePreMergeValidation path run the verify/smoke gate?", "why_unknown": "Domain doc + call-site analysis say runPreMergeGate is wired only into review-exit and monitor-cycle, NOT the manual/orchestrator merge body — so a hand-merge can land build/test/boot-unverified code. No test asserts this gap either way." },
-      { "question": "Is the POST /fix-and-merge endpoint itself (vs the resolver-exit recovery) asserted to set status=fixing and relaunch the agent?", "why_unknown": "Tests cover resolver-exit re-merge and zombie recovery, but no test drives the endpoint and asserts the fixing transition + agent launch." },
-      { "question": "Is the actual synchronous foundational-merge execution (not just isFoundationalBlocker eligibility) exercised?", "why_unknown": "foundational-merge.service.test.ts asserts only the classifier; the sync-merge land path is unasserted." },
-      { "question": "Live behaviour not exercised — env was READ-ONLY (no merges/agent spawns), so all statuses are from code+tests not running-app observation.", "why_unknown": "subagent constraint: GET-only against the dev server" }
+      {
+        "question": "Does the manual /merge → runWorkspacePreMergeValidation path run the verify/smoke gate?",
+        "why_unknown": "Domain doc + call-site analysis say runPreMergeGate is wired only into review-exit and monitor-cycle, NOT the manual/orchestrator merge body — so a hand-merge can land build/test/boot-unverified code. No test asserts this gap either way."
+      },
+      {
+        "question": "Is the POST /fix-and-merge endpoint itself (vs the resolver-exit recovery) asserted to set status=fixing and relaunch the agent?",
+        "why_unknown": "Tests cover resolver-exit re-merge and zombie recovery, but no test drives the endpoint and asserts the fixing transition + agent launch."
+      },
+      {
+        "question": "Is the actual synchronous foundational-merge execution (not just isFoundationalBlocker eligibility) exercised?",
+        "why_unknown": "foundational-merge.service.test.ts asserts only the classifier; the sync-merge land path is unasserted."
+      },
+      {
+        "question": "Live behaviour not exercised — env was READ-ONLY (no merges/agent spawns), so all statuses are from code+tests not running-app observation.",
+        "why_unknown": "subagent constraint: GET-only against the dev server"
+      }
     ]
   },
   "coverage": {
@@ -282,145 +638,353 @@
         "ref": "review-merge.launch.review",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/e2e/tests/ui/code-review.test.ts::Review API returns 200 and sessionId for idle workspace", "strength": "asserts-outcome" },
-          { "test": "packages/e2e/tests/ui/code-review.test.ts::Review endpoint returns 409 when workspace is not idle", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/review-concurrent.test.ts::returns 409 ReviewError (not a bare throw) when workspace is not idle", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/review-concurrent.test.ts::concurrent review triggers: second call gets CONFLICT, not an uncaught 500", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/review-workspace-profile.test.ts::overrides provider + codex_profile from a codex workspace so the review uses its license", "strength": "asserts-outcome" }
+          {
+            "test": "packages/e2e/tests/ui/code-review.test.ts::Review API returns 200 and sessionId for idle workspace",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/e2e/tests/ui/code-review.test.ts::Review endpoint returns 409 when workspace is not idle",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/review-concurrent.test.ts::returns 409 ReviewError (not a bare throw) when workspace is not idle",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/review-concurrent.test.ts::concurrent review triggers: second call gets CONFLICT, not an uncaught 500",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/review-workspace-profile.test.ts::overrides provider + codex_profile from a codex workspace so the review uses its license",
+            "strength": "asserts-outcome"
+          }
         ],
-        "requirements": ["PRD-04:ai-review"],
-        "dimensions_covered": ["api", "error-handling", "concurrency", "config"],
+        "requirements": [
+          "PRD-04:ai-review"
+        ],
+        "dimensions_covered": [
+          "api",
+          "error-handling",
+          "concurrency",
+          "config"
+        ],
         "dimensions_missing": []
       },
       {
         "ref": "review-merge.exit.auto-review",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/active-stopped-workspace-enters-review.test.ts::board status, workspace status, and workflow node state all agree after the transition", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/active-stopped-workspace-enters-review.test.ts::is idempotent: a second exit call does not duplicate the review session and preserves the diff", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/zero-diff-inreview-exit.test.ts::leaves In Progress issue untouched when no committed changes", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/active-stopped-workspace-enters-review.test.ts::board status, workspace status, and workflow node state all agree after the transition",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/active-stopped-workspace-enters-review.test.ts::is idempotent: a second exit call does not duplicate the review session and preserves the diff",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/zero-diff-inreview-exit.test.ts::leaves In Progress issue untouched when no committed changes",
+            "strength": "asserts-outcome"
+          }
         ],
-        "requirements": ["PRD-04:auto-review-handshake"],
-        "dimensions_covered": ["workflow", "state-transition", "concurrency"],
+        "requirements": [
+          "PRD-04:auto-review-handshake"
+        ],
+        "dimensions_covered": [
+          "workflow",
+          "state-transition",
+          "concurrency"
+        ],
         "dimensions_missing": []
       },
       {
         "ref": "review-merge.guard.zero-commit-no-approve",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/ready-for-merge-zero-commit-guard.test.ts::does NOT set readyForMerge=true when review exits but branch has no committed changes", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/ready-for-merge-zero-commit-guard.test.ts::keeps workspace idle and in In Review when review exits on 0-commit branch", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/ready-for-merge-zero-commit-guard.test.ts::does NOT broadcast workspace_ready_for_merge for 0-commit review exit", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/ready-for-merge-zero-commit-guard.test.ts::does NOT set readyForMerge=true when review exits but branch has no committed changes",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/ready-for-merge-zero-commit-guard.test.ts::keeps workspace idle and in In Review when review exits on 0-commit branch",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/ready-for-merge-zero-commit-guard.test.ts::does NOT broadcast workspace_ready_for_merge for 0-commit review exit",
+            "strength": "asserts-outcome"
+          }
         ],
-        "requirements": ["#629"],
-        "dimensions_covered": ["boundary", "state-transition", "regression", "risk"],
+        "requirements": [
+          "#629"
+        ],
+        "dimensions_covered": [
+          "boundary",
+          "state-transition",
+          "regression",
+          "risk"
+        ],
         "dimensions_missing": []
       },
       {
         "ref": "review-merge.signal.ready",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/e2e/tests/api/ready-for-merge.test.ts::POST /api/workspaces/:id/ready-for-merge sets readyForMerge=true", "strength": "asserts-outcome" },
-          { "test": "packages/e2e/tests/api/ready-for-merge.test.ts::board workspaceSummary reflects readyForMerge=true", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/review-prompt-approval-instruction.test.ts::reviewer mode verifies + approves but does NOT self-merge (so the exit gate runs) (#822)", "strength": "asserts-outcome" }
+          {
+            "test": "packages/e2e/tests/api/ready-for-merge.test.ts::POST /api/workspaces/:id/ready-for-merge sets readyForMerge=true",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/e2e/tests/api/ready-for-merge.test.ts::board workspaceSummary reflects readyForMerge=true",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/review-prompt-approval-instruction.test.ts::reviewer mode verifies + approves but does NOT self-merge (so the exit gate runs) (#822)",
+            "strength": "asserts-outcome"
+          }
         ],
-        "requirements": ["#822"],
-        "dimensions_covered": ["api", "permission", "state-transition"],
+        "requirements": [
+          "#822"
+        ],
+        "dimensions_covered": [
+          "api",
+          "permission",
+          "state-transition"
+        ],
         "dimensions_missing": []
       },
       {
         "ref": "review-merge.merge.approved",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::calls mergeBranch and returns merged=true with SHAs", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::closes the workspace and moves the issue to Done after a clean merge", "strength": "asserts-outcome" },
-          { "test": "packages/e2e/tests/api/merge-advances-master.test.ts::POST /merge closes workspace and moves issue to Done", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::returns the same promise for concurrent calls to the same workspace", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/merge-atomic-done-transition.test.ts::normal merge: both workspace closed and issue Done on clean path", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::calls mergeBranch and returns merged=true with SHAs",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::closes the workspace and moves the issue to Done after a clean merge",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/e2e/tests/api/merge-advances-master.test.ts::POST /merge closes workspace and moves issue to Done",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::returns the same promise for concurrent calls to the same workspace",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/merge-atomic-done-transition.test.ts::normal merge: both workspace closed and issue Done on clean path",
+            "strength": "asserts-outcome"
+          }
         ],
-        "requirements": ["INV:Done-iff-on-base", "PRD-04:auto-merge"],
-        "dimensions_covered": ["api", "workflow", "state-transition", "risk", "concurrency"],
+        "requirements": [
+          "INV:Done-iff-on-base",
+          "PRD-04:auto-merge"
+        ],
+        "dimensions_covered": [
+          "api",
+          "workflow",
+          "state-transition",
+          "risk",
+          "concurrency"
+        ],
         "dimensions_missing": []
       },
       {
         "ref": "review-merge.reject.not-approved",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/workspace-already-merged.test.ts::throws CONFLICT with mergeReason=not_approved when readyForMerge=false", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/merge-error-reporting.test.ts::reason=not_approved when workspace is not ready for merge", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::proceeds past the readyForMerge gate when autoMergeInReview=true and readyForMerge=false", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::does not bypass the gate for isDirect workspaces (they skip readyForMerge unconditionally)", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/workspace-already-merged.test.ts::throws CONFLICT with mergeReason=not_approved when readyForMerge=false",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/merge-error-reporting.test.ts::reason=not_approved when workspace is not ready for merge",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::proceeds past the readyForMerge gate when autoMergeInReview=true and readyForMerge=false",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::does not bypass the gate for isDirect workspaces (they skip readyForMerge unconditionally)",
+            "strength": "asserts-outcome"
+          }
         ],
-        "requirements": ["INV:no-merge-without-approval"],
-        "dimensions_covered": ["error-handling", "permission", "config"],
+        "requirements": [
+          "INV:no-merge-without-approval"
+        ],
+        "dimensions_covered": [
+          "error-handling",
+          "permission",
+          "config"
+        ],
         "dimensions_missing": []
       },
       {
         "ref": "review-merge.guard.dirty-main",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::throws CONFLICT with mergeReason=dirty_main when main checkout is dirty", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::checks dirty-main even when workingDir is missing", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/merge-error-reporting.test.ts::reason=dirty_main when main checkout has uncommitted changes", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::throws CONFLICT with mergeReason=dirty_main when main checkout is dirty",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::checks dirty-main even when workingDir is missing",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/merge-error-reporting.test.ts::reason=dirty_main when main checkout has uncommitted changes",
+            "strength": "asserts-outcome"
+          }
         ],
-        "requirements": ["INV:never-merge-into-dirty-main"],
-        "dimensions_covered": ["error-handling", "risk", "boundary"],
+        "requirements": [
+          "INV:never-merge-into-dirty-main"
+        ],
+        "dimensions_covered": [
+          "error-handling",
+          "risk",
+          "boundary"
+        ],
         "dimensions_missing": []
       },
       {
         "ref": "review-merge.reject.conflict",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/merge-service-edge-cases.test.ts::throws CONFLICT with mergeReason=conflict when mergeBranch detects conflict markers", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/merge-service-edge-cases.test.ts::clears readyForMerge and throws CONFLICT when branch is behind and merge-tree conflicts", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/merge-conflict-server-health.test.ts::returns 409 and does NOT advance master when the branch conflicts", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/merge-conflict-server-health.test.ts::server health endpoint remains responsive after a failed conflicting merge", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/merge-service-edge-cases.test.ts::throws CONFLICT with mergeReason=conflict when mergeBranch detects conflict markers",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/merge-service-edge-cases.test.ts::clears readyForMerge and throws CONFLICT when branch is behind and merge-tree conflicts",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/merge-conflict-server-health.test.ts::returns 409 and does NOT advance master when the branch conflicts",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/merge-conflict-server-health.test.ts::server health endpoint remains responsive after a failed conflicting merge",
+            "strength": "asserts-outcome"
+          }
         ],
-        "requirements": ["#598", "#599", "#600", "#761"],
-        "dimensions_covered": ["error-handling", "risk", "regression"],
+        "requirements": [
+          "#598",
+          "#599",
+          "#600",
+          "#761"
+        ],
+        "dimensions_covered": [
+          "error-handling",
+          "risk",
+          "regression"
+        ],
         "dimensions_missing": []
       },
       {
         "ref": "review-merge.reconcile.already-merged",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/merge-endpoint-reconcile-noop.test.ts::(b2) reconcile no-op response shape: merged=false, reconciled=true, baseBranch, baseHeadSha*", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/merge-endpoint-reconcile-noop.test.ts::(d) NO new merge commit created on master — mergeBranch is not called", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/merge-endpoint-reconcile-noop.test.ts::closes stale reviewing workspace and running review session on first ancestor no-op reconciliation", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::reconciles idempotently when mergedAt is set (dropped-response retry)", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/workspace-merge-flap.test.ts::retry with mergedAt already set reconciles issue to Done without re-running mergeBranch", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/merge-endpoint-reconcile-noop.test.ts::(b2) reconcile no-op response shape: merged=false, reconciled=true, baseBranch, baseHeadSha*",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/merge-endpoint-reconcile-noop.test.ts::(d) NO new merge commit created on master — mergeBranch is not called",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/merge-endpoint-reconcile-noop.test.ts::closes stale reviewing workspace and running review session on first ancestor no-op reconciliation",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::reconciles idempotently when mergedAt is set (dropped-response retry)",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/workspace-merge-flap.test.ts::retry with mergedAt already set reconciles issue to Done without re-running mergeBranch",
+            "strength": "asserts-outcome"
+          }
         ],
-        "requirements": ["#583", "#492", "#820"],
-        "dimensions_covered": ["api", "state-transition", "regression", "concurrency"],
+        "requirements": [
+          "#583",
+          "#492",
+          "#820"
+        ],
+        "dimensions_covered": [
+          "api",
+          "state-transition",
+          "regression",
+          "concurrency"
+        ],
         "dimensions_missing": []
       },
       {
         "ref": "review-merge.guard.zero-commit-no-reconcile",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/merge-service-edge-cases.test.ts::does not mark the workspace closed or move issue to Done when branch has 0 unique commits", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/merge-service-edge-cases.test.ts::returns clean-ancestor no-op when 0-commit branch is reconciled as clean ancestor", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::returns clean-ancestor when branch equals the base head and has 0 unique commits", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/merge-service-edge-cases.test.ts::does not mark the workspace closed or move issue to Done when branch has 0 unique commits",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/merge-service-edge-cases.test.ts::returns clean-ancestor no-op when 0-commit branch is reconciled as clean ancestor",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::returns clean-ancestor when branch equals the base head and has 0 unique commits",
+            "strength": "asserts-outcome"
+          }
         ],
-        "requirements": ["#581", "#585"],
-        "dimensions_covered": ["boundary", "regression", "state-transition"],
+        "requirements": [
+          "#581",
+          "#585"
+        ],
+        "dimensions_covered": [
+          "boundary",
+          "regression",
+          "state-transition"
+        ],
         "dimensions_missing": []
       },
       {
         "ref": "review-merge.recover.fix-and-merge",
         "status": "partial",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/stranded-fix-and-merge-resolver-exit.test.ts::keeps the workspace OPEN and idle (retryable) when the resolver exits but the branch did NOT land", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/stranded-fix-and-merge-resolver-exit.test.ts::does NOT reopen/touch the workspace when the resolver DID land the branch (autoMerge closed it)", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::force-stops a stale zero-output fix-and-merge session before retrying merge", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::closes the workspace and moves the issue to Done when merging from fixing status", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/stranded-fix-and-merge-resolver-exit.test.ts::keeps the workspace OPEN and idle (retryable) when the resolver exits but the branch did NOT land",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/stranded-fix-and-merge-resolver-exit.test.ts::does NOT reopen/touch the workspace when the resolver DID land the branch (autoMerge closed it)",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::force-stops a stale zero-output fix-and-merge session before retrying merge",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/workspace-merge-service.test.ts::closes the workspace and moves the issue to Done when merging from fixing status",
+            "strength": "asserts-outcome"
+          }
         ],
-        "requirements": ["#764"],
-        "dimensions_covered": ["state-transition", "error-handling", "workflow"],
-        "dimensions_missing": ["api"],
+        "requirements": [
+          "#764"
+        ],
+        "dimensions_covered": [
+          "state-transition",
+          "error-handling",
+          "workflow"
+        ],
+        "dimensions_missing": [
+          "api"
+        ],
         "gap": {
           "kind": "outcome-not-asserted",
-          "missing_dimensions": ["api"],
+          "missing_dimensions": [
+            "api"
+          ],
           "rationale": "Resolver-exit recovery and zombie-fix recovery are well asserted, but the POST /api/workspaces/:id/fix-and-merge endpoint itself — that it transitions the workspace to status=fixing and relaunches the fix agent in the worktree — is never driven end-to-end and asserted."
         }
       },
@@ -428,159 +992,341 @@
         "ref": "review-merge.batch.auto-merge",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/auto-merge-orchestrator.test.ts::runs only when the merge strategy is the merge queue", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/auto-merge-orchestrator.test.ts::finds idle reviewed workspaces (incl. ready work stranded in Done) and excludes direct, closed, in-progress, and user-parked Done", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/auto-merge-orchestrator.test.ts::excludes a project that has auto_merge_disabled_<projectId> set", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/auto-merge-orchestrator.test.ts::includes idle In Review workspaces only when auto_merge_in_review is enabled", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/merge-strategy.test.ts::disables automatic merging only for the direct strategy or auto_merge=false", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/auto-merge-pref.test.ts::defaults to ENABLED when the key is unset", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/auto-merge-orchestrator.test.ts::runs only when the merge strategy is the merge queue",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/auto-merge-orchestrator.test.ts::finds idle reviewed workspaces (incl. ready work stranded in Done) and excludes direct, closed, in-progress, and user-parked Done",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/auto-merge-orchestrator.test.ts::excludes a project that has auto_merge_disabled_<projectId> set",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/auto-merge-orchestrator.test.ts::includes idle In Review workspaces only when auto_merge_in_review is enabled",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/merge-strategy.test.ts::disables automatic merging only for the direct strategy or auto_merge=false",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/auto-merge-pref.test.ts::defaults to ENABLED when the key is unset",
+            "strength": "asserts-outcome"
+          }
         ],
-        "requirements": ["#866", "decision-006"],
-        "dimensions_covered": ["config", "permission", "workflow", "regression"],
+        "requirements": [
+          "#866",
+          "decision-006"
+        ],
+        "dimensions_covered": [
+          "config",
+          "permission",
+          "workflow",
+          "regression"
+        ],
         "dimensions_missing": []
       },
       {
         "ref": "review-merge.batch.execute",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/merge-queue.service.test.ts::reports migration-number collisions across queued workspaces", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/merge-queue.service.test.ts::renumbers migrations before the queue rebases the workspace", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/merge-queue.service.test.ts::aborts a skipped rebase conflict so the worktree is not left mid-rebase", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/merge-queue-strategy.test.ts::overlapping cluster, no conflict → integration-union; members grouped", "strength": "asserts-outcome" },
-          { "test": "packages/shared/__tests__/append-only-hotfile-merge.integration.test.ts::lands a 3-ticket append-only cluster via the plumbing merge with no manual git or strand", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/merge-overlap-cluster-landing.test.ts::lands a mechanically-mergeable overlap cluster without rebasing or looping", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/merge-queue.service.test.ts::reports migration-number collisions across queued workspaces",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/merge-queue.service.test.ts::renumbers migrations before the queue rebases the workspace",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/merge-queue.service.test.ts::aborts a skipped rebase conflict so the worktree is not left mid-rebase",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/merge-queue-strategy.test.ts::overlapping cluster, no conflict → integration-union; members grouped",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/shared/__tests__/append-only-hotfile-merge.integration.test.ts::lands a 3-ticket append-only cluster via the plumbing merge with no manual git or strand",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/merge-overlap-cluster-landing.test.ts::lands a mechanically-mergeable overlap cluster without rebasing or looping",
+            "strength": "asserts-outcome"
+          }
         ],
-        "requirements": ["#763", "#761"],
-        "dimensions_covered": ["workflow", "boundary", "concurrency", "state-transition"],
+        "requirements": [
+          "#763",
+          "#761"
+        ],
+        "dimensions_covered": [
+          "workflow",
+          "boundary",
+          "concurrency",
+          "state-transition"
+        ],
         "dimensions_missing": []
       },
       {
         "ref": "review-merge.invariant.done-unmerged",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/done-unmerged-invariant-scanner.test.ts::regression #584/#581: detects Done issue whose branch is NOT reachable from base and has >=1 unique commit", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/done-unmerged-invariant-scanner.test.ts::#592: auto-merges Done issue with clean ahead-only branch; issue stays Done", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/done-unmerged-invariant-scanner.test.ts::#592: NEVER reopens issue — 0-commit branch is log-only, no status change", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/done-unmerged-invariant-scanner.test.ts::#592: rate-limit cap — auto-merges at most 3 per cycle", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/done-unmerged-invariant-scanner.test.ts::#590 guard 1: skips issue that has ANY workspace with mergedAt set (false-positive fix)", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/done-unmerged-invariant-scanner.test.ts::regression #584/#581: detects Done issue whose branch is NOT reachable from base and has >=1 unique commit",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/done-unmerged-invariant-scanner.test.ts::#592: auto-merges Done issue with clean ahead-only branch; issue stays Done",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/done-unmerged-invariant-scanner.test.ts::#592: NEVER reopens issue — 0-commit branch is log-only, no status change",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/done-unmerged-invariant-scanner.test.ts::#592: rate-limit cap — auto-merges at most 3 per cycle",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/done-unmerged-invariant-scanner.test.ts::#590 guard 1: skips issue that has ANY workspace with mergedAt set (false-positive fix)",
+            "strength": "asserts-outcome"
+          }
         ],
-        "requirements": ["INV:Done-iff-on-base", "#584", "#590", "#592", "#615", "#639"],
-        "dimensions_covered": ["regression", "risk", "boundary"],
+        "requirements": [
+          "INV:Done-iff-on-base",
+          "#584",
+          "#590",
+          "#592",
+          "#615",
+          "#639"
+        ],
+        "dimensions_covered": [
+          "regression",
+          "risk",
+          "boundary"
+        ],
         "dimensions_missing": []
       },
       {
         "ref": "review-merge.reconcile.idempotent-done",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/reconcile-merged-issue.test.ts::is idempotent: calling twice is safe and does not rewrite statusChangedAt", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/merge-cleanup.service.test.ts::keeps issue Done when workspace close fails (#668: no rollback)", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/merge-atomic-done-transition.test.ts::issue is Done even when workspace close DB write fails after git merge", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/issue-transition-on-interrupted-merge.test.ts::issue ends up Done via ancestor-branch reconciler when mergedAt was never written", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/reconcile-silently-merged.test.ts::closes a workspace that has mergedAt set but status=idle (dropped HTTP response scenario)", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/reconcile-merged-issue.test.ts::is idempotent: calling twice is safe and does not rewrite statusChangedAt",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/merge-cleanup.service.test.ts::keeps issue Done when workspace close fails (#668: no rollback)",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/merge-atomic-done-transition.test.ts::issue is Done even when workspace close DB write fails after git merge",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/issue-transition-on-interrupted-merge.test.ts::issue ends up Done via ancestor-branch reconciler when mergedAt was never written",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/reconcile-silently-merged.test.ts::closes a workspace that has mergedAt set but status=idle (dropped HTTP response scenario)",
+            "strength": "asserts-outcome"
+          }
         ],
-        "requirements": ["#668", "#575"],
-        "dimensions_covered": ["regression", "state-transition", "concurrency"],
+        "requirements": [
+          "#668",
+          "#575"
+        ],
+        "dimensions_covered": [
+          "regression",
+          "state-transition",
+          "concurrency"
+        ],
         "dimensions_missing": []
       },
       {
         "ref": "review-merge.reconcile.stranded-review",
-        "status": "partial",
+        "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/stranded-review-reconciler.test.ts::performs zero mutations when disabled via deps.enabled=false", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/stranded-review-reconciler.test.ts::performs zero mutations when disabled via DB preference", "strength": "touches-only" }
+          {
+            "test": "packages/server/src/__tests__/stranded-review-reconciler.test.ts::performs zero mutations when disabled via deps.enabled=false",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/stranded-review-reconciler.test.ts::performs zero mutations when disabled via DB preference",
+            "strength": "touches-only"
+          },
+          {
+            "test": "packages/server/src/__tests__/stranded-review-reconciler-relaunch.test.ts",
+            "strength": "asserts-outcome"
+          }
         ],
-        "requirements": ["#582"],
-        "dimensions_covered": ["config"],
-        "dimensions_missing": ["workflow", "state-transition"],
-        "gap": {
-          "kind": "outcome-not-asserted",
-          "missing_dimensions": ["workflow", "state-transition"],
-          "rationale": "The ONLY asserted path is the disable/no-op guard (#582). The reconciler's core honesty-restoration outcome — that a genuinely stranded idle/In-Review/not-ready workspace with commits gets a review relaunched (or is marked ready when auto_review is off) — is never asserted. A regression that stopped relaunching reviews would pass the existing suite."
-        }
+        "requirements": [
+          "#582"
+        ],
+        "dimensions_covered": [
+          "config",
+          "workflow"
+        ],
+        "dimensions_missing": [],
+        "gap": null,
+        "note": "Closed by e2e-test-author wave-3 2026-06-27 (adversarially reviewed). stranded-review-reconciler-relaunch.test.ts"
       },
       {
         "ref": "review-merge.gate.verify-smoke",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/pre-merge-gate.service.test.ts::FAILS (withholds merge) when verify_script exits non-zero", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/pre-merge-gate.service.test.ts::fail-closed: verify_script configured but NO worktree → fails, doesn't approve unverifiable work", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/pre-merge-gate.service.test.ts::runs the smoke check for a web project and FAILS when boot/render fails", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/monitor-merge-gate.test.ts::true when a verify_script is configured", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/pre-merge-gate.service.test.ts::FAILS (withholds merge) when verify_script exits non-zero",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/pre-merge-gate.service.test.ts::fail-closed: verify_script configured but NO worktree → fails, doesn't approve unverifiable work",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/pre-merge-gate.service.test.ts::runs the smoke check for a web project and FAILS when boot/render fails",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/monitor-merge-gate.test.ts::true when a verify_script is configured",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/merge-verify-gate-path-coverage.test.ts",
+            "strength": "asserts-outcome"
+          }
         ],
-        "requirements": ["#821"],
-        "dimensions_covered": ["error-handling", "config", "risk"],
+        "requirements": [
+          "#821"
+        ],
+        "dimensions_covered": [
+          "error-handling",
+          "config",
+          "risk"
+        ],
         "dimensions_missing": [],
-        "gap": {
-          "kind": "dimension-missing",
-          "missing_dimensions": ["api"],
-          "rationale": "The gate LOGIC is well covered, but NO test asserts that the manual/orchestrator merge body (POST /:id/merge → runWorkspacePreMergeValidation) does NOT invoke runPreMergeGate — the documented hole where a hand-merge can land build/test/boot-unverified code. Status kept 'covered' for the implemented gate; flagged as a behaviour-level escalation in unknowns, not a test-coverage downgrade."
-        }
+        "gap": null,
+        "note": "Closed by e2e-test-author wave-3 2026-06-27 (adversarially reviewed). merge-verify-gate-path-coverage.test.ts"
       },
       {
         "ref": "review-merge.foundational.sync-merge",
         "status": "partial",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/foundational-merge.service.test.ts::treats a no-dependency shell with an open tier-1 dependent as foundational", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/foundational-merge.service.test.ts::is NOT foundational when it has its own unresolved dependency", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/foundational-merge.service.test.ts::IS foundational once its own dependency is already Done (no open blocker left)", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/foundational-merge.service.test.ts::treats a no-dependency shell with an open tier-1 dependent as foundational",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/foundational-merge.service.test.ts::is NOT foundational when it has its own unresolved dependency",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/foundational-merge.service.test.ts::IS foundational once its own dependency is already Done (no open blocker left)",
+            "strength": "asserts-outcome"
+          }
         ],
-        "requirements": ["#797", "#784"],
-        "dimensions_covered": ["config"],
-        "dimensions_missing": ["workflow"],
+        "requirements": [
+          "#797",
+          "#784"
+        ],
+        "dimensions_covered": [
+          "config"
+        ],
+        "dimensions_missing": [
+          "workflow"
+        ],
         "gap": {
           "kind": "outcome-not-asserted",
-          "missing_dimensions": ["workflow"],
+          "missing_dimensions": [
+            "workflow"
+          ],
           "rationale": "isFoundationalBlocker eligibility classification is thoroughly covered, but the actual observable consequence — that an eligible foundational blocker is merged SYNCHRONOUSLY so a dependent isn't cut from an empty pre-merge base — is not asserted."
         }
       }
     ],
     "summary": {
-      "covered": 15,
-      "partial": 3,
+      "covered": 16,
+      "partial": 2,
       "uncovered": 0,
       "undocumented_implemented": 0,
       "documented_missing": 0,
-      "score": 0.86,
+      "score": 0.944,
       "by_dimension": {
-        "api": { "covered": 6, "partial": 2, "uncovered": 0 },
-        "workflow": { "covered": 5, "partial": 2, "uncovered": 0 },
-        "state-transition": { "covered": 9, "partial": 1, "uncovered": 0 },
-        "error-handling": { "covered": 6, "partial": 0, "uncovered": 0 },
-        "boundary": { "covered": 4, "partial": 0, "uncovered": 0 },
-        "regression": { "covered": 8, "partial": 0, "uncovered": 0 },
-        "risk": { "covered": 7, "partial": 0, "uncovered": 0 },
-        "concurrency": { "covered": 5, "partial": 0, "uncovered": 0 },
-        "config": { "covered": 4, "partial": 2, "uncovered": 0 },
-        "permission": { "covered": 3, "partial": 0, "uncovered": 0 }
-      },
-      "weak_dimensions": ["workflow (reconciler-relaunch + sync-merge land paths unasserted)", "api (fix-and-merge endpoint + manual-merge-gate-bypass unasserted)"],
-      "top_gaps": [
-        {
-          "ref": "review-merge.reconcile.stranded-review",
-          "priority": "P1",
-          "roi": 5.3,
-          "dimensions_to_add": ["workflow", "state-transition"],
-          "rationale": "Highest-value gap: the stranded-review reconciler is a core honesty restorer, but only its disable/no-op path is tested. A regression that stops relaunching reviews for genuinely stranded work would pass the whole suite, silently stranding In-Review tickets forever. Seed a stranded workspace (idle, In Review, not ready, has commits, no session, no prior review) and assert a review session is relaunched (or readyForMerge set when auto_review off)."
+        "api": {
+          "covered": 6,
+          "partial": 2,
+          "uncovered": 0
         },
+        "workflow": {
+          "covered": 5,
+          "partial": 2,
+          "uncovered": 0
+        },
+        "state-transition": {
+          "covered": 9,
+          "partial": 1,
+          "uncovered": 0
+        },
+        "error-handling": {
+          "covered": 6,
+          "partial": 0,
+          "uncovered": 0
+        },
+        "boundary": {
+          "covered": 4,
+          "partial": 0,
+          "uncovered": 0
+        },
+        "regression": {
+          "covered": 8,
+          "partial": 0,
+          "uncovered": 0
+        },
+        "risk": {
+          "covered": 7,
+          "partial": 0,
+          "uncovered": 0
+        },
+        "concurrency": {
+          "covered": 5,
+          "partial": 0,
+          "uncovered": 0
+        },
+        "config": {
+          "covered": 4,
+          "partial": 2,
+          "uncovered": 0
+        },
+        "permission": {
+          "covered": 3,
+          "partial": 0,
+          "uncovered": 0
+        }
+      },
+      "weak_dimensions": [
+        "workflow (reconciler-relaunch + sync-merge land paths unasserted)",
+        "api (fix-and-merge endpoint + manual-merge-gate-bypass unasserted)"
+      ],
+      "top_gaps": [
         {
           "ref": "review-merge.recover.fix-and-merge",
           "priority": "P1",
-          "roi": 4.0,
-          "dimensions_to_add": ["api"],
+          "roi": 4,
+          "dimensions_to_add": [
+            "api"
+          ],
           "rationale": "Conflict recovery is high-churn and high-blast-radius. Resolver-exit recovery is covered, but the POST /:id/fix-and-merge entry point itself (status→fixing + agent relaunch in worktree) is never driven end-to-end. An endpoint-level regression (e.g. not setting fixing, not launching) would be invisible."
-        },
-        {
-          "ref": "review-merge.gate.verify-smoke",
-          "priority": "P1",
-          "roi": 4.5,
-          "dimensions_to_add": ["api"],
-          "rationale": "Documented safety hole (domain doc Risks): the manual/orchestrator merge path (runWorkspacePreMergeValidation) does NOT run runPreMergeGate, so a hand-merge can land build/test/boot-unverified code. No test pins which paths gate vs don't. Add a test asserting the gate IS invoked on the paths that should gate and document/escalate the manual-merge bypass — a real behaviour gap, not just a test gap."
         },
         {
           "ref": "review-merge.foundational.sync-merge",
           "priority": "P2",
           "roi": 2.7,
-          "dimensions_to_add": ["workflow"],
+          "dimensions_to_add": [
+            "workflow"
+          ],
           "rationale": "Eligibility classifier is covered; the observable consequence (synchronous merge so a dependent isn't cut from an empty base, #797/#784) is not. Lower frequency than the reconciler/fix paths but a real cascade-correctness behaviour."
         }
       ]

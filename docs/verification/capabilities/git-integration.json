@@ -14,28 +14,79 @@
       "packages/mcp-server/src/git-service.ts"
     ],
     "actors": [
-      { "name": "server-services", "kind": "automation", "notes": "workspace/review/merge services + deterministic monitor consume the facade via the server re-export shim" },
-      { "name": "mcp-agent", "kind": "automation", "notes": "agents call git-backed MCP tools (get_workspace_diff, start_workspace) through the MCP re-export shim" },
-      { "name": "cli", "kind": "automation", "notes": "pnpm cli reaches the same facade (from the main checkout)" },
-      { "name": "operator", "kind": "human", "notes": "single local user; triggers indirectly via UI buttons (New Workspace, Merge, diff viewer, Crime Scene / Hot Files)" }
+      {
+        "name": "server-services",
+        "kind": "automation",
+        "notes": "workspace/review/merge services + deterministic monitor consume the facade via the server re-export shim"
+      },
+      {
+        "name": "mcp-agent",
+        "kind": "automation",
+        "notes": "agents call git-backed MCP tools (get_workspace_diff, start_workspace) through the MCP re-export shim"
+      },
+      {
+        "name": "cli",
+        "kind": "automation",
+        "notes": "pnpm cli reaches the same facade (from the main checkout)"
+      },
+      {
+        "name": "operator",
+        "kind": "human",
+        "notes": "single local user; triggers indirectly via UI buttons (New Workspace, Merge, diff viewer, Crime Scene / Hot Files)"
+      }
     ],
     "entry_points": [
-      { "kind": "library", "ref": "git-service.ts facade barrel (deep-path import only)", "observable": "whole high-level API: createWorktree/removeWorktree/mergeBranch/detectConflicts/getWorkingTreeDiff/rebaseOntoBase/prepareForReview/autoRenumberMigrations/branch+history helpers" },
-      { "kind": "library", "ref": "git-exec.ts gitExec/gitExecOrThrow/gitExecSync", "observable": "the ONLY git spawn site; never-throw / throw / sync contracts, windowsHide, buffer/timeout/env/stdin" },
-      { "kind": "library", "ref": "git-info.service.ts detectRepoInfo/getProjectGitStats(Async) (server-only)", "observable": "validate+register a repo (default-branch detect, git-root resolve), compute churn/hotspot metrics" },
-      { "kind": "library", "ref": "branch.ts sanitizeBranchName/suggestBranchName (pure, client-safe)", "observable": "derive a legal feature/ak-<n>-<slug> branch name from an issue" },
-      { "kind": "api", "ref": "POST /api/workspaces (worktree create) / GET /api/workspaces/:id/diff / POST :id/merge", "observable": "creates worktree+branch; returns diff; lands branch — all delegate to this module" },
-      { "kind": "mcp", "ref": "get_workspace_diff", "observable": "returns the worktree diff vs base produced by getDiff/getWorkingTreeDiff" }
+      {
+        "kind": "library",
+        "ref": "git-service.ts facade barrel (deep-path import only)",
+        "observable": "whole high-level API: createWorktree/removeWorktree/mergeBranch/detectConflicts/getWorkingTreeDiff/rebaseOntoBase/prepareForReview/autoRenumberMigrations/branch+history helpers"
+      },
+      {
+        "kind": "library",
+        "ref": "git-exec.ts gitExec/gitExecOrThrow/gitExecSync",
+        "observable": "the ONLY git spawn site; never-throw / throw / sync contracts, windowsHide, buffer/timeout/env/stdin"
+      },
+      {
+        "kind": "library",
+        "ref": "git-info.service.ts detectRepoInfo/getProjectGitStats(Async) (server-only)",
+        "observable": "validate+register a repo (default-branch detect, git-root resolve), compute churn/hotspot metrics"
+      },
+      {
+        "kind": "library",
+        "ref": "branch.ts sanitizeBranchName/suggestBranchName (pure, client-safe)",
+        "observable": "derive a legal feature/ak-<n>-<slug> branch name from an issue"
+      },
+      {
+        "kind": "api",
+        "ref": "POST /api/workspaces (worktree create) / GET /api/workspaces/:id/diff / POST :id/merge",
+        "observable": "creates worktree+branch; returns diff; lands branch — all delegate to this module"
+      },
+      {
+        "kind": "mcp",
+        "ref": "get_workspace_diff",
+        "observable": "returns the worktree diff vs base produced by getDiff/getWorkingTreeDiff"
+      }
     ],
     "behaviors": [
       {
         "id": "git-integration.create.worktree",
         "statement": "Creating a workspace provisions an isolated worktree checked out on its own branch cut from the requested base, with a guaranteed non-detached HEAD; an existing healthy worktree for the same branch is reused (same path returned), not duplicated",
         "actor": "server-services",
-        "preconditions": ["registered repo", "branch name (sanitized) and optional baseBranch"],
+        "preconditions": [
+          "registered repo",
+          "branch name (sanitized) and optional baseBranch"
+        ],
         "observable_outcome": "worktree directory exists with the base branch's files; createWorktree returns the path; a second call for the same branch returns the same path",
-        "evidence": ["packages/shared/src/lib/git-service/worktree.ts:44", "packages/server/src/__tests__/git.service.test.ts:55", "packages/server/src/__tests__/git.service.test.ts:72"],
-        "dimensions": ["workflow", "capability", "state-transition"],
+        "evidence": [
+          "packages/shared/src/lib/git-service/worktree.ts:44",
+          "packages/server/src/__tests__/git.service.test.ts:55",
+          "packages/server/src/__tests__/git.service.test.ts:72"
+        ],
+        "dimensions": [
+          "workflow",
+          "capability",
+          "state-transition"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -43,10 +94,20 @@
         "id": "git-integration.refresh.reused-branch",
         "statement": "A reused branch with NO unique commits beyond base is hard-refreshed onto the advanced base; a reused branch WITH its own commits is left untouched (never discarded)",
         "actor": "server-services",
-        "preconditions": ["branch already exists from a prior, possibly stale, base"],
+        "preconditions": [
+          "branch already exists from a prior, possibly stale, base"
+        ],
         "observable_outcome": "never-built branch tip == new base after createWorktree; branch with own work keeps its own tip",
-        "evidence": ["packages/shared/src/lib/git-service/worktree.ts:127", "packages/server/src/__tests__/git-service-branch-refresh.test.ts:67", "packages/server/src/__tests__/git-service-branch-refresh.test.ts:89"],
-        "dimensions": ["state-transition", "regression", "boundary"],
+        "evidence": [
+          "packages/shared/src/lib/git-service/worktree.ts:127",
+          "packages/server/src/__tests__/git-service-branch-refresh.test.ts:67",
+          "packages/server/src/__tests__/git-service-branch-refresh.test.ts:89"
+        ],
+        "dimensions": [
+          "state-transition",
+          "regression",
+          "boundary"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -54,10 +115,23 @@
         "id": "git-integration.remove.worktree",
         "statement": "Removing a worktree breaks every junction (top-level and nested packages/*/node_modules) before deleting and never recurses into a link, refuses any path not strictly inside .worktrees/, and falls back to a manual recursive delete when `git worktree remove` fails — so the shared dependency store is never touched",
         "actor": "server-services",
-        "preconditions": ["a worktree dir (possibly with junctions/leftover node_modules)"],
+        "preconditions": [
+          "a worktree dir (possibly with junctions/leftover node_modules)"
+        ],
         "observable_outcome": "worktree dir gone; junction target dirs + their sentinel files survive; an unsafe path throws 'Refusing to recursively remove unsafe worktree path' and is left intact",
-        "evidence": ["packages/shared/src/lib/git-service/worktree.ts:224", "packages/shared/src/lib/git-service/worktree.ts:283", "packages/server/src/__tests__/git-service-remove-worktree.test.ts:55", "packages/server/src/__tests__/git-service-remove-worktree.test.ts:72", "packages/server/src/__tests__/git-service-remove-worktree.test.ts:108"],
-        "dimensions": ["error-handling", "boundary", "risk", "regression"],
+        "evidence": [
+          "packages/shared/src/lib/git-service/worktree.ts:224",
+          "packages/shared/src/lib/git-service/worktree.ts:283",
+          "packages/server/src/__tests__/git-service-remove-worktree.test.ts:55",
+          "packages/server/src/__tests__/git-service-remove-worktree.test.ts:72",
+          "packages/server/src/__tests__/git-service-remove-worktree.test.ts:108"
+        ],
+        "dimensions": [
+          "error-handling",
+          "boundary",
+          "risk",
+          "regression"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -65,10 +139,21 @@
         "id": "git-integration.merge.clean",
         "statement": "A clean branch lands via a plumbing merge (merge-tree→commit-tree→update-ref): the target ref advances, and when the target is checked out the working tree is synced to the merge commit and left clean",
         "actor": "server-services",
-        "preconditions": ["feature branch with commits ahead of base", "no conflict"],
+        "preconditions": [
+          "feature branch with commits ahead of base",
+          "no conflict"
+        ],
         "observable_outcome": "result contains 'plumbing-merge'; base ref + checked-out working tree contain the feature file; status --porcelain empty; no uncommitted tracked changes",
-        "evidence": ["packages/shared/src/lib/git-service/merge.ts:146", "packages/shared/__tests__/git-service.integration.test.ts:122", "packages/server/src/__tests__/git.service.test.ts:102"],
-        "dimensions": ["workflow", "capability", "api"],
+        "evidence": [
+          "packages/shared/src/lib/git-service/merge.ts:146",
+          "packages/shared/__tests__/git-service.integration.test.ts:122",
+          "packages/server/src/__tests__/git.service.test.ts:102"
+        ],
+        "dimensions": [
+          "workflow",
+          "capability",
+          "api"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -76,10 +161,21 @@
         "id": "git-integration.merge.reject-conflict",
         "statement": "A conflicting merge is refused via three independent gates (stage-entry parse, merge-tree exit-1, marker scan of changed feature blobs excluding .md): it throws, never advances the target ref, never creates MERGE_HEAD, and never commits conflict markers into history or the working tree",
         "actor": "server-services",
-        "preconditions": ["two branches with overlapping edits to a shared file (incl. drizzle _journal.json)"],
+        "preconditions": [
+          "two branches with overlapping edits to a shared file (incl. drizzle _journal.json)"
+        ],
         "observable_outcome": "mergeBranch rejects /conflict/i; target ref unchanged; no MERGE_HEAD; working-tree + every historical blob free of <<<<<<< / ======= / >>>>>>>",
-        "evidence": ["packages/shared/src/lib/git-service/merge.ts:301", "packages/shared/__tests__/git-service.integration.test.ts:140", "packages/server/src/__tests__/git.service.test.ts:348", "packages/server/src/__tests__/git.service.test.ts:294"],
-        "dimensions": ["error-handling", "regression", "risk"],
+        "evidence": [
+          "packages/shared/src/lib/git-service/merge.ts:301",
+          "packages/shared/__tests__/git-service.integration.test.ts:140",
+          "packages/server/src/__tests__/git.service.test.ts:348",
+          "packages/server/src/__tests__/git.service.test.ts:294"
+        ],
+        "dimensions": [
+          "error-handling",
+          "regression",
+          "risk"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -87,10 +183,21 @@
         "id": "git-integration.merge.idempotent",
         "statement": "Merging a branch already reachable from the target is idempotent — no new commit, ref/count unchanged — and it self-heals an interrupted plumbing merge (ref advanced but working tree never reset) by syncing the clean checked-out target forward",
         "actor": "server-services",
-        "preconditions": ["feature branch already an ancestor of target (possibly with a desynced checkout)"],
+        "preconditions": [
+          "feature branch already an ancestor of target (possibly with a desynced checkout)"
+        ],
         "observable_outcome": "result says 'already merged'; target ref + commit count unchanged across a second merge; an interrupted-merge checkout gets the missing files back",
-        "evidence": ["packages/shared/src/lib/git-service/merge.ts:146", "packages/server/src/__tests__/git.service.test.ts:134", "packages/server/src/__tests__/git.service.test.ts:160", "packages/server/src/__tests__/git.service.test.ts:195"],
-        "dimensions": ["state-transition", "regression", "error-handling"],
+        "evidence": [
+          "packages/shared/src/lib/git-service/merge.ts:146",
+          "packages/server/src/__tests__/git.service.test.ts:134",
+          "packages/server/src/__tests__/git.service.test.ts:160",
+          "packages/server/src/__tests__/git.service.test.ts:195"
+        ],
+        "dimensions": [
+          "state-transition",
+          "regression",
+          "error-handling"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -98,10 +205,18 @@
         "id": "git-integration.merge.refuse-dirty",
         "statement": "Merging into a checked-out target that has uncommitted tracked changes is refused up-front rather than reset --hard over the user's work",
         "actor": "server-services",
-        "preconditions": ["target branch checked out in the main checkout with an uncommitted tracked edit"],
+        "preconditions": [
+          "target branch checked out in the main checkout with an uncommitted tracked edit"
+        ],
         "observable_outcome": "mergeBranch rejects /uncommitted tracked change/; the local edit survives byte-for-byte",
-        "evidence": ["packages/shared/src/lib/git-service/merge.ts:227", "packages/server/src/__tests__/git.service.test.ts:224"],
-        "dimensions": ["error-handling", "risk"],
+        "evidence": [
+          "packages/shared/src/lib/git-service/merge.ts:227",
+          "packages/server/src/__tests__/git.service.test.ts:224"
+        ],
+        "dimensions": [
+          "error-handling",
+          "risk"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -109,10 +224,23 @@
         "id": "git-integration.merge.safe-sync",
         "statement": "The post-merge working-tree sync only ever moves forward: it resolves a safe sync target (never reset --hard to a SHA that isn't a descendant of HEAD, so a stale deferred sync can't delete files a concurrent merge added — #771) and self-heals tracked files deleted relative to HEAD after an interrupted hard sync (#692)",
         "actor": "server-services",
-        "preconditions": ["deferred working-tree sync queued; possibly a later merge advanced HEAD first, or an interrupted reset left files deleted"],
+        "preconditions": [
+          "deferred working-tree sync queued; possibly a later merge advanced HEAD first, or an interrupted reset left files deleted"
+        ],
         "observable_outcome": "a late applyDeferredWorkingTreeSync(stale-sha) deletes nothing; files added by the concurrent merge + the restored deleted files all present; status clean",
-        "evidence": ["packages/shared/src/lib/git-service/merge.ts:409", "packages/shared/src/lib/git-service/merge.ts:435", "packages/shared/src/lib/git-service/merge.ts:462", "packages/shared/__tests__/git-service.integration.test.ts:249", "packages/shared/__tests__/git-service.integration.test.ts:194"],
-        "dimensions": ["concurrency", "regression", "risk", "error-handling"],
+        "evidence": [
+          "packages/shared/src/lib/git-service/merge.ts:409",
+          "packages/shared/src/lib/git-service/merge.ts:435",
+          "packages/shared/src/lib/git-service/merge.ts:462",
+          "packages/shared/__tests__/git-service.integration.test.ts:249",
+          "packages/shared/__tests__/git-service.integration.test.ts:194"
+        ],
+        "dimensions": [
+          "concurrency",
+          "regression",
+          "risk",
+          "error-handling"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -120,10 +248,23 @@
         "id": "git-integration.merge.append-resolve",
         "statement": "A merge whose ONLY conflicts are pure tail-appends to shared hot files auto-resolves by concatenation (seeded from the conflicted merged tree, so the feature's clean files are NOT dropped) — but only behind the explicit autoResolveAppendConflicts opt-in; any overlapping EDIT still throws",
         "actor": "server-services",
-        "preconditions": ["a wave of branches each appending distinct blocks to one shared file"],
+        "preconditions": [
+          "a wave of branches each appending distinct blocks to one shared file"
+        ],
         "observable_outcome": "result contains 'append-merge'; master holds every ticket's appended block + each branch's own feature file; without the flag the same conflict throws; an edit-conflict throws even with the flag",
-        "evidence": ["packages/shared/src/lib/git-service/append-resolve.ts:21", "packages/shared/src/lib/git-service/merge.ts:56", "packages/shared/__tests__/append-only-hotfile-merge.integration.test.ts:97", "packages/shared/__tests__/append-only-hotfile-merge.integration.test.ts:160", "packages/shared/__tests__/append-only-hotfile-merge.integration.test.ts:169"],
-        "dimensions": ["feature", "regression", "boundary", "error-handling"],
+        "evidence": [
+          "packages/shared/src/lib/git-service/append-resolve.ts:21",
+          "packages/shared/src/lib/git-service/merge.ts:56",
+          "packages/shared/__tests__/append-only-hotfile-merge.integration.test.ts:97",
+          "packages/shared/__tests__/append-only-hotfile-merge.integration.test.ts:160",
+          "packages/shared/__tests__/append-only-hotfile-merge.integration.test.ts:169"
+        ],
+        "dimensions": [
+          "feature",
+          "regression",
+          "boundary",
+          "error-handling"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -131,10 +272,22 @@
         "id": "git-integration.detect.conflicts",
         "statement": "Conflict detection is read-only via merge-tree --write-tree: detectConflicts / detectConflictsByBranch / detectAppendOnlyResolvableConflicts report conflicting files (or append-resolvable hot files) without moving HEAD, touching the index/working tree, or creating MERGE_HEAD",
         "actor": "server-services",
-        "preconditions": ["two refs/branches to probe"],
+        "preconditions": [
+          "two refs/branches to probe"
+        ],
         "observable_outcome": "hasConflicts + conflictingFiles correct; HEAD, status --porcelain, and file content identical before/after; no MERGE_HEAD",
-        "evidence": ["packages/shared/src/lib/git-service/conflict.ts:9", "packages/shared/src/lib/git-service/conflict.ts:42", "packages/shared/__tests__/git-service.integration.test.ts:312", "packages/shared/__tests__/git-service.integration.test.ts:363", "packages/shared/__tests__/append-only-hotfile-merge.integration.test.ts:146"],
-        "dimensions": ["api", "risk", "capability"],
+        "evidence": [
+          "packages/shared/src/lib/git-service/conflict.ts:9",
+          "packages/shared/src/lib/git-service/conflict.ts:42",
+          "packages/shared/__tests__/git-service.integration.test.ts:312",
+          "packages/shared/__tests__/git-service.integration.test.ts:363",
+          "packages/shared/__tests__/append-only-hotfile-merge.integration.test.ts:146"
+        ],
+        "dimensions": [
+          "api",
+          "risk",
+          "capability"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -142,10 +295,22 @@
         "id": "git-integration.diff.working-tree",
         "statement": "Diffing a branch/worktree surfaces its changes vs base including UNTRACKED files (hand-synthesized diff headers), and a direct workspace diffs via git diff HEAD; diff-stat ref semantics match the board (worktree→base, direct→HEAD)",
         "actor": "mcp-agent",
-        "preconditions": ["a worktree (or direct workspace) with committed + untracked changes"],
+        "preconditions": [
+          "a worktree (or direct workspace) with committed + untracked changes"
+        ],
         "observable_outcome": "getWorkingTreeDiff output contains 'diff --git', 'new file mode', and the untracked file's added lines; getDiffShortstat called with the right (path, base) per workspace kind",
-        "evidence": ["packages/shared/src/lib/git-service/diff.ts:6", "packages/shared/src/lib/git-service/diff.ts:57", "packages/shared/__tests__/git-service.integration.test.ts:352", "packages/server/src/__tests__/git.service.test.ts:83", "packages/server/src/__tests__/workspace-diff-stats.test.ts:16"],
-        "dimensions": ["api", "capability", "boundary"],
+        "evidence": [
+          "packages/shared/src/lib/git-service/diff.ts:6",
+          "packages/shared/src/lib/git-service/diff.ts:57",
+          "packages/shared/__tests__/git-service.integration.test.ts:352",
+          "packages/server/src/__tests__/git.service.test.ts:83",
+          "packages/server/src/__tests__/workspace-diff-stats.test.ts:16"
+        ],
+        "dimensions": [
+          "api",
+          "capability",
+          "boundary"
+        ],
         "risk": "medium",
         "confidence": "high"
       },
@@ -153,10 +318,20 @@
         "id": "git-integration.recover.detached-head",
         "statement": "Commits made from a detached HEAD in a worktree are recovered: syncBranchToHead force-updates the branch ref to the detached commit, and ensureOnBranch reattaches so subsequent merges aren't silent no-ops",
         "actor": "server-services",
-        "preconditions": ["a worktree left on a detached HEAD with a new commit"],
+        "preconditions": [
+          "a worktree left on a detached HEAD with a new commit"
+        ],
         "observable_outcome": "branch ref == detached commit after syncBranchToHead (returns true); current branch == feature branch after ensureOnBranch; the commit's file content is on disk",
-        "evidence": ["packages/shared/src/lib/git-service/branch-attach.ts:9", "packages/shared/src/lib/git-service/branch-attach.ts:33", "packages/shared/__tests__/git-service.integration.test.ts:473"],
-        "dimensions": ["state-transition", "regression", "risk"],
+        "evidence": [
+          "packages/shared/src/lib/git-service/branch-attach.ts:9",
+          "packages/shared/src/lib/git-service/branch-attach.ts:33",
+          "packages/shared/__tests__/git-service.integration.test.ts:473"
+        ],
+        "dimensions": [
+          "state-transition",
+          "regression",
+          "risk"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -164,10 +339,22 @@
         "id": "git-integration.renumber.migrations",
         "statement": "Before merge, a feature branch's added drizzle migrations are auto-renumbered above the base's highest (all-or-nothing, multiple shifted without clobber) and _journal.json is rebuilt as base-prefix + renumbered entries, turning a guaranteed collision into a clean merge; no-op when no migrations were added; idempotent",
         "actor": "server-services",
-        "preconditions": ["base advanced a migration (NNNN) while the feature added its own NNNN"],
+        "preconditions": [
+          "base advanced a migration (NNNN) while the feature added its own NNNN"
+        ],
         "observable_outcome": "renames reported (0001_b→0002_b, 0002_c→0003_c); journal tags ordered base-prefix-first; the previously-conflicting merge now succeeds; second renumber makes no commit; no-mig branch unchanged",
-        "evidence": ["packages/shared/src/lib/git-service/migration-renumber.ts:84", "packages/server/src/__tests__/git.service.test.ts:515", "packages/server/src/__tests__/git.service.test.ts:538", "packages/server/src/__tests__/git.service.test.ts:573", "packages/server/src/__tests__/git.service.test.ts:610"],
-        "dimensions": ["regression", "boundary", "state-transition"],
+        "evidence": [
+          "packages/shared/src/lib/git-service/migration-renumber.ts:84",
+          "packages/server/src/__tests__/git.service.test.ts:515",
+          "packages/server/src/__tests__/git.service.test.ts:538",
+          "packages/server/src/__tests__/git.service.test.ts:573",
+          "packages/server/src/__tests__/git.service.test.ts:610"
+        ],
+        "dimensions": [
+          "regression",
+          "boundary",
+          "state-transition"
+        ],
         "risk": "high",
         "confidence": "high"
       },
@@ -175,10 +362,23 @@
         "id": "git-integration.detect.repo-info",
         "statement": "Repo detection resolves the path to the git toplevel (subdirectory registration yields the same project), prefers default branch main-then-master (null if neither exists), reads the origin remote, and throws on a non-git directory",
         "actor": "server-services",
-        "preconditions": ["a directory path (git or not), possibly a subdirectory of the repo"],
+        "preconditions": [
+          "a directory path (git or not), possibly a subdirectory of the repo"
+        ],
         "observable_outcome": "repoPath == git root; defaultBranch main>master or null; remoteUrl from origin; 'Not a git repository' thrown for non-git",
-        "evidence": ["packages/server/src/services/git-info.service.ts:35", "packages/server/src/services/git-info.service.ts:54", "packages/server/src/__tests__/git-info.service.test.ts:33", "packages/server/src/__tests__/git-info.service.test.ts:41", "packages/server/src/__tests__/git-info.service.test.ts:53", "packages/server/src/__tests__/git-info.service.test.ts:83"],
-        "dimensions": ["error-handling", "boundary", "config"],
+        "evidence": [
+          "packages/server/src/services/git-info.service.ts:35",
+          "packages/server/src/services/git-info.service.ts:54",
+          "packages/server/src/__tests__/git-info.service.test.ts:33",
+          "packages/server/src/__tests__/git-info.service.test.ts:41",
+          "packages/server/src/__tests__/git-info.service.test.ts:53",
+          "packages/server/src/__tests__/git-info.service.test.ts:83"
+        ],
+        "dimensions": [
+          "error-handling",
+          "boundary",
+          "config"
+        ],
         "risk": "medium",
         "confidence": "high"
       },
@@ -186,10 +386,24 @@
         "id": "git-integration.stats.hotspots",
         "statement": "Project git stats compute commit count, recent commits, source-tree LOC (prod vs test), 12-week history, and churn-ranked hotspots; the async twin dedupes concurrent cold computes into one shared in-flight promise and shares a 60s HEAD-keyed cache with the sync twin; a dormant repo falls back to a bounded full-history hotspot scan",
         "actor": "operator",
-        "preconditions": ["a repo with commits (possibly all older than the 12-week window)"],
+        "preconditions": [
+          "a repo with commits (possibly all older than the 12-week window)"
+        ],
         "observable_outcome": "commitCount/codeMetrics/history/hotspots populated and equal sync↔async; concurrent calls return the SAME object references; old-only repo still yields hotspots via fallback; fallback log args capped by --max-count",
-        "evidence": ["packages/server/src/services/git-info.service.ts:347", "packages/server/src/services/git-info.service.ts:481", "packages/server/src/__tests__/git-info-async.service.test.ts:47", "packages/server/src/__tests__/git-info-async.service.test.ts:126", "packages/server/src/__tests__/git-info-async.service.test.ts:147"],
-        "dimensions": ["capability", "concurrency", "boundary", "config", "regression"],
+        "evidence": [
+          "packages/server/src/services/git-info.service.ts:347",
+          "packages/server/src/services/git-info.service.ts:481",
+          "packages/server/src/__tests__/git-info-async.service.test.ts:47",
+          "packages/server/src/__tests__/git-info-async.service.test.ts:126",
+          "packages/server/src/__tests__/git-info-async.service.test.ts:147"
+        ],
+        "dimensions": [
+          "capability",
+          "concurrency",
+          "boundary",
+          "config",
+          "regression"
+        ],
         "risk": "medium",
         "confidence": "high"
       },
@@ -197,10 +411,19 @@
         "id": "git-integration.guard.single-spawn",
         "statement": "The git CLI is spawnable from exactly one adapter (git-exec.ts); an AST gate scans every package src/ and fails if any other module spawns git directly (via literal, const, variable, promisify alias, namespace, or dynamic import), keeping the 'single source of truth' true",
         "actor": "server-services",
-        "preconditions": ["any package source under packages/*/src"],
+        "preconditions": [
+          "any package source under packages/*/src"
+        ],
         "observable_outcome": "the gate reports zero offenders outside the allowlisted adapter, and still detects the adapter itself (allowlist is live, not stale)",
-        "evidence": ["packages/shared/src/lib/git-exec.ts:58", "packages/shared/__tests__/git-exec-single-spawn.test.ts:300", "packages/shared/__tests__/git-exec-single-spawn.test.ts:325"],
-        "dimensions": ["regression", "risk"],
+        "evidence": [
+          "packages/shared/src/lib/git-exec.ts:58",
+          "packages/shared/__tests__/git-exec-single-spawn.test.ts:300",
+          "packages/shared/__tests__/git-exec-single-spawn.test.ts:325"
+        ],
+        "dimensions": [
+          "regression",
+          "risk"
+        ],
         "risk": "medium",
         "confidence": "high"
       },
@@ -208,10 +431,20 @@
         "id": "git-integration.name.branch",
         "statement": "Branch names are derived deterministically from an issue: sanitizeBranchName lowercases, replaces spaces, collapses/trims hyphens, keeps slashes, truncates to 80; suggestBranchName yields feature/ak-<n>-<slug> (slug capped 40, issue number omitted when absent)",
         "actor": "server-services",
-        "preconditions": ["an issue number + title"],
+        "preconditions": [
+          "an issue number + title"
+        ],
         "observable_outcome": "exact branch strings, e.g. feature/ak-3-fix-the-big-bug; 80-char / 40-char truncation enforced",
-        "evidence": ["packages/shared/src/lib/branch.ts:1", "packages/shared/src/lib/branch.ts:12", "packages/shared/__tests__/branch.test.ts:4", "packages/shared/__tests__/branch.test.ts:31"],
-        "dimensions": ["boundary", "capability"],
+        "evidence": [
+          "packages/shared/src/lib/branch.ts:1",
+          "packages/shared/src/lib/branch.ts:12",
+          "packages/shared/__tests__/branch.test.ts:4",
+          "packages/shared/__tests__/branch.test.ts:31"
+        ],
+        "dimensions": [
+          "boundary",
+          "capability"
+        ],
         "risk": "low",
         "confidence": "high"
       },
@@ -219,41 +452,128 @@
         "id": "git-integration.rebase.prepare-review",
         "statement": "Preparing a branch for review rebases onto the LOCAL base branch (not origin/*), first committing any leftover uncommitted worktree changes instead of bailing on a dirty tree, aborting a stale rebase, fetching best-effort, and on conflict collecting --diff-filter=U files then aborting to leave the tree clean",
         "actor": "server-services",
-        "preconditions": ["a feature worktree, possibly dirty, possibly conflicting with an advanced local base"],
+        "preconditions": [
+          "a feature worktree, possibly dirty, possibly conflicting with an advanced local base"
+        ],
         "observable_outcome": "rebaseOntoBase succeeds on a dirty tree and leaves status clean; (untested) rebases onto local master ahead of origin and returns the conflicting-file list on conflict without leaving a half-rebase",
-        "evidence": ["packages/shared/src/lib/git-service/rebase.ts:36", "packages/shared/src/lib/git-service/rebase.ts:51", "packages/shared/src/lib/git-service/rebase.ts:60", "packages/server/src/__tests__/git.service.test.ts:637"],
-        "dimensions": ["workflow", "error-handling", "regression"],
+        "evidence": [
+          "packages/shared/src/lib/git-service/rebase.ts:36",
+          "packages/shared/src/lib/git-service/rebase.ts:51",
+          "packages/shared/src/lib/git-service/rebase.ts:60",
+          "packages/server/src/__tests__/git.service.test.ts:637"
+        ],
+        "dimensions": [
+          "workflow",
+          "error-handling",
+          "regression"
+        ],
         "risk": "high",
         "confidence": "medium"
       }
     ],
     "permissions": [
-      { "actor": "operator", "behavior": "all", "allowed": true, "notes": "single-user local-first app — no RBAC; permission dimension is N/A for this capability" }
+      {
+        "actor": "operator",
+        "behavior": "all",
+        "allowed": true,
+        "notes": "single-user local-first app — no RBAC; permission dimension is N/A for this capability"
+      }
     ],
     "state_model": {
-      "states": ["no-worktree", "worktree-on-branch", "detached-head", "rebasing", "merged", "removed"],
+      "states": [
+        "no-worktree",
+        "worktree-on-branch",
+        "detached-head",
+        "rebasing",
+        "merged",
+        "removed"
+      ],
       "transitions": [
-        { "from": "no-worktree", "to": "worktree-on-branch", "trigger": "createWorktree", "behavior": "git-integration.create.worktree" },
-        { "from": "detached-head", "to": "worktree-on-branch", "trigger": "syncBranchToHead+ensureOnBranch", "behavior": "git-integration.recover.detached-head" },
-        { "from": "worktree-on-branch", "to": "merged", "trigger": "mergeBranch (clean / append-resolve)", "behavior": "git-integration.merge.clean" },
-        { "from": "worktree-on-branch", "to": "worktree-on-branch", "trigger": "mergeBranch on conflict (refused, no state change)", "behavior": "git-integration.merge.reject-conflict" },
-        { "from": "worktree-on-branch", "to": "removed", "trigger": "removeWorktree (junction-safe)", "behavior": "git-integration.remove.worktree" }
+        {
+          "from": "no-worktree",
+          "to": "worktree-on-branch",
+          "trigger": "createWorktree",
+          "behavior": "git-integration.create.worktree"
+        },
+        {
+          "from": "detached-head",
+          "to": "worktree-on-branch",
+          "trigger": "syncBranchToHead+ensureOnBranch",
+          "behavior": "git-integration.recover.detached-head"
+        },
+        {
+          "from": "worktree-on-branch",
+          "to": "merged",
+          "trigger": "mergeBranch (clean / append-resolve)",
+          "behavior": "git-integration.merge.clean"
+        },
+        {
+          "from": "worktree-on-branch",
+          "to": "worktree-on-branch",
+          "trigger": "mergeBranch on conflict (refused, no state change)",
+          "behavior": "git-integration.merge.reject-conflict"
+        },
+        {
+          "from": "worktree-on-branch",
+          "to": "removed",
+          "trigger": "removeWorktree (junction-safe)",
+          "behavior": "git-integration.remove.worktree"
+        }
       ]
     },
     "error_states": [
-      { "id": "git-integration.err.conflict", "statement": "mergeBranch throws /conflict/i and leaves the target ref + working tree untouched (no MERGE_HEAD, no markers)", "evidence": "git-service/merge.ts:301" },
-      { "id": "git-integration.err.dirty-target", "statement": "mergeBranch throws /uncommitted tracked change/ rather than reset over the user's edit", "evidence": "git-service/merge.ts:227" },
-      { "id": "git-integration.err.unsafe-path", "statement": "removeWorktree throws 'Refusing to recursively remove unsafe worktree path' for any path not inside .worktrees/", "evidence": "git-service/worktree.ts:283" },
-      { "id": "git-integration.err.not-a-repo", "statement": "detectRepoInfo throws 'Not a git repository' for a non-git directory", "evidence": "git-info.service.ts" },
-      { "id": "git-integration.err.detached-loss", "statement": "(guarded) a detached-HEAD worktree would make commits dangle and merges silent no-ops; recovered by branch-attach", "evidence": "git-service/branch-attach.ts:9" },
-      { "id": "git-integration.err.stale-index-lock", "statement": "a stale on-disk .git/index.lock makes all git ops fail and is easily mistaken for a DB lock; operational recovery only, not code-guarded", "evidence": "docs/domain/git-integration.md (Risks)" }
+      {
+        "id": "git-integration.err.conflict",
+        "statement": "mergeBranch throws /conflict/i and leaves the target ref + working tree untouched (no MERGE_HEAD, no markers)",
+        "evidence": "git-service/merge.ts:301"
+      },
+      {
+        "id": "git-integration.err.dirty-target",
+        "statement": "mergeBranch throws /uncommitted tracked change/ rather than reset over the user's edit",
+        "evidence": "git-service/merge.ts:227"
+      },
+      {
+        "id": "git-integration.err.unsafe-path",
+        "statement": "removeWorktree throws 'Refusing to recursively remove unsafe worktree path' for any path not inside .worktrees/",
+        "evidence": "git-service/worktree.ts:283"
+      },
+      {
+        "id": "git-integration.err.not-a-repo",
+        "statement": "detectRepoInfo throws 'Not a git repository' for a non-git directory",
+        "evidence": "git-info.service.ts"
+      },
+      {
+        "id": "git-integration.err.detached-loss",
+        "statement": "(guarded) a detached-HEAD worktree would make commits dangle and merges silent no-ops; recovered by branch-attach",
+        "evidence": "git-service/branch-attach.ts:9"
+      },
+      {
+        "id": "git-integration.err.stale-index-lock",
+        "statement": "a stale on-disk .git/index.lock makes all git ops fail and is easily mistaken for a DB lock; operational recovery only, not code-guarded",
+        "evidence": "docs/domain/git-integration.md (Risks)"
+      }
     ],
-    "external_integrations": ["git CLI (wrapped behind git-exec.ts adapter/port)", "filesystem (node:fs — untracked diff, worktree dirs/junctions, journal read/write)"],
+    "external_integrations": [
+      "git CLI (wrapped behind git-exec.ts adapter/port)",
+      "filesystem (node:fs — untracked diff, worktree dirs/junctions, journal read/write)"
+    ],
     "unknowns": [
-      { "question": "Is prepareForReview's local-base preference (rebase onto local master ahead of stale origin) and its --diff-filter=U conflict-file collection asserted anywhere, or only the leftover-commit branch?", "why_unknown": "only rebaseOntoBase's dirty-tree leftover-commit path is exercised by an integration test; the local-vs-origin choice and conflict-list return are not directly asserted" },
-      { "question": "Is the documented getDiff/getDiffFromRepo default baseBranch='main' a latent bug on a master-only repo (diffs against a nonexistent ref)?", "why_unknown": "domain doc flags it as inferred-unverified; no test passes the default base on a master repo" },
-      { "question": "Are the untracked-diff synthesis edge cases (binary/unreadable file → header-only, trailing-newline off-by-one) correct?", "why_unknown": "only the nominal text-untracked case is asserted; edge inputs not exercised" },
-      { "question": "Is the append-resolve concatenation ORDER (target-tail then feature-tail) ever wrong for an order-sensitive appended file?", "why_unknown": "order is chosen as 'deterministic' not semantic; only order-insensitive smoke-test appends are tested" }
+      {
+        "question": "Is prepareForReview's local-base preference (rebase onto local master ahead of stale origin) and its --diff-filter=U conflict-file collection asserted anywhere, or only the leftover-commit branch?",
+        "why_unknown": "only rebaseOntoBase's dirty-tree leftover-commit path is exercised by an integration test; the local-vs-origin choice and conflict-list return are not directly asserted"
+      },
+      {
+        "question": "Is the documented getDiff/getDiffFromRepo default baseBranch='main' a latent bug on a master-only repo (diffs against a nonexistent ref)?",
+        "why_unknown": "domain doc flags it as inferred-unverified; no test passes the default base on a master repo"
+      },
+      {
+        "question": "Are the untracked-diff synthesis edge cases (binary/unreadable file → header-only, trailing-newline off-by-one) correct?",
+        "why_unknown": "only the nominal text-untracked case is asserted; edge inputs not exercised"
+      },
+      {
+        "question": "Is the append-resolve concatenation ORDER (target-tail then feature-tail) ever wrong for an order-sensitive appended file?",
+        "why_unknown": "order is chosen as 'deterministic' not semantic; only order-insensitive smoke-test appends are tested"
+      }
     ]
   },
   "coverage": {
@@ -262,259 +582,592 @@
         "ref": "git-integration.create.worktree",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/git.service.test.ts::creates a worktree for a new branch", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/git.service.test.ts::reuses existing worktree for an already-checked-out branch", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/git.service.test.ts::creates a worktree for a new branch",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/git.service.test.ts::reuses existing worktree for an already-checked-out branch",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["workflow", "capability", "state-transition"],
+        "dimensions_covered": [
+          "workflow",
+          "capability",
+          "state-transition"
+        ],
         "dimensions_missing": [],
-        "history": { "churn_90d": null, "bugs": 0 }
+        "history": {
+          "churn_90d": null,
+          "bugs": 0
+        }
       },
       {
         "ref": "git-integration.refresh.reused-branch",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/git-service-branch-refresh.test.ts::createWorktree re-cuts a reused never-built-on branch onto the advanced base", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/git-service-branch-refresh.test.ts::createWorktree leaves a reused branch WITH its own commits untouched", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/git-service-branch-refresh.test.ts::createWorktree re-cuts a reused never-built-on branch onto the advanced base",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/git-service-branch-refresh.test.ts::createWorktree leaves a reused branch WITH its own commits untouched",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["state-transition", "regression", "boundary"],
+        "dimensions_covered": [
+          "state-transition",
+          "regression",
+          "boundary"
+        ],
         "dimensions_missing": [],
-        "history": { "bugs": 2, "notes": "#778/#781 regressions" }
+        "history": {
+          "bugs": 2,
+          "notes": "#778/#781 regressions"
+        }
       },
       {
         "ref": "git-integration.remove.worktree",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/git-service-remove-worktree.test.ts::removes a non-empty directory left behind when git worktree remove fails", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/git-service-remove-worktree.test.ts::does not recursively remove paths outside the managed worktrees directory", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/git-service-remove-worktree.test.ts::does not delete junction target when recursively removing a worktree with a junction", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/git-service-remove-worktree.test.ts::does not delete NESTED packages/<pkg>/node_modules junction targets (#780)", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/git-service-remove-worktree.test.ts::removes a non-empty directory left behind when git worktree remove fails",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/git-service-remove-worktree.test.ts::does not recursively remove paths outside the managed worktrees directory",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/git-service-remove-worktree.test.ts::does not delete junction target when recursively removing a worktree with a junction",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/git-service-remove-worktree.test.ts::does not delete NESTED packages/<pkg>/node_modules junction targets (#780)",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["error-handling", "boundary", "risk", "regression"],
+        "dimensions_covered": [
+          "error-handling",
+          "boundary",
+          "risk",
+          "regression"
+        ],
         "dimensions_missing": [],
-        "history": { "bugs": 2, "notes": "#518/#780 data-loss" }
+        "history": {
+          "bugs": 2,
+          "notes": "#518/#780 data-loss"
+        }
       },
       {
         "ref": "git-integration.merge.clean",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/shared/__tests__/git-service.integration.test.ts::mergeBranch creates a clean plumbing merge and syncs the checked-out target", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/git.service.test.ts::merges a branch via plumbing and syncs the working tree when the target is checked out", "strength": "asserts-outcome" }
+          {
+            "test": "packages/shared/__tests__/git-service.integration.test.ts::mergeBranch creates a clean plumbing merge and syncs the checked-out target",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/git.service.test.ts::merges a branch via plumbing and syncs the working tree when the target is checked out",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["workflow", "capability", "api"],
+        "dimensions_covered": [
+          "workflow",
+          "capability",
+          "api"
+        ],
         "dimensions_missing": [],
-        "history": { "bugs": 0 }
+        "history": {
+          "bugs": 0
+        }
       },
       {
         "ref": "git-integration.merge.reject-conflict",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/shared/__tests__/git-service.integration.test.ts::mergeBranch rejects conflicts without committing conflict markers", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/git.service.test.ts::rejects a conflicting plumbing merge and never commits conflict markers (regression: #598)", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/git.service.test.ts::aborts merge on _journal.json conflict and leaves main checkout clean", "strength": "asserts-outcome" }
+          {
+            "test": "packages/shared/__tests__/git-service.integration.test.ts::mergeBranch rejects conflicts without committing conflict markers",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/git.service.test.ts::rejects a conflicting plumbing merge and never commits conflict markers (regression: #598)",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/git.service.test.ts::aborts merge on _journal.json conflict and leaves main checkout clean",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["error-handling", "regression", "risk"],
+        "dimensions_covered": [
+          "error-handling",
+          "regression",
+          "risk"
+        ],
         "dimensions_missing": [],
-        "history": { "bugs": 3, "notes": "#598-600 marker-commit esbuild crash" }
+        "history": {
+          "bugs": 3,
+          "notes": "#598-600 marker-commit esbuild crash"
+        }
       },
       {
         "ref": "git-integration.merge.idempotent",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/git.service.test.ts::is idempotent when merging a branch that is already reachable from the target", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/git.service.test.ts::syncs a clean checked-out target when retrying after the target ref already contains the feature", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/git.service.test.ts::does not reset dirty already-merged targets unless they match an interrupted plumbing merge", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/git.service.test.ts::is idempotent when merging a branch that is already reachable from the target",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/git.service.test.ts::syncs a clean checked-out target when retrying after the target ref already contains the feature",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/git.service.test.ts::does not reset dirty already-merged targets unless they match an interrupted plumbing merge",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["state-transition", "regression", "error-handling"],
+        "dimensions_covered": [
+          "state-transition",
+          "regression",
+          "error-handling"
+        ],
         "dimensions_missing": [],
-        "history": { "bugs": 1 }
+        "history": {
+          "bugs": 1
+        }
       },
       {
         "ref": "git-integration.merge.refuse-dirty",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/git.service.test.ts::refuses to merge into a checked-out branch with uncommitted tracked changes", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/git.service.test.ts::refuses to merge into a checked-out branch with uncommitted tracked changes",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["error-handling", "risk"],
+        "dimensions_covered": [
+          "error-handling",
+          "risk"
+        ],
         "dimensions_missing": [],
-        "history": { "bugs": 0 }
+        "history": {
+          "bugs": 0
+        }
       },
       {
         "ref": "git-integration.merge.safe-sync",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/shared/__tests__/git-service.integration.test.ts::a stale deferred working-tree sync never deletes files a concurrent merge added (#771)", "strength": "asserts-outcome" },
-          { "test": "packages/shared/__tests__/git-service.integration.test.ts::mergeBranch self-heals a desynced checkout, never leaving tracked files deleted (#692)", "strength": "asserts-outcome" }
+          {
+            "test": "packages/shared/__tests__/git-service.integration.test.ts::a stale deferred working-tree sync never deletes files a concurrent merge added (#771)",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/shared/__tests__/git-service.integration.test.ts::mergeBranch self-heals a desynced checkout, never leaving tracked files deleted (#692)",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["concurrency", "regression", "risk", "error-handling"],
+        "dimensions_covered": [
+          "concurrency",
+          "regression",
+          "risk",
+          "error-handling"
+        ],
         "dimensions_missing": [],
-        "history": { "bugs": 2, "notes": "#692, #771 mass-deletion/outage" }
+        "history": {
+          "bugs": 2,
+          "notes": "#692, #771 mass-deletion/outage"
+        }
       },
       {
         "ref": "git-integration.merge.append-resolve",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/shared/__tests__/append-only-hotfile-merge.integration.test.ts::lands a 3-ticket append-only cluster via the plumbing merge with no manual git or strand", "strength": "asserts-outcome" },
-          { "test": "packages/shared/__tests__/append-only-hotfile-merge.integration.test.ts::without the opt-in flag the same append conflict still throws (gated)", "strength": "asserts-outcome" },
-          { "test": "packages/shared/__tests__/append-only-hotfile-merge.integration.test.ts::an overlapping EDIT to the hot file is not an append — it still throws", "strength": "asserts-outcome" }
+          {
+            "test": "packages/shared/__tests__/append-only-hotfile-merge.integration.test.ts::lands a 3-ticket append-only cluster via the plumbing merge with no manual git or strand",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/shared/__tests__/append-only-hotfile-merge.integration.test.ts::without the opt-in flag the same append conflict still throws (gated)",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/shared/__tests__/append-only-hotfile-merge.integration.test.ts::an overlapping EDIT to the hot file is not an append — it still throws",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["feature", "regression", "error-handling", "boundary"],
-        "dimensions_missing": ["boundary"],
-        "history": { "bugs": 1, "notes": "#763" },
-        "gap": { "kind": "dimension-missing", "missing_dimensions": ["boundary"], "rationale": "order-sensitivity of the target-then-feature concatenation order is never asserted; all tested appends are order-insensitive smoke blocks. Low blast radius (gated + pure-append predicate)." }
+        "dimensions_covered": [
+          "feature",
+          "regression",
+          "error-handling",
+          "boundary"
+        ],
+        "dimensions_missing": [
+          "boundary"
+        ],
+        "history": {
+          "bugs": 1,
+          "notes": "#763"
+        },
+        "gap": {
+          "kind": "dimension-missing",
+          "missing_dimensions": [
+            "boundary"
+          ],
+          "rationale": "order-sensitivity of the target-then-feature concatenation order is never asserted; all tested appends are order-insensitive smoke blocks. Low blast radius (gated + pure-append predicate)."
+        }
       },
       {
         "ref": "git-integration.detect.conflicts",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/shared/__tests__/git-service.integration.test.ts::detectConflicts reports conflicts without touching HEAD, index, or working tree", "strength": "asserts-outcome" },
-          { "test": "packages/shared/__tests__/git-service.integration.test.ts::detectConflictsByBranch detects conflicts between two named branches without a worktree", "strength": "asserts-outcome" },
-          { "test": "packages/shared/__tests__/git-service.integration.test.ts::detectConflictsByBranch returns no conflicts for non-overlapping branches", "strength": "asserts-outcome" },
-          { "test": "packages/shared/__tests__/append-only-hotfile-merge.integration.test.ts::detectAppendOnlyResolvableConflicts reports the hot file read-only", "strength": "asserts-outcome" }
+          {
+            "test": "packages/shared/__tests__/git-service.integration.test.ts::detectConflicts reports conflicts without touching HEAD, index, or working tree",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/shared/__tests__/git-service.integration.test.ts::detectConflictsByBranch detects conflicts between two named branches without a worktree",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/shared/__tests__/git-service.integration.test.ts::detectConflictsByBranch returns no conflicts for non-overlapping branches",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/shared/__tests__/append-only-hotfile-merge.integration.test.ts::detectAppendOnlyResolvableConflicts reports the hot file read-only",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["api", "risk", "capability"],
+        "dimensions_covered": [
+          "api",
+          "risk",
+          "capability"
+        ],
         "dimensions_missing": [],
-        "history": { "bugs": 0 }
+        "history": {
+          "bugs": 0
+        }
       },
       {
         "ref": "git-integration.diff.working-tree",
         "status": "partial",
         "covered_by": [
-          { "test": "packages/shared/__tests__/git-service.integration.test.ts::getWorkingTreeDiff includes untracked files", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/git.service.test.ts::gets diff between worktree and base branch", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/workspace-diff-stats.test.ts::computes active workspace diff stats with the same ref semantics as board status", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/workspace-diff-stats.test.ts::uses HEAD for direct workspace diff stats", "strength": "asserts-outcome" }
+          {
+            "test": "packages/shared/__tests__/git-service.integration.test.ts::getWorkingTreeDiff includes untracked files",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/git.service.test.ts::gets diff between worktree and base branch",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/workspace-diff-stats.test.ts::computes active workspace diff stats with the same ref semantics as board status",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/workspace-diff-stats.test.ts::uses HEAD for direct workspace diff stats",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["api", "capability"],
-        "dimensions_missing": ["boundary"],
-        "history": { "bugs": 0 },
-        "gap": { "kind": "dimension-missing", "missing_dimensions": ["boundary"], "rationale": "untracked-diff synthesis edge cases untested: binary/unreadable file (header-only) and trailing-newline off-by-one. Display-grade only; domain doc flags it as not apply-grade." }
+        "dimensions_covered": [
+          "api",
+          "capability"
+        ],
+        "dimensions_missing": [
+          "boundary"
+        ],
+        "history": {
+          "bugs": 0
+        },
+        "gap": {
+          "kind": "dimension-missing",
+          "missing_dimensions": [
+            "boundary"
+          ],
+          "rationale": "untracked-diff synthesis edge cases untested: binary/unreadable file (header-only) and trailing-newline off-by-one. Display-grade only; domain doc flags it as not apply-grade."
+        }
       },
       {
         "ref": "git-integration.recover.detached-head",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/shared/__tests__/git-service.integration.test.ts::syncBranchToHead and ensureOnBranch recover commits made from detached HEAD", "strength": "asserts-outcome" }
+          {
+            "test": "packages/shared/__tests__/git-service.integration.test.ts::syncBranchToHead and ensureOnBranch recover commits made from detached HEAD",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["state-transition", "regression", "risk"],
+        "dimensions_covered": [
+          "state-transition",
+          "regression",
+          "risk"
+        ],
         "dimensions_missing": [],
-        "history": { "bugs": 0 }
+        "history": {
+          "bugs": 0
+        }
       },
       {
         "ref": "git-integration.renumber.migrations",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/git.service.test.ts::is a no-op when the feature branch added no migrations", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/git.service.test.ts::renumbers a single colliding migration and the merge then succeeds cleanly", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/git.service.test.ts::renumbers MULTIPLE feature migrations without clobbering", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/git.service.test.ts::is idempotent - a second renumber after a successful one is a no-op", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/git.service.test.ts::is a no-op when the feature branch added no migrations",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/git.service.test.ts::renumbers a single colliding migration and the merge then succeeds cleanly",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/git.service.test.ts::renumbers MULTIPLE feature migrations without clobbering",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/git.service.test.ts::is idempotent - a second renumber after a successful one is a no-op",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["regression", "boundary", "state-transition"],
+        "dimensions_covered": [
+          "regression",
+          "boundary",
+          "state-transition"
+        ],
         "dimensions_missing": [],
-        "history": { "bugs": 0 }
+        "history": {
+          "bugs": 0
+        }
       },
       {
         "ref": "git-integration.detect.repo-info",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/git-info.service.test.ts::detects basic repo info", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/git-info.service.test.ts::resolves to git root when called from a subdirectory", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/git-info.service.test.ts::throws for non-git directory", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/git-info.service.test.ts::prefers main over master when both branches exist", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/git-info.service.test.ts::detects basic repo info",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/git-info.service.test.ts::resolves to git root when called from a subdirectory",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/git-info.service.test.ts::throws for non-git directory",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/git-info.service.test.ts::prefers main over master when both branches exist",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["error-handling", "boundary", "config"],
+        "dimensions_covered": [
+          "error-handling",
+          "boundary",
+          "config"
+        ],
         "dimensions_missing": [],
-        "history": { "bugs": 0 }
+        "history": {
+          "bugs": 0
+        }
       },
       {
         "ref": "git-integration.stats.hotspots",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/git-info-async.service.test.ts::computes commit stats, code metrics, history, and hotspots (cold path)", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/git-info-async.service.test.ts::deduplicates concurrent cold computations into one shared in-flight promise", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/git-info-async.service.test.ts::falls back to full history for hotspots when all churn is older than the 12-week window", "strength": "asserts-outcome" },
-          { "test": "packages/server/src/__tests__/git-info.service.test.ts::returns commit count when defaultBranch is provided", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/git-info-async.service.test.ts::computes commit stats, code metrics, history, and hotspots (cold path)",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/git-info-async.service.test.ts::deduplicates concurrent cold computations into one shared in-flight promise",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/git-info-async.service.test.ts::falls back to full history for hotspots when all churn is older than the 12-week window",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/git-info.service.test.ts::returns commit count when defaultBranch is provided",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["capability", "concurrency", "boundary", "config", "regression"],
+        "dimensions_covered": [
+          "capability",
+          "concurrency",
+          "boundary",
+          "config",
+          "regression"
+        ],
         "dimensions_missing": [],
-        "history": { "bugs": 1, "notes": "#844 empty Crime Scene" }
+        "history": {
+          "bugs": 1,
+          "notes": "#844 empty Crime Scene"
+        }
       },
       {
         "ref": "git-integration.guard.single-spawn",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/shared/__tests__/git-exec-single-spawn.test.ts::no package source spawns git outside the git-exec adapter", "strength": "asserts-outcome" },
-          { "test": "packages/shared/__tests__/git-exec-single-spawn.test.ts::the adapter itself is detected as a git spawn site (allowlist is live, not stale)", "strength": "asserts-outcome" }
+          {
+            "test": "packages/shared/__tests__/git-exec-single-spawn.test.ts::no package source spawns git outside the git-exec adapter",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/shared/__tests__/git-exec-single-spawn.test.ts::the adapter itself is detected as a git spawn site (allowlist is live, not stale)",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["regression", "risk"],
+        "dimensions_covered": [
+          "regression",
+          "risk"
+        ],
         "dimensions_missing": [],
-        "history": { "bugs": 0, "notes": "arch-review #899" }
+        "history": {
+          "bugs": 0,
+          "notes": "arch-review #899"
+        }
       },
       {
         "ref": "git-integration.name.branch",
         "status": "covered",
         "covered_by": [
-          { "test": "packages/shared/__tests__/branch.test.ts::sanitizeBranchName (6 cases incl. 80-char truncation)", "strength": "asserts-outcome" },
-          { "test": "packages/shared/__tests__/branch.test.ts::suggestBranchName (8 cases incl. 40-char slug truncation)", "strength": "asserts-outcome" }
+          {
+            "test": "packages/shared/__tests__/branch.test.ts::sanitizeBranchName (6 cases incl. 80-char truncation)",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/shared/__tests__/branch.test.ts::suggestBranchName (8 cases incl. 40-char slug truncation)",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["boundary", "capability"],
+        "dimensions_covered": [
+          "boundary",
+          "capability"
+        ],
         "dimensions_missing": [],
-        "history": { "bugs": 0 }
+        "history": {
+          "bugs": 0
+        }
       },
       {
         "ref": "git-integration.rebase.prepare-review",
-        "status": "partial",
+        "status": "covered",
         "covered_by": [
-          { "test": "packages/server/src/__tests__/git.service.test.ts::rebaseOntoBase commits leftover worktree changes instead of failing on a dirty tree", "strength": "asserts-outcome" }
+          {
+            "test": "packages/server/src/__tests__/git.service.test.ts::rebaseOntoBase commits leftover worktree changes instead of failing on a dirty tree",
+            "strength": "asserts-outcome"
+          },
+          {
+            "test": "packages/server/src/__tests__/git-prepare-for-review.test.ts",
+            "strength": "asserts-outcome"
+          }
         ],
-        "dimensions_covered": ["regression"],
-        "dimensions_missing": ["workflow", "error-handling"],
-        "history": { "bugs": 1 },
-        "gap": { "kind": "dimension-missing", "missing_dimensions": ["workflow", "error-handling"], "rationale": "only the dirty-tree leftover-commit path is asserted. The local-base preference (rebase onto local master ahead of a stale origin), abort-stale-rebase, and the on-conflict --diff-filter=U file-list return are never exercised end-to-end — a regression there would silently route or strand a review." }
+        "dimensions_covered": [
+          "regression",
+          "workflow",
+          "error-handling"
+        ],
+        "dimensions_missing": [],
+        "history": {
+          "bugs": 1
+        },
+        "gap": null,
+        "note": "Closed by e2e-test-author wave-3 2026-06-27 (adversarially reviewed). git-prepare-for-review.test.ts"
       }
     ],
     "summary": {
-      "covered": 16,
-      "partial": 2,
+      "covered": 17,
+      "partial": 1,
       "uncovered": 0,
       "undocumented_implemented": 0,
       "documented_missing": 0,
-      "score": 0.94,
+      "score": 0.972,
       "by_dimension": {
-        "workflow": { "covered": 3, "partial": 1, "uncovered": 0 },
-        "capability": { "covered": 6, "partial": 0, "uncovered": 0 },
-        "api": { "covered": 3, "partial": 0, "uncovered": 0 },
-        "error-handling": { "covered": 7, "partial": 1, "uncovered": 0 },
-        "boundary": { "covered": 6, "partial": 2, "uncovered": 0 },
-        "state-transition": { "covered": 5, "partial": 0, "uncovered": 0 },
-        "regression": { "covered": 11, "partial": 1, "uncovered": 0 },
-        "concurrency": { "covered": 2, "partial": 0, "uncovered": 0 },
-        "risk": { "covered": 7, "partial": 0, "uncovered": 0 },
-        "config": { "covered": 2, "partial": 0, "uncovered": 0 },
-        "feature": { "covered": 1, "partial": 0, "uncovered": 0 },
-        "permission": { "na": true, "reason": "single-user local-first app — no RBAC" },
-        "accessibility": { "na": true, "reason": "library/server capability, no direct UI surface" }
-      },
-      "weak_dimensions": ["boundary", "workflow (rebase/review path)"],
-      "top_gaps": [
-        {
-          "ref": "git-integration.rebase.prepare-review",
-          "priority": "P1",
-          "roi": 4.0,
-          "dimensions_to_add": ["workflow", "error-handling"],
-          "rationale": "prepareForReview is the rebase step on the build→review→merge critical path and churns; only its dirty-tree leftover-commit branch is asserted. The local-vs-origin base choice (rebasing onto a stale origin replays local history and conflicts spuriously) and the on-conflict file-list return are unverified — a regression silently strands reviews. impact 4 x regression 4 / (exec 2 + maint 2). Build a temp-repo integration test: local master ahead of origin + a true conflict, assert it rebases onto LOCAL base and returns the --diff-filter=U file list with a clean tree afterward."
+        "workflow": {
+          "covered": 3,
+          "partial": 1,
+          "uncovered": 0
         },
+        "capability": {
+          "covered": 6,
+          "partial": 0,
+          "uncovered": 0
+        },
+        "api": {
+          "covered": 3,
+          "partial": 0,
+          "uncovered": 0
+        },
+        "error-handling": {
+          "covered": 7,
+          "partial": 1,
+          "uncovered": 0
+        },
+        "boundary": {
+          "covered": 6,
+          "partial": 2,
+          "uncovered": 0
+        },
+        "state-transition": {
+          "covered": 5,
+          "partial": 0,
+          "uncovered": 0
+        },
+        "regression": {
+          "covered": 11,
+          "partial": 1,
+          "uncovered": 0
+        },
+        "concurrency": {
+          "covered": 2,
+          "partial": 0,
+          "uncovered": 0
+        },
+        "risk": {
+          "covered": 7,
+          "partial": 0,
+          "uncovered": 0
+        },
+        "config": {
+          "covered": 2,
+          "partial": 0,
+          "uncovered": 0
+        },
+        "feature": {
+          "covered": 1,
+          "partial": 0,
+          "uncovered": 0
+        },
+        "permission": {
+          "na": true,
+          "reason": "single-user local-first app — no RBAC"
+        },
+        "accessibility": {
+          "na": true,
+          "reason": "library/server capability, no direct UI surface"
+        }
+      },
+      "weak_dimensions": [
+        "boundary",
+        "workflow (rebase/review path)"
+      ],
+      "top_gaps": [
         {
           "ref": "git-integration.diff.working-tree",
           "priority": "P3",
           "roi": 1.5,
-          "dimensions_to_add": ["boundary"],
+          "dimensions_to_add": [
+            "boundary"
+          ],
           "rationale": "untracked-diff synthesis is hand-rolled and flagged display-grade-not-apply-grade. Add boundary cases: a binary/unreadable untracked file (expect header-only, no crash) and a no-trailing-newline file (line-count off-by-one). impact 3 x regression 2 / (exec 1 + maint 3). Low blast radius (review UI only)."
         },
         {
           "ref": "git-integration.detect.repo-info",
           "priority": "P4",
           "roi": 1.3,
-          "dimensions_to_add": ["boundary", "error-handling"],
+          "dimensions_to_add": [
+            "boundary",
+            "error-handling"
+          ],
           "rationale": "documented latent risk: getDiff/getDiffFromRepo default baseBranch='main' while default-branch detection allows master-only repos — omitting the base on a master repo would diff against a nonexistent ref. Verify whether all real callers pass an explicit base; if not, this is a bug, not just a gap. impact 3 x regression 2 / (exec 1 + maint 2)."
         }
       ]

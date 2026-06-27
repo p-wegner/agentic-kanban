@@ -1017,28 +1017,26 @@
       },
       {
         "ref": "mcp-server.create.agent-skill",
-        "status": "uncovered",
-        "covered_by": [],
-        "dimensions_covered": [],
-        "dimensions_missing": [
-          "error",
-          "boundary",
-          "permission"
+        "status": "covered",
+        "covered_by": [
+          {
+            "test": "packages/mcp-server/src/__tests__/tools/create-agent-skill.test.ts",
+            "strength": "asserts-outcome"
+          }
         ],
+        "dimensions_covered": [
+          "security",
+          "error",
+          "boundary"
+        ],
+        "dimensions_missing": [],
         "history": {
           "churn_90d": null,
           "bugs": 0,
           "last_regression": null
         },
-        "gap": {
-          "kind": "no-test",
-          "missing_dimensions": [
-            "error",
-            "boundary",
-            "permission"
-          ],
-          "rationale": "No test exercises create_agent_skill. The path-traversal guard (names with '/','\\','..' become .claude/skills/<name>/SKILL.md filesystem paths) and per-scope uniqueness (create-agent-skill.ts:19,26) are a security-relevant rejection path with zero coverage."
-        }
+        "gap": null,
+        "note": "Closed by e2e-test-author wave-3 2026-06-27 (adversarially reviewed). create-agent-skill.test.ts"
       },
       {
         "ref": "mcp-server.govern.disabled-tools",
@@ -1115,12 +1113,12 @@
       }
     ],
     "summary": {
-      "covered": 14,
+      "covered": 15,
       "partial": 3,
-      "uncovered": 3,
+      "uncovered": 2,
       "undocumented_implemented": 0,
       "documented_missing": 0,
-      "score": 0.775,
+      "score": 0.825,
       "by_dimension": {
         "api": {
           "covered": 9,
@@ -1180,17 +1178,6 @@
         "config(security egress)"
       ],
       "top_gaps": [
-        {
-          "ref": "mcp-server.create.agent-skill",
-          "priority": "P1",
-          "roi": 3.5,
-          "dimensions_to_add": [
-            "error",
-            "boundary",
-            "permission"
-          ],
-          "rationale": "Path-traversal rejection (names → filesystem paths) is security-relevant and untested. Negative-input test is cheap and high-value: assert '../x', 'a/b', 'a\\\\b' rejected with no SKILL.md written, and per-scope duplicate rejected."
-        },
         {
           "ref": "mcp-server.fire.webhook",
           "priority": "P1",
