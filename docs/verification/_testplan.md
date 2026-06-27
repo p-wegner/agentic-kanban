@@ -4,9 +4,9 @@
 > behaviour; the tick is derived from `_coverage.json` (`testplan.mjs`). Regenerate after
 > tests land and ticks update themselves — the plan can't drift from reality.
 
-**Progress: 210/273 scenarios covered (77%)** · 37 partial · 26 to author
+**Progress: 215/273 scenarios covered (79%)** · 35 partial · 23 to author
 
-`[███████████████░░░░░]`
+`[████████████████░░░░]`
 
 Pipeline roles (cf. Playwright Agents): **planner** = behavior-discovery + coverage-intelligence (this plan) · **generator** = e2e-test-author (implements gaps top-down) · **healer** = e2e-test-author re-run + flaky-test-triage (keeps the suite green).
 
@@ -16,27 +16,27 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 
 | Capability | Covered | Plan |
 |---|--:|---|
-| [agent-providers](#agent-providers) | 13/16 | `[████████░░]` |
+| [agent-providers](#agent-providers) | 14/16 | `[█████████░]` |
 | [agent-sessions](#agent-sessions) | 13/20 | `[███████░░░]` |
 | [board-ui](#board-ui) | 18/24 | `[████████░░]` |
 | [butler](#butler) | 14/19 | `[███████░░░]` |
 | [codemods](#codemods) | 6/9 | `[███████░░░]` |
 | [git-integration](#git-integration) | 16/18 | `[█████████░]` |
 | [issues-board](#issues-board) | 19/20 | `[██████████]` |
-| [mcp-server](#mcp-server) | 12/20 | `[██████░░░░]` |
+| [mcp-server](#mcp-server) | 13/20 | `[███████░░░]` |
 | [monitor-orchestration](#monitor-orchestration) | 16/19 | `[████████░░]` |
 | [persistence-schema](#persistence-schema) | 13/15 | `[█████████░]` |
-| [preferences-config](#preferences-config) | 14/16 | `[█████████░]` |
-| [project-registration](#project-registration) | 10/17 | `[██████░░░░]` |
+| [preferences-config](#preferences-config) | 15/16 | `[█████████░]` |
+| [project-registration](#project-registration) | 11/17 | `[██████░░░░]` |
 | [review-merge](#review-merge) | 15/18 | `[████████░░]` |
-| [workflow-engine](#workflow-engine) | 11/16 | `[███████░░░]` |
+| [workflow-engine](#workflow-engine) | 12/16 | `[████████░░]` |
 | [workspaces](#workspaces) | 20/26 | `[████████░░]` |
 
 ---
 
 ## agent-providers
 
-**agent-providers** — 13/16 covered `[████████░░]`
+**agent-providers** — 14/16 covered `[█████████░]`
 
 - [ ] ⬜ **medium** `agent-providers.login.oauthBootstrap` — Picking a Codex license / Claude subscription with no auth on disk creates the credential dir and pops a REAL visible terminal (windowsHide:false) running codex login / claude /login with the right CODEX_HOME/CLAUDE_CONFIG_DIR; failure is non-fatal because the equivalent manual command is returned for a copy-button
   - _given_ operator
@@ -48,11 +48,6 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
   - _then_ the dashboard shows error for a missing codex config / below-min version / recorded launch failure; secrets in flags/errors are redacted
   - _add dimensions_ state-transition
   - _gap_ failure-override-to-error and missing-config-error are asserted, but the version-probe-cached-once-per-(provider,command) optimization and the full ok→warning→error verdict folding across license-ring vs config-file auth
-- [~] ⚠️ **high** `agent-providers.strip.profileEnv` — Before a profile is applied, the server's own profile-owned ANTHROPIC_* env vars are stripped from the spawn env to prevent cross-profile credential bleed, and if a Claude profile sets ANTHROPIC_AUTH_TOKEN but no key, ANTHROPIC_API_KEY is deleted so the profile's auth wins cleanly
-  - _given_ agent-sessions
-  - _then_ the spawn env contains no leaked server ANTHROPIC_* vars; token+key conflict is resolved by dropping the key
-  - _add dimensions_ boundary, error-handling
-  - _gap_ buildSpawnEnv stripping the server's own ANTHROPIC_* vars (cross-profile credential-bleed guard, helpers.ts:119) and the delete-ANTHROPIC_API_KEY-when-AUTH_TOKEN-present rule (helpers.ts:161) are security-relevant but no
 - [x] ✅ `agent-providers.build.launch` — buildAgentLaunchConfig dispatches by ProviderName to the matching adapter and returns a ready-to-spawn {command,args,env} plus stdin-delivery hints
   - _given_ agent-sessions
   - _then_ config.command/args/env reflect the provider's invocation grammar; claude-code routes to claude; unknown provider throws in registry but narrows to claude at narrowProviderName
@@ -105,6 +100,10 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
   - _given_ monitor
   - _then_ ring picks next non-cooled license/subscription, switches the active-profile pref, builder resumes same worktree with a continuation prompt; non-builder or no-fresh-profile → blocked, never silently relaunched
   - _asserted by_ `rate-limit-exit-decision.test.ts::relaunches only when rotated to a fresh profile `, `usage-limit-rotation-exit.test.ts::rotates a Codex license and relaunches the build`, `usage-limit-rotation-exit.test.ts::leaves the workspace blocked (no relaunch) when `, `codex-license-ring.test.ts::pickNextLicense rotates to the next entry in rin`
+- [x] ✅ `agent-providers.strip.profileEnv` — Before a profile is applied, the server's own profile-owned ANTHROPIC_* env vars are stripped from the spawn env to prevent cross-profile credential bleed, and if a Claude profile sets ANTHROPIC_AUTH_TOKEN but no key, ANTHROPIC_API_KEY is deleted so the profile's auth wins cleanly
+  - _given_ agent-sessions
+  - _then_ the spawn env contains no leaked server ANTHROPIC_* vars; token+key conflict is resolved by dropping the key
+  - _asserted by_ `agent-provider.test.ts::skips --model for profiles with a custom ANTHROP`, `build-spawn-env-strip.test.ts`
 
 ## agent-sessions
 
@@ -602,13 +601,8 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 
 ## mcp-server
 
-**mcp-server** — 12/20 covered `[██████░░░░]`
+**mcp-server** — 13/20 covered `[███████░░░]`
 
-- [ ] ⬜ **P0** `mcp-server.govern.disabled-tools` — A tool whose name is in the disabled_mcp_tools preference is never registered, so it does not appear in tools/list and cannot be called for that session
-  - _given_ settings-operator
-  - _then_ the disabled tool is absent from tools/list; calling it returns method-not-found
-  - _add dimensions_ permission, config, api
-  - _gap_ The disabled_mcp_tools registration gate (index.ts:198) — the ONLY authority knob on the surface — is untested. No test asserts that a listed tool is absent from tools/list and uncallable. Client-side toggle UI tests (mc
 - [ ] ⬜ **P1** `mcp-server.move.issue.workflow-edge` — A workflow-driven issue may only move along a legal outgoing edge of its current node; an illegal jump is refused with the valid next stages and a pointer to propose_transition
   - _given_ ai-agent
   - _then_ illegal target → code WORKFLOW_TRANSITION_INVALID with the list of valid next stages; legal target proceeds
@@ -692,6 +686,10 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
   - _given_ ai-agent
   - _then_ advertised ⊆ registered (no phantom tool like the old mark_ready_for_merge) AND registered ⊆ advertised; mark_ready_for_merge present; no blank descriptions
   - _asserted by_ `mcp-tools.test.ts::the MCP_TOOL_DEFINITIONS catalog and the runtime`
+- [x] ✅ `mcp-server.govern.disabled-tools` — A tool whose name is in the disabled_mcp_tools preference is never registered, so it does not appear in tools/list and cannot be called for that session
+  - _given_ settings-operator
+  - _then_ the disabled tool is absent from tools/list; calling it returns method-not-found
+  - _asserted by_ `disabled-tools.test.ts`
 
 ## monitor-orchestration
 
@@ -814,7 +812,7 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 - [x] ✅ `persistence-schema.cascade.delete-issue` — Deleting an issue removes its entire dependent subtree (workspaces, sessions, messages, diff-comments, artifacts, comments, time-entries, showdowns, dependencies both directions, tags) atomically and leaves no orphan or FK violation
   - _given_ operator
   - _then_ issue + all children gone; sibling issue untouched; PRAGMA foreign_key_check returns no rows
-  - _asserted by_ `issue-cascade-and-dep.repo.test.ts::deletes an issue and leaves no orphans across is`, `issue-cascade-and-dep.repo.test.ts::deletes an issue with no children`
+  - _asserted by_ `issue-cascade-and-dep.repo.test.ts::deletes an issue and leaves no orphans across is`, `issue-cascade-and-dep.repo.test.ts::deletes an issue with no children`, `issue-cascade-completeness.repo.test.ts`
 - [x] ✅ `persistence-schema.cascade.delete-workspace` — Deleting a workspace removes every table that references the workspace or its sessions, atomically, while leaving the parent issue intact
   - _given_ operator
   - _then_ workspace + sessions gone; parent issue remains; no FK violations
@@ -846,13 +844,8 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 
 ## preferences-config
 
-**preferences-config** — 14/16 covered `[█████████░]`
+**preferences-config** — 15/16 covered `[█████████░]`
 
-- [~] ⚠️ **P1** `preferences-config.resolve.start-policy` — Start Mode is the single auto-start kill-switch: manual stops ALL auto-start, conductor forces in-process auto-start off, monitor enables it; an unset mode is derived from legacy flags (conductor never derived)
-  - _given_ monitor
-  - _then_ StartPolicy exposes autoStartUnblocked/postMergeCascade/backlogRefill/scheduledRuns booleans + source; manual → all false, conductor → all in-process false (scheduledRuns true)
-  - _add dimensions_ state-transition, risk
-  - _gap_ Only the mode='monitor' StartPolicy is asserted (via resolveProjectRuntimeConfig). The kill-switch semantics that justify this module's existence (decision 008) — manual → all four capability booleans false, conductor → 
 - [~] ⚠️ **P2** `preferences-config.read.quota-usage` — Live quota telemetry is surfaced from the external tampermonkey-direct service and degrades to 503 (with empty providers) when that source is unavailable
   - _given_ operator
   - _then_ GET returns quota data (200) or {error, providers:[]} with 503 when the external endpoint is down
@@ -882,6 +875,10 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
   - _given_ workspace-creator
   - _then_ only default_model_<provider> (or requestedModel) drives the model; global default_model has no effect; mismatch → undefined (provider default)
   - _asserted by_ `no-global-default-model.test.ts::a value in the global default_model key is IGNOR`, `no-global-default-model.test.ts::the resolver source does NOT read the global def`, `provider-config-resolution.test.ts::a stale global default_model never leaks into a `, `provider-config-resolution.test.ts::keeps provider-specific model defaults isolated `
+- [x] ✅ `preferences-config.resolve.start-policy` — Start Mode is the single auto-start kill-switch: manual stops ALL auto-start, conductor forces in-process auto-start off, monitor enables it; an unset mode is derived from legacy flags (conductor never derived)
+  - _given_ monitor
+  - _then_ StartPolicy exposes autoStartUnblocked/postMergeCascade/backlogRefill/scheduledRuns booleans + source; manual → all false, conductor → all in-process false (scheduledRuns true)
+  - _asserted by_ `project-runtime-config.test.ts::resolves provider, model, start policy, and driv`, `project-runtime-config.test.ts::writes only project-scoped kill-switch prefs whe`, `start-policy.service.test.ts`
 - [x] ✅ `preferences-config.resolve.monitor-tunables` — A saved Strategy Bullseye derives the monitor's effective dials (active-agents target, backlog floor, max-new-starts, refill focus); bugfix-heavy weights yield bugfix-only refill; malformed/absent Bullseye falls back to legacy nudge prefs
   - _given_ monitor
   - _then_ resolveMonitorTunables returns {tunables, source:'strategy'|'prefs'}; malformed JSON silently falls through to legacy with source='prefs'
@@ -917,13 +914,8 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 
 ## project-registration
 
-**project-registration** — 10/17 covered `[██████░░░░]`
+**project-registration** — 11/17 covered `[██████░░░░]`
 
-- [ ] ⬜ **P0** `project-registration.resolve.defaultBranch` — A newly registered project never gets a null defaultBranch — it falls back to the repo's actually checked-out branch so the project is not silently undriveable (#772)
-  - _given_ operator
-  - _then_ project.defaultBranch is non-null when a branch is checked out; POST /api/workspaces does not 400 'No default branch configured'
-  - _add dimensions_ regression, error-handling, boundary
-  - _gap_ the #772 never-null-branch guarantee (fallback to checked-out branch on a non-main/master repo) has no asserting test; a regression would silently re-create undriveable projects. PATCH defaultBranch-validation is a diffe
 - [ ] ⬜ **P1** `project-registration.register.idempotent` — Re-registering the same repo (or a subdirectory resolving to the same git root) returns the existing project instead of creating a duplicate
   - _given_ operator
   - _then_ result.created === false and the same project id is returned; no second row; issues/skills stay on one project
@@ -958,6 +950,10 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
   - _given_ operator
   - _then_ POST /api/projects returns 400 with error mentioning repoPath; duplicate path returns 409
   - _asserted by_ `projects.test.ts::POST /api/projects rejects missing repoPath`
+- [x] ✅ `project-registration.resolve.defaultBranch` — A newly registered project never gets a null defaultBranch — it falls back to the repo's actually checked-out branch so the project is not silently undriveable (#772)
+  - _given_ operator
+  - _then_ project.defaultBranch is non-null when a branch is checked out; POST /api/workspaces does not 400 'No default branch configured'
+  - _asserted by_ `registration-resolve-default-branch.test.ts`
 - [x] ✅ `project-registration.detect.stackProfile` — Marker files are reverse-engineered into one durable StackProfile across many stacks (node/pnpm/npm/yarn, rust/cargo, go, python/pip/poetry), inferring package manager, monorepo-ness, build/test/lint/dev commands, web-ness and dev port
   - _given_ operator
   - _then_ detectStackProfile returns a typed profile with the correct stack/commands; empty repo yields a valid sparse profile (stack null, source 'detected')
@@ -1077,13 +1073,8 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
 
 ## workflow-engine
 
-**workflow-engine** — 11/16 covered `[███████░░░]`
+**workflow-engine** — 12/16 covered `[████████░░]`
 
-- [ ] ⬜ **P1** `workflow-engine.advance.mcpProposeTransition` — The MCP propose_transition tool is the AGENT's primary entry point to advance work — resolving the agent's workspace, applying the same legality/auto-route/gate/maxVisits rules, and returning the next stages for prompt re-injection
-  - _given_ agent
-  - _then_ tool returns ok + next stages (or a refusal reason) and the board column advances; mirrors the REST transition contract
-  - _add dimensions_ api, workflow, state-transition
-  - _gap_ the agent's PRIMARY entry point to advance the workflow has no test in packages/mcp-server; only the REST /transition path (same engine) is tested. The MCP tool's workspace-resolution + result-shaping wrapper around prop
 - [~] ⚠️ **P4** `workflow-engine.autoroute.condition` — With no explicit target, the engine auto-takes an edge IFF exactly one outgoing condition fires for the current signals; zero firing => refuse and ask the agent to choose; multiple firing => ambiguous, refuse
   - _given_ agent
   - _then_ single fire: ok true, autoResolved true, lands on that node; zero: ok false 'Specify a target'; multiple: ok false 'Multiple edges fired'
@@ -1148,6 +1139,10 @@ Legend: `[x]` ✅ covered (outcome asserted) · `[~]` ⚠️ partial (touched / 
   - _given_ agent
   - _then_ rendered markdown contains/omits 'propose_transition' and the right next-stage list per node type
   - _asserted by_ `workflow-engine.test.ts::builds a transition block embedding the workspac`, `workflow-engine.test.ts::keeps spec planning phases behind the human appr`, `workflow-fork.test.ts::launches the attached spec phase skill (prompt c`
+- [x] ✅ `workflow-engine.advance.mcpProposeTransition` — The MCP propose_transition tool is the AGENT's primary entry point to advance work — resolving the agent's workspace, applying the same legality/auto-route/gate/maxVisits rules, and returning the next stages for prompt re-injection
+  - _given_ agent
+  - _then_ tool returns ok + next stages (or a refusal reason) and the board column advances; mirrors the REST transition contract
+  - _asserted by_ `propose-transition.test.ts`
 
 ## workspaces
 
