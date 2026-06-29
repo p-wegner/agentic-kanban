@@ -116,13 +116,30 @@ interface ClaudeProfileSettings {
   env?: Record<string, string>;
 }
 
-const PROFILE_OWNED_ENV_VARS = [
-  "ANTHROPIC_API_KEY",
-  "ANTHROPIC_AUTH_TOKEN",
-  "ANTHROPIC_BASE_URL",
-  "ANTHROPIC_MODEL",
-  "API_TIMEOUT_MS",
-];
+/**
+ * Env-var name PREFIXES that belong to whatever Claude profile is being launched and must be
+ * stripped from the inherited server env before a session is spawned — otherwise a credential
+ * the server happens to hold (its own login, a previously-applied profile) BLEEDS into a
+ * session launched for a different profile and silently authenticates the wrong account.
+ *
+ * This is a DENYLIST, not an allowlist: any new `ANTHROPIC_*` (e.g. `ANTHROPIC_SMALL_FAST_MODEL`,
+ * `ANTHROPIC_DEFAULT_*`) or `CLAUDE_CODE_*` (e.g. `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_BEDROCK`,
+ * `CLAUDE_CODE_USE_VERTEX`) var is stripped without having to be enumerated, closing the gap where a
+ * non-`ANTHROPIC_`-prefixed auth var (notably `CLAUDE_CODE_OAUTH_TOKEN`) slipped through the old
+ * hardcoded 5-key list.
+ */
+const PROFILE_OWNED_ENV_PREFIXES = ["ANTHROPIC_", "CLAUDE_CODE_"];
+
+/** Profile-owned vars whose names don't match {@link PROFILE_OWNED_ENV_PREFIXES}. */
+const PROFILE_OWNED_ENV_VARS = ["API_TIMEOUT_MS"];
+
+/** True if `key` is a Claude profile-owned auth/endpoint/model var that must not bleed across profiles. */
+function isProfileOwnedEnvVar(key: string): boolean {
+  return (
+    PROFILE_OWNED_ENV_VARS.includes(key) ||
+    PROFILE_OWNED_ENV_PREFIXES.some((prefix) => key.startsWith(prefix))
+  );
+}
 
 /**
  * True if the Claude profile's settings.json defines a custom `ANTHROPIC_BASE_URL` (e.g. z.ai/glm).
@@ -145,8 +162,8 @@ export function profileDefinesCustomEndpoint(profileName: string | undefined, fs
 export function buildSpawnEnv(claudeProfile?: string, fs: FileSystem = nodeFileSystem): Record<string, string> {
   const spawnEnv: Record<string, string> = { ...process.env as Record<string, string> };
 
-  for (const key of PROFILE_OWNED_ENV_VARS) {
-    delete spawnEnv[key];
+  for (const key of Object.keys(spawnEnv)) {
+    if (isProfileOwnedEnvVar(key)) delete spawnEnv[key];
   }
 
   if (!claudeProfile) return spawnEnv;
@@ -157,11 +174,9 @@ export function buildSpawnEnv(claudeProfile?: string, fs: FileSystem = nodeFileS
   try {
     const profileSettings = JSON.parse(fs.readFileSync(settingsPath, "utf-8")) as ClaudeProfileSettings;
     if (profileSettings.env && typeof profileSettings.env === "object") {
-      const profileEnv = profileSettings.env;
-      if (profileEnv.ANTHROPIC_AUTH_TOKEN && !profileEnv.ANTHROPIC_API_KEY) {
-        delete spawnEnv.ANTHROPIC_API_KEY;
-      }
-      Object.assign(spawnEnv, profileEnv);
+      // The strip loop above already removed every profile-owned var (incl. ANTHROPIC_API_KEY)
+      // from the inherited server env, so the profile's own env is applied onto a clean slate.
+      Object.assign(spawnEnv, profileSettings.env);
     }
   } catch (err) {
     console.warn(`[agent] Failed to read profile env from ${settingsPath}: ${String(err)}`);
