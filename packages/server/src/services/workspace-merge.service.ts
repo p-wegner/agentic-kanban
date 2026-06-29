@@ -47,6 +47,7 @@ import {
 import { executeWorkspaceMerge } from "./workspace-merge-execution.service.js";
 import { runWorkspacePostMergeCleanup } from "./workspace-merge-cleanup.service.js";
 import { finalizeMergeCleanup } from "./merge-cleanup.service.js";
+import { runPreMergeGate } from "./pre-merge-gate.service.js";
 
 export function createWorkspaceMergeService(deps: {
   database: Database;
@@ -255,6 +256,33 @@ export function createWorkspaceMergeService(deps: {
     });
     if (preflight.kind === "completed") return preflight.result;
     await runWorkspacePreMergeValidation({ workspace, repoPath, baseBranch, gitService });
+
+    // #930: gate the MANUAL/operator merge path (and, since the orchestrator/merge-queue route
+    // through here too, those) with the SAME verify_script + boot/render smoke gate the in-process
+    // monitor (monitor-cycle.ts) and review-exit handler run. Without this a hand-merge could land
+    // build/test/boot-UNVERIFIED code on a project that explicitly configured a gate — exactly the
+    // failure the gate exists to prevent. Unlike the monitor we do NOT skip on readyForMerge: a
+    // manual merge is an explicit operator action, so we always re-verify before landing. On failure
+    // we WITHHOLD the merge (throw, surfaced to the operator) rather than silently land it.
+    if (project) {
+      const gate = await runPreMergeGate({ id, workingDir: workspace.workingDir }, project.id, database);
+      if (!gate.passed) {
+        await recordMergeAttempt(
+          workspace,
+          "conflict",
+          `Merge withheld: pre-merge gate failed (${gate.stage}). ${gate.message}`,
+          { mergeReason: "pre_merge_gate_failed", gateStage: gate.stage, gateMessage: gate.message, targetBranch: baseBranch },
+        );
+        throw new WorkspaceError(
+          `Pre-merge gate failed (${gate.stage}) — merge withheld. ${gate.message}`,
+          "CONFLICT",
+          { mergeReason: "pre_merge_gate_failed", gateStage: gate.stage },
+        );
+      }
+      if (!gate.skipped) {
+        console.log(`[workspace-merge] pre-merge gate passed for workspace ${id} (${gate.stage}); proceeding with merge`);
+      }
+    }
 
     const targetBranch = baseBranch;
     const { response, postMergeContext } = await executeWorkspaceMerge({
