@@ -187,4 +187,48 @@ describe("review-merge.gate.verify-smoke — gate decision + which merge path ru
     expect(result.merged).toBe(true);
     expect(await issueStatusName(db, issueId)).toBe("Done");
   });
+
+  // #943: the in-process monitor's auto-merge paths already run the gate against the same worktree
+  // state in the same cycle (or rely on the review-exit gate for readyForMerge work). They pass
+  // `skipPreMergeGate` so `doMerge` does NOT re-run it — otherwise an expensive build/boot doubles
+  // per monitor merge. The skip is per-call, so the manual route (no flag) keeps gating.
+  it("skipPreMergeGate suppresses the doMerge gate re-run, so the verify_script is NOT spawned again (#943)", async () => {
+    const { projectId, issueId, workspaceId } = await seedApprovedWorkspace(db);
+    await setPreference(verifyScriptPrefKey(projectId), ".\\verify.sh", db);
+    runSetupScript.mockResolvedValue({ exitCode: 0, stdout: "ok", stderr: "" });
+
+    const git = makeGit();
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+    const result = await svc.mergeWorkspace(workspaceId, { skipPreMergeGate: true });
+
+    // The gate did NOT run a second build, but the merge still landed.
+    expect(runSetupScript).not.toHaveBeenCalled();
+    expect(result.merged).toBe(true);
+    expect(await issueStatusName(db, issueId)).toBe("Done");
+  });
+
+  // The monitor reaches doMerge via mergeWorkspaceDeduped — verify the skip flag threads through it too.
+  it("mergeWorkspaceDeduped threads skipPreMergeGate through to doMerge (#943)", async () => {
+    const { projectId, workspaceId } = await seedApprovedWorkspace(db);
+    await setPreference(verifyScriptPrefKey(projectId), ".\\verify.sh", db);
+    // Even a FAILING verify must not be consulted when the gate is skipped — it never runs.
+    runSetupScript.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "would have failed" });
+
+    const git = makeGit();
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+    const result = await svc.mergeWorkspaceDeduped(workspaceId, { skipPreMergeGate: true });
+
+    expect(runSetupScript).not.toHaveBeenCalled();
+    expect(result.merged).toBe(true);
+  });
 });
