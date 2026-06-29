@@ -159,11 +159,7 @@ scoop install pnpm            # gives ~\scoop\shims\pnpm.exe (first on PATH)
 
 **Cause:** the client resolves `@agentic-kanban/shared` through the package's `import` export condition → `packages/shared/dist/…`. On a clean clone that `dist/` does **not** exist yet — it is gitignored, `pnpm install` has no `prepare` step that builds it, and `dev.mjs`'s shared preflight only restores *wiped source files from git*, it does not run the build. (The API **server** is unaffected: it runs tsx with `--conditions development`, which resolves shared to its `src/`.)
 
-**Fix:** build the shared package once before the first client start:
-```bash
-pnpm --filter @agentic-kanban/shared build
-```
-After that the gitignored `dist/` persists locally. (Maintainer fix worth considering: add `"development"` to `resolve.conditions` in `packages/client/vite.config.ts` so the client also resolves shared to `src/` and needs no pre-build — that is the stated intent of the comment there, but `import` currently wins.)
+**Status:** fixed — `packages/client/vite.config.ts` now prepends the `"development"` condition in dev (`serve`) mode, so the client resolves shared to `src/` and needs **no** pre-build. (`vite build` still uses the compiled `import` → `dist` path.) If you somehow still hit this on the client, build shared once: `pnpm --filter @agentic-kanban/shared build`.
 
 ### 3. `pnpm dev` server never comes up on `:3001` (proxy is up, API hangs)
 
