@@ -99,6 +99,7 @@ const db = (): TestDb => h.db!;
 
 // Imported AFTER the mock is registered (vi.mock is hoisted above all imports anyway).
 import { deduplicateProjects } from "../services/project-registration.js";
+import { projectChildEdges } from "../repositories/project-registration.repository.js";
 
 function makeGitRepo(): { root: string; sub: string; dispose: () => void } {
   const root = join(tmpdir(), `dedup-repo-${randomUUID()}`);
@@ -228,11 +229,154 @@ describe("deduplicateProjects — two rows on one git root collapse to a single 
     const fk = await client().execute("PRAGMA foreign_key_check");
     expect(fk.rows).toEqual([]);
 
-    // TODO(#929): once deduplicateProjects reassigns the FULL project-child set, extend this
-    // test to seed a dup-owned row in EVERY project-child table (milestones, drives,
-    // drive_obstacles, workflow_templates, quality_metrics, board_health_events, flaky_tests,
-    // project_script_shortcuts, scheduled_run_history) plus a NAME-MISMATCHED status, and assert
-    // each is moved to the survivor (not silently deleted / orphaned) and no issues.status_id
-    // is left dangling. Those assertions correctly FAIL today, so they live with the #929 fix.
+    // The FULL project-child completeness + name-mismatched-status assertions (the #929 fix)
+    // live in the dedicated test below.
+  });
+});
+
+// --- #929: dedup must be LOSSLESS across EVERY project-child table, and must not leave a
+//     dangling issues.status_id when the duplicate owns a status the survivor lacks.
+//
+// This mirrors issue-cascade-completeness.repo.test.ts: the set of project-child tables is
+// DERIVED from the Drizzle FK graph (projectChildEdges()), not hand-listed, so adding a new
+// table that FK-references projects.id turns the completeness guard RED until it is seeded here
+// (and, because deduplicateProjects reassigns generically off the same graph, it is handled
+// automatically). project_statuses is the one intentional exclusion — the dup's statuses are
+// remapped-by-name then deleted, never moved (moving them would duplicate the survivor's columns).
+describe("deduplicateProjects — lossless across the FULL project-child FK graph (#929)", () => {
+  let repo: ReturnType<typeof makeGitRepo>;
+
+  beforeEach(() => {
+    repo = makeGitRepo();
+  });
+
+  afterEach(() => {
+    try { h.client?.close(); } catch { /* ignore */ }
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try { rmSync(`${h.file}${suffix}`, { force: true }); } catch { /* best-effort */ }
+    }
+    repo.dispose();
+    vi.resetModules();
+  });
+
+  /**
+   * Seed two projects on one git root, the dup owning ONE row in every project-child table
+   * (cascade AND non-cascade), plus a NAME-MISMATCHED status ("Backlog") the survivor lacks,
+   * with an issue pointing at it. Returns the ids needed to assert survival/remap.
+   */
+  async function seedFull(d: TestDb, root: string, sub: string) {
+    const ids = {
+      keepId: randomUUID(), dupId: randomUUID(),
+      keepTodoId: randomUUID(), dupTodoId: randomUUID(), dupBacklogId: randomUUID(),
+      dupIssueId: randomUUID(), dupBacklogIssueId: randomUUID(),
+      skillId: randomUUID(), repoId: randomUUID(), runId: randomUUID(),
+      runHistoryId: randomUUID(), milestoneId: randomUUID(), driveId: randomUUID(),
+      obstacleId: randomUUID(), templateId: randomUUID(), healthId: randomUUID(),
+      flakyId: randomUUID(), shortcutId: randomUUID(), metricId: randomUUID(),
+    };
+    const earlier = new Date(Date.now() - 60_000).toISOString();
+    const later = new Date().toISOString();
+
+    await d.insert(schema.projects).values([
+      { id: ids.keepId, name: "app", repoPath: root, repoName: "app", defaultBranch: "main", createdAt: earlier, updatedAt: earlier },
+      { id: ids.dupId, name: "app-sub", repoPath: sub, repoName: "app-sub", defaultBranch: "main", createdAt: earlier, updatedAt: later },
+    ]);
+    // keep has only "Todo"; dup has "Todo" (matched) AND "Backlog" (NAME-MISMATCH — keep lacks it).
+    await d.insert(schema.projectStatuses).values([
+      { id: ids.keepTodoId, projectId: ids.keepId, name: "Todo", sortOrder: 0, isDefault: true, createdAt: earlier },
+      { id: ids.dupTodoId, projectId: ids.dupId, name: "Todo", sortOrder: 0, isDefault: true, createdAt: earlier },
+      { id: ids.dupBacklogId, projectId: ids.dupId, name: "Backlog", sortOrder: -1, isDefault: false, createdAt: earlier },
+    ]);
+    await d.insert(schema.issues).values([
+      { id: ids.dupIssueId, issueNumber: 1, title: "Dup issue (matched status)", description: null, priority: "medium", sortOrder: 0, statusId: ids.dupTodoId, projectId: ids.dupId, createdAt: earlier, updatedAt: earlier },
+      { id: ids.dupBacklogIssueId, issueNumber: 2, title: "Dup issue (mismatched status)", description: null, priority: "medium", sortOrder: 0, statusId: ids.dupBacklogId, projectId: ids.dupId, createdAt: earlier, updatedAt: earlier },
+    ]);
+    await d.insert(schema.agentSkills).values({ id: ids.skillId, name: "dup-skill", description: "d", prompt: "p", projectId: ids.dupId, createdAt: earlier, updatedAt: earlier });
+    await d.insert(schema.repos).values({ id: ids.repoId, workspaceId: null, projectId: ids.dupId, path: sub, createdAt: earlier });
+    await d.insert(schema.scheduledRuns).values({ id: ids.runId, name: "nightly", projectId: ids.dupId, intervalMinutes: 60, enabled: true, createdAt: earlier, updatedAt: earlier });
+    await d.insert(schema.scheduledRunHistory).values({ id: ids.runHistoryId, scheduledRunId: ids.runId, projectId: ids.dupId, status: "completed", startedAt: earlier, createdAt: earlier });
+    // Cascade children — these were SILENTLY DELETED before #929.
+    await d.insert(schema.milestones).values({ id: ids.milestoneId, projectId: ids.dupId, name: "v1", createdAt: earlier });
+    await d.insert(schema.drives).values({ id: ids.driveId, projectId: ids.dupId, target: "ship it", status: "active", startedAt: earlier });
+    await d.insert(schema.driveObstacles).values({ id: ids.obstacleId, projectId: ids.dupId, driveId: ids.driveId, kind: "stall", severity: "warning", summary: "stuck", detectedAt: earlier });
+    // Non-cascade children — these orphaned or ABORTED the merge before #929.
+    await d.insert(schema.workflowTemplates).values({ id: ids.templateId, projectId: ids.dupId, name: "Custom Flow", isDefault: false, isBuiltin: false, createdAt: earlier, updatedAt: earlier });
+    await d.insert(schema.boardHealthEvents).values({ id: ids.healthId, projectId: ids.dupId, cycleId: "c1", eventType: "observation", summary: "all good", createdAt: earlier });
+    await d.insert(schema.flakyTests).values({ id: ids.flakyId, projectId: ids.dupId, testName: "sometimes fails", createdAt: earlier });
+    await d.insert(schema.projectScriptShortcuts).values({ id: ids.shortcutId, projectId: ids.dupId, name: "build", command: "pnpm build", cwdMode: "project", sortOrder: 0, createdAt: earlier, updatedAt: earlier });
+    await d.insert(schema.qualityMetrics).values({ id: ids.metricId, projectId: ids.dupId, metricKey: "coverage", value: 0.9, collectedAt: earlier });
+    await d.insert(schema.preferences).values({ key: "activeProjectId", value: ids.dupId, updatedAt: later });
+    return ids;
+  }
+
+  it("seeds + verifies EVERY schema-declared project-child table (completeness guard)", () => {
+    // Future-proof guard: the tables seedFull() exercises must equal the schema's project-child
+    // set (minus project_statuses, the intentional special-case). Add a new projects-referencing
+    // table to the schema and this goes RED until it is seeded here — exactly like the issue
+    // cascade-completeness guard. Source of truth: projectChildEdges() (derived from the FK graph).
+    const schemaChildren = new Set(projectChildEdges().map((e) => e.table));
+    schemaChildren.delete("project_statuses"); // remapped-by-name + deleted, never moved
+    const exercised = new Set([
+      "issues", "agent_skills", "repos", "scheduled_runs", "scheduled_run_history",
+      "milestones", "drives", "drive_obstacles", "workflow_templates",
+      "board_health_events", "flaky_tests", "project_script_shortcuts", "quality_metrics",
+    ]);
+    expect(exercised).toEqual(schemaChildren);
+  });
+
+  it("reassigns every project-child row to the survivor (no cascade-child data loss, no orphans) and rehomes a name-mismatched status", async () => {
+    const ids = await seedFull(db(), repo.root, repo.sub);
+
+    await deduplicateProjects();
+
+    // Exactly one project survives — the root-path one.
+    const survivors = await db().select().from(schema.projects);
+    expect(survivors).toHaveLength(1);
+    expect(survivors[0]?.id).toBe(ids.keepId);
+
+    // EVERY child table: every surviving row points at the survivor — nothing was orphaned to
+    // the deleted dup, and (for cascade children) nothing was silently deleted. We assert both
+    // "row still exists" (count) and "belongs to keep" generically off the FK graph.
+    for (const edge of projectChildEdges()) {
+      if (edge.table === "project_statuses") continue; // special-cased
+      const col = edge.column;
+      const total = await client().execute(`SELECT COUNT(*) AS n FROM "${edge.table}"`);
+      const wrong = await client().execute({
+        sql: `SELECT COUNT(*) AS n FROM "${edge.table}" WHERE "${col}" IS NOT NULL AND "${col}" != ?`,
+        args: [ids.keepId],
+      });
+      expect(Number(wrong.rows[0]?.n)).toBe(0);
+      // Each table we seeded must still have its row(s) — proves cascade children were NOT deleted.
+      expect(Number(total.rows[0]?.n)).toBeGreaterThan(0);
+    }
+
+    // Name-MATCHED status: the dup's "Todo" issue was remapped to the survivor's "Todo".
+    const matchedIssue = (await db().select().from(schema.issues).where(eq(schema.issues.id, ids.dupIssueId)))[0];
+    expect(matchedIssue?.statusId).toBe(ids.keepTodoId);
+
+    // Name-MISMATCHED status: the survivor had no "Backlog" status. The issue must NOT dangle —
+    // a "Backlog" status was created on the survivor and the issue repointed onto it.
+    const mismatchIssue = (await db().select().from(schema.issues).where(eq(schema.issues.id, ids.dupBacklogIssueId)))[0];
+    expect(mismatchIssue).toBeDefined();
+    expect(mismatchIssue?.statusId).not.toBe(ids.dupBacklogId); // dup's status row is gone
+    const rehomedStatusId = mismatchIssue?.statusId ?? "";
+    const newStatus = (await db().select().from(schema.projectStatuses).where(eq(schema.projectStatuses.id, rehomedStatusId)))[0];
+    expect(newStatus).toBeDefined();
+    expect(newStatus?.projectId).toBe(ids.keepId);
+    expect(newStatus?.name).toBe("Backlog");
+    // The created status must not have stolen the survivor's default flag.
+    expect(newStatus?.isDefault).toBe(false);
+
+    // The dup's own status rows are gone.
+    expect(await db().select().from(schema.projectStatuses).where(eq(schema.projectStatuses.id, ids.dupTodoId))).toHaveLength(0);
+    expect(await db().select().from(schema.projectStatuses).where(eq(schema.projectStatuses.id, ids.dupBacklogId))).toHaveLength(0);
+
+    // Active-project pointer redirected to the survivor.
+    const active = await db().select().from(schema.preferences).where(eq(schema.preferences.key, "activeProjectId"));
+    expect(active[0]?.value).toBe(ids.keepId);
+
+    // Hard invariant: no row anywhere references a now-deleted parent.
+    const fk = await client().execute("PRAGMA foreign_key_check");
+    expect(fk.rows).toEqual([]);
   });
 });
