@@ -61,8 +61,10 @@ This skill debugs **one** session. For **aggregate, time-scoped questions across
 ## Directory naming convention (Claude)
 
 Each working directory maps to a session dir by replacing path separators with `--`:
-- `C:\the-organisation\.worktrees\feature_ak-17-...` → `C--the-organisation--worktrees-feature-ak-17-...`
-- `C:\the-organisation\agentic-kanban\packages\.worktrees\feature_ak-N-...` → `C--the-organisation-agentic-kanban-packages--worktrees-feature-ak-N-...`
+- `C:\code\.worktrees\feature_ak-17-...` → `C--code--worktrees-feature-ak-17-...`
+- `C:\code\my-app\packages\.worktrees\feature_ak-N-...` → `C--code-my-app-packages--worktrees-feature-ak-N-...`
+
+(substitute your own repo root for `C:\code\my-app`)
 
 Multiple `.jsonl` files in one dir = multiple sessions (e.g. original run + re-launched review). Sort by `LastWriteTime` descending to find the latest.
 
