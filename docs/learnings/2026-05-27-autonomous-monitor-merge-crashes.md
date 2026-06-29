@@ -25,7 +25,7 @@
 
 ## The root cause beneath most of these
 
-**The orchestrator runs the same code the agents are rewriting.** The board server runs from `C:\andrena\agentic-kanban` under `tsx watch`. Agents modify that codebase and merge into the master it runs from. So normal, successful operation (merging finished work) destabilizes the very server doing the orchestrating. Bugs #42/#44 are mitigations; the structural fix is to stop self-hosting the orchestrator on the live working tree.
+**The orchestrator runs the same code the agents are rewriting.** The board server runs from the main checkout (the agentic-kanban repo root) under `tsx watch`. Agents modify that codebase and merge into the master it runs from. So normal, successful operation (merging finished work) destabilizes the very server doing the orchestrating. Bugs #42/#44 are mitigations; the structural fix is to stop self-hosting the orchestrator on the live working tree.
 
 ## Recovery procedure (proven this session)
 
