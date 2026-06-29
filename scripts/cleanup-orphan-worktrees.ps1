@@ -6,8 +6,12 @@
 #   3. has NO .git entry                        (git can't operate -> dead)
 # Active set is re-derived from git at runtime, so this is safe to re-run.
 # Uses `rd /s /q` (cmd) — far faster than Remove-Item -Recurse on node_modules trees.
-$repo = 'C:\andrena\agentic-kanban'
-$root = 'C:\andrena\.worktrees'
+# Derive paths from the script's own location so this is machine-independent:
+# the script lives at <repo>/scripts/, and the board creates worktrees at
+# <repo-parent>/.worktrees (see git-service/worktree.ts). Override $repo via the
+# first arg if running against a different checkout.
+$repo = if ($args.Count -ge 1 -and $args[0]) { $args[0] } else { Split-Path -Parent $PSScriptRoot }
+$root = Join-Path (Split-Path -Parent $repo) '.worktrees'
 
 $active = & git -C $repo worktree list --porcelain |
   Where-Object { $_ -like 'worktree *' } |

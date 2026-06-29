@@ -1,8 +1,5 @@
 ﻿import { chromium } from "@playwright/test";
-const browser = await chromium.launch({ 
-  headless: true,
-  executablePath: "C:/Users/pwegner/AppData/Local/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-win64/chrome-headless-shell.exe"
-});
+const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage();
 await page.goto("http://127.0.0.1:5173");
 await page.waitForTimeout(3000);
@@ -10,12 +7,12 @@ await page.waitForTimeout(3000);
 const inProgressCards = await page.locator(".cursor-pointer").all();
 await inProgressCards[3].click();
 await page.waitForTimeout(1500);
-await page.screenshot({ path: "C:/andrena/agentic-kanban/issue-panel.png" });
+await page.screenshot({ path: "issue-panel.png" });
 // Look for workspace/branch link
 const wsLink = page.locator("text=feature/").first();
 if (await wsLink.isVisible()) {
   await wsLink.click();
   await page.waitForTimeout(1000);
 }
-await page.screenshot({ path: "C:/andrena/agentic-kanban/workspace-view.png" });
+await page.screenshot({ path: "workspace-view.png" });
 await browser.close();
