@@ -63,6 +63,19 @@ export function createWorkspaceMergeService(deps: {
   const createBackup = deps.createBackup ?? realCreateBackup;
   const killProcesses = deps.processKiller ?? killProcessesInDir;
 
+  /**
+   * Options threaded from the merge entry points down into {@link doMerge}.
+   *
+   * `skipPreMergeGate` lets a caller that has ALREADY run the verify/smoke pre-merge gate against
+   * the same worktree state in the same cycle suppress the otherwise-mandatory re-run inside
+   * `doMerge` (#943). It is set ONLY by the in-process monitor's merge action
+   * (monitor-workspace-actions.ts): the monitor either runs the gate itself just before merging
+   * un-ready In-Review work, or merges work the review-exit handler already gated (readyForMerge),
+   * so re-gating in `doMerge` would double an expensive build/boot per merge. It defaults to false,
+   * so the manual/operator `/merge` route and the merge-queue/orchestrator path keep gating.
+   */
+  type MergeOptions = { skipPreMergeGate?: boolean };
+
   function warningMessage(err: unknown): string {
     return err instanceof Error ? err.message : String(err);
   }
@@ -161,7 +174,7 @@ export function createWorkspaceMergeService(deps: {
     await updateWorkspaceStatus(workspace.id, "idle", {}, database);
   }
 
-  async function mergeWorkspace(id: string) {
+  async function mergeWorkspace(id: string, opts: MergeOptions = {}) {
     let workspace = await getWorkspaceById(id, database);
     if (!workspace) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
     await recoverFailedFixAndMergeSessionIfNeeded(workspace);
@@ -195,7 +208,7 @@ export function createWorkspaceMergeService(deps: {
       }
     }
 
-    const rawMergePromise = doMerge(id, workspace, project, repoPath, defaultBranch);
+    const rawMergePromise = doMerge(id, workspace, project, repoPath, defaultBranch, opts);
     const mergePromise = rawMergePromise.catch((err) => {
       // A TypeError (e.g. "gitService.X is not a function") means shared/dist is stale —
       // a deploy/build issue, NOT a merge conflict. Return a distinct 503 so the board
@@ -234,6 +247,7 @@ export function createWorkspaceMergeService(deps: {
     project: typeof projects.$inferSelect | null,
     repoPath: string,
     defaultBranch: string | null,
+    opts: MergeOptions = {},
   ) {
     const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
     const prefMap = await loadMergePreferences(database);
@@ -264,7 +278,14 @@ export function createWorkspaceMergeService(deps: {
     // failure the gate exists to prevent. Unlike the monitor we do NOT skip on readyForMerge: a
     // manual merge is an explicit operator action, so we always re-verify before landing. On failure
     // we WITHHOLD the merge (throw, surfaced to the operator) rather than silently land it.
-    if (project) {
+    //
+    // #943: the in-process monitor auto-merge paths (monitor-cycle.ts) already run this exact gate
+    // against the same worktree state in the same cycle (for un-ready In-Review work), and merge
+    // readyForMerge work that the review-exit handler already gated — so re-running here doubles an
+    // expensive build/boot per monitor merge. Those callers pass `skipPreMergeGate` to suppress the
+    // redundant re-run; the manual/operator route and the merge-queue/orchestrator leave it false
+    // and stay gated.
+    if (project && !opts.skipPreMergeGate) {
       const gate = await runPreMergeGate({ id, workingDir: workspace.workingDir }, project.id, database);
       if (!gate.passed) {
         await recordMergeAttempt(
@@ -764,11 +785,11 @@ export function createWorkspaceMergeService(deps: {
    */
   const activeRequests = new Map<string, Promise<Awaited<ReturnType<typeof mergeWorkspace>>>>();
 
-  function mergeWorkspaceDeduped(id: string): Promise<Awaited<ReturnType<typeof mergeWorkspace>>> {
+  function mergeWorkspaceDeduped(id: string, opts: MergeOptions = {}): Promise<Awaited<ReturnType<typeof mergeWorkspace>>> {
     const existing = activeRequests.get(id);
     if (existing) return existing;
 
-    const promise = mergeWorkspace(id);
+    const promise = mergeWorkspace(id, opts);
     const tracked = promise.finally(() => {
       if (activeRequests.get(id) === tracked) {
         activeRequests.delete(id);
