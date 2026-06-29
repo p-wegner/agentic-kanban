@@ -8,20 +8,16 @@
 // wrong billing, wrong quota, wrong base-url endpoint). This test pollutes process.env with a
 // foreign profile's credentials and asserts the built spawn env carries none of them.
 //
-// SCOPE: this test covers the unconditional STRIP LOOP (helpers.ts:148-150) — the real security
-// guard. It does NOT claim the "AUTH_TOKEN set, no API_KEY -> delete ANTHROPIC_API_KEY" branch
-// (helpers.ts:161-163), and the @covers above intentionally omits the error-handling dimension
-// for that reason. That branch is DEAD CODE: the strip loop already deletes ANTHROPIC_API_KEY
-// (it is in PROFILE_OWNED_ENV_VARS) before control reaches :161, and the branch's own guard
-// `!profileEnv.ANTHROPIC_API_KEY` only fires when the profile supplies no key — so the later
-// Object.assign never re-introduces one either. Under every reachable state the delete at :161
-// is a no-op; removing :161-163 leaves all assertions in this file GREEN (verified). A product
-// ticket is being filed to confirm + remove that branch.
+// SCOPE: this test covers the unconditional STRIP LOOP in `buildSpawnEnv` — the real security
+// guard. The former "AUTH_TOKEN set, no API_KEY -> delete ANTHROPIC_API_KEY" branch was DEAD CODE
+// (the strip loop already removed ANTHROPIC_API_KEY before control reached it) and has been removed
+// in #927; there is nothing left to cover there.
 //
-// note: the strip is ALLOWLIST-shaped (a fixed 5-key PROFILE_OWNED_ENV_VARS list), so it misses
-// non-ANTHROPIC_ Claude auth vars (e.g. CLAUDE_CODE_OAUTH_TOKEN), which would still bleed across
-// profiles. A prefix/denylist strip would be safer — tracked by a separate security ticket (to
-// be filed). This test deliberately does NOT assert that unimplemented hardening.
+// The strip is now DENYLIST-shaped: any var matching a profile-owned PREFIX (`ANTHROPIC_`,
+// `CLAUDE_CODE_`) or the explicit `API_TIMEOUT_MS` is stripped. This closes the old gap where the
+// allowlist missed non-`ANTHROPIC_` Claude auth vars (notably `CLAUDE_CODE_OAUTH_TOKEN`, plus
+// Bedrock/Vertex toggles like `CLAUDE_CODE_USE_BEDROCK`), which would otherwise bleed across
+// profiles. The dedicated bleed-through assertion lives at the bottom of this file.
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { buildSpawnEnv } from "../services/agent-provider/helpers.js";
@@ -56,16 +52,26 @@ const noProfileFs: FileSystem = {
   writeFileSync: () => undefined,
 };
 
+// Non-ANTHROPIC_ Claude auth/endpoint vars that the old hardcoded allowlist missed but the
+// prefix/denylist strip (#927) must now remove.
+const NON_ANTHROPIC_PROFILE_OWNED = [
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "CLAUDE_CODE_USE_BEDROCK",
+  "CLAUDE_CODE_USE_VERTEX",
+] as const;
+
+const ALL_PROFILE_OWNED = [...PROFILE_OWNED, ...NON_ANTHROPIC_PROFILE_OWNED] as const;
+
 describe("buildSpawnEnv — cross-profile credential-bleed strip", () => {
   // Snapshot only the keys we mutate, so we can restore process.env exactly.
   const saved: Record<string, string | undefined> = {};
 
   beforeEach(() => {
-    for (const key of PROFILE_OWNED) saved[key] = process.env[key];
+    for (const key of ALL_PROFILE_OWNED) saved[key] = process.env[key];
   });
 
   afterEach(() => {
-    for (const key of PROFILE_OWNED) {
+    for (const key of ALL_PROFILE_OWNED) {
       if (saved[key] === undefined) delete process.env[key];
       else process.env[key] = saved[key];
     }
@@ -145,8 +151,37 @@ describe("buildSpawnEnv — cross-profile credential-bleed strip", () => {
 
     const env = buildSpawnEnv("keyed", fs);
 
-    // The stray server key is replaced by the profile's own key (not deleted, since the
-    // AUTH_TOKEN-without-key branch does not apply here).
+    // The stray server key is replaced by the profile's own key.
     expect(env.ANTHROPIC_API_KEY).toBe("sk-profile-own-key");
+  });
+
+  it("strips a polluted CLAUDE_CODE_OAUTH_TOKEN (and other non-ANTHROPIC_ Claude auth/endpoint vars) — denylist closes the allowlist gap", () => {
+    // The server env is polluted with a foreign profile's NON-ANTHROPIC_-prefixed Claude creds,
+    // exactly the vars the old 5-key allowlist let bleed through.
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "foreign-oauth-token";
+    process.env.CLAUDE_CODE_USE_BEDROCK = "1";
+    process.env.CLAUDE_CODE_USE_VERTEX = "1";
+
+    // No profile applied: a default launch must inherit none of them.
+    const env = buildSpawnEnv(undefined, noProfileFs);
+
+    for (const key of NON_ANTHROPIC_PROFILE_OWNED) {
+      expect(env[key], `${key} must be stripped`).toBeUndefined();
+    }
+  });
+
+  it("a profile's OWN CLAUDE_CODE_* var wins after the server's is stripped (no bleed-through)", () => {
+    // Server holds a foreign OAuth token...
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-foreign-oauth";
+
+    // ...but we launch a profile that supplies its own token.
+    const fs = fakeFsFor("oauthB", {
+      env: { CLAUDE_CODE_OAUTH_TOKEN: "profileB-oauth-token" },
+    });
+
+    const env = buildSpawnEnv("oauthB", fs);
+
+    // The foreign token is gone; the agent sees only the target profile's token.
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("profileB-oauth-token");
   });
 });
