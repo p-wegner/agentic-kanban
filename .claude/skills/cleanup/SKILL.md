@@ -30,7 +30,7 @@ Optional flags in the user's message:
 Spawn a subagent with this prompt (substituting active flags):
 
 ```
-You are working on the agentic-kanban project at C:\andrena\agentic-kanban.
+You are working on the agentic-kanban project at the repo root (run `git rev-parse --show-toplevel` from the checkout to get its absolute path).
 Server runs at http://localhost:3001. Run the cleanup tasks marked below.
 
 ## TASK 1 — Stale git worktrees [always run unless --sessions or --e2e only]
@@ -39,14 +39,14 @@ Worktrees live at C:\andrena\.worktrees\.
 
 1. Get all workspaces: GET http://localhost:3001/api/workspaces
    Active = status in (idle, active, reviewing). Others = closed/merged.
-2. Run: git -C C:\andrena\agentic-kanban worktree list --porcelain
+2. Run: git -C "$(git rev-parse --show-toplevel)" worktree list --porcelain
    Parse each "worktree <path>" line.
-3. Skip the main worktree (C:\andrena\agentic-kanban itself).
+3. Skip the main worktree (the repo root itself — the first entry in `git worktree list`).
 4. For each non-main worktree path:
    a. If the path doesn't exist on disk → prune only (git worktree prune)
    b. If it exists but has NO matching active workspace → git worktree remove --force <path>
    c. If it exists and HAS an active workspace → leave it alone
-5. Run: git -C C:\andrena\agentic-kanban worktree prune
+5. Run: git -C "$(git rev-parse --show-toplevel)" worktree prune
 6. Report: N removed, N pruned, N kept.
 
 ### TASK 1b — Orphaned worktree DIRECTORIES git no longer tracks (Windows EBUSY residue)
@@ -65,7 +65,7 @@ Sweep them with the dedicated, idempotent, triple-guarded script (re-derives the
 from git at runtime, so it can never delete a live worktree):
 
 ```powershell
-powershell -NoProfile -File C:\andrena\agentic-kanban\scripts\cleanup-orphan-worktrees.ps1
+powershell -NoProfile -File "$(git rev-parse --show-toplevel)\scripts\cleanup-orphan-worktrees.ps1"
 ```
 
 The script's guards (all must hold to delete a dir): name matches `feature_ak-*`, NOT in the
@@ -75,7 +75,7 @@ to sweep dirs that were locked by a live process at delete time (it's safe to re
 
 ## TASK 2 — Stale Claude Code chat sessions [always run unless --worktrees or --e2e only]
 
-Session dirs: C:\Users\pwegner\.claude\projects\
+Session dirs: %USERPROFILE%\.claude\projects\ (i.e. the current user's home — do not hardcode a username)
 
 1. List subdirs whose names contain "worktrees" or "feature--ak" or "feature_ak".
 2. Decode dir name back to path: replace "--" with "\" and leading "C-" with "C:\"

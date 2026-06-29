@@ -30,7 +30,7 @@ const readline = require("readline");
 let hookInput = {};
 
 function getProjectDir() {
-  const startDir = process.env.CLAUDE_PROJECT_DIR || hookInput.cwd || "C:\\andrena\\agentic-kanban";
+  const startDir = process.env.CLAUDE_PROJECT_DIR || hookInput.cwd || path.resolve(__dirname, "..", "..");
   try {
     return execSync("git rev-parse --show-toplevel", {
       cwd: startDir,
@@ -44,8 +44,8 @@ function getProjectDir() {
 }
 
 function getDbProjectDir() {
-  const mainCheckout = process.env.KANBAN_MAIN_CHECKOUT || "C:\\andrena\\agentic-kanban";
-  if (fs.existsSync(path.join(mainCheckout, "packages", "server"))) return mainCheckout;
+  const mainCheckout = getMainCheckout();
+  if (mainCheckout && fs.existsSync(path.join(mainCheckout, "packages", "server"))) return mainCheckout;
   return getProjectDir();
 }
 
@@ -131,7 +131,10 @@ function usesReadOnlyPsVar(command) {
 }
 
 function commandMovesToMainCheckout(command) {
-  return /\b(?:cd|Set-Location|Push-Location)\s+["']?C:[\/\\]andrena[\/\\]agentic-kanban\b/i.test(command);
+  const main = getMainCheckout();
+  if (!main) return false;
+  const m = command.match(/\b(?:cd|Set-Location|Push-Location)\s+["']?([^\s"';]+)/i);
+  return m ? pathIsInside(m[1], main) : false;
 }
 
 function isWorktreeProjectDir() {
@@ -193,7 +196,31 @@ function isExplicitDepChange(command) {
 }
 
 function getMainCheckout() {
-  return process.env.KANBAN_MAIN_CHECKOUT || "C:\\andrena\\agentic-kanban";
+  if (process.env.KANBAN_MAIN_CHECKOUT) return process.env.KANBAN_MAIN_CHECKOUT;
+  // Derive the main checkout from git instead of hardcoding a machine-specific path.
+  // In a worktree, --git-common-dir resolves to the MAIN checkout's .git, whose parent
+  // is the main checkout; in the main checkout it resolves to ./.git → the repo root.
+  const startDir = process.env.CLAUDE_PROJECT_DIR || hookInput.cwd || path.resolve(__dirname, "..", "..");
+  try {
+    const commonDir = execSync("git rev-parse --path-format=absolute --git-common-dir", {
+      cwd: startDir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
+    }).trim();
+    if (commonDir) return path.dirname(commonDir);
+  } catch {}
+  return getProjectDir();
+}
+
+function normalizePathForCompare(p) {
+  return String(p || "").replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+}
+
+function pathIsInside(child, parent) {
+  const c = normalizePathForCompare(child);
+  const p = normalizePathForCompare(parent);
+  return c === p || c.startsWith(`${p}\\`);
 }
 
 // Has this worktree's dependency manifest diverged from the main checkout the
@@ -336,7 +363,7 @@ function getBlockedNonDbReason(command) {
       "`pnpm cli --` is unreliable from git worktrees because the server package can use the wrong " +
       "or missing shared build context. Use MCP tools, REST on the running server, or run the CLI " +
       "from the main checkout:\n" +
-      "  cd C:\\andrena\\agentic-kanban && pnpm cli -- <command>"
+      `  cd ${getMainCheckout()} && pnpm cli -- <command>`
     );
   }
 

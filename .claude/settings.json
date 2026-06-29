@@ -17,8 +17,7 @@
         "--filter",
         "@agentic-kanban/mcp-server",
         "dev"
-      ],
-      "cwd": "C:/andrena/agentic-kanban"
+      ]
     }
   },
   "hooks": {
@@ -28,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node C:/andrena/agentic-kanban/.claude/hooks/smart-hooks-runner.js PreToolUse"
+            "command": "node $CLAUDE_PROJECT_DIR/.claude/hooks/smart-hooks-runner.js PreToolUse"
           }
         ]
       },
@@ -37,7 +36,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node C:/andrena/agentic-kanban/.claude/hooks/prevent-cross-worktree-writes.js"
+            "command": "node $CLAUDE_PROJECT_DIR/.claude/hooks/prevent-cross-worktree-writes.js"
           }
         ]
       },
@@ -46,7 +45,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node C:/andrena/agentic-kanban/.claude/hooks/vital-file-guard.js"
+            "command": "node $CLAUDE_PROJECT_DIR/.claude/hooks/vital-file-guard.js"
           }
         ]
       },
@@ -55,7 +54,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node C:/andrena/agentic-kanban/.claude/hooks/require-read-before-write.js"
+            "command": "node $CLAUDE_PROJECT_DIR/.claude/hooks/require-read-before-write.js"
           }
         ]
       }
@@ -66,7 +65,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node C:/andrena/agentic-kanban/.claude/hooks/smart-hooks-runner.js PostToolUse"
+            "command": "node $CLAUDE_PROJECT_DIR/.claude/hooks/smart-hooks-runner.js PostToolUse"
           }
         ]
       }
@@ -76,7 +75,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node C:/andrena/agentic-kanban/.claude/hooks/smart-hooks-runner.js Stop"
+            "command": "node $CLAUDE_PROJECT_DIR/.claude/hooks/smart-hooks-runner.js Stop"
           }
         ]
       },
@@ -84,7 +83,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node C:/andrena/agentic-kanban/.claude/hooks/check-conflict-markers.js"
+            "command": "node $CLAUDE_PROJECT_DIR/.claude/hooks/check-conflict-markers.js"
           }
         ]
       }

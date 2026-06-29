@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/smart-hooks-runner.js\" PreToolUse",
-            "commandWindows": "node C:/andrena/agentic-kanban/.claude/hooks/smart-hooks-runner.js PreToolUse",
+            "commandWindows": "node .claude/hooks/smart-hooks-runner.js PreToolUse",
             "timeout": 10,
             "statusMessage": "Checking command safety"
           }
@@ -19,7 +19,7 @@
           {
             "type": "command",
             "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/prevent-cross-worktree-writes.js\"",
-            "commandWindows": "node C:/andrena/agentic-kanban/.claude/hooks/prevent-cross-worktree-writes.js",
+            "commandWindows": "node .claude/hooks/prevent-cross-worktree-writes.js",
             "timeout": 10,
             "statusMessage": "Checking worktree write scope"
           }
@@ -32,7 +32,7 @@
           {
             "type": "command",
             "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/check-uncommitted.js\"",
-            "commandWindows": "node C:/andrena/agentic-kanban/.claude/hooks/check-uncommitted.js",
+            "commandWindows": "node .claude/hooks/check-uncommitted.js",
             "timeout": 10,
             "statusMessage": "Checking for stranded uncommitted source changes"
           }
@@ -43,7 +43,7 @@
           {
             "type": "command",
             "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/check-conflict-markers.js\"",
-            "commandWindows": "node C:/andrena/agentic-kanban/.claude/hooks/check-conflict-markers.js",
+            "commandWindows": "node .claude/hooks/check-conflict-markers.js",
             "timeout": 15,
             "statusMessage": "Checking for committed conflict markers"
           }

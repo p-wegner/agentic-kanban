@@ -15,7 +15,6 @@
       {
         "name": "Vitest (server)",
         "command": "pnpm --filter @agentic-kanban/server test",
-        "cwd": "C:/andrena/agentic-kanban",
         "filePatterns": ["packages/server/**/*.ts"],
         "enabled": true,
         "blocking": true,
@@ -24,7 +23,6 @@
       {
         "name": "TypeScript build check",
         "command": "pnpm build",
-        "cwd": "C:/andrena/agentic-kanban",
         "filePatterns": ["packages/**/*.ts", "packages/**/*.tsx"],
         "enabled": true,
         "blocking": true,
