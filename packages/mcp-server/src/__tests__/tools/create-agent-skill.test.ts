@@ -104,24 +104,20 @@ describe("create_agent_skill MCP tool", () => {
   );
 
   // --- Create↔materialization guard divergence (ticket #931) ---------------------
-  // The create-time guard (create-agent-skill.ts:19, /[/\\]|\.\./) is STRICTLY WEAKER
-  // than the downstream filesystem guard (shared/src/lib/agent-skill-files.ts:11, which
-  // also rejects the EXACT names "." and ".."). Several filesystem-degenerate names pass
-  // create today and get a DB row, then later resolve to a degenerate skills path:
+  // The create-time guard now shares ONE `isSafeSkillName` predicate with the downstream
+  // filesystem guard (shared/src/lib/agent-skill-files.ts), so it rejects exactly what
+  // materialization rejects — including names that the old weak guard (/[/\\]|\.\./) let
+  // through and persisted as broken DB rows:
   //   "."  → join(skillsDir, ".")  = skillsDir itself
-  //   ""   → join(skillsDir, "")   = skillsDir itself (zod has no .min(1) on `name`)
+  //   ""   → join(skillsDir, "")   = skillsDir itself (now also blocked by zod .min(1))
   //   "C:" → a Windows drive-relative path
-  // These `it.fails` cases assert the DESIRED post-#931 behaviour (create REJECTS them
-  // with zero rows). Today the body FAILS (the row IS inserted) → it.fails PASSES, so the
-  // suite stays green while flagging the gap. When #931 unifies the guards the body will
-  // PASS → it.fails FLIPS to failing, forcing whoever lands #931 to delete the `.fails`
-  // marker and promote these to ordinary assertions.
-  it.fails.each([
+  // These assert the unified behaviour: create REJECTS them with zero rows written.
+  it.each([
     [".", "bare current-dir"],
     ["", "empty string (no zod .min(1))"],
     ["C:", "windows drive-relative"],
   ])(
-    "[#931 desired] rejects filesystem-degenerate name %j (%s) with zero rows",
+    "rejects filesystem-degenerate name %j (%s) with zero rows (#931)",
     async (degenerateName) => {
       const invoke = makeInvoke();
 
