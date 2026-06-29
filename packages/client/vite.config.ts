@@ -11,7 +11,7 @@ const clientPort = Number(process.env.VITE_PORT) || 5173;
 // still reach it. Override with VITE_HOST=127.0.0.1 to restrict to IPv4.
 const clientHost = process.env.VITE_HOST || "::";
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [react(), tailwindcss()],
   build: {
     rollupOptions: {
@@ -30,9 +30,19 @@ export default defineConfig({
     },
   },
   resolve: {
-    // Use the "default" export condition so workspace packages resolve to
-    // their TypeScript source directly, without requiring a pre-build step.
-    conditions: ["default", "browser", "module", "import"],
+    // In dev (`serve`), prepend the "development" export condition so workspace
+    // packages (@agentic-kanban/shared) resolve to their TypeScript SOURCE — the
+    // shared `exports` map lists "development" → src first, so this wins over
+    // "import" → dist. That removes the hidden first-start blocker where a clean
+    // clone fails with `Failed to resolve entry for "@agentic-kanban/shared"`
+    // because dist/ was never built (it's gitignored and nothing builds it on
+    // install). For `vite build` we keep the compiled "import" → dist path and do
+    // NOT add "development" — that condition would otherwise pull dev-only exports
+    // of third-party deps into the production bundle.
+    conditions:
+      command === "serve"
+        ? ["development", "default", "browser", "module", "import"]
+        : ["default", "browser", "module", "import"],
   },
   server: {
     host: clientHost,
@@ -45,4 +55,4 @@ export default defineConfig({
       "/ws": { target: `http://127.0.0.1:${serverPort}`, ws: true },
     },
   },
-});
+}));
