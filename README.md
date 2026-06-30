@@ -50,21 +50,7 @@ pnpm dev             # start server (port 3001) + client (port 5173)
 
 Open http://localhost:5173 — the board loads with 3 active columns for the registered project.
 
-For detailed installation instructions including prerequisites, see [INSTALL.md](INSTALL.md).
-
-### Network Access (HTTP/2)
-
-The server runs plain HTTP/1.1 on `localhost` by default. To reach the board from another machine, set `KANBAN_HOST=0.0.0.0` — and optionally point `KANBAN_TLS_CERT` + `KANBAN_TLS_KEY` at a PEM cert/key to serve **HTTP/2 over TLS** (multiplexes requests over one connection instead of the browser's ~6-connection HTTP/1.1 cap; keeps an HTTP/1.1 fallback so WebSocket updates still work). Unset, it's a no-op. See [docs/deployment.md → HTTPS / HTTP/2](docs/deployment.md#https--http2-network-access).
-
-### Reset to Clean State
-
-Stop the dev server first, then:
-
-```bash
-pnpm db:reset        # wipe DB, re-migrate, re-seed tags
-pnpm cli -- register .   # re-register the repo
-pnpm dev
-```
+For prerequisites, troubleshooting, and clean-clone gotchas see [docs/install.md](docs/install.md).
 
 ## CLI
 
