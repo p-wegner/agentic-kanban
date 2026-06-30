@@ -121,12 +121,12 @@ Prompt templates in the `agent_skills` table, written to `.claude/skills/<name>/
 | Publish/release npm package | `publish`, `release` |
 | Change directly on master | `direct-master` |
 
-## Clean-clone / first-start blockers (Windows) — read before "the app won't start"
-A fresh clone hits these in sequence; full symptom→cause→fix in `INSTALL.md` (“Clean-clone / first-start gotchas”). The short list:
-1. **`spawn pnpm ENOENT`** — `dev.mjs`/`server-dev-proxy.mjs`/preflights `spawn("pnpm", {shell:false})`, which needs a real **`pnpm.exe`** on PATH; an `npm i -g` install resolves only to `pnpm.ps1` and fails (and the self-healing `pnpm install --force` preflights can't run either). Fix: `scoop install pnpm` / corepack. Check `(Get-Command pnpm).Source` is not *only* a `.ps1`.
-2. **Client: `Failed to resolve entry for "@agentic-kanban/shared"`** — was: Vite resolved shared via the `import` condition → `dist/`, which a clean clone hasn't built (`dist/` gitignored, no `prepare`, `repairSharedIfNeeded` only restores wiped *source*). **Fixed**: `vite.config.ts` prepends the `"development"` condition in `serve` mode → shared resolves to `src/`, no pre-build (build still uses `dist`). Fallback if it recurs: `pnpm --filter @agentic-kanban/shared build`.
-3. **`pnpm dev` backend hangs (proxy up on 3001, nothing on 13001)** — `tsx watch` of the full server hangs on Windows (plain `tsx` and `tsx watch` of a trivial file both work). Workaround: run the backend with plain `tsx --conditions development src/index.ts` bound to the public port + `pnpm exec vite` separately (Vite proxies `/api` to `$SERVER_PORT`). Prefer Node **LTS 20/22**, not 23.x.
-4. **DB location**: dev DB is `packages/server/kanban.db` (drizzle `file:kanban.db`); if absent the server silently uses `~/.agentic-kanban/kanban.db` and the board looks empty/wrong. `register .` on THIS repo also commits duplicate hooks — drop that commit.
+## Clean-clone / first-start blockers (Windows)
+Full symptom→cause→fix in `docs/install.md` (“Clean-clone / first-start gotchas”). The `dev-server` skill Step 0 handles bootstrap automatically (no DB → `pnpm db:setup`; 0 projects → register). Key facts for triage:
+- **`spawn pnpm ENOENT`** — needs `pnpm.exe` on PATH, not just `pnpm.ps1`. Fix: `scoop install pnpm`.
+- **Client shared resolution** — fixed; `vite.config.ts` uses `development` condition → `src/`. Fallback: `pnpm --filter @agentic-kanban/shared build`.
+- **Backend hangs (proxy up, nothing on 13001)** — `tsx watch` + Node 23.x on Windows; use Node LTS 20/22.
+- **DB location** — `packages/server/kanban.db`; absent → falls back to `~/.agentic-kanban/kanban.db` (board looks empty).
 
 ## Common Commands
 - `pnpm dev` — server + client (worktree ports: main 3001/5173, `feature/<N>-…` = `3001+N`/`5173+N`). `pnpm dev:desktop` adds Tauri. Safe headless launch: `dev-server` skill.

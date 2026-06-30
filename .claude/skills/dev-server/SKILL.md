@@ -25,6 +25,34 @@ So a node web app, a python service, a go server, etc. can each be booted + heal
 - **NEVER poll with `Get-NetTCPConnection` / `netstat | findstr` in a loop** — each iteration spawns a subprocess that flashes a window. Use one snapshot for port checks. (Polling the HTTP endpoint to wait for *bind* is the exception — see Step 3b.)
 - **NEVER use `curl`** for health checks — it's an alias for `Invoke-WebRequest` and breaks JSON. Use `Invoke-RestMethod`.
 
+## Step 0 — Bootstrap (first-run check)
+
+**Run this before Step 1 when helping a new user or when the DB might not exist.**
+
+**0a — Check DB; initialize if missing:**
+```bash
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+DB_PATH="$REPO_ROOT/packages/server/kanban.db"
+if [ ! -f "$DB_PATH" ]; then
+  echo "No DB — running db:setup (migrate + seed + register)..."
+  cd "$REPO_ROOT" && pnpm db:setup
+fi
+```
+
+`pnpm db:setup` = migrate + seed default tags/skills + register the current repo as a project. `pnpm install` (with the `prepare` script in `packages/shared`) auto-builds `shared/dist` so the CLI works immediately.
+
+**0b — After the server is up (Step 3 complete), check project registration:**
+```powershell
+$r = Invoke-RestMethod "http://127.0.0.1:$serverPort/api/projects" -TimeoutSec 5
+if ($r.Count -eq 0) {
+  Write-Host "No projects registered — registering current repo..."
+  # Run from the main checkout (not a worktree):
+  pnpm cli -- register .
+}
+```
+
+If it's unclear which repo to register (user said "start the app" with CWD unknown), ask before running `register`.
+
 ## Step 1 — Determine ports
 
 `scripts/dev.mjs` auto-detects worktree context and sets `KANBAN_WORKTREE_SERVER_PORT`, `KANBAN_WORKTREE_CLIENT_PORT`, `KANBAN_SERVER_PORT`, `KANBAN_CLIENT_PORT`, `SERVER_PORT`, `PORT`, `VITE_PORT`. (Worktree board REST calls use `KANBAN_BOARD_SERVER_PORT`; dev-server cleanup uses the worktree ports.) **In a worktree, never hardcode 3001/5173** — read the env vars. Later steps reuse `$serverPort`/`$clientPort` from here:
