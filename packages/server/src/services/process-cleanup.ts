@@ -1,5 +1,5 @@
 import { auditProcessEvent, guardProcessKill } from "./process-guard.js";
-import { execCommand, listenerPidsForPort, parseLsofPids, parseWmicProcessList, taskkillTree } from "./process-exec.js";
+import { execCommand, listOsProcesses, listenerPidsForPort, parseLsofPids, parseWmicProcessList, taskkillTree } from "./process-exec.js";
 
 /**
  * Kill the process (tree) listening on each of the given ports. Used to free the
@@ -38,6 +38,72 @@ export async function killProcessesOnPorts(ports: number[]): Promise<number> {
         auditProcessEvent({ action: "process-cleanup-kill-failed", pid, port, error: err instanceof Error ? err.message : String(err) });
         // Process may have already exited.
       }
+    }
+  }
+  return killed;
+}
+
+/**
+ * Kill the `scripts/dev.mjs` SUPERVISOR that owns the dev servers on the given ports,
+ * if one exists. dev.mjs respawns killed children, so killing only a port listener
+ * (killProcessesOnPorts) makes the port reappear within ~1s and leaves the supervised
+ * backend alive. We start from THIS dev server's port listener(s) and walk UP the
+ * parent chain, so the only dev.mjs we can reach is the supervisor of the server we're
+ * stopping — never another worktree's. Killing it with `/T` cascades to ALL its
+ * children (proxy + vite + the tsx backend). No-op (returns 0) when no dev.mjs ancestor
+ * is found — i.e. for generic, non-agentic-kanban projects with a plain dev command.
+ * Every kill still routes through guardProcessKill (protected board PIDs are spared).
+ */
+export async function killDevServerSupervisorOnPorts(ports: number[]): Promise<number> {
+  const unique = [...new Set(ports.filter((p) => Number.isInteger(p) && p > 0))];
+  if (unique.length === 0) return 0;
+
+  let processes: Awaited<ReturnType<typeof listOsProcesses>>;
+  try {
+    processes = await listOsProcesses();
+  } catch {
+    return 0;
+  }
+  const byPid = new Map(processes.map((p) => [p.pid, p]));
+
+  const supervisorPids = new Set<number>();
+  for (const port of unique) {
+    let listeners: number[] = [];
+    try {
+      listeners = await listenerPidsForPort(port);
+    } catch {
+      continue;
+    }
+    for (const listenerPid of listeners) {
+      // Climb the parent chain (bounded) to the topmost dev.mjs ancestor.
+      let cursor = byPid.get(listenerPid);
+      let supervisor: number | null = null;
+      for (let depth = 0; depth < 10 && cursor; depth++) {
+        if (/dev\.mjs/i.test(cursor.commandLine)) supervisor = cursor.pid;
+        const parent = byPid.get(cursor.ppid);
+        if (!parent || parent.pid === cursor.pid) break;
+        cursor = parent;
+      }
+      if (supervisor != null) supervisorPids.add(supervisor);
+    }
+  }
+
+  let killed = 0;
+  for (const pid of supervisorPids) {
+    if (!guardProcessKill(pid, { reason: "dev-server-supervisor-port-match" })) continue;
+    auditProcessEvent({ action: "dev-server-supervisor-candidate", pid });
+    try {
+      if (process.platform === "win32") {
+        await taskkillTree(pid, { timeout: 5000 });
+      } else {
+        process.kill(pid, "SIGTERM");
+      }
+      console.log(`[process-cleanup] killed dev.mjs supervisor PID ${pid} (cascades to its dev-server children)`);
+      auditProcessEvent({ action: "dev-server-supervisor-killed", pid });
+      killed++;
+    } catch (err) {
+      auditProcessEvent({ action: "dev-server-supervisor-kill-failed", pid, error: err instanceof Error ? err.message : String(err) });
+      // Process may have already exited.
     }
   }
   return killed;
