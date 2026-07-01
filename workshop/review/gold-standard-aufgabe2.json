@@ -1,0 +1,36 @@
+{
+  "task": "aufgabe2",
+  "description": "feat: add issues CSV export endpoint",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "high",
+      "description": "Falsche Sortierung: Issues werden nach created_at aufsteigend sortiert statt nach der vorgeschriebenen Status-Reihenfolge todo → in_progress → done → cancelled (AC2). Dadurch erscheinen Issues in zufälliger zeitlicher Reihenfolge statt nach Workflow-Priorität.",
+      "location": "packages/server/src/routes/export.ts:17"
+    },
+    {
+      "id": "F2",
+      "severity": "high",
+      "description": "Fehlende Felder im CSV-Output: Die Header-Zeile enthält nur ['id', 'title', 'status', 'created_at']; die von AC3 geforderten Felder 'priority' und 'assignee' werden weder in den Headers noch in den Rows ausgegeben.",
+      "location": "packages/server/src/routes/export.ts:20"
+    },
+    {
+      "id": "F3",
+      "severity": "medium",
+      "description": "Locale-abhängige Datumsformatierung: toLocaleDateString() gibt je nach Server-Locale unterschiedliche Formate zurück (z.B. '1/15/2026' oder '15.1.2026'). AC3 verlangt ISO 8601 (YYYY-MM-DD), z.B. via toISOString().slice(0, 10).",
+      "location": "packages/server/src/routes/export.ts:25"
+    },
+    {
+      "id": "F4",
+      "severity": "high",
+      "description": "Query-Parameter ?includeCancelled wird ignoriert: Der Route-Handler liest c.req.query('includeCancelled') nie aus. Cancelled Issues werden immer in den Export eingeschlossen, anstatt sie standardmäßig auszublenden und nur bei includeCancelled=true einzubeziehen (AC4).",
+      "location": "packages/server/src/routes/export.ts:7"
+    },
+    {
+      "id": "F5",
+      "severity": "low",
+      "description": "Content-Disposition-Dateiname enthält kein Datum: Der Dateiname lautet 'issues-{projectId}.csv' statt 'issues-{projectId}-{YYYY-MM-DD}.csv'. AC6 verlangt ein Datum im Dateinamen, damit Exports verschiedener Tage eindeutig unterscheidbar sind.",
+      "location": "packages/server/src/routes/export.ts:32"
+    }
+  ]
+}
