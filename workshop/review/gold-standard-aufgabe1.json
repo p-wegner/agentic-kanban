@@ -1,0 +1,36 @@
+{
+  "task": "aufgabe1",
+  "description": "feat: add task CSV export endpoint",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "high",
+      "description": "Null dereference: issue.assignee.name is accessed without checking whether assignee is null. When a task has no assignee the expression throws 'Cannot read properties of null (reading name)'.",
+      "location": "packages/server/src/services/csv-export.service.ts:32"
+    },
+    {
+      "id": "F2",
+      "severity": "high",
+      "description": "Missing error handling: the await writeFile(...) call has no try/catch block. Any I/O failure (disk full, permission denied, etc.) causes an unhandled promise rejection that crashes the request without returning a proper HTTP error response.",
+      "location": "packages/server/src/routes/task-export.ts:43"
+    },
+    {
+      "id": "F3",
+      "severity": "medium",
+      "description": "Off-by-one in pagination filter: the condition `i > offset + limit` should be `i < offset + limit`. As written, items before the offset are included and items within the requested page are excluded — the logic is inverted.",
+      "location": "packages/server/src/services/csv-export.service.ts:29"
+    },
+    {
+      "id": "F4",
+      "severity": "medium",
+      "description": "Missing input validation: the 'limit' query parameter is parsed with parseInt and used directly in a DB query without an upper bound. A caller can pass limit=9999999 triggering unbounded memory allocation and query load (potential DoS).",
+      "location": "packages/server/src/routes/task-export.ts:31"
+    },
+    {
+      "id": "F5",
+      "severity": "low",
+      "description": "Wrong HTTP status code: the route returns 200 OK after creating a new export artifact. Resource creation should return 201 Created per HTTP semantics.",
+      "location": "packages/server/src/routes/task-export.ts:47"
+    }
+  ]
+}
