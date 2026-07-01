@@ -1,0 +1,36 @@
+{
+  "task": "aufgabe3",
+  "description": "feat: add audit log service and REST endpoints",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "high",
+      "description": "SQL-Injection in AuditLogService.query(): Der Parameter 'action' aus dem Query-String wird per Template-Literal direkt in den SQL-String interpoliert: `AND action = '${action}'`. Ein Angreifer kann action auf `' OR '1'='1` setzen und damit alle Audit-Einträge aller Projekte lesen, die projectId-Filterung aushebeln oder Daten exfiltrieren. Der Parameter muss als Prepared-Statement-Platzhalter übergeben werden.",
+      "location": "packages/server/src/services/audit-log.service.ts:76"
+    },
+    {
+      "id": "F2",
+      "severity": "high",
+      "description": "Sensitive Data Exposure: Der rohe Authorization-Header-Wert (z.B. 'Bearer eyJ...') wird als actorToken unverändert in der audit_log-Tabelle persistiert. Wer Lesezugriff auf die Datenbank hat, kann damit alle Bearer-Tokens aus dem Audit-Log extrahieren und Requests als betroffene Nutzer absenden. Es darf nur ein sicherer Bezeichner (Hash, User-ID, anonymisierter Principal) gespeichert werden, niemals das Token selbst.",
+      "location": "packages/server/src/services/audit-log.service.ts:55"
+    },
+    {
+      "id": "F3",
+      "severity": "high",
+      "description": "Race Condition / TOCTOU in AuditLogService.record(): Der Duplikat-Check (SELECT) und die eigentliche Einfügung (INSERT) laufen ohne Datenbank-Transaktion. Treffen zwei gleichzeitige Requests ein, können beide den SELECT-Check bestehen bevor einer von ihnen den INSERT abgeschlossen hat. Das Ergebnis sind doppelte Audit-Einträge trotz Duplikatschutz. Die Lösung ist ein atomares BEGIN/COMMIT oder ein INSERT OR IGNORE mit einem Unique-Constraint.",
+      "location": "packages/server/src/services/audit-log.service.ts:43"
+    },
+    {
+      "id": "F4",
+      "severity": "medium",
+      "description": "Silent Error Swallow in POST /:projectId/audit: Der catch-Block loggt den Fehler, gibt aber trotzdem HTTP 200 mit { ok: true } zurück. Der Aufrufer kann einen fehlgeschlagenen Schreibvorgang nicht von einem erfolgreichen unterscheiden. Bei einem I/O-Fehler, DB-Fehler oder Constraint-Verletzung muss der Handler mit einem passenden Fehlercode antworten (z.B. 500 Internal Server Error), nicht mit einer Erfolgsantwort.",
+      "location": "packages/server/src/routes/audit.ts:74"
+    },
+    {
+      "id": "F5",
+      "severity": "medium",
+      "description": "Memory Leak durch akkumulierende Event-Listener: createAuditRoute() ruft process.on('beforeExit', flushOnExit) bei jeder Instanziierung auf. In Tests, Hot-Reload-Szenarien oder mehrfachen createAuditRoute()-Aufrufen akkumulieren sich unbegrenzt viele Listener auf dem process-Objekt. Node.js gibt dabei eine MaxListenersExceededWarning aus, und der Heap wächst kontinuierlich. Der Listener muss entweder process.once() verwenden oder per process.off() beim Teardown entfernt werden.",
+      "location": "packages/server/src/routes/audit.ts:40"
+    }
+  ]
+}
