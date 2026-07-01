@@ -5,32 +5,32 @@
     {
       "id": "F1",
       "severity": "high",
-      "description": "Falsche Sortierung: Issues werden nach created_at aufsteigend sortiert statt nach der vorgeschriebenen Status-Reihenfolge todo → in_progress → done → cancelled (AC2). Dadurch erscheinen Issues in zufälliger zeitlicher Reihenfolge statt nach Workflow-Priorität.",
-      "location": "packages/server/src/routes/export.ts:17"
+      "description": "Falsche Status-Sortierreihenfolge: STATUS_ORDER ordnet 'done' vor 'in_progress' (done:1, in_progress:2). AC2 schreibt die Reihenfolge todo → in_progress → done → cancelled vor. Dadurch erscheinen 'done'-Issues im Export vor 'in_progress'-Issues.",
+      "location": "packages/server/src/routes/export.ts:6"
     },
     {
       "id": "F2",
       "severity": "high",
-      "description": "Fehlende Felder im CSV-Output: Die Header-Zeile enthält nur ['id', 'title', 'status', 'created_at']; die von AC3 geforderten Felder 'priority' und 'assignee' werden weder in den Headers noch in den Rows ausgegeben.",
-      "location": "packages/server/src/routes/export.ts:20"
+      "description": "includeCancelled-Filter vergleicht mit dem falschen Status: Der Filter schließt Issues mit status 'done' aus statt Issues mit status 'cancelled' (AC4). Dadurch werden abgeschlossene Issues nie exportiert, aber cancelled Issues immer.",
+      "location": "packages/server/src/routes/export.ts:22"
     },
     {
       "id": "F3",
-      "severity": "medium",
-      "description": "Locale-abhängige Datumsformatierung: toLocaleDateString() gibt je nach Server-Locale unterschiedliche Formate zurück (z.B. '1/15/2026' oder '15.1.2026'). AC3 verlangt ISO 8601 (YYYY-MM-DD), z.B. via toISOString().slice(0, 10).",
-      "location": "packages/server/src/routes/export.ts:25"
+      "severity": "high",
+      "description": "Falscher CSV-Spaltenname: Der Header verwendet 'prio' statt 'priority'. AC3 definiert den Spaltennamen explizit als 'priority'. Downstream-Systeme, die auf den Spaltennamen 'priority' parsen, werden den Wert nicht finden.",
+      "location": "packages/server/src/routes/export.ts:35"
     },
     {
       "id": "F4",
-      "severity": "high",
-      "description": "Query-Parameter ?includeCancelled wird ignoriert: Der Route-Handler liest c.req.query('includeCancelled') nie aus. Cancelled Issues werden immer in den Export eingeschlossen, anstatt sie standardmäßig auszublenden und nur bei includeCancelled=true einzubeziehen (AC4).",
-      "location": "packages/server/src/routes/export.ts:7"
+      "severity": "medium",
+      "description": "Falscher HTTP-Statuscode bei leerem Export: Der Handler gibt 200 mit leerem Body zurück. AC5 schreibt 204 No Content vor, wenn keine Issues für den Export vorhanden sind.",
+      "location": "packages/server/src/routes/export.ts:27"
     },
     {
       "id": "F5",
-      "severity": "low",
+      "severity": "medium",
       "description": "Content-Disposition-Dateiname enthält kein Datum: Der Dateiname lautet 'issues-{projectId}.csv' statt 'issues-{projectId}-{YYYY-MM-DD}.csv'. AC6 verlangt ein Datum im Dateinamen, damit Exports verschiedener Tage eindeutig unterscheidbar sind.",
-      "location": "packages/server/src/routes/export.ts:32"
+      "location": "packages/server/src/routes/export.ts:50"
     }
   ]
 }
