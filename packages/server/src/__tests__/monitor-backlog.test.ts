@@ -47,6 +47,8 @@ function makeDeps(overrides: Partial<BacklogEmptyDeps> = {}): BacklogEmptyDeps &
     boardEvents: { broadcast: vi.fn() } as unknown as BacklogEmptyDeps["boardEvents"],
     logMonitorAction: vi.fn(),
     setCooldownStamp: vi.fn().mockResolvedValue(undefined),
+    // Cooldown timestamp is runtime state (#975); default to "no prior run".
+    getCooldownStamp: vi.fn().mockResolvedValue(null),
     ...overrides,
   } as BacklogEmptyDeps & { setCooldownStamp: ReturnType<typeof vi.fn> };
 }
@@ -124,13 +126,12 @@ describe("runBacklogEmptyStrategy — gating", () => {
   });
 
   it("respects the cooldown window", async () => {
-    const deps = makeDeps();
     const now = new Date("2026-05-30T12:00:00.000Z").toISOString();
     const lastRun = new Date("2026-05-30T11:30:00.000Z").toISOString(); // 30 min ago, cooldown 120
+    const deps = makeDeps({ getCooldownStamp: vi.fn().mockResolvedValue(lastRun) });
     const prefs = new Map([
       ["backlog_empty_strategy", "generate_tickets"],
       ["backlog_empty_cooldown_min", "120"],
-      ["backlog_empty_last_run", lastRun],
     ]);
     await runBacklogEmptyStrategy(prefs, deps, now);
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
