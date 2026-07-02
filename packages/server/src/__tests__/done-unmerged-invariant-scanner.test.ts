@@ -16,6 +16,7 @@ import { eq } from "drizzle-orm";
 import { issues, preferences, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { scanDoneUnmergedWorkspaces, startDoneUnmergedScanner } from "../startup/done-unmerged-invariant-scanner.js";
+import { activeMerges } from "../services/workspace-internals.js";
 import type { BranchTipAncestryResult } from "@agentic-kanban/shared/lib/git-service";
 
 type CheckAncestor = (repoPath: string, branch: string, baseBranch: string, worktreeDir?: string) => Promise<BranchTipAncestryResult>;
@@ -130,6 +131,8 @@ describe("scanDoneUnmergedWorkspaces", () => {
 
   beforeEach(() => {
     ({ db } = createTestDb());
+    // The per-repo merge lock is a module-level Map — clear between tests (#979).
+    activeMerges.clear();
   });
 
   // --- Core detection ---
@@ -1439,5 +1442,91 @@ describe("scanDoneUnmergedWorkspaces", () => {
     // Workspace stamped with mergedAt
     const [ws] = await db.select({ mergedAt: workspaces.mergedAt }).from(workspaces).where(eq(workspaces.id, workspaceId));
     expect(ws.mergedAt).not.toBeNull();
+  });
+
+  // --- Repo merge lock (#979) ---
+
+  it("#979: skips a repo whose merge lock is held — no git merge, no workspace stamp, finding still logged", async () => {
+    const { issueId, workspaceId } = await seedWorkspace(db);
+    const mergeGitBranch = makeMergeGitBranch();
+
+    // Simulate an in-flight merge holding the repo lock (same primitive the merge service uses).
+    activeMerges.set("/repo", {
+      promise: new Promise(() => {}), // never settles — merge still in flight
+      workspaceId: "ws-other-merge",
+      repoPath: "/repo",
+      startedAt: new Date().toISOString(),
+      startedAtMs: Date.now(), // fresh — NOT stale
+    });
+
+    try {
+      const result = await scanDoneUnmergedWorkspaces({
+        database: db,
+        checkAncestor: makeCheckAncestor(false),
+        countCommits: makeCountCommits(2),
+        detectConflicts: makeDetectConflicts(false),
+        countBehind: makeCountBehind(0),
+        mergeGitBranch,
+      });
+
+      // The violation is still detected (flag phase is lock-independent) ...
+      expect(result.findings).toHaveLength(1);
+      // ... but the auto-merge is SKIPPED this tick — never queued behind the live merge.
+      expect(result.autoMerged).toBe(0);
+      expect(mergeGitBranch).not.toHaveBeenCalled();
+
+      // Workspace untouched — retried on a later tick once the lock is free.
+      const [ws] = await db.select({ mergedAt: workspaces.mergedAt, status: workspaces.status })
+        .from(workspaces).where(eq(workspaces.id, workspaceId));
+      expect(ws.mergedAt).toBeNull();
+
+      // The holder's lock entry is left alone.
+      expect(activeMerges.get("/repo")?.workspaceId).toBe("ws-other-merge");
+
+      // Issue stays Done
+      const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+      const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
+      expect(status.name).toBe("Done");
+    } finally {
+      activeMerges.clear();
+    }
+  });
+
+  it("#979: merges when the lock is free, holds the repo lock during the merge, and releases it after", async () => {
+    const { workspaceId } = await seedWorkspace(db);
+    let lockHeldDuringMerge = false;
+    const mergeGitBranch: MergeGitBranch = vi.fn(async () => {
+      // Yield one microtask: acquireRepoMergeLock installs the lock entry synchronously
+      // right after work()'s synchronous prefix, so observe from the first async slice
+      // (where a real git merge lives).
+      await Promise.resolve();
+      lockHeldDuringMerge = activeMerges.has("/repo");
+      return "Merge branch 'feature/ak-584-test'";
+    });
+
+    try {
+      const result = await scanDoneUnmergedWorkspaces({
+        database: db,
+        checkAncestor: makeCheckAncestor(false),
+        countCommits: makeCountCommits(2),
+        detectConflicts: makeDetectConflicts(false),
+        countBehind: makeCountBehind(0),
+        mergeGitBranch,
+      });
+
+      expect(result.autoMerged).toBe(1);
+      // The git merge ran INSIDE the shared repo merge lock ...
+      expect(lockHeldDuringMerge).toBe(true);
+      // ... and the lock was released afterwards (also on failure — the primitive releases on settle).
+      expect(activeMerges.has("/repo")).toBe(false);
+
+      // Terminal stamp went through (via the workspace-status authority).
+      const [ws] = await db.select({ mergedAt: workspaces.mergedAt, status: workspaces.status })
+        .from(workspaces).where(eq(workspaces.id, workspaceId));
+      expect(ws.mergedAt).not.toBeNull();
+      expect(ws.status).toBe("closed");
+    } finally {
+      activeMerges.clear();
+    }
   });
 });
