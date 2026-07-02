@@ -2724,6 +2724,10 @@ describe("Transcript Search API", () => {
   const { app, db: database } = createTestApp();
   let projectId: string;
   let statusId: string;
+  // Deterministic, unique per-issue number: seedSession accumulates several issues
+  // in the one shared project, and migration 0094 makes (project_id, issue_number)
+  // UNIQUE — a random number risked a birthday collision (and hitting the fixed 8888).
+  let transcriptIssueSeq = 1000;
 
   beforeAll(async () => {
     projectId = await createProjectDirectly(database, { name: "Transcript Search Project" });
@@ -2752,7 +2756,7 @@ describe("Transcript Search API", () => {
       id: issueId,
       projectId,
       statusId: sid,
-      issueNumber: Math.floor(Math.random() * 9000) + 1000,
+      issueNumber: transcriptIssueSeq++,
       title: overrides.issueTitle,
       priority: "medium",
       issueType: "task",

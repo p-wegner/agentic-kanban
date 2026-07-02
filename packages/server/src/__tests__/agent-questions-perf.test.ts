@@ -31,6 +31,11 @@ type Db = ReturnType<typeof createTestDb>["db"];
 
 const PROJECT_ID = "proj-perf";
 
+// Unique per-issue number: migration 0094 enforces UNIQUE(project_id, issue_number)
+// and seed() shares one PROJECT_ID across calls. Start at 100 so seeded numbers never
+// collide with the explicit issueNumber 2/3 literals used elsewhere in this file.
+let seedIssueNumber = 100;
+
 function ts(offsetMs: number) {
   return new Date(Date.now() + offsetMs).toISOString();
 }
@@ -73,7 +78,7 @@ async function seed(db: Db, opts: {
   await db.insert(projects).values({ id: PROJECT_ID, name: "p", repoPath: "/tmp/p" }).onConflictDoNothing();
   await db.insert(projectStatuses).values({ id: statusId, projectId: PROJECT_ID, name: "In Progress", sortOrder: 1 }).onConflictDoNothing();
   const issueId = `issue-${opts.key}`;
-  await db.insert(issues).values({ id: issueId, issueNumber: 1, title: "T", statusId, projectId: PROJECT_ID });
+  await db.insert(issues).values({ id: issueId, issueNumber: seedIssueNumber++, title: "T", statusId, projectId: PROJECT_ID });
   const workspaceId = `ws-${opts.key}`;
   await db.insert(workspaces).values({
     id: workspaceId,

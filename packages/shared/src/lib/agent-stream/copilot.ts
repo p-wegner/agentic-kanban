@@ -48,7 +48,16 @@ function extractCopilotAssistantText(obj: Record<string, unknown>): string {
   if (type === "message" && role === "assistant") {
     return contentToText(obj.content) || getString(obj, ["text", "message"]);
   }
-  return "";
+  // General fallback (restored #961): Copilot also emits assistant text on flat
+  // shapes that carry no assistant-typed envelope — e.g. an `assistant.message`
+  // with top-level `text` (no `data` wrapper) or a generic event whose payload
+  // holds a content array. The #888/#892 refactor narrowed this to typed events
+  // only, silently dropping that text. `result` is intentionally excluded so a
+  // completion summary isn't duplicated as an assistant message.
+  const payload = Object.keys(data).length > 0 ? data : obj;
+  const direct = stringValue(payload.text ?? payload.message ?? payload.response);
+  if (direct) return direct;
+  return contentToText(payload.content);
 }
 
 function formatShutdownResult(shutdownType: string, linesAdded: number, linesRemoved: number, filesModified: string[]): string {
