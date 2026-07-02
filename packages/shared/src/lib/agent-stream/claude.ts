@@ -9,6 +9,8 @@ import {
   stringValue,
   toolNameFor,
 } from "./shared.js";
+import { recordUnknownFieldDrift } from "./unknown-fields.js";
+import { claudeResultLacksTokenFields, claudeResultUsageSchema } from "./claude-schema.js";
 
 function handleClaudeSystemInit(obj: Record<string, unknown>, result: ParsedStreamEvent): void {
   const sessionId = stringValue(obj.session_id) ?? "";
@@ -181,6 +183,16 @@ function handleResultEvent(obj: Record<string, unknown>, result: ParsedStreamEve
   const inputTokens = numberValue(firstModelUsage?.inputTokens ?? usage.input_tokens);
   const outputTokens = numberValue(firstModelUsage?.outputTokens ?? usage.output_tokens);
   const model = firstModelEntry?.[0] ?? stringValue(obj.model) ?? "";
+  // #994: neither the flat `usage` nor any `modelUsage` entry carrying a token
+  // field means the numberValue() defaults above silently read an upstream
+  // rename as "0 tokens" (the same failure class as the codex #976 fix).
+  if (!isSubagentMessage && claudeResultLacksTokenFields(obj)) {
+    const parsed = claudeResultUsageSchema.safeParse(obj);
+    const detail = parsed.success
+      ? "usage/modelUsage matched the schema but carried no known token fields"
+      : parsed.error.issues.map((issue) => `${issue.path.join(".") || "<root>"}: ${issue.message}`).join("; ");
+    recordUnknownFieldDrift("claude", "result", detail);
+  }
   if (!isSubagentMessage) {
     result.stats = {
       durationMs: numberValue(obj.duration_ms),
