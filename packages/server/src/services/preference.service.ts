@@ -58,6 +58,22 @@ export interface ProviderDivergenceRejection {
   settingsProfile: string | null;
 }
 
+/**
+ * Provider/profile keys that participate in Bullseye divergence. A write that does
+ * not touch any of these can never CREATE divergence, so the guard skips it (an
+ * unrelated toggle save must never be blocked by a pre-existing, untouched drift).
+ * Exported so other write paths (the CLI's `preferences set`, #973) can route
+ * exactly these keys through the guarded `updateSettings` instead of the raw
+ * repository `setPreference`.
+ */
+export const PROVIDER_DIVERGENCE_KEYS: ReadonlySet<string> = new Set([
+  "provider",
+  "claude_profile",
+  "codex_profile",
+  "copilot_profile",
+  "pi_profile",
+]);
+
 function isConductorEnabledPreference(value: string | null | undefined): boolean {
   if (!value) return false;
   if (value === "true") return true;
@@ -128,13 +144,6 @@ export function createPreferenceService({ database }: { database: Database }) {
     await updateStrategyObjectives(entries);
     return { applied, dropped, divergence: null };
   }
-
-  /**
-   * Provider/profile keys that participate in Bullseye divergence. A write that does
-   * not touch any of these can never CREATE divergence, so the guard skips it (an
-   * unrelated toggle save must never be blocked by a pre-existing, untouched drift).
-   */
-  const PROVIDER_DIVERGENCE_KEYS = new Set(["provider", "claude_profile", "codex_profile", "copilot_profile", "pi_profile"]);
 
   async function checkProviderDivergenceGuard(
     entries: Array<{ key: string; value: string }>,

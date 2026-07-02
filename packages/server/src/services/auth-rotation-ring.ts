@@ -44,6 +44,12 @@ export interface AuthRingInfo {
 }
 
 export interface AuthRingConfig<E extends BaseRingEntry> {
+  /**
+   * Provider name as used by Strategy Bullseye `providerPolicies[].provider`
+   * ("claude" / "codex"). Used by rotation to retarget Bullseye policies that pin
+   * the exhausted profile by name, keeping the #903 divergence invariant (#973).
+   */
+  provider: "claude" | "codex" | "copilot" | "pi";
   /** Config-dir name prefix under the home dir, e.g. ".claude-" / ".codex-". */
   dirPrefix: string;
   /** Files whose presence marks a `<prefix><name>` dir as a discoverable OAuth login. */
@@ -201,6 +207,63 @@ export function fallbackCooldownIso<E extends BaseRingEntry>(cfg: AuthRingConfig
   return new Date(now.getTime() + cfg.defaultCooldownMs).toISOString();
 }
 
+const BOARD_STRATEGY_PREFIX = "board_strategy_";
+
+/**
+ * #973 rotation/Bullseye coherence. Rotation is a LEGITIMATE writer of the global
+ * `<provider>_profile` pref, but the #903 write-time guard forbids that pref
+ * diverging from the active project's Strategy Bullseye. A Bullseye policy that
+ * pins the exhausted profile BY NAME would (a) manufacture exactly that divergence
+ * — a later legitimate settings save then 422s on drift it didn't cause — and
+ * (b) keep selecting the cooled-down login for Bullseye-driven launches
+ * (`selectProviderFromStrategy` reads the policy's `profileName`, not this pref).
+ *
+ * So rotation retargets every stored Bullseye policy that references the
+ * rotated-from profile for this ring's provider, in the same step as the pref
+ * write — the "write both sides so the projected map is self-consistent" shape
+ * the config-import route uses.
+ *
+ * The stored JSON is rewritten surgically (raw parse, mutate the matching
+ * `providerPolicies[].profileName`, re-serialize) so unknown/extra fields are
+ * preserved. Unparseable configs are skipped, never fatal to the rotation.
+ * Objective.md regeneration is deliberately NOT triggered here: the monitors
+ * re-read the pref itself (`resolveMonitorTunables` / workspace creation), and
+ * conductor objective regeneration remains a Bullseye-save concern.
+ */
+async function retargetBullseyePolicies<E extends BaseRingEntry>(
+  cfg: AuthRingConfig<E>,
+  database: Database,
+  prefMap: Map<string, string>,
+  fromProfile: string,
+  toProfile: string,
+): Promise<void> {
+  for (const [key, raw] of prefMap) {
+    if (!key.startsWith(BOARD_STRATEGY_PREFIX) || !raw?.trim()) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    if (!parsed || typeof parsed !== "object") continue;
+    const policies = (parsed as Record<string, unknown>).providerPolicies;
+    if (!Array.isArray(policies)) continue;
+    let changed = false;
+    for (const policy of policies) {
+      if (!policy || typeof policy !== "object") continue;
+      const rec = policy as Record<string, unknown>;
+      if (rec.provider === cfg.provider && rec.profileName === fromProfile) {
+        rec.profileName = toProfile;
+        changed = true;
+      }
+    }
+    if (!changed) continue;
+    const updated = JSON.stringify(parsed);
+    await setPreference(key, updated, database);
+    prefMap.set(key, updated);
+  }
+}
+
 /**
  * Stamp a cooldown (`until`) on the exhausted login and switch the selected
  * profile to the next usable one. Returns whether a rotation happened. Does NOT
@@ -234,6 +297,9 @@ export async function rotateRing<E extends BaseRingEntry>(
 
   await setPreference(cfg.profilePrefKey, next.profile, database);
   prefMap.set(cfg.profilePrefKey, next.profile);
+  // Keep Bullseye policies pinning the exhausted profile in step with the pref
+  // write, so the #903 divergence invariant holds after rotation (#973).
+  await retargetBullseyePolicies(cfg, database, prefMap, currentProfile, next.profile);
   return { rotated: true, fromProfile: currentProfile, toProfile: next.profile, reason: `rotated to ${next.profile} (cooled ${currentProfile} until ${until})` };
 }
 

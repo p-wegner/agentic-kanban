@@ -50,6 +50,7 @@ export interface CodexLicenseEntry {
 const DEFAULT_COOLDOWN_MS = 3 * 60 * 60 * 1000; // 3h fallback when retryAfter is absent/unparseable
 
 const CONFIG: AuthRingConfig<CodexLicenseEntry> = {
+  provider: "codex",
   dirPrefix: ".codex-",
   discoverAuthFiles: ["config.toml", "auth.json"],
   authFiles: ["auth.json"],
