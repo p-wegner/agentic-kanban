@@ -88,8 +88,33 @@ test.describe("Drag backlog card onto empty agent slot", () => {
     }, "create issue");
     createdIssueIds.push(issueId);
 
-    // Navigate to the agents view — this is where the EmptySlot drop targets live.
-    await page.goto("/agents");
+    // The backlog card (the drag SOURCE) lives on the Backlog view; the EmptySlot
+    // drop target lives on the agents view. The board's drag payload is a
+    // module-level singleton (getBoardDragData), populated only by a card's real
+    // onDragStart handler — it survives an in-app (no-reload) view switch. So we
+    // fire a real `dragstart` on the backlog card here, then SPA-navigate to the
+    // agents view (the payload persists) and drop onto the empty slot.
+    await page.goto("/backlog");
+    const backlogCard = page.getByLabel(`Open issue ${title}`);
+    await expect(backlogCard).toBeVisible({ timeout: 15000 });
+
+    await page.evaluate(({ cardLabel }) => {
+      const card = document.querySelector<HTMLElement>(
+        `[aria-label="Open issue ${cardLabel}"]`,
+      );
+      if (!card) throw new Error(`backlog card "${cardLabel}" not found`);
+
+      // Real dragstart → the app's onDragStart populates the module-level payload.
+      const startEvent = new DragEvent("dragstart", { bubbles: true, cancelable: true });
+      Object.defineProperty(startEvent, "dataTransfer", { value: new DataTransfer() });
+      card.dispatchEvent(startEvent);
+
+      // In-app navigation (no reload) to the agents view so the module-level drag
+      // payload set above is preserved (a full page.goto would reset the module).
+      window.history.pushState(null, "", "/agents");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }, { cardLabel: title });
+
     await page.waitForSelector("[data-testid='board-stats-bar']", { timeout: 15000 });
 
     // The EmptySlot renders "Drop issue here" when no drag is in progress.
@@ -98,34 +123,26 @@ test.describe("Drag backlog card onto empty agent slot", () => {
     const emptySlot = page.locator("p", { hasText: "Drop issue here" }).first();
     await expect(emptySlot).toBeVisible({ timeout: 10000 });
 
-    // Simulate the drag: set window.__dragData (as IssueCard's onDragStart would),
-    // then dispatch proper DragEvents on the EmptySlot container.
-    // React 17+ uses root delegation — dispatching native DragEvents bubbles up correctly.
-    // We use page.evaluate for both steps so __dragData is set before the events fire.
-    await page.evaluate(
-      ({ id, statusId, slotSelector }) => {
-        // Step 1: set drag data (normally set by IssueCard's onDragStart).
-        (window as unknown as Record<string, unknown>).__dragData = {
-          issueId: id,
-          sourceStatusId: statusId,
-        };
+    // Dispatch the drag-over + drop on the EmptySlot container. React 17+ uses root
+    // delegation, so native DragEvents bubble up to its handlers. The handlers read
+    // the persisted module payload (not the dead `window.__dragData` global) to
+    // resolve the dragged issue.
+    await page.evaluate(() => {
+      // Find the EmptySlot container div (parent of the "Drop issue here" paragraph).
+      const para = Array.from(document.querySelectorAll("p")).find(
+        (el) => el.textContent?.trim() === "Drop issue here",
+      );
+      const slot = para?.parentElement;
+      if (!slot) throw new Error("EmptySlot container not found");
 
-        // Step 2: find the EmptySlot container div (parent of the "Drop issue here" paragraph).
-        const para = Array.from(document.querySelectorAll("p")).find(
-          (el) => el.textContent?.trim() === "Drop issue here",
-        );
-        const slot = para?.parentElement;
-        if (!slot) throw new Error(`EmptySlot not found via selector "${slotSelector}"`);
+      const dragover = new DragEvent("dragover", { bubbles: true, cancelable: true });
+      Object.defineProperty(dragover, "dataTransfer", { value: new DataTransfer() });
+      slot.dispatchEvent(dragover);
 
-        // Step 3: dispatch DragEvent — needed so React receives the right event type.
-        const dragover = new DragEvent("dragover", { bubbles: true, cancelable: true });
-        slot.dispatchEvent(dragover);
-
-        const drop = new DragEvent("drop", { bubbles: true, cancelable: true });
-        slot.dispatchEvent(drop);
-      },
-      { id: issueId, statusId: backlogStatusId, slotSelector: "p:has-text('Drop issue here')" },
-    );
+      const drop = new DragEvent("drop", { bubbles: true, cancelable: true });
+      Object.defineProperty(drop, "dataTransfer", { value: new DataTransfer() });
+      slot.dispatchEvent(drop);
+    });
 
     // Assert 1: a workspace was created for this issue.
     // Poll the board until the issue has a workspaceSummary.
