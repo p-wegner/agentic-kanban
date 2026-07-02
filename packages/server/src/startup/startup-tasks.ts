@@ -14,6 +14,7 @@ import { scanDoneUnmergedWorkspaces } from "./done-unmerged-invariant-scanner.js
 import { reapTerminalWorkspaces } from "./terminal-workspace-reaper.js";
 import { finalizeMergeCleanup, reconcileMergedIssue } from "../services/merge-cleanup.service.js";
 import { assertForeignKeysEnabled, alignForeignKeyActionsOnStartup } from "./fk-alignment.js";
+import { checkForeignKeyViolations, logForeignKeyViolations } from "../db/fk-violations.js";
 import { modelBelongsToProvider } from "@agentic-kanban/shared";
 import { PREF_DEFAULT_MODEL, PREF_PROVIDER } from "../constants/preference-keys.js";
 import { MODEL_PREF_KEYS_BY_PROVIDER } from "../services/effective-config.service.js";
@@ -234,6 +235,22 @@ export async function alignLiveDbForeignKeys(): Promise<void> {
   } catch (err) {
     console.warn(
       "[startup] FK-action alignment failed (non-fatal — schema shape is still up to date):",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+
+  // NON-fatal sweep of EXISTING data (#987): the pragma assertion above only guards
+  // NEW writes on these connections — rows inserted by past connections that never
+  // set `PRAGMA foreign_keys=ON` (ad-hoc scripts) can already violate FKs. Report
+  // them LOUDLY; never auto-delete at startup — `pnpm db:repair` is the removal path.
+  try {
+    const violations = await checkForeignKeyViolations(rawClient);
+    if (violations.length > 0) {
+      logForeignKeyViolations(violations, "startup");
+    }
+  } catch (err) {
+    console.warn(
+      "[startup] PRAGMA foreign_key_check sweep failed (non-fatal):",
       err instanceof Error ? err.message : String(err),
     );
   }
