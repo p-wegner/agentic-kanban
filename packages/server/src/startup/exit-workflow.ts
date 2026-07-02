@@ -409,9 +409,21 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
         isReview: roleFlags.isReview,
         exitCode,
       });
-      await setWorkspaceStatus(db, workspaceId, "idle", { now });
+      // #966: the closed+mergedAt check above ran on a snapshot read ~60 lines earlier —
+      // a merge landing in between must NOT be flapped back to idle. setWorkspaceStatus
+      // enforces the terminal invariant atomically in its UPDATE's WHERE clause, so a
+      // `false` here means a concurrent terminal transition (or vanished row) won the
+      // race: stop the exit workflow instead of running it against a merged workspace.
+      const wentIdle = await setWorkspaceStatus(db, workspaceId, "idle", { now });
       boardEvents.broadcastActivity(projectId, { issueId, sessionId, activity: "" });
       boardEvents.broadcast(projectId, "session_completed");
+      if (!wentIdle) {
+        console.log(`[workflow] session ${sessionId} exited but workspace ${workspaceId} reached a terminal state before the idle write (#966) — skipping exit workflow`);
+        fixAndMergeSessionIds.delete(sessionId);
+        reviewSessionIds.delete(sessionId);
+        learningSessionIds.delete(sessionId);
+        return;
+      }
       boardEvents.broadcast(projectId, "workspace_idle");
       // A read-only plan run produces no new commits, but the branch may already differ from
       // its base  which would otherwise trip the "committed changes  In Review  auto-review"
