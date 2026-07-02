@@ -183,11 +183,14 @@ async function assertIssueCascadeComplete(issueId: string, database: DbOrTx): Pr
  *   - repos — project-level rows; workspace-scoped rows already went with their workspace
  *   - project_statuses — after issues (issues.status_id FK)
  *   - preferences — the `activeProjectId` pointer row, plus every per-project
- *     templated key (`start_mode_<id>`, `board_strategy_<id>`, `butler_session_<id>`, …):
- *     any key ending in `_<projectId>` is by construction project-scoped, so one
- *     LIKE delete covers the whole class without duplicating the server's
- *     PROJECT_SCOPED_KEY_PREFIXES table. Done INSIDE the tx (stricter than the old
- *     behavior, which cleaned nothing but the activeProjectId row).
+ *     templated key (`start_mode_<id>`, `board_strategy_<id>`, …): any key ending in
+ *     `_<projectId>` is by construction project-scoped, so one LIKE delete covers the
+ *     whole class without duplicating the server's PROJECT_SCOPED_KEY_PREFIXES table.
+ *     Done INSIDE the tx (stricter than the old behavior, which cleaned nothing but
+ *     the activeProjectId row).
+ *   - runtime_state — the same suffix delete for per-project runtime rows
+ *     (`butler_session_<id>`, `butler_session_history_<id>`), which moved out of
+ *     `preferences` in #975.
  * Intentionally retained: nothing — no project-referencing table survives.
  * (tags are global, session output temp files are filesystem, not DB.)
  */
@@ -238,6 +241,11 @@ async function deleteProjectCascadeRows(projectId: string, database: DbOrTx): Pr
     .where(and(eq(schema.preferences.key, "activeProjectId"), eq(schema.preferences.value, projectId)));
   await database.delete(schema.preferences).where(like(schema.preferences.key, `%_${projectId}`));
 
+  // Per-project RUNTIME STATE (#975): butler_session_<id> / butler_session_history_<id>
+  // moved out of `preferences` into `runtime_state`, so the same suffix delete must
+  // run there too or those rows orphan on project deletion.
+  await database.delete(schema.runtimeState).where(like(schema.runtimeState.key, `%_${projectId}`));
+
   await database.delete(schema.projects).where(eq(schema.projects.id, projectId));
 
   await assertProjectCascadeComplete(projectId, database);
@@ -264,6 +272,7 @@ async function assertProjectCascadeComplete(projectId: string, database: DbOrTx)
     ["project repo", () => countRows(database.select({ id: schema.repos.id }).from(schema.repos).where(eq(schema.repos.projectId, projectId)))],
     ["project status", () => countRows(database.select({ id: schema.projectStatuses.id }).from(schema.projectStatuses).where(eq(schema.projectStatuses.projectId, projectId)))],
     ["project-scoped preference", () => countRows(database.select({ key: schema.preferences.key }).from(schema.preferences).where(like(schema.preferences.key, `%_${projectId}`)))],
+    ["project-scoped runtime state", () => countRows(database.select({ key: schema.runtimeState.key }).from(schema.runtimeState).where(like(schema.runtimeState.key, `%_${projectId}`)))],
   ];
   for (const [label, count] of byProjectId) {
     await assertNoRows(label, count());

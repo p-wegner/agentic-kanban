@@ -4,6 +4,7 @@
  */
 import type { Database } from "../../db/index.js";
 import { getPreference } from "../../repositories/preferences.repository.js";
+import { getRuntimeState } from "../../repositories/runtime-state.repository.js";
 import { getProjectRow } from "../../repositories/agent-questions.repository.js";
 import { ensureButlerSession, sendButlerTurn, subscribeButler, getButlerSession } from "../butler-sdk.service.js";
 import type { AgentQuestionRecommendation, RecommendInput } from "./types.js";
@@ -92,7 +93,7 @@ export async function recommendQuestionsForSet(
       || (await getPreference("claude_profile", db))
       || undefined;
     const model = (await getPreference(`butler_model_${projectId}`, db)) || undefined;
-    const resumeSessionId = (await getPreference(`butler_session_${projectId}`, db)) || undefined;
+    const resumeSessionId = (await getRuntimeState(`butler_session_${projectId}`, db)) || undefined;
     ensureButlerSession({
       projectId,
       repoPath: project.repoPath,

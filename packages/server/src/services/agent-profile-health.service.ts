@@ -2,8 +2,8 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, delimiter, join } from "node:path";
 import type { Database } from "../db/index.js";
-import { setPreference } from "../repositories/preferences.repository.js";
 import { getAllPreferences } from "../repositories/agent-profile-health.repository.js";
+import { getRuntimeStateByPrefix, setRuntimeState } from "../repositories/runtime-state.repository.js";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { buildAgentLaunchConfig, type ProviderName } from "./agent-provider.js";
 import { resolvePiExecutable, splitArgs } from "./agent-provider/helpers.js";
@@ -376,10 +376,9 @@ export async function listAgentProfileHealth(
 ): Promise<AgentProfileHealthRow[]> {
   const prefRows = await getAllPreferences(database);
   const prefMap = new Map(prefRows.map((row) => [row.key, row.value]));
+  // Launch-failure payloads are RUNTIME STATE (in `runtime_state`, #975), not config.
   const failureRows = new Map(
-    prefRows
-      .filter((row) => row.key.startsWith(FAILURE_PREFIX))
-      .map((row) => [row.key, row.value]),
+    (await getRuntimeStateByPrefix(FAILURE_PREFIX, database)).map((row) => [row.key, row.value]),
   );
   const selectedProvider = (prefMap.get("provider") === "codex" || prefMap.get("provider") === "copilot" || prefMap.get("provider") === "pi")
     ? prefMap.get("provider") as ProviderName
@@ -479,5 +478,5 @@ export async function recordAgentProfileLaunchFailure(
     sessionId: input.sessionId,
     workspaceId: input.workspaceId,
   };
-  await setPreference(failurePreferenceKey(input.provider, profileName), JSON.stringify(payload), database);
+  await setRuntimeState(failurePreferenceKey(input.provider, profileName), JSON.stringify(payload), database);
 }
