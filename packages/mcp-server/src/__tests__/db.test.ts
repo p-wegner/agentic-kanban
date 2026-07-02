@@ -25,4 +25,49 @@ describe("MCP DB connection pragmas", () => {
 
     expect(Number(result.rows[0]?.foreign_keys ?? 0)).toBe(1);
   });
+
+  it("fails module init loudly when PRAGMA foreign_keys does not take (#955)", async () => {
+    process.env.DB_URL = "file:unused.db";
+    vi.resetModules();
+    vi.doMock("@libsql/client", () => ({
+      createClient: () => ({
+        execute: async (sql: string) => {
+          if (sql === "PRAGMA foreign_keys") {
+            return { rows: [{ foreign_keys: 0 }] };
+          }
+          return { rows: [] };
+        },
+      }),
+    }));
+
+    await expect(import("../db.js")).rejects.toThrow(/PRAGMA foreign_keys is OFF/);
+    vi.doUnmock("@libsql/client");
+  });
+
+  it("logs which pragma failed instead of swallowing it, and still asserts FKs (#955)", async () => {
+    process.env.DB_URL = "file:unused.db";
+    vi.resetModules();
+    vi.doMock("@libsql/client", () => ({
+      createClient: () => ({
+        execute: async (sql: string) => {
+          if (sql === "PRAGMA journal_mode=WAL") {
+            throw new Error("cannot change into wal mode");
+          }
+          if (sql === "PRAGMA foreign_keys") {
+            return { rows: [{ foreign_keys: 1 }] };
+          }
+          return { rows: [] };
+        },
+      }),
+    }));
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(import("../db.js")).resolves.toBeDefined();
+
+    expect(errSpy).toHaveBeenCalledWith(
+      expect.stringContaining("PRAGMA journal_mode=WAL failed"),
+    );
+    errSpy.mockRestore();
+    vi.doUnmock("@libsql/client");
+  });
 });
