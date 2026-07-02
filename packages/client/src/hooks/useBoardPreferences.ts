@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { getSettings, setSettings } from "../lib/settingsStore.js";
 import { getWipLimit, wipLimitKey } from "../lib/wipLimits.js";
@@ -80,7 +81,7 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
         setAgingHotDays(isNaN(hot) ? 7 : hot);
         setRecentMergesCollapsed(s[`board_recent_merges_collapsed_${projectId}`] === "true");
       }
-      setAutoReview(s.auto_review !== "false");
+      setAutoReview(isAutoReviewEnabled(s.auto_review));
       setAutoMerge(s.auto_merge !== "false");
       setAutoMonitor(s.auto_monitor === "true");
       setAutoMonitorInterval(s.auto_monitor_interval ?? "4");
