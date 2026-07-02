@@ -212,6 +212,13 @@ function handleResultEvent(obj: Record<string, unknown>, result: ParsedStreamEve
   if (denials.some((d) => d.tool_name === "ExitPlanMode")) result.exitPlanModeDenied = true;
 }
 
+// Top-level event types this parser understands. A known type that yields no
+// fields (e.g. a plain text-only `user` message — no tool_result blocks) is a
+// HEALTHY event, not wire-format drift: return an empty-but-defined result so
+// the unknown-event drift detector never counts it (#969). Only types outside
+// this set fall through to `undefined` and get flagged as unknown.
+const KNOWN_CLAUDE_EVENT_TYPES = new Set(["system", "assistant", "user", "rate_limit_event", "result"]);
+
 export function parseClaudeEvent(obj: Record<string, unknown>, context: ParseContext): ParsedStreamEvent | undefined {
   const result: ParsedStreamEvent = {};
   const type = obj.type;
@@ -223,5 +230,7 @@ export function parseClaudeEvent(obj: Record<string, unknown>, context: ParseCon
   if (type === "rate_limit_event") handleRateLimitEvent(obj, result);
   if (type === "result") handleResultEvent(obj, result, isSubagentMessage);
 
-  return hasFields(result) ? result : undefined;
+  if (hasFields(result)) return result;
+  // Known-but-fieldless: recognized-but-empty (#969), unknown types: undefined.
+  return typeof type === "string" && KNOWN_CLAUDE_EVENT_TYPES.has(type) ? result : undefined;
 }

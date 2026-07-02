@@ -39,6 +39,7 @@ export {
   setUnknownEventLogger,
   setUnknownEventClock,
   UNKNOWN_EVENT_ALERT_THRESHOLD,
+  UNKNOWN_EVENT_ALERT_WINDOW_MS,
   type UnknownEventCounter,
   type UnknownEventLogger,
 } from "./agent-stream/unknown-events.js";

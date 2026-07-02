@@ -24,14 +24,25 @@ let total = 0;
 
 // Escalation threshold (#956): per-key rate-limited logs are easy to miss when a
 // provider drifts wholesale (every event unknown). Once a PROVIDER accumulates
-// this many unknown events, emit ONE louder alert naming the provider and the
-// most frequent unknown types, so sustained drift is a single unmissable line
-// instead of a slow drip. Counts are per provider (this module has no session
-// context — the parse hot path is provider-scoped), which is the right grain:
-// drift comes from the CLI binary, not from one session.
+// this many unknown events within the alert window, emit ONE louder alert naming
+// the provider and the most frequent unknown types, so sustained drift is a
+// single unmissable line instead of a slow drip. Counts are per provider (this
+// module has no session context — the parse hot path is provider-scoped), which
+// is the right grain: drift comes from the CLI binary, not from one session.
+//
+// The alert is RE-ARMABLE (#969): counts accumulate within a rolling window and
+// the alert fires at most once per provider per window. The previous design was
+// process-lifetime cumulative with a one-shot latch, so a single burst of false
+// positives consumed the only loud signal forever — real drift days later would
+// have been silent.
 export const UNKNOWN_EVENT_ALERT_THRESHOLD = 10;
-const providerTotals = new Map<string, number>();
-const alertedProviders = new Set<string>();
+export const UNKNOWN_EVENT_ALERT_WINDOW_MS = 10 * 60_000;
+interface ProviderAlertWindow {
+  windowStart: number;
+  count: number;
+  alerted: boolean;
+}
+const providerWindows = new Map<string, ProviderAlertWindow>();
 
 // Rate-limit the log so a sustained stream of an unknown type does not flood the
 // console. We log the first occurrence of each distinct provider:type key, then
@@ -70,8 +81,7 @@ export function setUnknownEventClock(next: () => number): () => number {
 export function resetUnknownEventCounters(): void {
   counts.clear();
   lastLoggedAt.clear();
-  providerTotals.clear();
-  alertedProviders.clear();
+  providerWindows.clear();
   total = 0;
 }
 
@@ -102,22 +112,29 @@ export function recordUnknownAgentEvent(provider: string, eventType: string | un
     );
   }
 
-  // Threshold alert (#956): fires ONCE per provider when its cumulative unknown
-  // count crosses the threshold (reset via resetUnknownEventCounters).
-  const providerTotal = (providerTotals.get(provider) ?? 0) + 1;
-  providerTotals.set(provider, providerTotal);
-  if (providerTotal >= UNKNOWN_EVENT_ALERT_THRESHOLD && !alertedProviders.has(provider)) {
-    alertedProviders.add(provider);
+  // Threshold alert (#956, re-armable #969): counts within a rolling window;
+  // fires at most once per provider per window, then re-arms when the window
+  // rolls over — a one-off false-positive burst no longer latches the alert off
+  // for the rest of the process lifetime.
+  let alertWindow = providerWindows.get(provider);
+  if (!alertWindow || now - alertWindow.windowStart >= UNKNOWN_EVENT_ALERT_WINDOW_MS) {
+    alertWindow = { windowStart: now, count: 0, alerted: false };
+    providerWindows.set(provider, alertWindow);
+  }
+  alertWindow.count += 1;
+  if (alertWindow.count >= UNKNOWN_EVENT_ALERT_THRESHOLD && !alertWindow.alerted) {
+    alertWindow.alerted = true;
     const sampleTypes = [...counts.entries()]
       .filter(([k]) => k.startsWith(`${provider}:`))
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
       .map(([k, c]) => `${k.slice(provider.length + 1)} (${c}x)`);
     logger(
-      `[agent-stream] ALERT: provider '${provider}' has produced ${providerTotal} unknown stream events — ` +
+      `[agent-stream] ALERT: provider '${provider}' has produced ${alertWindow.count} unknown stream events ` +
+        `within ${Math.round(UNKNOWN_EVENT_ALERT_WINDOW_MS / 60_000)} minutes — ` +
         "its CLI wire format has likely drifted (auto-update?). Check the installed CLI version against " +
         `maxKnown in agent-cli-version.service.ts. Top unknown types: ${sampleTypes.join(", ")}`,
-      { provider, total: providerTotal, sampleTypes },
+      { provider, total: alertWindow.count, sampleTypes },
     );
   }
 }

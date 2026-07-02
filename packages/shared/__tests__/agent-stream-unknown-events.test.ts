@@ -10,6 +10,7 @@ import {
   setUnknownEventLogger,
   setUnknownEventClock,
   UNKNOWN_EVENT_ALERT_THRESHOLD,
+  UNKNOWN_EVENT_ALERT_WINDOW_MS,
   type UnknownEventLogger,
 } from "../src/lib/agent-stream-parser.js";
 
@@ -128,6 +129,66 @@ describe("agent-stream unknown-event observability", () => {
       expect(counts.get("codex:a")).toBe(1);
       expect(counts.get("claude:a")).toBe(1);
       expect(counts.get("codex:b")).toBe(1);
+    });
+  });
+
+  describe("known-but-fieldless claude events are recognized, not drift (#969)", () => {
+    it("classifies a plain text-only user message as recognized", () => {
+      const line = JSON.stringify({
+        type: "user",
+        message: { role: "user", content: [{ type: "text", text: "please continue" }] },
+      });
+      const c = classifyAgentStreamLine("claude", line);
+      expect(c.validJson).toBe(true);
+      expect(c.recognized).toBe(true);
+      parseAgentProviderStreamLineObserved("claude", line);
+      expect(getUnknownEventCounters().total).toBe(0);
+      expect(logged).toHaveLength(0);
+    });
+
+    it("classifies a system event with an unhandled subtype as recognized", () => {
+      const c = classifyAgentStreamLine("claude", JSON.stringify({ type: "system", subtype: "compact_boundary" }));
+      expect(c.recognized).toBe(true);
+      expect(getUnknownEventCounters().total).toBe(0);
+    });
+
+    it("healthy fieldless traffic never trips the drift ALERT", () => {
+      const line = JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text: "hi" }] } });
+      for (let i = 0; i < UNKNOWN_EVENT_ALERT_THRESHOLD * 2; i++) {
+        parseAgentProviderStreamLineObserved("claude", line);
+      }
+      expect(logged).toHaveLength(0);
+    });
+
+    it("still counts a truly unknown claude event type", () => {
+      parseAgentProviderStreamLineObserved("claude", JSON.stringify({ type: "user_v2" }));
+      expect(getUnknownEventCounters().counts.get("claude:user_v2")).toBe(1);
+    });
+  });
+
+  describe("alert re-arms across rolling windows (#969)", () => {
+    it("re-alerts in a later window instead of latching once per process lifetime", () => {
+      const line = JSON.stringify({ type: "drift" });
+      for (let i = 0; i < UNKNOWN_EVENT_ALERT_THRESHOLD; i++) {
+        parseAgentProviderStreamLineObserved("codex", line);
+      }
+      expect(logged.filter((l) => l.message.includes("ALERT:"))).toHaveLength(1);
+
+      // A second burst in a LATER window alerts again — no permanent latch.
+      clock += UNKNOWN_EVENT_ALERT_WINDOW_MS + 1;
+      for (let i = 0; i < UNKNOWN_EVENT_ALERT_THRESHOLD; i++) {
+        parseAgentProviderStreamLineObserved("codex", line);
+      }
+      expect(logged.filter((l) => l.message.includes("ALERT:"))).toHaveLength(2);
+    });
+
+    it("does not alert when occurrences are spread thinly across windows", () => {
+      const line = JSON.stringify({ type: "sporadic" });
+      for (let i = 0; i < UNKNOWN_EVENT_ALERT_THRESHOLD * 2; i++) {
+        parseAgentProviderStreamLineObserved("codex", line);
+        clock += UNKNOWN_EVENT_ALERT_WINDOW_MS; // each occurrence lands in a fresh window
+      }
+      expect(logged.filter((l) => l.message.includes("ALERT:"))).toHaveLength(0);
     });
   });
 
