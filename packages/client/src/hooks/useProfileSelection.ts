@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { apiFetch } from "../lib/api.js";
 import { getSettings } from "../lib/settingsStore.js";
 import { defaultModelForProvider, type AgentProvider } from "../lib/settings-shared.js";
@@ -40,7 +41,7 @@ export function useProfileSelection(issueId: string): UseProfileSelectionResult 
     getSettings()
       .then((s) => {
         setPrefs(s);
-        setRequiresReview(s.auto_review !== "false");
+        setRequiresReview(isAutoReviewEnabled(s.auto_review));
         setSelectedProfile(defaultSelectedProfile(s));
         setSelectedModel(defaultModelForProvider(s, ((s.provider || "claude") as AgentProvider)));
       })

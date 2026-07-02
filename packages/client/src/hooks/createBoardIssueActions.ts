@@ -6,6 +6,7 @@ import { apiPost, apiPatch, apiDelete } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
 import { getSettings } from "../lib/settingsStore.js";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
+import { isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { runCreateIssueFlow, type CreateIssuePayload } from "../lib/createIssueService.js";
 import type { ExpandedCreatePanel } from "../routes/BoardPage.js";
 import type { IssueWithStatus, UpdateIssueRequest, StatusWithIssues } from "@agentic-kanban/shared";
@@ -110,7 +111,7 @@ export function createBoardIssueActions(deps: BoardIssueActionsDeps) {
       const body: Record<string, unknown> = {
         issueId: issue.id,
         branch,
-        requiresReview: s.auto_review !== "false",
+        requiresReview: isAutoReviewEnabled(s.auto_review),
         planMode: issue.priority === "high" || issue.priority === "critical",
         isDirect: false,
         profile: { provider, name: profileName },

@@ -1,3 +1,4 @@
+import { isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { Field, Toggle } from "./SettingsPrimitives.js";
 import { SlowRequestsPanel } from "./SlowRequestsPanel.js";
 import type { Settings, MonitorTunables } from "../lib/settings-shared.js";
@@ -18,10 +19,10 @@ export function WorkflowProcessPipelineSection({ settings }: { settings: Setting
           { label: "Agent runs", always: true },
           { label: "Manual approval", key: "require_manual_approval", enabled: settings.require_manual_approval === "true" },
           { label: "Learn (after agent)", key: "learning_step_after_agent", enabled: settings.learning_step_after_agent === "true" },
-          { label: "AI Review", key: "auto_review", enabled: settings.auto_review !== "false" },
-          { label: "Auto-fix", key: "review_auto_fix", enabled: settings.auto_review !== "false" && settings.review_auto_fix !== "false", indent: true },
+          { label: "AI Review", key: "auto_review", enabled: isAutoReviewEnabled(settings.auto_review) },
+          { label: "Auto-fix", key: "review_auto_fix", enabled: isAutoReviewEnabled(settings.auto_review) && settings.review_auto_fix !== "false", indent: true },
           { label: "Learn (after review)", key: "learning_step_after_review", enabled: settings.learning_step_after_review === "true" },
-          { label: "Auto-merge", key: "auto_merge", enabled: settings.auto_review !== "false" && settings.auto_merge !== "false", indent: true },
+          { label: "Auto-merge", key: "auto_merge", enabled: isAutoReviewEnabled(settings.auto_review) && settings.auto_merge !== "false", indent: true },
           { label: "Learn (before merge)", key: "learning_step_before_merge", enabled: settings.learning_step_before_merge === "true" },
           { label: "Merge", always: true },
           { label: "Visual verify", key: "visual_verification_mode", enabled: settings.visual_verification_mode === "after_merge" },

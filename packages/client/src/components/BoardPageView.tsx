@@ -6,6 +6,7 @@
 // useX>`, `Dispatch<SetStateAction>`) so the spread is fully type-checked — no
 // `any`.
 import { lazy, Suspense } from "react";
+import { isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { Layout } from "./Layout.js";
 import { BacklogView } from "./BacklogView.js";
 import { MilestoneFilterBanner } from "./MilestoneFilterBanner.js";
@@ -667,7 +668,7 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
         refetchBoard={refetchBoard}
         handleProjectChange={handleProjectChange}
         onSettingsReloaded={(s, monitorStatus) => {
-          prefs.setAutoReview(s.auto_review !== "false");
+          prefs.setAutoReview(isAutoReviewEnabled(s.auto_review));
           prefs.setAutoMerge(s.auto_merge !== "false");
           if (monitorStatus) {
             // monitorStatus is set by the hook's internal interval but we can trigger a re-read

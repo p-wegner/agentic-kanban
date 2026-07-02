@@ -1,4 +1,5 @@
 import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
+import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import type { Database } from "../db/index.js";
 import { getAllPreferences } from "../repositories/preferences.repository.js";
 import { PREF_BUILDER_GUARDRAILS, DEFAULT_BUILDER_GUARDRAILS } from "../constants/preference-keys.js";
@@ -133,7 +134,7 @@ export function resolveProjectRuntimeConfig(input: ProjectRuntimeConfigInput): P
     drive: {
       enabled: input.prefMap.get(autodrivePrefKey(input.projectId)) === "true",
       autoMergeDisabled,
-      autoReview: input.prefMap.get("auto_review") === "true",
+      autoReview: isAutoReviewEnabled(input.prefMap.get(AUTO_REVIEW_PREF_KEY)),
       autoMerge,
       planAutoContinue: HARNESS_IDS.every((harness) => input.prefMap.get(harnessSettingKey(harness, "plan_auto_continue")) === "true"),
     },

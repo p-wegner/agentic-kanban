@@ -1,6 +1,7 @@
 import { isSpecPlanningStageName, syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import { runSmokeCheck } from "@agentic-kanban/shared/lib/smoke-check";
+import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { buildSmokeCheck, getStackProfile } from "../services/stack-profile.service.js";
 import { runUnderBuildGate } from "../services/jvm-build-gate.js";
 import { issues, preferences, projectStatuses, projects, scheduledRunHistory, scheduledRuns, sessions, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
@@ -799,7 +800,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     }
     boardEvents.broadcast(projectId, "issue_updated");
     if (prefMap.get("learning_step_after_agent") === "true" && workspace.workingDir) await launchLearningStep(db, sessionManager, learningSessionIds, workspace, prefMap, "after agent");
-    const autoReview = !skipAutoReview && (workspace.requiresReview || prefMap.get("auto_review") !== "false");
+    const autoReview = !skipAutoReview && (workspace.requiresReview || isAutoReviewEnabled(prefMap.get(AUTO_REVIEW_PREF_KEY)));
     if (!autoReview) return;
     await launchAutoReview(ctx);
   }
