@@ -8,6 +8,7 @@ import {
   registerToolName,
   stringValue,
 } from "./shared.js";
+import { recordUnknownAgentEvent } from "./unknown-events.js";
 
 const CODEX_USAGE_LIMIT_PATTERN = /you(?:['\u2019])?ve hit your usage limit for\s+(.+?)(?:\.|$)/i;
 const CODEX_RETRY_AFTER_PATTERN = /try again at\s+(.+?)(?:\.|$)/i;
@@ -134,6 +135,10 @@ function handleCodexFileChange(item: Record<string, unknown>, result: ParsedStre
   }
 }
 
+function hasCodexTokenFields(usage: Record<string, unknown>): boolean {
+  return typeof usage.input_tokens === "number" || typeof usage.output_tokens === "number";
+}
+
 function handleCodexTurnCompleted(obj: Record<string, unknown>, result: ParsedStreamEvent): void {
   const usage = objectValue(obj.usage);
   const totalUsage = optionalObject(usage.total_token_usage) ?? usage;
@@ -141,7 +146,16 @@ function handleCodexTurnCompleted(obj: Record<string, unknown>, result: ParsedSt
   const inputTokens = numberValue(totalUsage.input_tokens);
   const outputTokens = numberValue(totalUsage.output_tokens);
   const contextTokens = numberValue(currentUsage.input_tokens) || inputTokens;
+  // #976: when NONE of the expected usage shapes carry token fields, the
+  // numberValue() defaults above read an upstream usage-shape change as a
+  // silent "0 tokens". Record it through the rate-limited unknown-events path
+  // so the drift is loud instead of misdiagnosed as an idle session.
+  if (!hasCodexTokenFields(totalUsage) && !hasCodexTokenFields(currentUsage)) {
+    recordUnknownAgentEvent("codex", "turn.completed#usage-shape-mismatch");
+  }
   result.stats = {
+    // The codex JSON stream carries no duration/cost — 0 means "not provided",
+    // not a measured value.
     durationMs: 0,
     totalCostUsd: 0,
     inputTokens,
