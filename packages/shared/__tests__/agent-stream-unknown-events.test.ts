@@ -251,6 +251,46 @@ describe("agent-stream unknown-event observability", () => {
     });
   });
 
+  describe("codex usage-shape mismatch is recorded, not a silent zero (#976)", () => {
+    it("records a mismatch when turn.completed carries an unrecognized usage shape", () => {
+      const out = parseAgentProviderStreamLineObserved(
+        "codex",
+        JSON.stringify({ type: "turn.completed", usage: { tokens: { in: 500, out: 200 } } }),
+      );
+      // The turn still completes (no invented numbers beyond the typed zeros)...
+      expect(out?.turnComplete).toBe(true);
+      expect(out?.stats?.inputTokens).toBe(0);
+      // ...but the shape drift is counted and logged through the shared path.
+      expect(getUnknownEventCounters().counts.get("codex:turn.completed#usage-shape-mismatch")).toBe(1);
+      expect(logged).toHaveLength(1);
+      expect(logged[0].detail).toMatchObject({ provider: "codex", eventType: "turn.completed#usage-shape-mismatch" });
+    });
+
+    it("records a mismatch when usage is absent entirely", () => {
+      parseAgentProviderStreamLineObserved("codex", JSON.stringify({ type: "turn.completed" }));
+      expect(getUnknownEventCounters().counts.get("codex:turn.completed#usage-shape-mismatch")).toBe(1);
+    });
+
+    it("does not record when the nested total_token_usage shape matches", () => {
+      const out = parseAgentProviderStreamLineObserved(
+        "codex",
+        JSON.stringify({ type: "turn.completed", usage: { total_token_usage: { input_tokens: 100, output_tokens: 50 } } }),
+      );
+      expect(out?.stats?.inputTokens).toBe(100);
+      expect(getUnknownEventCounters().total).toBe(0);
+      expect(logged).toHaveLength(0);
+    });
+
+    it("does not record when the flat usage shape matches, even at genuinely 0 tokens", () => {
+      parseAgentProviderStreamLineObserved(
+        "codex",
+        JSON.stringify({ type: "turn.completed", usage: { input_tokens: 0, output_tokens: 0 } }),
+      );
+      expect(getUnknownEventCounters().total).toBe(0);
+      expect(logged).toHaveLength(0);
+    });
+  });
+
   describe("per-provider threshold alert (#956)", () => {
     it("emits ONE alert naming the provider and sample types once the threshold is crossed", () => {
       // Distinct types so the per-key rate limit logs each first occurrence too;
