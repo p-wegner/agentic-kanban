@@ -27,6 +27,7 @@ import { SkeletonBoard } from "./SkeletonBoard.js";
 import { ViewLoadingFallback } from "./ViewLoadingFallback.js";
 import { MentionProvider } from "../lib/MentionContext.js";
 import { useBoardSelectionStore } from "../stores/boardSelectionStore.js";
+import { boardBulkSelectionActions } from "../stores/boardBulkSelectionStore.js";
 import type { Dispatch, MouseEvent as ReactMouseEvent, MutableRefObject, SetStateAction } from "react";
 import type {
   IssueWithStatus,
@@ -34,7 +35,7 @@ import type {
   MilestoneResponse,
 } from "@agentic-kanban/shared";
 import type { ApprovalRequest, LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
-import type { BoardViewState, SavedViewReference } from "../lib/boardSavedViews.js";
+import type { SavedViewReference } from "../lib/boardSavedViews.js";
 import type { Theme } from "../hooks/useTheme.js";
 import type { NotificationEvent } from "../hooks/useActivityNotifications.js";
 import type {
@@ -46,7 +47,6 @@ import type {
 } from "../routes/BoardPage.js";
 // Hook/factory return shapes — type-only (erased), so the props stay exactly in
 // sync with the container's producers without runtime imports or coupling.
-import type { useBoardFilters } from "../hooks/useBoardFilters.js";
 import type { useBoardPanelNavigation } from "../hooks/useBoardPanelNavigation.js";
 import type { useProjectManagement } from "../hooks/useProjectManagement.js";
 import type { createBoardIssueActions } from "../hooks/createBoardIssueActions.js";
@@ -63,7 +63,6 @@ import type { useColumnResize } from "../lib/columnResizeHandler.js";
 import type { createQuickUpdateHandlers } from "../lib/issueQuickUpdates.js";
 import type { buildRunQueueForecast } from "./RunQueueForecastPanel.js";
 
-type Filters = ReturnType<typeof useBoardFilters>;
 type PanelNav = ReturnType<typeof useBoardPanelNavigation>;
 type ProjectMgmt = ReturnType<typeof useProjectManagement>;
 type IssueActions = ReturnType<typeof createBoardIssueActions>;
@@ -87,18 +86,15 @@ interface BoardPageViewModel {
   // BoardPageView is only rendered after BoardPage's `!activeProjectId` guard,
   // which control-flow-narrows this to a non-null string.
   activeProjectId: string;
-  activeTagIds: Filters["activeTagIds"];
   agentQuestionsCount: number;
   allMentionIssues: { id: string; issueNumber: number | null; title: string }[];
   allTags: Tag[];
-  applyBoardViewState: (state: BoardViewState) => void;
   approvalRequests: ApprovalRequest[];
   archiveColumns: StatusWithIssues[];
   archivedProjects: Project[];
   backlogColumn: StatusWithIssues | undefined;
   boardStatusOptions: StatusOption[];
   boardTagOptions: StatusOption[];
-  boardViewState: BoardViewState;
   bulk: ReturnType<typeof useBoardBulkSelection>;
   butlerInitialPrompt: string | null;
   canStartWorkspace: boolean;
@@ -106,18 +102,15 @@ interface BoardPageViewModel {
   columnWidths: ColumnResize["columnWidths"];
   columns: StatusWithIssues[];
   columnsRef: MutableRefObject<StatusWithIssues[]>;
-  createdDateFilter: string | null;
   creatingInColumnId: string | null;
   dependencyImpactPending: DependencyImpactPending;
   error: string | null;
   expandedCreatePanel: ExpandedCreatePanel;
-  focusMode: boolean;
   graphFocusIssueId: Route["graphFocusIssueId"];
   handleArchiveProject: ProjectMgmt["handleArchiveProject"];
   handleBoardDragStart: Movement["handleBoardDragStart"];
   handleBoardIssueClick: (issue: IssueWithStatus, event: ReactMouseEvent) => void;
   handleChatAboutTicket: PanelNav["handleChatAboutTicket"];
-  handleClearTagFilter: Filters["handleClearTagFilter"];
   handleColumnReorder: Movement["handleColumnReorder"];
   handleColumnResizeStart: ColumnResize["handleColumnResizeStart"];
   handleCreateIssue: IssueActions["handleCreateIssue"];
@@ -129,7 +122,6 @@ interface BoardPageViewModel {
   handleDropWithLane: Movement["handleDropWithLane"];
   handleDuplicateIssue: Misc["handleDuplicateIssue"];
   handleIssueClick: PanelNav["handleIssueClick"];
-  handleIssueTypeFilterChange: Filters["handleIssueTypeFilterChange"];
   handleManageWorkspaces: PanelNav["handleManageWorkspaces"];
   handleMentionClick: Misc["handleMentionClick"];
   handleMilestoneOverviewClick: (milestoneId: string) => void;
@@ -137,7 +129,6 @@ interface BoardPageViewModel {
   handleNotificationEventClick: (event: NotificationEvent) => void;
   handleOpenDiff: PanelNav["handleOpenDiff"];
   handleOpenWorkspaceById: PanelNav["handleOpenWorkspaceById"];
-  handlePriorityFilterChange: Filters["handlePriorityFilterChange"];
   handleProjectChange: ProjectMgmt["handleProjectChange"];
   handlePromoteBacklogIssue: Movement["handlePromoteBacklogIssue"];
   handleQuickAddTag: QuickUpdates["handleQuickAddTag"];
@@ -147,55 +138,36 @@ interface BoardPageViewModel {
   handleRegisterProject: ProjectMgmt["handleRegisterProject"];
   handleStartWorkspace: PanelNav["handleStartWorkspace"];
   handleSwimlaneChange: Movement["handleSwimlaneChange"];
-  handleTagFilterToggle: Filters["handleTagFilterToggle"];
   handleUnarchiveProject: ProjectMgmt["handleUnarchiveProject"];
   handleUnregisterProject: ProjectMgmt["handleUnregisterProject"];
   handleUpdateIssue: IssueActions["handleUpdateIssue"];
   handleViewModeChange: Route["handleViewModeChange"];
   isDark: boolean;
-  issueTypeFilter: Filters["issueTypeFilter"];
-  keyboardCursorIssueId: string | null;
   liveStats: Record<string, LiveSessionStats>;
   loadSavedViewTags: () => Promise<SavedViewReference[]>;
   loadTags: () => Promise<SavedViewReference[]>;
-  milestoneFilterId: string | null;
   milestones: MilestoneResponse[];
   moveToDonePending: MoveToDonePending;
   mutating: boolean;
   notifications: ReturnType<typeof useActivityNotifications>;
   openIssueById: Nav["openIssueById"];
   panels: ReturnType<typeof useBoardPanels>;
-  pendingIssueIds: Set<string>;
-  pendingWorkspaceIssueIds: Set<string>;
   prefs: ReturnType<typeof useBoardPreferences>;
-  priorityFilter: Filters["priorityFilter"];
   projects: Project[];
   refetchBoard: (projectId?: string, options?: { force?: boolean }) => Promise<StatusWithIssues[] | undefined>;
   resetColumnWidth: ColumnResize["resetColumnWidth"];
   runQueueForecast: ReturnType<typeof buildRunQueueForecast>;
-  searchQuery: string;
   sessionActivity: Record<string, string>;
   sessionTodos: Record<string, TodoItem[]>;
   setApprovalRequests: Dispatch<SetStateAction<ApprovalRequest[]>>;
   setButlerInitialPrompt: Dispatch<SetStateAction<string | null>>;
-  setCreatedDateFilter: Dispatch<SetStateAction<string | null>>;
   setCreatingInColumnId: Dispatch<SetStateAction<string | null>>;
   setDependencyImpactPending: Dispatch<SetStateAction<DependencyImpactPending>>;
   setError: Dispatch<SetStateAction<string | null>>;
   setExpandedCreatePanel: Dispatch<SetStateAction<ExpandedCreatePanel>>;
-  setFocusMode: Dispatch<SetStateAction<boolean>>;
   setGraphFocusIssueId: Route["setGraphFocusIssueId"];
-  setMilestoneFilterId: Dispatch<SetStateAction<string | null>>;
   setMoveToDonePending: Dispatch<SetStateAction<MoveToDonePending>>;
-  setPendingWorkspaceIssueIds: Dispatch<SetStateAction<Set<string>>>;
-  setSearchQuery: Dispatch<SetStateAction<string>>;
-  setShowBlocked: Dispatch<SetStateAction<boolean>>;
-  setShowStaleOnly: Dispatch<SetStateAction<boolean>>;
-  setStatusFilterId: Dispatch<SetStateAction<string | null>>;
   setTheme: (theme: Theme) => void;
-  showBlocked: boolean;
-  showStaleOnly: boolean;
-  statusFilterId: string | null;
   swimlaneDimension: Movement["swimlaneDimension"];
   switchingProject: boolean;
   tickerEntries: ReturnType<typeof useAgentLiveTicker>;
@@ -212,19 +184,16 @@ type ProjectController = Pick<BoardPageViewModel,
 >;
 type BoardDataController = Pick<BoardPageViewModel,
   "activeAgentsTarget" | "activeColumns" | "allMentionIssues" | "allTags" | "archiveColumns" |
-  "backlogColumn" | "boardStatusOptions" | "boardTagOptions" | "boardViewState" | "bulk" |
+  "backlogColumn" | "boardStatusOptions" | "boardTagOptions" | "bulk" |
   "canStartWorkspace" | "collapsedGroups" | "columnWidths" | "columns" | "columnsRef" |
-  "creatingInColumnId" | "expandedCreatePanel" | "keyboardCursorIssueId" | "milestones" |
-  "pendingIssueIds" | "pendingWorkspaceIssueIds" | "runQueueForecast" | "visibilityColumns"
+  "creatingInColumnId" | "expandedCreatePanel" | "milestones" |
+  "runQueueForecast" | "visibilityColumns"
 >;
+// Filter state itself moved into the board filter store (#958); what remains
+// here are the data-loading callbacks and the milestone drill-down (which also
+// switches the view mode).
 type FilterNavigationController = Pick<BoardPageViewModel,
-  "activeTagIds" | "applyBoardViewState" | "createdDateFilter" | "focusMode" |
-  "handleClearTagFilter" | "handleIssueTypeFilterChange" | "handleMilestoneOverviewClick" |
-  "handlePriorityFilterChange" | "handleTagFilterToggle" | "issueTypeFilter" |
-  "loadSavedViewTags" | "loadTags" | "milestoneFilterId" | "priorityFilter" | "searchQuery" |
-  "setCreatedDateFilter" | "setFocusMode" | "setMilestoneFilterId" | "setSearchQuery" |
-  "setShowBlocked" | "setShowStaleOnly" | "setStatusFilterId" | "showBlocked" |
-  "showStaleOnly" | "statusFilterId"
+  "handleMilestoneOverviewClick" | "loadSavedViewTags" | "loadTags"
 >;
 type WorkspaceController = Pick<BoardPageViewModel,
   "butlerInitialPrompt" | "setButlerInitialPrompt"
@@ -249,7 +218,7 @@ type BoardChromeController = Pick<BoardPageViewModel,
   "dependencyImpactPending" | "error" | "graphFocusIssueId" | "isDark" | "moveToDonePending" |
   "mutating" | "panels" | "prefs" | "setCreatingInColumnId" | "setDependencyImpactPending" |
   "setError" | "setExpandedCreatePanel" | "setGraphFocusIssueId" | "setMoveToDonePending" |
-  "setPendingWorkspaceIssueIds" | "setTheme"
+  "setTheme"
 >;
 
 interface BoardPageViewProps {
@@ -265,14 +234,14 @@ interface BoardPageViewProps {
 export function BoardPageView({ board, chrome, commands, filters, project, realtime, workspace }: BoardPageViewProps) {
   const {
     activeAgentsTarget, activeColumns, allMentionIssues, allTags, archiveColumns, backlogColumn,
-    boardStatusOptions, boardTagOptions, boardViewState, bulk, canStartWorkspace, collapsedGroups,
-    columnWidths, columns, columnsRef, creatingInColumnId, expandedCreatePanel, keyboardCursorIssueId,
-    milestones, pendingIssueIds, pendingWorkspaceIssueIds, runQueueForecast, visibilityColumns,
+    boardStatusOptions, boardTagOptions, bulk, canStartWorkspace, collapsedGroups,
+    columnWidths, columns, columnsRef, creatingInColumnId, expandedCreatePanel,
+    milestones, runQueueForecast, visibilityColumns,
   } = board;
   const {
     dependencyImpactPending, error, graphFocusIssueId, isDark, moveToDonePending, mutating, panels,
     prefs, setCreatingInColumnId, setDependencyImpactPending, setError, setExpandedCreatePanel,
-    setGraphFocusIssueId, setMoveToDonePending, setPendingWorkspaceIssueIds, setTheme,
+    setGraphFocusIssueId, setMoveToDonePending, setTheme,
   } = chrome;
   const {
     handleBoardDragStart, handleBoardIssueClick, handleChatAboutTicket, handleColumnReorder,
@@ -284,14 +253,7 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
     handleUpdateIssue, handleViewModeChange, openIssueById, refetchBoard, resetColumnWidth,
     swimlaneDimension, toggleGroup, trailControls, viewMode,
   } = commands;
-  const {
-    activeTagIds, applyBoardViewState, createdDateFilter, focusMode, handleClearTagFilter,
-    handleIssueTypeFilterChange, handleMilestoneOverviewClick, handlePriorityFilterChange,
-    handleTagFilterToggle, issueTypeFilter, loadSavedViewTags, loadTags, milestoneFilterId,
-    priorityFilter, searchQuery, setCreatedDateFilter, setFocusMode, setMilestoneFilterId,
-    setSearchQuery, setShowBlocked, setShowStaleOnly, setStatusFilterId, showBlocked,
-    showStaleOnly, statusFilterId,
-  } = filters;
+  const { handleMilestoneOverviewClick, loadSavedViewTags, loadTags } = filters;
   const {
     activeProject, activeProjectId, archivedProjects, handleArchiveProject, handleCreateProject,
     handleProjectChange, handleRegisterProject, handleUnarchiveProject, handleUnregisterProject,
@@ -324,8 +286,6 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
       onArchiveProject={handleArchiveProject}
       onUnarchiveProject={handleUnarchiveProject}
       archivedProjects={archivedProjects}
-      searchQuery={searchQuery}
-      onSearchChange={setSearchQuery}
       onRegisterProject={handleRegisterProject}
       onCreateProject={handleCreateProject}
       onSettingsClick={() => panels.setShowSettings(true)}
@@ -371,17 +331,11 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
           <BoardStats
             activeColumns={activeColumns}
             archiveColumns={archiveColumns}
-            searchQuery={searchQuery}
             projectId={activeProjectId}
           />
         )}
         <BoardToolbar
           activeColumns={activeColumns}
-          focusMode={focusMode}
-          onFocusModeChange={(v) => {
-            setFocusMode(v);
-            try { sessionStorage.setItem("board-focus-mode", v ? "1" : "0"); } catch { /* ignore */ }
-          }}
           onShowQuickTasks={() => panels.setShowQuickTasks(true)}
           autoMonitor={prefs.autoMonitor}
           monitorRunning={prefs.monitorRunning}
@@ -451,12 +405,10 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
           viewMode={viewMode}
           activeProjectId={activeProjectId}
           columns={columns}
-          searchQuery={searchQuery}
           liveActivity={sessionActivity}
           liveStats={liveStats}
           sessionTodos={sessionTodos}
           graphFocusIssueId={graphFocusIssueId}
-          createdDateFilter={createdDateFilter}
           activeAgentsTarget={activeAgentsTarget}
           canStartWorkspace={canStartWorkspace}
           butlerInitialPrompt={butlerInitialPrompt}
@@ -466,7 +418,6 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
           onMilestoneClick={handleMilestoneOverviewClick}
           onOpenWorkspaceById={handleOpenWorkspaceById}
           onCreatedDateClick={handleCreatedDateDrilldown}
-          onClearCreatedDateFilter={() => setCreatedDateFilter(null)}
           onDropIssue={handleDropOnAgentSlot}
           onRefresh={() => refetchBoard()}
           onButlerPromptConsumed={() => setButlerInitialPrompt(null)}
@@ -477,13 +428,9 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
               backlogColumn={backlogColumn}
               activeColumns={activeColumns}
               projectId={activeProjectId}
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
               sessionActivity={sessionActivity}
               liveStats={liveStats}
               sessionTodos={sessionTodos}
-              pendingIssueIds={pendingIssueIds}
-              pendingWorkspaceIssueIds={pendingWorkspaceIssueIds}
               canStartWorkspace={canStartWorkspace}
               onIssueClick={handleIssueClick}
               onWorkspaceClick={handleManageWorkspaces}
@@ -499,12 +446,10 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
           </BoardErrorBoundary>
         )}
         </Suspense>
-        {viewMode === "kanban" && milestoneFilterId && (
+        {viewMode === "kanban" && (
           <MilestoneFilterBanner
-            milestoneId={milestoneFilterId}
             milestones={milestones}
             columns={columns}
-            onClear={() => setMilestoneFilterId(null)}
           />
         )}
         {viewMode === "kanban" && (
@@ -520,18 +465,14 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
             activeColumns={activeColumns}
             archiveColumns={archiveColumns}
             allColumns={columns}
-            focusMode={focusMode}
             projectId={activeProjectId}
             columnWidths={columnWidths}
             dynamicColumnScaling={prefs.dynamicColumnScaling}
             cardDensity={prefs.cardDensity}
             creatingInColumnId={creatingInColumnId}
-            searchQuery={searchQuery}
             sessionActivity={sessionActivity}
             liveStats={liveStats}
             sessionTodos={sessionTodos}
-            pendingIssueIds={pendingIssueIds}
-            pendingWorkspaceIssueIds={pendingWorkspaceIssueIds}
             collapsedArchive={collapsedGroups.has("archive")}
             canStartWorkspace={canStartWorkspace}
             onToggleArchive={() => toggleGroup("archive")}
@@ -553,8 +494,6 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
             onColumnResizeReset={resetColumnWidth}
             onCreateIssue={handleCreateIssue}
             onExpandCreate={(statusId, statusName, state) => setExpandedCreatePanel({ statusId, statusName, state })}
-            selectedIssueIds={bulk.selectedBoardIssueIds}
-            keyboardCursorIssueId={keyboardCursorIssueId}
             allProjectTags={allTags}
             quickUpdate={{
               onPriorityChange: handleQuickPriorityChange,
@@ -609,8 +548,8 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
               issue={workspaceIssue}
               project={activeProject ?? null}
               onClose={() => { setWorkspaceIssue(null); setWorkspaceInitial(null); setWorkspaceOpenCreate(false); setWorkspaceInitialDiff(false); }}
-              onWorkspaceCreating={(issueId) => setPendingWorkspaceIssueIds((prev) => new Set([...prev, issueId]))}
-              onWorkspaceCreateSettled={(issueId) => setPendingWorkspaceIssueIds((prev) => {
+              onWorkspaceCreating={(issueId) => boardBulkSelectionActions.setPendingWorkspaceIssueIds((prev) => new Set([...prev, issueId]))}
+              onWorkspaceCreateSettled={(issueId) => boardBulkSelectionActions.setPendingWorkspaceIssueIds((prev) => {
                 const next = new Set(prev);
                 next.delete(issueId);
                 return next;
@@ -680,31 +619,14 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
             {activeProjectId && (
               <SavedBoardViews
                 projectId={activeProjectId}
-                currentState={boardViewState}
                 tags={boardTagOptions}
-                onApply={applyBoardViewState}
                 onLoadTags={loadSavedViewTags}
               />
             )}
             <BoardFilterMenu
               statuses={boardStatusOptions}
-              statusFilterId={statusFilterId}
-              onStatusFilterChange={setStatusFilterId}
-              issueTypeFilter={issueTypeFilter}
-              onIssueTypeFilterChange={handleIssueTypeFilterChange}
-              priorityFilter={priorityFilter}
-              onPriorityFilterChange={handlePriorityFilterChange}
               milestones={milestones}
-              milestoneFilterId={milestoneFilterId}
-              onMilestoneFilterChange={setMilestoneFilterId}
-              showBlocked={showBlocked}
-              onToggleBlocked={() => setShowBlocked((v) => !v)}
-              showStaleOnly={showStaleOnly}
-              onToggleStaleOnly={() => setShowStaleOnly((v) => !v)}
               tags={allTags}
-              activeTagIds={activeTagIds}
-              onTagFilterToggle={handleTagFilterToggle}
-              onClearTagFilter={handleClearTagFilter}
             />
             <ExportImportMenu projectId={activeProjectId} />
           </>

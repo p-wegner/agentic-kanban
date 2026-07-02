@@ -13,12 +13,11 @@ import {
 } from "../lib/boardSavedViews.js";
 import { getSettings, setSettings } from "../lib/settingsStore.js";
 import { showToast } from "./Toast.js";
+import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 
 interface SavedBoardViewsProps {
   projectId: string;
-  currentState: BoardViewState;
   tags: SavedViewReference[];
-  onApply: (state: BoardViewState) => void;
   onLoadTags: () => Promise<SavedViewReference[]>;
 }
 
@@ -27,14 +26,26 @@ interface SavedBoardViewsProps {
  * (filters + active view, persisted in preferences). Was previously a wider
  * inline row with a separate md/mobile layout and an ambiguous download glyph;
  * collapsed here to match the View / Activity / Filter menu pattern.
+ *
+ * Filter slice (#958): the current view state is derived from the board filter
+ * store (not a threaded prop) and applying a view writes the store directly.
  */
 export function SavedBoardViews({
   projectId,
-  currentState,
   tags,
-  onApply,
   onLoadTags,
 }: SavedBoardViewsProps) {
+  const activeTagIds = useBoardFilterStore((s) => s.activeTagIds);
+  const issueTypeFilter = useBoardFilterStore((s) => s.issueTypeFilter);
+  const priorityFilter = useBoardFilterStore((s) => s.priorityFilter);
+  const onApply = useBoardFilterStore((s) => s.applyBoardViewState);
+  const currentState: BoardViewState = useMemo(() => {
+    const tagIds = [...activeTagIds].sort((a, b) => a.localeCompare(b));
+    const tagNames = tagIds
+      .map((tagId) => tags.find((tag) => tag.id === tagId)?.name)
+      .filter((name): name is string => !!name);
+    return { tagIds, tagNames, issueType: issueTypeFilter, priority: priorityFilter };
+  }, [activeTagIds, tags, issueTypeFilter, priorityFilter]);
   const [views, setViews] = useState<SavedBoardView[]>([]);
   const [selectedViewId, setSelectedViewId] = useState("");
   const [viewName, setViewName] = useState("");

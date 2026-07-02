@@ -3,12 +3,12 @@ import { buildTicketChatPrompt } from "@agentic-kanban/shared";
 import { showToast } from "../lib/toast.js";
 import type { ViewMode } from "../lib/viewRegistry.js";
 import { boardSelectionActions } from "../stores/boardSelectionStore.js";
+import { boardCursorActions } from "../stores/boardCursorStore.js";
+import { useBoardBulkSelectionStore } from "../stores/boardBulkSelectionStore.js";
 
 interface UseBoardPanelNavigationDeps {
-  pendingIssueIds: Set<string>;
   columnsRef: React.RefObject<StatusWithIssues[]>;
   refetchBoard: (projectId?: string) => Promise<StatusWithIssues[] | undefined>;
-  setKeyboardCursorIssueId: (id: string | null) => void;
   setButlerInitialPrompt: (prompt: string | null) => void;
   handleViewModeChange: (mode: ViewMode) => void;
 }
@@ -22,10 +22,8 @@ interface UseBoardPanelNavigationDeps {
  */
 export function useBoardPanelNavigation(deps: UseBoardPanelNavigationDeps) {
   const {
-    pendingIssueIds,
     columnsRef,
     refetchBoard,
-    setKeyboardCursorIssueId,
     setButlerInitialPrompt,
     handleViewModeChange,
   } = deps;
@@ -38,9 +36,9 @@ export function useBoardPanelNavigation(deps: UseBoardPanelNavigationDeps) {
   } = boardSelectionActions;
 
   function handleIssueClick(issue: IssueWithStatus) {
-    if (pendingIssueIds.has(issue.id)) return;
+    if (useBoardBulkSelectionStore.getState().pendingIssueIds.has(issue.id)) return;
     setSelectedIssue(issue);
-    setKeyboardCursorIssueId(null);
+    boardCursorActions.setKeyboardCursorIssueId(null);
   }
 
   function handleManageWorkspaces(issue: IssueWithStatus, workspaceId?: string, sessionId = "") {

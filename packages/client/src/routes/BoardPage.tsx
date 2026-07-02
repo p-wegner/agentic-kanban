@@ -5,7 +5,6 @@ import { useTheme } from "../hooks/useTheme.js";
 import { useAgentQuestionsCount } from "../components/AgentQuestionsPanel.js";
 import { useBoardPanelNavigation } from "../hooks/useBoardPanelNavigation.js";
 import { useProjectManagement } from "../hooks/useProjectManagement.js";
-import { useBoardFilters } from "../hooks/useBoardFilters.js";
 import { createBoardIssueActions } from "../hooks/createBoardIssueActions.js";
 import { useBoardMiscHandlers } from "../hooks/useBoardMiscHandlers.js";
 import { BoardPageView } from "../components/BoardPageView.js";
@@ -34,11 +33,13 @@ import {
 } from "../hooks/useBoardDataQueries.js";
 import { invalidateClientSurface, subscribeClientInvalidations } from "../lib/clientInvalidation.js";
 import { useBoardSelectionStore } from "../stores/boardSelectionStore.js";
+import { useBoardFilterStore, boardFilterActions } from "../stores/boardFilterStore.js";
+import { useBoardBulkSelectionStore } from "../stores/boardBulkSelectionStore.js";
 import type {
   DependencyInfo,
   IssueWithStatus,
 } from "@agentic-kanban/shared";
-import type { BoardViewState, SavedViewReference } from "../lib/boardSavedViews.js";
+import type { SavedViewReference } from "../lib/boardSavedViews.js";
 
 
 export interface Project {
@@ -132,32 +133,29 @@ export function BoardPage() {
   // A prompt to seed the butler with when entering its view via "Chat about this
   // ticket" (#838). Cleared once ButlerView has consumed it.
   const [butlerInitialPrompt, setButlerInitialPrompt] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [focusMode, setFocusMode] = useState(() => {
-    try { return sessionStorage.getItem("board-focus-mode") === "1"; } catch { return false; }
-  });
-  const [statusFilterId, setStatusFilterId] = useState<string | null>(null);
-  const {
-    activeTagIds,
-    setActiveTagIds,
-    issueTypeFilter,
-    priorityFilter,
-    handleIssueTypeFilterChange,
-    handlePriorityFilterChange,
-    handleTagFilterToggle,
-    handleClearTagFilter,
-    handleSetTagFilterIds,
-  } = useBoardFilters(activeProjectId);
-  const [milestoneFilterId, setMilestoneFilterId] = useState<string | null>(null);
-  const [createdDateFilter, setCreatedDateFilter] = useState<string | null>(null);
+  // Filter slice (#958) — filter state lives in the board filter store. This
+  // container only reads what it needs to compute `filteredColumns` (below)
+  // and to run the validation/hydration effects; consumers (toolbar, filter
+  // menu, kanban/backlog views, cards) subscribe to the store directly.
+  const searchQuery = useBoardFilterStore((s) => s.searchQuery);
+  const focusMode = useBoardFilterStore((s) => s.focusMode);
+  const statusFilterId = useBoardFilterStore((s) => s.statusFilterId);
+  const milestoneFilterId = useBoardFilterStore((s) => s.milestoneFilterId);
+  const showBlocked = useBoardFilterStore((s) => s.showBlocked);
+  const showStaleOnly = useBoardFilterStore((s) => s.showStaleOnly);
+  const activeTagIds = useBoardFilterStore((s) => s.activeTagIds);
+  const issueTypeFilter = useBoardFilterStore((s) => s.issueTypeFilter);
+  const priorityFilter = useBoardFilterStore((s) => s.priorityFilter);
+  const hydrateProjectFilters = useBoardFilterStore((s) => s.hydrateProjectFilters);
+  // Load the per-project persisted filters (type/priority/tags) on switch.
+  useEffect(() => {
+    hydrateProjectFilters(activeProjectId);
+  }, [activeProjectId, hydrateProjectFilters]);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
     new Set(["archive"]),
   );
   const loadProjectsRef = useRef<() => Promise<string | undefined>>(() => Promise.resolve(undefined));
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<ExpandedCreatePanel>(null);
-  const [keyboardCursorIssueId, setKeyboardCursorIssueId] = useState<string | null>(null);
-  const keyboardCursorIssueIdRef = useRef<string | null>(null);
-  keyboardCursorIssueIdRef.current = keyboardCursorIssueId;
 
   const {
     viewMode,
@@ -174,8 +172,9 @@ export function BoardPage() {
 
   const [moveToDonePending, setMoveToDonePending] = useState<MoveToDonePending>(null);
   const [dependencyImpactPending, setDependencyImpactPending] = useState<DependencyImpactPending>(null);
-  const [pendingIssueIds, setPendingIssueIds] = useState<Set<string>>(new Set());
-  const [pendingWorkspaceIssueIds, setPendingWorkspaceIssueIds] = useState<Set<string>>(new Set());
+  // Bulk-selection slice (#958) — pending indicator sets live in the store;
+  // only the click-guard below still reads them here.
+  const pendingIssueIds = useBoardBulkSelectionStore((s) => s.pendingIssueIds);
 
   const {
     approvalRequests,
@@ -194,7 +193,6 @@ export function BoardPage() {
     addNotificationApprovalEvent,
     addNotificationBoardEvent,
     setColumns,
-    setPendingWorkspaceIssueIds,
   });
   useEffect(() => subscribeClientInvalidations((event) => {
     if (event.surface !== "workspace" && event.surface !== "board" && event.surface !== "issue-detail") return;
@@ -275,30 +273,12 @@ export function BoardPage() {
     handleOpenWorkspaceById,
     handleStartWorkspace,
   } = useBoardPanelNavigation({
-    pendingIssueIds,
     columnsRef,
     refetchBoard,
-    setKeyboardCursorIssueId,
     setButlerInitialPrompt,
     handleViewModeChange,
   });
 
-
-  const [showBlocked, setShowBlocked] = useState(false);
-  const [showStaleOnly, setShowStaleOnly] = useState(false);
-
-  const boardViewState: BoardViewState = useMemo(() => {
-    const tagIds = [...activeTagIds].sort((a, b) => a.localeCompare(b));
-    const tagNames = tagIds
-      .map((tagId) => allTags.find((tag) => tag.id === tagId)?.name)
-      .filter((name): name is string => !!name);
-    return {
-      tagIds,
-      tagNames,
-      issueType: issueTypeFilter,
-      priority: priorityFilter,
-    };
-  }, [activeTagIds, allTags, issueTypeFilter, priorityFilter]);
   const boardStatusOptions = useMemo(
     () => columns.map((col) => ({ id: col.id, name: col.name })),
     [columns],
@@ -318,7 +298,7 @@ export function BoardPage() {
 
   useEffect(() => {
     if (statusFilterId && columns.length > 0 && !columns.some((col) => col.id === statusFilterId)) {
-      setStatusFilterId(null);
+      useBoardFilterStore.getState().setStatusFilterId(null);
     }
   }, [columns, statusFilterId]);
 
@@ -326,19 +306,13 @@ export function BoardPage() {
     if (activeTagIds.size > 0 && tagsLoaded) {
       const validIds = new Set([...activeTagIds].filter((id) => allTags.some((t) => t.id === id)));
       if (validIds.size !== activeTagIds.size) {
-        setActiveTagIds(validIds);
+        useBoardFilterStore.getState().pruneTagFilter(validIds);
       }
     }
   }, [allTags, activeTagIds, tagsLoaded]);
 
-  const applyBoardViewState = useCallback((state: BoardViewState) => {
-    handleSetTagFilterIds(state.tagIds);
-    handleIssueTypeFilterChange(state.issueType);
-    handlePriorityFilterChange(state.priority);
-  }, [handleIssueTypeFilterChange, handlePriorityFilterChange, handleSetTagFilterIds]);
-
   const handleMilestoneOverviewClick = useCallback((milestoneId: string) => {
-    setMilestoneFilterId(milestoneId);
+    boardFilterActions.setMilestoneFilterId(milestoneId);
     handleViewModeChange("kanban");
   }, [handleViewModeChange]);
 
@@ -438,11 +412,12 @@ export function BoardPage() {
   const { openIssueById, trailControls, ticketTrail } = useBoardNavigation(columns);
 
   const { handleDuplicateIssue, handleMentionClick, toggleGroup, handleCreatedDateDrilldown } = useBoardMiscHandlers({
-    selectedIssue, keyboardCursorIssueId, ticketTrail, openIssueById,
-    handleViewModeChange, refetchBoard, setCollapsedGroups, setCreatedDateFilter,
+    selectedIssue, ticketTrail, openIssueById,
+    handleViewModeChange, refetchBoard, setCollapsedGroups,
   });
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts (cursor/search/focus state is read from the board
+  // stores inside the hook — no setter wiring from this container).
   useBoardKeyboardShortcuts(
     {
       columnsRef,
@@ -452,9 +427,6 @@ export function BoardPage() {
       archiveColumns,
       archiveExpanded,
       viewMode,
-      keyboardCursorIssueId,
-      keyboardCursorIssueIdRef,
-      searchQuery,
       projects,
       activeProjectId,
     },
@@ -462,9 +434,6 @@ export function BoardPage() {
       handleIssueClick,
       handleViewModeChange,
       handleProjectChange,
-      setSearchQuery,
-      setKeyboardCursorIssueId,
-      setFocusMode,
       setExpandedCreatePanel,
       setCreatingInColumnId,
       panels,
@@ -500,7 +469,7 @@ export function BoardPage() {
   const { handleCreateIssue, handleUpdateIssue, handleDeleteIssue, handleDropOnAgentSlot } = createBoardIssueActions({
     activeProject: activeProject ?? null, activeAgentsTarget, columns, columnsRef, pendingBoardRefreshRef,
     refetchBoard, setColumns, setCreatingInColumnId, setError, setExpandedCreatePanel,
-    setMutating, setPendingIssueIds, setPendingWorkspaceIssueIds,
+    setMutating,
   });
   const canStartWorkspace = !!activeProject?.repoPath;
 
@@ -549,7 +518,6 @@ export function BoardPage() {
         backlogColumn,
         boardStatusOptions,
         boardTagOptions,
-        boardViewState,
         bulk,
         canStartWorkspace,
         collapsedGroups,
@@ -558,10 +526,7 @@ export function BoardPage() {
         columnsRef,
         creatingInColumnId,
         expandedCreatePanel,
-        keyboardCursorIssueId,
         milestones,
-        pendingIssueIds,
-        pendingWorkspaceIssueIds,
         runQueueForecast,
         visibilityColumns,
       }}
@@ -580,7 +545,6 @@ export function BoardPage() {
         setExpandedCreatePanel,
         setGraphFocusIssueId,
         setMoveToDonePending,
-        setPendingWorkspaceIssueIds,
         setTheme,
       }}
       commands={{
@@ -620,31 +584,9 @@ export function BoardPage() {
         viewMode,
       }}
       filters={{
-        activeTagIds,
-        applyBoardViewState,
-        createdDateFilter,
-        focusMode,
-        handleClearTagFilter,
-        handleIssueTypeFilterChange,
         handleMilestoneOverviewClick,
-        handlePriorityFilterChange,
-        handleTagFilterToggle,
-        issueTypeFilter,
         loadSavedViewTags,
         loadTags,
-        milestoneFilterId,
-        priorityFilter,
-        searchQuery,
-        setCreatedDateFilter,
-        setFocusMode,
-        setMilestoneFilterId,
-        setSearchQuery,
-        setShowBlocked,
-        setShowStaleOnly,
-        setStatusFilterId,
-        showBlocked,
-        showStaleOnly,
-        statusFilterId,
       }}
       project={{
         activeProject,
