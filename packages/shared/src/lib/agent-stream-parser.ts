@@ -49,6 +49,15 @@ export {
   type UnknownEventCounter,
   type UnknownEventLogger,
 } from "./agent-stream/unknown-events.js";
+export {
+  recordUnknownFieldDrift,
+  getUnknownFieldCounters,
+  resetUnknownFieldCounters,
+  setUnknownFieldLogger,
+  setUnknownFieldClock,
+  type UnknownFieldCounter,
+  type UnknownFieldLogger,
+} from "./agent-stream/unknown-fields.js";
 
 import { recordUnknownAgentEvent } from "./agent-stream/unknown-events.js";
 
