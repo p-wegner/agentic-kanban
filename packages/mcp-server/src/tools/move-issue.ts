@@ -4,7 +4,8 @@ import { eq } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { requireEntity, resolveStatusByName, checkOpenUnmergedWorkspace } from "../db-utils.js";
 import { transitionIssueStatus, getOutgoingTransitions } from "@agentic-kanban/shared/lib/workflow-engine";
-import { validateWebhookUrl, fireWebhook, buildIssueStatusPayload, isTerminalStatusName } from "@agentic-kanban/shared/lib";
+import { fireIssueStatusWebhook } from "@agentic-kanban/shared/lib/issue-status-orchestration";
+import { isTerminalStatusName } from "@agentic-kanban/shared/lib";
 
 export function registerMoveIssue(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, notifyBoard } = deps;
@@ -86,26 +87,18 @@ export function registerMoveIssue(server: McpServer, deps: ToolDeps = prodDeps) 
 
       notifyBoard(projectId, "mcp_move_issue");
 
-      // Fire outbound webhook if configured for this project (best-effort)
-      const webhookPref = await db
-        .select({ value: schema.preferences.value })
-        .from(schema.preferences)
-        .where(eq(schema.preferences.key, `outbound_webhook_url_${projectId}`))
-        .limit(1)
-        .then((rows) => rows[0]?.value ?? null)
-        .catch(() => null);
-      const webhookUrl = validateWebhookUrl(webhookPref);
-      if (webhookUrl) {
-        fireWebhook(webhookUrl, buildIssueStatusPayload({
-          issueId,
-          issueNumber,
-          title,
-          projectId,
-          newStatusId: r.statusId,
-          newStatusName: statusName,
-          statusChangedAt: now,
-        }));
-      }
+      // Fire outbound webhook if configured for this project (best-effort). The
+      // pref lookup + validation + fire live in the shared orchestration seam
+      // (#974), shared with update_issue and the server webhook sender.
+      await fireIssueStatusWebhook(db, {
+        issueId,
+        issueNumber,
+        title,
+        projectId,
+        newStatusId: r.statusId,
+        newStatusName: statusName,
+        statusChangedAt: now,
+      });
 
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ id: issueId, movedTo: statusName }, null, 2) }],

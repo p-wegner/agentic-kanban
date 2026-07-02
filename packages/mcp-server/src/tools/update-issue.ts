@@ -3,7 +3,8 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { requireEntity, resolveStatusByName, checkOpenUnmergedWorkspace } from "../db-utils.js";
-import { validateWebhookUrl, fireWebhook, buildIssueStatusPayload, isTerminalStatusName } from "@agentic-kanban/shared/lib";
+import { fireIssueStatusWebhook } from "@agentic-kanban/shared/lib/issue-status-orchestration";
+import { isTerminalStatusName } from "@agentic-kanban/shared/lib";
 
 export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, notifyBoard } = deps;
@@ -66,27 +67,19 @@ export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps
 
       notifyBoard(existing.projectId, "mcp_update_issue");
 
-      // Fire outbound webhook if a status change occurred and a URL is configured
+      // Fire outbound webhook if a status change occurred and a URL is configured.
+      // Pref lookup + validation + fire live in the shared orchestration seam
+      // (#974), shared with move_issue and the server webhook sender.
       if (resolvedStatusId && statusName) {
-        const webhookPref = await db
-          .select({ value: schema.preferences.value })
-          .from(schema.preferences)
-          .where(eq(schema.preferences.key, `outbound_webhook_url_${existing.projectId}`))
-          .limit(1)
-          .then((rows) => rows[0]?.value ?? null)
-          .catch(() => null);
-        const webhookUrl = validateWebhookUrl(webhookPref);
-        if (webhookUrl) {
-          fireWebhook(webhookUrl, buildIssueStatusPayload({
-            issueId,
-            issueNumber: existing.issueNumber,
-            title: title ?? existing.title,
-            projectId: existing.projectId,
-            newStatusId: resolvedStatusId,
-            newStatusName: statusName,
-            statusChangedAt: now,
-          }));
-        }
+        await fireIssueStatusWebhook(db, {
+          issueId,
+          issueNumber: existing.issueNumber,
+          title: title ?? existing.title,
+          projectId: existing.projectId,
+          newStatusId: resolvedStatusId,
+          newStatusName: statusName,
+          statusChangedAt: now,
+        });
       }
 
       return {
