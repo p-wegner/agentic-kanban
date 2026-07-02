@@ -13,6 +13,11 @@ und fetcht/chunkt **nicht** von sich aus: Braucht ein Review mehr als den Diff (
 Criteria, Quelldateien, History), muss der Teilnehmer-Skill sich das über seine eigenen Tools holen.
 Ein naiver Teilnehmer-Skill soll an Aufgaben scheitern, die mehr als den Diff brauchen.
 
+**Ausgabe-Regel:** Arbeite TEIL 0–3 **still** ab — keine Zwischenausgaben, keine Schritt-für-Schritt-
+Erklärungen, keine Findings-Liste, keine Tool-Kommentare. Gib am Ende **ausschließlich** den
+Benchmark-Block aus TEIL 4.5 aus (das ist die Bewertung des Teilnehmer-Skills). Einzige Ausnahme:
+Abbruchmeldungen (fehlender Branch in TEIL 0, fehlender Gold-Standard in TEIL 4.1).
+
 ## Parameter
 
 Der erste übergebene Parameter ist die AUFGABE_NR (z.B. `1` bei `/review-aufgabe 1`).
@@ -123,11 +128,7 @@ Merke dir außerdem den vom Agent-Tool zurückgegebenen **`subagent_tokens`**-We
 des Agent-Ergebnisses). Das ist die Selbstauskunft über den Token-Verbrauch des Reviews (Input inkl.
 bereitgestelltem Kontext + Output). Er wird in TEIL 3 als `tokens_used` verwendet.
 
-## Schritt 2.3: Review-Summary ausgeben
-
-Gib aus:
-- Wie viele Findings gefunden wurden
-- Eine kurze Liste der Findings mit Severity und Location
+(Keine Zwischenausgabe — die Findings erscheinen später im Benchmark-Block. Siehe Ausgabe-Regel.)
 
 ---
 
