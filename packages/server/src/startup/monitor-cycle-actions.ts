@@ -1,6 +1,8 @@
-import { issues, projectStatuses, workspaces } from "@agentic-kanban/shared/schema";
-import { eq, sql } from "drizzle-orm";
+import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { projectStatuses } from "@agentic-kanban/shared/schema";
+import { sql } from "drizzle-orm";
 import { db } from "../db/index.js";
+import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import type { MonitorActionName } from "../services/monitor-nudge.js";
 import type { MonitorAction } from "./monitor-helpers.js";
 import type { WorkspaceCandidate } from "./monitor-cycle.js";
@@ -60,8 +62,8 @@ export async function mergeWorkspaceWithFixFallback(
  */
 export async function closeDirectWorkspaceAsDone(ws: WorkspaceCandidate, logAction: LogMonitorActionFn): Promise<void> {
   const now = new Date().toISOString();
-  await db.update(workspaces).set({ status: "closed", workingDir: null, updatedAt: now }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
+  await setWorkspaceStatus(db, ws.wsId, "closed", { now, set: { workingDir: null } });
   const doneStatusId = await getProjectStatusIdByName(ws.projectId, "Done");
-  if (doneStatusId) await db.update(issues).set({ statusId: doneStatusId, updatedAt: now }).where(eq(issues.id, ws.issueId)).catch(() => {});
+  if (doneStatusId) await transitionIssueStatus(db, ws.issueId, doneStatusId, { now }).catch((err) => console.warn(`[monitor] failed to move direct-workspace issue ${ws.issueId} to Done:`, err instanceof Error ? err.message : String(err)));
   logAction("merge", ws.wsId, ws.issueId, { verificationResult: "ok" });
 }

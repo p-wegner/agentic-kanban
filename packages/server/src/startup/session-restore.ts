@@ -2,6 +2,7 @@ import { db } from "../db/index.js";
 import { sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { eq, inArray } from "drizzle-orm";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
+import { setWorkspaceStatus, type WorkspaceStatus } from "../repositories/workspace-status.repository.js";
 
 interface WorkflowSets {
   reviewSessionIds: Set<string>;
@@ -84,7 +85,7 @@ async function fixOrphanedWorkspaces(): Promise<void> {
   if (orphaned.length > 0) {
     console.log(`[startup] ${orphaned.length} orphaned workspace(s) have no running session -- resolving status`);
     for (const ws of orphaned) {
-      let newStatus = "idle";
+      let newStatus: WorkspaceStatus = "idle";
       try {
         if (ws.workingDir && ws.baseBranch && (await workspaceHasCommits(ws.workingDir, ws.baseBranch))) {
           newStatus = "ready_for_merge";
@@ -92,7 +93,7 @@ async function fixOrphanedWorkspaces(): Promise<void> {
       } catch (err) {
         console.warn(`[startup] could not determine committed changes for orphaned workspace ${ws.id}`, err);
       }
-      await db.update(workspaces).set({ status: newStatus, updatedAt: now }).where(eq(workspaces.id, ws.id));
+      await setWorkspaceStatus(db, ws.id, newStatus, { now });
       console.log(`[startup] orphaned workspace ${ws.id} -> ${newStatus}`);
     }
   }

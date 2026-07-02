@@ -8,6 +8,10 @@ import {
 } from "@agentic-kanban/shared/schema";
 import { desc, eq, ne, inArray, and, gte, isNotNull } from "drizzle-orm";
 import { deleteWorkspaceCascade as deleteWorkspaceCascadeShared } from "@agentic-kanban/shared/lib/cascade-delete";
+import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { setWorkspaceStatus, type WorkspaceStatus } from "./workspace-status.repository.js";
+
+type WorkflowDbLike = Parameters<typeof transitionIssueStatus>[0];
 
 type Project = typeof projects.$inferSelect;
 import { db } from "../db/index.js";
@@ -157,14 +161,10 @@ export async function getWorkspacesForIssues(issueIds: string[], database: Datab
 export async function updateWorkspaceStatus(
   workspaceId: string,
   status: string,
-  extra: Partial<Omit<Workspace, "id" | "status">> = {},
+  extra: Partial<Omit<Workspace, "id" | "status" | "updatedAt">> = {},
   database: Database = db,
 ): Promise<void> {
-  const now = new Date().toISOString();
-  await database
-    .update(workspaces)
-    .set({ status, updatedAt: now, ...extra })
-    .where(eq(workspaces.id, workspaceId));
+  await setWorkspaceStatus(database, workspaceId, status as WorkspaceStatus, { set: extra });
 }
 
 export async function resolveProjectFull(
@@ -263,7 +263,7 @@ export async function moveIssueToDone(
     const doneStatus = statuses.find(s => s.name === "Done")
       ?? (fallbackToAiReviewed ? statuses.find(s => s.name === "AI Reviewed") : undefined);
     if (doneStatus) {
-      await database.update(issues).set({ statusId: doneStatus.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, issueId));
+      await transitionIssueStatus(database, issueId, doneStatus.id, { now });
     }
   } catch (err) {
     console.warn("[workspaces] Failed to move issue to Done:", err);
@@ -284,7 +284,7 @@ export async function moveIssueToInProgress(
     const statuses = await database.select().from(projectStatuses).where(eq(projectStatuses.projectId, projectId));
     const inProgress = statuses.find(s => s.name === "In Progress");
     if (inProgress) {
-      await database.update(issues).set({ statusId: inProgress.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, issueId));
+      await transitionIssueStatus(database, issueId, inProgress.id, { now });
     }
   } catch (err) {
     console.warn("[workspaces] Failed to move issue to In Progress:", err);
@@ -306,7 +306,9 @@ export async function moveIssueToInProgressStrict(
   if (!inProgress) {
     throw new Error(`Project ${projectId} has no In Progress status`);
   }
-  await database.update(issues).set({ statusId: inProgress.id, updatedAt: now, statusChangedAt: now }).where(eq(issues.id, issueId));
+  // A TransactionClient is structurally a WorkflowDb for the select/update calls
+  // transitionIssueStatus makes; the node sync participates in the caller's tx.
+  await transitionIssueStatus(database as WorkflowDbLike, issueId, inProgress.id, { now });
 }
 
 /** Cascade delete a workspace and every table that directly FK-references it. */

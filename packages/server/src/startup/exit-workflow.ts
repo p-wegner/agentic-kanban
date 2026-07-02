@@ -1,4 +1,4 @@
-import { isSpecPlanningStageName, syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { isSpecPlanningStageName, transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import { runSmokeCheck } from "@agentic-kanban/shared/lib/smoke-check";
@@ -27,6 +27,7 @@ import { isClaudeUsageLimitStats } from "../services/claude-rate-limit.js";
 import { rotateClaudeSubscription } from "../services/claude-subscription-ring.js";
 import { decideRateLimitExit, formatRateLimitBlockedReason } from "./rate-limit-exit-decision.js";
 import { classifySessionExit, resolveSessionRoleFlags } from "./session-exit-classification.js";
+import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import type { SessionRoleFlags } from "./session-exit-classification.js";
 import { buildLearningStepPrompt } from "../services/merge-helpers.service.js";
 import { isFoundationalBlocker } from "../services/foundational-merge.service.js";
@@ -271,7 +272,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       // Not landed: keep the workspace OPEN + idle and retryable. Clear readyForMerge so a
       // conflicted branch is not silently re-queued as "ready". Surface a clear signal.
       const now = new Date().toISOString();
-      await db.update(workspaces).set({ status: "idle", readyForMerge: false, updatedAt: now }).where(eq(workspaces.id, workspace.id));
+      await setWorkspaceStatus(db, workspace.id, "idle", { now, set: { readyForMerge: false } });
       boardEvents.broadcast(projectId, "workspace_idle");
       boardEvents.broadcast(projectId, "workflow_error");
       emitButlerSystemEvent({
@@ -315,7 +316,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     if (decideRateLimitExit(rotation, builder).action === "relaunch") {
       try {
         const continuation = await buildRotationContinuationPrompt(db, issueId, cfg.label);
-        await db.update(workspaces).set({ status: "active", updatedAt: now }).where(eq(workspaces.id, workspaceId));
+        await setWorkspaceStatus(db, workspaceId, "active", { now });
         const relaunchSessionId = await sessionManager.startSession({
           workspaceId,
           prompt: continuation,
@@ -337,7 +338,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       }
     }
 
-    await db.update(workspaces).set({ status: "blocked", updatedAt: now }).where(eq(workspaces.id, workspaceId));
+    await setWorkspaceStatus(db, workspaceId, "blocked", { now });
     boardEvents.broadcastActivity(projectId, { issueId, sessionId, activity: "" });
     boardEvents.broadcast(projectId, "session_completed");
     boardEvents.broadcast(projectId, "workflow_error");
@@ -408,7 +409,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
         isReview: roleFlags.isReview,
         exitCode,
       });
-      await db.update(workspaces).set({ status: "idle", updatedAt: now }).where(eq(workspaces.id, workspaceId));
+      await setWorkspaceStatus(db, workspaceId, "idle", { now });
       boardEvents.broadcastActivity(projectId, { issueId, sessionId, activity: "" });
       boardEvents.broadcast(projectId, "session_completed");
       boardEvents.broadcast(projectId, "workspace_idle");
@@ -774,10 +775,9 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     // Direct workspaces WITH changes fall through to the review flow below.
     if (workspace.isDirect && !committedChanges) {
       const doneStatus = findStatus("Done");
-      await db.update(workspaces).set({ status: "closed", workingDir: null, updatedAt: now }).where(eq(workspaces.id, workspaceId));
+      await setWorkspaceStatus(db, workspaceId, "closed", { now, set: { workingDir: null } });
       if (doneStatus) {
-        await db.update(issues).set({ statusId: doneStatus.id, updatedAt: now }).where(eq(issues.id, issueId));
-        await syncCurrentNodeToStatus(db, issueId);
+        await transitionIssueStatus(db, issueId, doneStatus.id, { now });
       }
       boardEvents.broadcast(projectId, "workspace_merged");
       console.log(`[workflow] direct workspace ${workspaceId} closed on agent exit (no committed changes)  issue moved to Done`);
@@ -791,10 +791,9 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       const currentStatusName2 = currentIssueRows2.length > 0 ? statuses.find((s) => s.id === currentIssueRows2[0].statusId)?.name : undefined;
       if (currentStatusName2 === "In Review") {
         const doneStatus = findStatus("Done");
-        await db.update(workspaces).set({ status: "closed", workingDir: null, updatedAt: now }).where(eq(workspaces.id, workspaceId));
+        await setWorkspaceStatus(db, workspaceId, "closed", { now, set: { workingDir: null } });
         if (doneStatus) {
-          await db.update(issues).set({ statusId: doneStatus.id, updatedAt: now }).where(eq(issues.id, issueId));
-          await syncCurrentNodeToStatus(db, issueId);
+          await transitionIssueStatus(db, issueId, doneStatus.id, { now });
         }
         boardEvents.broadcast(projectId, "workspace_merged");
         console.log(`[workflow] non-direct workspace ${workspaceId} closed on agent exit (no committed changes, was In Review)  issue moved to Done`);
@@ -806,8 +805,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     console.log(`[workflow] agent session ${sessionId} completed with committed changes  moving to In Review`);
     const inReview = findStatus("In Review");
     if (inReview) {
-      await db.update(issues).set({ statusId: inReview.id, updatedAt: now }).where(eq(issues.id, issueId));
-      await syncCurrentNodeToStatus(db, issueId);
+      await transitionIssueStatus(db, issueId, inReview.id, { now });
     }
     boardEvents.broadcast(projectId, "issue_updated");
     if (getBool(prefMap, "learning_step_after_agent") && workspace.workingDir) await launchLearningStep(db, sessionManager, learningSessionIds, workspace, prefMap, "after agent");
@@ -851,7 +849,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     const { prompt, model } = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, conflictingFiles, uncommittedChanges, workspaceId, reviewSkillName, verifyAgent);
     const reviewArgsWithModel = model && reviewProvider === "claude" ? `${reviewArgs ?? ""} --model ${model}`.trim() : reviewArgs;
     try {
-      await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
+      await setWorkspaceStatus(db, workspaceId, "reviewing", { now });
       boardEvents.broadcast(projectId, "issue_updated");
       const reviewSessionId = await sessionManager.startSession({ workspaceId, prompt, agentCommand, agentArgs: reviewArgsWithModel, claudeProfile: effectiveReviewProfile, provider: toExecutorProvider(reviewProvider), triggerType: "review", profile: profileSelection, extraEnv: { KANBAN_SESSION_TYPE: "review", KANBAN_AFTER_MERGE_VERIFY: verifyAgent } });
       reviewSessionIds.add(reviewSessionId);
@@ -862,7 +860,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       // running session (the #529 stranding). Reset to idle and surface the failure;
       // the stranded-review reconciler then re-launches it instead of it sitting
       // forever as never-reviewed / not-mergeable.
-      await db.update(workspaces).set({ status: "idle", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, workspaceId)).catch(() => {});
+      await setWorkspaceStatus(db, workspaceId, "idle");
       boardEvents.broadcast(projectId, "workflow_error");
       emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Auto-review failed to launch for workspace ${workspaceId}; reset to idle for recovery.` });
     }

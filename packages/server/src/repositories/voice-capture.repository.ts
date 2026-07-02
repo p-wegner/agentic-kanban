@@ -3,6 +3,7 @@ import { issues, issueTags, tags, projectStatuses } from "@agentic-kanban/shared
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 
 /**
  * Find or create the `voice-capture` tag for the given database.
@@ -65,10 +66,7 @@ export async function setIssueStatus(
   now: string,
   database: Database = db,
 ): Promise<void> {
-  await database
-    .update(issues)
-    .set({ statusId, statusChangedAt: now, updatedAt: now })
-    .where(eq(issues.id, issueId));
+  await transitionIssueStatus(database, issueId, statusId, { now });
 }
 
 export async function insertVoiceCaptureIssue(
