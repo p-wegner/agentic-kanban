@@ -10,17 +10,27 @@ import {
 } from "./shared.js";
 import { recordUnknownAgentEvent } from "./unknown-events.js";
 
-const CODEX_USAGE_LIMIT_PATTERN = /you(?:['\u2019])?ve hit your usage limit for\s+(.+?)(?:\.|$)/i;
-const CODEX_RETRY_AFTER_PATTERN = /try again at\s+(.+?)(?:\.|$)/i;
+/**
+ * Single source of truth for the codex usage-limit prose contract (#991).
+ * Matches upstream English prose like "you've hit your usage limit for ...".
+ * The server's codex-rate-limit service imports these \u2014 do NOT copy the regex.
+ */
+export const CODEX_USAGE_LIMIT_PATTERN = /you(?:['\u2019])?ve hit your usage limit for\s+(.+?)(?:\.|$)/i;
+export const CODEX_RETRY_AFTER_PATTERN = /try again at\s+(.+?)(?:\.|$)/i;
 
-function detectCodexUsageLimitText(text: string | undefined): { message: string; retryAfter?: string } | undefined {
+export interface CodexUsageLimitMatch {
+  message: string;
+  retryAfter?: string;
+}
+
+export function matchCodexUsageLimitText(text: string | null | undefined): CodexUsageLimitMatch | undefined {
   if (!text || !CODEX_USAGE_LIMIT_PATTERN.test(text)) return undefined;
   return { message: text.trim(), retryAfter: CODEX_RETRY_AFTER_PATTERN.exec(text)?.[1]?.trim() };
 }
 
 function handleCodexUsageLimit(obj: Record<string, unknown>, result: ParsedStreamEvent): void {
   const error = objectValue(obj.error);
-  const usageLimit = detectCodexUsageLimitText(stringValue(obj.message) ?? stringValue(error.message));
+  const usageLimit = matchCodexUsageLimitText(stringValue(obj.message) ?? stringValue(error.message));
   if (usageLimit) {
     result.rateLimitInfo = {
       status: "limited",
