@@ -134,3 +134,104 @@ export function selectPolicyByPriority(
   }
   return null;
 }
+
+/** Preference key holding the Strategy Bullseye config JSON for a project. */
+export function strategyPrefKey(projectId: string): string {
+  return `board_strategy_${projectId}`;
+}
+
+/**
+ * Preference key holding the selected profile for a provider (e.g. "codex" →
+ * "codex_profile"). Mirrors the server-side provider registry's `profilePrefKey`
+ * (locked distinct + `${provider}_profile`-shaped by agent-provider-registry.test.ts)
+ * so client-safe consumers don't hand-roll the claude/codex/copilot/pi ladder —
+ * the hand-rolled MCP copy fell through copilot/pi to `claude_profile` (#984).
+ */
+export function providerProfilePrefKey(provider: ProviderPolicyProvider): string {
+  return `${provider}_profile`;
+}
+
+/**
+ * Narrow an untrusted string (a stored pref, the legacy "claude-code" id) to a
+ * canonical provider, defaulting to "claude" — same semantics as the server's
+ * `narrowProviderName`.
+ */
+export function narrowPolicyProvider(value: string | null | undefined): ProviderPolicyProvider {
+  const key = value === "claude-code" ? "claude" : value;
+  return isProviderPolicyProvider(key) ? key : "claude";
+}
+
+/**
+ * Parse the persisted `board_strategy_<projectId>` JSON into normalized provider
+ * policies. Throws on malformed JSON (callers decide the fallback); a valid JSON
+ * without policies yields `[]`.
+ */
+export function parseProviderPoliciesFromStrategy(raw: string): ProviderProfilePolicy[] {
+  if (!raw.trim()) return [];
+  const parsed = JSON.parse(raw) as { providerPolicies?: unknown };
+  if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.providerPolicies)) return [];
+  return parsed.providerPolicies.map((p, i) => normalizeProviderPolicy(p, i));
+}
+
+/** A resolved effective provider+profile decision and where it came from. */
+export interface EffectiveProviderSelection {
+  provider: ProviderPolicyProvider;
+  profileName: string | null;
+  /** Optional model pinned on the winning Bullseye policy (unvalidated — callers gate by provider family). */
+  model?: string;
+  source: "strategy" | "settings";
+}
+
+/**
+ * The settings-prefs fallback selection: global `provider` pref narrowed, profile
+ * read from THAT provider's own `<provider>_profile` key (never cross-provider).
+ */
+export function readSettingsProviderSelection(
+  prefMap: ReadonlyMap<string, string>,
+): { provider: ProviderPolicyProvider; profileName: string | null } {
+  const provider = narrowPolicyProvider(prefMap.get("provider"));
+  return { provider, profileName: prefMap.get(providerProfilePrefKey(provider))?.trim() || null };
+}
+
+/**
+ * Resolve the EFFECTIVE default provider+profile for new work in a project — the
+ * single Bullseye-aware selection core (#984), pure and client-safe (prefs in, no
+ * DB, no quota fetch):
+ *
+ * 1. `board_strategy_<projectId>` pref → parse policies → `selectPolicyByPriority`
+ *    (callers may layer live-quota gating via `isBlocked`, as the server does).
+ * 2. Otherwise (no Bullseye / no selectable policy / malformed JSON): the global
+ *    `provider` pref + that provider's own `<provider>_profile` key.
+ *
+ * Consumers: the server's new-workspace default fan-out and the MCP
+ * `start_workspace` tool — which previously hand-rolled a codex→claude profile
+ * ladder that ignored the Bullseye entirely and mis-keyed copilot/pi.
+ */
+export function resolveProviderProfileFromPrefs(
+  prefMap: ReadonlyMap<string, string>,
+  projectId: string | null | undefined,
+  options: { allowFallback?: boolean; isBlocked?: (policy: ProviderProfilePolicy) => boolean } = {},
+): EffectiveProviderSelection {
+  const raw = projectId ? prefMap.get(strategyPrefKey(projectId)) : undefined;
+  if (raw?.trim()) {
+    try {
+      const selected = selectPolicyByPriority(parseProviderPoliciesFromStrategy(raw), {
+        // Match the server's selectProviderFromStrategy default: fallback-only
+        // policies are not auto-selected unless explicitly allowed.
+        allowFallback: options.allowFallback ?? false,
+        isBlocked: options.isBlocked,
+      });
+      if (selected) {
+        return {
+          provider: selected.provider,
+          profileName: selected.profileName.trim() || null,
+          model: selected.model,
+          source: "strategy",
+        };
+      }
+    } catch {
+      /* malformed strategy JSON — fall back to settings prefs */
+    }
+  }
+  return { ...readSettingsProviderSelection(prefMap), source: "settings" };
+}

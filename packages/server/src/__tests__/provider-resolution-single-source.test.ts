@@ -15,11 +15,13 @@ import { join } from "node:path";
 // so a regression fails `pnpm test` instead of eroding silently. Same shape as
 // no-self-http-in-services.test.ts.
 //
-// FOLLOW-UP (tracked under #901's parent #890): the mcp-server start-workspace tool
-// still hand-rolls `prefMap.get('provider') || 'claude'` + a codex profile ladder.
-// It cannot import the server's resolver without a new cross-package seam, so it is
-// out of THIS PR's scope (FIRST PR = butler only). When that seam lands, extend this
-// gate to scan mcp-server/src too.
+// #984 closed the mcp-server exemption: the cross-package seam now exists —
+// `resolveProviderProfileFromPrefs` in `@agentic-kanban/shared/lib/strategy-policy`
+// is the pure, client-safe Bullseye-aware selection core (Bullseye policies →
+// settings `provider` + `<provider>_profile` fallback). The mcp-server
+// start_workspace tool calls it instead of hand-rolling a codex→claude profile
+// ladder, so this gate also scans mcp-server/src: no hand-rolled
+// `prefMap.get("<provider>_profile")` reads may reappear there.
 //
 // The lock: `selectProviderFromStrategy()` reads the raw Strategy Bullseye and is the
 // PRIMITIVE a hand-rolled resolution fork reaches for. Launch-time provider/profile
@@ -31,6 +33,7 @@ import { join } from "node:path";
 // Any NEW caller is a likely fork and fails here until it is justified + added below.
 
 const SERVER_SRC = join(import.meta.dirname, "..");
+const MCP_SERVER_SRC = join(import.meta.dirname, "..", "..", "..", "mcp-server", "src");
 
 // Files permitted to reference `selectProviderFromStrategy`. Each is a deliberate
 // Bullseye reader, NOT a launch-time resolution fork — shrink/justify before adding.
@@ -102,5 +105,42 @@ describe("architecture: provider/profile resolution funnels through one shared r
         "applyProviderSelectionToPrefMap() and call resolveEffectiveProviderProfile() " +
         "instead (the shared resolver). Offending files:\n" + offenders.join("\n"),
     ).toEqual([]);
+  });
+
+  describe("mcp-server (#984 — exemption closed)", () => {
+    const mcpFiles = collectSourceFiles(MCP_SERVER_SRC);
+
+    it("finds mcp-server source files to scan", () => {
+      expect(mcpFiles.length).toBeGreaterThan(20);
+    });
+
+    it("no mcp tool hand-rolls provider/profile resolution from raw *_profile pref reads", () => {
+      // The hand-rolled fork this gate kills: reading a provider's profile via a
+      // literal `prefMap.get("claude_profile")`-style ladder (which ignored the
+      // Strategy Bullseye and fell copilot/pi through to claude_profile). All
+      // launch-default resolution must go through the shared
+      // resolveProviderProfileFromPrefs (strategy-policy.ts).
+      const handRolled = /\.get\(\s*["'](?:claude|codex|copilot|pi)_profile["']\s*\)/;
+      const offenders: string[] = [];
+      for (const file of mcpFiles) {
+        const code = stripComments(readFileSync(file, "utf8"));
+        if (handRolled.test(code)) {
+          offenders.push(relUnder(file, MCP_SERVER_SRC));
+        }
+      }
+      expect(
+        offenders,
+        "hand-rolled `<provider>_profile` pref read found in mcp-server — resolve " +
+          "provider+profile via resolveProviderProfileFromPrefs() from " +
+          "@agentic-kanban/shared/lib/strategy-policy instead. Offending files:\n" +
+          offenders.join("\n"),
+      ).toEqual([]);
+    });
+
+    it("start_workspace resolves provider/profile via the shared Bullseye-aware resolver", () => {
+      const tool = readFileSync(join(MCP_SERVER_SRC, "tools", "start-workspace.ts"), "utf8");
+      expect(tool).toMatch(/resolveProviderProfileFromPrefs/);
+      expect(tool).toMatch(/@agentic-kanban\/shared\/lib\/strategy-policy/);
+    });
   });
 });

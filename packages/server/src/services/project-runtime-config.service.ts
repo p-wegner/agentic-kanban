@@ -13,6 +13,7 @@ import {
   selectProviderFromStrategy,
   resolveStrategyProviderSelection,
 } from "./strategy-objective.service.js";
+import { providerProfilePrefKey, readSettingsProviderSelection } from "@agentic-kanban/shared/lib/strategy-policy";
 import { resolveStartPolicy, startModePrefKey, type StartPolicy } from "./start-policy.service.js";
 import { HARNESS_IDS, harnessSettingKey } from "./harness-settings.js";
 
@@ -67,15 +68,9 @@ export interface ProjectRuntimeConfigInput {
 }
 
 function readSettingsSelection(prefMap: Map<string, string>): { provider: ProviderName; profileName: string | null } {
-  const provider = narrowProviderName(prefMap.get("provider"));
-  const key = provider === "claude"
-    ? "claude_profile"
-    : provider === "codex"
-      ? "codex_profile"
-      : provider === "copilot"
-        ? "copilot_profile"
-        : "pi_profile";
-  return { provider, profileName: prefMap.get(key)?.trim() || null };
+  // Selection core shared with the MCP start_workspace tool (#984): the global
+  // `provider` pref + that provider's own `<provider>_profile` key.
+  return readSettingsProviderSelection(prefMap);
 }
 
 function resolveProviderSource(input: ProjectRuntimeConfigInput): RuntimeProviderConfig["source"] {
@@ -95,14 +90,7 @@ function applyWorkspaceSelection(
   prefMap.set("provider", provider);
   const profileName = workspaceSelection.profileName?.trim();
   if (!profileName) return;
-  const key = provider === "claude"
-    ? "claude_profile"
-    : provider === "codex"
-      ? "codex_profile"
-      : provider === "copilot"
-        ? "copilot_profile"
-        : "pi_profile";
-  prefMap.set(key, profileName);
+  prefMap.set(providerProfilePrefKey(provider), profileName);
 }
 
 export function resolveProjectRuntimeConfig(input: ProjectRuntimeConfigInput): ProjectRuntimeConfig {
