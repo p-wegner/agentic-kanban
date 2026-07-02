@@ -8,7 +8,7 @@ import { MOCK_AGENT_COMMAND, isMockProfile, toExecutorProvider } from "../servic
 import { createBoardEvents } from "../services/board-events.js";
 import { emitButlerSystemEvent } from "../services/butler-event-feed.js";
 import * as gitService from "../services/git.service.js";
-import { activeMerges, type ActiveMergeLock } from "../services/workspace-internals.js";
+import { acquireRepoMergeLock } from "../services/workspace-internals.js";
 import { createBackup } from "../db/backup.js";
 import { killProcessesInDir } from "../services/process-cleanup.js";
 import { runScript } from "../services/script-runner.js";
@@ -148,14 +148,15 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
         {
           const { repoPath, teardownScript, defaultBranch } = projectRows[0];
 
-          const mergePromise = (async () => {
-            const pendingMerge = activeMerges.get(repoPath);
-            if (pendingMerge) {
-              console.log(`[workflow] auto-merge for workspace ${workspace.id} is queued behind existing merge on ${repoPath}`);
-              await pendingMerge.promise.catch(() => {});
-            }
-
-            return (async () => {
+          // #944: acquire the shared per-repo merge lock via the serializing
+          // primitive. It re-checks the map in a loop after every wait, so two
+          // concurrent autoMerge calls queued behind the same merge run strictly
+          // one-after-the-other (the old code awaited once and then proceeded,
+          // letting both run concurrent git merges and overwrite the lock entry).
+          await acquireRepoMergeLock(
+            repoPath,
+            workspace.id,
+            async () => {
               if (workspace.workingDir) {
                 try { await killProcessesInDir(workspace.workingDir); } catch {}
                 if (teardownScript) {
@@ -249,24 +250,12 @@ Server: http://localhost:${serverPort}`;
                   console.warn("[workflow] dedicated verification session failed (non-fatal):", err);
                 }
               }
-            })();
-          })();
-
-          let trackedMergeLock: ActiveMergeLock;
-          const trackedMerge = mergePromise.finally(() => {
-            if (activeMerges.get(repoPath) === trackedMergeLock) {
-              activeMerges.delete(repoPath);
-            }
-          });
-          trackedMergeLock = {
-            promise: trackedMerge,
-            workspaceId: workspace.id,
-            repoPath,
-            startedAt: new Date().toISOString(),
-            startedAtMs: Date.now(),
-          };
-          activeMerges.set(repoPath, trackedMergeLock);
-          await trackedMerge;
+            },
+            () =>
+              console.log(
+                `[workflow] auto-merge for workspace ${workspace.id} is queued behind existing merge on ${repoPath}`,
+              ),
+          );
         }
       }
 

@@ -33,6 +33,7 @@ import {
   resolveRelaunchAgentSelection,
   requireBaseBranch,
   activeMerges,
+  acquireRepoMergeLock,
   describeMergeLock,
   resolveMergeState,
   type GitService,
@@ -170,6 +171,9 @@ export function createWorkspaceMergeService(deps: {
 
     const { project, repoPath, defaultBranch } = await resolveProjectFull(id, database);
 
+    // Manual-merge semantics are refuse/reuse (intentional, unlike autoMerge's
+    // queueing): an in-flight merge for the same workspace is reused; for a
+    // different workspace we return "already in progress" instead of queueing.
     const existingLock = activeMerges.get(repoPath);
     if (existingLock) {
       const diagnostic = describeMergeLock(existingLock);
@@ -194,37 +198,23 @@ export function createWorkspaceMergeService(deps: {
       }
     }
 
-    const rawMergePromise = doMerge(id, workspace, project, repoPath, defaultBranch);
-    const mergePromise = rawMergePromise.catch((err) => {
-      // A TypeError (e.g. "gitService.X is not a function") means shared/dist is stale —
-      // a deploy/build issue, NOT a merge conflict. Return a distinct 503 so the board
-      // monitor can rebuild rather than attempting a wasted fix-and-merge.
-      if (err instanceof TypeError && !(err instanceof WorkspaceError)) {
-        throw new WorkspaceError(
-          `Merge helper unavailable — the server build may be stale. Rebuild shared/dist and restart. (${err.message})`,
-          "CONFLICT",
-          { mergeReason: "server_build_stale", originalMessage: err.message },
-        );
-      }
-      throw err;
-    });
-    const lock = {
-      promise: mergePromise,
-      workspaceId: id,
-      repoPath,
-      startedAt: new Date().toISOString(),
-      startedAtMs: Date.now(),
-    };
-    activeMerges.set(repoPath, lock);
-    // Always clear the lock - both on success and on rejection - so a crashed
-    // merge never strands the repo behind a stale in-memory lock.
-    mergePromise.finally(() => {
-      if (activeMerges.get(repoPath) === lock) {
-        activeMerges.delete(repoPath);
-      }
-    }).catch(() => { /* swallow: caller awaits mergePromise below */ });
-
-    return await mergePromise;
+    // Install the lock and run the merge via the shared primitive (#944) so the
+    // entry can never be overwritten by a concurrent acquirer.
+    return await acquireRepoMergeLock(repoPath, id, () =>
+      doMerge(id, workspace, project, repoPath, defaultBranch).catch((err) => {
+        // A TypeError (e.g. "gitService.X is not a function") means shared/dist is stale —
+        // a deploy/build issue, NOT a merge conflict. Return a distinct 503 so the board
+        // monitor can rebuild rather than attempting a wasted fix-and-merge.
+        if (err instanceof TypeError && !(err instanceof WorkspaceError)) {
+          throw new WorkspaceError(
+            `Merge helper unavailable — the server build may be stale. Rebuild shared/dist and restart. (${err.message})`,
+            "CONFLICT",
+            { mergeReason: "server_build_stale", originalMessage: err.message },
+          );
+        }
+        throw err;
+      }),
+    );
   }
 
   async function doMerge(

@@ -314,6 +314,70 @@ export interface ActiveMergeLock {
 /** Merge serialization: one active merge per repo at a time. Shared across services. */
 export const activeMerges = new Map<string, ActiveMergeLock>();
 
+/**
+ * Acquire the per-repo merge lock and run `work` under it (#944).
+ *
+ * This is the ONE correct acquisition protocol for `activeMerges`:
+ * - Waiters loop: after any wait they RE-CHECK the map before proceeding, so two
+ *   concurrent callers waiting on the same in-flight merge serialize strictly
+ *   one-after-the-other instead of both proceeding (the old wait-then-proceed race).
+ * - The lock entry is installed synchronously after the (also synchronous) final
+ *   map check, so a second caller can never overwrite the first's entry.
+ * - Stale locks (holder lost to a hot-reload) are recovered exactly like the
+ *   manual-merge path does.
+ *
+ * Callers that want refuse/reuse semantics instead of queueing (manual merge)
+ * should check the map themselves first and only call this when they intend to
+ * proceed.
+ */
+export async function acquireRepoMergeLock<T>(
+  repoPath: string,
+  workspaceId: string,
+  work: () => Promise<T>,
+  onWait?: (holder: ActiveMergeLock) => void,
+): Promise<T> {
+  for (;;) {
+    const existing = activeMerges.get(repoPath);
+    if (!existing) break;
+    if (describeMergeLock(existing).isStale) {
+      console.warn(
+        `[merge-lock] recovering stale merge lock: repoPath=${repoPath} activeWorkspaceId=${existing.workspaceId}`,
+      );
+      activeMerges.delete(repoPath);
+      break;
+    }
+    onWait?.(existing);
+    await existing.promise.catch(() => {});
+    // Loop and re-check: another waiter may have installed a fresh lock while
+    // we were awaiting — never proceed just because the awaited promise settled.
+  }
+
+  // No awaits between the check above and the set below (work()'s synchronous
+  // prefix runs inline, but nothing else can interleave on the event loop), so
+  // installation is atomic with respect to other acquirers.
+  const promise = work();
+  const lock: ActiveMergeLock = {
+    promise,
+    workspaceId,
+    repoPath,
+    startedAt: new Date().toISOString(),
+    startedAtMs: Date.now(),
+  };
+  activeMerges.set(repoPath, lock);
+  // Always clear the lock — success or rejection — so a crashed merge never
+  // strands the repo behind a stale in-memory lock.
+  promise
+    .finally(() => {
+      if (activeMerges.get(repoPath) === lock) {
+        activeMerges.delete(repoPath);
+      }
+    })
+    .catch(() => {
+      /* swallow: the caller awaits `promise` itself */
+    });
+  return promise;
+}
+
 export function describeMergeLock(lock: ActiveMergeLock, nowMs = Date.now()) {
   const ageMs = Math.max(0, nowMs - lock.startedAtMs);
   return {
