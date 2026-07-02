@@ -40,19 +40,21 @@ function handleCodexCommandExecution(
   const command = stringValue(item.command) ?? "";
   if ((type === "item.started" || item.status === "in_progress") && command) {
     result.toolActivity = { name: "shell", input: { command }, toolUseId: id || undefined };
-    registerToolName(context, id, "shell_command");
-    pushDisplay(result, { kind: "tool_use", id, name: "shell_command", input: command, inputParsed: { command } });
+    registerToolName(context, id, "shell");
+    pushDisplay(result, { kind: "tool_use", id, name: "shell", input: command, inputParsed: { command } });
   }
   if (type === "item.completed" || item.status === "completed") {
     const output = stringValue(item.aggregated_output) ?? "";
+    const exitCode = item.exit_code;
+    const isError = exitCode !== null && exitCode !== undefined && exitCode !== 0;
     result.toolResult = { toolUseId: id };
-    if (output) {
+    if (output || isError) {
       pushDisplay(result, {
         kind: "tool_result",
-        toolName: "shell_command",
+        toolName: "shell",
         toolUseId: id,
-        output,
-        isError: item.exit_code !== null && item.exit_code !== 0,
+        output: output || `exit code ${numberValue(exitCode)}`,
+        isError,
       });
     }
   }
@@ -72,11 +74,12 @@ function handleCodexMcpToolCall(
     registerToolName(context, id, name);
     pushDisplay(result, { kind: "tool_use", id, name, input: JSON.stringify(args, null, 2), inputParsed: args });
   }
-  if (type === "item.completed" || item.status === "completed") {
+  if (type === "item.completed" || item.status === "completed" || item.status === "failed" || item.status === "error") {
     const resultText = stringValue(item.result);
+    const failed = item.status === "failed" || item.status === "error";
     result.toolResult = { toolUseId: id, ...(resultText ? { agentResultText: resultText } : {}) };
-    if (resultText) {
-      pushDisplay(result, { kind: "tool_result", toolName: name, toolUseId: id, output: resultText, isError: false });
+    if (resultText || failed) {
+      pushDisplay(result, { kind: "tool_result", toolName: name, toolUseId: id, output: resultText ?? "failed", isError: failed });
     }
   }
 }
@@ -100,8 +103,34 @@ function handleCodexItem(obj: Record<string, unknown>, context: ParseContext, re
   } else if (itemType === "mcp_tool_call") {
     handleCodexMcpToolCall(item, type, result, id, context);
   } else if (itemType === "file_change") {
-    const path = stringValue(item.path) ?? "";
-    pushDisplay(result, { kind: "tool_use", id, name: "file_change", input: path, inputParsed: { path } });
+    handleCodexFileChange(item, result, id);
+  }
+}
+
+/**
+ * Codex native `file_change` items: newer CLIs emit a `changes: [{path, kind}]`
+ * array (kind = add|update|delete); older payloads carried a flat `path`.
+ * Emitted as `file_change` tool_use display events so the summary layer can
+ * classify them into filesEdited/filesWritten (#951 — these were previously
+ * dropped by the offline summary parser entirely).
+ */
+function handleCodexFileChange(item: Record<string, unknown>, result: ParsedStreamEvent, id: string): void {
+  const changes = Array.isArray(item.changes) ? item.changes : [];
+  const entries = changes.length > 0
+    ? changes.map((change) => objectValue(change)).map((change) => ({
+      path: stringValue(change.path) ?? "",
+      kind: stringValue(change.kind),
+    }))
+    : [{ path: stringValue(item.path) ?? "", kind: stringValue(item.kind) }];
+  for (const entry of entries) {
+    if (!entry.path) continue;
+    pushDisplay(result, {
+      kind: "tool_use",
+      id,
+      name: "file_change",
+      input: entry.path,
+      inputParsed: entry.kind ? { path: entry.path, kind: entry.kind } : { path: entry.path },
+    });
   }
 }
 

@@ -60,15 +60,11 @@ export const COPILOT_DEFAULT_ALLOWED_TOOLS = [
   "agentic-kanban",
 ];
 
-export const COPILOT_SESSION_ID_TYPES = new Set([
-  "session.start",
-  "session.started",
-  "session.created",
-  "session_start",
-  "session_started",
-  "session_created",
-  "result",
-]);
+// NOTE (#951): the former COPILOT_SESSION_ID_TYPES set and the
+// extractCopilotAssistantText fork that lived here were dead code (no
+// consumers) duplicating the single sources of truth in
+// @agentic-kanban/shared/lib/agent-stream/{copilot-event-types,copilot}.ts.
+// Copilot event interpretation belongs there — do not re-add forks here.
 
 // --- MCP config ---
 
@@ -238,33 +234,6 @@ export function numberValue(value: unknown): number {
 
 export function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-}
-
-export function extractCopilotAssistantText(obj: Record<string, unknown>): string | undefined {
-  const data = objectValue(obj.data);
-  const payload = Object.keys(data).length > 0 ? data : obj;
-
-  const direct = stringValue(payload.text ?? payload.message ?? payload.response ?? payload.result);
-  if (direct) return direct;
-
-  const item = payload.item as Record<string, unknown> | undefined;
-  const itemText = stringValue(item?.text ?? item?.message);
-  if (itemText) return itemText;
-
-  const content = payload.content ?? item?.content;
-  if (typeof content === "string" && content.length > 0) return content;
-  if (Array.isArray(content)) {
-    const textParts: string[] = [];
-    for (const block of content) {
-      if (block && typeof block === "object") {
-        const text = stringValue((block as Record<string, unknown>).text);
-        if (text) textParts.push(text);
-      }
-    }
-    if (textParts.length > 0) return textParts.join("\n");
-  }
-
-  return undefined;
 }
 
 // --- Windows resolvers ---

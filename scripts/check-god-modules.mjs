@@ -41,7 +41,7 @@ const COHESION_MAX_FN_DECLS = 20;
 // (#911 stack-profile, #912 agent-questions, #913 the rest); drop a file's entry once
 // it is split. Goal: drain this map to empty so the flat threshold governs everything.
 const COHESION_BASELINE = {
-  "packages/shared/src/lib/session-summary.ts": 38,
+  // session-summary.ts rewritten to consume the agent-stream parsers (#951) — entry removed.
   "packages/server/src/services/butler-sdk.service.ts": 30,
   // stack-profile.service.ts decomposed behind a facade barrel (#911) — entry removed.
   "packages/server/src/services/agent.service.ts": 27,

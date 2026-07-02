@@ -57,7 +57,7 @@ const COHESION_MAX_FN_DECLS = 20;
 // gate fails if it grows past its baseline. Keep in sync with check-god-modules.mjs.
 // Decomposition tracked on the board (#911/#912/#913); drop an entry once split.
 const COHESION_BASELINE: Record<string, number> = {
-  "packages/shared/src/lib/session-summary.ts": 38,
+  // session-summary.ts rewritten to consume the agent-stream parsers (#951) — entry removed.
   "packages/server/src/services/butler-sdk.service.ts": 30,
   // stack-profile.service.ts decomposed behind a facade barrel (#911) — entry removed.
   "packages/server/src/services/agent.service.ts": 27,
