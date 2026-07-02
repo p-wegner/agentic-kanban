@@ -12,6 +12,7 @@ import { PREF_AUTO_START_FOLLOWUP } from "../constants/preference-keys.js";
 import { autoStartFollowups } from "./followup-workspace.service.js";
 import { autoStartUnblockedDependencyIssue } from "./dependency-auto-chain.service.js";
 import { rebuildSharedIfChanged, runLearningStep } from "./merge-helpers.service.js";
+import { cleanupMergedWorktreeAndBranch } from "./merge-executor.service.js";
 import type { MergeWarning } from "./workspace-merge-prevalidation.service.js";
 import { applyDeferredWorkingTreeSync } from "@agentic-kanban/shared/lib/git-service";
 
@@ -59,8 +60,7 @@ export async function runWorkspacePostMergeCleanup(
   await teardownMergedWorktree(args, deps, warnings);
   await collectCodeMetrics(args, deps.database, warnings);
   mergeResult = await applyOpenSpecPostMerge(args, deps, warnings, mergeResult);
-  await removeWorktreeDirectory(args, deps, warnings);
-  await deleteMergedBranch(args, deps, warnings);
+  await removeWorktreeAndBranch(args, deps, warnings);
   await recordCleanupWarnings(args, deps.database, warnings);
 
   const postMergeChangedFiles = await getPostMergeChangedFiles(args, deps.gitService);
@@ -130,36 +130,28 @@ async function applyOpenSpecPostMerge(
   }
 }
 
-async function removeWorktreeDirectory(
+async function removeWorktreeAndBranch(
   args: WorkspacePostMergeCleanupArgs,
   deps: { database: Database; gitService: GitService },
   warnings: MergeWarning[],
 ): Promise<void> {
-  if (!args.workingDir) return;
-  try {
-    await deps.gitService.removeWorktree(args.repoPath, args.workingDir);
-  } catch (err) {
-    addRecoverableWarning(warnings, "remove-worktree", err);
-    const warningMsg = err instanceof Error ? err.message : String(err);
-    try {
-      await persistWorkspaceCleanupWarning(args.workspaceId, warningMsg, args.workingDir, deps.database);
-    } catch (dbErr) {
-      console.warn("[workspace-merge] failed to persist cleanup warning:", dbErr instanceof Error ? dbErr.message : String(dbErr));
-    }
-  }
-}
-
-async function deleteMergedBranch(
-  args: WorkspacePostMergeCleanupArgs,
-  deps: { gitService: GitService },
-  warnings: MergeWarning[],
-): Promise<void> {
-  try {
-    await deps.gitService.deleteBranch(args.repoPath, args.branch);
-    console.log(`[workspace-service] deleted branch ${args.branch}`);
-  } catch (err) {
-    addRecoverableWarning(warnings, "delete-branch", err);
-  }
+  await cleanupMergedWorktreeAndBranch({
+    repoPath: args.repoPath,
+    workingDir: args.workingDir,
+    branch: args.branch,
+    gitService: deps.gitService,
+    onRemoveWorktreeError: async (err) => {
+      addRecoverableWarning(warnings, "remove-worktree", err);
+      const warningMsg = err instanceof Error ? err.message : String(err);
+      try {
+        await persistWorkspaceCleanupWarning(args.workspaceId, warningMsg, args.workingDir ?? "", deps.database);
+      } catch (dbErr) {
+        console.warn("[workspace-merge] failed to persist cleanup warning:", dbErr instanceof Error ? dbErr.message : String(dbErr));
+      }
+    },
+    onBranchDeleted: () => console.log(`[workspace-service] deleted branch ${args.branch}`),
+    onDeleteBranchError: (err) => addRecoverableWarning(warnings, "delete-branch", err),
+  });
 }
 
 async function recordCleanupWarnings(
