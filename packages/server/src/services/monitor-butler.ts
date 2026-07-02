@@ -29,6 +29,7 @@
  * changes without a server restart, mirroring the existing board-monitor pattern.
  */
 import { randomUUID } from "node:crypto";
+import { parseBoolSetting } from "@agentic-kanban/shared/lib/settings-registry";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { query, type Options } from "@anthropic-ai/claude-agent-sdk";
@@ -279,7 +280,7 @@ export function startMonitorButler(): void {
   const generation = ++state.generation;
 
   async function scheduleNext() {
-    const enabled = (await getPreference("monitor_butler_enabled").catch(() => null)) === "true";
+    const enabled = parseBoolSetting("monitor_butler_enabled", await getPreference("monitor_butler_enabled").catch(() => null));
     if (state.generation !== generation) return;
     if (!enabled) {
       if (state.timer) {

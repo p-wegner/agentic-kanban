@@ -1,4 +1,5 @@
 import { isSpecPlanningStageName, syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import { runSmokeCheck } from "@agentic-kanban/shared/lib/smoke-check";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
@@ -702,7 +703,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     reviewSessionIds.delete(sessionId);
     const currentIssueRows = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId)).limit(1);
     const currentStatus = currentIssueRows.length > 0 ? statuses.find((s) => s.id === currentIssueRows[0].statusId) : null;
-    const autoFix = prefMap.get("review_auto_fix") !== "false";
+    const autoFix = getBool(prefMap, "review_auto_fix");
     if (currentStatus?.name === "In Progress" && !autoFix) {
       console.log("[workflow] reviewer flagged issues (non-auto-fix mode)  skipping auto-merge, leaving in In Progress");
       boardEvents.broadcast(projectId, "issue_updated");
@@ -724,7 +725,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     }
     await db.update(workspaces).set({ readyForMerge: true, updatedAt: now }).where(eq(workspaces.id, workspaceId));
     boardEvents.broadcast(projectId, "workspace_ready_for_merge");
-    const learningAfterReview = prefMap.get("learning_step_after_review") === "true" && workspace.workingDir ? launchLearningStep(db, sessionManager, learningSessionIds, workspace, prefMap, "after review", true) : Promise.resolve();
+    const learningAfterReview = getBool(prefMap, "learning_step_after_review") && workspace.workingDir ? launchLearningStep(db, sessionManager, learningSessionIds, workspace, prefMap, "after review", true) : Promise.resolve();
     if (autoMergeEnabled) {
       await learningAfterReview;
       // #797 synchronous foundational merge. A no-dependency scaffold/shell ticket that
@@ -799,7 +800,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       await syncCurrentNodeToStatus(db, issueId);
     }
     boardEvents.broadcast(projectId, "issue_updated");
-    if (prefMap.get("learning_step_after_agent") === "true" && workspace.workingDir) await launchLearningStep(db, sessionManager, learningSessionIds, workspace, prefMap, "after agent");
+    if (getBool(prefMap, "learning_step_after_agent") && workspace.workingDir) await launchLearningStep(db, sessionManager, learningSessionIds, workspace, prefMap, "after agent");
     const autoReview = !skipAutoReview && (workspace.requiresReview || isAutoReviewEnabled(prefMap.get(AUTO_REVIEW_PREF_KEY)));
     if (!autoReview) return;
     await launchAutoReview(ctx);
@@ -822,7 +823,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     const claudeProfile = isMockProfile(reviewProfile) ? undefined : reviewProfile;
     const effectiveReviewProfile = getEffectiveProfile(reviewPrefs, reviewProvider, claudeProfile);
     const profileSelection = effectiveReviewProfile ? { provider: reviewProvider, name: effectiveReviewProfile } : undefined;
-    const reviewArgs = buildReviewArgs(reviewPrefs, reviewProvider), autoFix = workspace.isDirect ? false : reviewPrefs.get("review_auto_fix") !== "false";
+    const reviewArgs = buildReviewArgs(reviewPrefs, reviewProvider), autoFix = workspace.isDirect ? false : getBool(reviewPrefs, "review_auto_fix");
     let diffRef = workspace.baseBranch || defaultBranch, conflictingFiles: string[] | undefined, uncommittedChanges: string[] | undefined;
     if (workspace.isDirect) diffRef = workspace.baseCommitSha || defaultBranch;
     else if (workspace.workingDir) {

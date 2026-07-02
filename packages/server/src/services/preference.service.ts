@@ -1,4 +1,5 @@
 import { readdirSync, statSync } from "node:fs";
+import { parseBoolSetting } from "@agentic-kanban/shared/lib/settings-registry";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { db } from "../db/index.js";
@@ -165,7 +166,7 @@ export function createPreferenceService({ database }: { database: Database }) {
     if (strategyEntries.length === 0) return;
     // Default ON: a Bullseye save regenerates the git-tracked objective.md, and an
     // uncommitted main checkout blocks the auto-merge queue. Opt out via the setting.
-    const autoCommit = (await getPreference("auto_commit_strategy_objective", database)) !== "false";
+    const autoCommit = parseBoolSetting("auto_commit_strategy_objective", await getPreference("auto_commit_strategy_objective", database));
     for (const entry of strategyEntries) {
       const projectId = projectIdFromBoardStrategyKey(entry.key);
       if (!projectId) continue;
