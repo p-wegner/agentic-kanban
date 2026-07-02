@@ -1,7 +1,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { openSync, closeSync, readSync, statSync, unlinkSync, existsSync, writeFileSync, readFileSync, appendFileSync, readdirSync, type Dirent } from "node:fs";
 import { join } from "node:path";
-import { buildAgentLaunchConfig, type ProviderId, type ProviderName } from "./agent-provider.js";
+import { buildAgentLaunchConfig, narrowProviderName, type ProviderId, type ProviderName } from "./agent-provider.js";
+import { warnIfCliVersionRisky } from "./agent-cli-version.service.js";
 import { sessionOutputPath, sessionErrorPath } from "../lib/session-paths.js";
 import { guardProcessKill, auditProcessEvent } from "./process-guard.js";
 import { resolveWorktreeDevPorts as resolveWorktreeDevPortsShared } from "./worktree-ports.js";
@@ -470,6 +471,15 @@ export function launch(
   };
 
   console.log(`[agent] launching: command=${command} provider=${provider ?? "auto"} worktree=${worktreePath} sessionId=${sessionId} resume=${providerSessionId ?? "none"}`);
+
+  // CLI version guard on the ACTUAL launch path (#956): the provider CLIs resolve
+  // by bare name from PATH and auto-update, so a breaking release used to pass
+  // every check until preflight happened to run. Fire-and-forget + TTL-cached
+  // (one `--version` subprocess per provider:command per 30 min), warn-only —
+  // never blocks or delays the spawn. Mock agents are not third-party CLIs.
+  if (!isMockAgent) {
+    void warnIfCliVersionRisky(narrowProviderName(provider), command);
+  }
 
   // Agents that don't need a shell can be detached — they survive tsx watch hot-reloads.
   // shell: true on Windows is used by mock agents and Codex (.cmd shim) — detaching those

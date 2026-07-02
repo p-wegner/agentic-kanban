@@ -22,6 +22,17 @@ export interface UnknownEventCounter {
 const counts = new Map<string, number>();
 let total = 0;
 
+// Escalation threshold (#956): per-key rate-limited logs are easy to miss when a
+// provider drifts wholesale (every event unknown). Once a PROVIDER accumulates
+// this many unknown events, emit ONE louder alert naming the provider and the
+// most frequent unknown types, so sustained drift is a single unmissable line
+// instead of a slow drip. Counts are per provider (this module has no session
+// context — the parse hot path is provider-scoped), which is the right grain:
+// drift comes from the CLI binary, not from one session.
+export const UNKNOWN_EVENT_ALERT_THRESHOLD = 10;
+const providerTotals = new Map<string, number>();
+const alertedProviders = new Set<string>();
+
 // Rate-limit the log so a sustained stream of an unknown type does not flood the
 // console. We log the first occurrence of each distinct provider:type key, then
 // at most once per key per window thereafter.
@@ -59,6 +70,8 @@ export function setUnknownEventClock(next: () => number): () => number {
 export function resetUnknownEventCounters(): void {
   counts.clear();
   lastLoggedAt.clear();
+  providerTotals.clear();
+  alertedProviders.clear();
   total = 0;
 }
 
@@ -86,6 +99,25 @@ export function recordUnknownAgentEvent(provider: string, eventType: string | un
       `[agent-stream] unknown event type from provider '${provider}': '${type}' ` +
         "(valid JSON, no parser matched — possible CLI wire-format drift)",
       { provider, eventType: type, count: counts.get(key) ?? 1 },
+    );
+  }
+
+  // Threshold alert (#956): fires ONCE per provider when its cumulative unknown
+  // count crosses the threshold (reset via resetUnknownEventCounters).
+  const providerTotal = (providerTotals.get(provider) ?? 0) + 1;
+  providerTotals.set(provider, providerTotal);
+  if (providerTotal >= UNKNOWN_EVENT_ALERT_THRESHOLD && !alertedProviders.has(provider)) {
+    alertedProviders.add(provider);
+    const sampleTypes = [...counts.entries()]
+      .filter(([k]) => k.startsWith(`${provider}:`))
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([k, c]) => `${k.slice(provider.length + 1)} (${c}x)`);
+    logger(
+      `[agent-stream] ALERT: provider '${provider}' has produced ${providerTotal} unknown stream events — ` +
+        "its CLI wire format has likely drifted (auto-update?). Check the installed CLI version against " +
+        `maxKnown in agent-cli-version.service.ts. Top unknown types: ${sampleTypes.join(", ")}`,
+      { provider, total: providerTotal, sampleTypes },
     );
   }
 }
