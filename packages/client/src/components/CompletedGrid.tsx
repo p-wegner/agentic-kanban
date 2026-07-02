@@ -4,6 +4,8 @@ import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { CompletedCard } from "./CompletedCard.js";
 import { ColumnMinimap } from "./ColumnMinimap.js";
 import { useIsNarrow } from "../hooks/useMediaQuery.js";
+import { useBoardFilterStore } from "../stores/boardFilterStore.js";
+import { useBoardBulkSelectionStore } from "../stores/boardBulkSelectionStore.js";
 
 const MINIMAP_THRESHOLD = 20;
 
@@ -18,8 +20,6 @@ interface CompletedGridProps {
   onIssueClick: (issue: IssueWithStatus, event: React.MouseEvent) => void;
   onDragStart: (e: React.DragEvent, issue: IssueWithStatus) => void;
   onDrop: (statusId: string, sortOrder?: number) => void;
-  searchQuery?: string;
-  selectedIssueIds?: Set<string>;
 }
 
 export function CompletedGrid({
@@ -29,9 +29,11 @@ export function CompletedGrid({
   onIssueClick,
   onDragStart,
   onDrop,
-  searchQuery,
-  selectedIssueIds,
 }: CompletedGridProps) {
+  // Store slices (#958): search highlight + bulk selection come from the board
+  // stores instead of being threaded through BoardKanbanView.
+  const searchQuery = useBoardFilterStore((s) => s.searchQuery);
+  const selectedIssueIds = useBoardBulkSelectionStore((s) => s.selectedBoardIssueIds);
   const [dragOver, setDragOver] = useState(false);
   const dragCounterRef = useRef(0);
   const isNarrow = useIsNarrow();
