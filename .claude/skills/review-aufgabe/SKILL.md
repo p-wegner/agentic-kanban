@@ -22,7 +22,7 @@ Warte auf die Antwort und verwende sie als AUFGABE_NR.
 
 ---
 
-# TEIL 0: Vorbereitung & Token-Watermark
+# TEIL 0: Vorbereitung
 
 ## Schritt 0.1: Branch prüfen
 
@@ -35,16 +35,6 @@ git rev-parse --verify --quiet origin/aufgabe{AUFGABE_NR}
 Wenn der Befehl nichts zurückgibt (Branch fehlt), gib aus:
 > "Branch origin/aufgabe{AUFGABE_NR} nicht gefunden. Verfügbar: $(git branch -r)"
 Und beende.
-
-## Schritt 0.2: Token-Watermark setzen
-
-Merke dir den Startzeitpunkt des Reviews (UTC, ISO 8601):
-
-```powershell
-(Get-Date).ToUniversalTime().ToString("o")
-```
-
-Speichere den Wert als `t0`. Er grenzt später die Token-Messung ein.
 
 ---
 
@@ -122,10 +112,14 @@ Output-Schema (Teil des Vertrags):
 }
 ```
 
-## Schritt 2.2: Findings übernehmen
+## Schritt 2.2: Findings & Token-Verbrauch übernehmen
 
 Nachdem der Subagent zurückkehrt, lese `workshop/review/findings-{AUFGABE_NR}.json`.
 Falls die Datei fehlt oder kein valides JSON enthält, vermerke das und behandle die Findings als leer.
+
+Merke dir außerdem den vom Agent-Tool zurückgegebenen **`subagent_tokens`**-Wert (im `<usage>`-Block
+des Agent-Ergebnisses). Das ist die Selbstauskunft über den Token-Verbrauch des Reviews (Input inkl.
+bereitgestelltem Kontext + Output). Er wird in TEIL 3 als `tokens_used` verwendet.
 
 ## Schritt 2.3: Review-Summary ausgeben
 
@@ -135,43 +129,20 @@ Gib aus:
 
 ---
 
-# TEIL 3: Token-Abrechnung (über alle Transcripts)
+# TEIL 3: Token-Abrechnung (Subagent-Selbstauskunft)
 
-## Schritt 3.1: Endzeit setzen & Transcripts scannen
+## Schritt 3.1: tokens_used bestimmen
 
-Setze `t1 = (Get-Date).ToUniversalTime().ToString("o")`. Summiere dann die Tokens aller
-Assistant-Nachrichten (Trainer-Session **und** Reviewer-Subagent(en)), deren Zeitstempel in
-`[t0, t1]` liegt. So werden auch verschachtelte Subagenten erfasst — egal ob Claude Code sie in
-eigene `*.jsonl`-Dateien oder als Sidechain in die Eltern-Datei schreibt.
+`tokens_used` = der in Schritt 2.2 gemerkte **`subagent_tokens`**-Wert aus dem `<usage>`-Block des
+Reviewer-Subagenten. Das ist der direkt vom Harness gemessene Token-Verbrauch des Reviews (Input inkl.
+bereitgestelltem Kontext + Output) — ohne den Trainer-Session-Kontext zu vermischen.
 
-```powershell
-$t0 = [datetime]"<t0>"; $t1 = [datetime]"<t1>"
-$slug = ($PWD.Path -replace '[:\\/]','-')
-$dir  = Join-Path $env:USERPROFILE ".claude\projects\$slug"
-$out = 0; $ctx = 0
-Get-ChildItem $dir -Filter *.jsonl | ForEach-Object {
-  $lastCtx = 0
-  Get-Content $_.FullName | ForEach-Object {
-    try { $m = $_ | ConvertFrom-Json } catch { return }
-    if ($m.type -ne 'assistant' -or -not $m.message.usage -or -not $m.timestamp) { return }
-    $ts = [datetime]$m.timestamp
-    if ($ts -ge $t0 -and $ts -le $t1) {
-      $u = $m.message.usage
-      $out += [int]$u.output_tokens
-      $lastCtx = [int]$u.input_tokens + [int]$u.cache_creation_input_tokens + [int]$u.cache_read_input_tokens
-    }
-  }
-  $ctx += $lastCtx
-}
-"output_tokens=$out context=$ctx tokens_used=$($out + $ctx)"
-```
+Kein Transcript-Scan, kein Zeitfenster. Die Zahl kommt ausschließlich aus dem Agent-Ergebnis.
 
-- `output_tokens` — vom Modell im Review-Fenster generierte Tokens (inkl. Subagenten)
-- `context` — Summe des letzten In-Window-Kontexts je Transcript (Review-Input)
-- `tokens_used = output_tokens + context` — geschätzter Gesamt-Token-Verbrauch des Reviews
-
-Hinweis: Näherung — die allerletzte Antwort eines Subagenten ist beim Auslesen evtl. noch nicht ins
-Transcript geschrieben (Flush-Race). Der Wert kann leicht zu niedrig sein.
+**Caveat bei Fan-out:** Wenn der Reviewer-Subagent gemäß seiner Strategie eigene Kind-Subagenten
+startet, ist deren Verbrauch je nach Harness evtl. **nicht** in `subagent_tokens` enthalten — dann ist
+`tokens_used` eine Untergrenze. Vermerke das in der Ausgabe, wenn du weißt, dass gefächert wurde. Falls
+das Agent-Ergebnis keinen `subagent_tokens`-Wert liefert, setze `tokens_used: null` und vermerke es.
 
 ---
 
@@ -215,8 +186,7 @@ Schreibe das Ergebnis nach `workshop/review/benchmark-result-{AUFGABE_NR}.json` 
   "max_score": 5,
   "tokens": {
     "tokens_used": 18432,
-    "output_tokens": 15230,
-    "context": 3202
+    "source": "subagent-self-report"
   },
   "details": [
     { "gold_id": "F1", "verdict": "found", "note": "Null check korrekt erkannt" },
@@ -235,7 +205,7 @@ Gib eine klare Zusammenfassung aus:
 ```
 === Benchmark Aufgabe {AUFGABE_NR} ===
 Score: X / {MAX}
-Tokens: {tokens_used}  (Output {output_tokens} / Kontext {context})
+Tokens: {tokens_used}  (Subagent-Selbstauskunft)
 
 ✓ F1 (high)   — found:   <kurze Note>
 ✓ F2 (high)   — found:   <kurze Note>
