@@ -154,4 +154,14 @@ describe("sanitizeUtf8 (write-boundary guard)", () => {
     const emoji = "🎉"; // U+1F389, a valid surrogate pair
     expect(sanitizeUtf8(emoji)).toBe(emoji);
   });
+
+  it("detects a lone surrogate on every call, not just the first (global-regex lastIndex)", () => {
+    // The detector regex has the `g` flag and is reused across calls; a naive
+    // `.test()` without resetting `lastIndex` only checks from where the previous
+    // call left off, silently skipping violations in later calls.
+    const first = "abc" + String.fromCharCode(0xd800) + "def";
+    const second = String.fromCharCode(0xd800) + "x";
+    expect(sanitizeUtf8(first)).toBe("abc�def");
+    expect(sanitizeUtf8(second)).toBe("�x");
+  });
 });
