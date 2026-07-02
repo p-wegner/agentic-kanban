@@ -13,7 +13,7 @@ Snapshot date: **2026-05-29**
 
 | Aspect            | Coding-Aider                                | Agentic-Kanban                           |
 | ----------------- | ------------------------------------------- | ---------------------------------------- |
-| Repo              | `C:/andrena/jetbrainsplugins/aider-shortcut` | `C:/andrena/agentic-kanban`              |
+| Repo              | `jetbrainsplugins/aider-shortcut`           | `agentic-kanban`                         |
 | What it is        | JetBrains IDE plugin wrapping the `aider` CLI | Local kanban board for AI-driven coding tasks |
 | Stack             | Kotlin (IntelliJ Platform SDK)              | TypeScript (Hono + React + Drizzle + MCP + Tauri) |
 | Era               | 2024-09 → 2025-10                           | 2026-05                                  |

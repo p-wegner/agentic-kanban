@@ -209,6 +209,36 @@ describe("stopDevServer", () => {
     expect(killPorts).not.toHaveBeenCalled();
     expect(killed).toBe(0);
   });
+
+  it("generic project: only the resolved port, no supervisor kill", async () => {
+    const killPorts = vi.fn(async () => 1);
+    const killSupervisor = vi.fn(async () => 0);
+    await stopDevServer({ port: 8000, source: { command: "profile", healthUrl: "profile", port: "profile" } }, { killPorts, killSupervisor });
+    expect(killSupervisor).not.toHaveBeenCalled();
+    expect(killPorts).toHaveBeenCalledWith([8000]);
+  });
+
+  it("this app's worktree server: also stops the backend port (+10000) and the dev.mjs supervisor", async () => {
+    const killPorts = vi.fn(async () => 2);
+    const killSupervisor = vi.fn(async () => 1);
+    await stopDevServer(
+      { port: 3005, source: { command: "profile", healthUrl: "worktree-port", port: "worktree-port" } },
+      { killPorts, killSupervisor },
+    );
+    // backend internal port = public ± 10000
+    expect(killSupervisor).toHaveBeenCalledWith([3005, 13005]);
+    expect(killPorts).toHaveBeenCalledWith([3005, 13005]);
+  });
+
+  it("worktree server above 55535: backend port is public − 10000", async () => {
+    const killPorts = vi.fn(async () => 0);
+    const killSupervisor = vi.fn(async () => 0);
+    await stopDevServer(
+      { port: 60000, source: { command: "profile", healthUrl: "worktree-port", port: "worktree-port" } },
+      { killPorts, killSupervisor },
+    );
+    expect(killPorts).toHaveBeenCalledWith([60000, 50000]);
+  });
 });
 
 describe("preference keys", () => {

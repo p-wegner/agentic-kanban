@@ -6,7 +6,7 @@
  *   ~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl
  *
  * Encoding scheme: replace all `:`, `\`, and `/` characters in the cwd with `-`.
- * E.g. `C:\andrena\agentic-kanban` → `C--andrena-agentic-kanban`
+ * E.g. `C:\code\my-app` → `C--code-my-app`
  *
  * Each line is a JSON object. Relevant entries:
  *   - `{ type: "user", entrypoint: "sdk-cli"|"cli", message: { role: "user", content: string }, timestamp: ISO, sessionId }`

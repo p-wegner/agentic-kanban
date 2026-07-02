@@ -420,26 +420,20 @@ Claude Code stores per-project conversation history under `~/.claude/projects/`,
 
 **Important: preserve non-kanban project sessions.** The `~/.claude/projects/` folder also contains sessions from other projects. The filter below uses two patterns to target only agentic-kanban worktree sessions while leaving everything else untouched.
 
-**Two path patterns produce worktree session dirs:**
-- `C:/andrena/.worktrees/...` encodes as `C--andrena--worktrees-*` (no "kanban" in the name)
-- `C:/andrena/agentic-kanban/packages/.worktrees/...` encodes as `C--andrena-agentic-kanban-packages--worktrees-*`
-- Claude Code's internal worktrees at `.claude/worktrees/` encode as `C--andrena-agentic-kanban--claude-worktrees-*`
+**Two path patterns produce worktree session dirs** (examples assume a repo at `<repo-parent>/<repo>` — substitute your own checkout location):
+- `<repo-parent>/.worktrees/...` encodes as `*<repo-parent>--worktrees-*` (no repo name in it)
+- `<repo-parent>/<repo>/packages/.worktrees/...` encodes as `*<repo>-packages--worktrees-*`
+- Claude Code's internal worktrees at `.claude/worktrees/` encode as `*<repo>--claude-worktrees-*`
 
 Both patterns are needed — a single `*kanban*worktrees*` filter misses the first category.
 
-**What gets preserved (not matched by filter):**
-- `C--andrena-agentic-kanban` — main checkout sessions
-- `C--andrena-agentic-kanban-packages-server` — server package sessions
-- `C--andrena-andrena-ai-blog` — other projects
-- `C--andrena-beyond-vibe-coding` — other projects
-- `C--andrena-beyond-vibe-coding-demo` — other projects
-- `C--andrena-KI-Themen` — other projects
-- `C--andrena-without-hook-demo` — other projects
-- `C--Tools`, `C--Tools-claude-pick` — other projects
-- `C--Users-pwegner` — other projects
+**What gets preserved (not matched by filter):** the main-checkout session dir
+(the encoded repo root with no `worktrees` segment), package-scoped dirs, and every
+other project's session dirs — the filter only matches the `worktrees` patterns above.
 
 ```powershell
-# Preview: list all agentic-kanban worktree session dirs
+# Preview: list this project's worktree session dirs
+# (the `*andrena--worktrees*` literal assumes a repo under C:\andrena — adjust to `*<your-repo-parent>--worktrees*`)
 Get-ChildItem "$env:USERPROFILE\.claude\projects\" -Directory |
     Where-Object {
         ($_.Name -like "*kanban*worktrees*") -or
@@ -459,7 +453,7 @@ $size = ($dirs | ForEach-Object {
 } | Measure-Object -Sum).Sum
 Write-Output "Dirs: $($dirs.Count), Size: $([math]::Round($size / 1MB, 1)) MB"
 
-# Delete all agentic-kanban worktree session history
+# Delete this project's worktree session history
 Get-ChildItem "$env:USERPROFILE\.claude\projects\" -Directory |
     Where-Object {
         ($_.Name -like "*kanban*worktrees*") -or

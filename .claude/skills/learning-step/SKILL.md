@@ -51,7 +51,7 @@ For each friction point, classify the fix and apply per these constraints:
 
 | Type | Target | When | Rules |
 |---|---|---|---|
-| **Documentation** | memory files, CLAUDE.md, `.llm/workflows.md` | agent lacked knowledge | 1-3 lines, never removal. Memory: create in `C:\Users\pwegner\.claude\projects\C--andrena-agentic-kanban\memory\` as `pitfall_/pattern_/feedback_<topic>.md` with frontmatter `type: feedback` (or `project`), AND add an index entry to `MEMORY.md`. CLAUDE.md: Architecture Patterns sections (root, client, server). |
+| **Documentation** | memory files, CLAUDE.md, `.llm/workflows.md` | agent lacked knowledge | 1-3 lines, never removal. Memory: create in the current project's memory dir (`%USERPROFILE%\.claude\projects\<encoded-repo-path>\memory\` — the same dir the session's transcript lives under) as `pitfall_/pattern_/feedback_<topic>.md` with frontmatter `type: feedback` (or `project`), AND add an index entry to `MEMORY.md`. CLAUDE.md: Architecture Patterns sections (root, client, server). |
 | **Skill update** | `.claude/skills/*/SKILL.md` | a skill prompt missed a step | preserve frontmatter + structure, add guidance |
 | **Hook addition** | `.claude/hooks/` config | failure mode is mechanically preventable | suggest the pattern, never weaken existing hooks |
 | **Code** | CLI / REST / MCP tools | a missing tool would prevent friction | implement simple additions; flag complex architectural ones for user review |

@@ -18,12 +18,10 @@
  */
 
 import { createClient } from "@libsql/client";
-import { drizzle } from "drizzle-orm/libsql";
-import { migrate } from "drizzle-orm/libsql/migrator";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { existsSync, statSync, unlinkSync, writeFileSync, renameSync } from "node:fs";
-import { getMigrationsFolder } from "../db/migrations.js";
+import { applyMigrations } from "../db/manual-migrate.js";
 import { createBackup, backupDir } from "../db/backup.js";
 import { alignForeignKeyActions } from "@agentic-kanban/shared/lib/fk-actions-repair";
 
@@ -72,20 +70,16 @@ function dbUrl(): string {
 }
 
 async function runMigrations(): Promise<void> {
+  // Use the hardened in-house migrator (applyMigrations), NOT drizzle-orm's migrate().
+  // On non-LTS Node the libsql@0.4.7 binding throws a spurious "SQLITE_OK: not an error"
+  // on the first CREATE TABLE IF NOT EXISTS. drizzle-orm's migrate() aborts on it, and
+  // catching-then-assuming-"up to date" (the previous impl) silently applied ZERO
+  // migrations on a fresh/empty db. applyMigrations ignores that error PER STATEMENT
+  // and continues, so repair actually brings an empty db fully up to date.
   const client = createClient({ url: dbUrl() });
-  const db = drizzle({ client });
   try {
-    await migrate(db, { migrationsFolder: getMigrationsFolder() });
+    await applyMigrations(client);
     log("migrations applied (schema up to date).");
-  } catch (err: unknown) {
-    // Known libsql@0.4.7 + Node bug: CREATE TABLE IF NOT EXISTS on an existing table
-    // returns SQLITE_OK which libsql misreports as an error. Safe to ignore.
-    const spurious =
-      err instanceof Error &&
-      err.message.includes("not an error") &&
-      (err as NodeJS.ErrnoException).code === "SQLITE_OK";
-    if (!spurious) throw err;
-    log("ignored known libsql SQLITE_OK false-error — db already up to date.");
   } finally {
     client.close();
   }

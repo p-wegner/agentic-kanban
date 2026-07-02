@@ -6,7 +6,7 @@ argument-hint: "[short description of the change]"
 
 # direct-master
 
-Use this when you're asked to change something **directly on master** in the main checkout (`C:\andrena\agentic-kanban`) — a quick doc fix, a small config tweak, a skill edit — rather than going through a kanban issue + worktree.
+Use this when you're asked to change something **directly on master** in the main checkout (the repo root) — a quick doc fix, a small config tweak, a skill edit — rather than going through a kanban issue + worktree.
 
 ## Why aggressive commits matter here
 
@@ -15,8 +15,8 @@ The board's auto-merge **refuses to land an approved workspace if the main check
 ## Step 1 — Confirm you're on master in the main checkout
 
 ```bash
-git -C C:/andrena/agentic-kanban rev-parse --abbrev-ref HEAD   # must print: master
-git -C C:/andrena/agentic-kanban status --short
+git -C "$(git rev-parse --show-toplevel)" rev-parse --abbrev-ref HEAD   # must print: master
+git -C "$(git rev-parse --show-toplevel)" status --short
 ```
 
 If you're not on `master` or not in the main checkout, stop — this skill is only for direct main-checkout work.
@@ -32,8 +32,8 @@ Break the work so each unit leaves the repo in a working, committable state. Pre
 Stage **only** the files this unit touched (never `git add .` / `git add -A` — that can sweep up `kanban.db-wal`, other agents' artifacts, or unrelated churn):
 
 ```bash
-git -C C:/andrena/agentic-kanban add <specific files>
-git -C C:/andrena/agentic-kanban commit -m "<concise message>"
+git -C "$(git rev-parse --show-toplevel)" add <specific files>
+git -C "$(git rev-parse --show-toplevel)" commit -m "<concise message>"
 ```
 
 End every commit message with the trailer:
@@ -47,7 +47,7 @@ Never stage or commit `kanban.db`, `kanban.db-shm`, or `kanban.db-wal`.
 ## Step 4 — Push immediately
 
 ```bash
-git -C C:/andrena/agentic-kanban push
+git -C "$(git rev-parse --show-toplevel)" push
 ```
 
 Push after each commit (or each tight batch). An unpushed master commit doesn't dirty the tree, but pushing promptly keeps worktrees that rebase onto `origin/master` current and avoids a pile-up.
@@ -55,7 +55,7 @@ Push after each commit (or each tight batch). An unpushed master commit doesn't 
 ## Step 5 — Verify the tree is clean before you stop
 
 ```bash
-git -C C:/andrena/agentic-kanban status --short    # must be empty
+git -C "$(git rev-parse --show-toplevel)" status --short    # must be empty
 ```
 
 The tree **must** be clean when you finish. If `status` shows anything you created, commit or revert it now. Report the commits you made (short SHAs + messages) and confirm the working tree is clean so auto-merge is unblocked.

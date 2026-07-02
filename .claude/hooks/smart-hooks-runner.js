@@ -188,7 +188,21 @@ function pathIsInside(child, parent) {
 }
 
 function getMainCheckout() {
-  return process.env.KANBAN_MAIN_CHECKOUT || "C:\\andrena\\agentic-kanban";
+  if (process.env.KANBAN_MAIN_CHECKOUT) return process.env.KANBAN_MAIN_CHECKOUT;
+  // Derive the main checkout from git instead of hardcoding a machine-specific path.
+  // In a worktree, --git-common-dir resolves to the MAIN checkout's .git, whose parent
+  // is the main checkout; in the main checkout it resolves to ./.git → the repo root.
+  const startDir = process.env.CLAUDE_PROJECT_DIR || hookInput.cwd || process.cwd();
+  try {
+    const commonDir = execSync("git rev-parse --path-format=absolute --git-common-dir", {
+      cwd: startDir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
+    }).trim();
+    if (commonDir) return path.dirname(commonDir);
+  } catch {}
+  return getProjectDir();
 }
 
 function isWorktreePath(p) {
@@ -204,7 +218,10 @@ function commandRunsVitest(command) {
 }
 
 function commandMovesToMainCheckout(command) {
-  return /\b(?:cd|Set-Location|Push-Location)\s+["']?C:[\/\\]andrena[\/\\]agentic-kanban\b/i.test(command);
+  const main = getMainCheckout();
+  if (!main) return false;
+  const m = command.match(/\b(?:cd|Set-Location|Push-Location)\s+["']?([^\s"';]+)/i);
+  return m ? pathIsInside(m[1], main) : false;
 }
 
 function getToolCwd(input) {
