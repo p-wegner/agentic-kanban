@@ -7,6 +7,7 @@ import { sessionOutputPath, sessionErrorPath } from "../lib/session-paths.js";
 import { guardProcessKill, auditProcessEvent } from "./process-guard.js";
 import { resolveWorktreeDevPorts as resolveWorktreeDevPortsShared } from "./worktree-ports.js";
 import { shouldDetachAgent, resolveLaunchPorts, buildAgentSpawnEnv } from "../lib/agent-launch-env.js";
+import { sanitizeUtf8 } from "@agentic-kanban/shared/lib/sanitize-utf8";
 
 function resolveWorktreeDevPorts(worktreePath: string): { serverPort: string; clientPort: string } | null {
   const ports = resolveWorktreeDevPortsShared(worktreePath);
@@ -172,7 +173,7 @@ function startOutputFileWatcher(
           const buf = Buffer.alloc(stat.size - offset);
           readSync(fd, buf, 0, buf.length, offset);
           offset = stat.size;
-          const data = buf.toString();
+          const data = sanitizeUtf8(buf.toString());
           if (data) {
             try {
               onOutput({ type: "stdout", sessionId, data });
@@ -338,7 +339,7 @@ function setupChildOutput(
 
   proc.stdout?.on("data", (chunk: Buffer) => {
     try {
-      const data = chunk.toString();
+      const data = sanitizeUtf8(chunk.toString());
       try { appendFileSync(pipedOutPath, data); } catch { /* ignore */ }
       onOutput({ type: "stdout", sessionId, data });
     } catch (err) {
@@ -348,7 +349,7 @@ function setupChildOutput(
 
   proc.stderr?.on("data", (chunk: Buffer) => {
     try {
-      onOutput({ type: "stderr", sessionId, data: chunk.toString() });
+      onOutput({ type: "stderr", sessionId, data: sanitizeUtf8(chunk.toString()) });
     } catch (err) {
       console.error(`[agent] stderr callback error: sessionId=${sessionId}`, err);
     }
