@@ -27,9 +27,12 @@ async function restoreWorkflowSets({ reviewSessionIds, fixAndMergeSessionIds, le
     if (s.triggerType === "review") {
       reviewSessionIds.add(s.id);
       console.log(`[startup] restored review session: sessionId=${s.id}`);
-    } else if (s.triggerType === "fix-and-merge") {
+    } else if (s.triggerType === "fix-and-merge" || s.triggerType === "fix-conflicts") {
+      // "fix-conflicts" (resolve-conflicts route) sessions live in the same
+      // fixAndMergeSessionIds set as fix-and-merge sessions at launch time —
+      // restore them into the same set (see roleFromTriggerType, #950).
       fixAndMergeSessionIds.add(s.id);
-      console.log(`[startup] restored fix-and-merge session: sessionId=${s.id}`);
+      console.log(`[startup] restored ${s.triggerType} session: sessionId=${s.id}`);
     } else if (s.triggerType === "learning") {
       learningSessionIds.add(s.id);
       console.log(`[startup] restored learning session: sessionId=${s.id}`);

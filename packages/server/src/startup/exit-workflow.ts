@@ -25,8 +25,9 @@ import { isCodexUsageLimitStats } from "../services/codex-rate-limit.js";
 import { rotateCodexLicense } from "../services/codex-license-ring.js";
 import { isClaudeUsageLimitStats } from "../services/claude-rate-limit.js";
 import { rotateClaudeSubscription } from "../services/claude-subscription-ring.js";
-import { isBuilderSession, decideRateLimitExit, formatRateLimitBlockedReason } from "./rate-limit-exit-decision.js";
-import { classifySessionExit } from "./session-exit-classification.js";
+import { decideRateLimitExit, formatRateLimitBlockedReason } from "./rate-limit-exit-decision.js";
+import { classifySessionExit, resolveSessionRoleFlags } from "./session-exit-classification.js";
+import type { SessionRoleFlags } from "./session-exit-classification.js";
 import { buildLearningStepPrompt } from "../services/merge-helpers.service.js";
 import { isFoundationalBlocker } from "../services/foundational-merge.service.js";
 import { isColdCloneCheckEnabled, runColdCloneBuildCheckForProject } from "../services/cold-clone-build-check.service.js";
@@ -300,12 +301,16 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     projectId: string,
     now: string,
     statsJson: string | null | undefined,
+    roleFlags: SessionRoleFlags,
   ): Promise<void> {
     const resetsAt = parseRateLimitRetryAfter(statsJson);
     const rotationPrefMap = new Map((await db.select().from(preferences)).map((r) => [r.key, r.value]));
     const currentProfile = rotationPrefMap.get(cfg.profilePrefKey) || "default";
     const rotation = await cfg.rotate(db, rotationPrefMap, currentProfile, resetsAt, new Date(now));
-    const builder = isBuilderSession(sessionId, { reviewSessionIds, fixAndMergeSessionIds, learningSessionIds });
+    // Builder = none of the special roles. Resolved from the in-memory sets AND the
+    // persisted triggerType so a reattached (post-restart) review/fix/learning session
+    // is never relaunched as if it were a builder (#950).
+    const builder = !roleFlags.isReview && !roleFlags.isFixAndMerge && !roleFlags.isLearning;
 
     if (decideRateLimitExit(rotation, builder).action === "relaunch") {
       try {
@@ -381,10 +386,15 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       // relaunch a builder on the fresh account (review/fix sessions inherit the switched
       // pref and rely on their own reconciler). Both providers share one implementation
       // parameterized by `USAGE_LIMIT_PROVIDERS`.
-      const sessionRows = await db.select({ stats: sessions.stats }).from(sessions).where(eq(sessions.id, sessionId)).limit(1);
+      const sessionRows = await db.select({ stats: sessions.stats, triggerType: sessions.triggerType }).from(sessions).where(eq(sessions.id, sessionId)).limit(1);
+      // #950: resolve the session's role from the in-memory sets (fast path) AND the
+      // persisted sessions.triggerType (source of truth that survives restarts). A
+      // reattached review/fix-and-merge/learning session exits into EMPTY sets — the
+      // DB value keeps it from being misrouted to the builder handler.
+      const roleFlags = resolveSessionRoleFlags(sessionId, sessionRows[0]?.triggerType, { reviewSessionIds, fixAndMergeSessionIds, learningSessionIds });
       const usageLimitCfg = USAGE_LIMIT_PROVIDERS.find((cfg) => cfg.isUsageLimitStats(sessionRows[0]?.stats));
       if (usageLimitCfg) {
-        await handleUsageLimitExit(usageLimitCfg, workspaceId, sessionId, issueId, projectId, now, sessionRows[0]?.stats);
+        await handleUsageLimitExit(usageLimitCfg, workspaceId, sessionId, issueId, projectId, now, sessionRows[0]?.stats, roleFlags);
         return;
       }
       // Route the (non-already-merged, non-usage-limited) exit to exactly one terminal
@@ -393,9 +403,9 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       // here, in the same order as the original control flow.
       const classification = classifySessionExit({
         wasPlanMode: wasPlanMode ?? false,
-        isFixAndMerge: fixAndMergeSessionIds.has(sessionId),
-        isLearning: learningSessionIds.has(sessionId),
-        isReview: reviewSessionIds.has(sessionId),
+        isFixAndMerge: roleFlags.isFixAndMerge,
+        isLearning: roleFlags.isLearning,
+        isReview: roleFlags.isReview,
         exitCode,
       });
       await db.update(workspaces).set({ status: "idle", updatedAt: now }).where(eq(workspaces.id, workspaceId));
