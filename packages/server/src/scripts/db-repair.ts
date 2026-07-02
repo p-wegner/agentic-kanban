@@ -17,12 +17,14 @@
  *   pnpm db:repair --force    # additionally recreate an unusable db (backup taken first)
  */
 
-import { createClient } from "@libsql/client";
+import type { createClient } from "@libsql/client";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { existsSync, statSync, unlinkSync, writeFileSync, renameSync } from "node:fs";
 import { applyMigrations } from "../db/manual-migrate.js";
 import { createBackup, backupDir } from "../db/backup.js";
+import { createClientWithPragmas } from "../db/pragmas.js";
+import { quarantineAndDeleteFkViolations } from "../db/fk-violations.js";
 import { alignForeignKeyActions } from "@agentic-kanban/shared/lib/fk-actions-repair";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -76,7 +78,7 @@ async function runMigrations(): Promise<void> {
   // catching-then-assuming-"up to date" (the previous impl) silently applied ZERO
   // migrations on a fresh/empty db. applyMigrations ignores that error PER STATEMENT
   // and continues, so repair actually brings an empty db fully up to date.
-  const client = createClient({ url: dbUrl() });
+  const client = await createClientWithPragmas(dbUrl());
   try {
     await applyMigrations(client);
     log("migrations applied (schema up to date).");
@@ -93,7 +95,7 @@ async function runMigrations(): Promise<void> {
  * column shape untouched). A backup was already taken at the top of main().
  */
 async function alignFks(): Promise<void> {
-  const client = createClient({ url: dbUrl() });
+  const client = await createClientWithPragmas(dbUrl());
   try {
     const result = await alignForeignKeyActions(client);
     if (result.driftedTables.length === 0) {
@@ -104,6 +106,37 @@ async function alignFks(): Promise<void> {
       log(`  drift: ${m.table}.${m.fk} ${m.field} — schema=${m.expected} live=${m.actual}`);
     }
     log(`FK-action drift aligned by rebuilding: ${result.rebuiltTables.join(", ")}`);
+  } finally {
+    client.close();
+  }
+}
+
+/**
+ * FK-VIOLATION repair (#987). `PRAGMA foreign_keys=ON` only guards new writes —
+ * rows inserted by past connections without the pragma (ad-hoc scripts) can already
+ * violate FKs, and neither migrations nor the FK-action alignment above touch them.
+ * This step reports every violating row, dumps the full rows to a quarantine JSON
+ * next to the DB, then deletes them inside one transaction. Clean DB = no-op.
+ */
+async function repairFkViolations(): Promise<void> {
+  const client = await createClientWithPragmas(dbUrl());
+  try {
+    const result = await quarantineAndDeleteFkViolations(client, dirname(DB_PATH));
+    if (result.violations.length === 0) {
+      log("foreign_key_check: no FK violations (existing data is consistent).");
+      return;
+    }
+    log(`foreign_key_check found ${result.violations.length} FK-violating row(s):`);
+    for (const v of result.violations) {
+      log(`  ${v.table} rowid=${v.rowid ?? "?"} → missing ${v.parent} (fk #${v.fkid}) row=${v.snippet}`);
+    }
+    log(`quarantined full rows to: ${result.quarantinePath}`);
+    log(`deleted ${result.deletedRows} orphaned row(s) in one transaction.`);
+    if (result.remaining === 0) {
+      log("re-check: foreign_key_check now reports 0 violations.");
+    } else {
+      log(`WARNING: re-check still reports ${result.remaining} violation(s) — inspect manually.`);
+    }
   } finally {
     client.close();
   }
@@ -129,8 +162,11 @@ async function main() {
   let usable = exists && size > 0;
 
   if (usable) {
-    const client = createClient({ url: dbUrl() });
+    let client: ReturnType<typeof createClient> | null = null;
     try {
+      // Standard pragmas (incl. foreign_keys=ON) via the shared factory (#987); on a
+      // corrupt file this throws SQLITE_NOTADB, handled just like the checkpoint below.
+      client = await createClientWithPragmas(dbUrl());
       // Flush any stale WAL into the main db; truncates the -wal file on success.
       await client.execute("PRAGMA wal_checkpoint(TRUNCATE)");
       log("WAL checkpoint complete.");
@@ -151,13 +187,13 @@ async function main() {
       } else if (code === "SQLITE_BUSY" || code === "EBUSY") {
         log("database is LOCKED. Stop the dev server / kill orphaned tsx processes, then retry:");
         log("  Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*tsx*src/index*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }");
-        client.close();
+        client?.close();
         process.exit(1);
       } else {
         throw err;
       }
     } finally {
-      client.close();
+      client?.close();
     }
   } else {
     log(exists ? "db file is zero bytes." : "db file does not exist.");
@@ -200,6 +236,15 @@ async function main() {
       await alignFks();
     } catch (err) {
       log(`WARNING: FK-action alignment failed (schema is still up to date): ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    // 6. Quarantine + delete rows that ALREADY violate FKs (#987) — pre-existing
+    //    orphans the per-connection pragma can't catch. Backup was taken in step 1;
+    //    the step writes its own quarantine JSON next to the DB before deleting.
+    try {
+      await repairFkViolations();
+    } catch (err) {
+      log(`WARNING: FK-violation repair failed (nothing was deleted — the delete is transactional): ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
