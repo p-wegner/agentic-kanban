@@ -28,9 +28,11 @@ import { join } from "node:path";
 // resolution must NOT call it directly — it must funnel through the shared resolver
 // (which mirrors the Bullseye onto the prefMap via `applyProviderSelectionToPrefMap`
 // first). Only a small, explicit allow-list of files may call it: the strategy module
-// that defines it, and the legitimate Bullseye *readers* (divergence detection, drive
-// preflight, the route that mirrors it onto the prefMap before calling the resolver).
-// Any NEW caller is a likely fork and fails here until it is justified + added below.
+// that defines it, and the legitimate Bullseye *readers* (divergence detection, the
+// route that mirrors it onto the prefMap before calling the resolver). Drive preflight
+// migrated to the shared cross-package resolver (`resolveProviderProfileFromPrefs`,
+// #992) and was removed from this allow-list. Any NEW caller is a likely fork and
+// fails here until it is justified + added below.
 
 const SERVER_SRC = join(import.meta.dirname, "..");
 const MCP_SERVER_SRC = join(import.meta.dirname, "..", "..", "..", "mcp-server", "src");
