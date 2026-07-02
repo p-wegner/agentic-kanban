@@ -35,6 +35,7 @@ function isLowSurrogate(code: number): boolean {
  * for the overwhelming majority of strings that contain no surrogates at all.
  */
 export function sanitizeUtf8(value: string): string {
+  LONE_SURROGATE.lastIndex = 0;
   if (!LONE_SURROGATE.test(value)) return value;
   let out = "";
   for (let i = 0; i < value.length; i++) {
