@@ -26,10 +26,12 @@ export const COPILOT_SESSION_START_TYPES = new Set([
 export const COPILOT_RESULT_TYPES = new Set([
   "result",
   "done",
+  "completed",
   "session_end",
   "session_ended",
   "session.end",
   "session.ended",
+  "session.completed",
   "turn_completed",
   "turn.completed",
   "stats",

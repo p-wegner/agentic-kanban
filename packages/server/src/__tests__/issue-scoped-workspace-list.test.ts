@@ -24,6 +24,11 @@ async function seedProject(db: TestDb, name = "test-project") {
   return projectId;
 }
 
+// Unique per-issue number: migration 0094 enforces UNIQUE(project_id, issue_number),
+// so seeding several issues into one project needs distinct numbers. Each test uses a
+// fresh DB, so a monotonic counter is unique within any one DB.
+let issueSeq = 0;
+
 async function seedIssue(db: TestDb, projectId: string, title = "Test issue") {
   const statusId = randomUUID();
   await db.insert(schema.projectStatuses).values({
@@ -39,7 +44,7 @@ async function seedIssue(db: TestDb, projectId: string, title = "Test issue") {
     title,
     statusId,
     projectId,
-    issueNumber: 1,
+    issueNumber: ++issueSeq,
   });
   return issueId;
 }
