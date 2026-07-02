@@ -42,7 +42,8 @@
     "./lib/workflow-engine": { "development": "./src/lib/workflow-engine.ts", "types": "./dist/lib/workflow-engine.d.ts", "import": "./dist/lib/workflow-engine.js", "default": "./src/lib/workflow-engine.ts" },
     "./lib/smoke-check": { "development": "./src/lib/smoke-check.ts", "types": "./dist/lib/smoke-check.d.ts", "import": "./dist/lib/smoke-check.js", "default": "./src/lib/smoke-check.ts" },
     "./lib/drive-retro": { "development": "./src/lib/drive-retro.ts", "types": "./dist/lib/drive-retro.d.ts", "import": "./dist/lib/drive-retro.js", "default": "./src/lib/drive-retro.ts" },
-    "./lib/failure-keywords": { "development": "./src/lib/failure-keywords.ts", "types": "./dist/lib/failure-keywords.d.ts", "import": "./dist/lib/failure-keywords.js", "default": "./src/lib/failure-keywords.ts" }
+    "./lib/failure-keywords": { "development": "./src/lib/failure-keywords.ts", "types": "./dist/lib/failure-keywords.d.ts", "import": "./dist/lib/failure-keywords.js", "default": "./src/lib/failure-keywords.ts" },
+    "./lib/db-path": { "development": "./src/lib/db-path.ts", "types": "./dist/lib/db-path.d.ts", "import": "./dist/lib/db-path.js", "default": "./src/lib/db-path.ts" }
   },
   "scripts": {
     "prepare": "pnpm build",
