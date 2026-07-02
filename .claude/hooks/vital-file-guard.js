@@ -138,6 +138,12 @@ function isCommandDangerous(command, vitalFiles) {
 // Backup
 // ---------------------------------------------------------------------------
 
+// SQLite WAL sidecars — in WAL mode, committed transactions live in the -wal
+// file until checkpoint, so a backup of the main file alone can silently omit
+// recent commits. Copy the sidecars alongside the main file when they exist
+// (mirrors validate-command-safety.js backupDatabase()).
+const SIDECAR_SUFFIXES = ["", "-wal", "-shm"];
+
 function backupFile(filePath, projectDir) {
   try {
     const abs = path.isAbsolute(filePath) ? filePath : path.join(projectDir, filePath);
@@ -146,8 +152,11 @@ function backupFile(filePath, projectDir) {
     const backupDir = path.join(abs + ".backups");
     fs.mkdirSync(backupDir, { recursive: true });
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const dest = path.join(backupDir, `${path.basename(abs)}.${stamp}`);
-    fs.copyFileSync(abs, dest);
+    for (const suffix of SIDECAR_SUFFIXES) {
+      const src = abs + suffix;
+      if (suffix && !fs.existsSync(src)) continue; // sidecars are optional
+      fs.copyFileSync(src, path.join(backupDir, `${path.basename(abs)}${suffix}.${stamp}`));
+    }
     pruneBackups(backupDir, 10);
     return backupDir;
   } catch {
@@ -155,12 +164,23 @@ function backupFile(filePath, projectDir) {
   }
 }
 
+/** Keep only the newest `keep` backup SETS, grouped by the timestamp suffix so
+ *  a main file and its -wal/-shm sidecars are pruned together. */
 function pruneBackups(dir, keep) {
   try {
-    const files = fs.readdirSync(dir).sort();
-    const toRemove = files.slice(0, Math.max(0, files.length - keep));
-    for (const f of toRemove) {
-      try { fs.unlinkSync(path.join(dir, f)); } catch { /* ignore */ }
+    const stampRe = /\.(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z)$/;
+    const byStamp = new Map();
+    for (const f of fs.readdirSync(dir)) {
+      const m = f.match(stampRe);
+      if (!m) continue; // unrecognized file — leave it alone
+      if (!byStamp.has(m[1])) byStamp.set(m[1], []);
+      byStamp.get(m[1]).push(f);
+    }
+    const sorted = [...byStamp.keys()].sort(); // ISO stamps sort chronologically
+    for (const stamp of sorted.slice(0, Math.max(0, sorted.length - keep))) {
+      for (const f of byStamp.get(stamp)) {
+        try { fs.unlinkSync(path.join(dir, f)); } catch { /* ignore */ }
+      }
     }
   } catch {
     /* non-fatal */
