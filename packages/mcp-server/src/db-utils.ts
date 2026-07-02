@@ -1,6 +1,7 @@
-import { eq, sql, and, ne } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { ToolDb } from "./tools/deps.js";
 import type * as schemaModule from "@agentic-kanban/shared/schema";
+import { findOpenUnmergedWorkspace } from "@agentic-kanban/shared/lib/issue-status-orchestration";
 
 // The per-session .out transcript reader is shared with the server (single source
 // of truth in @agentic-kanban/shared/lib/session-files), not a hand-synced fork.
@@ -162,25 +163,23 @@ export async function resolveStatusByName(
  * workspace for this issue? Direct workspaces (isDirect=true) commit straight to
  * master — no branch to merge — so they are excluded. Moving an issue to a
  * terminal status (Done/Cancelled) while such a workspace is open strands the
- * branch and causes silent merge loss (AK-535). Shared by move_issue and
- * update_issue so the two guards can't drift.
+ * branch and causes silent merge loss (AK-535).
+ *
+ * The guard QUERY now lives in the shared `issue-status-orchestration` seam
+ * (arch-review #974), consumed by BOTH the server issue service and these MCP
+ * tools so they can no longer drift; this thin wrapper adapts the shared
+ * `{ id, branch } | null` result into the `{ blocked, workspaceId, branch }`
+ * shape the move_issue/update_issue call sites branch on. The `schema` param is
+ * kept for call-site compatibility.
  */
 export async function checkOpenUnmergedWorkspace(
   db: ToolDb,
-  schema: typeof schemaModule,
+  _schema: typeof schemaModule,
   issueId: string,
 ): Promise<{ blocked: boolean; workspaceId?: string; branch?: string }> {
-  const openWs = await db
-    .select({ id: schema.workspaces.id, branch: schema.workspaces.branch })
-    .from(schema.workspaces)
-    .where(and(
-      eq(schema.workspaces.issueId, issueId),
-      ne(schema.workspaces.status, "closed"),
-      eq(schema.workspaces.isDirect, false),
-    ))
-    .limit(1);
-  if (openWs.length === 0) return { blocked: false };
-  return { blocked: true, workspaceId: openWs[0].id, branch: openWs[0].branch };
+  const openWs = await findOpenUnmergedWorkspace(db, issueId);
+  if (!openWs) return { blocked: false };
+  return { blocked: true, workspaceId: openWs.id, branch: openWs.branch };
 }
 
 /**
