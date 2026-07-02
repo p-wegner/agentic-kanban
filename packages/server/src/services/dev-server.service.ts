@@ -13,8 +13,9 @@
 //     prefs > profile > app worktree-port convention.
 //   - startDevServer: spawn the command headless + windowsHide + detached, log to file.
 //   - healthCheckDevServer: poll the health URL until it answers (bounded), no port-scan.
-//   - stopDevServer: kill ONLY the resolved port's listener (reuses killProcessesOnPorts) —
-//     never all node, never a range.
+//   - stopDevServer: kill the resolved port's listener (reuses killProcessesOnPorts) —
+//     never all node, never a range. For this app's own worktree dev server it also
+//     stops the proxy-backed backend port and the respawning scripts/dev.mjs supervisor.
 
 import type { ChildProcess } from "node:child_process";
 import { openSync } from "node:fs";
@@ -24,7 +25,7 @@ import type { StackProfile } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { getStackProfile } from "./stack-profile.service.js";
-import { killProcessesOnPorts } from "./process-cleanup.js";
+import { killProcessesOnPorts, killDevServerSupervisorOnPorts } from "./process-cleanup.js";
 import { spawnShellCommand } from "./process-exec.js";
 import { resolveWorktreeDevPorts } from "./worktree-ports.js";
 
@@ -293,6 +294,15 @@ export async function healthCheckDevServer(
 
 export interface StopDevServerDeps {
   killPorts?: (ports: number[]) => Promise<number>;
+  killSupervisor?: (ports: number[]) => Promise<number>;
+}
+
+/**
+ * Internal backend port behind this app's `server-dev-proxy.mjs`: the public server
+ * port forwards to a backend on publicPort ± 10000 (mirrors the proxy's own math).
+ */
+function backendPortFor(publicPort: number): number {
+  return publicPort <= 55535 ? publicPort + 10000 : publicPort - 10000;
 }
 
 /**
@@ -300,12 +310,33 @@ export interface StopDevServerDeps {
  * node, never a range. Reuses killProcessesOnPorts, which targets exact ports and
  * still routes every kill through the board's process guard (protected PIDs spared).
  * A no-op (returns 0) when the plan has no port to target.
+ *
+ * Special-cased for this app's OWN worktree dev server (`source.port === "worktree-port"`),
+ * which runs behind `server-dev-proxy.mjs` under a `scripts/dev.mjs` supervisor:
+ *   1. The real backend (the `tsx src/index.ts` that holds the DB open) listens on a
+ *      SEPARATE internal port (publicPort ± 10000) — killing only the public port
+ *      leaves it alive, so the next launch serves the wrong DB / fails to bind. We
+ *      stop the backend port too.
+ *   2. `dev.mjs` respawns killed children, so we first kill the supervisor (which
+ *      cascades to proxy + vite + backend). Scoped via the port listeners, so it only
+ *      ever reaches THIS dev server's supervisor — never another worktree's.
+ * Generic projects (port from a pref/profile, no dev.mjs ancestor) are unaffected:
+ * the supervisor kill is a no-op and only the resolved port is touched.
  */
 export async function stopDevServer(
-  plan: Pick<DevServerPlan, "port">,
+  plan: Pick<DevServerPlan, "port"> & Partial<Pick<DevServerPlan, "source">>,
   deps: StopDevServerDeps = {},
 ): Promise<number> {
   if (plan.port == null) return 0;
   const killPorts = deps.killPorts ?? killProcessesOnPorts;
-  return killPorts([plan.port]);
+
+  const ports = [plan.port];
+  if (plan.source?.port === "worktree-port") {
+    ports.push(backendPortFor(plan.port));
+    const killSupervisor = deps.killSupervisor ?? killDevServerSupervisorOnPorts;
+    // Kill the respawning supervisor first (cascades to proxy/vite/backend); then the
+    // port sweep below mops up anything not under it.
+    await killSupervisor(ports);
+  }
+  return killPorts(ports);
 }

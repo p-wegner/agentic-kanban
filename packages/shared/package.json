@@ -43,6 +43,7 @@
     "./lib/failure-keywords": { "development": "./src/lib/failure-keywords.ts", "types": "./dist/lib/failure-keywords.d.ts", "import": "./dist/lib/failure-keywords.js", "default": "./src/lib/failure-keywords.ts" }
   },
   "scripts": {
+    "prepare": "pnpm build",
     "build": "tsc",
     "db:generate": "drizzle-kit generate",
     "typecheck": "tsc --noEmit"
