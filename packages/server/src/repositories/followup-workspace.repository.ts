@@ -3,6 +3,8 @@ import { eq, and, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
+import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { setWorkspaceStatus, type WorkspaceStatus } from "./workspace-status.repository.js";
 
 export async function getDependentsOf(
   mergedIssueId: string,
@@ -101,7 +103,7 @@ export async function updateIssueStatus(
   values: { statusId: string; updatedAt: string; statusChangedAt: string },
   database: Database = db,
 ): Promise<void> {
-  await database.update(issues).set(values).where(eq(issues.id, issueId));
+  await transitionIssueStatus(database, issueId, values.statusId, { now: values.updatedAt });
 }
 
 export async function updateWorkspaceStatus(
@@ -109,5 +111,5 @@ export async function updateWorkspaceStatus(
   values: { status: string; updatedAt: string },
   database: Database = db,
 ): Promise<void> {
-  await database.update(workspaces).set(values).where(eq(workspaces.id, workspaceId));
+  await setWorkspaceStatus(database, workspaceId, values.status as WorkspaceStatus, { now: values.updatedAt });
 }

@@ -11,6 +11,7 @@ import type { SessionManager } from "../services/session.manager.js";
 import { resolveMergeStrategy } from "./merge-strategy.js";
 import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
 import { reconcileCompletionStates } from "./completion-state-reconciler.js";
+import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { reconcileDriveCompletion } from "./drive-completion-reconciler.js";
 import { reconcileProjectCompletion } from "./project-completion-reconciler.js";
 
@@ -232,10 +233,7 @@ export function createAutoMergeOrchestrator(deps: {
         }
       }
       console.log(`[auto-merge] reconciler session ${state.reconciler.sessionId} finished (status=${sess?.status ?? "gone"})`);
-      try {
-        await database.update(workspaces).set({ status: "idle", updatedAt: new Date().toISOString() })
-          .where(and(eq(workspaces.id, state.reconciler.integrationWorkspaceId), eq(workspaces.status, "fixing")));
-      } catch { /* best effort */ }
+      await setWorkspaceStatus(database, state.reconciler.integrationWorkspaceId, "idle", { onlyIfCurrentStatus: "fixing" });
       state.reconciler = null;
     }
 

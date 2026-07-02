@@ -8,6 +8,7 @@ import * as agentService from "../services/agent.service.js";import * as gitServ
 import type { SessionManager } from "../services/session.manager.js";
 import type { Database } from "../db/index.js";
 import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
+import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { reconcileAncestorBranchWorkspaces } from "./ancestor-branch-reconciler.js";
 import { scanDoneUnmergedWorkspaces } from "./done-unmerged-invariant-scanner.js";
 import { reapTerminalWorkspaces } from "./terminal-workspace-reaper.js";
@@ -270,7 +271,7 @@ export async function cleanupStaleSessions(sessionManager: SessionManager, agent
   }
   const deadWorkspaceIds = [...new Set(dead.map(s => s.workspaceId))];
   for (const wsId of deadWorkspaceIds) {
-    await db.update(workspaces).set({ status: "idle", updatedAt: now }).where(eq(workspaces.id, wsId));
+    await setWorkspaceStatus(db, wsId, "idle", { now });
   }
   if (dead.length > 0) {
     console.log(`[startup] ${dead.length} dead session(s) cleaned up`);

@@ -12,6 +12,7 @@ import { toExecutorProvider } from "../services/agent-settings.service.js";
 import { sessionOutputPath } from "../lib/session-paths.js";
 import { emitButlerSystemEvent } from "../services/butler-event-feed.js";
 import { PREF_RECONCILER_STRANDED_PLAN_ENABLED } from "../constants/preference-keys.js";
+import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 
 export interface StrandedPlanReconcilerDeps {
@@ -119,9 +120,7 @@ export async function reconcileStrandedPlanModeWorkspaces(deps: StrandedPlanReco
       const plan = c.workingDir ? extractPlanFromMessages(messages) : null;
 
       if (!plan || !c.workingDir) {
-        await database.update(workspaces)
-          .set({ planMode: false, status: "blocked", updatedAt: now() })
-          .where(eq(workspaces.id, c.wsId));
+        await setWorkspaceStatus(database, c.wsId, "blocked", { now: now(), set: { planMode: false } });
         boardEvents.broadcast(c.projectId, "workflow_error");
         emitButlerSystemEvent({
           projectId: c.projectId,
@@ -139,7 +138,7 @@ export async function reconcileStrandedPlanModeWorkspaces(deps: StrandedPlanReco
       const autoContinue = getHarnessBoolSetting(prefMap, harness, "plan_auto_continue");
 
       if (autoContinue) {
-        await database.update(workspaces).set({ planMode: false, status: "active", updatedAt: now() }).where(eq(workspaces.id, c.wsId));
+        await setWorkspaceStatus(database, c.wsId, "active", { now: now(), set: { planMode: false } });
         await getSessionManager().startSession({
           workspaceId: c.wsId,
           prompt: buildImplementPrompt(),
@@ -153,9 +152,7 @@ export async function reconcileStrandedPlanModeWorkspaces(deps: StrandedPlanReco
         boardEvents.broadcast(c.projectId, "issue_updated");
         console.log(`[reconcile] stranded plan-mode workspace ${c.wsId} (#${c.issueNumber ?? "?"}): recovered plan (${planPath}) — auto-continuing to implementation`);
       } else {
-        await database.update(workspaces)
-          .set({ planMode: false, pendingPlanPath: planPath, status: "awaiting-plan-approval", updatedAt: now() })
-          .where(eq(workspaces.id, c.wsId));
+        await setWorkspaceStatus(database, c.wsId, "awaiting-plan-approval", { now: now(), set: { planMode: false, pendingPlanPath: planPath } });
         boardEvents.broadcast(c.projectId, "issue_updated");
         console.log(`[reconcile] stranded plan-mode workspace ${c.wsId} (#${c.issueNumber ?? "?"}): recovered plan (${planPath}) — parked awaiting approval`);
       }

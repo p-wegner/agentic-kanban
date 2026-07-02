@@ -3,7 +3,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { requireEntity, resolveStatusByName, checkOpenUnmergedWorkspace } from "../db-utils.js";
-import { syncCurrentNodeToStatus, getOutgoingTransitions } from "@agentic-kanban/shared/lib/workflow-engine";
+import { transitionIssueStatus, getOutgoingTransitions } from "@agentic-kanban/shared/lib/workflow-engine";
 import { validateWebhookUrl, fireWebhook, buildIssueStatusPayload, isTerminalStatusName } from "@agentic-kanban/shared/lib";
 
 export function registerMoveIssue(server: McpServer, deps: ToolDeps = prodDeps) {
@@ -80,12 +80,9 @@ export function registerMoveIssue(server: McpServer, deps: ToolDeps = prodDeps) 
       if (!r.ok) return r.error;
 
       const now = new Date().toISOString();
-      await db.update(schema.issues)
-        .set({ statusId: r.statusId, statusChangedAt: now, updatedAt: now })
-        .where(eq(schema.issues.id, issueId));
-
-      // Keep currentNode consistent with the new status for workflow-driven issues.
-      await syncCurrentNodeToStatus(db, issueId).catch(() => {});
+      // Writes statusId + statusChangedAt and keeps currentNode consistent with
+      // the new status for workflow-driven issues (#953 single authority).
+      await transitionIssueStatus(db, issueId, r.statusId, { now });
 
       notifyBoard(projectId, "mcp_move_issue");
 
