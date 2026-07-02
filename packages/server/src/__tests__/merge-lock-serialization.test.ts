@@ -1,8 +1,14 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   acquireRepoMergeLock,
   activeMerges,
+  tryRecoverStaleMergeLock,
   MERGE_LOCK_STALE_MS,
+  GIT_INDEX_LOCK_FRESH_MS,
+  type ActiveMergeLock,
 } from "../services/workspace-internals.js";
 
 // #944: the activeMerges lock had two incompatible protocols — the autoMerge
@@ -148,6 +154,147 @@ describe("acquireRepoMergeLock serialization (#944)", () => {
     const result = await acquireRepoMergeLock(REPO, "ws-fresh", async () => "done");
     expect(result).toBe("done");
     expect(activeMerges.has(REPO)).toBe(false);
+  });
+
+  // #970 hole 1: doMerge used to schedule the post-merge main-checkout cleanup
+  // (the deferred `git reset --hard`) via setImmediate AFTER returning — i.e.
+  // after the lock was released — so a second merge could acquire the lock and
+  // observe the main checkout mid-cleanup (stale tree → dirty-main block).
+  // These tests pin the fix: extendHold keeps the lock held until the cleanup
+  // extension settles, while the caller still gets the result early.
+  describe("extendHold — lock held through deferred post-merge cleanup (#970)", () => {
+    it("does not release the lock (nor start the next merge) until the hold extension settles", async () => {
+      const events: string[] = [];
+      const cleanupGate = deferred();
+
+      const a = acquireRepoMergeLock(REPO, "ws-a", async (extendHold) => {
+        events.push("a-merge");
+        // Mirrors doMerge: register the deferred cleanup synchronously, then
+        // return the response immediately.
+        extendHold(new Promise<void>((resolve) => {
+          setImmediate(() => {
+            void cleanupGate.promise.then(() => {
+              events.push("a-cleanup-done");
+              resolve();
+            });
+          });
+        }));
+        return "a-response";
+      });
+
+      const b = acquireRepoMergeLock(REPO, "ws-b", async () => {
+        events.push("b-merge");
+        return "b-response";
+      });
+
+      // a's RESULT resolves early (the HTTP caller isn't held up by cleanup)...
+      await expect(a).resolves.toBe("a-response");
+      // ...but the lock is still held: b must not have started, and the map
+      // entry must still belong to ws-a.
+      await new Promise((r) => setImmediate(r));
+      await new Promise((r) => setImmediate(r));
+      expect(events).toEqual(["a-merge"]);
+      expect(activeMerges.get(REPO)?.workspaceId).toBe("ws-a");
+
+      cleanupGate.resolve();
+      await expect(b).resolves.toBe("b-response");
+      expect(events).toEqual(["a-merge", "a-cleanup-done", "b-merge"]);
+      expect(activeMerges.has(REPO)).toBe(false);
+    });
+
+    it("releases the lock after the extension even when the merge itself rejects", async () => {
+      const events: string[] = [];
+      const a = acquireRepoMergeLock(REPO, "ws-a", async (extendHold) => {
+        extendHold(Promise.resolve().then(() => { events.push("a-cleanup"); }));
+        throw new Error("merge failed");
+      });
+      const b = acquireRepoMergeLock(REPO, "ws-b", async () => {
+        events.push("b-merge");
+      });
+
+      await expect(a).rejects.toThrow("merge failed");
+      await b;
+      expect(events).toEqual(["a-cleanup", "b-merge"]);
+      expect(activeMerges.has(REPO)).toBe(false);
+    });
+
+    it("a rejected hold extension still releases the lock", async () => {
+      const a = acquireRepoMergeLock(REPO, "ws-a", async (extendHold) => {
+        extendHold(Promise.reject(new Error("cleanup blew up")));
+        return "ok";
+      });
+      await expect(a).resolves.toBe("ok");
+      const b = await acquireRepoMergeLock(REPO, "ws-b", async () => "next");
+      expect(b).toBe("next");
+      expect(activeMerges.has(REPO)).toBe(false);
+    });
+
+    it("exposes resultPromise on the lock entry for the manual-merge reuse path", async () => {
+      const cleanupGate = deferred();
+      const a = acquireRepoMergeLock(REPO, "ws-a", async (extendHold) => {
+        extendHold(cleanupGate.promise);
+        return "the-response";
+      });
+      await a;
+      // Lock still held by the pending cleanup; reuse must see the result.
+      const lock = activeMerges.get(REPO);
+      expect(lock?.workspaceId).toBe("ws-a");
+      await expect(lock!.resultPromise).resolves.toBe("the-response");
+      cleanupGate.resolve();
+      await lock!.promise;
+      expect(activeMerges.has(REPO)).toBe(false);
+    });
+  });
+
+  // #970 hole 2: stale-lock recovery deleted the map entry without checking
+  // whether the holder's git process was gone. A fresh .git/index.lock in the
+  // target repo now refuses recovery.
+  describe("stale-lock recovery checks .git/index.lock (#970)", () => {
+    let repoDir: string;
+
+    beforeEach(() => {
+      repoDir = mkdtempSync(join(tmpdir(), "merge-lock-stale-"));
+      mkdirSync(join(repoDir, ".git"), { recursive: true });
+    });
+
+    afterEach(() => {
+      rmSync(repoDir, { recursive: true, force: true });
+    });
+
+    function staleLock(): ActiveMergeLock {
+      const lock: ActiveMergeLock = {
+        promise: new Promise(() => {}),
+        workspaceId: "ws-stale",
+        repoPath: repoDir,
+        startedAt: new Date(Date.now() - MERGE_LOCK_STALE_MS - 1000).toISOString(),
+        startedAtMs: Date.now() - MERGE_LOCK_STALE_MS - 1000,
+      };
+      activeMerges.set(repoDir, lock);
+      return lock;
+    }
+
+    it("refuses recovery when a fresh .git/index.lock is present", () => {
+      const lock = staleLock();
+      writeFileSync(join(repoDir, ".git", "index.lock"), "");
+      expect(tryRecoverStaleMergeLock(repoDir, lock)).toBe(false);
+      expect(activeMerges.get(repoDir)).toBe(lock);
+    });
+
+    it("recovers when the .git/index.lock is old debris", () => {
+      const lock = staleLock();
+      const indexLockPath = join(repoDir, ".git", "index.lock");
+      writeFileSync(indexLockPath, "");
+      const oldSec = (Date.now() - GIT_INDEX_LOCK_FRESH_MS - 60_000) / 1000;
+      utimesSync(indexLockPath, oldSec, oldSec);
+      expect(tryRecoverStaleMergeLock(repoDir, lock)).toBe(true);
+      expect(activeMerges.has(repoDir)).toBe(false);
+    });
+
+    it("recovers when no index.lock exists", () => {
+      const lock = staleLock();
+      expect(tryRecoverStaleMergeLock(repoDir, lock)).toBe(true);
+      expect(activeMerges.has(repoDir)).toBe(false);
+    });
   });
 
   it("does not serialize acquisitions across different repoPaths", async () => {

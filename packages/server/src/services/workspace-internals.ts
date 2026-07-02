@@ -1,3 +1,5 @@
+import { existsSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { workspaces } from "@agentic-kanban/shared/schema";
 import type { WorkspaceSetupRun, WorkspaceSymlinkRun } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
@@ -306,7 +308,19 @@ export async function resolveMergeState(
 export const MERGE_LOCK_STALE_MS = 15 * 60 * 1000;
 
 export interface ActiveMergeLock {
+  /**
+   * Lock-lifetime promise: settles only when the merge AND every registered
+   * hold extension (e.g. the deferred post-merge main-checkout cleanup, #970)
+   * have completed. Waiters in {@link acquireRepoMergeLock} await THIS.
+   */
   promise: Promise<unknown>;
+  /**
+   * The merge's own result promise (the value the HTTP caller receives).
+   * Settles as soon as the merge response is ready — possibly BEFORE the lock
+   * is released. Used by the manual-merge reuse path; falls back to `promise`
+   * for entries created without it (tests, legacy).
+   */
+  resultPromise?: Promise<unknown>;
   workspaceId: string;
   repoPath: string;
   startedAt: string;
@@ -315,6 +329,56 @@ export interface ActiveMergeLock {
 
 /** Merge serialization: one active merge per repo at a time. Shared across services. */
 export const activeMerges = new Map<string, ActiveMergeLock>();
+
+/**
+ * A `.git/index.lock` younger than this in the target repo means a git process
+ * is very likely still running there — refuse stale-lock recovery (#970).
+ */
+export const GIT_INDEX_LOCK_FRESH_MS = 2 * 60 * 1000;
+
+/**
+ * Recover a stale merge lock — but only if it looks safe (#970).
+ *
+ * The old behavior deleted the map entry after 15 minutes without checking
+ * whether the holder's git process was actually gone. Before force-releasing,
+ * we now look for a live `.git/index.lock` in the target repo: a FRESH one
+ * (mtime < {@link GIT_INDEX_LOCK_FRESH_MS}) means git is probably still
+ * running, so we refuse recovery and the caller keeps waiting/refusing. An OLD
+ * index.lock is most likely debris from a crashed git — we recover, but log
+ * loudly so the operator sees it.
+ *
+ * Returns true if the map entry was removed (caller may proceed).
+ */
+export function tryRecoverStaleMergeLock(repoPath: string, lock: ActiveMergeLock, nowMs = Date.now()): boolean {
+  const indexLockPath = join(repoPath, ".git", "index.lock");
+  try {
+    if (existsSync(indexLockPath)) {
+      const ageMs = nowMs - statSync(indexLockPath).mtimeMs;
+      if (ageMs < GIT_INDEX_LOCK_FRESH_MS) {
+        console.error(
+          `[merge-lock] REFUSING stale merge-lock recovery: ${indexLockPath} is only ${Math.round(ageMs / 1000)}s old — ` +
+            `the holder's git process (workspace ${lock.workspaceId}) may still be running in ${repoPath}.`,
+        );
+        return false;
+      }
+      console.error(
+        `[merge-lock] recovering stale merge lock DESPITE ${indexLockPath} (age ${Math.round(ageMs / 1000)}s): ` +
+          `the holder (workspace ${lock.workspaceId}) likely crashed mid-git. If merges keep failing, remove the index.lock manually.`,
+      );
+    }
+  } catch (err) {
+    console.warn(
+      `[merge-lock] index.lock check failed (proceeding with recovery): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  console.warn(
+    `[merge-lock] recovering stale merge lock: repoPath=${repoPath} activeWorkspaceId=${lock.workspaceId}`,
+  );
+  if (activeMerges.get(repoPath) === lock) {
+    activeMerges.delete(repoPath);
+  }
+  return true;
+}
 
 /**
  * Acquire the per-repo merge lock and run `work` under it (#944).
@@ -331,21 +395,25 @@ export const activeMerges = new Map<string, ActiveMergeLock>();
  * Callers that want refuse/reuse semantics instead of queueing (manual merge)
  * should check the map themselves first and only call this when they intend to
  * proceed.
+ *
+ * `work` receives an `extendHold` callback (#970): promises registered through
+ * it — synchronously or at any point before the LAST registered extension
+ * settles — keep the lock held after `work`'s own result resolves. This lets
+ * the merge return its HTTP response early while the deferred post-merge
+ * cleanup (which `git reset --hard`s the MAIN checkout's working tree) still
+ * runs INSIDE the lock, so a second merge can never observe the stale tree and
+ * trip its dirty-main guard mid-cleanup.
  */
 export async function acquireRepoMergeLock<T>(
   repoPath: string,
   workspaceId: string,
-  work: () => Promise<T>,
+  work: (extendHold: (p: Promise<unknown>) => void) => Promise<T>,
   onWait?: (holder: ActiveMergeLock) => void,
 ): Promise<T> {
   for (;;) {
     const existing = activeMerges.get(repoPath);
     if (!existing) break;
-    if (describeMergeLock(existing).isStale) {
-      console.warn(
-        `[merge-lock] recovering stale merge lock: repoPath=${repoPath} activeWorkspaceId=${existing.workspaceId}`,
-      );
-      activeMerges.delete(repoPath);
+    if (describeMergeLock(existing).isStale && tryRecoverStaleMergeLock(repoPath, existing)) {
       break;
     }
     onWait?.(existing);
@@ -354,30 +422,44 @@ export async function acquireRepoMergeLock<T>(
     // we were awaiting — never proceed just because the awaited promise settled.
   }
 
+  const holdExtensions: Promise<unknown>[] = [];
+  const extendHold = (p: Promise<unknown>) => {
+    holdExtensions.push(p.catch(() => {}));
+  };
+
   // No awaits between the check above and the set below (work()'s synchronous
   // prefix runs inline, but nothing else can interleave on the event loop), so
   // installation is atomic with respect to other acquirers.
-  const promise = work();
+  const resultPromise = work(extendHold);
   const lock: ActiveMergeLock = {
-    promise,
+    promise: Promise.resolve(), // replaced with the real hold promise just below
+    resultPromise,
     workspaceId,
     repoPath,
     startedAt: new Date().toISOString(),
     startedAtMs: Date.now(),
   };
+  // Lock lifetime = result + every registered hold extension. Never rejects.
+  // The map delete runs INSIDE this chain (not via a separate .then on it) so
+  // that with no extensions the entry is gone in the same microtask the result
+  // settles in — i.e. before the caller's own `await` resumes, preserving the
+  // pre-#970 observable release ordering. Success or rejection both release,
+  // so a crashed merge never strands the repo behind a stale in-memory lock.
+  lock.promise = (async () => {
+    try {
+      await resultPromise;
+    } catch {
+      /* rejection still releases the lock (after extensions, if any) */
+    }
+    while (holdExtensions.length > 0) {
+      await holdExtensions.shift();
+    }
+    if (activeMerges.get(repoPath) === lock) {
+      activeMerges.delete(repoPath);
+    }
+  })();
   activeMerges.set(repoPath, lock);
-  // Always clear the lock — success or rejection — so a crashed merge never
-  // strands the repo behind a stale in-memory lock.
-  promise
-    .finally(() => {
-      if (activeMerges.get(repoPath) === lock) {
-        activeMerges.delete(repoPath);
-      }
-    })
-    .catch(() => {
-      /* swallow: the caller awaits `promise` itself */
-    });
-  return promise;
+  return resultPromise;
 }
 
 export function describeMergeLock(lock: ActiveMergeLock, nowMs = Date.now()) {
