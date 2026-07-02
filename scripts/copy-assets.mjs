@@ -30,14 +30,15 @@ try {
 
 // Copy the scaffold hook sources to server/dist/scaffold/hooks/ so npm/npx installs can
 // scaffold them into registered projects (resolveHookSource reads this dir first — #952).
-// Canonical source for the verify-gate runner is the TESTED copy in src/scaffold/; the
-// remaining generic hooks are canonical in the repo's .claude/hooks/.
+// ALL hooks ship from the canonical TESTED copies in packages/server/src/scaffold/ (#990);
+// the repo's .claude/hooks/ files are this checkout's live deployments of the same sources,
+// kept byte-identical by scaffold-hook-sources.test.ts + verify-gate-runner.test.ts.
 // Missing sources are a BUG (broken publish would silently drop the quality gate) — fail loud.
 const scaffoldHookSources = [
   resolve(root, "packages/server/src/scaffold/verify-gate-runner.js"),
-  resolve(root, ".claude/hooks/vital-file-guard.js"),
-  resolve(root, ".claude/hooks/prevent-cross-worktree-writes.js"),
-  resolve(root, ".claude/hooks/smart-hooks-runner.js"),
+  resolve(root, "packages/server/src/scaffold/vital-file-guard.js"),
+  resolve(root, "packages/server/src/scaffold/prevent-cross-worktree-writes.js"),
+  resolve(root, "packages/server/src/scaffold/smart-hooks-runner.js"),
 ];
 const scaffoldHooksDist = resolve(serverDist, "scaffold/hooks");
 mkdirSync(scaffoldHooksDist, { recursive: true });
