@@ -177,14 +177,23 @@ function extractCommand(input) {
   );
 }
 
+// Windows paths are case-insensitive with either separator; POSIX paths are
+// case-sensitive with "/" only — lowercasing there would falsely match
+// /home/Alice and /home/alice.
+const IS_WINDOWS = process.platform === "win32";
+
 function normalizePathForCompare(p) {
-  return String(p || "").replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+  const s = String(p || "");
+  return IS_WINDOWS
+    ? s.replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase()
+    : s.replace(/\/+$/, "");
 }
 
 function pathIsInside(child, parent) {
   const c = normalizePathForCompare(child);
   const p = normalizePathForCompare(parent);
-  return c === p || c.startsWith(`${p}\\`);
+  const sep = IS_WINDOWS ? "\\" : "/";
+  return c === p || c.startsWith(`${p}${sep}`);
 }
 
 function getMainCheckout() {
