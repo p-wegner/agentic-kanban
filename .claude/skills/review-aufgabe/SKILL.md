@@ -13,10 +13,11 @@ und fetcht/chunkt **nicht** von sich aus: Braucht ein Review mehr als den Diff (
 Criteria, Quelldateien, History), muss der Teilnehmer-Skill sich das über seine eigenen Tools holen.
 Ein naiver Teilnehmer-Skill soll an Aufgaben scheitern, die mehr als den Diff brauchen.
 
-**Ausgabe-Regel:** Arbeite TEIL 0–3 **still** ab — keine Zwischenausgaben, keine Schritt-für-Schritt-
-Erklärungen, keine Findings-Liste, keine Tool-Kommentare. Gib am Ende **ausschließlich** den
-Benchmark-Block aus TEIL 4.5 aus (das ist die Bewertung des Teilnehmer-Skills). Einzige Ausnahme:
-Abbruchmeldungen (fehlender Branch in TEIL 0, fehlender Gold-Standard in TEIL 4.1).
+**Ausgabe-Regel:** Arbeite TEIL 0–3 **still** ab — keine Schritt-für-Schritt-Erklärungen, keine
+Tool-Kommentare. Gib am Ende **genau zwei Blöcke** aus (nichts sonst): zuerst das **Review-Ergebnis
+des Teilnehmer-Skills** (die Findings), danach den **Benchmark-Block** (die Bewertung). Beide Formate
+stehen in TEIL 4.5. Einzige Ausnahme: Abbruchmeldungen (fehlender Branch in TEIL 0, fehlender
+Gold-Standard in TEIL 4.1).
 
 ## Parameter
 
@@ -201,9 +202,21 @@ Schreibe das Ergebnis nach `workshop/review/benchmark-result-{AUFGABE_NR}.json` 
 }
 ```
 
-## Schritt 4.5: Ergebnis ausgeben
+## Schritt 4.5: Ergebnisse ausgeben
 
-Gib eine klare Zusammenfassung aus:
+Gib **zuerst** das Review-Ergebnis des Teilnehmer-Skills aus (die Findings aus
+`findings-{AUFGABE_NR}.json` — das ist, was der Teilnehmer-Skill selbst geliefert hat):
+
+```
+=== Review-Ergebnis Aufgabe {AUFGABE_NR} (Teilnehmer-Skill) ===
+{Anzahl} Findings — Tokens: {tokens_used}
+
+- F1 (high)   dateiname.ts:zeile — <kurzbeschreibung>
+- F2 (medium) dateiname.ts:zeile — <kurzbeschreibung>
+- ...
+```
+
+Gib **danach** den Benchmark-Block aus (die Bewertung gegen den Gold-Standard):
 
 ```
 === Benchmark Aufgabe {AUFGABE_NR} ===
