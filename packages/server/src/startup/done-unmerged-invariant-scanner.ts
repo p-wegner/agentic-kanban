@@ -7,6 +7,7 @@ import {
   countBehindCommits,
   mergeBranch,
 } from "@agentic-kanban/shared/lib/git-service";
+import { inspectRepoLock } from "@agentic-kanban/shared/lib/repo-lock";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import {
@@ -340,6 +341,18 @@ export async function scanDoneUnmergedWorkspaces(
         );
         return;
       }
+    }
+
+    // On-disk repo lock (#993): also skip if a CROSS-PROCESS holder — a Conductor-loop
+    // agent's own git, a merge-queue rebase, or a manual merge in another server process —
+    // is currently holding the lockfile. This has no in-process `activeMerges` entry, so
+    // it would otherwise be invisible here and the scanner could race it.
+    const diskLock = inspectRepoLock(c.repoPath);
+    if (diskLock && !diskLock.isStale) {
+      console.log(
+        `[done-unmerged-scanner] repo ${c.repoPath} has an active on-disk repo lock (holder ${diskLock.contents.holder}, age ${Math.round(diskLock.ageMs / 1000)}s) — skipping issue #${c.issueNumber ?? "?"} this tick`,
+      );
+      return;
     }
 
     // All guards passed: ahead>=1, behind<=limit, no conflicts — attempt auto-merge.
