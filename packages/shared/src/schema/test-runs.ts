@@ -1,8 +1,9 @@
 import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
+import { sessions } from "./sessions.js";
 
 export const testRuns = sqliteTable("test_runs", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  sessionId: text("session_id").notNull(),
+  sessionId: text("session_id").notNull().references(() => sessions.id, { onDelete: "cascade" }),
   commitSha: text("commit_sha"),
   testName: text("test_name").notNull(),
   file: text("file"),

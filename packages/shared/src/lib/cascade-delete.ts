@@ -33,6 +33,7 @@ async function deleteWorkspaceCascadeRows(workspaceId: string, database: DbOrTx)
   await database.delete(schema.repos).where(eq(schema.repos.workspaceId, workspaceId));
   if (sessionIds.length > 0) {
     await database.delete(schema.sessionMessages).where(inArray(schema.sessionMessages.sessionId, sessionIds));
+    await database.delete(schema.testRuns).where(inArray(schema.testRuns.sessionId, sessionIds));
   }
   await database.delete(schema.sessions).where(eq(schema.sessions.workspaceId, workspaceId));
   await database.delete(schema.workspaces).where(eq(schema.workspaces.id, workspaceId));
@@ -85,6 +86,15 @@ async function assertWorkspaceCascadeComplete(
           .select({ sessionId: schema.sessionMessages.sessionId })
           .from(schema.sessionMessages)
           .where(inArray(schema.sessionMessages.sessionId, sessionIds)),
+      ),
+    );
+    await assertNoRows(
+      "test run",
+      countRows(
+        database
+          .select({ sessionId: schema.testRuns.sessionId })
+          .from(schema.testRuns)
+          .where(inArray(schema.testRuns.sessionId, sessionIds)),
       ),
     );
   }
