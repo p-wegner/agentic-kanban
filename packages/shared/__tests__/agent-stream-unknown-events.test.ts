@@ -7,6 +7,7 @@ import {
   resetUnknownEventCounters,
   setUnknownEventLogger,
   setUnknownEventClock,
+  UNKNOWN_EVENT_ALERT_THRESHOLD,
   type UnknownEventLogger,
 } from "../src/lib/agent-stream-parser.js";
 
@@ -125,6 +126,56 @@ describe("agent-stream unknown-event observability", () => {
       expect(counts.get("codex:a")).toBe(1);
       expect(counts.get("claude:a")).toBe(1);
       expect(counts.get("codex:b")).toBe(1);
+    });
+  });
+
+  describe("per-provider threshold alert (#956)", () => {
+    it("emits ONE alert naming the provider and sample types once the threshold is crossed", () => {
+      // Distinct types so the per-key rate limit logs each first occurrence too;
+      // the alert is the one containing "ALERT:".
+      for (let i = 0; i < UNKNOWN_EVENT_ALERT_THRESHOLD; i++) {
+        parseAgentProviderStreamLineObserved("codex", JSON.stringify({ type: i < 6 ? "renamed.common" : `renamed.rare_${i}` }));
+      }
+      const alerts = logged.filter((l) => l.message.includes("ALERT:"));
+      expect(alerts).toHaveLength(1);
+      expect(alerts[0].message).toContain("'codex'");
+      expect(alerts[0].message).toContain(`${UNKNOWN_EVENT_ALERT_THRESHOLD} unknown stream events`);
+      // Most frequent type is listed first among the samples.
+      expect(alerts[0].message).toContain("renamed.common (6x)");
+      expect(alerts[0].detail).toMatchObject({ provider: "codex", total: UNKNOWN_EVENT_ALERT_THRESHOLD });
+      expect((alerts[0].detail.sampleTypes as string[]).length).toBeLessThanOrEqual(5);
+    });
+
+    it("does not re-alert for the same provider after the threshold", () => {
+      const line = JSON.stringify({ type: "drift" });
+      for (let i = 0; i < UNKNOWN_EVENT_ALERT_THRESHOLD * 3; i++) {
+        parseAgentProviderStreamLineObserved("codex", line);
+      }
+      expect(logged.filter((l) => l.message.includes("ALERT:"))).toHaveLength(1);
+    });
+
+    it("stays silent below the threshold", () => {
+      for (let i = 0; i < UNKNOWN_EVENT_ALERT_THRESHOLD - 1; i++) {
+        parseAgentProviderStreamLineObserved("codex", JSON.stringify({ type: "drift" }));
+      }
+      expect(logged.filter((l) => l.message.includes("ALERT:"))).toHaveLength(0);
+    });
+
+    it("tracks providers independently and re-arms after reset", () => {
+      for (let i = 0; i < UNKNOWN_EVENT_ALERT_THRESHOLD; i++) {
+        parseAgentProviderStreamLineObserved("codex", JSON.stringify({ type: "drift" }));
+        parseAgentProviderStreamLineObserved("claude", JSON.stringify({ type: "drift" }));
+      }
+      const alerts = logged.filter((l) => l.message.includes("ALERT:"));
+      expect(alerts).toHaveLength(2);
+      expect(alerts.map((a) => a.detail.provider).sort()).toEqual(["claude", "codex"]);
+
+      resetUnknownEventCounters();
+      logged.length = 0;
+      for (let i = 0; i < UNKNOWN_EVENT_ALERT_THRESHOLD; i++) {
+        parseAgentProviderStreamLineObserved("codex", JSON.stringify({ type: "drift" }));
+      }
+      expect(logged.filter((l) => l.message.includes("ALERT:"))).toHaveLength(1);
     });
   });
 
