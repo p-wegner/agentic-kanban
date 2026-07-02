@@ -34,19 +34,34 @@ function normalizedType(obj: Record<string, unknown>): string {
   return String((obj.type as string) || (obj.event as string) || (obj.name as string) || "").toLowerCase().replace(/-/g, "_");
 }
 
+/**
+ * Extract assistant text from Copilot's varied message shapes (CLI nested, REST
+ * flat, legacy). Single definition (#951) — the offline session-summary parser
+ * consumes this via `parseCopilotEvent`, and the server-side fork in
+ * agent-provider/helpers.ts was deleted; its field coverage (top-level
+ * `text`/`message` on `assistant.message`, bare `content[]` arrays with no
+ * recognizable type/role) is unioned in here.
+ */
 function extractCopilotAssistantText(obj: Record<string, unknown>): string {
   const type = normalizedType(obj);
   const role = String((obj.role as string) || "").toLowerCase();
   const data = objectValue(obj.data);
   const message = objectValue(obj.message);
-  if (type === "assistant.message" && Object.keys(data).length > 0) {
-    return contentToText(data.content) || getString(data, ["content", "text", "message"]);
+  if (type === "assistant.message") {
+    return contentToText(data.content)
+      || getString(data, ["content", "text", "message"])
+      || getString(obj, ["text", "message"]);
   }
   if (type === "assistant" || type === "assistant_message" || role === "assistant") {
     return contentToText(obj.content) || getString(obj, ["text", "message", "delta"]) || contentToText(message.content) || getString(message, ["text", "content", "message"]);
   }
   if (type === "message" && role === "assistant") {
     return contentToText(obj.content) || getString(obj, ["text", "message"]);
+  }
+  // Legacy flexible shapes: a bare top-level content[] with no recognizable
+  // type/role. Never applied to user/system/session/tool events.
+  if (!role && !type.includes("user") && !type.includes("system") && !type.includes("session") && !type.includes("tool")) {
+    return contentToText(obj.content);
   }
   return "";
 }
@@ -178,10 +193,13 @@ export function parseCopilotEvent(obj: Record<string, unknown>, rawLine: string,
     pushDisplay(result, { kind: "tool_use", id: id ?? "", name, input: stringifyValue(inputValue), inputParsed });
   } else if (toolName) {
     const id = stringValue(payload.id ?? payload.tool_use_id ?? payload.toolUseId ?? payload.toolCallId ?? item.id);
-    const input = objectValue(payload.input ?? payload.arguments ?? item.input);
+    const input = parseInput(payload.input ?? payload.arguments ?? item.input);
     result.toolActivity = { name: toolName, input, toolUseId: id };
     registerToolName(context, id, toolName);
-    if (type.includes("start") || type.includes("call") || type.includes("use")) {
+    // A completion event that happens to carry the tool name (e.g. tool_call.completed)
+    // must not be counted as a second invocation — it is handled as a tool result below.
+    const isResultish = type.includes("complete") || type.includes("end") || type.includes("result");
+    if ((type.includes("start") || type.includes("call") || type.includes("use")) && !isResultish) {
       pushDisplay(result, { kind: "tool_use", id: id ?? "", name: toolName, input: stringifyValue(payload.input ?? payload.arguments ?? item.input), inputParsed: input });
     }
   } else if (type.includes("command") || item.type === "command_execution") {

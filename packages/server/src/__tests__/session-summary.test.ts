@@ -596,6 +596,127 @@ describe("Session Summary API", () => {
     ]));
   });
 
+  it("extracts Codex native file_change items into filesEdited/filesWritten (#951)", async () => {
+    const { sessionId } = await createSessionWithData(testApp.db);
+
+    await testApp.db.insert(schema.sessionMessages).values([
+      {
+        sessionId,
+        type: "stdout",
+        data: [
+          JSON.stringify({ type: "thread.started", thread_id: "th-1" }),
+          JSON.stringify({
+            type: "item.completed",
+            item: {
+              id: "fc-1",
+              type: "file_change",
+              status: "completed",
+              changes: [
+                { path: "/src/edited.ts", kind: "update" },
+                { path: "/src/new.ts", kind: "add" },
+              ],
+            },
+          }),
+          // Legacy flat shape (single path, no changes array)
+          JSON.stringify({
+            type: "item.completed",
+            item: { id: "fc-2", type: "file_change", path: "/src/flat.ts" },
+          }),
+          JSON.stringify({
+            type: "item.completed",
+            item: { id: "msg-1", type: "agent_message", text: "Edited files natively." },
+          }),
+        ].join("\n"),
+      },
+    ]);
+
+    const res = await testApp.app.request(`/api/sessions/${sessionId}/summary`);
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.filesEdited).toEqual(["/src/edited.ts", "/src/flat.ts"]);
+    expect(body.filesWritten).toEqual(["/src/new.ts"]);
+    expect(body.overview).toContain("edited 2 files");
+    expect(body.overview).toContain("wrote 1 file");
+    expect(body.keyExcerpts).toContain("Edited files natively.");
+  });
+
+  it("extracts Pi --mode json session activity (#951)", async () => {
+    const { sessionId } = await createSessionWithData(testApp.db);
+
+    await testApp.db.insert(schema.sessionMessages).values([
+      {
+        sessionId,
+        type: "stdout",
+        data: [
+          JSON.stringify({ type: "session", id: "pi-sess-1", cwd: "/repo" }),
+          JSON.stringify({
+            type: "tool_execution_start",
+            toolCallId: "t1",
+            toolName: "read",
+            args: { path: "/src/a.ts" },
+          }),
+          JSON.stringify({
+            type: "tool_execution_end",
+            toolCallId: "t1",
+            toolName: "read",
+            isError: false,
+            result: { content: [{ text: "file contents" }] },
+          }),
+          JSON.stringify({
+            type: "tool_execution_start",
+            toolCallId: "t2",
+            toolName: "bash",
+            args: { command: "pnpm test" },
+          }),
+          JSON.stringify({
+            type: "tool_execution_end",
+            toolCallId: "t2",
+            toolName: "bash",
+            isError: true,
+            result: { content: [{ text: "1 test failed" }] },
+          }),
+          JSON.stringify({
+            type: "message_end",
+            message: {
+              role: "assistant",
+              model: "claude-opus-4",
+              content: [{ text: "Pi finished the task." }],
+              usage: { input: 100, output: 20, cost: { total: 0.01 } },
+            },
+          }),
+          JSON.stringify({
+            type: "turn_end",
+            message: {
+              role: "assistant",
+              model: "claude-opus-4",
+              content: [{ text: "Pi finished the task." }],
+              stopReason: "stop",
+              usage: { input: 100, output: 20, cost: { total: 0.01 } },
+            },
+          }),
+        ].join("\n"),
+      },
+    ]);
+
+    const res = await testApp.app.request(`/api/sessions/${sessionId}/summary`);
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.overview).not.toBe("No activity recorded");
+    expect(body.model).toBe("claude-opus-4");
+    expect(body.filesRead).toEqual(["/src/a.ts"]);
+    expect(body.commandsRun).toEqual(["pnpm test"]);
+    expect(body.keyExcerpts).toContain("Pi finished the task.");
+    expect(body.errors[0]).toContain("bash");
+    expect(body.errors[0]).toContain("1 test failed");
+    expect(body.toolUsePatterns).toEqual(expect.arrayContaining([
+      { tool: "read", count: 1, failedCount: 0 },
+      { tool: "bash", count: 1, failedCount: 1 },
+    ]));
+    expect(body.overview).toContain("Agent session using claude-opus-4");
+  });
+
   it("records Codex command errors and turn failures", async () => {
     const { sessionId } = await createSessionWithData(testApp.db);
 
