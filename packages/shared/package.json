@@ -46,7 +46,8 @@
     "./lib/issue-status-orchestration": { "development": "./src/lib/issue-status-orchestration.ts", "types": "./dist/lib/issue-status-orchestration.d.ts", "import": "./dist/lib/issue-status-orchestration.js", "default": "./src/lib/issue-status-orchestration.ts" },
     "./lib/smoke-check": { "development": "./src/lib/smoke-check.ts", "types": "./dist/lib/smoke-check.d.ts", "import": "./dist/lib/smoke-check.js", "default": "./src/lib/smoke-check.ts" },
     "./lib/drive-retro": { "development": "./src/lib/drive-retro.ts", "types": "./dist/lib/drive-retro.d.ts", "import": "./dist/lib/drive-retro.js", "default": "./src/lib/drive-retro.ts" },
-    "./lib/failure-keywords": { "development": "./src/lib/failure-keywords.ts", "types": "./dist/lib/failure-keywords.d.ts", "import": "./dist/lib/failure-keywords.js", "default": "./src/lib/failure-keywords.ts" }
+    "./lib/failure-keywords": { "development": "./src/lib/failure-keywords.ts", "types": "./dist/lib/failure-keywords.d.ts", "import": "./dist/lib/failure-keywords.js", "default": "./src/lib/failure-keywords.ts" },
+    "./lib/sanitize-utf8": { "development": "./src/lib/sanitize-utf8.ts", "types": "./dist/lib/sanitize-utf8.d.ts", "import": "./dist/lib/sanitize-utf8.js", "default": "./src/lib/sanitize-utf8.ts" }
   },
   "scripts": {
     "prepare": "pnpm build",

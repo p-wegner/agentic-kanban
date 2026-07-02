@@ -1,4 +1,5 @@
 import { sessions, sessionMessages } from "@agentic-kanban/shared/schema";
+import { sanitizeUtf8 } from "@agentic-kanban/shared/lib/sanitize-utf8";
 import { eq } from "drizzle-orm";
 import { writeDb } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -14,25 +15,35 @@ export async function selectSessionStats(
 /**
  * Persist the `stats` JSON blob for a session. Returns the query promise so the
  * caller can attach its own fire-and-forget `.catch()` / await it.
+ *
+ * Sanitized here (not just at the raw-byte read sites) as a last-line guard at the
+ * persistence boundary (arch-review #960): `statsJson` is often reassembled from
+ * agent stdout text, so a lone surrogate that slipped past an earlier decode would
+ * otherwise still reach libsql and panic the process.
  */
 export function updateSessionStats(
   sessionId: string,
   statsJson: string,
   database: Database = writeDb,
 ) {
-  return database.update(sessions).set({ stats: statsJson }).where(eq(sessions.id, sessionId));
+  return database.update(sessions).set({ stats: sanitizeUtf8(statsJson) }).where(eq(sessions.id, sessionId));
 }
 
 /**
  * Batch-insert buffered session messages. Returns the query promise so the
  * caller keeps its fire-and-forget FK-constraint `.catch()` handling.
+ *
+ * `data` is sanitized here as the persistence-boundary guard (arch-review #960) —
+ * see `updateSessionStats` above for why this can't be relied on only upstream.
  */
 export function insertSessionMessages(
   sessionId: string,
   rows: Array<{ type: string; data: string | null; exitCode: string | null }>,
   database: Database = writeDb,
 ) {
-  return database.insert(sessionMessages).values(rows.map((r) => ({ sessionId, ...r })));
+  return database.insert(sessionMessages).values(
+    rows.map((r) => ({ sessionId, ...r, data: r.data == null ? null : sanitizeUtf8(r.data) })),
+  );
 }
 
 /**
