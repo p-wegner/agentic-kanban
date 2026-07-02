@@ -13,10 +13,16 @@ und fetcht/chunkt **nicht** von sich aus: Braucht ein Review mehr als den Diff (
 Criteria, Quelldateien, History), muss der Teilnehmer-Skill sich das über seine eigenen Tools holen.
 Ein naiver Teilnehmer-Skill soll an Aufgaben scheitern, die mehr als den Diff brauchen.
 
-**Ausgabe-Regel:** Arbeite TEIL 0–3 **still** ab — keine Schritt-für-Schritt-Erklärungen, keine
-Tool-Kommentare. Gib am Ende **genau zwei Blöcke** aus (nichts sonst): zuerst das **Review-Ergebnis
-des Teilnehmer-Skills** (die Findings), danach den **Benchmark-Block** (die Bewertung). Beide Formate
-stehen in TEIL 4.5. Einzige Ausnahme: Abbruchmeldungen (fehlender Branch in TEIL 0, fehlender
+**Ausgabe-Regel:** Arbeite still ab — keine Schritt-für-Schritt-Erklärungen, keine Tool-Kommentare.
+Gib **genau zwei Blöcke** aus (nichts sonst), und zwar an **zwei getrennten Zeitpunkten**:
+1. Das **Review-Ergebnis des Teilnehmer-Skills** (die Findings) direkt nach TEIL 3 — also **bevor**
+   TEIL 4 den Gold-Standard überhaupt liest (Format in TEIL 3.2).
+2. Den **Benchmark-Block** (die Bewertung) am Ende nach TEIL 4 (Format in TEIL 4.5).
+
+Diese Reihenfolge ist verbindlich: Der Review-Block muss ausgegeben sein, **bevor** die erste
+`Read`-Operation auf eine `gold-standard-*`-Datei stattfindet. So belegt die Reihenfolge der
+geloggten Tool-Aufrufe, dass der Reviewer die Bewertungsgrundlage nicht angefasst hat.
+Einzige weitere Ausgaben: Abbruchmeldungen (fehlender Branch in TEIL 0, fehlender
 Gold-Standard in TEIL 4.1).
 
 ## Parameter
@@ -129,7 +135,8 @@ Merke dir außerdem den vom Agent-Tool zurückgegebenen **`subagent_tokens`**-We
 des Agent-Ergebnisses). Das ist die Selbstauskunft über den Token-Verbrauch des Reviews (Input inkl.
 bereitgestelltem Kontext + Output). Er wird in TEIL 3 als `tokens_used` verwendet.
 
-(Keine Zwischenausgabe — die Findings erscheinen später im Benchmark-Block. Siehe Ausgabe-Regel.)
+(Noch keine Ausgabe hier — der Review-Block wird in TEIL 3.2 ausgegeben, sobald auch `tokens_used`
+feststeht. Siehe Ausgabe-Regel.)
 
 ---
 
@@ -147,6 +154,24 @@ Kein Transcript-Scan, kein Zeitfenster. Die Zahl kommt ausschließlich aus dem A
 startet, ist deren Verbrauch je nach Harness evtl. **nicht** in `subagent_tokens` enthalten — dann ist
 `tokens_used` eine Untergrenze. Vermerke das in der Ausgabe, wenn du weißt, dass gefächert wurde. Falls
 das Agent-Ergebnis keinen `subagent_tokens`-Wert liefert, setze `tokens_used: null` und vermerke es.
+
+## Schritt 3.2: Review-Ergebnis ausgeben (VOR dem Gold-Standard-Zugriff)
+
+Gib **jetzt** — bevor TEIL 4 irgendeine `gold-standard-*`-Datei liest — das Review-Ergebnis des
+Teilnehmer-Skills aus (die Findings aus `findings-{AUFGABE_NR}.json`, das ist, was der Teilnehmer-Skill
+selbst geliefert hat):
+
+```
+=== Review-Ergebnis Aufgabe {AUFGABE_NR} (Teilnehmer-Skill) ===
+{Anzahl} Findings — Tokens: {tokens_used}
+
+- F1 (high)   dateiname.ts:zeile — <kurzbeschreibung>
+- F2 (medium) dateiname.ts:zeile — <kurzbeschreibung>
+- ...
+```
+
+Erst nach dieser Ausgabe mit TEIL 4 fortfahren. Dadurch steht im Transcript die erste `Read`-Operation
+auf `gold-standard-aufgabe{AUFGABE_NR}.json` nachweislich **nach** dem Review-Block.
 
 ---
 
@@ -202,21 +227,10 @@ Schreibe das Ergebnis nach `workshop/review/benchmark-result-{AUFGABE_NR}.json` 
 }
 ```
 
-## Schritt 4.5: Ergebnisse ausgeben
+## Schritt 4.5: Benchmark-Block ausgeben
 
-Gib **zuerst** das Review-Ergebnis des Teilnehmer-Skills aus (die Findings aus
-`findings-{AUFGABE_NR}.json` — das ist, was der Teilnehmer-Skill selbst geliefert hat):
-
-```
-=== Review-Ergebnis Aufgabe {AUFGABE_NR} (Teilnehmer-Skill) ===
-{Anzahl} Findings — Tokens: {tokens_used}
-
-- F1 (high)   dateiname.ts:zeile — <kurzbeschreibung>
-- F2 (medium) dateiname.ts:zeile — <kurzbeschreibung>
-- ...
-```
-
-Gib **danach** den Benchmark-Block aus (die Bewertung gegen den Gold-Standard):
+Das Review-Ergebnis wurde bereits in TEIL 3.2 ausgegeben. Gib jetzt **nur noch** den Benchmark-Block
+aus (die Bewertung gegen den Gold-Standard):
 
 ```
 === Benchmark Aufgabe {AUFGABE_NR} ===
