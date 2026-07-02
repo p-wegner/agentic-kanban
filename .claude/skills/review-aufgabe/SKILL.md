@@ -1,15 +1,17 @@
 ---
 name: review-aufgabe
-description: Workshop Review + Benchmark für eine Aufgabe — Parameter: Aufgabennummer als Freitext (z.B. "/review-aufgabe 1"). Materialisiert den vom Teilnehmer-Skill deklarierten Kontext, führt das Review als eigenen Subagent aus (Fan-out für große Diffs möglich) und gibt sofort den Benchmark-Score inkl. Token-Verbrauch aus. Fragt nach der Nummer falls kein Parameter angegeben.
+description: Workshop Review + Benchmark für eine Aufgabe — Parameter: Aufgabennummer als Freitext (z.B. "/review-aufgabe 1"). Pinnt Aufgabe und Branch, stellt den Diff + vollen Tool-Zugriff bereit und führt das Review als eigenen Subagent aus (Fan-out für große Diffs möglich); gibt sofort den Benchmark-Score inkl. Token-Verbrauch aus. Fragt nach der Nummer falls kein Parameter angegeben.
 argument-hint: "[Aufgabennummer, z.B. 1]"
 ---
 
 Du bist ein Workshop-Runner (das "Harness"), der Review und Benchmark in einem Durchlauf ausführt.
 
-Wichtiges Prinzip: **Der Teilnehmer-Skill besitzt die Review-Strategie, das Harness stellt nur bereit.**
-Das Harness materialisiert ausschließlich den Kontext, den der Teilnehmer-Skill *deklariert*, und
-führt dessen Methodik treu aus. Es fetcht oder chunkt **nicht** von sich aus — ein naiver
-Teilnehmer-Skill soll an Aufgaben scheitern, die mehr als den Diff brauchen.
+Wichtiges Prinzip: **Der Teilnehmer-Skill besitzt die Review-Strategie, das Harness verankert nur die Aufgabe.**
+Das Harness pinnt zuverlässig Aufgabe und Branch, stellt den Diff sowie vollen Tool-Zugriff bereit und
+führt die Methodik des Teilnehmers treu aus. Es schreibt dem Teilnehmer **kein** Frontmatter-Schema vor
+und fetcht/chunkt **nicht** von sich aus: Braucht ein Review mehr als den Diff (z.B. Ticket/Acceptance
+Criteria, Quelldateien, History), muss der Teilnehmer-Skill sich das über seine eigenen Tools holen.
+Ein naiver Teilnehmer-Skill soll an Aufgaben scheitern, die mehr als den Diff brauchen.
 
 ## Parameter
 
@@ -38,46 +40,46 @@ Und beende.
 
 ---
 
-# TEIL 1: Kontext materialisieren
+# TEIL 1: Aufgabe verankern & Diff bereitstellen
 
-## Schritt 1.1: Teilnehmer-Skill laden & Frontmatter parsen
+Das Harness parst **kein** vorgegebenes Frontmatter-Schema. Es pinnt die Aufgabe zuverlässig (Branch,
+Basis, Diff) und übergibt dem Reviewer diesen festen Anker plus vollen Tool-Zugriff. Jeden weiteren
+Kontext holt sich der Teilnehmer-Skill über seine eigene Methodik.
 
-Lese `workshop/review/skill.md`. Die Datei besteht aus:
-- **Optionalem YAML-Frontmatter** (zwischen `---`-Zeilen) mit `inputs:` und/oder `strategy:`
-- **Methodik-Body** (der Rest) — der eigentliche Reviewer-Prompt
+## Schritt 1.1: Teilnehmer-Skill (Methodik) laden
 
-Parse das Frontmatter defensiv:
-- Kein/ungültiges Frontmatter → Default `inputs: { diff: full }` verwenden und in der Ausgabe vermerken ("Kein Frontmatter — nur Diff bereitgestellt").
-- **Materialisiere ausschließlich die deklarierten Inputs.** Was nicht deklariert ist, wird nicht bereitgestellt.
-- Den Gold-Standard **niemals** dem Reviewer zeigen.
+Lese `workshop/review/skill.md`. Der gesamte Inhalt ist die **Review-Methodik** — der Prompt, dem der
+Reviewer folgt. Führende Doku-/Kommentarblöcke (`<!-- ... -->`) sind Anleitung für den Teilnehmer und
+gehören nicht in den Reviewer-Prompt; alles andere schon. **Keine Schlüssel-Interpretation** — was der
+Teilnehmer nicht in seiner Methodik beschreibt, passiert nicht.
 
-Unterstützte `inputs`-Schlüssel (alle optional):
+## Schritt 1.2: Diff für die richtige Aufgabe materialisieren
 
-| Schlüssel | Werte | Bedeutung |
-|---|---|---|
-| `diff` | `full` \| `per-file` \| `none` | Default `full` |
-| `issue` | `true` \| `false` | `true` → `workshop/review/issue-aufgabe{AUFGABE_NR}.md` einlesen |
-| `files` | Liste von Globs | Quelldateien auf Branch-HEAD via `git show` |
-| `git-log` | `true` \| `false` | Commit-Messages des Branches |
-| `manifest` | `true` \| `false` | Datei-Manifest + Diff-Stat |
+Damit der Reviewer garantiert die **richtige** Aufgabe/den richtigen Branch prüft — egal wie seine
+Methodik formuliert ist — pinnt das Harness den Diff selbst über die in TEIL 0 verifizierte Branch-Ref
+und schreibt ihn in eine Scratch-Datei (hält den ggf. großen Diff aus dem Trainer-Kontext):
 
-## Schritt 1.2: Inputs materialisieren
+```powershell
+$diffFile = Join-Path $env:TEMP "review-aufgabe{AUFGABE_NR}-diff.txt"
+git diff origin/master...origin/aufgabe{AUFGABE_NR} | Out-File -Encoding utf8 $diffFile
+(git diff --stat origin/master...origin/aufgabe{AUFGABE_NR} | Select-Object -Last 1).Trim()
+```
 
-Führe je nach Deklaration aus:
+## Schritt 1.3: Aufgaben-Anker bauen
 
-- `diff: full` → `git diff origin/master...origin/aufgabe{AUFGABE_NR}`
-- `diff: per-file` → Änderungsdateien ermitteln (`git diff --name-only origin/master...origin/aufgabe{AUFGABE_NR}`), dann pro Datei `git diff origin/master...origin/aufgabe{AUFGABE_NR} -- <datei>` — als getrennte Blöcke bereitstellen.
-- `manifest: true` → `git diff --stat --name-status origin/master...origin/aufgabe{AUFGABE_NR}`
-- `issue: true` → Inhalt von `workshop/review/issue-aufgabe{AUFGABE_NR}.md`. Fehlt die Datei, vermerke das ("Kein Issue-File für Aufgabe {AUFGABE_NR}") und fahre fort — nicht ersetzen.
-- `files: [globs]` → je Treffer `git show origin/aufgabe{AUFGABE_NR}:<pfad>`
-- `git-log: true` → `git log origin/master..origin/aufgabe{AUFGABE_NR} --oneline`
+Baue einen festen Anker-Block, der dem Reviewer sagt, WORAN er arbeitet und WAS bereitsteht:
+- Aufgabe: {AUFGABE_NR}
+- Branch: `origin/aufgabe{AUFGABE_NR}` — Basis: `origin/master`
+- Diff-Kommando (bei Bedarf selbst ausführbar): `git diff origin/master...origin/aufgabe{AUFGABE_NR}`
+- Vollständiger Diff bereits materialisiert unter `<diffFile>` (mit Read lesen)
+- Diff-Größe: `<stat>`
+- Token-Budget-Hinweis aus CONCEPT.md (z.B. "mittlerer PR-Review < ~10.000 Output-Tokens")
+- **Voller Tool-Zugriff** (Bash, Read, Grep, Agent): "Hol dir jeden weiteren Kontext, den deine Methodik
+  braucht, selbst — z.B. verknüpftes Ticket/Acceptance Criteria, Quelldateien, Commit-History."
+- **Integritäts-Guard**: "Lies keine Workshop-Referenzdateien (`gold-standard-*`, `benchmark-result-*`) —
+  das ist die Bewertungsgrundlage, nicht Teil des Reviews."
 
-## Schritt 1.3: Kontext-Bundle zusammenstellen
-
-Baue ein Bundle aus:
-- **Header**: Branch-Ref (`origin/aufgabe{AUFGABE_NR}`), Diff-Größe (Zeilen/Dateien aus dem Manifest bzw. `git diff --stat`), Hinweis auf das Token-Budget aus CONCEPT.md (z.B. "Ein Review für PR-2 sollte unter 10.000 Output-Tokens fertig sein").
-- Die materialisierten Inputs aus Schritt 1.2.
-- Den Methodik-Body aus Schritt 1.1.
+Der Anker ist vom Harness fest vorgegeben; er verlangt vom Teilnehmer **keine** Schlüssel.
 
 ---
 
@@ -91,7 +93,7 @@ dem Trainer-Kontext und macht die Token-Messung sauber.
 
 Der Prompt an den Subagenten enthält, in dieser Reihenfolge:
 1. Den **Methodik-Body** des Teilnehmer-Skills (Schritt 1.1) — das ist die Anleitung, der der Subagent folgt.
-2. Das **Kontext-Bundle** (Schritt 1.3).
+2. Den **Aufgaben-Anker** (Schritt 1.3).
 3. Einen festen **Output-Vertrag** (vom Harness angehängt):
    > Schreibe deine Findings als valides JSON nach `workshop/review/findings-{AUFGABE_NR}.json`
    > (Schema unten, kein Text davor/danach). Gib als Antwort nur eine einzeilige Zusammenfassung
