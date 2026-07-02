@@ -9,6 +9,8 @@ import {
   stringValue,
 } from "./shared.js";
 import { recordUnknownAgentEvent } from "./unknown-events.js";
+import { recordUnknownFieldDrift } from "./unknown-fields.js";
+import { codexThreadStartedSchema, codexTurnCompletedUsageSchema } from "./codex-schema.js";
 
 /**
  * Single source of truth for the codex usage-limit prose contract (#991).
@@ -156,12 +158,18 @@ function handleCodexTurnCompleted(obj: Record<string, unknown>, result: ParsedSt
   const inputTokens = numberValue(totalUsage.input_tokens);
   const outputTokens = numberValue(totalUsage.output_tokens);
   const contextTokens = numberValue(currentUsage.input_tokens) || inputTokens;
-  // #976: when NONE of the expected usage shapes carry token fields, the
+  // #976/#994: when NONE of the expected usage shapes carry token fields, the
   // numberValue() defaults above read an upstream usage-shape change as a
-  // silent "0 tokens". Record it through the rate-limited unknown-events path
-  // so the drift is loud instead of misdiagnosed as an idle session.
+  // silent "0 tokens". A zod parse of the raw `usage` object against the
+  // schema this parser actually relies on turns that into a reported field
+  // drift (with the exact zod issue paths) instead of just a silent zero.
   if (!hasCodexTokenFields(totalUsage) && !hasCodexTokenFields(currentUsage)) {
     recordUnknownAgentEvent("codex", "turn.completed#usage-shape-mismatch");
+    const parsed = codexTurnCompletedUsageSchema.safeParse(usage);
+    const detail = parsed.success
+      ? "usage object matched the schema but carried no known token fields"
+      : parsed.error.issues.map((issue) => `${issue.path.join(".") || "<root>"}: ${issue.message}`).join("; ");
+    recordUnknownFieldDrift("codex", "turn.completed", detail);
   }
   result.stats = {
     // The codex JSON stream carries no duration/cost — 0 means "not provided",
@@ -198,6 +206,15 @@ export function parseCodexEvent(obj: Record<string, unknown>, context: ParseCont
     if (sessionId) {
       result.providerSessionId = sessionId;
       pushDisplay(result, { kind: "init", model: "codex", sessionId, cwd: "", tools: [], mcpServers: [], permissionMode: "" });
+    } else {
+      // A thread.started with no usable thread_id silently drops session-resume
+      // tracking (#994) — a renamed field reads identically to "no session id
+      // yet" with numberValue/stringValue-style coercion. Report it as drift.
+      const parsed = codexThreadStartedSchema.safeParse(obj);
+      const detail = parsed.success
+        ? "thread_id parsed but was empty"
+        : parsed.error.issues.map((issue) => `${issue.path.join(".") || "<root>"}: ${issue.message}`).join("; ");
+      recordUnknownFieldDrift("codex", "thread.started", detail);
     }
   }
 

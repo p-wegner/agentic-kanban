@@ -54,7 +54,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "drizzle-orm": "0.45.2"
+    "drizzle-orm": "0.45.2",
+    "zod": "3.25.76"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
