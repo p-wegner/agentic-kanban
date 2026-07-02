@@ -7,6 +7,7 @@ import * as gitService from "../git-service.js";
 import { notifyBoard } from "../notify.js";
 import { runSetupScript } from "../setup-script.js";
 import { writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
+import { resolveProviderProfileFromPrefs } from "@agentic-kanban/shared/lib/strategy-policy";
 import { requireEntity } from "../db-utils.js";
 
 export function registerStartWorkspace(server: McpServer) {
@@ -93,13 +94,15 @@ export function registerStartWorkspace(server: McpServer) {
           }
         }
 
-        // Read agent settings to store on workspace
+        // Read agent settings to store on workspace. Provider+profile go through
+        // the shared Bullseye-aware resolution (#984): the project's Strategy
+        // Bullseye (`board_strategy_<projectId>`) wins over the global settings
+        // prefs, and the settings fallback reads each provider's OWN profile key
+        // (the old hand-rolled ladder ignored the Bullseye and fell through
+        // copilot/pi to claude_profile).
         const prefRows = await db.select().from(schema.preferences);
         const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
-        const provider = (prefMap.get("provider") || "claude");
-        const profileName = provider === "codex"
-          ? (prefMap.get("codex_profile") || prefMap.get("claude_profile") || null)
-          : (prefMap.get("claude_profile") || null);
+        const { provider, profileName } = resolveProviderProfileFromPrefs(prefMap, issue.projectId);
         const agentCommand = prefMap.get("agent_command") || null;
 
         await db.insert(schema.workspaces).values({
