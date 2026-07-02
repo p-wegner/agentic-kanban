@@ -1,5 +1,10 @@
 import type { ParseContext, ParsedStreamEvent } from "./types.js";
-import { COPILOT_RESULT_TYPES, COPILOT_SESSION_START_TYPES } from "./copilot-event-types.js";
+import {
+  COPILOT_RESULT_TYPES,
+  COPILOT_SESSION_START_TYPES,
+  COPILOT_TOOL_RESULT_TYPES,
+  COPILOT_TOOL_USE_TYPES,
+} from "./copilot-event-types.js";
 import {
   contentToText,
   getString,
@@ -29,6 +34,28 @@ const COPILOT_IGNORED_TYPES = new Set([
   "session.warning",
   "session.tools_updated",
 ]);
+
+// Catch-all raw fallback events (#968): the fallback keeps UI continuity for
+// unmatched-but-valid JSON, but it must NOT count as "recognized" in the drift
+// detector — before #968 it made literally any JSON parse as defined, so a
+// Copilot CLI wire-format change produced ZERO unknown-event counts. Marked via
+// a WeakSet (not a ParsedStreamEvent field) so the wire contract is unchanged.
+const unmatchedFallbackEvents = new WeakSet<ParsedStreamEvent>();
+
+/** True when the event is only the copilot catch-all raw fallback for an unmatched type (#968). */
+export function isCopilotUnmatchedFallback(event: ParsedStreamEvent): boolean {
+  return unmatchedFallbackEvents.has(event);
+}
+
+/**
+ * Tool-shaped type gate (#968): the tool branches used to fire on bare
+ * `type.includes("tool")`, so foreign shapes (e.g. `subagent_toolkit.updated`)
+ * silently misparsed as tool activity. All known copilot tool type names either
+ * live in the shared sets or start with `tool` — require that.
+ */
+function isCopilotToolishType(type: string): boolean {
+  return COPILOT_TOOL_USE_TYPES.has(type) || COPILOT_TOOL_RESULT_TYPES.has(type) || type.startsWith("tool");
+}
 
 function normalizedType(obj: Record<string, unknown>): string {
   return String((obj.type as string) || (obj.event as string) || (obj.name as string) || "").toLowerCase().replace(/-/g, "_");
@@ -191,7 +218,7 @@ export function parseCopilotEvent(obj: Record<string, unknown>, rawLine: string,
     result.toolActivity = { name, input: inputParsed, toolUseId: id };
     registerToolName(context, id, name);
     pushDisplay(result, { kind: "tool_use", id: id ?? "", name, input: stringifyValue(inputValue), inputParsed });
-  } else if (toolName) {
+  } else if (toolName && isCopilotToolishType(type)) {
     const id = stringValue(payload.id ?? payload.tool_use_id ?? payload.toolUseId ?? payload.toolCallId ?? item.id);
     const input = parseInput(payload.input ?? payload.arguments ?? item.input);
     result.toolActivity = { name: toolName, input, toolUseId: id };
@@ -210,7 +237,7 @@ export function parseCopilotEvent(obj: Record<string, unknown>, rawLine: string,
     }
   }
 
-  if (type.includes("tool") && (type.includes("complete") || type.includes("completed") || type.includes("end") || type.includes("result"))) {
+  if (COPILOT_TOOL_RESULT_TYPES.has(type) || (isCopilotToolishType(type) && (type.includes("complete") || type.includes("end") || type.includes("result")))) {
     const id = stringValue(payload.id ?? payload.tool_use_id ?? payload.toolUseId ?? payload.toolCallId ?? obj.id ?? item.id);
     if (id) {
       const resultRecord = objectValue(payload.result);
@@ -263,10 +290,16 @@ export function parseCopilotEvent(obj: Record<string, unknown>, rawLine: string,
     });
   }
 
-  if (!hasFields(result) && !COPILOT_IGNORED_TYPES.has(type)) {
+  if (!hasFields(result)) {
+    if (COPILOT_IGNORED_TYPES.has(type)) {
+      // Known-but-deliberately-ignored chatter (deltas, turn boundaries):
+      // recognized-but-empty, so healthy noise never counts as drift (#968).
+      return result;
+    }
     const rawText = getString(obj, ["message", "text", "content", "status"]);
     pushDisplay(result, { kind: "raw", text: rawText || rawLine });
+    unmatchedFallbackEvents.add(result);
   }
 
-  return hasFields(result) ? result : undefined;
+  return result;
 }

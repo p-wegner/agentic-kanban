@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   classifyAgentStreamLine,
+  createAgentStreamParseContext,
   parseAgentProviderStreamLineObserved,
+  parseAgentStreamLineObserved,
   getUnknownEventCounters,
   resetUnknownEventCounters,
   setUnknownEventLogger,
@@ -126,6 +128,65 @@ describe("agent-stream unknown-event observability", () => {
       expect(counts.get("codex:a")).toBe(1);
       expect(counts.get("claude:a")).toBe(1);
       expect(counts.get("codex:b")).toBe(1);
+    });
+  });
+
+  describe("copilot catch-all fallback counts as unknown (#968)", () => {
+    it("classifies an unmatched copilot type as NOT recognized while keeping the raw display fallback", () => {
+      const c = classifyAgentStreamLine("copilot", JSON.stringify({ type: "totally.new_event", message: "hi" }));
+      expect(c.validJson).toBe(true);
+      expect(c.recognized).toBe(false);
+      expect(c.eventType).toBe("totally.new_event");
+      // UI continuity: the raw display fallback is still produced.
+      expect(c.event?.displayEvents).toEqual([{ kind: "raw", text: "hi" }]);
+    });
+
+    it("records an unknown event for an unmatched copilot type (drift is no longer invisible)", () => {
+      const out = parseAgentStreamLineObserved("copilot", JSON.stringify({ type: "totally.new_event" }));
+      // The raw fallback is still returned for display...
+      expect(out?.displayEvents?.[0]).toMatchObject({ kind: "raw" });
+      // ...but the drift detector counted it.
+      expect(getUnknownEventCounters().counts.get("copilot:totally.new_event")).toBe(1);
+      expect(logged).toHaveLength(1);
+    });
+
+    it("still recognizes known copilot event types without counting them", () => {
+      const c = classifyAgentStreamLine("copilot", JSON.stringify({ type: "assistant.message", data: { content: "done" } }));
+      expect(c.recognized).toBe(true);
+      parseAgentStreamLineObserved("copilot", JSON.stringify({ type: "assistant.message", data: { content: "done" } }));
+      expect(getUnknownEventCounters().total).toBe(0);
+    });
+
+    it("treats deliberately-ignored copilot chatter as recognized-but-empty, not unknown", () => {
+      const c = classifyAgentStreamLine("copilot", JSON.stringify({ type: "assistant.message_delta", data: { delta: "x" } }));
+      expect(c.recognized).toBe(true);
+      parseAgentStreamLineObserved("copilot", JSON.stringify({ type: "assistant.turn_start" }));
+      expect(getUnknownEventCounters().total).toBe(0);
+      expect(logged).toHaveLength(0);
+    });
+
+    it("does not misparse a foreign shape carrying a tool-name field as copilot tool activity", () => {
+      const c = classifyAgentStreamLine("copilot", JSON.stringify({ type: "widget.updated", name: "not_a_tool" }));
+      expect(c.recognized).toBe(false);
+      expect(c.event?.toolActivity).toBeUndefined();
+    });
+
+    it("keeps the known copilot tool type names working", () => {
+      const context = createAgentStreamParseContext();
+      const start = classifyAgentStreamLine(
+        "copilot",
+        JSON.stringify({ type: "tool_call", id: "t1", name: "bash", arguments: { command: "ls" } }),
+        context,
+      );
+      expect(start.recognized).toBe(true);
+      expect(start.event?.toolActivity).toMatchObject({ name: "bash", toolUseId: "t1" });
+      const done = classifyAgentStreamLine(
+        "copilot",
+        JSON.stringify({ type: "tool_call.completed", id: "t1", output: "ok" }),
+        context,
+      );
+      expect(done.recognized).toBe(true);
+      expect(done.event?.toolResult).toMatchObject({ toolUseId: "t1" });
     });
   });
 
