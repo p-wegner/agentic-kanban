@@ -83,15 +83,3 @@ export async function setSessionTerminal(
     .set({ status, endedAt, exitCode })
     .where(eq(sessions.id, sessionId));
 }
-
-/** Update a workspace's status + updatedAt timestamp. */
-export async function setWorkspaceStatus(
-  workspaceId: string,
-  status: string,
-  updatedAt: string,
-  database: Database = db,
-): Promise<void> {
-  await database.update(workspaces)
-    .set({ status, updatedAt })
-    .where(eq(workspaces.id, workspaceId));
-}
