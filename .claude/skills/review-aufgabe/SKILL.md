@@ -1,17 +1,19 @@
 ---
 name: review-aufgabe
-description: Workshop Review + Benchmark für eine Aufgabe — Parameter: Aufgabennummer als Freitext (z.B. "/review-aufgabe 1"). Pinnt Aufgabe und Branch, stellt den Diff + vollen Tool-Zugriff bereit und führt das Review als eigenen Subagent aus (Fan-out für große Diffs möglich); gibt sofort den Benchmark-Score inkl. Token-Verbrauch aus. Fragt nach der Nummer falls kein Parameter angegeben.
+description: Workshop Review + Benchmark für eine Aufgabe — Parameter: Aufgabennummer als Freitext (z.B. "/review-aufgabe 1"). Pinnt Aufgabe und Branch und stellt vollen Tool-Zugriff bereit (den Diff zieht der Teilnehmer selbst über den Anker); führt das Review als eigenen Subagent aus (Fan-out für große Diffs möglich); gibt sofort den Benchmark-Score inkl. Token-Verbrauch aus. Fragt nach der Nummer falls kein Parameter angegeben.
 argument-hint: "[Aufgabennummer, z.B. 1]"
 ---
 
 Du bist ein Workshop-Runner (das "Harness"), der Review und Benchmark in einem Durchlauf ausführt.
 
 Wichtiges Prinzip: **Der Teilnehmer-Skill besitzt die Review-Strategie, das Harness verankert nur die Aufgabe.**
-Das Harness pinnt zuverlässig Aufgabe und Branch, stellt den Diff sowie vollen Tool-Zugriff bereit und
-führt die Methodik des Teilnehmers treu aus. Es schreibt dem Teilnehmer **kein** Frontmatter-Schema vor
-und fetcht/chunkt **nicht** von sich aus: Braucht ein Review mehr als den Diff (z.B. Ticket/Acceptance
-Criteria, Quelldateien, History), muss der Teilnehmer-Skill sich das über seine eigenen Tools holen.
-Ein naiver Teilnehmer-Skill soll an Aufgaben scheitern, die mehr als den Diff brauchen.
+Das Harness pinnt zuverlässig Aufgabe und Branch (Branch-Name bleibt im Anker sichtbar) und stellt
+vollen Tool-Zugriff bereit; **den Diff zieht der Teilnehmer selbst** über das im Anker genannte
+Kommando. Es führt die Methodik des Teilnehmers treu aus, schreibt ihm **kein** Frontmatter-Schema vor
+und fetcht/chunkt **nicht** von sich aus: Braucht ein Review den Diff, Ticket/Acceptance Criteria,
+Quelldateien oder History, muss der Teilnehmer-Skill sich das über seine eigenen Tools holen.
+Ein naiver Teilnehmer-Skill, der nur einen mitgelieferten Diff erwartet, soll scheitern —
+das Harness liefert keinen vorgekauten Diff mehr.
 
 **Ausgabe-Regel:** Arbeite still ab — keine Schritt-für-Schritt-Erklärungen, keine Tool-Kommentare.
 Gib **genau zwei Blöcke** aus (nichts sonst), und zwar an **zwei getrennten Zeitpunkten**:
@@ -52,11 +54,11 @@ Und beende.
 
 ---
 
-# TEIL 1: Aufgabe verankern & Diff bereitstellen
+# TEIL 1: Aufgabe verankern
 
 Das Harness parst **kein** vorgegebenes Frontmatter-Schema. Es pinnt die Aufgabe zuverlässig (Branch,
-Basis, Diff) und übergibt dem Reviewer diesen festen Anker plus vollen Tool-Zugriff. Jeden weiteren
-Kontext holt sich der Teilnehmer-Skill über seine eigene Methodik.
+Basis) und übergibt dem Reviewer diesen festen Anker plus vollen Tool-Zugriff. Den Diff und jeden
+weiteren Kontext holt sich der Teilnehmer-Skill über seine eigene Methodik.
 
 ## Schritt 1.1: Teilnehmer-Skill (Methodik) laden
 
@@ -65,33 +67,29 @@ Reviewer folgt. Führende Doku-/Kommentarblöcke (`<!-- ... -->`) sind Anleitung
 gehören nicht in den Reviewer-Prompt; alles andere schon. **Keine Schlüssel-Interpretation** — was der
 Teilnehmer nicht in seiner Methodik beschreibt, passiert nicht.
 
-## Schritt 1.2: Diff für die richtige Aufgabe materialisieren
+## Schritt 1.2: Diff bewusst NICHT vor-materialisieren
 
-Damit der Reviewer garantiert die **richtige** Aufgabe/den richtigen Branch prüft — egal wie seine
-Methodik formuliert ist — pinnt das Harness den Diff selbst über die in TEIL 0 verifizierte Branch-Ref
-und schreibt ihn in eine Scratch-Datei (hält den ggf. großen Diff aus dem Trainer-Kontext):
-
-```powershell
-$diffFile = Join-Path $env:TEMP "review-aufgabe{AUFGABE_NR}-diff.txt"
-git diff origin/master...origin/aufgabe{AUFGABE_NR} | Out-File -Encoding utf8 $diffFile
-(git diff --stat origin/master...origin/aufgabe{AUFGABE_NR} | Select-Object -Last 1).Trim()
-```
+Das Harness kaut den Diff **nicht** vor. Die Aufgabe ist über die in TEIL 0 verifizierte Branch-Ref
+bereits eindeutig gepinnt; den Diff-**Inhalt** holt sich der Teilnehmer-Skill selbst über das im Anker
+genannte Kommando (`git diff origin/master...origin/aufgabe{AUFGABE_NR}`). Ein naiver
+"review the following diff"-Skill findet nichts vor und scheitert — genau so gewollt. Wer den Diff
+braucht, zieht ihn per Bash im Reviewer-Subagenten (das hält den ggf. großen Diff ohnehin aus dem
+Trainer-Kontext); bei großen Diffs chunkt der Teilnehmer pro Datei/Modul selbst.
 
 ## Schritt 1.3: Aufgaben-Anker bauen
 
 Baue einen festen Anker-Block, der dem Reviewer sagt, WORAN er arbeitet und WAS bereitsteht:
 - Aufgabe: {AUFGABE_NR}
 - Branch: `origin/aufgabe{AUFGABE_NR}` — Basis: `origin/master`
-- Diff-Kommando (bei Bedarf selbst ausführbar): `git diff origin/master...origin/aufgabe{AUFGABE_NR}`
-- Vollständiger Diff bereits materialisiert unter `<diffFile>` (mit Read lesen)
-- Diff-Größe: `<stat>`
-- Token-Budget-Hinweis aus CONCEPT.md (z.B. "mittlerer PR-Review < ~10.000 Output-Tokens")
-- **Voller Tool-Zugriff** (Bash, Read, Grep, Agent): "Hol dir jeden weiteren Kontext, den deine Methodik
-  braucht, selbst — z.B. verknüpftes Ticket/Acceptance Criteria, Quelldateien, Commit-History."
+- Diff selbst ziehen: `git diff origin/master...origin/aufgabe{AUFGABE_NR}`
+  (bei großen Diffs: `git diff --name-only origin/master...origin/aufgabe{AUFGABE_NR}`, dann pro Datei)
+- **Voller Tool-Zugriff** (Bash, Read, Grep, Agent): "Hol dir den Diff und jeden weiteren Kontext, den
+  deine Methodik braucht, selbst — z.B. verknüpftes Ticket/Acceptance Criteria, Quelldateien, History."
 - **Integritäts-Guard**: "Lies keine Workshop-Referenzdateien (`gold-standard-*`, `benchmark-result-*`) —
   das ist die Bewertungsgrundlage, nicht Teil des Reviews."
 
 Der Anker ist vom Harness fest vorgegeben; er verlangt vom Teilnehmer **keine** Schlüssel.
+Der Branch-Name bleibt im Anker sichtbar, damit der Teilnehmer den Diff gezielt ziehen kann.
 
 ---
 

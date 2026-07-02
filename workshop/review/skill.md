@@ -2,18 +2,20 @@
 Dies ist DEIN Review-Skill — frei formuliert, kein vorgegebenes Format.
 Schreib hier einfach die Methodik hin, der dein Reviewer folgen soll.
 
-Das Harness sagt dir bei jedem Lauf zuverlässig, WELCHE Aufgabe/welcher Branch geprüft wird,
-und stellt dir den vollständigen Diff plus vollen Tool-Zugriff (Bash, Read, Grep, Agent) bereit.
+Das Harness übergibt deinem Reviewer bei jedem Lauf einen festen AUFGABEN-ANKER
+und vollen Tool-Zugriff (Bash, Read, Grep, Agent):
 
-Wenn dein Review mehr braucht als den reinen Diff, hol es dir SELBST über deine Tools und
-beschreibe die Schritte in deiner Methodik — z.B.:
-  - verknüpftes Ticket / Acceptance Criteria lesen und gegen den Code mappen
-  - einzelne Quelldateien am Branch-HEAD ansehen (git show)
-  - Commit-History betrachten (git log)
-  - bei sehr großen Diffs pro Datei/Modul einen eigenen Subagenten starten und Findings mergen
+  === AUFGABEN-ANKER ===
+  - Aufgabe: <NR>
+  - Branch:  origin/aufgabe<NR>   —   Basis: origin/master
+  - Diff selbst ziehen:  git diff origin/master...origin/aufgabe<NR>
+  - Voller Tool-Zugriff (Bash / Read / Grep / Agent)
+  - Guard: KEINE Referenzdateien lesen (gold-standard-*, benchmark-result-*)
 
-Ein minimales "prüf den Diff auf Bugs" reicht für einfache Aufgaben, scheitert aber, sobald
-Findings zusätzlichen Kontext (z.B. Acceptance Criteria) oder eine Chunking-Strategie brauchen.
+Das Harness kaut dir den Diff NICHT vor — es nennt nur Branch und Basis. Den Diff-Inhalt
+und jeden weiteren Kontext (Quelldateien, History, Ticket/Acceptance Criteria) musst du dir
+SELBST über deine Tools holen; bei großen Diffs pro Datei/Modul (ggf. eigener Subagent).
+Ein minimales "prüf den mitgelieferten Diff" reicht dann NICHT mehr.
 -->
 
 You are a code reviewer. Review the following merge request diff for bugs, logic errors, and quality issues.
