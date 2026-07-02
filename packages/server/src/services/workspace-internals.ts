@@ -2,6 +2,7 @@ import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { workspaces } from "@agentic-kanban/shared/schema";
 import type { WorkspaceSetupRun, WorkspaceSymlinkRun } from "@agentic-kanban/shared";
+import { tryAcquireRepoLock, type RepoLockHandle } from "@agentic-kanban/shared/lib/repo-lock";
 import type { Database } from "../db/index.js";
 import type { ProviderName } from "./agent-provider.js";
 import type { AgentSettings } from "./agent-settings.service.js";
@@ -381,7 +382,26 @@ export function tryRecoverStaleMergeLock(repoPath: string, lock: ActiveMergeLock
 }
 
 /**
- * Acquire the per-repo merge lock and run `work` under it (#944).
+ * Poll for the on-disk repo lock (#993) — the cross-process source of truth
+ * that guards the shared main checkout against every writer, not just this
+ * server process: a Conductor-loop agent's own `git` commands, a human
+ * running git by hand, or a second server instance surviving a hot-reload
+ * restart all contend for the SAME lockfile. The in-memory `activeMerges` map
+ * stays as the in-process waiter queue (so same-process callers get
+ * promise-based waiting instead of polling), but admission is only granted
+ * once the on-disk lock is actually held.
+ */
+async function acquireOnDiskRepoLock(repoPath: string, workspaceId: string): Promise<RepoLockHandle> {
+  for (;;) {
+    const handle = tryAcquireRepoLock(repoPath, `workspace:${workspaceId}`);
+    if (handle) return handle;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+}
+
+/**
+ * Acquire the per-repo merge lock and run `work` under it (#944, on-disk
+ * cross-process lock added in #993).
  *
  * This is the ONE correct acquisition protocol for `activeMerges`:
  * - Waiters loop: after any wait they RE-CHECK the map before proceeding, so two
@@ -391,6 +411,11 @@ export function tryRecoverStaleMergeLock(repoPath: string, lock: ActiveMergeLock
  *   map check, so a second caller can never overwrite the first's entry.
  * - Stale locks (holder lost to a hot-reload) are recovered exactly like the
  *   manual-merge path does.
+ * - Once admitted in-process, the caller still acquires the on-disk lockfile
+ *   (`@agentic-kanban/shared/lib/repo-lock`) before `work` runs — this is what
+ *   makes the lock visible to writers outside this process. A heartbeat keeps
+ *   the on-disk lock fresh for the duration of `work` (+ any hold extensions),
+ *   and it is always released in a `finally`.
  *
  * Callers that want refuse/reuse semantics instead of queueing (manual merge)
  * should check the map themselves first and only call this when they intend to
@@ -421,6 +446,9 @@ export async function acquireRepoMergeLock<T>(
     // Loop and re-check: another waiter may have installed a fresh lock while
     // we were awaiting — never proceed just because the awaited promise settled.
   }
+
+  const diskLock = await acquireOnDiskRepoLock(repoPath, workspaceId);
+  const heartbeatTimer = setInterval(() => diskLock.heartbeat(), 15_000);
 
   const holdExtensions: Promise<unknown>[] = [];
   const extendHold = (p: Promise<unknown>) => {
@@ -457,6 +485,8 @@ export async function acquireRepoMergeLock<T>(
     if (activeMerges.get(repoPath) === lock) {
       activeMerges.delete(repoPath);
     }
+    clearInterval(heartbeatTimer);
+    diskLock.release();
   })();
   activeMerges.set(repoPath, lock);
   return resultPromise;
