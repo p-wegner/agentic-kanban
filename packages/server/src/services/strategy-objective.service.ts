@@ -8,6 +8,7 @@ import { fetchLiveQuotaUsage } from "./quota-usage.service.js";
 import type { QuotaUsageResult } from "./quota-usage.service.js";
 import { resolveEffectiveModel } from "./effective-config.service.js";
 import { PROVIDER_POLICY_MODES, PROVIDER_POLICY_PROVIDERS, selectPolicyByPriority } from "@agentic-kanban/shared/lib/strategy-policy";
+import { isBoardStrategyPreferenceKey } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import type { ProviderPolicyMode, ProviderProfilePolicy } from "@agentic-kanban/shared/lib/strategy-policy";
 
 export type StrategySegmentKind = "work-type" | "provider" | "area" | "custom";
@@ -391,7 +392,8 @@ export function resolveMonitorTunables(
 }
 
 export function isBoardStrategyKey(key: string): boolean {
-  return /^board_strategy_[0-9a-f-]+$/.test(normalizeText(key));
+  // Delegates to the shared pure predicate (also enforced by MCP set_preference, #989).
+  return isBoardStrategyPreferenceKey(key);
 }
 
 export function projectIdFromBoardStrategyKey(key: string): string | null {
