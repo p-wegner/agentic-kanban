@@ -1,4 +1,5 @@
 import { PREF_MERGE_STRATEGY } from "../constants/preference-keys.js";
+import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
 
 export type MergeStrategy = "direct" | "monitor" | "merge_queue";
@@ -11,7 +12,7 @@ export function resolveMergeStrategy(prefMap: Map<string, string>): MergeStrateg
 
   // Preserve legacy behavior: the in-process monitor owned merges when enabled;
   // otherwise the lightweight queue orchestrator owned reviewed workspaces.
-  return prefMap.get("auto_monitor") === "true" ? "monitor" : "merge_queue";
+  return getBool(prefMap, "auto_monitor") ? "monitor" : "merge_queue";
 }
 
 export function isAutomaticMergeEnabled(prefMap: Map<string, string>): boolean {

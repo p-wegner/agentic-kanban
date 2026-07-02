@@ -19,19 +19,11 @@ async function workspaceHasCommittedChanges(
   workingDir: string,
   baseBranch: string,
 ): Promise<boolean> {
-  const { execFile } = await import("node:child_process");
-  return new Promise<boolean>((resolve) => {
-    // Count commits on HEAD that are not on baseBranch — non-zero means the agent committed work.
-    execFile(
-      "git",
-      ["rev-list", "--count", `${baseBranch}..HEAD`],
-      { cwd: workingDir },
-      (err, stdout) => {
-        if (err) resolve(false);
-        else resolve(parseInt(stdout.trim(), 10) > 0);
-      },
-    );
-  });
+  // Count commits on HEAD that are not on baseBranch — non-zero means the agent committed work.
+  const { gitExec } = await import("@agentic-kanban/shared/lib/git-exec");
+  const result = await gitExec(["rev-list", "--count", `${baseBranch}..HEAD`], { cwd: workingDir });
+  if (result.code !== 0 || result.error) return false;
+  return parseInt(result.stdout.trim(), 10) > 0;
 }
 
 /**

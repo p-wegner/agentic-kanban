@@ -1,4 +1,5 @@
 import { isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
+import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { Field, Toggle } from "./SettingsPrimitives.js";
 import { SlowRequestsPanel } from "./SlowRequestsPanel.js";
 import type { Settings, MonitorTunables } from "../lib/settings-shared.js";
@@ -18,12 +19,12 @@ export function WorkflowProcessPipelineSection({ settings }: { settings: Setting
         {[
           { label: "Agent runs", always: true },
           { label: "Manual approval", key: "require_manual_approval", enabled: settings.require_manual_approval === "true" },
-          { label: "Learn (after agent)", key: "learning_step_after_agent", enabled: settings.learning_step_after_agent === "true" },
+          { label: "Learn (after agent)", key: "learning_step_after_agent", enabled: getBool(settings, "learning_step_after_agent") },
           { label: "AI Review", key: "auto_review", enabled: isAutoReviewEnabled(settings.auto_review) },
-          { label: "Auto-fix", key: "review_auto_fix", enabled: isAutoReviewEnabled(settings.auto_review) && settings.review_auto_fix !== "false", indent: true },
-          { label: "Learn (after review)", key: "learning_step_after_review", enabled: settings.learning_step_after_review === "true" },
-          { label: "Auto-merge", key: "auto_merge", enabled: isAutoReviewEnabled(settings.auto_review) && settings.auto_merge !== "false", indent: true },
-          { label: "Learn (before merge)", key: "learning_step_before_merge", enabled: settings.learning_step_before_merge === "true" },
+          { label: "Auto-fix", key: "review_auto_fix", enabled: isAutoReviewEnabled(settings.auto_review) && getBool(settings, "review_auto_fix"), indent: true },
+          { label: "Learn (after review)", key: "learning_step_after_review", enabled: getBool(settings, "learning_step_after_review") },
+          { label: "Auto-merge", key: "auto_merge", enabled: isAutoReviewEnabled(settings.auto_review) && getBool(settings, "auto_merge"), indent: true },
+          { label: "Learn (before merge)", key: "learning_step_before_merge", enabled: getBool(settings, "learning_step_before_merge") },
           { label: "Merge", always: true },
           { label: "Visual verify", key: "visual_verification_mode", enabled: settings.visual_verification_mode === "after_merge" },
         ].filter((s) => s.always || s.enabled).map((step, i) => (
@@ -58,7 +59,7 @@ export function WorkflowAgentBehaviourSection({ settings, setBool }: WorkflowSec
           hint="Same as the Codex setting, but for Copilot plan-mode runs."
         />
         <Toggle
-          checked={settings.resume_with_new_model === "true"}
+          checked={getBool(settings, "resume_with_new_model")}
           onChange={setBool("resume_with_new_model")}
           label="Use new profile on resume"
           hint="When continuing a chat, start a fresh session using the current profile instead of resuming the previous one. Use this when switching providers via a different Claude profile."
@@ -87,14 +88,14 @@ export function WorkflowReviewMergeSection({ settings, set, setBool, autoReviewO
         />
         <div className={`pl-5 space-y-3 border-l-2 ${autoReviewOn ? "border-brand-200 dark:border-brand-700" : "border-gray-100 dark:border-gray-800"}`}>
           <Toggle
-            checked={settings.review_auto_fix !== "false"}
+            checked={getBool(settings, "review_auto_fix")}
             onChange={setBool("review_auto_fix")}
             label="Auto-fix issues found in review"
             hint="When the review agent finds CRITICAL or MAJOR issues, it edits the code and commits fixes directly. Requires 'Skip permission prompts' to be enabled so the agent can write files. When disabled, the agent reports issues but makes no changes."
             disabled={!autoReviewOn}
           />
           <Toggle
-            checked={settings.auto_merge !== "false"}
+            checked={getBool(settings, "auto_merge")}
             onChange={setBool("auto_merge")}
             label="Auto-merge after review"
             hint="Merge the branch and close the workspace automatically once the review agent passes. When disabled, the issue moves to AI Reviewed and waits for manual merge."
@@ -105,9 +106,9 @@ export function WorkflowReviewMergeSection({ settings, set, setBool, autoReviewO
             hint="Choose who owns reviewed branches. Direct leaves merges to manual per-workspace actions. Monitor lets the board monitor merge immediately. Merge queue batches reviewed workspaces into the queue release train."
           >
             <select
-              value={settings.merge_strategy || (settings.auto_monitor === "true" ? "monitor" : "merge_queue")}
+              value={settings.merge_strategy || (getBool(settings, "auto_monitor") ? "monitor" : "merge_queue")}
               onChange={(e) => set("merge_strategy")(e.target.value)}
-              disabled={!autoReviewOn || settings.auto_merge === "false"}
+              disabled={!autoReviewOn || !getBool(settings, "auto_merge")}
               className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
             >
               <option value="direct">Direct/manual - one workspace at a time</option>
@@ -116,11 +117,11 @@ export function WorkflowReviewMergeSection({ settings, set, setBool, autoReviewO
             </select>
           </Field>
           <Toggle
-            checked={settings.auto_merge_in_review === "true"}
+            checked={getBool(settings, "auto_merge_in_review")}
             onChange={setBool("auto_merge_in_review")}
             label="Auto-merge In Review without 'ready' gate"
             hint="When on, the board monitor merges any idle In-Review workspace whose work is committed — even if the agent never marked it 'ready for merge'. This lands In-Review work to master with no human gating. When off (default), not-yet-ready In-Review work is left waiting. Still respects the Auto-merge kill-switch above."
-            disabled={!autoReviewOn || settings.auto_merge === "false"}
+            disabled={!autoReviewOn || !getBool(settings, "auto_merge")}
           />
         </div>
         <Toggle
@@ -175,19 +176,19 @@ export function WorkflowLearningSection({ settings, setBool }: WorkflowSectionPr
       <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Learning steps</div>
       <div className="space-y-3">
         <Toggle
-          checked={settings.learning_step_after_agent === "true"}
+          checked={getBool(settings, "learning_step_after_agent")}
           onChange={setBool("learning_step_after_agent")}
           label="Learning step after agent (parallel)"
           hint="When an agent session completes with committed changes, runs a learning session in parallel with code review. Extracts insights from session transcripts and updates docs and hooks without blocking the review."
         />
         <Toggle
-          checked={settings.learning_step_after_review === "true"}
+          checked={getBool(settings, "learning_step_after_review")}
           onChange={setBool("learning_step_after_review")}
           label="Learning step after review (parallel)"
           hint="When a review session completes, runs a learning session in parallel with the auto-merge step. Extracts insights without delaying the merge."
         />
         <Toggle
-          checked={settings.learning_step_before_merge === "true"}
+          checked={getBool(settings, "learning_step_before_merge")}
           onChange={setBool("learning_step_before_merge")}
           label="Learning step before merge (blocking)"
           hint="When enabled, runs an agent session before merging that reads the worktree's session transcripts and updates docs and Claude hooks with extracted insights. Blocks merge until complete (up to 3 minutes)."
@@ -212,13 +213,13 @@ export function WorkflowFollowUpSection({
       <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Follow-up &amp; automation</div>
       <div className="space-y-3">
         <Toggle
-          checked={settings.auto_start_followup === "true"}
+          checked={getBool(settings, "auto_start_followup")}
           onChange={setBool("auto_start_followup")}
           label="Auto-start follow-up tasks after merge"
           hint="When a workspace is merged and the issue has outgoing 'depends_on' or 'child_of' dependencies, automatically create workspaces for unblocked follow-up issues."
         />
         <Toggle
-          checked={settings.dependency_auto_chain === "true"}
+          checked={getBool(settings, "dependency_auto_chain")}
           onChange={setBool("dependency_auto_chain")}
           label="Auto-chain unblocked dependencies"
           hint="After an upstream issue merges, start newly unblocked dependent or child issues when WIP capacity is available. Add the no-auto-start tag to opt out individual issues."
@@ -299,7 +300,7 @@ export function AdvancedSettingsSection({ settings, setBool }: WorkflowSectionPr
   return (
     <>
       <Toggle
-        checked={settings.skip_permissions === "true"}
+        checked={getBool(settings, "skip_permissions")}
         onChange={setBool("skip_permissions")}
         label="Skip Permissions (--dangerously-skip-permissions)"
         hint="Bypass all permission checks. Recommended only for sandboxes with no internet access."
@@ -485,13 +486,13 @@ export function WorkflowBoardMonitorSection({
         </div>
         <div className="flex items-center gap-4">
           <Toggle
-            checked={settings.auto_monitor === "true"}
+            checked={getBool(settings, "auto_monitor")}
             onChange={setBool("auto_monitor")}
             label="Auto-monitor"
             hint="Periodically checks workspaces and relaunches idle agents, triggers merges, and auto-starts unblocked issues."
           />
         </div>
-        {settings.auto_monitor === "true" && (
+        {getBool(settings, "auto_monitor") && (
           <div className="mt-2 pl-5 flex items-center gap-2">
             <label className="text-xs text-gray-600 dark:text-gray-400">Interval</label>
             <input
@@ -537,7 +538,7 @@ export function WorkflowBoardMonitorSection({
             In Progress cards older than this threshold get a warning badge. Age badges appear on all cards.
           </p>
         </div>
-        {settings.auto_monitor === "true" && (
+        {getBool(settings, "auto_monitor") && (
           <div className="mt-3 pl-5">
             <div className="flex items-center gap-2">
               <label className="text-xs text-gray-600 dark:text-gray-400">When backlog is empty</label>
@@ -588,12 +589,12 @@ export function WorkflowBoardMonitorSection({
         )}
         <div className="mt-3">
           <Toggle
-            checked={settings.monitor_maintenance_window_enabled === "true"}
+            checked={getBool(settings, "monitor_maintenance_window_enabled")}
             onChange={setBool("monitor_maintenance_window_enabled")}
             label="Maintenance window"
             hint="Pause disruptive board actions (merges, relaunches, auto-start) while keeping health checks running. Enable before deployments, migrations, or manual board work."
           />
-          {settings.monitor_maintenance_window_enabled === "true" && (
+          {getBool(settings, "monitor_maintenance_window_enabled") && (
             <div className="mt-2 pl-5 space-y-2">
               <div className="flex items-center gap-2">
                 <label className="text-xs text-gray-600 dark:text-gray-400">End time</label>
@@ -612,7 +613,7 @@ export function WorkflowBoardMonitorSection({
                   Maintenance window active{monitorStatus.maintenanceEnd ? ` — ends ${new Date(monitorStatus.maintenanceEnd).toLocaleString("en-US")}` : " (indefinite)"}
                 </p>
               )}
-              {settings.monitor_maintenance_window_enabled === "true" && !monitorStatus?.maintenanceActive && settings.monitor_maintenance_window_end && new Date(settings.monitor_maintenance_window_end).getTime() <= Date.now() && (
+              {getBool(settings, "monitor_maintenance_window_enabled") && !monitorStatus?.maintenanceActive && settings.monitor_maintenance_window_end && new Date(settings.monitor_maintenance_window_end).getTime() <= Date.now() && (
                 <p className="text-xs text-gray-500 dark:text-gray-400 italic">Window has expired — disable the toggle to clear it.</p>
               )}
             </div>
@@ -620,7 +621,7 @@ export function WorkflowBoardMonitorSection({
         </div>
         <div className="mt-3">
           <Toggle
-            checked={settings.auto_commit_strategy_objective !== "false"}
+            checked={getBool(settings, "auto_commit_strategy_objective")}
             onChange={setBool("auto_commit_strategy_objective")}
             label="Auto-commit strategy objective.md"
             hint="When you save the Strategy Bullseye, the board regenerates the git-tracked scripts/board-monitor/objective.md. Commit it automatically (path-scoped) so the main checkout doesn't stay dirty and block the auto-merge queue. Disable to commit it yourself."

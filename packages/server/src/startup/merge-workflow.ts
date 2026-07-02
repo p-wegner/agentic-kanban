@@ -1,4 +1,5 @@
 import { issueTags, issues, preferences, projects, sessions, tags, workspaces } from "@agentic-kanban/shared/schema";
+import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { runDoneUnmergedScannerNow } from "./done-unmerged-invariant-scanner.js";
 import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { eq } from "drizzle-orm";
@@ -107,7 +108,7 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
     try {
       const prefRowsLearning = await db.select().from(preferences);
       const prefMapLearning = new Map(prefRowsLearning.map((r) => [r.key, r.value]));
-      if (prefMapLearning.get("learning_step_before_merge") === "true" && workspace.workingDir) {
+      if (getBool(prefMapLearning, "learning_step_before_merge") && workspace.workingDir) {
         try {
           const learningPrompt = buildLearningStepPrompt(true);
           const learningProfile = prefMapLearning.get("claude_profile") || undefined;

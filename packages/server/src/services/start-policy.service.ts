@@ -1,4 +1,5 @@
 import { resolveMonitorTunables, type MonitorTunables } from "./strategy-objective.service.js";
+import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 
 /**
  * Start Mode — the single per-project decision for HOW new tickets get auto-started.
@@ -62,7 +63,7 @@ export function resolveStartPolicy(prefMap: Map<string, string>, projectId: stri
   const source: StartPolicy["source"] = VALID_MODES.has(explicit ?? "") ? "start_mode" : "derived";
 
   const wip = resolveMonitorTunables(prefMap, projectId).tunables;
-  const cascadeOptIn = prefMap.get("dependency_auto_chain") === "true";
+  const cascadeOptIn = getBool(prefMap, "dependency_auto_chain");
   const refillOptIn = prefMap.get("backlog_empty_strategy") === "generate_tickets";
 
   switch (mode) {
@@ -103,6 +104,6 @@ export function resolveStartPolicy(prefMap: Map<string, string>, projectId: stri
 function deriveMode(prefMap: Map<string, string>, projectId: string): StartMode {
   const autodrive = prefMap.get(`board_autodrive_${projectId}`) === "true";
   const globalMonitorAutoStart =
-    prefMap.get("auto_monitor") === "true" && prefMap.get("nudge_auto_start") === "true";
+    getBool(prefMap, "auto_monitor") && getBool(prefMap, "nudge_auto_start");
   return autodrive || globalMonitorAutoStart ? "monitor" : "manual";
 }

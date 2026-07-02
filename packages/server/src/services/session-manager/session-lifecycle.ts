@@ -1,4 +1,5 @@
 import { db as realDb } from "../../db/index.js";
+import { parseBoolSetting } from "@agentic-kanban/shared/lib/settings-registry";
 import type { Database } from "../../db/index.js";
 import { createHash, randomUUID } from "node:crypto";
 import * as lifecycleRepo from "../../repositories/session-lifecycle.repository.js";
@@ -347,7 +348,7 @@ export function createSessionLifecycle(
 
     // Determine skip_permissions: explicit opt takes priority over global preference.
     const skipPermRows = await lifecycleRepo.getSkipPermissionsRows(db);
-    const dbSkipPerms = skipPermRows.length === 0 || skipPermRows[0].value !== "false";
+    const dbSkipPerms = parseBoolSetting("skip_permissions", skipPermRows[0]?.value);
     const skipPermissions = skipPermissionsOpt !== undefined ? skipPermissionsOpt : dbSkipPerms;
 
     // For Claude only: skip-permissions is conveyed via --dangerously-skip-permissions in agentArgs.

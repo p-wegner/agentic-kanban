@@ -1,4 +1,5 @@
 import type { Database } from "../db/index.js";
+import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { db } from "../db/index.js";
 import { isCodexUsageLimitStats } from "./codex-rate-limit.js";
 import { resolveStartPolicy } from "./start-policy.service.js";
@@ -137,7 +138,7 @@ function classifyCause(rows: ActiveWorkspaceWithSessions[], prefMap: Map<string,
   }
 
   const autoMergeOn = isAutoMergeEnabled(prefMap);
-  const autoMergeInReview = prefMap.get("auto_merge_in_review") === "true";
+  const autoMergeInReview = getBool(prefMap, "auto_merge_in_review");
   if (autoMergeOn && rows.some((row) => {
     const disabled = prefMap.get(`auto_merge_disabled_${row.projectId}`) === "true";
     return !disabled && row.statusName === "In Review" && (row.readyForMerge || autoMergeInReview || row.workspaceStatus === "reviewing");

@@ -1,4 +1,5 @@
 import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
+import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import type { Database } from "../db/index.js";
 import { getAllPreferences } from "../repositories/preferences.repository.js";
@@ -140,9 +141,9 @@ export function resolveProjectRuntimeConfig(input: ProjectRuntimeConfigInput): P
     },
     monitor: {
       autoMerge,
-      autoMergeInReview: input.prefMap.get("auto_merge_in_review") === "true",
+      autoMergeInReview: getBool(input.prefMap, "auto_merge_in_review"),
       autoMergeDisabled,
-      maintenanceWindowEnabled: input.prefMap.get("monitor_maintenance_window_enabled") === "true",
+      maintenanceWindowEnabled: getBool(input.prefMap, "monitor_maintenance_window_enabled"),
       maintenanceWindowEnd: input.prefMap.get("monitor_maintenance_window_end") || null,
     },
     systemInstructions: input.prefMap.get(PREF_BUILDER_GUARDRAILS) ?? DEFAULT_BUILDER_GUARDRAILS,

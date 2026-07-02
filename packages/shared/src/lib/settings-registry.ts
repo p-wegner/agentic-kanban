@@ -151,7 +151,7 @@ export const DEFAULT_SETTINGS: Settings = (() => {
   return out;
 })();
 
-type PrefSource = Map<string, string> | Record<string, string>;
+type PrefSource = Map<string, string> | Record<string, string | undefined>;
 
 function readRaw(source: PrefSource, key: string): string | undefined {
   return source instanceof Map ? source.get(key) : source[key];
@@ -164,11 +164,40 @@ function readRaw(source: PrefSource, key: string): string | undefined {
  * use them; for registry keys the key is type-checked at the call site via `SettingKey`.
  */
 
-/** Boolean read: a value is true unless it is the literal string "false" (and present). */
+/**
+ * Parse a raw persisted preference value as a boolean, honoring the per-key
+ * declared `default` from SETTINGS_REGISTRY (#947).
+ *
+ * Rules:
+ * - Key in the registry with a bool type and a non-empty default: unset/empty ⇒ that
+ *   registry default. The `fallback` param is IGNORED for such keys — the registry is
+ *   the single source of truth for the key's polarity.
+ * - Otherwise (dynamic keys, or registry keys with an empty default): unset/empty ⇒
+ *   the explicit `fallback` param (backward compatible).
+ * - Set values preserve each polarity family's semantics, matching the canonical
+ *   accessors (isAutoReviewEnabled / isAutoMergeEnabled): a default-ON key is true for
+ *   anything but the literal "false"; a default-OFF key is true only for the literal
+ *   "true". Stored values are always the strings "true"/"false", so the two families
+ *   only differ for unset keys (handled by the default) and garbage values.
+ *
+ * The old #903 implementation hardcoded `raw !== "false"` for every key, which would
+ * silently flip default-OFF keys (`=== "true"` sites) from OFF to ON if adopted
+ * mechanically — the exact polarity bug class of #866 (auto_merge) / #946 (auto_review).
+ */
+export function parseBoolSetting(key: string, raw: string | null | undefined, fallback = false): boolean {
+  const def = (SETTINGS_REGISTRY as Record<string, SettingDef | undefined>)[key];
+  const defaultOn = def && def.type === "bool" && def.default !== "" ? def.default === "true" : fallback;
+  if (raw === undefined || raw === null || raw === "") return defaultOn;
+  return defaultOn ? raw !== "false" : raw === "true";
+}
+
+/**
+ * Boolean read from a pref map/record. Unset ⇒ the SETTINGS_REGISTRY default for the
+ * key (or `fallback` for keys outside the registry). See parseBoolSetting for the
+ * exact polarity rules.
+ */
 export function getBool(source: PrefSource, key: string, fallback = false): boolean {
-  const raw = readRaw(source, key);
-  if (raw === undefined || raw === "") return fallback;
-  return raw !== "false";
+  return parseBoolSetting(key, readRaw(source, key), fallback);
 }
 
 /** Numeric read: parses the string; returns `fallback` when absent or unparseable. */

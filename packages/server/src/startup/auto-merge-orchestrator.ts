@@ -1,4 +1,5 @@
 import { isTerminalStatusView } from "@agentic-kanban/shared";
+import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { issues, preferences, projectStatuses, workspaces, workflowNodes, sessions, sessionMessages } from "@agentic-kanban/shared/schema";
 import { and, count, eq, inArray, ne, or } from "drizzle-orm";
 import type { Database } from "../db/index.js";
@@ -72,7 +73,7 @@ export function createAutoMergeOrchestrator(deps: {
   async function findCompletedWorkspaceIds(): Promise<string[]> {
     const prefRows = await database.select().from(preferences);
     const prefMap = new Map(prefRows.map((row) => [row.key, row.value]));
-    const autoMergeInReview = prefMap.get("auto_merge_in_review") === "true";
+    const autoMergeInReview = getBool(prefMap, "auto_merge_in_review");
 
     // Per-project opt-out: an `auto_merge_disabled_<projectId>` pref set to "true" keeps
     // the orchestrator from auto-merging THAT project's workspaces, while other projects
