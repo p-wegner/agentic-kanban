@@ -19,11 +19,14 @@ import ts from "typescript";
  *  1. {@link MAX_LINES} — a hard ceiling kept as an absolute backstop. No single
  *     module should ever be enormous regardless of how cohesive it claims to be.
  *
- *  2. A COHESION signal — a module is a probable god-module when it is large
- *     ({@link COHESION_MIN_LINES}+) AND declares a broad BEHAVIORAL surface
- *     (> {@link COHESION_MAX_FN_DECLS} top-level functions/classes, EXPORTED AND
- *     INTERNAL). Many independent top-level behaviors in one big file = many
- *     responsibilities = low cohesion. Counting only EXPORTS undercounts (#889): a
+ *  2. A COHESION signal — a module is a probable god-module when it declares a
+ *     broad BEHAVIORAL surface (> {@link COHESION_MAX_FN_DECLS} top-level
+ *     functions/classes, EXPORTED AND INTERNAL). Many independent top-level
+ *     behaviors in one file = many responsibilities = low cohesion. The signal
+ *     fires on the count ALONE — the former 600-line floor was removed (#977): it
+ *     left a blind spot where a 450-line file with 31 top-level functions sat
+ *     invisible below the floor and could grow unchecked until it crossed 600
+ *     already deep in breach. Counting only EXPORTS undercounts (#889): a
  *     god-module hides behind a few exports while declaring dozens of internal
  *     helpers — agent-stream-parser.ts had 3 exports but 28 internal functions at
  *     1042 lines, waved straight through the old export-only signal. The count is
@@ -48,9 +51,9 @@ import ts from "typescript";
 
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "../../../..");
 const MAX_LINES = 1000;
-const COHESION_MIN_LINES = 600;
-// Top-level function-like declarations, exported AND internal (#889). Keep in sync
-// with scripts/check-god-modules.mjs (the merge-blocking gate of record).
+// Top-level function-like declarations, exported AND internal (#889). The count fires
+// alone — no line-count floor (#977). Keep in sync with scripts/check-god-modules.mjs
+// (the merge-blocking gate of record).
 const COHESION_MAX_FN_DECLS = 20;
 
 // Ratchet baseline (#889): large modules grandfathered at their current top-level
@@ -69,6 +72,19 @@ const COHESION_BASELINE: Record<string, number> = {
   "packages/server/src/services/insights.service.ts": 23,
   // agent-questions.service.ts decomposed into ./agent-questions/* sub-modules (#912);
   // the facade barrel re-exports only, so its baseline entry is removed.
+  // #977: the 600-line cohesion floor was removed (the count fires alone now). These
+  // files sat in the old blind spot — under 600 lines but over 20 top-level function
+  // declarations — and are grandfathered at their current count. Shrink-only, same as
+  // every entry above.
+  "packages/server/src/repositories/workflow-fork.repository.ts": 33,
+  "packages/server/src/repositories/issue-ai.repository.ts": 31,
+  "packages/server/src/repositories/issue-service.repository.ts": 30,
+  "packages/server/src/services/git-info.service.ts": 28,
+  "packages/server/src/repositories/workspace-crud.repository.ts": 27,
+  "packages/server/src/scripts/mock-agent.ts": 23,
+  "packages/server/src/repositories/workspace.repository.ts": 22,
+  "packages/server/src/repositories/session-lifecycle.repository.ts": 21,
+  "packages/shared/src/lib/openspec.ts": 21,
 };
 
 function isExcluded(absPath: string): boolean {
@@ -171,13 +187,12 @@ describe("god-module gate (cohesion-aware)", () => {
     ).toEqual([]);
   });
 
-  it(`no large module (${COHESION_MIN_LINES}+ lines) declares more than ${COHESION_MAX_FN_DECLS} top-level functions/classes`, () => {
+  it(`no module declares more than ${COHESION_MAX_FN_DECLS} top-level functions/classes`, () => {
     const offenders: string[] = [];
     for (const file of gatherSourceFiles()) {
       const rel = relative(REPO_ROOT, file).split(sep).join("/");
       const text = readFileSync(file, "utf8");
       const lines = lineCount(text);
-      if (lines < COHESION_MIN_LINES) continue;
       const fnDecls = countInternalFunctions(file, text);
       const allowed = Math.max(COHESION_MAX_FN_DECLS, COHESION_BASELINE[rel] ?? 0);
       if (fnDecls > allowed) {
@@ -190,7 +205,7 @@ describe("god-module gate (cohesion-aware)", () => {
 
     expect(
       offenders,
-      `These large modules declare a broad behavioral surface (top-level functions/classes, ` +
+      `These modules declare a broad behavioral surface (top-level functions/classes, ` +
         `exported + internal) — a low-cohesion god-module smell (#889). ` +
         `Split by responsibility into cohesive sub-modules re-exported through a facade ` +
         `barrel (see workflow-engine.ts / git-service.ts / agent-stream-parser.ts):\n` +
