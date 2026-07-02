@@ -9,6 +9,13 @@ import {
 } from "@agentic-kanban/shared/lib/git-service";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
+import {
+  acquireRepoMergeLock,
+  activeMerges,
+  describeMergeLock,
+  tryRecoverStaleMergeLock,
+} from "../services/workspace-internals.js";
+import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
 import { recordDriveObstacle } from "../services/drive-obstacles.service.js";
 import { PREF_DONE_UNMERGED_SCANNER_ENABLED } from "../constants/preference-keys.js";
@@ -318,19 +325,46 @@ export async function scanDoneUnmergedWorkspaces(
       return;
     }
 
+    // Repo merge lock (#979): the scanner must never merge concurrently with the merge
+    // service. If the repo's merge lock is held (and not recoverably stale), SKIP this
+    // repo for this tick — never queue/block a background scanner behind a live merge.
+    // The check-then-acquire below is race-free: there is no await between this check
+    // and acquireRepoMergeLock's synchronous lock installation.
+    const existingLock = activeMerges.get(c.repoPath);
+    if (existingLock) {
+      const diagnostic = describeMergeLock(existingLock);
+      const recovered = diagnostic.isStale && tryRecoverStaleMergeLock(c.repoPath, existingLock);
+      if (!recovered) {
+        console.log(
+          `[done-unmerged-scanner] repo ${c.repoPath} has an active merge (workspace ${diagnostic.activeWorkspaceId}, age ${Math.round(diagnostic.ageMs / 1000)}s) — skipping issue #${c.issueNumber ?? "?"} this tick`,
+        );
+        return;
+      }
+    }
+
     // All guards passed: ahead>=1, behind<=limit, no conflicts — attempt auto-merge.
     attemptedWorkspaceIds.add(c.wsId);
+    // Narrow to locals: the top-of-function guard doesn't survive into the closure below.
+    const repoPath = c.repoPath;
+    const branch = c.branch;
+    const baseBranch = c.baseBranch;
     try {
       console.log(
-        `[done-unmerged-scanner] auto-merging: issue #${c.issueNumber ?? "?"} branch '${c.branch}' → ${c.baseBranch} (ahead=${finding.uniqueCommitCount}, behind=${behind})`,
+        `[done-unmerged-scanner] auto-merging: issue #${c.issueNumber ?? "?"} branch '${branch}' → ${baseBranch} (ahead=${finding.uniqueCommitCount}, behind=${behind})`,
       );
-      await gitMerge(c.repoPath, c.branch, c.baseBranch);
+      // Run the merge + workspace stamp under the shared per-repo merge lock (#944/#979)
+      // so a manual/auto merge can never interleave with the scanner's git merge. The
+      // primitive releases the lock when the work settles (success or failure).
+      await acquireRepoMergeLock(repoPath, c.wsId, async () => {
+        await gitMerge(repoPath, branch, baseBranch);
 
-      // Stamp mergedAt and close the workspace. Issue stays Done — no status change.
-      await database
-        .update(workspaces)
-        .set({ mergedAt: now, status: "closed", closedAt: now, updatedAt: now })
-        .where(eq(workspaces.id, c.wsId));
+        // Stamp mergedAt and close the workspace via the terminal-invariant authority
+        // (#953/#979). Issue stays Done — no status change.
+        await setWorkspaceStatus(database, c.wsId, "closed", {
+          now,
+          set: { mergedAt: now, closedAt: now },
+        });
+      });
 
       autoMerged++;
       console.log(
