@@ -3,10 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Database } from "../db/index.js";
 import { invokeClaudePrompt } from "./claude-cli.service.js";
-import {
-  getProjectRepoInfo,
-  getProjectRepoInfoWithSetupScript,
-} from "../repositories/project-setup.repository.js";
+import { getProjectById } from "../repositories/project.repository.js";
 
 const PROJECT_MARKER_FILES = [
   "package.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock",
@@ -25,7 +22,7 @@ export function detectProjectMarkers(repoPath: string): string[] {
 }
 
 export async function generateSetupScript(projectId: string, database: Database): Promise<string> {
-  const project = await getProjectRepoInfo(projectId, database);
+  const project = await getProjectById(projectId, database);
   if (!project) {
     throw Object.assign(new Error("Project not found"), { statusCode: 404 });
   }
@@ -47,7 +44,7 @@ Detected files: ${detected.length > 0 ? detected.join(", ") : "none"}`;
 }
 
 export async function generateTeardownScript(projectId: string, database: Database): Promise<string> {
-  const project = await getProjectRepoInfoWithSetupScript(projectId, database);
+  const project = await getProjectById(projectId, database);
   if (!project) {
     throw Object.assign(new Error("Project not found"), { statusCode: 404 });
   }
@@ -134,7 +131,7 @@ export function deriveVerifyScript(repoPath: string, detected: string[]): string
 }
 
 export async function generateVerifyScript(projectId: string, database: Database): Promise<string> {
-  const project = await getProjectRepoInfo(projectId, database);
+  const project = await getProjectById(projectId, database);
   if (!project) {
     throw Object.assign(new Error("Project not found"), { statusCode: 404 });
   }

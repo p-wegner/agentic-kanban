@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
+import { getSessionStatsRaw, getSessionStatus as getSessionStatusCanonical } from "./session.repository.js";
 
 export async function getWorkspaceById(
   workspaceId: string,
@@ -87,9 +88,7 @@ export async function getSessionStats(
   sessionId: string,
   database: Database = db,
 ): Promise<string | null | undefined> {
-  const rows = await database.select({ stats: sessions.stats }).from(sessions).where(eq(sessions.id, sessionId)).limit(1);
-  if (rows.length === 0) return undefined;
-  return rows[0].stats;
+  return getSessionStatsRaw(sessionId, database);
 }
 
 export async function insertSession(
@@ -206,12 +205,8 @@ export async function getSessionStatus(
   sessionId: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select({ status: sessions.status })
-    .from(sessions)
-    .where(eq(sessions.id, sessionId))
-    .limit(1);
-  return rows[0] ?? null;
+  const status = await getSessionStatusCanonical(sessionId, database);
+  return status === null ? null : { status };
 }
 
 export async function getSessionWorkspaceId(

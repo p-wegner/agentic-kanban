@@ -140,14 +140,6 @@ export async function getIssueForTouchedFiles(
   return rows[0] ?? null;
 }
 
-export async function getProjectRepoPath(
-  projectId: string,
-  database: Database = db,
-) {
-  const project = await getProjectById(projectId, database);
-  return project?.repoPath ?? null;
-}
-
 export async function updateIssueTouchedFiles(
   issueId: string,
   touchedFilesJson: string,

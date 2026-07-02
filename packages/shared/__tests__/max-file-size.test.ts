@@ -33,11 +33,12 @@ import ts from "typescript";
  *     version pins, lookup maps) and type/interface exports — cohesive data /
  *     contracts, not behaviors.
  *
- * Exemptions (path/shape-based, not a per-file allowlist):
- *  - the REPOSITORY layer — a data-access module legitimately exports one query
- *    function per row operation; breadth there is cohesion-by-layer, not a
- *    grab-bag, so the cohesion signal does not apply (the line ceiling still does);
- *  - type-only modules (the wire-contract DTOs) — no behavioral surface at all.
+ * The former blanket REPOSITORY-layer exemption was removed (#957): a data-access
+ * module exporting one query fn per operation is broad by design, but "broad by
+ * design" had become a blind spot — per-consumer mirror files and 800-line
+ * aggregate repos hid behind it. Large repositories are now RATCHETED via
+ * COHESION_BASELINE like everything else (they may only shrink). Type-only
+ * modules (the wire-contract DTOs) remain naturally exempt — no behavioral surface.
  *
  * The decompose recipe when a file trips: extract a cohesive sub-module, or split
  * a god-file behind a facade barrel — see packages/shared/src/lib/git-service.ts
@@ -59,6 +60,10 @@ const COHESION_MAX_FN_DECLS = 20;
 const COHESION_BASELINE: Record<string, number> = {
   // session-summary.ts rewritten to consume the agent-stream parsers (#951) — entry removed.
   "packages/server/src/services/butler-sdk.service.ts": 30,
+  // #957: the blanket /repositories/ cohesion exemption was removed — the two large
+  // aggregate repositories are now RATCHETED instead of invisible. They may only shrink.
+  "packages/server/src/repositories/issue.repository.ts": 36,
+  "packages/server/src/repositories/session.repository.ts": 32,
   // stack-profile.service.ts decomposed behind a facade barrel (#911) — entry removed.
   "packages/server/src/services/agent.service.ts": 27,
   "packages/server/src/services/insights.service.ts": 23,
@@ -83,11 +88,6 @@ function isExcluded(absPath: string): boolean {
     absPath.endsWith(".spec.ts") ||
     absPath.endsWith(".d.ts")
   );
-}
-
-/** The repository layer exports one query fn per operation — broad by design. */
-function isRepositoryLayer(rel: string): boolean {
-  return rel.includes("/repositories/");
 }
 
 function collectSourceFiles(dir: string, out: string[]): void {
@@ -175,7 +175,6 @@ describe("god-module gate (cohesion-aware)", () => {
     const offenders: string[] = [];
     for (const file of gatherSourceFiles()) {
       const rel = relative(REPO_ROOT, file).split(sep).join("/");
-      if (isRepositoryLayer(rel)) continue; // broad-by-design data-access layer
       const text = readFileSync(file, "utf8");
       const lines = lineCount(text);
       if (lines < COHESION_MIN_LINES) continue;

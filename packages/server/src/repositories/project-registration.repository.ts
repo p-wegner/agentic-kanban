@@ -2,12 +2,12 @@ import { projects, projectStatuses, preferences, issues, agentSkills, repos, sch
 import { eq, and } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database, TransactionClient } from "../db/index.js";
-import { getProjectById } from "./project.repository.js";
+import { getProjectById, getAllProjects as getAllProjectsCanonical } from "./project.repository.js";
 
 type DbOrTx = Database | TransactionClient;
 
 export async function getAllProjects(database: Database = db) {
-  return database.select().from(projects);
+  return getAllProjectsCanonical(database, { includeArchived: true });
 }
 
 export async function getProjectByIdRaw(

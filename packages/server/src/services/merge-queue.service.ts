@@ -3,10 +3,10 @@ import * as gitService from "./git.service.js";
 import {
   getMergeQueueWorkspaceRows,
   getMergeQueueIssueRows,
-  getMergeQueueProjectRows,
   getWorkspaceStatus,
   getWorkspaceMergeState,
 } from "../repositories/merge-queue.repository.js";
+import { getProjectsByIds } from "../repositories/project.repository.js";
 import { createWorkspaceMergeService } from "./workspace-merge.service.js";
 import type { BoardEvents } from "./board-events.js";
 import type { SessionManager } from "./session.manager.js";
@@ -225,7 +225,7 @@ export function createMergeQueueService(deps: {
     const issueRows = await getMergeQueueIssueRows(issueIds, database);
 
     const projectIds = [...new Set(issueRows.map((i) => i.projectId))];
-    const projectRows = await getMergeQueueProjectRows(projectIds, database);
+    const projectRows = await getProjectsByIds(projectIds, database);
 
     const issueMap = new Map(issueRows.map((i) => [i.id, i]));
     const projectMap = new Map(projectRows.map((p) => [p.id, p]));
