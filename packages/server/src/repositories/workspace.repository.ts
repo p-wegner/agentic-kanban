@@ -9,6 +9,7 @@ import {
 import { desc, eq, ne, inArray, and, gte, isNotNull } from "drizzle-orm";
 import { deleteWorkspaceCascade as deleteWorkspaceCascadeShared } from "@agentic-kanban/shared/lib/cascade-delete";
 import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { findOpenUnmergedWorkspace as findOpenUnmergedWorkspaceShared } from "@agentic-kanban/shared/lib/issue-status-orchestration";
 import { setWorkspaceStatus, type WorkspaceStatus } from "./workspace-status.repository.js";
 import { getProjectById } from "./project.repository.js";
 
@@ -309,24 +310,17 @@ export async function moveIssueToInProgressStrict(
  * issue (or null). Open = status != "closed" (a merged workspace is closed);
  * direct workspaces (isDirect=true) commit straight to the default branch — no
  * branch to strand — so they are excluded. Moving an issue to a terminal status
- * while such a workspace exists strands the branch (silent merge loss). The
- * server-side mirror of mcp-server db-utils.checkOpenUnmergedWorkspace, so the
- * status-write transports (MCP move/update, server PATCH, CLI move) share one guard.
+ * while such a workspace exists strands the branch (silent merge loss). The guard
+ * QUERY now lives in the shared `issue-status-orchestration` seam so the
+ * status-write transports (MCP move/update, server PATCH, CLI move) share ONE
+ * implementation (arch-review #974); this thin wrapper keeps the existing
+ * `(issueId, database)` call signature for server callers.
  */
 export async function findOpenUnmergedWorkspace(
   issueId: string,
   database: Database = db,
 ): Promise<{ id: string; branch: string } | null> {
-  const rows = await database
-    .select({ id: workspaces.id, branch: workspaces.branch })
-    .from(workspaces)
-    .where(and(
-      eq(workspaces.issueId, issueId),
-      ne(workspaces.status, "closed"),
-      eq(workspaces.isDirect, false),
-    ))
-    .limit(1);
-  return rows[0] ?? null;
+  return findOpenUnmergedWorkspaceShared(database, issueId);
 }
 
 export async function deleteWorkspaceCascade(
