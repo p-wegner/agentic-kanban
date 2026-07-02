@@ -37,7 +37,7 @@ Analysiere den Diff sorgfältig auf Bugs, Logic-Fehler und Qualitätsprobleme.
 
 ## Schritt 4: Ergebnis schreiben
 
-Schreibe deine Findings als JSON nach `workshop/review/findings.json`:
+Schreibe deine Findings als JSON nach `workshop/review/findings-{AUFGABE_NR}.json` (z.B. `findings-2.json`):
 
 ```json
 {
@@ -67,7 +67,7 @@ Gib aus:
 ## Schritt 6: Inputs laden
 
 Lese:
-- `workshop/review/findings.json` — der soeben erstellte Output
+- `workshop/review/findings-{AUFGABE_NR}.json` — der soeben erstellte Output
 - `workshop/review/gold-standard-aufgabe{AUFGABE_NR}.json` — die Referenz-Findings
 
 Falls `gold-standard-aufgabe{AUFGABE_NR}.json` nicht existiert, gib aus:
@@ -94,7 +94,7 @@ Maximaler Score = Anzahl der Gold-Standard-Findings
 
 ## Schritt 9: Ergebnis schreiben
 
-Schreibe das Ergebnis nach `workshop/review/benchmark-result.json`:
+Schreibe das Ergebnis nach `workshop/review/benchmark-result-{AUFGABE_NR}.json` (z.B. `benchmark-result-2.json`):
 
 ```json
 {
