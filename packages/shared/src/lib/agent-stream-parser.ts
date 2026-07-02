@@ -33,6 +33,12 @@ import { parsePiEvent } from "./agent-stream/pi.js";
 
 export { createAgentStreamParseContext } from "./agent-stream/shared.js";
 export {
+  CODEX_USAGE_LIMIT_PATTERN,
+  CODEX_RETRY_AFTER_PATTERN,
+  matchCodexUsageLimitText,
+  type CodexUsageLimitMatch,
+} from "./agent-stream/codex.js";
+export {
   recordUnknownAgentEvent,
   getUnknownEventCounters,
   resetUnknownEventCounters,
