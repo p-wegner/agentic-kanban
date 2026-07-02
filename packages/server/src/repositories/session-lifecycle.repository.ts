@@ -1,4 +1,5 @@
 import { sessions, sessionMessages, workspaces, issues, preferences, agentSkills } from "@agentic-kanban/shared/schema";
+import { sanitizeUtf8 } from "@agentic-kanban/shared/lib/sanitize-utf8";
 import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -107,7 +108,7 @@ export async function insertSession(
   },
   database: Database = db,
 ): Promise<void> {
-  await database.insert(sessions).values(values);
+  await database.insert(sessions).values({ ...values, stats: sanitizeUtf8(values.stats) });
 }
 
 export async function updateSessionPid(
@@ -140,7 +141,7 @@ export async function updateSessionStoppedWithStats(
   database: Database = db,
 ): Promise<void> {
   await database.update(sessions)
-    .set({ status: "stopped", endedAt, exitCode, stats })
+    .set({ status: "stopped", endedAt, exitCode, stats: sanitizeUtf8(stats) })
     .where(eq(sessions.id, sessionId));
 }
 
@@ -159,7 +160,10 @@ export async function insertSessionMessage(
   values: { sessionId: string; type: string; data: string | null; exitCode: string | null },
   database: Database = db,
 ): Promise<void> {
-  await database.insert(sessionMessages).values(values);
+  await database.insert(sessionMessages).values({
+    ...values,
+    data: values.data == null ? null : sanitizeUtf8(values.data),
+  });
 }
 
 export async function updateSessionCompleted(

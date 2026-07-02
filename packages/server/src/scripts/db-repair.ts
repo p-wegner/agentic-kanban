@@ -25,6 +25,7 @@ import { applyMigrations } from "../db/manual-migrate.js";
 import { createBackup, backupDir } from "../db/backup.js";
 import { createClientWithPragmas } from "../db/pragmas.js";
 import { quarantineAndDeleteFkViolations } from "../db/fk-violations.js";
+import { repairInvalidUtf8Rows, UTF8_REPAIR_TABLES } from "../db/utf8-repair.js";
 import { alignForeignKeyActions } from "@agentic-kanban/shared/lib/fk-actions-repair";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -142,6 +143,31 @@ async function repairFkViolations(): Promise<void> {
   }
 }
 
+/**
+ * Invalid-UTF-8 TEXT repair (arch-review #960). A row containing invalid UTF-8
+ * makes libsql PANIC the whole process on a plain SELECT — this must run via the
+ * tolerant BLOB-cast reader (`utf8-repair.ts`), never a bare `SELECT *`. Repairs
+ * in place (UPDATE), never deletes.
+ */
+async function repairInvalidUtf8(): Promise<void> {
+  const client = await createClientWithPragmas(dbUrl());
+  try {
+    const result = await repairInvalidUtf8Rows(client, [...UTF8_REPAIR_TABLES], dirname(DB_PATH));
+    if (result.violations.length === 0) {
+      log("invalid-UTF-8 scan: no invalid-UTF-8 TEXT values found.");
+      return;
+    }
+    log(`invalid-UTF-8 scan found ${result.violations.length} affected row(s):`);
+    for (const v of result.violations) {
+      log(`  ${v.table} rowid=${v.rowid} columns=${Object.keys(v.columns).join(", ")}`);
+    }
+    log(`quarantine dump written to: ${result.quarantinePath}`);
+    log(`repaired ${result.repairedRows} row(s) in place (UPDATE, not delete).`);
+  } finally {
+    client.close();
+  }
+}
+
 async function main() {
   log(`target: ${DB_PATH}`);
 
@@ -245,6 +271,15 @@ async function main() {
       await repairFkViolations();
     } catch (err) {
       log(`WARNING: FK-violation repair failed (nothing was deleted — the delete is transactional): ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    // 7. Repair rows with invalid-UTF-8 TEXT columns (#960) — these PANIC the whole
+    //    process on a plain SELECT, so this must run via the tolerant BLOB-cast
+    //    reader. Repairs in place; never deletes.
+    try {
+      await repairInvalidUtf8();
+    } catch (err) {
+      log(`WARNING: invalid-UTF-8 repair failed (nothing was changed — the update is transactional): ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
