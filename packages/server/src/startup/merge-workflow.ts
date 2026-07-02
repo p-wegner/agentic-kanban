@@ -9,6 +9,7 @@ import { createBoardEvents } from "../services/board-events.js";
 import { emitButlerSystemEvent } from "../services/butler-event-feed.js";
 import * as gitService from "../services/git.service.js";
 import { acquireRepoMergeLock } from "../services/workspace-internals.js";
+import { cleanupMergedWorktreeAndBranch, runMergeCore } from "../services/merge-executor.service.js";
 import { createBackup } from "../db/backup.js";
 import { killProcessesInDir } from "../services/process-cleanup.js";
 import { runScript } from "../services/script-runner.js";
@@ -164,43 +165,33 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
                 }
               }
               await tagIfNeedsVisualVerification(repoPath, workspace.branch, workspace.baseBranch, issueId, now, projectId);
-              // Mandatory pre-merge backup. Non-fatal: must not block a legit auto-merge.
-              try {
-                await createBackup("pre-merge");
-              } catch (err) {
-                console.warn("[backup] pre-merge backup failed (non-fatal):", err instanceof Error ? err.message : String(err));
-              }
-              // Guard: refuse merge if main checkout has uncommitted tracked changes.
-              const uncommittedInMain = await gitService.getUncommittedTrackedChanges(repoPath);
-              if (uncommittedInMain.length > 0) {
-                const preview = uncommittedInMain.slice(0, 5).join(", ");
-                const suffix = uncommittedInMain.length > 5 ? ` (and ${uncommittedInMain.length - 5} more)` : "";
-                console.error(`[workflow] auto-merge blocked: main checkout has ${uncommittedInMain.length} uncommitted tracked change(s): ${preview}${suffix}`);
-                boardEvents.broadcast(projectId, "workflow_error");
-                emitButlerSystemEvent({ projectId, kind: "merge_failed", workspaceId: workspace.id, text: `Auto-merge blocked for workspace ${workspace.id} (branch ${workspace.branch}): main checkout has ${uncommittedInMain.length} uncommitted tracked change(s).` });
-                throw new Error(`Main checkout has ${uncommittedInMain.length} uncommitted tracked change(s) — cannot merge workspace ${workspace.id}. Commit or stash those changes first.`);
-              }
 
               const targetBranch = workspace.baseBranch || defaultBranch || "main";
-              // #763: auto-resolve pure-append hot-file conflicts by concatenation so a
-              // wave of tickets that all append to one shared smoke test / log lands
-              // without fix-and-merge thrash. Non-append conflicts still throw.
-              const mergeOutput = await gitService.mergeBranch(repoPath, workspace.branch, targetBranch, {
-                autoResolveAppendConflicts: true,
+              // The git-touching pipeline (dirty-main guard → pre-merge backup →
+              // merge with append-conflict auto-resolution (#763) → post-merge
+              // ancestry verification) lives in the shared merge executor core (#945)
+              // — the same core the manual/monitor doMerge path runs.
+              const { mergeOutput, mergeCommitSha } = await runMergeCore({
+                repoPath,
+                branch: workspace.branch,
+                targetBranch,
+                gitService,
+                createBackup,
+                deferWorkingTreeSync: false,
+                onDirtyMain: (uncommittedInMain) => {
+                  const preview = uncommittedInMain.slice(0, 5).join(", ");
+                  const suffix = uncommittedInMain.length > 5 ? ` (and ${uncommittedInMain.length - 5} more)` : "";
+                  console.error(`[workflow] auto-merge blocked: main checkout has ${uncommittedInMain.length} uncommitted tracked change(s): ${preview}${suffix}`);
+                  boardEvents.broadcast(projectId, "workflow_error");
+                  emitButlerSystemEvent({ projectId, kind: "merge_failed", workspaceId: workspace.id, text: `Auto-merge blocked for workspace ${workspace.id} (branch ${workspace.branch}): main checkout has ${uncommittedInMain.length} uncommitted tracked change(s).` });
+                  return new Error(`Main checkout has ${uncommittedInMain.length} uncommitted tracked change(s) — cannot merge workspace ${workspace.id}. Commit or stash those changes first.`);
+                },
+                makeAncestryError: (branch, target) =>
+                  new Error(
+                    `Post-merge invariant violated: branch '${branch}' is still not an ancestor of '${target}' after merge — refusing to move issue to Done (workspace ${workspace.id})`,
+                  ),
               });
 
-              // Post-merge invariant: verify the branch tip is now reachable from target.
-              // If not, the git merge did not actually land the work (e.g. plumbing anomaly
-              // or interrupted ref update) — refuse to set Done so the scanner can catch it.
-              const postMergeAncestry = await gitService.checkBranchTipIsAncestor(repoPath, workspace.branch, targetBranch);
-              if (!postMergeAncestry.isAncestor) {
-                throw new Error(
-                  `Post-merge invariant violated: branch '${workspace.branch}' is still not an ancestor of '${targetBranch}' after merge — refusing to move issue to Done (workspace ${workspace.id})`,
-                );
-              }
-
-              let mergeCommitSha = "";
-              try { mergeCommitSha = await gitService.revParse(repoPath, "HEAD"); } catch { /* tolerate */ }
               await recordMergeAttempt(
                 workspace,
                 "merged",
@@ -208,10 +199,12 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
                 { targetBranch, commitSha: mergeCommitSha || null, mergedAt: now, mergeOutput },
                 now,
               );
-              if (workspace.workingDir) {
-                try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch {}
-              }
-              try { await gitService.deleteBranch(repoPath, workspace.branch); } catch {}
+              await cleanupMergedWorktreeAndBranch({
+                repoPath,
+                workingDir: workspace.workingDir,
+                branch: workspace.branch,
+                gitService,
+              });
 
               const verifyAgent = prefMapLearning.get("after_merge_verify_agent") || "none";
               const issueTagged = await db.select({ tagId: issueTags.tagId }).from(issueTags).where(eq(issueTags.issueId, issueId)).limit(100).then((rows) => rows.some((r) => r.tagId !== null));

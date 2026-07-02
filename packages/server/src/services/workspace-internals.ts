@@ -6,6 +6,7 @@ import type { AgentSettings } from "./agent-settings.service.js";
 import { loadProjectRuntimeConfig } from "./project-runtime-config.service.js";
 import * as realGitService from "./git.service.js";
 import { detectWorkspaceMergeConflicts } from "./workspace-merge-conflict.service.js";
+import { getDirtyMainFiles } from "./merge-executor.service.js";
 
 export class WorkspaceError extends Error {
   constructor(
@@ -242,9 +243,10 @@ export async function resolveMergeState(
 
   // Branch-level checks require a non-null workingDir; skip cleanly if absent.
   // Dirty-main guard: main checkout must not have uncommitted tracked changes.
-  if (!workspace.isDirect && typeof gitService.getUncommittedTrackedChanges === "function") {
+  // (Delegates to the shared merge-executor primitive so the git call exists once — #945.)
+  if (!workspace.isDirect) {
     try {
-      const uncommitted = await gitService.getUncommittedTrackedChanges(repoPath);
+      const uncommitted = await getDirtyMainFiles(repoPath, gitService);
       if (uncommitted.length > 0) {
         return {
           kind: "error-skip",
