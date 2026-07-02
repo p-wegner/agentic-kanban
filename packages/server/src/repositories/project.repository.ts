@@ -1,6 +1,6 @@
 import { projects, projectStatuses, issues, workspaces } from "@agentic-kanban/shared/schema";
 import { deleteProjectCascade as deleteProjectCascadeShared } from "@agentic-kanban/shared/lib/cascade-delete";
-import { eq, sql, and, isNull, gte } from "drizzle-orm";
+import { eq, sql, and, isNull, gte, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -12,6 +12,28 @@ export async function getProjectById(
 ) {
   const rows = await database.select().from(projects).where(eq(projects.id, projectId)).limit(1);
   return rows[0] ?? null;
+}
+
+/**
+ * Canonical repoPath accessor (#957). Was duplicated verbatim in
+ * agent-skill/drive-service/issue-ai per-consumer mirror files — this is now the
+ * only copy; services import it from here.
+ */
+export async function getProjectRepoPath(
+  projectId: string,
+  database: Database = db,
+): Promise<string | null> {
+  const project = await getProjectById(projectId, database);
+  return project?.repoPath ?? null;
+}
+
+/** Batch project lookup by ids (#957 — was merge-queue.repository's private mirror). */
+export async function getProjectsByIds(
+  projectIds: string[],
+  database: Database = db,
+) {
+  if (projectIds.length === 0) return [];
+  return database.select().from(projects).where(inArray(projects.id, projectIds));
 }
 
 export async function getProjectByRepoPath(

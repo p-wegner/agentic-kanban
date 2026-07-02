@@ -10,6 +10,7 @@ import { desc, eq, ne, inArray, and, gte, isNotNull } from "drizzle-orm";
 import { deleteWorkspaceCascade as deleteWorkspaceCascadeShared } from "@agentic-kanban/shared/lib/cascade-delete";
 import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { setWorkspaceStatus, type WorkspaceStatus } from "./workspace-status.repository.js";
+import { getProjectById } from "./project.repository.js";
 
 type WorkflowDbLike = Parameters<typeof transitionIssueStatus>[0];
 
@@ -185,14 +186,9 @@ export async function resolveProjectFull(
     .limit(1);
   if (issueRows.length === 0) throw new Error("Issue not found");
 
-  const projectRows = await database
-    .select()
-    .from(projects)
-    .where(eq(projects.id, issueRows[0].projectId))
-    .limit(1);
-  if (projectRows.length === 0) throw new Error("Project not found");
+  const project = await getProjectById(issueRows[0].projectId, database);
+  if (!project) throw new Error("Project not found");
 
-  const project = projectRows[0];
   return { project, repoPath: project.repoPath, defaultBranch: project.defaultBranch };
 }
 
@@ -214,14 +210,10 @@ export async function resolveProjectRepo(
     .limit(1);
   if (issueRows.length === 0) throw new Error("Issue not found");
 
-  const projectRows = await database
-    .select({ repoPath: projects.repoPath, defaultBranch: projects.defaultBranch })
-    .from(projects)
-    .where(eq(projects.id, issueRows[0].projectId))
-    .limit(1);
-  if (projectRows.length === 0) throw new Error("Project not found");
+  const project = await getProjectById(issueRows[0].projectId, database);
+  if (!project) throw new Error("Project not found");
 
-  return { repoPath: projectRows[0].repoPath, defaultBranch: projectRows[0].defaultBranch };
+  return { repoPath: project.repoPath, defaultBranch: project.defaultBranch };
 }
 
 export async function resolveProjectId(

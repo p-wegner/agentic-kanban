@@ -10,8 +10,8 @@ import {
   updateAgentSkill,
   deleteAgentSkill,
   getActiveProjectRepoPath,
-  getProjectRepoPath,
 } from "../repositories/agent-skill.repository.js";
+import { getProjectRepoPath } from "../repositories/project.repository.js";
 
 export class AgentSkillError extends Error {
   constructor(

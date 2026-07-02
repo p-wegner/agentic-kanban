@@ -43,6 +43,10 @@ const COHESION_MAX_FN_DECLS = 20;
 const COHESION_BASELINE = {
   // session-summary.ts rewritten to consume the agent-stream parsers (#951) — entry removed.
   "packages/server/src/services/butler-sdk.service.ts": 30,
+  // #957: the blanket /repositories/ cohesion exemption was removed — the two large
+  // aggregate repositories are now RATCHETED instead of invisible. They may only shrink.
+  "packages/server/src/repositories/issue.repository.ts": 36,
+  "packages/server/src/repositories/session.repository.ts": 32,
   // stack-profile.service.ts decomposed behind a facade barrel (#911) — entry removed.
   "packages/server/src/services/agent.service.ts": 27,
   "packages/server/src/services/insights.service.ts": 23,
@@ -73,11 +77,6 @@ function isExcluded(absPath) {
     absPath.endsWith(".spec.ts") ||
     absPath.endsWith(".d.ts")
   );
-}
-
-/** The repository layer exports one query fn per operation — broad by design. */
-function isRepositoryLayer(rel) {
-  return rel.includes("/repositories/");
 }
 
 function collectSourceFiles(dir, out) {
@@ -154,7 +153,7 @@ for (const file of files) {
   const text = readFileSync(file, "utf8");
   const lines = lineCount(text);
   if (lines > MAX_LINES) lineOffenders.push(`${rel}  (${lines} lines)`);
-  if (!isRepositoryLayer(rel) && lines >= COHESION_MIN_LINES) {
+  if (lines >= COHESION_MIN_LINES) {
     const fnDecls = countInternalFunctions(file, text);
     const allowed = Math.max(COHESION_MAX_FN_DECLS, COHESION_BASELINE[rel] ?? 0);
     if (fnDecls > allowed) {

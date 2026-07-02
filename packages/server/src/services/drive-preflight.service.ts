@@ -1,7 +1,6 @@
 import { getUncommittedTrackedChanges } from "@agentic-kanban/shared/lib/git-service";
 import type { Database } from "../db/index.js";
-import { getProjectStatuses } from "../repositories/project.repository.js";
-import { getProjectRepoAndBranch } from "../repositories/drive-preflight.repository.js";
+import { getProjectById, getProjectStatuses } from "../repositories/project.repository.js";
 import { getAllPreferences } from "../repositories/preferences.repository.js";
 import { getStackProfile, verifyScriptPrefKey } from "./stack-profile.service.js";
 import { parseStrategyBullseyeConfig, selectProviderFromStrategy } from "./strategy-objective.service.js";
@@ -179,7 +178,7 @@ export async function runDrivePreflight(
     const checks: PreflightCheck[] = [];
 
     // --- Project record: registered, defaultBranch set, repoPath resolvable ---
-    const [project] = await getProjectRepoAndBranch(projectId, database);
+    const project = await getProjectById(projectId, database);
 
     if (!project) {
       checks.push(block("project", "Project registered", "No project with this id — register it first."));
