@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -7,6 +7,19 @@ const { wrongCheckoutVitestReason } = require("../../../../.claude/hooks/smart-h
 };
 
 describe("smart-hooks-runner wrong-checkout vitest guard", () => {
+  // The guard derives the main checkout from git at runtime (portable, no hardcoded path).
+  // Pin it deterministically here via the KANBAN_MAIN_CHECKOUT override so the test is
+  // machine-independent and matches the fixture paths below regardless of where it runs.
+  let priorMainCheckout: string | undefined;
+  beforeAll(() => {
+    priorMainCheckout = process.env.KANBAN_MAIN_CHECKOUT;
+    process.env.KANBAN_MAIN_CHECKOUT = "C:/andrena/agentic-kanban";
+  });
+  afterAll(() => {
+    if (priorMainCheckout === undefined) delete process.env.KANBAN_MAIN_CHECKOUT;
+    else process.env.KANBAN_MAIN_CHECKOUT = priorMainCheckout;
+  });
+
   it("blocks test:mine from the main checkout when the session belongs to a worktree", () => {
     const reason = wrongCheckoutVitestReason(
       {

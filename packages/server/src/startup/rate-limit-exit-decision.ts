@@ -23,6 +23,11 @@ export interface SpecialSessionSets {
  * fix-and-merge, or learning session. Only builder sessions are relaunched on a
  * fresh profile after a rate-limit rotation; the others inherit the switched pref
  * and rely on their own reconciler.
+ *
+ * SUPERSEDED in the exit path (#950): the in-memory sets are empty after a server
+ * restart, so `exit-workflow.ts` now derives the builder flag from
+ * `resolveSessionRoleFlags` (sets + the persisted `sessions.triggerType`). This
+ * set-only helper remains for callers that have no session row at hand.
  */
 export function isBuilderSession(sessionId: string, sets: SpecialSessionSets): boolean {
   return (

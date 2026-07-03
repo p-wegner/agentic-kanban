@@ -7,6 +7,8 @@ import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { getSettings, setSettings } from "../lib/settingsStore.js";
 import { showToast } from "./Toast.js";
+import { useBoardFilterStore } from "../stores/boardFilterStore.js";
+import { useBoardBulkSelectionStore } from "../stores/boardBulkSelectionStore.js";
 
 type SortMode = "rank" | "newest" | "oldest" | "priority" | "type" | "due";
 type GroupMode = "none" | "priority" | "type";
@@ -117,13 +119,9 @@ export interface BacklogViewProps {
   backlogColumn: StatusWithIssues | undefined;
   activeColumns: StatusWithIssues[];
   projectId: string;
-  searchQuery: string;
-  onSearchChange: (query: string) => void;
   sessionActivity: Record<string, string>;
   liveStats: Record<string, LiveSessionStats>;
   sessionTodos: Record<string, TodoItem[]>;
-  pendingIssueIds: Set<string>;
-  pendingWorkspaceIssueIds: Set<string>;
   canStartWorkspace: boolean;
   onIssueClick: (issue: IssueWithStatus) => void;
   onWorkspaceClick: (issue: IssueWithStatus, workspaceId?: string) => void;
@@ -141,13 +139,9 @@ export function BacklogView({
   backlogColumn,
   activeColumns,
   projectId,
-  searchQuery,
-  onSearchChange,
   sessionActivity,
   liveStats,
   sessionTodos,
-  pendingIssueIds,
-  pendingWorkspaceIssueIds,
   canStartWorkspace,
   onIssueClick,
   onWorkspaceClick,
@@ -160,6 +154,12 @@ export function BacklogView({
   onCreateIssue,
   onExpandCreate,
 }: BacklogViewProps) {
+  // Store slices (#958): search comes from the filter store, the pending
+  // indicator sets from the bulk-selection store (no more prop threading).
+  const searchQuery = useBoardFilterStore((s) => s.searchQuery);
+  const onSearchChange = useBoardFilterStore((s) => s.setSearchQuery);
+  const pendingIssueIds = useBoardBulkSelectionStore((s) => s.pendingIssueIds);
+  const pendingWorkspaceIssueIds = useBoardBulkSelectionStore((s) => s.pendingWorkspaceIssueIds);
   const [sortMode, setSortMode] = useState<SortMode>("rank");
   const [groupMode, setGroupMode] = useState<GroupMode>("none");
   const [filterMode, setFilterMode] = useState<FilterMode>("all");

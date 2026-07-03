@@ -42,11 +42,8 @@ vi.mock("../repositories/preferences.repository.js", () => ({
   setPreference: vi.fn(async () => {}),
 }));
 
-vi.mock("../repositories/monitor-butler.repository.js", () => ({
-  getProjectSummaryById: vi.fn(async (id: string) => {
-    const p = h.projects.get(id);
-    return p ? [p] : [];
-  }),
+vi.mock("../repositories/project.repository.js", () => ({
+  getProjectById: vi.fn(async (id: string) => h.projects.get(id) ?? null),
 }));
 
 vi.mock("../repositories/board-health-events.repository.js", () => ({
@@ -94,7 +91,7 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
 }));
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { getProjectSummaryById } from "../repositories/monitor-butler.repository.js";
+import { getProjectById } from "../repositories/project.repository.js";
 import {
   runMonitorButlerCycle,
   startMonitorButler,
@@ -115,7 +112,7 @@ beforeEach(() => {
   h.projects.set(ACTIVE_PROJECT, { id: ACTIVE_PROJECT, name: "Proj", repoPath: process.cwd() });
 
   vi.mocked(query).mockClear();
-  vi.mocked(getProjectSummaryById).mockClear();
+  vi.mocked(getProjectById).mockClear();
 });
 
 afterEach(() => {
@@ -129,8 +126,8 @@ describe("monitor-butler LLM cycle", () => {
     await runMonitorButlerCycle(); // no explicit projectId
 
     // Resolution: it looked up exactly the one active project.
-    expect(getProjectSummaryById).toHaveBeenCalledTimes(1);
-    expect(getProjectSummaryById).toHaveBeenCalledWith(ACTIVE_PROJECT);
+    expect(getProjectById).toHaveBeenCalledTimes(1);
+    expect(getProjectById).toHaveBeenCalledWith(ACTIVE_PROJECT);
 
     // It spawned exactly one SDK session (acted on the one project).
     expect(query).toHaveBeenCalledTimes(1);
@@ -148,7 +145,7 @@ describe("monitor-butler LLM cycle", () => {
     await expect(runMonitorButlerCycle()).resolves.toBeUndefined();
 
     // No project resolution, no SDK session, no audit noise.
-    expect(getProjectSummaryById).not.toHaveBeenCalled();
+    expect(getProjectById).not.toHaveBeenCalled();
     expect(query).not.toHaveBeenCalled();
     expect(h.healthEvents).toHaveLength(0);
   });

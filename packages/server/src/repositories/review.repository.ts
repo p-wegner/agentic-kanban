@@ -109,12 +109,3 @@ export async function getProjectDefaultBranch(
   const project = await getProjectById(projectId, database);
   return project ? [{ defaultBranch: project.defaultBranch }] : [];
 }
-
-export async function setWorkspaceStatus(
-  workspaceId: string,
-  status: string,
-  updatedAt: string,
-  database: Database = db,
-): Promise<void> {
-  await database.update(workspaces).set({ status, updatedAt }).where(eq(workspaces.id, workspaceId));
-}

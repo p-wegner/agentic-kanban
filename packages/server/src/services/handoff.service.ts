@@ -4,8 +4,7 @@ import { join } from "node:path";
 import { getLatestCommit, getDiffShortstat, getChangedFileNames } from "./git.service.js";
 import { parseSessionSummary } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
-import { getSessionMessageRows } from "../repositories/session.repository.js";
-import { getSessionStats } from "../repositories/handoff.repository.js";
+import { getSessionMessageRows, getSessionStatsRaw } from "../repositories/session.repository.js";
 
 const HANDOFF_FILENAME = "HANDOFF.md";
 const MAX_FILES = 20;
@@ -52,16 +51,16 @@ export async function generateHandoff(
   baseBranch?: string | null,
 ): Promise<string> {
   const diffBase = baseBranch || "HEAD~1";
-  const [lastCommit, diffStatsResult, changedFilesResult, sessionRows, messageRows] = await Promise.all([
+  const [lastCommit, diffStatsResult, changedFilesResult, statsRaw, messageRows] = await Promise.all([
     getLatestCommit(workingDir).catch(() => null),
     getDiffShortstat(workingDir, diffBase).catch(() => null),
     getChangedFileNames(workingDir, diffBase).catch(() => []),
-    getSessionStats(sessionId, database),
+    getSessionStatsRaw(sessionId, database),
     getSessionMessageRows(sessionId, database),
   ]);
 
   const summary = parseSessionSummary(messageRows);
-  const statsJson = sessionRows[0]?.stats;
+  const statsJson = statsRaw;
   let parsedStats: Record<string, unknown> = {};
   if (statsJson) {
     try { parsedStats = JSON.parse(statsJson) as Record<string, unknown>; } catch { /* ignore */ }

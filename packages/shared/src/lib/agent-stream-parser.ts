@@ -28,19 +28,36 @@ import type { AgentStreamProvider, ParsedStreamEvent } from "./agent-stream/type
 import { createAgentStreamParseContext, hasProviderFields } from "./agent-stream/shared.js";
 import { parseClaudeEvent } from "./agent-stream/claude.js";
 import { parseCodexEvent } from "./agent-stream/codex.js";
-import { parseCopilotEvent } from "./agent-stream/copilot.js";
+import { isCopilotUnmatchedFallback, parseCopilotEvent } from "./agent-stream/copilot.js";
 import { parsePiEvent } from "./agent-stream/pi.js";
 
 export { createAgentStreamParseContext } from "./agent-stream/shared.js";
+export {
+  CODEX_USAGE_LIMIT_PATTERN,
+  CODEX_RETRY_AFTER_PATTERN,
+  matchCodexUsageLimitText,
+  type CodexUsageLimitMatch,
+} from "./agent-stream/codex.js";
 export {
   recordUnknownAgentEvent,
   getUnknownEventCounters,
   resetUnknownEventCounters,
   setUnknownEventLogger,
   setUnknownEventClock,
+  UNKNOWN_EVENT_ALERT_THRESHOLD,
+  UNKNOWN_EVENT_ALERT_WINDOW_MS,
   type UnknownEventCounter,
   type UnknownEventLogger,
 } from "./agent-stream/unknown-events.js";
+export {
+  recordUnknownFieldDrift,
+  getUnknownFieldCounters,
+  resetUnknownFieldCounters,
+  setUnknownFieldLogger,
+  setUnknownFieldClock,
+  type UnknownFieldCounter,
+  type UnknownFieldLogger,
+} from "./agent-stream/unknown-fields.js";
 
 import { recordUnknownAgentEvent } from "./agent-stream/unknown-events.js";
 
@@ -78,7 +95,11 @@ export function classifyAgentStreamLine(
   }
   const eventType = typeof obj.type === "string" ? obj.type : undefined;
   const event = parseAgentStreamLine(provider, line, context);
-  return { validJson: true, recognized: event !== undefined, eventType, event };
+  // The copilot parser keeps a `raw` display fallback for UI continuity, but that
+  // fallback must count as UNKNOWN here — otherwise any JSON is "recognized" and
+  // a Copilot CLI format change produces zero unknown-event counts (#968).
+  const recognized = event !== undefined && !isCopilotUnmatchedFallback(event);
+  return { validJson: true, recognized, eventType, event };
 }
 
 /**

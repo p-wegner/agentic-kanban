@@ -1,6 +1,6 @@
 {
   "name": "agentic-kanban",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "type": "module",
   "description": "Kanban board for AI-driven coding tasks — each card is a Claude Code session with built-in diff review and merge. Local-first, MCP-enabled, zero config.",
   "license": "MIT",
@@ -22,15 +22,16 @@
     "dist/server.js",
     "dist/mcp.js",
     "dist/client/",
-    "dist/migrations/"
+    "dist/migrations/",
+    "dist/scaffold/"
   ],
   "scripts": {
     "dev": "node ../../scripts/server-dev-proxy.mjs",
     "build": "tsc",
     "start": "node dist/cli/index.js dev",
-    "db:migrate": "drizzle-kit migrate",
+    "db:migrate": "tsx src/scripts/db-migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
-    "db:reset": "tsx src/scripts/db-reset.ts && drizzle-kit migrate && tsx src/db/seed.ts",
+    "db:reset": "tsx src/scripts/db-reset.ts && tsx src/scripts/db-migrate.ts && tsx src/db/seed.ts",
     "db:repair": "tsx src/scripts/db-repair.ts",
     "db:restore": "tsx src/scripts/db-restore.ts",
     "openapi:generate": "tsx scripts/generate-openapi.ts",

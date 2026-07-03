@@ -111,6 +111,48 @@ describe("normalizeConfig", () => {
   });
 });
 
+describe("normalizeConfig provider-policy round-trip (#983)", () => {
+  const serverWrittenPolicy = {
+    id: "policy-claude-work",
+    provider: "claude",
+    profileName: "work",
+    label: "Claude (work)",
+    mode: "fill",
+    headroomPct: 20,
+    notes: "",
+    quotaProviderId: "claude-max",
+    // Server-side field the old client interface didn't know about — the exact
+    // field the field-list normalizer used to silently DROP on save.
+    model: "sonnet",
+  };
+
+  it("preserves a per-policy model through open -> normalize -> save", () => {
+    const cfg = normalizeConfig({ providerPolicies: [serverWrittenPolicy] });
+    expect(cfg.providerPolicies).toHaveLength(1);
+    expect(cfg.providerPolicies[0].model).toBe("sonnet");
+    // Full save shape keeps everything the server wrote.
+    expect(cfg.providerPolicies[0]).toMatchObject(serverWrittenPolicy);
+    // And it survives a SECOND round-trip (save -> reload -> save).
+    const again = normalizeConfig(JSON.parse(JSON.stringify(cfg)));
+    expect(again.providerPolicies[0].model).toBe("sonnet");
+  });
+
+  it("preserves unknown future fields on round-trip", () => {
+    const cfg = normalizeConfig({
+      providerPolicies: [{ ...serverWrittenPolicy, futureField: "keep-me" }],
+    });
+    expect((cfg.providerPolicies[0] as unknown as Record<string, unknown>).futureField).toBe("keep-me");
+  });
+
+  it("drops an invalid/blank model instead of persisting garbage", () => {
+    const blank = normalizeConfig({ providerPolicies: [{ ...serverWrittenPolicy, model: "  " }] });
+    expect(blank.providerPolicies[0].model).toBeUndefined();
+    expect("model" in blank.providerPolicies[0]).toBe(false);
+    const nonString = normalizeConfig({ providerPolicies: [{ ...serverWrittenPolicy, model: 42 }] });
+    expect(nonString.providerPolicies[0].model).toBeUndefined();
+  });
+});
+
 describe("matchesSegment", () => {
   it("matches when an issue's text contains a segment token (>=3 chars)", () => {
     const seg = mkSegment({ keywords: "bug regression" });

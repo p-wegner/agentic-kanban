@@ -29,12 +29,13 @@
  * changes without a server restart, mirroring the existing board-monitor pattern.
  */
 import { randomUUID } from "node:crypto";
+import { parseBoolSetting } from "@agentic-kanban/shared/lib/settings-registry";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { query, type Options } from "@anthropic-ai/claude-agent-sdk";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
-import { getProjectSummaryById } from "../repositories/monitor-butler.repository.js";
+import { getProjectById } from "../repositories/project.repository.js";
 import { buildSpawnEnv, getMcpServersConfig } from "./agent-provider/helpers.js";
 import { getBoardStatus } from "./board-status.js";
 import { isTransientNetworkError } from "../startup/transient-errors.js";
@@ -129,12 +130,11 @@ export async function runMonitorButlerCycle(opts?: { projectId?: string }): Prom
       return;
     }
 
-    const projectRows = await getProjectSummaryById(projectId);
-    if (projectRows.length === 0) {
+    const project = await getProjectById(projectId);
+    if (!project) {
       console.warn(`[monitor-butler] project ${projectId} not found — skipping cycle`);
       return;
     }
-    const project = projectRows[0];
 
     const { text: strategy, source } = resolveStrategy(project.repoPath);
     const board = await getBoardStatus({ projectId });
@@ -279,7 +279,7 @@ export function startMonitorButler(): void {
   const generation = ++state.generation;
 
   async function scheduleNext() {
-    const enabled = (await getPreference("monitor_butler_enabled").catch(() => null)) === "true";
+    const enabled = parseBoolSetting("monitor_butler_enabled", await getPreference("monitor_butler_enabled").catch(() => null));
     if (state.generation !== generation) return;
     if (!enabled) {
       if (state.timer) {

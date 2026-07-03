@@ -28,6 +28,11 @@ const external = [
   // dependency, so npx installs it + the right native binary for the user's platform.
   "@anthropic-ai/claude-agent-sdk",
   "zod",
+  // Must stay external: ts-morph bundles the TypeScript compiler (CJS), which reads
+  // `__filename` at module init — inlining it into this ESM bundle crashes every
+  // `npx agentic-kanban` start with "__filename is not defined". It's a runtime
+  // dependency, so npm installs it alongside the package.
+  "ts-morph",
 ];
 
 const shared = {

@@ -29,7 +29,13 @@
 set -u
 
 PROJECT_ID="${MONITOR_PROJECT_ID:-agentic-kanban}"
-REPO="${MONITOR_REPO:-C:/andrena/agentic-kanban}"
+# Default the repo to THIS checkout (loop.sh lives at <repo>/scripts/board-monitor/),
+# derived from the script's own location so it is machine-independent. `pwd -W` yields a
+# Windows-style path (C:/...) on Git Bash/MSYS — needed for codex -C and Windows tooling —
+# and falls back to a POSIX path elsewhere. Override with MONITOR_REPO when driving another repo.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_REPO="$(cd "$SCRIPT_DIR/../.." && { pwd -W 2>/dev/null || pwd; })"
+REPO="${MONITOR_REPO:-$DEFAULT_REPO}"
 OBJECTIVE="${MONITOR_OBJECTIVE:-}"
 STATE_DIR="${MONITOR_STATE_DIR:-}"
 while [ "$#" -gt 0 ]; do

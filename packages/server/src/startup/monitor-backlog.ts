@@ -4,7 +4,7 @@ import { issues, projectStatuses, workspaces } from "@agentic-kanban/shared/sche
 import { eq, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { createBoardEvents } from "../services/board-events.js";
-import { setPreference } from "../repositories/preferences.repository.js";
+import { getRuntimeState, setRuntimeState } from "../repositories/runtime-state.repository.js";
 import { nextIssueNumber } from "../repositories/issue-number.repository.js";
 import type { MonitorActionName } from "../services/monitor-nudge.js";
 import { resolveMonitorTunables } from "../services/strategy-objective.service.js";
@@ -92,8 +92,10 @@ export interface BacklogEmptyDeps {
   logMonitorAction: (action: MonitorActionName, workspaceId: string, issueId: string) => void;
   /** Which projects this cycle may refill (global monitor on, or per-project hands-off mode). Defaults to all. */
   allowProject?: (projectId: string) => boolean;
-  /** Injectable persistence for the cooldown timestamp (defaults to the real preferences repo). */
+  /** Injectable writer for the cooldown timestamp — runtime state, not config (#975). */
   setCooldownStamp?: (iso: string) => Promise<void>;
+  /** Injectable reader for the cooldown timestamp (defaults to the runtime-state repo). */
+  getCooldownStamp?: () => Promise<string | null>;
   /** Injectable host-issue creator (defaults to a real DB insert). Returns the new issue id or null. */
   createHostIssue?: (issue: HostIssue, nowIso: string) => Promise<string | null>;
   /** Injectable host-issue remover (defaults to a real DB delete). */
@@ -124,7 +126,8 @@ export async function runBacklogEmptyStrategy(
     serverPort,
     boardEvents,
     logMonitorAction,
-    setCooldownStamp = (iso) => setPreference("backlog_empty_last_run", iso),
+    setCooldownStamp = (iso) => setRuntimeState("backlog_empty_last_run", iso),
+    getCooldownStamp = () => getRuntimeState("backlog_empty_last_run"),
     createHostIssue = defaultCreateHostIssue,
     deleteHostIssue = defaultDeleteHostIssue,
     allowProject = () => true,
@@ -137,7 +140,7 @@ export async function runBacklogEmptyStrategy(
 
   // Cooldown: don't refill more often than the configured interval.
   const cooldownMin = parseInt(prefMap.get("backlog_empty_cooldown_min") || String(DEFAULT_COOLDOWN_MIN), 10);
-  const lastRun = prefMap.get("backlog_empty_last_run");
+  const lastRun = await getCooldownStamp();
   if (lastRun) {
     const elapsedMs = new Date(now).getTime() - new Date(lastRun).getTime();
     if (elapsedMs < cooldownMin * 60 * 1000) {

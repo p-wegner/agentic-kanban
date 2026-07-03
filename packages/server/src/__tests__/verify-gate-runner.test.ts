@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 const RUNNER_SRC = join(__dirname, "../scaffold/verify-gate-runner.js");
+// The dev checkout's LIVE hook — a deliberate copy of the canonical (tested) scaffold source.
+const DEPLOYED_HOOK = join(__dirname, "../../../../.claude/hooks/verify-gate-runner.js");
 
 interface RunResult {
   status: number;
@@ -44,6 +46,19 @@ function runGate(opts: {
 async function tmp(): Promise<string> {
   return mkdtemp(join(tmpdir(), "verify-gate-test-"));
 }
+
+describe("verify-gate-runner — source identity (#952)", () => {
+  it("the deployed .claude/hooks copy is byte-identical to the canonical tested scaffold source", async () => {
+    // Two copies exist on purpose: packages/server/src/scaffold/verify-gate-runner.js is the
+    // canonical source (tested here, shipped to dist/scaffold/hooks/ by copy-assets.mjs), and
+    // .claude/hooks/verify-gate-runner.js is this checkout's live Stop hook. If they drift,
+    // the tested artifact no longer matches the deployed one — keep them in sync manually
+    // (edit the scaffold source, copy to .claude/hooks/).
+    const canonical = await readFile(RUNNER_SRC, "utf8");
+    const deployed = await readFile(DEPLOYED_HOOK, "utf8");
+    expect(deployed).toBe(canonical);
+  });
+});
 
 describe("verify-gate-runner", () => {
   let hookDir: string;

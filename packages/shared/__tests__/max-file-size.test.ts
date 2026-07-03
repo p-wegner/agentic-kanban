@@ -19,11 +19,14 @@ import ts from "typescript";
  *  1. {@link MAX_LINES} — a hard ceiling kept as an absolute backstop. No single
  *     module should ever be enormous regardless of how cohesive it claims to be.
  *
- *  2. A COHESION signal — a module is a probable god-module when it is large
- *     ({@link COHESION_MIN_LINES}+) AND declares a broad BEHAVIORAL surface
- *     (> {@link COHESION_MAX_FN_DECLS} top-level functions/classes, EXPORTED AND
- *     INTERNAL). Many independent top-level behaviors in one big file = many
- *     responsibilities = low cohesion. Counting only EXPORTS undercounts (#889): a
+ *  2. A COHESION signal — a module is a probable god-module when it declares a
+ *     broad BEHAVIORAL surface (> {@link COHESION_MAX_FN_DECLS} top-level
+ *     functions/classes, EXPORTED AND INTERNAL). Many independent top-level
+ *     behaviors in one file = many responsibilities = low cohesion. The signal
+ *     fires on the count ALONE — the former 600-line floor was removed (#977): it
+ *     left a blind spot where a 450-line file with 31 top-level functions sat
+ *     invisible below the floor and could grow unchecked until it crossed 600
+ *     already deep in breach. Counting only EXPORTS undercounts (#889): a
  *     god-module hides behind a few exports while declaring dozens of internal
  *     helpers — agent-stream-parser.ts had 3 exports but 28 internal functions at
  *     1042 lines, waved straight through the old export-only signal. The count is
@@ -33,11 +36,12 @@ import ts from "typescript";
  *     version pins, lookup maps) and type/interface exports — cohesive data /
  *     contracts, not behaviors.
  *
- * Exemptions (path/shape-based, not a per-file allowlist):
- *  - the REPOSITORY layer — a data-access module legitimately exports one query
- *    function per row operation; breadth there is cohesion-by-layer, not a
- *    grab-bag, so the cohesion signal does not apply (the line ceiling still does);
- *  - type-only modules (the wire-contract DTOs) — no behavioral surface at all.
+ * The former blanket REPOSITORY-layer exemption was removed (#957): a data-access
+ * module exporting one query fn per operation is broad by design, but "broad by
+ * design" had become a blind spot — per-consumer mirror files and 800-line
+ * aggregate repos hid behind it. Large repositories are now RATCHETED via
+ * COHESION_BASELINE like everything else (they may only shrink). Type-only
+ * modules (the wire-contract DTOs) remain naturally exempt — no behavioral surface.
  *
  * The decompose recipe when a file trips: extract a cohesive sub-module, or split
  * a god-file behind a facade barrel — see packages/shared/src/lib/git-service.ts
@@ -47,9 +51,9 @@ import ts from "typescript";
 
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "../../../..");
 const MAX_LINES = 1000;
-const COHESION_MIN_LINES = 600;
-// Top-level function-like declarations, exported AND internal (#889). Keep in sync
-// with scripts/check-god-modules.mjs (the merge-blocking gate of record).
+// Top-level function-like declarations, exported AND internal (#889). The count fires
+// alone — no line-count floor (#977). Keep in sync with scripts/check-god-modules.mjs
+// (the merge-blocking gate of record).
 const COHESION_MAX_FN_DECLS = 20;
 
 // Ratchet baseline (#889): large modules grandfathered at their current top-level
@@ -57,13 +61,30 @@ const COHESION_MAX_FN_DECLS = 20;
 // gate fails if it grows past its baseline. Keep in sync with check-god-modules.mjs.
 // Decomposition tracked on the board (#911/#912/#913); drop an entry once split.
 const COHESION_BASELINE: Record<string, number> = {
-  "packages/shared/src/lib/session-summary.ts": 38,
+  // session-summary.ts rewritten to consume the agent-stream parsers (#951) — entry removed.
   "packages/server/src/services/butler-sdk.service.ts": 30,
+  // #957: the blanket /repositories/ cohesion exemption was removed — the two large
+  // aggregate repositories are now RATCHETED instead of invisible. They may only shrink.
+  "packages/server/src/repositories/issue.repository.ts": 36,
+  "packages/server/src/repositories/session.repository.ts": 32,
   // stack-profile.service.ts decomposed behind a facade barrel (#911) — entry removed.
   "packages/server/src/services/agent.service.ts": 27,
   "packages/server/src/services/insights.service.ts": 23,
   // agent-questions.service.ts decomposed into ./agent-questions/* sub-modules (#912);
   // the facade barrel re-exports only, so its baseline entry is removed.
+  // #977: the 600-line cohesion floor was removed (the count fires alone now). These
+  // files sat in the old blind spot — under 600 lines but over 20 top-level function
+  // declarations — and are grandfathered at their current count. Shrink-only, same as
+  // every entry above.
+  "packages/server/src/repositories/workflow-fork.repository.ts": 33,
+  "packages/server/src/repositories/issue-ai.repository.ts": 31,
+  "packages/server/src/repositories/issue-service.repository.ts": 30,
+  "packages/server/src/services/git-info.service.ts": 28,
+  "packages/server/src/repositories/workspace-crud.repository.ts": 27,
+  "packages/server/src/scripts/mock-agent.ts": 23,
+  "packages/server/src/repositories/workspace.repository.ts": 22,
+  "packages/server/src/repositories/session-lifecycle.repository.ts": 21,
+  "packages/shared/src/lib/openspec.ts": 21,
 };
 
 function isExcluded(absPath: string): boolean {
@@ -83,11 +104,6 @@ function isExcluded(absPath: string): boolean {
     absPath.endsWith(".spec.ts") ||
     absPath.endsWith(".d.ts")
   );
-}
-
-/** The repository layer exports one query fn per operation — broad by design. */
-function isRepositoryLayer(rel: string): boolean {
-  return rel.includes("/repositories/");
 }
 
 function collectSourceFiles(dir: string, out: string[]): void {
@@ -171,14 +187,12 @@ describe("god-module gate (cohesion-aware)", () => {
     ).toEqual([]);
   });
 
-  it(`no large module (${COHESION_MIN_LINES}+ lines) declares more than ${COHESION_MAX_FN_DECLS} top-level functions/classes`, () => {
+  it(`no module declares more than ${COHESION_MAX_FN_DECLS} top-level functions/classes`, () => {
     const offenders: string[] = [];
     for (const file of gatherSourceFiles()) {
       const rel = relative(REPO_ROOT, file).split(sep).join("/");
-      if (isRepositoryLayer(rel)) continue; // broad-by-design data-access layer
       const text = readFileSync(file, "utf8");
       const lines = lineCount(text);
-      if (lines < COHESION_MIN_LINES) continue;
       const fnDecls = countInternalFunctions(file, text);
       const allowed = Math.max(COHESION_MAX_FN_DECLS, COHESION_BASELINE[rel] ?? 0);
       if (fnDecls > allowed) {
@@ -191,7 +205,7 @@ describe("god-module gate (cohesion-aware)", () => {
 
     expect(
       offenders,
-      `These large modules declare a broad behavioral surface (top-level functions/classes, ` +
+      `These modules declare a broad behavioral surface (top-level functions/classes, ` +
         `exported + internal) — a low-cohesion god-module smell (#889). ` +
         `Split by responsibility into cohesive sub-modules re-exported through a facade ` +
         `barrel (see workflow-engine.ts / git-service.ts / agent-stream-parser.ts):\n` +

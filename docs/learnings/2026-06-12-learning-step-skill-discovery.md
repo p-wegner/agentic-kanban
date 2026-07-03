@@ -9,7 +9,7 @@ On 2026-06-12, a Space Invaders learning-step session started from a feature wor
 - Merge commit observed on the project repo: `842f934 Merge branch 'feature/ak-5-bullets-player-shot-invader-bombs'`
 - Handoff said `npm test` passed and the feature worktree was clean
 
-The target project did not expose `learning-step` in the active skill list. The agent first fell back to `distill-learnings`, then manually searched `C:\andrena\agentic-kanban` and found the canonical project-local skill at `.claude/skills/learning-step/SKILL.md`.
+The target project did not expose `learning-step` in the active skill list. The agent first fell back to `distill-learnings`, then manually searched the main checkout (the agentic-kanban repo root) and found the canonical project-local skill at `.claude/skills/learning-step/SKILL.md`.
 
 ## Lessons
 
