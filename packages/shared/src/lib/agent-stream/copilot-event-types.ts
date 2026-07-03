@@ -28,7 +28,6 @@ export const COPILOT_RESULT_TYPES = new Set([
   "result",
   "completed",
   "done",
-  "completed",
   "session_end",
   "session_ended",
   "session_completed",
