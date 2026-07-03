@@ -20,8 +20,10 @@ function baseStatus(statusId: string, projectId: string, name: string, now: stri
   return { id: statusId, projectId, name, sortOrder: 0, isDefault: name === "In Progress", createdAt: now };
 }
 
-function baseIssue(issueId: string, projectId: string, statusId: string, now: string, title = "Test Issue") {
-  return { id: issueId, issueNumber: 1, title, statusId, projectId, createdAt: now, updatedAt: now };
+// issueNumber defaults to 1; pass a distinct value when seeding multiple issues into
+// one project (migration 0094 enforces UNIQUE(project_id, issue_number)).
+function baseIssue(issueId: string, projectId: string, statusId: string, now: string, title = "Test Issue", issueNumber = 1) {
+  return { id: issueId, issueNumber, title, statusId, projectId, createdAt: now, updatedAt: now };
 }
 
 function baseWorkspace(wsId: string, issueId: string, now: string, overrides: Record<string, unknown> = {}) {
@@ -493,8 +495,8 @@ describe("getWorkspaceLaunchFailures", () => {
     const older = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
     const newer = new Date(Date.now() - 30 * 60 * 1000).toISOString();
     await db.insert(issues).values([
-      baseIssue(issueId1, projectId, statusId, older, "Old Issue"),
-      baseIssue(issueId2, projectId, statusId, newer, "New Issue"),
+      baseIssue(issueId1, projectId, statusId, older, "Old Issue", 1),
+      baseIssue(issueId2, projectId, statusId, newer, "New Issue", 2),
     ]);
     await db.insert(workspaces).values([
       baseWorkspace(wsId1, issueId1, older, { workingDir: null, updatedAt: older }),

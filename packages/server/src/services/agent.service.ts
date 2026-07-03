@@ -1,11 +1,13 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { openSync, closeSync, readSync, statSync, unlinkSync, existsSync, writeFileSync, readFileSync, appendFileSync, readdirSync, type Dirent } from "node:fs";
 import { join } from "node:path";
-import { buildAgentLaunchConfig, type ProviderId, type ProviderName } from "./agent-provider.js";
+import { buildAgentLaunchConfig, narrowProviderName, type ProviderId, type ProviderName } from "./agent-provider.js";
+import { warnIfCliVersionRisky } from "./agent-cli-version.service.js";
 import { sessionOutputPath, sessionErrorPath } from "../lib/session-paths.js";
 import { guardProcessKill, auditProcessEvent } from "./process-guard.js";
 import { resolveWorktreeDevPorts as resolveWorktreeDevPortsShared } from "./worktree-ports.js";
 import { shouldDetachAgent, resolveLaunchPorts, buildAgentSpawnEnv } from "../lib/agent-launch-env.js";
+import { sanitizeUtf8 } from "@agentic-kanban/shared/lib/sanitize-utf8";
 
 function resolveWorktreeDevPorts(worktreePath: string): { serverPort: string; clientPort: string } | null {
   const ports = resolveWorktreeDevPortsShared(worktreePath);
@@ -171,7 +173,7 @@ function startOutputFileWatcher(
           const buf = Buffer.alloc(stat.size - offset);
           readSync(fd, buf, 0, buf.length, offset);
           offset = stat.size;
-          const data = buf.toString();
+          const data = sanitizeUtf8(buf.toString());
           if (data) {
             try {
               onOutput({ type: "stdout", sessionId, data });
@@ -337,7 +339,7 @@ function setupChildOutput(
 
   proc.stdout?.on("data", (chunk: Buffer) => {
     try {
-      const data = chunk.toString();
+      const data = sanitizeUtf8(chunk.toString());
       try { appendFileSync(pipedOutPath, data); } catch { /* ignore */ }
       onOutput({ type: "stdout", sessionId, data });
     } catch (err) {
@@ -347,7 +349,7 @@ function setupChildOutput(
 
   proc.stderr?.on("data", (chunk: Buffer) => {
     try {
-      onOutput({ type: "stderr", sessionId, data: chunk.toString() });
+      onOutput({ type: "stderr", sessionId, data: sanitizeUtf8(chunk.toString()) });
     } catch (err) {
       console.error(`[agent] stderr callback error: sessionId=${sessionId}`, err);
     }
@@ -470,6 +472,15 @@ export function launch(
   };
 
   console.log(`[agent] launching: command=${command} provider=${provider ?? "auto"} worktree=${worktreePath} sessionId=${sessionId} resume=${providerSessionId ?? "none"}`);
+
+  // CLI version guard on the ACTUAL launch path (#956): the provider CLIs resolve
+  // by bare name from PATH and auto-update, so a breaking release used to pass
+  // every check until preflight happened to run. Fire-and-forget + TTL-cached
+  // (one `--version` subprocess per provider:command per 30 min), warn-only —
+  // never blocks or delays the spawn. Mock agents are not third-party CLIs.
+  if (!isMockAgent) {
+    void warnIfCliVersionRisky(narrowProviderName(provider), command);
+  }
 
   // Agents that don't need a shell can be detached — they survive tsx watch hot-reloads.
   // shell: true on Windows is used by mock agents and Codex (.cmd shim) — detaching those

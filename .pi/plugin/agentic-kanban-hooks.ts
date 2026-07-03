@@ -72,18 +72,28 @@ export default function AgenticKanbanHooks(pi: ExtensionAPI) {
   pi.on("tool_call", async (event) => {
     if (event.toolName === "bash") {
       const input = event.input as Record<string, unknown>;
-      const result = await runHookScript(
-        [join(HOOKS_DIR, "smart-hooks-runner.js"), "PreToolUse"],
-        {
-          tool_name: "Bash",
-          tool_input: {
-            command: String(input.command ?? ""),
-            cwd: PROJECT_DIR,
-          },
+      const hookInput = {
+        tool_name: "Bash",
+        tool_input: {
+          command: String(input.command ?? ""),
           cwd: PROJECT_DIR,
         },
+        cwd: PROJECT_DIR,
+      };
+      const result = await runHookScript(
+        [join(HOOKS_DIR, "smart-hooks-runner.js"), "PreToolUse"],
+        hookInput,
       );
       if (isBlocked(result)) return { block: true, reason: blockReason(result) };
+
+      // Vital-file destruction guard (#972) — same gate .claude/settings.json and
+      // .codex/hooks.json wire for shell commands. (require-read-before-write is
+      // deliberately NOT wired here: that constraint is Claude-Code-specific.)
+      const vitalResult = await runHookScript(
+        [join(HOOKS_DIR, "vital-file-guard.js")],
+        hookInput,
+      );
+      if (isBlocked(vitalResult)) return { block: true, reason: blockReason(vitalResult) };
     }
 
     if (event.toolName === "write" || event.toolName === "edit") {

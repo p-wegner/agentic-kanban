@@ -1,4 +1,6 @@
 import { resolveMonitorTunables, type MonitorTunables } from "./strategy-objective.service.js";
+import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
+import { START_MODE_VALUES } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 
 /**
  * Start Mode — the single per-project decision for HOW new tickets get auto-started.
@@ -21,7 +23,7 @@ import { resolveMonitorTunables, type MonitorTunables } from "./strategy-objecti
  *                  the SOLE driver (via the ungated POST path). The in-process monitor stands
  *                  down so the two never double-start. Independent scheduled crons still fire.
  */
-export type StartMode = "manual" | "monitor" | "conductor";
+export type StartMode = (typeof START_MODE_VALUES)[number];
 
 export interface StartPolicy {
   mode: StartMode;
@@ -43,7 +45,9 @@ export function startModePrefKey(projectId: string): string {
   return `start_mode_${projectId}`;
 }
 
-const VALID_MODES: ReadonlySet<string> = new Set<StartMode>(["manual", "monitor", "conductor"]);
+// Derived from the shared START_MODE_VALUES list so preference writers (settings
+// route, MCP set_preference) validate against exactly what this resolver accepts.
+const VALID_MODES: ReadonlySet<string> = new Set<StartMode>(START_MODE_VALUES);
 
 /**
  * Resolve the effective Start Mode + capabilities for a project. Mirrors
@@ -62,7 +66,7 @@ export function resolveStartPolicy(prefMap: Map<string, string>, projectId: stri
   const source: StartPolicy["source"] = VALID_MODES.has(explicit ?? "") ? "start_mode" : "derived";
 
   const wip = resolveMonitorTunables(prefMap, projectId).tunables;
-  const cascadeOptIn = prefMap.get("dependency_auto_chain") === "true";
+  const cascadeOptIn = getBool(prefMap, "dependency_auto_chain");
   const refillOptIn = prefMap.get("backlog_empty_strategy") === "generate_tickets";
 
   switch (mode) {
@@ -103,6 +107,6 @@ export function resolveStartPolicy(prefMap: Map<string, string>, projectId: stri
 function deriveMode(prefMap: Map<string, string>, projectId: string): StartMode {
   const autodrive = prefMap.get(`board_autodrive_${projectId}`) === "true";
   const globalMonitorAutoStart =
-    prefMap.get("auto_monitor") === "true" && prefMap.get("nudge_auto_start") === "true";
+    getBool(prefMap, "auto_monitor") && getBool(prefMap, "nudge_auto_start");
   return autodrive || globalMonitorAutoStart ? "monitor" : "manual";
 }

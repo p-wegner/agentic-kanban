@@ -1,12 +1,17 @@
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
+import {
+  CODEX_USAGE_LIMIT_PATTERN,
+  matchCodexUsageLimitText,
+} from "@agentic-kanban/shared/lib/agent-stream-parser";
 
 export interface CodexUsageLimitInfo {
   message: string;
   retryAfter: string | null;
 }
 
-export const CODEX_USAGE_LIMIT_PATTERN = /you(?:['\u2019])?ve hit your usage limit for\s+(.+?)(?:\.|$)/i;
-const RETRY_AFTER_PATTERN = /try again at\s+(.+?)(?:\.|$)/i;
+// Single source of truth for the usage-limit prose contract lives in
+// shared/src/lib/agent-stream/codex.ts (#991) \u2014 re-exported for existing consumers.
+export { CODEX_USAGE_LIMIT_PATTERN };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -15,9 +20,9 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 export function detectCodexUsageLimitText(text: string | null | undefined): CodexUsageLimitInfo | null {
-  if (!text || !CODEX_USAGE_LIMIT_PATTERN.test(text)) return null;
-  const retryAfter = RETRY_AFTER_PATTERN.exec(text)?.[1]?.trim() || null;
-  return { message: text.trim(), retryAfter };
+  const match = matchCodexUsageLimitText(text);
+  if (!match) return null;
+  return { message: match.message, retryAfter: match.retryAfter || null };
 }
 
 function detectCodexUsageLimitLine(line: string): CodexUsageLimitInfo | null {

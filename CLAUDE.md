@@ -41,7 +41,7 @@ High-level git ops in `packages/shared/src/lib/git-service.ts`; `server/src/serv
 **Spawning git — the adapter.** The ONLY sanctioned place to spawn the `git` CLI is `packages/shared/src/lib/git-exec.ts` (the adapter/port). Use its `gitExec` (never-throws, returns `{stdout,stderr,code,error}`), `gitExecOrThrow` (normalised error), or `gitExecSync`; import via the deep path `@agentic-kanban/shared/lib/git-exec` (node-only — never the client-reachable barrel). **Do NOT write a private `execGit`/`execFile("git", …)` helper** — that drift is what made the "single source of truth" a lie across ~17 files. Enforced by `packages/shared/__tests__/git-exec-single-spawn.test.ts`, which scans all package `src/` (tests excluded) and fails on any raw git spawn outside the adapter.
 
 ### Windows / hooks
-- **Hook commands in `settings.json`**: forward slashes (`\\` → `MODULE_NOT_FOUND`); relative paths fail on CWD shift; `$CLAUDE_PROJECT_DIR` not expanded.
+- **Hook commands in `settings.json`**: use forward slashes (`\\` → `MODULE_NOT_FOUND`) and prefix the script with `$CLAUDE_PROJECT_DIR/` — never a hardcoded absolute path (breaks on every other clone/machine) and never a bare relative path (fails on CWD shift). `$CLAUDE_PROJECT_DIR` is set by Claude Code for hook execution (not for the Bash tool) and resolves to the session's repo root, so it works across machines, clones, and worktrees. This is the convention `project-scaffold.ts` ships to every scaffolded project. The hook scripts themselves self-locate (via `git rev-parse`/`__dirname` + the `KANBAN_MAIN_CHECKOUT` override), so they hold no machine-specific paths either.
 - **Codex hook parity**: `.codex/hooks.json` routes shell checks through `.claude/hooks/smart-hooks-runner.js`, patch/write through `prevent-cross-worktree-writes.js`. New Claude safety hooks must also handle Codex input (`tool_name`, `tool_input.command`, patch/write, `cwd`).
 - **Git tests**: `.trim()` content assertions (CRLF vs LF); assert on keywords, not exact strings.
 - **No `--no-edit` on `git rebase`** — that's a `git merge` flag; `git rebase` rejects it with "unknown option". Non-interactive rebase already opens no editor, so just drop the flag (recurring agent error, ~5 failed calls/window).
@@ -120,6 +120,13 @@ Prompt templates in the `agent_skills` table, written to `.claude/skills/<name>/
 | Clean up stale worktrees/sessions/artifacts | `cleanup` |
 | Publish/release npm package | `publish`, `release` |
 | Change directly on master | `direct-master` |
+
+## Clean-clone / first-start blockers (Windows)
+Full symptom→cause→fix in `docs/install.md` (“Clean-clone / first-start gotchas”). The `dev-server` skill Step 0 handles bootstrap automatically (no DB → `pnpm db:setup`; 0 projects → register). Key facts for triage:
+- **`spawn pnpm ENOENT`** — needs `pnpm.exe` on PATH, not just `pnpm.ps1`. Fix: `scoop install pnpm`.
+- **Client shared resolution** — fixed; `vite.config.ts` uses `development` condition → `src/`. Fallback: `pnpm --filter @agentic-kanban/shared build`.
+- **Backend hangs (proxy up, nothing on 13001)** — `tsx watch` + Node 23.x on Windows; use Node LTS 20/22.
+- **DB location** — `packages/server/kanban.db`; absent → falls back to `~/.agentic-kanban/kanban.db` (board looks empty).
 
 ## Common Commands
 - `pnpm dev` — server + client (worktree ports: main 3001/5173, `feature/<N>-…` = `3001+N`/`5173+N`). `pnpm dev:desktop` adds Tauri. Safe headless launch: `dev-server` skill.

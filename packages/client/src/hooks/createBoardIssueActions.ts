@@ -6,11 +6,13 @@ import { apiPost, apiPatch, apiDelete } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
 import { getSettings } from "../lib/settingsStore.js";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
+import { isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { runCreateIssueFlow, type CreateIssuePayload } from "../lib/createIssueService.js";
 import type { ExpandedCreatePanel } from "../routes/BoardPage.js";
 import type { IssueWithStatus, UpdateIssueRequest, StatusWithIssues } from "@agentic-kanban/shared";
 import { resolveWorkspaceLaunchDefaults } from "../lib/workspaceLaunchDefaults.js";
 import { boardSelectionActions } from "../stores/boardSelectionStore.js";
+import { boardBulkSelectionActions } from "../stores/boardBulkSelectionStore.js";
 
 type Setter<T> = Dispatch<SetStateAction<T>>;
 
@@ -26,18 +28,19 @@ interface BoardIssueActionsDeps {
   setError: Setter<string | null>;
   setExpandedCreatePanel: Setter<ExpandedCreatePanel>;
   setMutating: Setter<boolean>;
-  setPendingIssueIds: Setter<Set<string>>;
-  setPendingWorkspaceIssueIds: Setter<Set<string>>;
 }
 
 export function createBoardIssueActions(deps: BoardIssueActionsDeps) {
   const {
     activeProject, activeAgentsTarget, columns, columnsRef, pendingBoardRefreshRef,
     refetchBoard, setColumns, setCreatingInColumnId, setError, setExpandedCreatePanel,
-    setMutating, setPendingIssueIds, setPendingWorkspaceIssueIds,
+    setMutating,
   } = deps;
   const { setSelectedIssue, setWorkspaceInitial, setWorkspaceIssue, setWorkspaceOpenCreate } =
     boardSelectionActions;
+  // Pending-indicator sets moved into the bulk-selection store (#958) — write
+  // it directly instead of receiving injected setters from BoardPage.
+  const { setPendingIssueIds, setPendingWorkspaceIssueIds } = boardBulkSelectionActions;
   async function handleCreateIssue(data: CreateIssuePayload) {
     await runCreateIssueFlow(data, {
       columns,
@@ -110,7 +113,7 @@ export function createBoardIssueActions(deps: BoardIssueActionsDeps) {
       const body: Record<string, unknown> = {
         issueId: issue.id,
         branch,
-        requiresReview: s.auto_review !== "false",
+        requiresReview: isAutoReviewEnabled(s.auto_review),
         planMode: issue.priority === "high" || issue.priority === "critical",
         isDirect: false,
         profile: { provider, name: profileName },

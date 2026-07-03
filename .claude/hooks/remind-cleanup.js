@@ -51,37 +51,56 @@ function main() {
   const DEV_SERVER_PROCS = new Set(["node"]);
   try {
     const portList = ports.join(",");
-    const output = execSync(
-      `powershell.exe -NoProfile -Command "Get-NetTCPConnection -LocalPort ${portList} -State Listen -ErrorAction SilentlyContinue | ForEach-Object { $p = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue; '{0} {1}' -f $_.LocalPort, $p.ProcessName } | Sort-Object -Unique"`,
-      {
+    const devServerPorts = new Set();
+    if (process.platform === "win32") {
+      const output = execSync(
+        `powershell.exe -NoProfile -Command "Get-NetTCPConnection -LocalPort ${portList} -State Listen -ErrorAction SilentlyContinue | ForEach-Object { $p = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue; '{0} {1}' -f $_.LocalPort, $p.ProcessName } | Sort-Object -Unique"`,
+        {
+          encoding: "utf8",
+          timeout: 5000,
+          windowsHide: true,
+          stdio: ["pipe", "pipe", "pipe"],
+        }
+      );
+      // Each line is "<port> <processName>"; keep only node-owned listeners.
+      for (const line of output.split(/\r?\n/)) {
+        const [portStr, procName] = line.trim().split(/\s+/);
+        if (!portStr) continue;
+        if (procName && DEV_SERVER_PROCS.has(procName.toLowerCase())) {
+          devServerPorts.add(portStr);
+        }
+      }
+    } else {
+      // POSIX: lsof lists listeners for the port set; COMMAND column is the process name.
+      const output = execSync(`lsof -nP -iTCP:${portList} -sTCP:LISTEN`, {
         encoding: "utf8",
         timeout: 5000,
-        windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"],
-      }
-    );
-    // Each line is "<port> <processName>"; keep only node-owned listeners.
-    const devServerPorts = new Set();
-    for (const line of output.split(/\r?\n/)) {
-      const [portStr, procName] = line.trim().split(/\s+/);
-      if (!portStr) continue;
-      if (procName && DEV_SERVER_PROCS.has(procName.toLowerCase())) {
-        devServerPorts.add(portStr);
+      });
+      for (const line of output.split(/\r?\n/)) {
+        const cols = line.trim().split(/\s+/);
+        if (cols.length < 9 || cols[0] === "COMMAND") continue;
+        const procName = cols[0].toLowerCase();
+        const portMatch = /:(\d+)$/.exec(cols[cols.length - 1].replace(/\s*\(LISTEN\)$/, ""));
+        if (portMatch && DEV_SERVER_PROCS.has(procName)) {
+          devServerPorts.add(portMatch[1]);
+        }
       }
     }
     for (const p of ports) {
       if (devServerPorts.has(String(p))) runningPorts.push(p);
     }
   } catch {
-    // PowerShell returned non-zero (no matches) — no ports listening
+    // Non-zero exit (no matches / tool unavailable) — treat as no ports listening
   }
 
   if (runningPorts.length === 0) process.exit(0);
 
   const killCommands = runningPorts
-    .map(
-      (p) =>
-        `  Get-NetTCPConnection -LocalPort ${p} | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force }`
+    .map((p) =>
+      process.platform === "win32"
+        ? `  Get-NetTCPConnection -LocalPort ${p} | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force }`
+        : `  kill $(lsof -tnP -iTCP:${p} -sTCP:LISTEN)`
     )
     .join("\n");
 

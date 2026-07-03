@@ -3,7 +3,7 @@ import { DRIVE_STATUSES } from "@agentic-kanban/shared/schema";
 import type { DriveStatus } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import { getAllPreferences, setPreferences } from "../repositories/preferences.repository.js";
-import { getProjectRepoPath } from "../repositories/drive-service.repository.js";
+import { getProjectRepoPath } from "../repositories/project.repository.js";
 import {
   listDrivesByProject,
   getDriveById,

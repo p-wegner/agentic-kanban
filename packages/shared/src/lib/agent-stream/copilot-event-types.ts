@@ -1,9 +1,10 @@
 // Single source of truth for Copilot event-type name sets (arch-review #892).
 //
-// Two parsers consume Copilot JSONL: the live stream parser (./copilot.ts) and
-// the offline session-summary parser (../session-summary.ts). Both classify
-// events by these normalized type names. They USED to each define their own
-// copies of `COPILOT_SESSION_START_TYPES` / `COPILOT_RESULT_TYPES`, and the sets
+// The live stream parser (./copilot.ts) classifies events by these normalized
+// type names; the offline session-summary parser (../session-summary.ts) now
+// consumes ./copilot.ts directly (#951) instead of classifying itself. The two
+// parsers USED to each define their own copies of
+// `COPILOT_SESSION_START_TYPES` / `COPILOT_RESULT_TYPES`, and the sets
 // had already drifted — a CLI version bump that teaches one parser a new event
 // name but not the other silently breaks the summary panel while the live
 // terminal keeps working, with no error. Hosting the sets here forces both to
@@ -25,11 +26,14 @@ export const COPILOT_SESSION_START_TYPES = new Set([
 /** Turn/session completion events. Note: bare `result` is handled per-provider. */
 export const COPILOT_RESULT_TYPES = new Set([
   "result",
+  "completed",
   "done",
   "session_end",
   "session_ended",
+  "session_completed",
   "session.end",
   "session.ended",
+  "session.completed",
   "turn_completed",
   "turn.completed",
   "stats",

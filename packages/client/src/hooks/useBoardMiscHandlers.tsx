@@ -9,25 +9,28 @@ import { showToast } from "../lib/toast.js";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import type { useTicketTrail } from "./useTicketTrail.js";
 import type { ViewMode } from "../lib/viewRegistry.js";
+import { useBoardCursorStore } from "../stores/boardCursorStore.js";
+import { boardFilterActions } from "../stores/boardFilterStore.js";
 
 type Setter<T> = Dispatch<SetStateAction<T>>;
 
 interface BoardMiscHandlersDeps {
   selectedIssue: IssueWithStatus | null;
-  keyboardCursorIssueId: string | null;
   ticketTrail: ReturnType<typeof useTicketTrail>;
   openIssueById: (id: string) => void;
   handleViewModeChange: (mode: ViewMode) => void;
   refetchBoard: (projectId?: string, options?: { force?: boolean }) => Promise<unknown>;
   setCollapsedGroups: Setter<Set<string>>;
-  setCreatedDateFilter: Setter<string | null>;
 }
 
 export function useBoardMiscHandlers(deps: BoardMiscHandlersDeps) {
   const {
-    selectedIssue, keyboardCursorIssueId, ticketTrail, openIssueById,
-    handleViewModeChange, refetchBoard, setCollapsedGroups, setCreatedDateFilter,
+    selectedIssue, ticketTrail, openIssueById,
+    handleViewModeChange, refetchBoard, setCollapsedGroups,
   } = deps;
+  // Cursor slice (#958): subscribe to the store instead of receiving the value
+  // from BoardPage — the scroll-into-view effect below is the only consumer.
+  const keyboardCursorIssueId = useBoardCursorStore((s) => s.keyboardCursorIssueId);
   async function handleDuplicateIssue(issue: IssueWithStatus) {
     try {
       const result = await apiPost<{ id: string; issueNumber: number; title: string }>(`/api/issues/${issue.id}/duplicate`);
@@ -74,7 +77,7 @@ export function useBoardMiscHandlers(deps: BoardMiscHandlersDeps) {
   }
 
   const handleCreatedDateDrilldown = useCallback((dateKey: string) => {
-    setCreatedDateFilter(dateKey);
+    boardFilterActions.setCreatedDateFilter(dateKey);
     handleViewModeChange("table");
   }, [handleViewModeChange]);
 

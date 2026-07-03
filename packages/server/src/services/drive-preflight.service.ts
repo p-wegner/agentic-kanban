@@ -1,10 +1,10 @@
 import { getUncommittedTrackedChanges } from "@agentic-kanban/shared/lib/git-service";
+import { resolveProviderProfileFromPrefs } from "@agentic-kanban/shared/lib/strategy-policy";
 import type { Database } from "../db/index.js";
-import { getProjectStatuses } from "../repositories/project.repository.js";
-import { getProjectRepoAndBranch } from "../repositories/drive-preflight.repository.js";
+import { getProjectById, getProjectStatuses } from "../repositories/project.repository.js";
 import { getAllPreferences } from "../repositories/preferences.repository.js";
 import { getStackProfile, verifyScriptPrefKey } from "./stack-profile.service.js";
-import { parseStrategyBullseyeConfig, selectProviderFromStrategy } from "./strategy-objective.service.js";
+import { parseStrategyBullseyeConfig } from "./strategy-objective.service.js";
 import { cooldownKey as claudeCooldownKey } from "./claude-subscription-ring.js";
 import { cooldownKey as codexCooldownKey } from "./codex-license-ring.js";
 import { getDriveStatus, setDriveEnabled } from "./drive.service.js";
@@ -87,40 +87,14 @@ function isProfileCooledDown(
 
 /**
  * Resolve the provider+profile this project's drive will launch with, then check its
- * health (real profile, not exhausted). Reads the Strategy Bullseye first (the single
- * source of truth for the provider default); falls back to the global `provider` +
- * `*_profile` prefs when no strategy policy is configured.
+ * health (real profile, not exhausted). Delegates to the shared Bullseye-aware resolver
+ * (`resolveProviderProfileFromPrefs`, `@agentic-kanban/shared/lib/strategy-policy`) —
+ * the same precedence (Strategy Bullseye first, else global `provider` + `*_profile`
+ * prefs) used by workspace launch and the butler, instead of re-deriving it here.
  */
 function checkProviderHealth(projectId: string, prefMap: Map<string, string>, now: Date): PreflightCheck {
-  let provider: "claude" | "codex" | "copilot" | "pi" = "claude";
-  let profileName = "";
-
-  const strategyRaw = prefMap.get(`board_strategy_${projectId}`);
-  if (strategyRaw) {
-    try {
-      const selected = selectProviderFromStrategy(parseStrategyBullseyeConfig(strategyRaw));
-      if (selected) {
-        provider = selected.provider;
-        profileName = selected.profileName;
-      }
-    } catch {
-      /* malformed strategy — fall through to global prefs */
-    }
-  }
-  if (!profileName) {
-    const globalProvider = prefMap.get("provider");
-    if (globalProvider === "codex" || globalProvider === "copilot" || globalProvider === "pi" || globalProvider === "claude") {
-      provider = globalProvider;
-    }
-    profileName =
-      provider === "codex"
-        ? prefMap.get("codex_profile") ?? ""
-        : provider === "pi"
-          ? prefMap.get("pi_profile") ?? ""
-        : provider === "copilot"
-          ? prefMap.get("copilot_profile") ?? ""
-          : prefMap.get("claude_profile") ?? "";
-  }
+  const { provider, profileName: resolvedProfileName } = resolveProviderProfileFromPrefs(prefMap, projectId);
+  const profileName = resolvedProfileName ?? "";
 
   // A `mock` profile drives against the mock agent — fine for E2E, never a real hands-off drive.
   if (provider === "claude" && profileName === "mock") {
@@ -179,7 +153,7 @@ export async function runDrivePreflight(
     const checks: PreflightCheck[] = [];
 
     // --- Project record: registered, defaultBranch set, repoPath resolvable ---
-    const [project] = await getProjectRepoAndBranch(projectId, database);
+    const project = await getProjectById(projectId, database);
 
     if (!project) {
       checks.push(block("project", "Project registered", "No project with this id — register it first."));

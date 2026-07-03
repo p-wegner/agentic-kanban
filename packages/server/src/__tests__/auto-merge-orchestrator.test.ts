@@ -34,6 +34,10 @@ async function seedProject(db: ReturnType<typeof createTestDb>["db"]) {
   return { projectId, statusIds };
 }
 
+// 0094_unique_issue_numbers.sql enforces UNIQUE(project_id, issue_number) — a hardcoded
+// issueNumber: 1 for every seeded issue violates it as of that migration.
+let nextIssueNumber = 1;
+
 async function seedWorkspace(
   db: ReturnType<typeof createTestDb>["db"],
   opts: {
@@ -49,7 +53,7 @@ async function seedWorkspace(
   const workspaceId = randomUUID();
   await db.insert(issues).values({
     id: issueId,
-    issueNumber: 1,
+    issueNumber: nextIssueNumber++,
     title: "Issue",
     priority: "medium",
     sortOrder: 0,

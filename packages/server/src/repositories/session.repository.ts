@@ -349,6 +349,41 @@ export async function getSessionOutput(
   return { messages };
 }
 
+/**
+ * Canonical narrow status read (#957). Was duplicated in merge-helpers /
+ * session-lifecycle per-consumer mirrors. Returns the status string, or null
+ * when the session does not exist.
+ */
+export async function getSessionStatus(
+  sessionId: string,
+  database: Database = db,
+): Promise<string | null> {
+  const rows = await database
+    .select({ status: sessions.status })
+    .from(sessions)
+    .where(eq(sessions.id, sessionId))
+    .limit(1);
+  return rows.length > 0 ? rows[0].status : null;
+}
+
+/**
+ * Canonical raw stats read (#957) — the unparsed `sessions.stats` string.
+ * `undefined` = session not found, `null` = session exists but has no stats.
+ * (getSessionStats below is the parsed, discriminated-union variant.)
+ */
+export async function getSessionStatsRaw(
+  sessionId: string,
+  database: Database = db,
+): Promise<string | null | undefined> {
+  const rows = await database
+    .select({ stats: sessions.stats })
+    .from(sessions)
+    .where(eq(sessions.id, sessionId))
+    .limit(1);
+  if (rows.length === 0) return undefined;
+  return rows[0].stats;
+}
+
 export type SessionStatsResult =
   | { status: "found"; stats: Record<string, unknown> }
   | { status: "not_found" }

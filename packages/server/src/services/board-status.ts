@@ -1,4 +1,5 @@
 import { db } from "../db/index.js";
+import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { workspaces } from "@agentic-kanban/shared/schema";
 import { isTerminalStatusIdView, ACTIVE_WORKSPACE_STATUSES, workspaceStatusPriority } from "@agentic-kanban/shared";
 import type { BoardStatusResponse, BoardStatusIssue } from "@agentic-kanban/shared";
@@ -82,7 +83,7 @@ export async function getBoardStatus(
   const preferenceMap = new Map(preferenceRows.map((pref) => [pref.key, pref.value]));
   const classificationOptions: BoardStatusClassificationOptions = {
     autoMergeEnabled: isAutoMergeEnabled(preferenceMap),
-    autoMergeInReview: preferenceMap.get("auto_merge_in_review") === "true",
+    autoMergeInReview: getBool(preferenceMap, "auto_merge_in_review"),
   };
 
   // 2. Get statuses to identify terminal ones (legacy fallback for non-workflow issues)

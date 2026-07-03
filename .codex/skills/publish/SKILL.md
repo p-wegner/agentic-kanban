@@ -65,6 +65,40 @@ git commit -m "Bump to v<X.Y.Z>"
 git push
 ```
 
+## 7. Smoke test the published package (REQUIRED)
+
+Not just "server boots" — the smoke test is the full loop: **register a project, create a ticket, run its workspace**. Run it against the REAL registry package, never the local build.
+
+```bash
+SMOKE=<scratch-dir>   # session scratchpad, NOT /tmp
+mkdir -p "$SMOKE/data" "$SMOKE/repo"
+
+# scratch project repo
+cd "$SMOKE/repo" && git init -b master && echo "# Smoke" > README.md \
+  && git add . && git -c user.email=smoke@test -c user.name=Smoke commit -m init
+
+# install from the registry (npx fetch also works; install survives flaky npx)
+cd "$SMOKE" && npm install agentic-kanban@<version>
+
+# start from the repo dir — first run must auto-register the CWD project
+cd "$SMOKE/repo" && AGENTIC_KANBAN_DIR="$SMOKE/data" PORT=3988 \
+  "$SMOKE/node_modules/.bin/agentic-kanban"   # run in background
+```
+
+Then, via REST on :3988, verify each step:
+1. `GET /api/projects` — the scratch repo was auto-registered (1 project).
+2. `POST /api/issues` — create a trivial ticket ("append one line to README.md, commit").
+3. `POST /api/workspaces` with `{"issueId":..., "provider":"claude", "claudeProfile":"anth"}` — **always pass provider + profile explicitly** (id-only defaults to codex). Response must show a worktree under `$SMOKE/repo/../.worktrees/` and `status: active`.
+4. Poll `GET /api/workspaces/:id` until terminal; the branch must contain the README change (`git -C "$SMOKE/repo" log --oneline --all`). Auto-review runs first (`status: reviewing`) — wait for it to return to `idle`.
+5. `POST /api/workspaces/:id/ready-for-merge` then `POST /api/workspaces/:id/merge` — merge alone returns `not_approved` until the workspace is marked ready. Verify master advanced: `git -C "$SMOKE/repo" show master:README.md` contains the new line.
+
+Cleanup: kill ONLY the smoke server PID (from its startup log / `boardPid` in process-audit lines), then delete `$SMOKE`.
+
+Gotchas seen in real runs:
+- The published CLI has **no `start` subcommand** — the bare command starts the server; port via `PORT` env (`--port/--no-open` exist only on `dev`).
+- `AGENTIC_KANBAN_DIR` isolates the DB; without it the smoke run writes `~/.agentic-kanban/kanban.db`.
+- A native npm/npx crash or `ENOSPC` during install = **check disk space first** (`df -h /c`), not the package.
+
 ## Known pitfalls
 
 - **bin wrappers**: `bin/cli.js` uses `import("../dist/cli.js")` (not `./dist/`) — relative to the bin/ dir

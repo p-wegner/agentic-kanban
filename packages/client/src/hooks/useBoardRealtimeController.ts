@@ -15,7 +15,6 @@ interface BoardRealtimeControllerParams {
   addNotificationApprovalEvent: (key: string, issue?: NotificationIssue) => void;
   addNotificationBoardEvent: (reason: string, issue?: NotificationIssue) => void;
   setColumns: Dispatch<SetStateAction<StatusWithIssues[]>>;
-  setPendingWorkspaceIssueIds: Dispatch<SetStateAction<Set<string>>>;
 }
 
 export function useBoardRealtimeController({
@@ -26,7 +25,6 @@ export function useBoardRealtimeController({
   addNotificationApprovalEvent,
   addNotificationBoardEvent,
   setColumns,
-  setPendingWorkspaceIssueIds,
 }: BoardRealtimeControllerParams) {
   const [sessionActivityRaw, setSessionActivityRaw] = useState<Record<string, Record<string, string>>>({});
   const sessionActivity = useMemo(() => {
@@ -47,7 +45,6 @@ export function useBoardRealtimeController({
     activeProjectId,
     columnsRef,
     setColumns,
-    setPendingWorkspaceIssueIds,
     setLiveStats,
     setSessionActivityRaw,
   });

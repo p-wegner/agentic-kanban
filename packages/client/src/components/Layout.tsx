@@ -3,6 +3,7 @@ import { ProjectTabs } from "./ProjectTabs.js";
 import { ProjectSelector } from "./ProjectSelector.js";
 import { NotificationBell } from "./NotificationBell.js";
 import type { NotificationEvent } from "../hooks/useActivityNotifications.js";
+import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 
 interface Project {
   id: string;
@@ -26,8 +27,6 @@ interface LayoutProps {
   archivedProjects?: Project[];
   onRegisterProject?: (args: { repoPath: string; gitignoreTemplate: string; generateReadme: boolean }) => Promise<void>;
   onCreateProject?: (name: string, path: string, gitignoreTemplate: string, generateReadme: boolean) => Promise<void>;
-  searchQuery?: string;
-  onSearchChange?: (query: string) => void;
   priorityFilter?: string;
   onPriorityFilterChange?: (priority: string) => void;
   onAllWorkspacesClick?: () => void;
@@ -57,8 +56,6 @@ export function Layout({
   archivedProjects = [],
   onRegisterProject,
   onCreateProject,
-  searchQuery = "",
-  onSearchChange,
   priorityFilter: _priorityFilter = "",
   onPriorityFilterChange: _onPriorityFilterChange,
   onAllWorkspacesClick,
@@ -76,6 +73,10 @@ export function Layout({
   onNotificationMarkRead,
   onNotificationEventClick,
 }: LayoutProps) {
+  // Filter slice (#958): the header search box reads/writes the board filter
+  // store directly instead of receiving searchQuery/onSearchChange props.
+  const searchQuery = useBoardFilterStore((s) => s.searchQuery);
+  const setSearchQuery = useBoardFilterStore((s) => s.setSearchQuery);
   const [showRegister, setShowRegister] = useState(false);
   const [confirmUnregister, setConfirmUnregister] = useState<Project | null>(null);
   const [unregistering, setUnregistering] = useState(false);
@@ -271,13 +272,13 @@ export function Layout({
                 id="search-input"
                 type="text"
                 value={searchQuery}
-                onChange={(e) => onSearchChange?.(e.target.value)}
+                onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder='Search issues... ("/")'
                 className="pl-8 pr-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md w-28 sm:w-36 md:w-44 lg:w-56 xl:w-64 focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500"
               />
               {searchQuery && (
                 <button
-                  onClick={() => onSearchChange?.("")}
+                  onClick={() => setSearchQuery("")}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 text-xs"
                 >
                   &times;

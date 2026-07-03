@@ -10,6 +10,7 @@ import {
 } from "../lib/boardDataReconcile.js";
 import type { LiveSessionStats } from "../lib/useBoardEvents.js";
 import { boardQueryKeys } from "./useBoardDataQueries.js";
+import { boardBulkSelectionActions } from "../stores/boardBulkSelectionStore.js";
 
 /** Trailing-debounce window for coalescing WS-triggered board refetches. */
 const REFETCH_DEBOUNCE_MS = 250;
@@ -19,7 +20,6 @@ export interface UseBoardRefetchParams {
   /** Live mirror of the rendered columns — read for ETag/304 short-circuits and identity reuse. */
   columnsRef: MutableRefObject<StatusWithIssues[]>;
   setColumns: Dispatch<SetStateAction<StatusWithIssues[]>>;
-  setPendingWorkspaceIssueIds: Dispatch<SetStateAction<Set<string>>>;
   setLiveStats: Dispatch<SetStateAction<Record<string, LiveSessionStats>>>;
   setSessionActivityRaw: Dispatch<SetStateAction<Record<string, Record<string, string>>>>;
 }
@@ -52,7 +52,6 @@ export function useBoardRefetch({
   activeProjectId,
   columnsRef,
   setColumns,
-  setPendingWorkspaceIssueIds,
   setLiveStats,
   setSessionActivityRaw,
 }: UseBoardRefetchParams): UseBoardRefetchResult {
@@ -115,13 +114,13 @@ export function useBoardRefetch({
     columnsRef.current = reconciled;
     queryClient.setQueryData(boardQueryKeys.board(pid), reconciled);
     const inactiveIssueIds = deriveInactiveIssueIds(reconciled);
-    setPendingWorkspaceIssueIds((prev) => prunePendingWorkspaceIssueIds(prev, reconciled));
+    boardBulkSelectionActions.setPendingWorkspaceIssueIds((prev) => prunePendingWorkspaceIssueIds(prev, reconciled));
     if (inactiveIssueIds.size > 0) {
       setLiveStats((prev) => pruneRecordKeys(prev, inactiveIssueIds));
       setSessionActivityRaw((prev) => pruneRecordKeys(prev, inactiveIssueIds));
     }
     return reconciled;
-  }, [activeProjectId, columnsRef, queryClient, setColumns, setPendingWorkspaceIssueIds, setLiveStats, setSessionActivityRaw]);
+  }, [activeProjectId, columnsRef, queryClient, setColumns, setLiveStats, setSessionActivityRaw]);
 
   // Coalesced board refetch: agent merge/exit cascades broadcast 3-6
   // board_changed events within 1-2s, and each used to trigger its own full

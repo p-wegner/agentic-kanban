@@ -1,4 +1,5 @@
 import type { projects, workspaces } from "@agentic-kanban/shared/schema";
+import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { isFailedLaunchSession } from "@agentic-kanban/shared/lib/workspace-activity-state.js";
 import {
   getLatestSessionForWorkspace,
@@ -33,6 +34,8 @@ import {
   resolveRelaunchAgentSelection,
   requireBaseBranch,
   activeMerges,
+  acquireRepoMergeLock,
+  tryRecoverStaleMergeLock,
   describeMergeLock,
   resolveMergeState,
   type GitService,
@@ -184,19 +187,22 @@ export function createWorkspaceMergeService(deps: {
 
     const { project, repoPath, defaultBranch } = await resolveProjectFull(id, database);
 
+    // Manual-merge semantics are refuse/reuse (intentional, unlike autoMerge's
+    // queueing): an in-flight merge for the same workspace is reused; for a
+    // different workspace we return "already in progress" instead of queueing.
     const existingLock = activeMerges.get(repoPath);
     if (existingLock) {
       const diagnostic = describeMergeLock(existingLock);
-      if (diagnostic.isStale) {
-        console.warn(
-          `[workspace-merge] recovering stale merge lock: repoPath=${repoPath} ` +
-            `activeWorkspaceId=${diagnostic.activeWorkspaceId} ageMs=${diagnostic.ageMs}`,
-        );
-        activeMerges.delete(repoPath);
-      } else {
+      // Stale-lock recovery goes through tryRecoverStaleMergeLock (#970): it
+      // refuses when a fresh .git/index.lock suggests the holder's git process
+      // is still alive, in which case we fall through to refuse/reuse below.
+      const recovered = diagnostic.isStale && tryRecoverStaleMergeLock(repoPath, existingLock);
+      if (!recovered) {
         if (existingLock.workspaceId === id) {
           console.log(`[workspace-merge] reusing in-flight merge result for workspace ${id} on repo ${repoPath}`);
-          return await existingLock.promise;
+          // resultPromise settles as soon as the merge response is ready; the
+          // lock itself may stay held longer for post-merge cleanup (#970).
+          return await (existingLock.resultPromise ?? existingLock.promise);
         }
         throw new WorkspaceError(
           `A merge is already in progress for this repository ` +
@@ -208,37 +214,24 @@ export function createWorkspaceMergeService(deps: {
       }
     }
 
-    const rawMergePromise = doMerge(id, workspace, project, repoPath, defaultBranch, opts);
-    const mergePromise = rawMergePromise.catch((err) => {
-      // A TypeError (e.g. "gitService.X is not a function") means shared/dist is stale —
-      // a deploy/build issue, NOT a merge conflict. Return a distinct 503 so the board
-      // monitor can rebuild rather than attempting a wasted fix-and-merge.
-      if (err instanceof TypeError && !(err instanceof WorkspaceError)) {
-        throw new WorkspaceError(
-          `Merge helper unavailable — the server build may be stale. Rebuild shared/dist and restart. (${err.message})`,
-          "CONFLICT",
-          { mergeReason: "server_build_stale", originalMessage: err.message },
-        );
-      }
-      throw err;
-    });
-    const lock = {
-      promise: mergePromise,
-      workspaceId: id,
-      repoPath,
-      startedAt: new Date().toISOString(),
-      startedAtMs: Date.now(),
-    };
-    activeMerges.set(repoPath, lock);
-    // Always clear the lock - both on success and on rejection - so a crashed
-    // merge never strands the repo behind a stale in-memory lock.
-    mergePromise.finally(() => {
-      if (activeMerges.get(repoPath) === lock) {
-        activeMerges.delete(repoPath);
-      }
-    }).catch(() => { /* swallow: caller awaits mergePromise below */ });
-
-    return await mergePromise;
+    // Install the lock and run the merge via the shared primitive (#944) so the
+    // entry can never be overwritten by a concurrent acquirer.
+    return await acquireRepoMergeLock(repoPath, id, (extendHold) =>
+      // #943: thread `opts` (e.g. skipPreMergeGate from the monitor auto-merge path) through.
+      doMerge(id, workspace, project, repoPath, defaultBranch, extendHold, opts).catch((err) => {
+        // A TypeError (e.g. "gitService.X is not a function") means shared/dist is stale —
+        // a deploy/build issue, NOT a merge conflict. Return a distinct 503 so the board
+        // monitor can rebuild rather than attempting a wasted fix-and-merge.
+        if (err instanceof TypeError && !(err instanceof WorkspaceError)) {
+          throw new WorkspaceError(
+            `Merge helper unavailable — the server build may be stale. Rebuild shared/dist and restart. (${err.message})`,
+            "CONFLICT",
+            { mergeReason: "server_build_stale", originalMessage: err.message },
+          );
+        }
+        throw err;
+      }),
+    );
   }
 
   async function doMerge(
@@ -247,11 +240,12 @@ export function createWorkspaceMergeService(deps: {
     project: typeof projects.$inferSelect | null,
     repoPath: string,
     defaultBranch: string | null,
+    extendHold: (p: Promise<unknown>) => void = () => {},
     opts: MergeOptions = {},
   ) {
     const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
     const prefMap = await loadMergePreferences(database);
-    const autoMergeInReview = prefMap.get("auto_merge_in_review") === "true";
+    const autoMergeInReview = getBool(prefMap, "auto_merge_in_review");
     const resolution = await resolveMergeState(workspace, repoPath, baseBranch, { gitService, autoMergeInReview });
     const preflight = await handleWorkspaceMergeResolution({
       id,
@@ -333,9 +327,28 @@ export function createWorkspaceMergeService(deps: {
       isDirect: workspace.isDirect,
       pendingWorkingTreeSyncSha: postMergeContext.pendingWorkingTreeSyncSha,
     };
-    setImmediate(() => {
-      void runWorkspacePostMergeCleanup(postMergeArgs, { database, gitService, killProcesses, getSessionManager, boardEvents });
-    });
+    // Post-merge cleanup — including the deferred `git reset --hard` sync of the
+    // MAIN checkout's working tree — must run INSIDE the repo merge lock (#970):
+    // otherwise a second merge acquires the lock while the sync is still pending,
+    // its dirty-main guard sees the stale tree, and it blocks (the recurring
+    // "auto-merge blocked by dirty main" incident class).
+    //
+    // Two earlier constraints are preserved:
+    // - setImmediate defers the cleanup past the current call stack so the Hono
+    //   response write (JSON body flush) happens first (#563 keep-alive drop).
+    // - The reset --hard runs after the HTTP response is already flushed, so a
+    //   tsx hot-reload can no longer drop the in-flight connection (#686).
+    // extendHold keeps the lock held until the cleanup settles, while the HTTP
+    // caller still receives `response` immediately.
+    extendHold(new Promise<void>((resolve) => {
+      setImmediate(() => {
+        runWorkspacePostMergeCleanup(postMergeArgs, { database, gitService, killProcesses, getSessionManager, boardEvents })
+          .catch((err) => {
+            console.warn("[workspace-merge] post-merge cleanup failed (non-fatal):", err instanceof Error ? err.message : String(err));
+          })
+          .finally(resolve);
+      });
+    }));
 
     return response;
   }

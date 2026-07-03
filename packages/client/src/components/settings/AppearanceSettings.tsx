@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { Field, Toggle, type Settings, type SettingsBoolSetter, type SettingsTextSetter } from "../SettingsPanel.shared.js";
 
 type AppearanceSettingsProps = {
@@ -34,7 +35,7 @@ export function AppearanceSettings({ boardToolsSlot, settings, set, setBool }: A
                 </Field>
                 <div className="space-y-3 mt-4">
                   <Toggle
-                    checked={settings.dynamic_column_scaling === "true"}
+                    checked={getBool(settings, "dynamic_column_scaling")}
                     onChange={setBool("dynamic_column_scaling")}
                     label="Dynamic column scaling"
                     hint="Columns grow proportionally to their issue count, giving more space to busy columns."

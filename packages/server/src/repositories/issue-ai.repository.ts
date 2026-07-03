@@ -4,6 +4,7 @@ import type { DependencyType } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
+import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 
 export async function getIssueBasics(
   issueId: string,
@@ -137,14 +138,6 @@ export async function getIssueForTouchedFiles(
     .where(eq(issues.id, issueId))
     .limit(1);
   return rows[0] ?? null;
-}
-
-export async function getProjectRepoPath(
-  projectId: string,
-  database: Database = db,
-) {
-  const project = await getProjectById(projectId, database);
-  return project?.repoPath ?? null;
 }
 
 export async function updateIssueTouchedFiles(
@@ -396,7 +389,7 @@ export async function setIssueStatus(
   updatedAt: string,
   database: Database = db,
 ): Promise<void> {
-  await database.update(issues).set({ statusId, updatedAt }).where(eq(issues.id, issueId));
+  await transitionIssueStatus(database, issueId, statusId, { now: updatedAt });
 }
 
 /** Append text to an issue's description (e.g. the absorbed-into pointer). */
