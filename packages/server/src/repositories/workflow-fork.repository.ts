@@ -9,6 +9,7 @@ import {
   sessions,
   sessionMessages,
 } from "@agentic-kanban/shared/schema";
+import { setWorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
@@ -30,12 +31,10 @@ export async function updateChildWorkspaceFailed(
   now: string,
   database: Database = db,
 ): Promise<void> {
-  await database.update(workspaces).set({
-    status: "closed",
-    forkStatus: "failed",
-    closedAt: now,
-    updatedAt: now,
-  }).where(eq(workspaces.id, childWorkspaceId));
+  await setWorkspaceStatus(database, childWorkspaceId, "closed", {
+    now,
+    set: { forkStatus: "failed", closedAt: now },
+  });
 }
 
 export async function insertFailedChildWorkspace(
@@ -259,7 +258,10 @@ export async function updateChildWorkspaceJoined(
   now: string,
   database: Database = db,
 ): Promise<void> {
-  await database.update(workspaces).set({ forkStatus: "joined", status: "closed", closedAt: now, updatedAt: now }).where(eq(workspaces.id, childWorkspaceId));
+  await setWorkspaceStatus(database, childWorkspaceId, "closed", {
+    now,
+    set: { forkStatus: "joined", closedAt: now },
+  });
 }
 
 export async function selectRunningSessionsForWorkspace(workspaceId: string, database: Database = db) {
@@ -292,7 +294,10 @@ export async function updateChildWorkspaceCancelled(
   now: string,
   database: Database = db,
 ): Promise<void> {
-  await database.update(workspaces).set({ forkStatus: "cancelled", status: "closed", closedAt: now, updatedAt: now }).where(eq(workspaces.id, childWorkspaceId));
+  await setWorkspaceStatus(database, childWorkspaceId, "closed", {
+    now,
+    set: { forkStatus: "cancelled", closedAt: now },
+  });
 }
 
 export async function selectWorkspaceNodeContext(workspaceId: string, database: Database = db) {

@@ -1,5 +1,6 @@
 import { sessions, sessionMessages, workspaces, issues, preferences, agentSkills } from "@agentic-kanban/shared/schema";
 import { sanitizeUtf8 } from "@agentic-kanban/shared/lib/sanitize-utf8";
+import { setWorkspaceStatus, type WorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -151,9 +152,7 @@ export async function updateWorkspaceStatus(
   updatedAt: string,
   database: Database = db,
 ): Promise<void> {
-  await database.update(workspaces)
-    .set({ status, updatedAt })
-    .where(eq(workspaces.id, workspaceId));
+  await setWorkspaceStatus(database, workspaceId, status as WorkspaceStatus, { now: updatedAt });
 }
 
 export async function insertSessionMessage(
@@ -192,7 +191,7 @@ export async function updateWorkspaceStatusOnly(
   updatedAt: string,
   database: Database = db,
 ): Promise<void> {
-  await database.update(workspaces).set({ status, updatedAt }).where(eq(workspaces.id, workspaceId));
+  await setWorkspaceStatus(database, workspaceId, status as WorkspaceStatus, { now: updatedAt });
 }
 
 export async function updateWorkspacePendingPlan(
@@ -202,7 +201,10 @@ export async function updateWorkspacePendingPlan(
   updatedAt: string,
   database: Database = db,
 ): Promise<void> {
-  await database.update(workspaces).set({ pendingPlanPath, status, updatedAt }).where(eq(workspaces.id, workspaceId));
+  await setWorkspaceStatus(database, workspaceId, status as WorkspaceStatus, {
+    now: updatedAt,
+    set: { pendingPlanPath },
+  });
 }
 
 export async function getSessionStatus(

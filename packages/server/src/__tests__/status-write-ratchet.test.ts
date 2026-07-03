@@ -21,6 +21,15 @@ import path from "node:path";
  *
  * When you migrate a file's raw writes to the authority, REMOVE (or lower) its
  * baseline entry — the test also fails on stale entries, so the ratchet only tightens.
+ *
+ * #967 drained every migratable `workspaces-status`/`workspaces-opaque-set` raw writer
+ * (mcp-server close/stop-workspace, session-lifecycle, workflow-fork, workspace-session,
+ * workspace-lifecycle-reconcile, and the status-carrying branches of workspace-crud) to
+ * `setWorkspaceStatus` — which moved to `@agentic-kanban/shared/lib/workspace-status` so
+ * both server and mcp-server share the one guarded authority. What remains grandfathered
+ * is either a genuine shape mismatch (issue-service's bulk multi-row close) or a proven
+ * false positive of the opaque-`.set(var)` heuristic (no `status` field in the value type
+ * at all — scorecard/summary caches, `setWorkspaceWorkingDir`).
  */
 
 const packagesRoot = path.join(import.meta.dirname!, "..", "..", "..");
@@ -43,20 +52,26 @@ const AUTHORITY_FILES = new Set([
  * Only SHRINK this list.
  */
 const BASELINE: Record<string, number> = {
-  "mcp-server/src/tools/close-workspace.ts::workspaces-status": 1,
   "mcp-server/src/tools/contract-coupled-issues.ts::issues-statusId": 1,
-  "mcp-server/src/tools/stop-workspace.ts::workspaces-status": 1,
   "mcp-server/src/tools/update-issue.ts::issues-opaque-set": 1,
   "server/src/repositories/issue-service.repository.ts::issues-opaque-set": 2,
   "server/src/repositories/issue-service.repository.ts::issues-statusId": 1,
+  // Bulk multi-row `update(workspaces).set({status:"closed",...}).where(status != 'closed')`
+  // across every open workspace of one issue — `setWorkspaceStatus` operates on a single
+  // workspaceId, so this doesn't fit the authority's signature without an extra
+  // select-then-loop. Left grandfathered; #967 migrated every single-row raw writer.
   "server/src/repositories/issue-service.repository.ts::workspaces-status": 1,
   "server/src/repositories/project-registration.repository.ts::issues-statusId": 1,
-  "server/src/repositories/session-lifecycle.repository.ts::workspaces-status": 3,
-  "server/src/repositories/workflow-fork.repository.ts::workspaces-status": 3,
-  "server/src/repositories/workspace-crud.repository.ts::workspaces-opaque-set": 4,
-  "server/src/repositories/workspace-lifecycle-reconcile.repository.ts::workspaces-opaque-set": 1,
+  // `setWorkspaceWorkingDir` (workingDir/baseBranch only) + the non-status branch of
+  // `applyWorkspaceUpdates` (#967 routes the status-carrying branch through
+  // `setWorkspaceStatus`) — both provably carry no `status` column; the opaque-`.set(var)`
+  // heuristic can't see that statically, so they stay grandfathered rather than migrated.
+  "server/src/repositories/workspace-crud.repository.ts::workspaces-opaque-set": 2,
+  // `persistScorecard` — values type is `{scorecardScore, scorecardJson, scorecardComputedAt}`,
+  // no `status` field. Provable non-status write caught only by the opaque-set heuristic.
   "server/src/repositories/workspace-scorecard.repository.ts::workspaces-opaque-set": 1,
-  "server/src/repositories/workspace-session.repository.ts::workspaces-status": 2,
+  // `updateWorkspaceDiffStatCache` + `updateWorkspaceConflictCache` — both cache-column-only
+  // value types, no `status` field. Same opaque-set false positive as the scorecard repo.
   "server/src/repositories/workspace-summary.repository.ts::workspaces-opaque-set": 2,
 };
 
