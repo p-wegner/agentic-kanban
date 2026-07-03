@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { setWorkspaceStatus, type WorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
@@ -22,10 +23,11 @@ export async function applyWorkspaceClosePatch(
   patch: Partial<typeof workspaces.$inferSelect>,
   database: Database = db,
 ): Promise<void> {
-  await database
-    .update(workspaces)
-    .set(patch)
-    .where(eq(workspaces.id, workspaceId));
+  const { status, updatedAt, ...rest } = patch;
+  await setWorkspaceStatus(database, workspaceId, (status ?? "closed") as WorkspaceStatus, {
+    now: updatedAt,
+    set: rest,
+  });
 }
 
 export async function getRunningSessionIdsForWorkspace(workspaceId: string, database: Database = db) {

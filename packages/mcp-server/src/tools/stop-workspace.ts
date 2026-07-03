@@ -4,6 +4,7 @@ import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
 import { notifyBoard } from "../notify.js";
 import { requireEntity } from "../db-utils.js";
+import { setWorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 
 export function registerStopWorkspace(server: McpServer) {
   server.tool(
@@ -34,9 +35,7 @@ export function registerStopWorkspace(server: McpServer) {
           .where(eq(schema.sessions.id, session.id));
       }
 
-      await db.update(schema.workspaces)
-        .set({ status: "idle", updatedAt: now })
-        .where(eq(schema.workspaces.id, workspaceId));
+      await setWorkspaceStatus(db, workspaceId, "idle", { now });
 
       // Resolve projectId for board notification
       const issueRows = await db.select({ projectId: schema.issues.projectId })
