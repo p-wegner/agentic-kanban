@@ -1,4 +1,5 @@
-import { isSpecPlanningStageName, syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { isSpecPlanningStageName, transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import { runSmokeCheck } from "@agentic-kanban/shared/lib/smoke-check";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
@@ -24,8 +25,10 @@ import { isCodexUsageLimitStats } from "../services/codex-rate-limit.js";
 import { rotateCodexLicense } from "../services/codex-license-ring.js";
 import { isClaudeUsageLimitStats } from "../services/claude-rate-limit.js";
 import { rotateClaudeSubscription } from "../services/claude-subscription-ring.js";
-import { isBuilderSession, decideRateLimitExit, formatRateLimitBlockedReason } from "./rate-limit-exit-decision.js";
-import { classifySessionExit } from "./session-exit-classification.js";
+import { decideRateLimitExit, formatRateLimitBlockedReason } from "./rate-limit-exit-decision.js";
+import { classifySessionExit, resolveSessionRoleFlags } from "./session-exit-classification.js";
+import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
+import type { SessionRoleFlags } from "./session-exit-classification.js";
 import { buildLearningStepPrompt } from "../services/merge-helpers.service.js";
 import { isFoundationalBlocker } from "../services/foundational-merge.service.js";
 import { isColdCloneCheckEnabled, runColdCloneBuildCheckForProject } from "../services/cold-clone-build-check.service.js";
@@ -269,7 +272,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       // Not landed: keep the workspace OPEN + idle and retryable. Clear readyForMerge so a
       // conflicted branch is not silently re-queued as "ready". Surface a clear signal.
       const now = new Date().toISOString();
-      await db.update(workspaces).set({ status: "idle", readyForMerge: false, updatedAt: now }).where(eq(workspaces.id, workspace.id));
+      await setWorkspaceStatus(db, workspace.id, "idle", { now, set: { readyForMerge: false } });
       boardEvents.broadcast(projectId, "workspace_idle");
       boardEvents.broadcast(projectId, "workflow_error");
       emitButlerSystemEvent({
@@ -299,17 +302,21 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     projectId: string,
     now: string,
     statsJson: string | null | undefined,
+    roleFlags: SessionRoleFlags,
   ): Promise<void> {
     const resetsAt = parseRateLimitRetryAfter(statsJson);
     const rotationPrefMap = new Map((await db.select().from(preferences)).map((r) => [r.key, r.value]));
     const currentProfile = rotationPrefMap.get(cfg.profilePrefKey) || "default";
     const rotation = await cfg.rotate(db, rotationPrefMap, currentProfile, resetsAt, new Date(now));
-    const builder = isBuilderSession(sessionId, { reviewSessionIds, fixAndMergeSessionIds, learningSessionIds });
+    // Builder = none of the special roles. Resolved from the in-memory sets AND the
+    // persisted triggerType so a reattached (post-restart) review/fix/learning session
+    // is never relaunched as if it were a builder (#950).
+    const builder = !roleFlags.isReview && !roleFlags.isFixAndMerge && !roleFlags.isLearning;
 
     if (decideRateLimitExit(rotation, builder).action === "relaunch") {
       try {
         const continuation = await buildRotationContinuationPrompt(db, issueId, cfg.label);
-        await db.update(workspaces).set({ status: "active", updatedAt: now }).where(eq(workspaces.id, workspaceId));
+        await setWorkspaceStatus(db, workspaceId, "active", { now });
         const relaunchSessionId = await sessionManager.startSession({
           workspaceId,
           prompt: continuation,
@@ -331,7 +338,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       }
     }
 
-    await db.update(workspaces).set({ status: "blocked", updatedAt: now }).where(eq(workspaces.id, workspaceId));
+    await setWorkspaceStatus(db, workspaceId, "blocked", { now });
     boardEvents.broadcastActivity(projectId, { issueId, sessionId, activity: "" });
     boardEvents.broadcast(projectId, "session_completed");
     boardEvents.broadcast(projectId, "workflow_error");
@@ -380,10 +387,15 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       // relaunch a builder on the fresh account (review/fix sessions inherit the switched
       // pref and rely on their own reconciler). Both providers share one implementation
       // parameterized by `USAGE_LIMIT_PROVIDERS`.
-      const sessionRows = await db.select({ stats: sessions.stats }).from(sessions).where(eq(sessions.id, sessionId)).limit(1);
+      const sessionRows = await db.select({ stats: sessions.stats, triggerType: sessions.triggerType }).from(sessions).where(eq(sessions.id, sessionId)).limit(1);
+      // #950: resolve the session's role from the in-memory sets (fast path) AND the
+      // persisted sessions.triggerType (source of truth that survives restarts). A
+      // reattached review/fix-and-merge/learning session exits into EMPTY sets — the
+      // DB value keeps it from being misrouted to the builder handler.
+      const roleFlags = resolveSessionRoleFlags(sessionId, sessionRows[0]?.triggerType, { reviewSessionIds, fixAndMergeSessionIds, learningSessionIds });
       const usageLimitCfg = USAGE_LIMIT_PROVIDERS.find((cfg) => cfg.isUsageLimitStats(sessionRows[0]?.stats));
       if (usageLimitCfg) {
-        await handleUsageLimitExit(usageLimitCfg, workspaceId, sessionId, issueId, projectId, now, sessionRows[0]?.stats);
+        await handleUsageLimitExit(usageLimitCfg, workspaceId, sessionId, issueId, projectId, now, sessionRows[0]?.stats, roleFlags);
         return;
       }
       // Route the (non-already-merged, non-usage-limited) exit to exactly one terminal
@@ -392,14 +404,26 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       // here, in the same order as the original control flow.
       const classification = classifySessionExit({
         wasPlanMode: wasPlanMode ?? false,
-        isFixAndMerge: fixAndMergeSessionIds.has(sessionId),
-        isLearning: learningSessionIds.has(sessionId),
-        isReview: reviewSessionIds.has(sessionId),
+        isFixAndMerge: roleFlags.isFixAndMerge,
+        isLearning: roleFlags.isLearning,
+        isReview: roleFlags.isReview,
         exitCode,
       });
-      await db.update(workspaces).set({ status: "idle", updatedAt: now }).where(eq(workspaces.id, workspaceId));
+      // #966: the closed+mergedAt check above ran on a snapshot read ~60 lines earlier —
+      // a merge landing in between must NOT be flapped back to idle. setWorkspaceStatus
+      // enforces the terminal invariant atomically in its UPDATE's WHERE clause, so a
+      // `false` here means a concurrent terminal transition (or vanished row) won the
+      // race: stop the exit workflow instead of running it against a merged workspace.
+      const wentIdle = await setWorkspaceStatus(db, workspaceId, "idle", { now });
       boardEvents.broadcastActivity(projectId, { issueId, sessionId, activity: "" });
       boardEvents.broadcast(projectId, "session_completed");
+      if (!wentIdle) {
+        console.log(`[workflow] session ${sessionId} exited but workspace ${workspaceId} reached a terminal state before the idle write (#966) — skipping exit workflow`);
+        fixAndMergeSessionIds.delete(sessionId);
+        reviewSessionIds.delete(sessionId);
+        learningSessionIds.delete(sessionId);
+        return;
+      }
       boardEvents.broadcast(projectId, "workspace_idle");
       // A read-only plan run produces no new commits, but the branch may already differ from
       // its base  which would otherwise trip the "committed changes  In Review  auto-review"
@@ -702,7 +726,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     reviewSessionIds.delete(sessionId);
     const currentIssueRows = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId)).limit(1);
     const currentStatus = currentIssueRows.length > 0 ? statuses.find((s) => s.id === currentIssueRows[0].statusId) : null;
-    const autoFix = prefMap.get("review_auto_fix") !== "false";
+    const autoFix = getBool(prefMap, "review_auto_fix");
     if (currentStatus?.name === "In Progress" && !autoFix) {
       console.log("[workflow] reviewer flagged issues (non-auto-fix mode)  skipping auto-merge, leaving in In Progress");
       boardEvents.broadcast(projectId, "issue_updated");
@@ -724,7 +748,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     }
     await db.update(workspaces).set({ readyForMerge: true, updatedAt: now }).where(eq(workspaces.id, workspaceId));
     boardEvents.broadcast(projectId, "workspace_ready_for_merge");
-    const learningAfterReview = prefMap.get("learning_step_after_review") === "true" && workspace.workingDir ? launchLearningStep(db, sessionManager, learningSessionIds, workspace, prefMap, "after review", true) : Promise.resolve();
+    const learningAfterReview = getBool(prefMap, "learning_step_after_review") && workspace.workingDir ? launchLearningStep(db, sessionManager, learningSessionIds, workspace, prefMap, "after review", true) : Promise.resolve();
     if (autoMergeEnabled) {
       await learningAfterReview;
       // #797 synchronous foundational merge. A no-dependency scaffold/shell ticket that
@@ -763,10 +787,9 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     // Direct workspaces WITH changes fall through to the review flow below.
     if (workspace.isDirect && !committedChanges) {
       const doneStatus = findStatus("Done");
-      await db.update(workspaces).set({ status: "closed", workingDir: null, updatedAt: now }).where(eq(workspaces.id, workspaceId));
+      await setWorkspaceStatus(db, workspaceId, "closed", { now, set: { workingDir: null } });
       if (doneStatus) {
-        await db.update(issues).set({ statusId: doneStatus.id, updatedAt: now }).where(eq(issues.id, issueId));
-        await syncCurrentNodeToStatus(db, issueId);
+        await transitionIssueStatus(db, issueId, doneStatus.id, { now });
       }
       boardEvents.broadcast(projectId, "workspace_merged");
       console.log(`[workflow] direct workspace ${workspaceId} closed on agent exit (no committed changes)  issue moved to Done`);
@@ -780,10 +803,9 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       const currentStatusName2 = currentIssueRows2.length > 0 ? statuses.find((s) => s.id === currentIssueRows2[0].statusId)?.name : undefined;
       if (currentStatusName2 === "In Review") {
         const doneStatus = findStatus("Done");
-        await db.update(workspaces).set({ status: "closed", workingDir: null, updatedAt: now }).where(eq(workspaces.id, workspaceId));
+        await setWorkspaceStatus(db, workspaceId, "closed", { now, set: { workingDir: null } });
         if (doneStatus) {
-          await db.update(issues).set({ statusId: doneStatus.id, updatedAt: now }).where(eq(issues.id, issueId));
-          await syncCurrentNodeToStatus(db, issueId);
+          await transitionIssueStatus(db, issueId, doneStatus.id, { now });
         }
         boardEvents.broadcast(projectId, "workspace_merged");
         console.log(`[workflow] non-direct workspace ${workspaceId} closed on agent exit (no committed changes, was In Review)  issue moved to Done`);
@@ -795,11 +817,10 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     console.log(`[workflow] agent session ${sessionId} completed with committed changes  moving to In Review`);
     const inReview = findStatus("In Review");
     if (inReview) {
-      await db.update(issues).set({ statusId: inReview.id, updatedAt: now }).where(eq(issues.id, issueId));
-      await syncCurrentNodeToStatus(db, issueId);
+      await transitionIssueStatus(db, issueId, inReview.id, { now });
     }
     boardEvents.broadcast(projectId, "issue_updated");
-    if (prefMap.get("learning_step_after_agent") === "true" && workspace.workingDir) await launchLearningStep(db, sessionManager, learningSessionIds, workspace, prefMap, "after agent");
+    if (getBool(prefMap, "learning_step_after_agent") && workspace.workingDir) await launchLearningStep(db, sessionManager, learningSessionIds, workspace, prefMap, "after agent");
     const autoReview = !skipAutoReview && (workspace.requiresReview || isAutoReviewEnabled(prefMap.get(AUTO_REVIEW_PREF_KEY)));
     if (!autoReview) return;
     await launchAutoReview(ctx);
@@ -822,7 +843,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     const claudeProfile = isMockProfile(reviewProfile) ? undefined : reviewProfile;
     const effectiveReviewProfile = getEffectiveProfile(reviewPrefs, reviewProvider, claudeProfile);
     const profileSelection = effectiveReviewProfile ? { provider: reviewProvider, name: effectiveReviewProfile } : undefined;
-    const reviewArgs = buildReviewArgs(reviewPrefs, reviewProvider), autoFix = workspace.isDirect ? false : reviewPrefs.get("review_auto_fix") !== "false";
+    const reviewArgs = buildReviewArgs(reviewPrefs, reviewProvider), autoFix = workspace.isDirect ? false : getBool(reviewPrefs, "review_auto_fix");
     let diffRef = workspace.baseBranch || defaultBranch, conflictingFiles: string[] | undefined, uncommittedChanges: string[] | undefined;
     if (workspace.isDirect) diffRef = workspace.baseCommitSha || defaultBranch;
     else if (workspace.workingDir) {
@@ -840,7 +861,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     const { prompt, model } = await buildReviewPrompt(workspace.branch, diffRef, issueId, autoFix, projectId, conflictingFiles, uncommittedChanges, workspaceId, reviewSkillName, verifyAgent);
     const reviewArgsWithModel = model && reviewProvider === "claude" ? `${reviewArgs ?? ""} --model ${model}`.trim() : reviewArgs;
     try {
-      await db.update(workspaces).set({ status: "reviewing", updatedAt: now }).where(eq(workspaces.id, workspaceId));
+      await setWorkspaceStatus(db, workspaceId, "reviewing", { now });
       boardEvents.broadcast(projectId, "issue_updated");
       const reviewSessionId = await sessionManager.startSession({ workspaceId, prompt, agentCommand, agentArgs: reviewArgsWithModel, claudeProfile: effectiveReviewProfile, provider: toExecutorProvider(reviewProvider), triggerType: "review", profile: profileSelection, extraEnv: { KANBAN_SESSION_TYPE: "review", KANBAN_AFTER_MERGE_VERIFY: verifyAgent } });
       reviewSessionIds.add(reviewSessionId);
@@ -851,7 +872,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       // running session (the #529 stranding). Reset to idle and surface the failure;
       // the stranded-review reconciler then re-launches it instead of it sitting
       // forever as never-reviewed / not-mergeable.
-      await db.update(workspaces).set({ status: "idle", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, workspaceId)).catch(() => {});
+      await setWorkspaceStatus(db, workspaceId, "idle");
       boardEvents.broadcast(projectId, "workflow_error");
       emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Auto-review failed to launch for workspace ${workspaceId}; reset to idle for recovery.` });
     }

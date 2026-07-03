@@ -97,14 +97,6 @@ export async function getActiveProjectRepoPath(
   return project?.repoPath ?? null;
 }
 
-export async function getProjectRepoPath(
-  projectId: string,
-  database: Database = db,
-): Promise<string | null> {
-  const project = await getProjectById(projectId, database);
-  return project?.repoPath ?? null;
-}
-
 // ───────────────────────── Butler system-prompt skill ─────────────────────────
 // The butler's editable system prompt is stored as a special `agentSkills` row
 // named "butler": a project-scoped row (projectId set) overrides the global

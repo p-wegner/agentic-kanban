@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { getSettings, setSettings } from "../lib/settingsStore.js";
@@ -68,7 +69,7 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
       // Shared, deduped settings read: the null-projectId and resolved-projectId
       // runs (plus StrictMode double-mounts) all resolve from one request/cache.
       const s = await getSettings();
-      setDynamicColumnScaling(s.dynamic_column_scaling === "true");
+      setDynamicColumnScaling(getBool(s, "dynamic_column_scaling"));
       setCardDensity(s.card_density === "compact" ? "compact" : "comfortable");
       if (projectId) {
         const raw = s[`board_hidden_columns_${projectId}`];
@@ -82,10 +83,10 @@ export function useBoardPreferences(projectId: string | null): BoardPreferences 
         setRecentMergesCollapsed(s[`board_recent_merges_collapsed_${projectId}`] === "true");
       }
       setAutoReview(isAutoReviewEnabled(s.auto_review));
-      setAutoMerge(s.auto_merge !== "false");
-      setAutoMonitor(s.auto_monitor === "true");
+      setAutoMerge(getBool(s, "auto_merge"));
+      setAutoMonitor(getBool(s, "auto_monitor"));
       setAutoMonitorInterval(s.auto_monitor_interval ?? "4");
-      setNudgeAutoStart(s.nudge_auto_start === "true");
+      setNudgeAutoStart(getBool(s, "nudge_auto_start"));
       setNudgeWipLimit(s.nudge_wip_limit ?? "5");
       const loadedWipLimits: Record<string, number | null> = {};
       for (const key of Object.keys(s)) {

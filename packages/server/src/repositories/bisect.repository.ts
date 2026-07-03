@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import { issues, sessionMessages, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { sanitizeUtf8 } from "@agentic-kanban/shared/lib/sanitize-utf8";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
@@ -8,7 +9,10 @@ export async function insertSessionMessage(
   values: { sessionId: string; type: string; data: string | null; exitCode: string | null },
   database: Database = db,
 ): Promise<void> {
-  await database.insert(sessionMessages).values(values);
+  await database.insert(sessionMessages).values({
+    ...values,
+    data: values.data == null ? null : sanitizeUtf8(values.data),
+  });
 }
 
 /** Workspace working-dir + base commit + owning project, for a bisect run. */
@@ -82,16 +86,4 @@ export async function setSessionTerminal(
   await database.update(sessions)
     .set({ status, endedAt, exitCode })
     .where(eq(sessions.id, sessionId));
-}
-
-/** Update a workspace's status + updatedAt timestamp. */
-export async function setWorkspaceStatus(
-  workspaceId: string,
-  status: string,
-  updatedAt: string,
-  database: Database = db,
-): Promise<void> {
-  await database.update(workspaces)
-    .set({ status, updatedAt })
-    .where(eq(workspaces.id, workspaceId));
 }

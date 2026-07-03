@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { apiPost, apiPatch } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
+import { useBoardBulkSelectionStore } from "../stores/boardBulkSelectionStore.js";
 import type { IssueWithStatus, UpdateIssueRequest } from "@agentic-kanban/shared";
 
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
@@ -11,14 +12,30 @@ interface Tag {
   color: string | null;
 }
 
+/**
+ * Bulk-selection orchestration on top of the boardBulkSelectionStore (#958).
+ * The raw selection/pending state lives in the store (components subscribe to
+ * it directly); this hook contributes the pieces that need board data — the
+ * selected-issue resolution against the visible issues, the visibility prune,
+ * and the async bulk mutations.
+ */
 export function useBoardBulkSelection(
   visibleKanbanIssues: IssueWithStatus[],
   allTags: Tag[],
   refetchBoard: () => Promise<unknown>,
 ) {
-  const [selectedBoardIssueIds, setSelectedBoardIssueIds] = useState<Set<string>>(new Set());
-  const [lastSelectedBoardIssueId, setLastSelectedBoardIssueId] = useState<string | null>(null);
-  const [boardBulkUpdating, setBoardBulkUpdating] = useState(false);
+  const selectedBoardIssueIds = useBoardBulkSelectionStore((s) => s.selectedBoardIssueIds);
+  const lastSelectedBoardIssueId = useBoardBulkSelectionStore((s) => s.lastSelectedBoardIssueId);
+  const boardBulkUpdating = useBoardBulkSelectionStore((s) => s.boardBulkUpdating);
+  // Zustand actions are stable references — safe to read once via getState().
+  const {
+    addToSelection,
+    toggleSelection,
+    clearSelection,
+    rangeSelect: rangeSelectInStore,
+    setSelectedBoardIssueIds,
+    setBoardBulkUpdating,
+  } = useBoardBulkSelectionStore.getState();
 
   const selectedBoardIssues = useMemo(() => {
     const byId = new Map(visibleKanbanIssues.map((issue) => [issue.id, issue]));
@@ -35,51 +52,11 @@ export function useBoardBulkSelection(
       const next = new Set([...prev].filter((id) => visibleIds.has(id)));
       return next.size === prev.size ? prev : next;
     });
-  }, [visibleKanbanIssues, selectedBoardIssueIds.size]);
-
-  const addToSelection = useCallback((issueId: string) => {
-    setSelectedBoardIssueIds((prev) => {
-      const next = new Set(prev);
-      next.add(issueId);
-      return next;
-    });
-    setLastSelectedBoardIssueId(issueId);
-  }, []);
-
-  const toggleSelection = useCallback((issueId: string) => {
-    setSelectedBoardIssueIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(issueId)) {
-        next.delete(issueId);
-      } else {
-        next.add(issueId);
-      }
-      return next;
-    });
-    setLastSelectedBoardIssueId(issueId);
-  }, []);
+  }, [visibleKanbanIssues, selectedBoardIssueIds.size, setSelectedBoardIssueIds]);
 
   const rangeSelect = useCallback((issueId: string) => {
-    const ids = visibleKanbanIssues.map((item) => item.id);
-    const anchorIndex = lastSelectedBoardIssueId ? ids.indexOf(lastSelectedBoardIssueId) : -1;
-    const currentIndex = ids.indexOf(issueId);
-    setSelectedBoardIssueIds((prev) => {
-      const next = new Set(prev);
-      if (anchorIndex >= 0 && currentIndex >= 0) {
-        const [start, end] = anchorIndex < currentIndex ? [anchorIndex, currentIndex] : [currentIndex, anchorIndex];
-        for (const id of ids.slice(start, end + 1)) next.add(id);
-      } else {
-        next.add(issueId);
-      }
-      return next;
-    });
-    setLastSelectedBoardIssueId(issueId);
-  }, [visibleKanbanIssues, lastSelectedBoardIssueId]);
-
-  const clearSelection = useCallback(() => {
-    setSelectedBoardIssueIds(new Set());
-    setLastSelectedBoardIssueId(null);
-  }, []);
+    rangeSelectInStore(visibleKanbanIssues.map((item) => item.id), issueId);
+  }, [visibleKanbanIssues, rangeSelectInStore]);
 
   const handleBoardBulkUpdate = useCallback(async (updates: UpdateIssueRequest, successLabel: string) => {
     if (hasArchivedBoardSelection) return;
@@ -102,7 +79,7 @@ export function useBoardBulkSelection(
     } finally {
       setBoardBulkUpdating(false);
     }
-  }, [hasArchivedBoardSelection, selectedBoardIssues, clearSelection, refetchBoard]);
+  }, [hasArchivedBoardSelection, selectedBoardIssues, clearSelection, refetchBoard, setBoardBulkUpdating]);
 
   const handleBoardBulkAddTag = useCallback(async (tagId: string) => {
     if (hasArchivedBoardSelection) return;
@@ -126,7 +103,7 @@ export function useBoardBulkSelection(
     } finally {
       setBoardBulkUpdating(false);
     }
-  }, [hasArchivedBoardSelection, allTags, selectedBoardIssues, clearSelection, refetchBoard]);
+  }, [hasArchivedBoardSelection, allTags, selectedBoardIssues, clearSelection, refetchBoard, setBoardBulkUpdating]);
 
   const handleBoardContractCoupled = useCallback(async () => {
     if (hasArchivedBoardSelection) return;
@@ -149,7 +126,7 @@ export function useBoardBulkSelection(
     } finally {
       setBoardBulkUpdating(false);
     }
-  }, [hasArchivedBoardSelection, selectedBoardIssues, clearSelection, refetchBoard]);
+  }, [hasArchivedBoardSelection, selectedBoardIssues, clearSelection, refetchBoard, setBoardBulkUpdating]);
 
   return {
     selectedBoardIssueIds,

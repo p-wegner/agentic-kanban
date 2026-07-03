@@ -6,17 +6,20 @@
  * stop appearing in the pending list.
  */
 import type { Database } from "../../db/index.js";
-import { getPreference, setPreference } from "../../repositories/preferences.repository.js";
+import { getRuntimeState, setRuntimeState } from "../../repositories/runtime-state.repository.js";
+import { AGENT_QUESTION_MARKER_TTL_MS } from "../../lib/runtime-state-keys.js";
 import { insertIssueComment } from "../../repositories/issue-comments.repository.js";
 import { getWorkspaceIssueId } from "../../repositories/agent-questions.repository.js";
 import { invalidateAgentQuestionsCache } from "./cache.js";
 import type { AgentQuestion, AgentQuestionRecommendation } from "./types.js";
 
-function answeredPrefKey(toolUseId: string): string {
+/** Runtime-state keys (kept out of the `preferences` config table, #975). The
+ *  namespace prefixes are catalogued in `lib/runtime-state-keys.ts`. */
+function answeredStateKey(toolUseId: string): string {
   return `agent_question_answered_${toolUseId}`;
 }
 
-function recommendationPrefKey(toolUseId: string): string {
+function recommendationStateKey(toolUseId: string): string {
   return `agent_question_recommendation_${toolUseId}`;
 }
 
@@ -25,11 +28,11 @@ function recommendationPrefKey(toolUseId: string): string {
  *  resolved question stops appearing in the pending list. The legacy value is the literal
  *  string "1"; dismissals store a JSON object `{ dismissed: true, dismissedAt }`. */
 export async function isAnswered(toolUseId: string, db: Database): Promise<boolean> {
-  return (await getPreference(answeredPrefKey(toolUseId), db)) !== null;
+  return (await getRuntimeState(answeredStateKey(toolUseId), db)) !== null;
 }
 
 export async function markAnswered(toolUseId: string, db: Database): Promise<void> {
-  await setPreference(answeredPrefKey(toolUseId), "1", db);
+  await setRuntimeState(answeredStateKey(toolUseId), "1", db, { ttlMs: AGENT_QUESTION_MARKER_TTL_MS });
   invalidateAgentQuestionsCache();
 }
 
@@ -77,7 +80,9 @@ export async function writeAgentQuestionComment(
  *  disappears from the pending list. `dismissedAt` is passed in (callers stamp the time)
  *  so the service stays free of `Date.now()`/`new Date()`. */
 export async function markDismissed(toolUseId: string, dismissedAt: string, db: Database): Promise<void> {
-  await setPreference(answeredPrefKey(toolUseId), JSON.stringify({ dismissed: true, dismissedAt }), db);
+  await setRuntimeState(answeredStateKey(toolUseId), JSON.stringify({ dismissed: true, dismissedAt }), db, {
+    ttlMs: AGENT_QUESTION_MARKER_TTL_MS,
+  });
   invalidateAgentQuestionsCache();
 }
 
@@ -87,7 +92,7 @@ export async function getCachedRecommendations(
   toolUseId: string,
   db: Database,
 ): Promise<Array<AgentQuestionRecommendation | null> | null> {
-  const raw = await getPreference(recommendationPrefKey(toolUseId), db);
+  const raw = await getRuntimeState(recommendationStateKey(toolUseId), db);
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as { recommendations?: Array<AgentQuestionRecommendation | null> };
@@ -103,7 +108,9 @@ export async function setCachedRecommendations(
   recommendations: Array<AgentQuestionRecommendation | null>,
   db: Database,
 ): Promise<void> {
-  await setPreference(recommendationPrefKey(toolUseId), JSON.stringify({ recommendations }), db);
+  await setRuntimeState(recommendationStateKey(toolUseId), JSON.stringify({ recommendations }), db, {
+    ttlMs: AGENT_QUESTION_MARKER_TTL_MS,
+  });
   // A landed recommendation changes the `recommendation` field attached to the
   // cached listing — drop the response cache so the next poll picks it up.
   invalidateAgentQuestionsCache();

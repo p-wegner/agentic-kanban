@@ -10,6 +10,8 @@ import {
   stringifyValue,
   toolNameFor,
 } from "./shared.js";
+import { recordUnknownFieldDrift } from "./unknown-fields.js";
+import { piUsageLacksTokenFields, piUsageSchema } from "./pi-schema.js";
 
 function extractPiUsage(message: Record<string, unknown>): {
   inputTokens: number;
@@ -135,6 +137,17 @@ function handlePiTurnEnd(obj: Record<string, unknown>, result: ParsedStreamEvent
   const message = objectValue(obj.message);
   const usageMessage = Object.keys(message).length > 0 ? message : objectValue(obj.message);
   const usage = extractPiUsage(usageMessage);
+  // #994: neither `input` nor `output` present on the usage object means the
+  // numberValue() defaults in extractPiUsage() silently read an upstream
+  // rename as "0 tokens" (the same failure class as the codex #976 fix).
+  const rawUsage = objectValue(usageMessage.usage);
+  if (piUsageLacksTokenFields(rawUsage)) {
+    const parsed = piUsageSchema.safeParse(rawUsage);
+    const detail = parsed.success
+      ? "usage object matched the schema but carried no known token fields"
+      : parsed.error.issues.map((issue) => `${issue.path.join(".") || "<root>"}: ${issue.message}`).join("; ");
+    recordUnknownFieldDrift("pi", "turn_end", detail);
+  }
   result.stats = {
     durationMs: 0,
     totalCostUsd: usage.totalCostUsd,

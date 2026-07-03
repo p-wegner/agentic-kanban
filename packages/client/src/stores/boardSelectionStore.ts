@@ -15,8 +15,10 @@
 // migration is behaviour-preserving at every call site, plus a couple of
 // composite actions for the recurring multi-set transitions.
 //
-// Subsequent slices (filters, bulk selection, keyboard cursor) move into their
-// own stores in follow-up PRs — do NOT fold them in here.
+// The follow-up slices now exist (#958): filters in boardFilterStore.ts, bulk
+// selection + pending indicators in boardBulkSelectionStore.ts, and the
+// keyboard cursor in boardCursorStore.ts — keep each concern in its own store,
+// do NOT fold them in here.
 import { create } from "zustand";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 

@@ -1,4 +1,5 @@
 import { issues, preferences, projectStatuses, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
+import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { eq, sql } from "drizzle-orm";
 import type { Hono } from "hono";
 import { db } from "../db/index.js";
@@ -37,7 +38,7 @@ export function autoDriveProjectIds(prefMap: Map<string, string>): Set<string> {
 }
 /** The monitor cycle should run/reschedule when the global toggle is on OR any project is auto-driven. */
 export function monitorShouldRun(prefMap: Map<string, string>): boolean {
-  return prefMap.get("auto_monitor") === "true" || autoDriveProjectIds(prefMap).size > 0;
+  return getBool(prefMap, "auto_monitor") || autoDriveProjectIds(prefMap).size > 0;
 }
 
 export interface MonitorState {
@@ -100,10 +101,10 @@ export function setupMonitorRoutes(app: Hono, monitorState: MonitorState, runMon
   app.get("/api/internal/monitor-status", async (c) => {
     const prefRows = await db.select().from(preferences);
     const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
-    const maintenanceEnabled = prefMap.get("monitor_maintenance_window_enabled") === "true";
+    const maintenanceEnabled = getBool(prefMap, "monitor_maintenance_window_enabled");
     const maintenanceEnd = prefMap.get("monitor_maintenance_window_end") || null;
     const maintenanceActive = maintenanceEnabled && (!maintenanceEnd || new Date(maintenanceEnd).getTime() > Date.now());
-    return c.json({ enabled: prefMap.get("auto_monitor") === "true", intervalMin: parseInt(prefMap.get("auto_monitor_interval") || "4", 10), active: monitorState.timer !== null, lastRun: monitorState.lastRun, nextRunAt: monitorState.nextRunAt, recentActions: monitorState.recentActions, resourceSnapshot: monitorState.lastResourceSnapshot, warnings: monitorState.warnings, lastHealthCheckAt: monitorState.lastHealthCheckAt, maintenanceActive, maintenanceEnd });
+    return c.json({ enabled: getBool(prefMap, "auto_monitor"), intervalMin: parseInt(prefMap.get("auto_monitor_interval") || "4", 10), active: monitorState.timer !== null, lastRun: monitorState.lastRun, nextRunAt: monitorState.nextRunAt, recentActions: monitorState.recentActions, resourceSnapshot: monitorState.lastResourceSnapshot, warnings: monitorState.warnings, lastHealthCheckAt: monitorState.lastHealthCheckAt, maintenanceActive, maintenanceEnd });
   });
 }
 
@@ -169,7 +170,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
   }
 
   function isInMaintenanceWindow(prefMap: Map<string, string>): boolean {
-    if (prefMap.get("monitor_maintenance_window_enabled") !== "true") return false;
+    if (!getBool(prefMap, "monitor_maintenance_window_enabled")) return false;
     const endTime = prefMap.get("monitor_maintenance_window_end");
     if (!endTime) return true;
     return new Date(endTime).getTime() > Date.now();
@@ -192,7 +193,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       if (!force && !monitorShouldRun(prefMap)) return;
       // Scope this cycle's actions: when the global toggle is on, act on every project
       // (legacy behaviour); otherwise act only on projects in per-project hands-off mode.
-      const globalOn = prefMap.get("auto_monitor") === "true";
+      const globalOn = getBool(prefMap, "auto_monitor");
       const driveIds = autoDriveProjectIds(prefMap);
       const allowProject = (projectId: string) => globalOn || driveIds.has(projectId);
       // Auto-start, backlog refill, and backlog-pull eligibility all consult the project's
@@ -244,7 +245,7 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
         boardEvents,
         workspaceActions,
         autoMergeEnabled: isAutoMergeEnabled(prefMap) && mergeStrategy === "monitor",
-        autoMergeInReview: prefMap.get("auto_merge_in_review") === "true",
+        autoMergeInReview: getBool(prefMap, "auto_merge_in_review"),
         autoMergeDisabledProjectIds,
         reviewSessionIds,
         monitorRecentActions: monitorState.recentActions,

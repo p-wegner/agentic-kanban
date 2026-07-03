@@ -8,6 +8,8 @@ import { computeNavTarget, type NavKey } from "../lib/boardKeyboardNav.js";
 import { showToast } from "../lib/toast.js";
 import type { BoardPanelState } from "./useBoardPanels.js";
 import { useBoardSelectionStore } from "../stores/boardSelectionStore.js";
+import { useBoardCursorStore } from "../stores/boardCursorStore.js";
+import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 
 export interface BoardKeyboardShortcutProject {
   id: string;
@@ -22,9 +24,6 @@ export interface BoardKeyboardShortcutState {
   archiveColumns: StatusWithIssues[];
   archiveExpanded: boolean;
   viewMode: ViewMode;
-  keyboardCursorIssueId: string | null;
-  keyboardCursorIssueIdRef: RefObject<string | null>;
-  searchQuery: string;
   projects: BoardKeyboardShortcutProject[];
   activeProjectId: string | null;
 }
@@ -33,9 +32,6 @@ export interface BoardKeyboardShortcutActions {
   handleIssueClick: (issue: IssueWithStatus) => void;
   handleViewModeChange: (mode: ViewMode) => void;
   handleProjectChange: (id: string) => Promise<void>;
-  setSearchQuery: Dispatch<SetStateAction<string>>;
-  setKeyboardCursorIssueId: Dispatch<SetStateAction<string | null>>;
-  setFocusMode: Dispatch<SetStateAction<boolean>>;
   setExpandedCreatePanel: Dispatch<SetStateAction<{ statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null>>;
   setCreatingInColumnId: Dispatch<SetStateAction<string | null>>;
   panels: BoardPanelState;
@@ -73,17 +69,14 @@ export function useBoardKeyboardShortcuts(
       { match: (e) => e.key === "h" && noMods(e), run: () => actions.panels.setShowFileContention((prev) => !prev) },
       { match: (e) => e.key === "t" && noMods(e), run: () => actions.panels.setShowTranscriptSearch(true) },
       { match: (e) => e.key === "q" && noMods(e), run: () => actions.panels.setShowQuickTasks(true) },
-      { match: (e) => e.key === "l" && noMods(e) && state.keyboardCursorIssueIdRef.current === null, run: () => actions.panels.setShowLiveActivityTicker((prev) => !prev) },
+      { match: (e) => e.key === "l" && noMods(e) && useBoardCursorStore.getState().keyboardCursorIssueId === null, run: () => actions.panels.setShowLiveActivityTicker((prev) => !prev) },
       { match: (e) => e.key === "x" && noMods(e), run: () => actions.panels.setShowCodemod((prev) => !prev) },
       { match: (e) => e.key === "p" && noMods(e), run: () => actions.panels.setShowProjectHealth((prev) => !prev) },
       { match: (e) => e.key === "V" && e.shiftKey && noMods(e), run: () => window.dispatchEvent(new CustomEvent("voice-inbox-trigger")) },
       {
         match: (e) => e.key === "f" && noMods(e),
-        run: () => actions.setFocusMode((v) => {
-          const next = !v;
-          try { sessionStorage.setItem("board-focus-mode", next ? "1" : "0"); } catch { /* ignore */ }
-          return next;
-        }),
+        // toggleFocusMode persists to sessionStorage inside the store action.
+        run: () => useBoardFilterStore.getState().toggleFocusMode(),
       },
     ];
 
@@ -111,7 +104,7 @@ export function useBoardKeyboardShortcuts(
         requestAnimationFrame(() => {
           if (input.value === "/") {
             input.value = "";
-            actions.setSearchQuery("");
+            useBoardFilterStore.getState().setSearchQuery("");
           }
         });
       }
@@ -123,32 +116,35 @@ export function useBoardKeyboardShortcuts(
       if (actions.panels.closeTopPanel()) return true;
       const selStore = useBoardSelectionStore.getState();
       if (selStore.selectedIssue) { selStore.setSelectedIssue(null); return true; }
-      if (state.keyboardCursorIssueIdRef.current) { actions.setKeyboardCursorIssueId(null); return true; }
-      if (state.searchQuery) {
-        actions.setSearchQuery("");
+      const cursorStore = useBoardCursorStore.getState();
+      if (cursorStore.keyboardCursorIssueId) { cursorStore.setKeyboardCursorIssueId(null); return true; }
+      const filterStore = useBoardFilterStore.getState();
+      if (filterStore.searchQuery) {
+        filterStore.setSearchQuery("");
         document.getElementById("search-input")?.blur();
       }
       return true;
     }
 
     function tryNavigation(e: KeyboardEvent): boolean {
+      const cursorStore = useBoardCursorStore.getState();
       const isArrowKey = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key);
       const isVimNavKey = ["j", "k", "h", "l"].includes(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey;
-      const vimNavActive = isVimNavKey && state.keyboardCursorIssueIdRef.current !== null;
+      const vimNavActive = isVimNavKey && cursorStore.keyboardCursorIssueId !== null;
       if (!((isArrowKey && !e.ctrlKey && !e.metaKey && !e.altKey) || vimNavActive)) return false;
       if (isTextEntryTarget(e.target)) return true;
       const navColumns = state.viewMode === "kanban" ? [...state.activeColumns, ...(state.archiveExpanded ? state.archiveColumns : [])] : [];
       if (navColumns.length === 0) return true;
       e.preventDefault();
-      const targetId = computeNavTarget(navColumns, state.keyboardCursorIssueIdRef.current, e.key as NavKey);
-      if (targetId) actions.setKeyboardCursorIssueId(targetId);
+      const targetId = computeNavTarget(navColumns, cursorStore.keyboardCursorIssueId, e.key as NavKey);
+      if (targetId) cursorStore.setKeyboardCursorIssueId(targetId);
       return true;
     }
 
     function tryEnter(e: KeyboardEvent): boolean {
       if (!(e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.altKey)) return false;
       if (isTextEntryTarget(e.target)) return true;
-      const cursorId = state.keyboardCursorIssueIdRef.current;
+      const cursorId = useBoardCursorStore.getState().keyboardCursorIssueId;
       if (!cursorId) return true;
       const issue = state.columnsRef.current.flatMap((c) => c.issues).find((i) => i.id === cursorId);
       if (issue) {
@@ -242,9 +238,6 @@ export function useBoardKeyboardShortcuts(
     state.activeColumns,
     state.archiveColumns,
     state.archiveExpanded,
-    state.keyboardCursorIssueId,
-    state.keyboardCursorIssueIdRef,
-    state.searchQuery,
     state.viewMode,
   ]);
 

@@ -1,4 +1,5 @@
 import { issues, sessions, sessionMessages, workspaces } from "@agentic-kanban/shared/schema";
+import { sanitizeUtf8 } from "@agentic-kanban/shared/lib/sanitize-utf8";
 import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -67,7 +68,7 @@ export async function insertPlanGateAuditMessage(
   await database.insert(sessionMessages).values({
     sessionId,
     type: "stdout",
-    data,
+    data: sanitizeUtf8(data),
     exitCode: null,
   });
 }

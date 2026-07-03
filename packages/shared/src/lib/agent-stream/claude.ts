@@ -9,6 +9,8 @@ import {
   stringValue,
   toolNameFor,
 } from "./shared.js";
+import { recordUnknownFieldDrift } from "./unknown-fields.js";
+import { claudeResultLacksTokenFields, claudeResultUsageSchema } from "./claude-schema.js";
 
 function handleClaudeSystemInit(obj: Record<string, unknown>, result: ParsedStreamEvent): void {
   const sessionId = stringValue(obj.session_id) ?? "";
@@ -181,6 +183,16 @@ function handleResultEvent(obj: Record<string, unknown>, result: ParsedStreamEve
   const inputTokens = numberValue(firstModelUsage?.inputTokens ?? usage.input_tokens);
   const outputTokens = numberValue(firstModelUsage?.outputTokens ?? usage.output_tokens);
   const model = firstModelEntry?.[0] ?? stringValue(obj.model) ?? "";
+  // #994: neither the flat `usage` nor any `modelUsage` entry carrying a token
+  // field means the numberValue() defaults above silently read an upstream
+  // rename as "0 tokens" (the same failure class as the codex #976 fix).
+  if (!isSubagentMessage && claudeResultLacksTokenFields(obj)) {
+    const parsed = claudeResultUsageSchema.safeParse(obj);
+    const detail = parsed.success
+      ? "usage/modelUsage matched the schema but carried no known token fields"
+      : parsed.error.issues.map((issue) => `${issue.path.join(".") || "<root>"}: ${issue.message}`).join("; ");
+    recordUnknownFieldDrift("claude", "result", detail);
+  }
   if (!isSubagentMessage) {
     result.stats = {
       durationMs: numberValue(obj.duration_ms),
@@ -212,6 +224,13 @@ function handleResultEvent(obj: Record<string, unknown>, result: ParsedStreamEve
   if (denials.some((d) => d.tool_name === "ExitPlanMode")) result.exitPlanModeDenied = true;
 }
 
+// Top-level event types this parser understands. A known type that yields no
+// fields (e.g. a plain text-only `user` message — no tool_result blocks) is a
+// HEALTHY event, not wire-format drift: return an empty-but-defined result so
+// the unknown-event drift detector never counts it (#969). Only types outside
+// this set fall through to `undefined` and get flagged as unknown.
+const KNOWN_CLAUDE_EVENT_TYPES = new Set(["system", "assistant", "user", "rate_limit_event", "result"]);
+
 export function parseClaudeEvent(obj: Record<string, unknown>, context: ParseContext): ParsedStreamEvent | undefined {
   const result: ParsedStreamEvent = {};
   const type = obj.type;
@@ -223,5 +242,7 @@ export function parseClaudeEvent(obj: Record<string, unknown>, context: ParseCon
   if (type === "rate_limit_event") handleRateLimitEvent(obj, result);
   if (type === "result") handleResultEvent(obj, result, isSubagentMessage);
 
-  return hasFields(result) ? result : undefined;
+  if (hasFields(result)) return result;
+  // Known-but-fieldless: recognized-but-empty (#969), unknown types: undefined.
+  return typeof type === "string" && KNOWN_CLAUDE_EVENT_TYPES.has(type) ? result : undefined;
 }

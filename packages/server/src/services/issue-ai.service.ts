@@ -17,6 +17,7 @@ import { invokeClaudePrompt } from "./claude-cli.service.js";
 import { NotFoundError } from "../errors/index.js";
 import { createDrive } from "../repositories/drive.repository.js";
 import * as repo from "../repositories/issue-ai.repository.js";
+import { getProjectRepoPath } from "../repositories/project.repository.js";
 import { nextIssueNumber } from "../repositories/issue-number.repository.js";
 
 export interface EnhanceIssueResult {
@@ -366,7 +367,7 @@ export async function analyzeTouchedFiles(
     } catch {}
   }
 
-  const repoPath = (await repo.getProjectRepoPath(issue.projectId, database)) ?? "";
+  const repoPath = (await getProjectRepoPath(issue.projectId, database)) ?? "";
 
   let treeSection = "";
   if (repoPath) {

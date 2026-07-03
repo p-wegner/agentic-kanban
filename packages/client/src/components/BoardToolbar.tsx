@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
+import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { MonitorPopover, type MonitorStatus } from "./MonitorPopover.js";
 import { useOrchestrator } from "../hooks/useOrchestrator.js";
 import { getSettings } from "../lib/settingsStore.js";
@@ -94,8 +95,6 @@ function AgingHeatmapLegend({ warmDays, hotDays, onChange }: AgingHeatmapLegendP
 interface BoardToolbarProps {
   activeColumns: StatusWithIssues[];
   onShowTimeReport?: () => void;
-  focusMode?: boolean;
-  onFocusModeChange?: (v: boolean) => void;
   onShowQuickTasks: () => void;
   autoMonitor: boolean;
   monitorRunning: boolean;
@@ -141,8 +140,6 @@ interface BoardToolbarProps {
 export function BoardToolbar({
   activeColumns,
   onShowTimeReport: _onShowTimeReport,
-  focusMode: _focusMode = false,
-  onFocusModeChange: _onFocusModeChange,
   onShowQuickTasks,
   autoMonitor,
   monitorRunning,
@@ -220,7 +217,7 @@ export function BoardToolbar({
   useEffect(() => {
     getSettings()
       .then((s) => {
-        setMonitorButlerEnabled(s.monitor_butler_enabled === "true");
+        setMonitorButlerEnabled(getBool(s, "monitor_butler_enabled"));
         const raw = parseInt(s.monitor_butler_interval_min ?? "15", 10);
         setMonitorButlerInterval(isNaN(raw) ? 15 : raw);
       })

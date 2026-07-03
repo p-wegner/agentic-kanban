@@ -1,17 +1,20 @@
 import type { MilestoneResponse, StatusWithIssues } from "@agentic-kanban/shared";
+import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 
 /** Milestone progress banner shown above the kanban board when a milestone filter is active. */
 export function MilestoneFilterBanner({
-  milestoneId,
   milestones,
   columns,
-  onClear,
 }: {
-  milestoneId: string;
   milestones: MilestoneResponse[];
   columns: StatusWithIssues[];
-  onClear: () => void;
 }) {
+  // Filter slice (#958): read/clear the milestone filter via the store instead
+  // of milestoneId/onClear props; renders nothing while no filter is active.
+  const milestoneId = useBoardFilterStore((s) => s.milestoneFilterId);
+  const setMilestoneFilterId = useBoardFilterStore((s) => s.setMilestoneFilterId);
+  const onClear = () => setMilestoneFilterId(null);
+  if (!milestoneId) return null;
   const activeMilestone = milestones.find(m => m.id === milestoneId);
   if (!activeMilestone) return null;
   const allMilestoneIssues = columns.flatMap(c => c.issues).filter(i => i.milestoneId === milestoneId);

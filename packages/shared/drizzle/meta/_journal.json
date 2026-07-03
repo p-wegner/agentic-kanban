@@ -306,373 +306,387 @@
     {
       "idx": 43,
       "version": "6",
-      "when": 1748246124000,
+      "when": 1780906801000,
       "tag": "0043_missing_indexes",
       "breakpoints": true
     },
     {
       "idx": 44,
       "version": "6",
-      "when": 1748332524000,
+      "when": 1780906802000,
       "tag": "0044_diff_comments_workspace_idx",
       "breakpoints": true
     },
     {
       "idx": 45,
       "version": "6",
-      "when": 1748418924000,
+      "when": 1780906803000,
       "tag": "0045_workspace_model",
       "breakpoints": true
     },
     {
       "idx": 46,
       "version": "6",
-      "when": 1748505324000,
+      "when": 1780906804000,
       "tag": "0046_issue_due_date",
       "breakpoints": true
     },
     {
       "idx": 47,
       "version": "6",
-      "when": 1748591724000,
+      "when": 1780906805000,
       "tag": "0047_workflow_graphs",
       "breakpoints": true
     },
     {
       "idx": 48,
       "version": "6",
-      "when": 1748678124000,
+      "when": 1780906806000,
       "tag": "0048_workflow_fork",
       "breakpoints": true
     },
     {
       "idx": 49,
       "version": "7",
-      "when": 1748764524000,
+      "when": 1780906807000,
       "tag": "0049_workspace_scorecard",
       "breakpoints": true
     },
     {
       "idx": 50,
       "version": "6",
-      "when": 1748764525000,
+      "when": 1780906808000,
       "tag": "0050_tdd_mode",
       "breakpoints": true
     },
     {
       "idx": 51,
       "version": "6",
-      "when": 1748764526000,
+      "when": 1780906809000,
       "tag": "0051_test_runs",
       "breakpoints": true
     },
     {
       "idx": 52,
       "version": "6",
-      "when": 1748764527052,
+      "when": 1780906810000,
       "tag": "0052_failure_patterns",
       "breakpoints": true
     },
     {
       "idx": 53,
       "version": "6",
-      "when": 1748764527053,
+      "when": 1780906811000,
       "tag": "0053_flaky_test_classifier",
       "breakpoints": true
     },
     {
       "idx": 54,
       "version": "6",
-      "when": 1748764527054,
+      "when": 1780906812000,
       "tag": "0054_touched_files",
       "breakpoints": true
     },
     {
       "idx": 55,
       "version": "6",
-      "when": 1748800000000,
+      "when": 1780906813000,
       "tag": "0055_context_primer",
       "breakpoints": true
     },
     {
       "idx": 56,
       "version": "6",
-      "when": 1748764524000,
+      "when": 1780906814000,
       "tag": "0056_showdowns",
       "breakpoints": true
     },
     {
       "idx": 57,
       "version": "6",
-      "when": 1748764527055,
+      "when": 1780906815000,
       "tag": "0057_codemod_type",
       "breakpoints": true
     },
     {
       "idx": 58,
       "version": "6",
-      "when": 1748764527056,
+      "when": 1780906816000,
       "tag": "0058_board_health_events",
       "breakpoints": true
     },
     {
       "idx": 59,
       "version": "6",
-      "when": 1748764527057,
+      "when": 1780906817000,
       "tag": "0059_issue_comments",
       "breakpoints": true
     },
     {
       "idx": 60,
       "version": "6",
-      "when": 1748764527058,
+      "when": 1780906818000,
       "tag": "0060_session_skill",
       "breakpoints": true
     },
     {
       "idx": 61,
       "version": "6",
-      "when": 1748764527059,
+      "when": 1780906819000,
       "tag": "0061_workspace_merged_at",
       "breakpoints": true
     },
     {
       "idx": 62,
       "version": "6",
-      "when": 1748764527060,
+      "when": 1780906820000,
       "tag": "0062_workspace_code_metrics",
       "breakpoints": true
     },
     {
       "idx": 63,
       "version": "6",
-      "when": 1748764527061,
+      "when": 1780906821000,
       "tag": "0063_workflow_edge_loop_flag",
       "breakpoints": true
     },
     {
       "idx": 64,
       "version": "6",
-      "when": 1748764527062,
+      "when": 1780906822000,
       "tag": "0064_quality_metrics",
       "breakpoints": true
     },
     {
       "idx": 65,
       "version": "6",
-      "when": 1748764527063,
+      "when": 1780906823000,
       "tag": "0065_project_script_shortcuts",
       "breakpoints": true
     },
     {
       "idx": 66,
       "version": "6",
-      "when": 1748764527064,
+      "when": 1780906824000,
       "tag": "0066_workspace_setup_status",
       "breakpoints": true
     },
     {
       "idx": 67,
       "version": "6",
-      "when": 1748764527065,
+      "when": 1780906825000,
       "tag": "0067_project_script_shortcut_details",
       "breakpoints": true
     },
     {
       "idx": 68,
       "version": "6",
-      "when": 1748764527066,
+      "when": 1780906826000,
       "tag": "0068_scheduled_run_history",
       "breakpoints": true
     },
     {
       "idx": 69,
       "version": "6",
-      "when": 1748764527067,
+      "when": 1780906827000,
       "tag": "0069_symlink_bootstrap",
       "breakpoints": true
     },
     {
       "idx": 70,
       "version": "6",
-      "when": 1748764527068,
+      "when": 1780906828000,
       "tag": "0070_workspace_symlink_diagnostics",
       "breakpoints": true
     },
     {
       "idx": 71,
       "version": "6",
-      "when": 1748764527069,
+      "when": 1780906829000,
       "tag": "0071_board_health_event_category",
       "breakpoints": true
     },
     {
       "idx": 72,
       "version": "6",
-      "when": 1748764527070,
+      "when": 1780906830000,
       "tag": "0072_external_tracker_link",
       "breakpoints": true
     },
     {
       "idx": 73,
       "version": "6",
-      "when": 1748764527071,
+      "when": 1780906831000,
       "tag": "0073_diff_comment_resolved",
       "breakpoints": true
     },
     {
       "idx": 74,
       "version": "6",
-      "when": 1748764527072,
+      "when": 1780906832000,
       "tag": "0074_cleanup_warning",
       "breakpoints": true
     },
     {
       "idx": 75,
       "version": "6",
-      "when": 1748764528072,
+      "when": 1780906833000,
       "tag": "0075_project_default_skill",
       "breakpoints": true
     },
     {
       "idx": 76,
       "version": "6",
-      "when": 1748764529000,
+      "when": 1780906834000,
       "tag": "0076_issue_checklist",
       "breakpoints": true
     },
     {
       "idx": 77,
       "version": "6",
-      "when": 1748764530000,
+      "when": 1780906835000,
       "tag": "0077_hot_status_composite_indexes",
       "breakpoints": true
     },
     {
       "idx": 78,
       "version": "6",
-      "when": 1748764531000,
+      "when": 1780906836000,
       "tag": "0078_pinned_issues",
       "breakpoints": true
     },
     {
       "idx": 79,
       "version": "6",
-      "when": 1748764532000,
+      "when": 1780906837000,
       "tag": "0079_issue_comments_issue_id_created_at_idx",
       "breakpoints": true
     },
     {
       "idx": 80,
       "version": "6",
-      "when": 1748764533000,
+      "when": 1780906838000,
       "tag": "0080_archived_status",
       "breakpoints": true
     },
     {
       "idx": 81,
       "version": "6",
-      "when": 1748764534000,
+      "when": 1780906839000,
       "tag": "0081_milestones",
       "breakpoints": true
     },
     {
       "idx": 82,
       "version": "6",
-      "when": 1780906800001,
+      "when": 1780906840000,
       "tag": "0082_activity_feed_composite_indexes",
       "breakpoints": true
     },
     {
       "idx": 83,
       "version": "6",
-      "when": 1780906800002,
+      "when": 1780906841000,
       "tag": "0083_archive_composite_index",
       "breakpoints": true
     },
     {
       "idx": 84,
       "version": "6",
-      "when": 1780906800003,
+      "when": 1780906842000,
       "tag": "0084_issue_time_entries",
       "breakpoints": true
-    }
-  ,
+    },
     {
       "idx": 85,
       "version": "6",
-      "when": 1780906800004,
+      "when": 1780906843000,
       "tag": "0085_session_messages_composite_index",
       "breakpoints": true
     },
     {
       "idx": 86,
       "version": "6",
-      "when": 1780906800005,
+      "when": 1780906844000,
       "tag": "0086_diff_stat_cache_head_sha",
       "breakpoints": true
     },
     {
       "idx": 87,
       "version": "6",
-      "when": 1780906800006,
+      "when": 1780906845000,
       "tag": "0087_issue_project_number_index",
       "breakpoints": true
     },
     {
       "idx": 88,
       "version": "6",
-      "when": 1780906800007,
+      "when": 1780906846000,
       "tag": "0088_drop_redundant_session_messages_idx",
       "breakpoints": true
     },
     {
       "idx": 89,
       "version": "6",
-      "when": 1780906800008,
+      "when": 1780906847000,
       "tag": "0089_workspace_merged_head_sha",
       "breakpoints": true
     },
     {
       "idx": 90,
       "version": "6",
-      "when": 1780906800009,
+      "when": 1780906848000,
       "tag": "0090_archive_projects",
       "breakpoints": true
     },
     {
       "idx": 91,
       "version": "6",
-      "when": 1780906800010,
+      "when": 1780906849000,
       "tag": "0091_drives",
       "breakpoints": true
     },
     {
       "idx": 92,
       "version": "6",
-      "when": 1780906800011,
+      "when": 1780906850000,
       "tag": "0092_drive_obstacles",
       "breakpoints": true
     },
     {
       "idx": 93,
       "version": "6",
-      "when": 1780906800012,
+      "when": 1780906851000,
       "tag": "0093_workspace_launch_error",
       "breakpoints": true
     },
     {
       "idx": 94,
       "version": "6",
-      "when": 1780906800013,
+      "when": 1780906852000,
       "tag": "0094_unique_issue_numbers",
       "breakpoints": true
     },
     {
       "idx": 95,
       "version": "6",
-      "when": 1780906800014,
+      "when": 1780906853000,
       "tag": "0095_coupled_with_dependency_type",
       "breakpoints": true
-    }]
+    },
+    {
+      "idx": 96,
+      "version": "6",
+      "when": 1780906854000,
+      "tag": "0096_test_runs_session_fk",
+      "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "6",
+      "when": 1780906855000,
+      "tag": "0097_runtime_state",
+      "breakpoints": true
+    }
+  ]
 }

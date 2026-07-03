@@ -22,7 +22,8 @@
     "dist/server.js",
     "dist/mcp.js",
     "dist/client/",
-    "dist/migrations/"
+    "dist/migrations/",
+    "dist/scaffold/"
   ],
   "scripts": {
     "dev": "node ../../scripts/server-dev-proxy.mjs",

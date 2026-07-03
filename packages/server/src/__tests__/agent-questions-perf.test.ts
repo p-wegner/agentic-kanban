@@ -17,7 +17,7 @@ import {
 import { readSessionStdoutFileTail } from "../lib/session-output-reader.js";
 import { sessionOutputPath } from "../lib/session-paths.js";
 import { createTestDb } from "./helpers/test-db.js";
-import { setPreference } from "../repositories/preferences.repository.js";
+import { setRuntimeState } from "../repositories/runtime-state.repository.js";
 import {
   projects,
   projectStatuses,
@@ -45,7 +45,7 @@ function ts(offsetMs: number) {
  *  fire-and-forget background butler recommendation, whose completion would
  *  invalidate the cache at a nondeterministic time. */
 async function primeRecommendationPref(toolUseId: string, db: Db) {
-  await setPreference(
+  await setRuntimeState(
     `agent_question_recommendation_${toolUseId}`,
     JSON.stringify({ recommendations: [null] }),
     db,

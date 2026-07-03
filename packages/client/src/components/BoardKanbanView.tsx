@@ -10,6 +10,7 @@ import type { CreateIssueFormState } from "./CreateIssueForm.js";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { useIsNarrow } from "../hooks/useMediaQuery.js";
 import type { CardDensity } from "../hooks/useBoardPreferences.js";
+import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 
 export type { SwimlaneDimension };
 
@@ -87,17 +88,13 @@ export interface BoardKanbanViewProps {
   activeColumns: StatusWithIssues[];
   archiveColumns: StatusWithIssues[];
   allColumns: StatusWithIssues[];
-  focusMode?: boolean;
   projectId: string;
   columnWidths: Record<string, number>;
   dynamicColumnScaling: boolean;
   creatingInColumnId: string | null;
-  searchQuery: string;
   sessionActivity: Record<string, string>;
   liveStats: Record<string, LiveSessionStats>;
   sessionTodos: Record<string, TodoItem[]>;
-  pendingIssueIds: Set<string>;
-  pendingWorkspaceIssueIds: Set<string>;
   collapsedArchive: boolean;
   canStartWorkspace: boolean;
   onToggleArchive: () => void;
@@ -117,8 +114,6 @@ export interface BoardKanbanViewProps {
   onColumnResizeReset: (colId: string) => void;
   onCreateIssue: (data: CreateIssueRequest & { startWorkspace?: boolean; planMode?: boolean; skipAutoReview?: boolean; profile?: ProfileSelection; model?: string; isDirect?: boolean; skillId?: string }) => Promise<void>;
   onExpandCreate: (statusId: string, statusName: string, state: Partial<CreateIssueFormState>) => void;
-  selectedIssueIds?: Set<string>;
-  keyboardCursorIssueId?: string | null;
   allProjectTags?: ProjectTag[];
   quickUpdate?: QuickUpdateCallbacks;
   wipLimits?: Record<string, number | null>;
@@ -136,17 +131,13 @@ export function BoardKanbanView({
   activeColumns,
   archiveColumns,
   allColumns,
-  focusMode = false,
   projectId,
   columnWidths,
   dynamicColumnScaling,
   creatingInColumnId,
-  searchQuery,
   sessionActivity,
   liveStats,
   sessionTodos,
-  pendingIssueIds,
-  pendingWorkspaceIssueIds,
   collapsedArchive,
   canStartWorkspace,
   onToggleArchive,
@@ -166,8 +157,6 @@ export function BoardKanbanView({
   onColumnResizeReset,
   onCreateIssue,
   onExpandCreate,
-  selectedIssueIds,
-  keyboardCursorIssueId,
   allProjectTags,
   quickUpdate,
   wipLimits,
@@ -180,6 +169,10 @@ export function BoardKanbanView({
   agingWarmDays = 3,
   agingHotDays = 7,
 }: BoardKanbanViewProps) {
+  // Filter slice (#958): focus mode comes from the store (only used for the
+  // collapsed empty-column rendering); the per-card filter/selection/cursor
+  // state is read further down the tree (BoardColumnCard / CompletedGrid).
+  const focusMode = useBoardFilterStore((s) => s.focusMode);
   // Below sm, columns stack vertically and the board scrolls down through them
   // (instead of a horizontal one-column-at-a-time swipe, where an empty column
   // wastes the whole screen). Stacked columns are full-width and auto-height.
@@ -308,14 +301,9 @@ export function BoardKanbanView({
               onMoveToNext={onMoveToNext}
               onDeleteIssue={onDeleteIssue}
               allColumns={allColumns}
-              searchQuery={searchQuery}
               sessionActivity={sessionActivity}
               liveStats={liveStats}
               sessionTodos={sessionTodos}
-              pendingIssueIds={pendingIssueIds}
-              pendingWorkspaceIssueIds={pendingWorkspaceIssueIds}
-              selectedIssueIds={selectedIssueIds}
-              keyboardCursorIssueId={keyboardCursorIssueId}
               allProjectTags={allProjectTags}
               quickUpdate={quickUpdate}
               wipLimit={wipLimits?.[col.id]}
@@ -357,8 +345,6 @@ export function BoardKanbanView({
           onIssueClick={onIssueClick}
           onDragStart={onDragStart}
           onDrop={onDrop}
-          searchQuery={searchQuery}
-          selectedIssueIds={selectedIssueIds}
         />
       </BoardErrorBoundary>
     </>

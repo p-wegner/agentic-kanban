@@ -861,6 +861,45 @@ describe("workspace.service", () => {
         "main",
         expect.objectContaining({ deferWorkingTreeSync: true, autoResolveAppendConflicts: true }),
       );
+      // #970: the merge result resolves early, but the lock is intentionally
+      // held until the deferred post-merge cleanup settles — await release.
+      await activeMerges.get("/tmp/test-repo")?.promise;
+      expect(activeMerges.has("/tmp/test-repo")).toBe(false);
+    });
+
+    it("holds the repo merge lock until the deferred post-merge cleanup completes (#970)", { timeout: 30000 }, async () => {
+      const { projectId, issueId } = await seedProjectAndIssue(db);
+      const wsId = await seedWorkspaceForMerge(projectId, issueId);
+      let releaseCleanup!: () => void;
+      const cleanupGate = new Promise<void>((resolve) => { releaseCleanup = resolve; });
+      const gitService = createFakeGitService({
+        // removeWorktree runs only in the deferred post-merge cleanup — gate it
+        // so the cleanup stays in flight while we probe the lock.
+        removeWorktree: vi.fn(async () => { await cleanupGate; }),
+      });
+      const service = createWorkspaceService({
+        database: db,
+        gitService,
+        createBackup: vi.fn(async () => ({})),
+        processKiller: vi.fn(async () => 0),
+      });
+
+      const result = await service.mergeWorkspace(wsId);
+      expect(result.id).toBe(wsId);
+
+      // The HTTP-facing result resolved, but the deferred cleanup (which applies
+      // the git reset --hard sync of the MAIN checkout) has not finished: the
+      // repo lock must still be held so a second merge cannot acquire it and
+      // observe the main checkout mid-cleanup (#970).
+      const lock = activeMerges.get("/tmp/test-repo");
+      expect(lock?.workspaceId).toBe(wsId);
+
+      // A second merge for a different workspace is refused, not admitted.
+      const otherWsId = await seedWorkspaceForMerge(projectId, issueId);
+      await expect(service.mergeWorkspace(otherWsId)).rejects.toMatchObject({ code: "CONFLICT" });
+
+      releaseCleanup();
+      await lock!.promise;
       expect(activeMerges.has("/tmp/test-repo")).toBe(false);
     });
 

@@ -1,6 +1,7 @@
-import { issueTags, issues, preferences, projects, sessions, tags, workspaces } from "@agentic-kanban/shared/schema";
+import { issueTags, preferences, projects, sessions, tags, workspaces } from "@agentic-kanban/shared/schema";
+import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { runDoneUnmergedScannerNow } from "./done-unmerged-invariant-scanner.js";
-import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { eq } from "drizzle-orm";
 import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { db } from "../db/index.js";
@@ -16,6 +17,7 @@ import { runScript } from "../services/script-runner.js";
 import { createSessionManager } from "../services/session.manager.js";
 import { getEffectiveProfile, parseProviderPref } from "./review-helpers.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
+import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { buildLearningStepPrompt } from "../services/merge-helpers.service.js";
 
 export type MergeWorkspace = Pick<typeof workspaces.$inferSelect, "id" | "isDirect" | "branch" | "workingDir" | "baseBranch" | "issueId">;
@@ -107,7 +109,7 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
     try {
       const prefRowsLearning = await db.select().from(preferences);
       const prefMapLearning = new Map(prefRowsLearning.map((r) => [r.key, r.value]));
-      if (prefMapLearning.get("learning_step_before_merge") === "true" && workspace.workingDir) {
+      if (getBool(prefMapLearning, "learning_step_before_merge") && workspace.workingDir) {
         try {
           const learningPrompt = buildLearningStepPrompt(true);
           const learningProfile = prefMapLearning.get("claude_profile") || undefined;
@@ -252,14 +254,12 @@ Server: http://localhost:${serverPort}`;
         }
       }
 
-      await db.update(workspaces).set({ status: "closed", workingDir: null, readyForMerge: false, updatedAt: now }).where(eq(workspaces.id, workspace.id));
+      await setWorkspaceStatus(db, workspace.id, "closed", { now, set: { workingDir: null, readyForMerge: false } });
       if (doneStatusId) {
-        await db.update(issues).set({ statusId: doneStatusId, updatedAt: now }).where(eq(issues.id, issueId));
-        // Advance the workflow node to the `end` node matching Done status, so
-        // blocked_by/depends_on dependents can resolve via the node type check (#537).
-        await syncCurrentNodeToStatus(db, issueId).catch((err) =>
-          console.warn("[workflow] syncCurrentNodeToStatus after merge failed (non-fatal):", err),
-        );
+        // transitionIssueStatus also advances the workflow node to the `end` node
+        // matching Done status, so blocked_by/depends_on dependents can resolve
+        // via the node type check (#537).
+        await transitionIssueStatus(db, issueId, doneStatusId, { now });
       }
       boardEvents.broadcast(projectId, "workspace_merged");
       console.log(`[workflow] auto-merged workspace ${workspace.id}`);

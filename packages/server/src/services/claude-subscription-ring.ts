@@ -52,6 +52,7 @@ export interface ClaudeSubscriptionEntry {
 const DEFAULT_COOLDOWN_MS = 5 * 60 * 60 * 1000; // 5h fallback — matches the Claude usage-limit window when resetsAt is absent
 
 const CONFIG: AuthRingConfig<ClaudeSubscriptionEntry> = {
+  provider: "claude",
   dirPrefix: ".claude-",
   discoverAuthFiles: [".credentials.json", "settings.json"],
   authFiles: [".credentials.json", "settings.json"],

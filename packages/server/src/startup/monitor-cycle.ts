@@ -1,5 +1,5 @@
-import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
-import { issues, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { sessions } from "@agentic-kanban/shared/schema";
 import { desc, eq, sql, or, isNull, notInArray, and } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { createBoardEvents } from "../services/board-events.js";
@@ -30,6 +30,7 @@ import {
   type LogMonitorActionFn,
 } from "./monitor-cycle-actions.js";
 import type { MonitorWorkspaceActions } from "./monitor-workspace-actions.js";
+import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 
 export { DEFAULT_STUCK_BUILDER_TIMEOUT_MS } from "./monitor-cycle-rules.js";
 
@@ -155,7 +156,7 @@ async function recoverStuckBuilder(
   await db.update(sessions).set({ status: "stopped", endedAt: new Date().toISOString() }).where(eq(sessions.id, sess.id)).catch(() => {});
 
   const committedFiles = await (deps.commitLeftoverChanges ?? commitLeftoverChanges)(ws.workingDir);
-  await db.update(workspaces).set({ status: "idle", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, ws.wsId));
+  await setWorkspaceStatus(db, ws.wsId, "idle");
 
   if (committedFiles <= 0) {
     logAction("mark_idle", ws.wsId, ws.issueId, {
@@ -169,8 +170,7 @@ async function recoverStuckBuilder(
 
   const inReviewStatusId = await getProjectStatusIdByName(ws.projectId, "In Review");
   if (inReviewStatusId) {
-    await db.update(issues).set({ statusId: inReviewStatusId, updatedAt: new Date().toISOString() }).where(eq(issues.id, ws.issueId));
-    await syncCurrentNodeToStatus(db, ws.issueId);
+    await transitionIssueStatus(db, ws.issueId, inReviewStatusId);
   }
 
   const { sessionId } = await (deps.startReview ?? startManualReview)(db, () => deps.sessionManager, deps.boardEvents, deps.reviewSessionIds, ws.wsId, false);
@@ -192,7 +192,7 @@ async function recoverStuckBuilder(
 async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession | undefined, sessionCount: number, ctx: CycleContext): Promise<void> {
   const { deps, stats, logAction, canStartRelaunch, canStartMerge } = ctx;
   if (isCodexUsageLimitStats(sess?.stats)) {
-    await db.update(workspaces).set({ status: "blocked", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
+    await setWorkspaceStatus(db, ws.wsId, "blocked");
     console.log(`[monitor] Needs attention: workspace ${ws.wsId} for issue #${ws.issueNumber ?? "?"} hit a Codex usage limit; skipping relaunch`);
     deps.boardEvents.broadcast(ws.projectId, "board_changed");
     return;
@@ -225,13 +225,13 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
     const needsReviewStatusId = await getProjectStatusIdByName(ws.projectId, "Needs Review");
     const inReviewStatusId = await getProjectStatusIdByName(ws.projectId, "In Review");
     const fallbackStatusId = needsReviewStatusId ?? inReviewStatusId;
-    if (fallbackStatusId) await db.update(issues).set({ statusId: fallbackStatusId }).where(eq(issues.id, ws.issueId)).catch(() => {});
-    await db.update(workspaces).set({ status: "closed", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
+    if (fallbackStatusId) await transitionIssueStatus(db, ws.issueId, fallbackStatusId).catch((err) => console.warn(`[monitor] failed to move issue ${ws.issueId} to review fallback status:`, err instanceof Error ? err.message : String(err)));
+    await setWorkspaceStatus(db, ws.wsId, "closed");
     logAction("mark_idle", ws.wsId, ws.issueId, { responseSummary: `${sessionCount} sessions — flagged stuck`, verificationResult: "ok" });
     console.log(`[monitor] Workspace ${ws.wsId} has ${sessionCount} sessions  flagged as stuck, closing`);
     deps.boardEvents.broadcast(ws.projectId, "board_changed");
   } else if (sessionCount >= 5 && ws.issueStatusName === "In Review") {
-    await db.update(workspaces).set({ status: "closed", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
+    await setWorkspaceStatus(db, ws.wsId, "closed");
     logAction("mark_idle", ws.wsId, ws.issueId, { responseSummary: "Closed to break review loop", verificationResult: "ok" });
     console.log(`[monitor] Workspace ${ws.wsId} has ${sessionCount} sessions with issue in review  closing to break review loop (merge or create new workspace)`);
     deps.boardEvents.broadcast(ws.projectId, "board_changed");
@@ -299,7 +299,7 @@ async function handleReviewingWorkspace(ws: WorkspaceCandidate, sess: LatestSess
     // we still reset the issue to In Progress and log the action either way.
     await deps.workspaceActions.delete(ws.wsId).catch(() => {});
     const inProgressStatusId = await getProjectStatusIdByName(ws.projectId, "In Progress");
-    if (inProgressStatusId) await db.update(issues).set({ statusId: inProgressStatusId }).where(eq(issues.id, ws.issueId)).catch(() => {});
+    if (inProgressStatusId) await transitionIssueStatus(db, ws.issueId, inProgressStatusId).catch((err) => console.warn(`[monitor] failed to reset ghost-workspace issue ${ws.issueId} to In Progress:`, err instanceof Error ? err.message : String(err)));
     logAction("mark_idle", ws.wsId, ws.issueId, {
       endpoint: `DELETE /api/workspaces/${ws.wsId}`,
       responseSummary: "Ghost workspace deleted",
@@ -356,7 +356,7 @@ async function handleReviewingWorkspace(ws: WorkspaceCandidate, sess: LatestSess
 async function handleActiveStoppedWorkspace(ws: WorkspaceCandidate, sess: LatestSession, ctx: CycleContext): Promise<void> {
   const { deps, logAction } = ctx;
   if (isCodexUsageLimitStats(sess.stats)) {
-    await db.update(workspaces).set({ status: "blocked", updatedAt: new Date().toISOString() }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
+    await setWorkspaceStatus(db, ws.wsId, "blocked");
     console.log(`[monitor] Needs attention: active workspace ${ws.wsId} stopped after Codex usage limit; marking blocked`);
     deps.boardEvents.broadcast(ws.projectId, "board_changed");
     return;
@@ -365,7 +365,7 @@ async function handleActiveStoppedWorkspace(ws: WorkspaceCandidate, sess: Latest
     await closeDirectWorkspaceAsDone(ws, logAction);
     console.log(`[monitor] Direct active workspace ${ws.wsId} has stopped session  closing`);
   } else {
-    await db.update(workspaces).set({ status: "idle" }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
+    await setWorkspaceStatus(db, ws.wsId, "idle");
     logAction("mark_idle", ws.wsId, ws.issueId, { verificationResult: "ok" });
     console.log(`[monitor] Active workspace ${ws.wsId} has stopped session  marking idle for relaunch`);
   }
@@ -375,7 +375,7 @@ async function handleActiveStoppedWorkspace(ws: WorkspaceCandidate, sess: Latest
 async function handleActiveRunningWorkspace(ws: WorkspaceCandidate, sess: LatestSession, ctx: CycleContext): Promise<void> {
   const { deps, stats, logAction, stuckBuilderTimeoutMs } = ctx;
   if (!deps.sessionManager.isProcessAlive(sess.id)) {
-    await db.update(workspaces).set({ status: "idle" }).where(eq(workspaces.id, ws.wsId)).catch(() => {});
+    await setWorkspaceStatus(db, ws.wsId, "idle");
     await db.update(sessions).set({ status: "stopped", endedAt: new Date().toISOString() }).where(eq(sessions.id, sess.id)).catch(() => {});
     logAction("mark_dead", ws.wsId, ws.issueId, { verificationResult: "ok" });
     console.log(`[monitor] Workspace ${ws.wsId} process dead  marking idle`);

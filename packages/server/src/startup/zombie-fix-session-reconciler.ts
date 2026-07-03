@@ -5,6 +5,7 @@ import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import type { BoardEvents } from "../services/board-events.js";
 import { PREF_RECONCILER_ZOMBIE_FIX_ENABLED } from "../constants/preference-keys.js";
+import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 
 /** Grace window: a fix-and-merge session must be this old before it is a candidate. */
 const GRACE_WINDOW_MS = 60_000;
@@ -130,10 +131,7 @@ export async function reconcileZombieFixSessions(deps: ZombieFixSessionReconcile
         .set({ status: "stopped", endedAt: now })
         .where(eq(sessions.id, s.sessionId));
 
-      await database
-        .update(workspaces)
-        .set({ status: "idle", updatedAt: now })
-        .where(eq(workspaces.id, s.workspaceId));
+      await setWorkspaceStatus(database, s.workspaceId, "idle", { now });
 
       // Resolve projectId for the board broadcast.
       const issueRows = await database
