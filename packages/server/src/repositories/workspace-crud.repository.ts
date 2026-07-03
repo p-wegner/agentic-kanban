@@ -2,6 +2,7 @@ import {
   issues, projects, preferences, workspaces, sessions, agentSkills, projectStatuses,
   issueDependencies, workflowNodes,
 } from "@agentic-kanban/shared/schema";
+import { setWorkspaceStatus, type WorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 import { eq, inArray, and, isNotNull, ne } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database, TransactionClient } from "../db/index.js";
@@ -117,7 +118,10 @@ export async function updateWorkspaceLaunchFailure(
   values: { status: string; latestLaunchError: string; updatedAt: string },
   database: Database = db,
 ) {
-  return database.update(workspaces).set(values).where(eq(workspaces.id, workspaceId));
+  return setWorkspaceStatus(database, workspaceId, values.status as WorkspaceStatus, {
+    now: values.updatedAt,
+    set: { latestLaunchError: values.latestLaunchError },
+  });
 }
 
 export async function getSessionsForWorkspace(
@@ -176,10 +180,10 @@ export async function updateWorkspaceClosed(
   values: { status: "closed"; workingDir: string | null; closedAt: string; updatedAt: string },
   database: Database = db,
 ): Promise<void> {
-  await database
-    .update(workspaces)
-    .set(values)
-    .where(eq(workspaces.id, workspaceId));
+  await setWorkspaceStatus(database, workspaceId, "closed", {
+    now: values.updatedAt,
+    set: { workingDir: values.workingDir, closedAt: values.closedAt },
+  });
 }
 
 export async function getWorkspaceIssueId(
@@ -223,11 +227,26 @@ export async function setWorkspaceWorkingDir(
     .where(eq(workspaces.id, workspaceId));
 }
 
+/**
+ * Generic PATCH-style workspace update backing `PATCH /api/workspaces/:id`. `updates` is
+ * a caller-assembled bag of optional columns; when it carries `status`, route the write
+ * through the `setWorkspaceStatus` authority (terminal-invariant guard included) with the
+ * remaining columns applied atomically via `opts.set`, instead of a raw update that could
+ * revive a closed+merged workspace.
+ */
 export async function applyWorkspaceUpdates(
   workspaceId: string,
   updates: Record<string, unknown>,
   database: Database = db,
 ): Promise<void> {
+  const { status, updatedAt, ...rest } = updates;
+  if (status !== undefined) {
+    await setWorkspaceStatus(database, workspaceId, status as WorkspaceStatus, {
+      now: updatedAt as string | undefined,
+      set: rest,
+    });
+    return;
+  }
   await database.update(workspaces).set(updates).where(eq(workspaces.id, workspaceId));
 }
 
