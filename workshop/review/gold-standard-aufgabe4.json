@@ -4,7 +4,7 @@
   "diff_base": "master",
   "challenge": "Adversarial Finding",
   "description": "Frontend adds 'Export with AI Summary' feature. The backend endpoint it calls does not exist. Some findings require adversarial thinking or Playwright to discover.",
-  "playwright_required": ["F4"],
+  "playwright_required": ["F4", "F5"],
   "findings": [
     {
       "id": "F1",
@@ -29,6 +29,12 @@
       "severity": "high",
       "description": "After clicking Export the modal becomes permanently unclosable. The Cancel button is disabled={loading} (line 88) and the backdrop onClick guard checks !loading (line 39). Combined with F3 (loading never resets after failure) and F1 (endpoint always 404s), both escape paths are blocked after the first click. The user must reload the page. This outcome is only observable at runtime — a static reviewer must connect three separate facts (missing endpoint → always throws, missing setLoading(false) → loading stays true, disabled Cancel + blocked backdrop → no escape) to predict it.",
       "location": "packages/client/src/components/ExportEnrichedModal.tsx:39"
+    },
+    {
+      "id": "F5",
+      "severity": "high",
+      "description": "The modal content div has max-h-48 (192px) combined with overflow-hidden (line 43). The modal's actual rendered height exceeds 192px, so the action buttons (Cancel and Export) are clipped and invisible to the user. The feature is completely unusable: the form is shown but cannot be submitted. A static reviewer cannot predict the rendered content height from the code alone; only a browser render (screenshot or isVisible() assertion in Playwright) reveals that the buttons are hidden.",
+      "location": "packages/client/src/components/ExportEnrichedModal.tsx:43"
     }
   ]
 }
